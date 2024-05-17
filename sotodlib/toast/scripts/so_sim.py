@@ -49,12 +49,13 @@ import pixell.fft
 pixell.fft.engine = "fftw"
 
 
-def simulate_data(job, otherargs, runargs, comm):
+def load_or_simulate_observing(job, otherargs, runargs, comm):
     log = toast.utils.Logger.get()
     job_ops = job.operators
 
     if job_ops.sim_ground.enabled:
         data = wrk.simulate_observing(job, otherargs, runargs, comm)
+        wrk.simple_noise_models(job, otherargs, runargs, data)
     else:
         group_size = wrk.reduction_group_size(job, runargs, comm)
         toast_comm = toast.Comm(world=comm, groupsize=group_size)
@@ -71,15 +72,21 @@ def simulate_data(job, otherargs, runargs, comm):
             toast.ops.Reset(detdata=[defaults.det_data])
         # Append a weather model
         wrk.append_weather_model(job, otherargs, runargs, data)
-
+        # Before running simulations based on real data, we need
+        # a starting noise estimate
+        wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.select_pointing(job, otherargs, runargs, data)
-    wrk.simple_noise_models(job, otherargs, runargs, data)
+    return data
+
+def simulate_data(job, otherargs, runargs, data):
+    log = toast.utils.Logger.get()
+
     wrk.simulate_atmosphere_signal(job, otherargs, runargs, data)
 
     # Shortcut if we are only caching the atmosphere.  If this job is only caching
     # (not observing) the atmosphere, then return at this point.
     if job.operators.sim_atmosphere.cache_only:
-        return data
+        return
 
     wrk.simulate_sky_map_signal(job, otherargs, runargs, data)
     wrk.simulate_conviqt_signal(job, otherargs, runargs, data)
@@ -97,6 +104,8 @@ def simulate_data(job, otherargs, runargs, comm):
     wrk.simulate_calibration_error(job, otherargs, runargs, data)
     wrk.simulate_readout_effects(job, otherargs, runargs, data)
 
+    comm = data.comm.comm_world
+
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After simulating data:  {mem}", comm)
 
@@ -105,28 +114,35 @@ def simulate_data(job, otherargs, runargs, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After saving data:  {mem}", comm)
 
-    return data
-
 
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
 
+    wrk.simple_deglitch(job, otherargs, runargs, data)
+    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
+
+    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
+    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
+    wrk.raw_statistics(job, otherargs, runargs, data)
+
     wrk.filter_hwpss(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
+
     data = wrk.demodulate(job, otherargs, runargs, data)
+    
     wrk.processing_mask(job, otherargs, runargs, data)
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
     wrk.crosslinking_map(job, otherargs, runargs, data)
-    wrk.raw_statistics(job, otherargs, runargs, data)
-    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
+    
     wrk.mapmaker_ml(job, otherargs, runargs, data)
-    wrk.filter_ground(job, otherargs, runargs, data)
-    wrk.filter_poly1d(job, otherargs, runargs, data)
-    wrk.filter_poly2d(job, otherargs, runargs, data)
-    wrk.filter_common_mode(job, otherargs, runargs, data)
     wrk.mapmaker(job, otherargs, runargs, data)
     wrk.mapmaker_filterbin(job, otherargs, runargs, data)
     wrk.mapmaker_madam(job, otherargs, runargs, data)
@@ -235,9 +251,11 @@ def main():
     wrk.setup_simulate_readout_effects(operators)
     wrk.setup_save_data_hdf5(operators)
 
+    wrk.setup_flag_diff_noise_outliers(operators)
     wrk.setup_flag_noise_outliers(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_demodulate(operators)
+    wrk.setup_diff_noise_estimation(operators)
     wrk.setup_noise_estimation(operators)
     wrk.setup_processing_mask(operators)
     wrk.setup_flag_sso(operators)
@@ -274,7 +292,9 @@ def main():
         log.info_rank("Dry-run complete", comm=comm)
         return
 
-    data = simulate_data(job, otherargs, runargs, comm)
+    data = load_or_simulate_observing(job, otherargs, runargs, comm)
+    
+    simulate_data(job, otherargs, runargs, data)
 
     if not job.operators.sim_atmosphere.cache_only:
         # Reduce the data

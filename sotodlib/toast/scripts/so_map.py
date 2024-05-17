@@ -59,33 +59,31 @@ pixell.fft.engine = "fftw"
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
 
-    wrk.select_pointing(job, otherargs, runargs, data)
-    wrk.simple_noise_models(job, otherargs, runargs, data)
-    wrk.create_az_intervals(job, otherargs, runargs, data)
-    wrk.apply_readout_filter(job, otherargs, runargs, data)
     wrk.simple_deglitch(job, otherargs, runargs, data)
     wrk.simple_jumpcorrect(job, otherargs, runargs, data)
 
+    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
+    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
+    wrk.raw_statistics(job, otherargs, runargs, data)
+
     wrk.filter_hwpss(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
 
     data = wrk.demodulate(job, otherargs, runargs, data)
 
+    wrk.processing_mask(job, otherargs, runargs, data)
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
     wrk.crosslinking_map(job, otherargs, runargs, data)
-    wrk.raw_statistics(job, otherargs, runargs, data)
-    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
 
     wrk.mapmaker_ml(job, otherargs, runargs, data)
-
-    wrk.filter_ground(job, otherargs, runargs, data)
-    wrk.filter_poly1d(job, otherargs, runargs, data)
-    wrk.filter_poly2d(job, otherargs, runargs, data)
-    wrk.filter_common_mode(job, otherargs, runargs, data)
-
     wrk.mapmaker(job, otherargs, runargs, data)
     wrk.mapmaker_filterbin(job, otherargs, runargs, data)
     wrk.mapmaker_madam(job, otherargs, runargs, data)
@@ -113,7 +111,10 @@ def load_data(job, otherargs, runargs, data):
     wrk.load_data_hdf5(job, otherargs, runargs, data)
     wrk.load_data_books(job, otherargs, runargs, data)
     wrk.load_data_context(job, otherargs, runargs, data)
+
     wrk.act_responsivity_sign(job, otherargs, runargs, data)
+    wrk.select_pointing(job, otherargs, runargs, data)
+    wrk.create_az_intervals(job, otherargs, runargs, data)
 
     job_ops.mem_count.prefix = "After Data Load"
     job_ops.mem_count.apply(data)
@@ -181,11 +182,14 @@ def main():
     wrk.setup_pointing(operators)
     wrk.setup_az_intervals(operators)
     wrk.setup_simple_noise_models(operators)
+    wrk.setup_flag_diff_noise_outliers(operators)
     wrk.setup_flag_noise_outliers(operators)
 
     wrk.setup_readout_filter(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_demodulate(operators)
+    wrk.setup_processing_mask(operators)
+    wrk.setup_diff_noise_estimation(operators)
     wrk.setup_noise_estimation(operators)
     wrk.setup_simple_deglitch(operators)
     wrk.setup_simple_jumpcorrect(operators)
