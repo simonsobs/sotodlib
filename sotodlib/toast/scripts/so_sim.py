@@ -182,6 +182,13 @@ def main():
         help="Map each observation separately.",
     )
     parser.add_argument(
+        "--intervalmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each interval separately.",
+    )
+    parser.add_argument(
         "--zero_loaded_data",
         required=False,
         default=False,
