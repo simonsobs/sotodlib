@@ -201,11 +201,13 @@ def main(
             aman_encoder = g3thwp.set_data(tod, h5_filename = h5_encoder)
         else:
             aman_encoder = g3thwp.set_data(tod)
+        del aman_encoder['dets']
         logger.info("Saving hwp_encoder")
         save(aman_encoder, db_encoder, h5_encoder, obs_id, overwrite, 'gzip')
         del aman_encoder
 
         aman_solution = g3thwp.make_solution(tod)
+        del aman_solution['dets']
         logger.info("Saving hwp_angle")
         save(aman_solution, db_solution, h5_solution, obs_id, overwrite, 'gzip')
         del aman_solution
