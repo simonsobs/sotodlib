@@ -57,13 +57,7 @@ class ReadoutFilter(Operator):
                 msg = f"Cannot apply readout filter. "
                 msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
                 raise RuntimeError(msg)
-            # iir_params = ob[self.iir_params]
-            # a = iir_params["a"]
-            # b = iir_params["b"]
-            # fscale = iir_params["fscale"]
-            # for det in ob.local_detectors:
             signal = ob.detdata[self.det_data].data
-            signal_copy = signal.copy() # DEBUG
             ndet, nsample = np.atleast_2d(signal).shape
 
             # From https://github.com/simonsobs/pwg-scripts/blob/99557fb4410a4751b0416687431b2713e38085b7/pwg-pmn/simple_ml_mapmaker/mapmaker.py#L230
