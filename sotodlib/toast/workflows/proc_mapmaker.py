@@ -191,9 +191,15 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
 
     if map_op.enabled:
         do_obsmaps = hasattr(otherargs, "obsmaps") and otherargs.obsmaps
-        do_intervalmaps = hasattr(otherargs, "intervalmaps") and otherargs.intevalmaps
+        do_intervalmaps = (
+            hasattr(otherargs, "intervalmaps") and otherargs.intevalmaps
+        )
         if do_obsmaps and do_intervalmaps:
-            log.warning_rank("--intermaps overrides --obsmaps", data.comm.comm_world)
+            log.warning_rank(
+                "--intervalmaps overrides --obsmaps", data.comm.comm_world
+            )
+        if do_intervalmaps and isinstance(map_op, so_ops.Splits):
+            raise RuntimeError("Interval mapping cannot be used with Splits")
         if do_obsmaps or do_intervalmaps:
             # Map each observation separately
             timer_obs = toast.timing.Timer()
@@ -204,7 +210,8 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
             new_comm = toast.Comm(world=data.comm.comm_group)
             for iobs, obs in enumerate(data.obs):
                 log.info_rank(
-                    f"{group} : mapping observation {iobs + 1} / {len(data.obs)}.",
+                    f"{group} : mapping observation {iobs + 1} "
+                    f"/ {len(data.obs)}.",
                     comm=new_comm.comm_world,
                 )
                 # Data object that only covers one observation
