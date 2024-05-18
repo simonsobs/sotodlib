@@ -420,40 +420,54 @@ class ObsDb(object):
         
         """
         cursor = self.conn.cursor()
-        extra_fields_main, joins_main, query_text_main = _generate_query_components_from_tags(query_text=query_text, tags=tags)
+        
+        try:
+            extra_fields_main, joins_main, query_text_main = _generate_query_components_from_tags(query_text=query_text, tags=tags)
 
-        if subdbs_info_list is not None:
-            assert isinstance(subdbs_info_list, list)
-            extra_fields_sub = []
-            joins_sub = []
-            query_text_sub = []
-            for i, subdb_info in enumerate(subdbs_info_list):
-                assert isinstance(subdb_info, dict)
-                if 'filepath' not in subdb_info.keys():
-                    raise InputError(f'subdb_info does not have "filepath" in keys')
-                filepath = subdb_info['filepath']
-                alias = f'subdb{i}'
-                attach = f"ATTACH DATABASE '{filepath}' AS '{alias}'"
-                cursor = cursor.execute(attach)            
-                _extra_fields_sub, _join_sub, _query_sub = _generate_query_components_from_subdb(filepath=filepath, 
-                                                                                                alias=alias,
-                                                                                                query_list=subdb_info.get('query_list', None),
-                                                                                                params_list=subdb_info.get('params_list', None),
-                                                                                                table_name=subdb_info.get('table_name', None),
-                                                                                                obs_id_name=subdb_info.get('obs_id_name', None),
-                                                                                                )
-                extra_fields_sub.append(_extra_fields_sub)
-                joins_sub.append(_join_sub)
-                query_text_sub.append(_query_sub)
-            extra_fields_sub = ''.join([''+f for f in extra_fields_sub])
-            joins_sub = ''.join(' '+_j for _j in joins_sub)
-            query_text_sub = ''.join(' '+q for q in query_text_sub)
-            tot_query = f'SELECT obs.* {extra_fields_main} {extra_fields_sub} FROM obs {joins_main} {joins_sub} WHERE {query_text_main} {query_text_sub}'
-        else:
-            tot_query = f'SELECT obs.* {extra_fields_main} FROM obs {joins_main} WHERE {query_text_main}'
-
-        cursor = cursor.execute(tot_query)
-        results = ResultSet.from_cursor(cursor)
+            if subdbs_info_list is not None:
+                assert isinstance(subdbs_info_list, list)
+                extra_fields_sub = []
+                joins_sub = []
+                query_text_sub = []
+                
+                aliases = []
+                for i, subdb_info in enumerate(subdbs_info_list):
+                    assert isinstance(subdb_info, dict)
+                    if 'filepath' not in subdb_info.keys():
+                        raise InputError(f'subdb_info does not have "filepath" in keys')
+                    filepath = subdb_info['filepath']
+                    alias = f'subdb{i}'
+                    aliases.append(alias)
+                    attach = f"ATTACH DATABASE '{filepath}' AS '{alias}'"
+                    cursor = cursor.execute(attach)            
+                    _extra_fields_sub, _join_sub, _query_sub = _generate_query_components_from_subdb(filepath=filepath, 
+                                                                                                    alias=alias,
+                                                                                                    query_list=subdb_info.get('query_list', None),
+                                                                                                    params_list=subdb_info.get('params_list', None),
+                                                                                                    table_name=subdb_info.get('table_name', None),
+                                                                                                    obs_id_name=subdb_info.get('obs_id_name', None),
+                                                                                                    )
+                    extra_fields_sub.append(_extra_fields_sub)
+                    joins_sub.append(_join_sub)
+                    query_text_sub.append(_query_sub)
+                extra_fields_sub = ''.join([''+f for f in extra_fields_sub])
+                joins_sub = ''.join(' '+_j for _j in joins_sub)
+                query_text_sub = ''.join(' '+q for q in query_text_sub)
+                tot_query = f'SELECT obs.* {extra_fields_main} {extra_fields_sub} FROM obs {joins_main} {joins_sub} WHERE {query_text_main} {query_text_sub}'
+                cursor = cursor.execute(tot_query)
+                results = ResultSet.from_cursor(cursor)
+                
+                for alias in aliases:
+                    cursor.execute(f"DETACH DATABASE {alias}")
+                
+            else:
+                tot_query = f'SELECT obs.* {extra_fields_main} FROM obs {joins_main} WHERE {query_text_main}'
+                cursor = cursor.execute(tot_query)
+                results = ResultSet.from_cursor(cursor)
+            
+        finally:
+            cursor.close()
+            
         if add_prefix is not None:
             results.keys = [add_prefix + k for k in results.keys]
         return results
