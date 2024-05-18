@@ -4,12 +4,12 @@ from typing import Literal, Optional, Tuple, Union, cast, overload
 
 import numpy as np
 import scipy.ndimage as simg
-import scipy.signal as sig
 import scipy.stats as ss
 from numpy.typing import NDArray
-from pixell.utils import block_expand, block_mean_filter, block_reduce
+from pixell.utils import block_expand, block_reduce
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
+from so3g import matched_jumps, matched_jumps64
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -91,40 +91,39 @@ def _jumpfinder(
     # and in the case of 2d data we find jumps along rows
     orig_shape = x.shape
     x = np.atleast_2d(x)
+    dtype = x.dtype.name
+    if len(x.shape) > 2:
+        raise ValueError("x may not have more than 2 dimensions")
+    if dtype == "float32":
+        matched_filt = matched_jumps
+    elif dtype == "float64":
+        matched_filt = matched_jumps64
+    else:
+        raise TypeError("x must be float32 or float64")
 
     jumps = np.zeros(x.shape, dtype=bool)
     if x.shape[-1] < win_size:
         return jumps.reshape(orig_shape)
 
-    size_msk = (np.max(x, axis=-1) - np.min(x, axis=-1)) < min_size
-    if np.all(size_msk):
-        return jumps.reshape(orig_shape)
-
-    # If std is basically 0 no need to check for jumps
-    std = np.std(x, axis=-1)
-    std_msk = np.isclose(std, 0.0) + np.isclose(std_est(x, ds=win_size, axis=-1), std)
-
-    msk = ~(size_msk + std_msk)
+    msk = np.ptp(x, axis=-1) > min_size
     if not np.any(msk):
         return jumps.reshape(orig_shape)
 
-    # Build a mean filter
+    # Build a matched filter
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
-    half_win = int(win_size / 2)
-    x_br = get_block_moment(x[msk], win_size)
-    diff = x[msk] - x_br
-    # Take cumulative sum, this is equivalent to convolving with a step
-    x_step = np.abs(np.cumsum(diff, axis=-1))
+    _x = np.ascontiguousarray(x[msk])
+    x_step = np.ascontiguousarray(np.empty_like(_x))
+    matched_filt(_x, x_step, win_size)
+    x_step = np.abs(x_step, out=x_step)
 
     # If the jump is at a multiple of win_size we will miss it so also do a shifted filter
-    # Reusing the same buffer here
-    x_br_shift = get_block_moment(
-        x[msk, half_win:], win_size
-    )  # , output=x_br[:, half_win:])
-    x_step[:, half_win:] = np.maximum(
-        x_step[:, half_win:],
-        np.abs(np.cumsum(x[msk, half_win:] - x_br_shift, axis=-1)),
-    )  # TODO: Is there something better than using the max for this?
+    half_win = int(win_size / 2)
+    _x = np.ascontiguousarray(x[msk, half_win:])
+    x_step_shift = np.ascontiguousarray(np.empty_like(_x))
+    matched_filt(_x, x_step_shift, win_size)
+    x_step_shift = np.abs(x_step_shift, out=x_step_shift)
+    # TODO: Is there something better than using the max for this?
+    x_step[:, half_win:] = np.maximum(x_step[:, half_win:], x_step_shift)
 
     # Because of the shift the closest to a window edge we can be in win_size/4
     # In this case the slope of the shorter segment is ~3*height/4
@@ -150,9 +149,13 @@ def _jumpfinder(
     #     ]
     #     > quarter_win
     # )
-    peak_msk = peak_msk.astype(float)
-    peak_msk[has_peaks, half_win:] -= peak_msk[has_peaks, : -1 * half_win]
-    jumps[has_peaks] = np.cumsum(peak_msk[has_peaks], axis=-1) > quarter_win
+    jumps[has_peaks] = (
+        np.cumsum(
+            _diff_buffed(peak_msk[has_peaks].astype(int), None, half_win, False),
+            axis=-1,
+        )
+        > quarter_win
+    )
 
     # Recall that we set _min_size to be half the actual peak min above
     jumps[has_peaks] *= x_step[has_peaks[msk]] >= 2 * _min_size[has_peaks]
@@ -258,13 +261,15 @@ def _diff_buffed(
     make_step: bool,
 ) -> NDArray[np.floating]:
     win_size = int(win_size + win_size % 2)
-    pad = np.zeros((len(signal.shape), 2), dtype=int)
-    half_win = int(win_size / 2)
-    pad[-1, :] = half_win
     if jumps is not None and make_step:
         signal = _make_step(signal, jumps)
-    padded = np.pad(signal, pad, mode="edge")
-    diff_buffed = padded[..., win_size:] - padded[..., : (-1 * win_size)]
+    diff_buffed = np.empty_like(signal)
+    diff_buffed[..., :win_size] = 0
+    diff_buffed[..., win_size:] = np.subtract(
+        signal[..., win_size:],
+        signal[..., : (-1 * win_size)],
+        out=diff_buffed[..., win_size:],
+    )
 
     return diff_buffed
 
@@ -722,9 +727,9 @@ def find_jumps(
     if max_iters > 1:
         _signal = signal.copy()
     _signal = np.atleast_2d(_signal)
-    # Median subtract, if we don't do this then when we cumsum we get floats
+    # Mean subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
-    _signal -= np.median(_signal, axis=-1)[..., None]
+    _signal -= np.mean(_signal, axis=-1)[..., None]
 
     nfuture = min(len(_signal), NFUTURE)
     slice_size = len(_signal) // nfuture
