@@ -66,6 +66,7 @@ setup_opts["install_requires"] = [
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
+        "venn"
     ],
     "tests": [
         "socs",
