@@ -229,7 +229,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     for iview, view in enumerate(views):
                         # Add a view for this specific interval
                         single_view = f"{orig_view}-{iview}"
-                        ob.intervals[single_view] = IntervalList(
+                        ob.intervals[single_view] = toast.IntervalList(
                             times, timespans=[(view.start, view.stop)]
                         )
                         binner.pixel_pointing.view = single_view
