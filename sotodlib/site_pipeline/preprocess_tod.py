@@ -5,7 +5,7 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional
-import multiprocessing
+from multiprocessing import get_context
 import h5py
 import copy
 
@@ -152,6 +152,9 @@ def preprocess_tod(obs_id,
             error = f'{obs_id}'
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
+            print(error)
+            print(errmsg)
+            print(tb)
             return error, [errmsg, tb]
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
@@ -343,7 +346,7 @@ def main(
                 run_list.append( (obs, groups) )
 
     # Setup multiprocessing pool.
-    pool = multiprocessing.Pool(processes=nproc) 
+    pool = get_context("spawn").Pool(processes=nproc) 
 
     # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
