@@ -52,7 +52,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
         # a starting noise estimate
         wrk.diff_noise_estimation(job, otherargs, runargs, data)
         # optionally zero out
-        if otherargs.zero_loaded_data:
+        if hasattr(otherargs, "zero_loaded_data") and otherargs.zero_loaded_data:
             toast.ops.Reset(detdata=[defaults.det_data])
     wrk.select_pointing(job, otherargs, runargs, data)
 
