@@ -88,8 +88,8 @@ def get_local_file(filename: str, cache: bool = True) -> str:
         target_file = de_url[7:]
     else:
         raise RuntimeError(
-            f'Malformed resource file URL {de_url}. Resource file URL needs to 
-            start with "ftp://" or "file://"'
+            f"Malformed resource file URL {de_url}. Resource file URL needs to "
+            + 'start with "ftp://" or "file://"'
         )
 
     return target_file
