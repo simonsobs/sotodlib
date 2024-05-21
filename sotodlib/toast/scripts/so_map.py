@@ -165,7 +165,6 @@ def main():
     wrk.setup_filter_ground(operators)
     wrk.setup_filter_poly1d(operators)
     wrk.setup_filter_poly2d(operators)
-    wrk.setup_diff_noise_estimation(operators)
     wrk.setup_noise_estimation(operators)
 
     wrk.setup_demodulate(operators)

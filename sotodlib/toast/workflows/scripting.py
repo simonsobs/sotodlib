@@ -33,9 +33,6 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
     timer = toast.timing.Timer()
     timer.start()
 
-    job_ops.mem_count.prefix = "Before Data Load or Simulate"
-    job_ops.mem_count.apply(data)
-
     if job_ops.sim_ground.enabled:
         data = wrk.simulate_observing(job, otherargs, runargs, comm)
         wrk.simple_noise_models(job, otherargs, runargs, data)
