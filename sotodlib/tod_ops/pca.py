@@ -217,7 +217,7 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
-def find_pcabounds(amans, pca_signals_cal, **kwargs):
+def find_pcabounds(aman, pca_signals_cal, xfac=2, yfac=1.5):
     """Finds the bounds of the pca box using IQR 
     statistics
 
@@ -227,43 +227,99 @@ def find_pcabounds(amans, pca_signals_cal, **kwargs):
         list of observation axismanagers
     pca_signals_cal : dict
         dictionary of pca axismanagers per observation
+    xfac:
+        multiplicative factor for the width of the pca box.
+        Default is 2.
+    yfac:
+        multiplicative factor for the height of the box.
+        Default is 1.5. 
+
+    TODO: needs more args used in preprocess config file setup
 
     Returns
     -------
-    dict
-        `results` dictionary with the x and y bounds, and det id's of 
-        good and bad detectors for each axismanager/observation
-
+    aman
+        aman that's wrapped with the x and y bounds and the good and bad dets
+        
     """
-    xfac = kwargs.get('xfac', 2)
-    yfac = kwargs.get('yfac', 1.5)
-
     results = {'good_dets': {'det_ids': {}},
                'baddets': {'det_ids': {}},
                'bounds': {}}
-    for aman in amans:
-        pca_signal = pca_signals_cal[aman.obs_info.obs_id]
-        print('obs', aman.obs_info.obs_id)
+    pca_signal = pca_signals_cal[aman.obs_info.obs_id]
+    print('obs', aman.obs_info.obs_id)
 
-        x = aman.det_cal.s_i
-        y = np.abs(pca_signal.weights[:, 0])
+    x = aman.det_cal.s_i
+    y = np.abs(pca_signal.weights[:, 0])
 
-        # remove positive Si values
-        filt = np.where(x < 0)[0]
-        xfilt = x[filt]
-        yfilt = y[filt]
+    # remove positive Si values
+    filt = np.where(x < 0)[0]
+    xfilt = x[filt]
+    yfilt = y[filt]
 
-        # normalize weights
-        ynorm = yfilt / np.median(yfilt)
-        median_ynorm = np.median(ynorm)
-        medianx = np.median(xfilt)
+    # normalize weights
+    ynorm = yfilt / np.median(yfilt)
+    median_ynorm = np.median(ynorm)
+    medianx = np.median(xfilt)
 
-        # IQR of normalized weights
-        q20 = np.percentile(ynorm, 20)
-        q80 = np.percentile(ynorm, 80)
-        iqry_norm = q80 - q20
+    # IQR of normalized weights
+    q20 = np.percentile(ynorm, 20)
+    q80 = np.percentile(ynorm, 80)
+    iqry_norm = q80 - q20
 
-        # IQR of Si's
-        q20x = np.percentile(xfilt, 20)
-        q80x = np.percentile(xfilt, 80)
-        iqrx = q80x - q20x
+    # IQR of Si's
+    q20x = np.percentile(xfilt, 20)
+    q80x = np.percentile(xfilt, 80)
+    iqrx = q80x - q20x
+
+    # Find box height using norm'd weights
+    ylb_norm = median_ynorm - yfac * iqry_norm
+    yub_norm = median_ynorm + yfac * iqry_norm
+
+    # Convert y bounds back to the scale of the raw weights
+    ylb = ylb_norm * np.median(yfilt)
+    yub = yub_norm * np.median(yfilt)
+
+    # Calculate box width
+    xlb = medianx - xfac * iqrx
+    xub = medianx + xfac * iqrx
+    if xub > 0:
+        mad = np.median(np.abs(xfilt - medianx))
+        xub = medianx + xfac * mad
+
+    xbounds = [xlb, xub]
+    ybounds = [ylb, yub]
+
+    # Get indices of the values in the box (indices are wrt `x` array)
+    box_xfilt_inds = np.where((xfilt >= xlb) & (
+        xfilt <= xub) & (yfilt >= ylb) & (yfilt <= yub))[0]
+    box = filt[box_xfilt_inds] # think this is the boolean array length of the original detector length 
+    notbox = np.setdiff1d(np.arange(len(x)), box)
+
+    goodids = aman.det_info.det_id[box]
+    cutids = [detid for detid in goodids if detid != 'NO_MATCH']
+    badids = aman.det_info.det_id[notbox]
+    badcutids = [detid for detid in badids if detid != 'NO_MATCH']
+
+    bad_removed = len(badids) - len(badcutids)
+    good_removed = len(goodids) - len(cutids)
+
+    if bad_removed > 0 or good_removed > 0:
+        if bad_removed > 0:
+            print(
+                f'NO_MATCH detectors removed from the bad detectors: {bad_removed}')
+        if good_removed > 0:
+            print(
+                f'NO_MATCH detectors removed from the good detectors: {good_removed}')
+
+    # populate results dictionary
+    results['bounds'].setdefault(aman.obs_info.obs_id, {}).update({
+        'x': xbounds, 'y': ybounds})
+    results['good_dets']['det_ids'].setdefault(
+        aman.obs_info.obs_id, cutids)
+    results['baddets']['det_ids'].setdefault(
+        aman.obs_info.obs_id, badcutids)
+
+    # saves with pca run this is (nominally, 1 or 2 but some might do > 2 runs)
+    results['pca_run_iteration'] = pca_signals_cal['pca_run_iteration']
+    return results
+
