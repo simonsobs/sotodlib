@@ -245,3 +245,55 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
+
+
+def plot_pcabounds(amans, pca_signals_cal, results, ufm, ghz):
+    """Subplot of pca bounds as well as the good and bad detector
+    timestreams with 0th mode weight overplotted
+
+    Parameters
+    ----------
+    amans : list
+        list of preprocessed observation axismanagers
+    pca_signals_cal : dict
+        dictionary of pca axismanagers for each observation
+    results : dict
+        dict of bounds and good and bad detector id's
+    ufm : str
+        UFM name (for plotting purposes)
+    ghz : str
+        Bandpass (for plotting purposes)
+
+    """
+    for aman in amans:
+        pca_run = pca_signals_cal['pca_run_iteration']
+
+        obs = aman.obs_info.obs_id
+        pca_signal = pca_signals_cal[aman.obs_info.obs_id]
+        print(f'plotting {obs}')
+
+        goodids = results['good_dets']['det_ids'][obs]
+        badids = results['baddets']['det_ids'][obs]
+
+        ids = list(aman.det_info.det_id)
+        good_indices = [ids.index(det_id) for det_id in goodids]
+        bad_indices = [ids.index(det_id) for det_id in badids]
+
+        xbounds = results['bounds'][obs]['x']
+        ybounds = results['bounds'][obs]['y']
+
+        timestamps = aman.timestamps[::20]  # because of the lpf
+        modes = pca_signal.modes[0][::20]
+
+        fig = plt.figure(figsize=(10, 6))
+
+        # Define axes
+        ax1 = plt.subplot2grid((2, 2), (1, 0), colspan=1, rowspan=1)
+        ax2 = plt.subplot2grid((2, 2), (1, 1), colspan=1, rowspan=1)
+        ax3 = plt.subplot2grid((2, 2), (0, 0), colspan=2, rowspan=1)
+
+        # ax1: good signals
+        ax1.plot(timestamps, modes, color='black', linewidth=3,
+                 label='0th mode', zorder=2, alpha=0.4)
+        for ind in good_indices:
+            weight = pca_signal.weights[ind, 0]
