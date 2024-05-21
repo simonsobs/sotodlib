@@ -215,3 +215,55 @@ def get_trends(tod, remove=False, size=1, signal=None):
     if remove:
         add_model(tod, trends, scale=-1, signal=signal)
     return trends
+
+
+def find_pcabounds(amans, pca_signals_cal, **kwargs):
+    """Finds the bounds of the pca box using IQR 
+    statistics
+
+    Parameters
+    ----------
+    amans : list
+        list of observation axismanagers
+    pca_signals_cal : dict
+        dictionary of pca axismanagers per observation
+
+    Returns
+    -------
+    dict
+        `results` dictionary with the x and y bounds, and det id's of 
+        good and bad detectors for each axismanager/observation
+
+    """
+    xfac = kwargs.get('xfac', 2)
+    yfac = kwargs.get('yfac', 1.5)
+
+    results = {'good_dets': {'det_ids': {}},
+               'baddets': {'det_ids': {}},
+               'bounds': {}}
+    for aman in amans:
+        pca_signal = pca_signals_cal[aman.obs_info.obs_id]
+        print('obs', aman.obs_info.obs_id)
+
+        x = aman.det_cal.s_i
+        y = np.abs(pca_signal.weights[:, 0])
+
+        # remove positive Si values
+        filt = np.where(x < 0)[0]
+        xfilt = x[filt]
+        yfilt = y[filt]
+
+        # normalize weights
+        ynorm = yfilt / np.median(yfilt)
+        median_ynorm = np.median(ynorm)
+        medianx = np.median(xfilt)
+
+        # IQR of normalized weights
+        q20 = np.percentile(ynorm, 20)
+        q80 = np.percentile(ynorm, 80)
+        iqry_norm = q80 - q20
+
+        # IQR of Si's
+        q20x = np.percentile(xfilt, 20)
+        q80x = np.percentile(xfilt, 80)
+        iqrx = q80x - q20x
