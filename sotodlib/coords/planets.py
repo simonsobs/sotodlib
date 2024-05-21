@@ -264,7 +264,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
     else:
         options = list(planets.names().values())
         raise ValueError(
-            f'Failed to find a match for "{source_name}" in ' f"ephemeris: {options}"
+            f'Failed to find a match for "{source_name}" in ephemeris: {options}'
         )
 
     if isinstance(site, str):
