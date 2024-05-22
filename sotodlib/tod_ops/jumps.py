@@ -14,7 +14,6 @@ from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
 from ..flag_utils import _merge
-from .utils import get_block_moment
 
 NFUTURE = int(os.environ.get("NUM_FUTURES", min(32, int(os.cpu_count() or 0) + 4)))
 
@@ -34,7 +33,9 @@ def std_est(
 
         x: Data to compute standard deviation of.
 
-        ds: Downsample factor to use, does a naive slicing.
+        ds: Downsample factor to use, does a naive slicing in blocks of ``win_size``.
+
+        win_size: Window size to downsample by.
 
         axis: The axis to compute along.
 
@@ -606,7 +607,6 @@ def slow_jumps(
 def find_jumps(
     aman,
     signal=...,
-    max_iters=...,
     min_sigma=...,
     min_size=...,
     win_size=...,
@@ -625,7 +625,6 @@ def find_jumps(
 def find_jumps(
     aman,
     signal=...,
-    max_iters=...,
     min_sigma=...,
     min_size=...,
     win_size=...,
@@ -643,7 +642,6 @@ def find_jumps(
 def find_jumps(
     aman: AxisManager,
     signal: Optional[NDArray[np.floating]] = None,
-    max_iters: int = 1,
     min_sigma: Optional[float] = None,
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
@@ -728,8 +726,6 @@ def find_jumps(
         min_size = float(min_size) * np.ones(len(signal))
 
     _signal = _filter(signal, **filter_pars)
-    if max_iters > 1:
-        _signal = signal.copy()
     _signal = np.atleast_2d(_signal)
     # Mean subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
