@@ -6,7 +6,7 @@ import numpy as np
 import scipy.ndimage as simg
 import scipy.stats as ss
 from numpy.typing import NDArray
-from pixell.utils import block_expand, block_reduce
+from pixell.utils import block_expand, block_reduce, moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
 from so3g import matched_jumps, matched_jumps64, clean_flag
@@ -22,6 +22,7 @@ NFUTURE = int(os.environ.get("NUM_FUTURES", min(32, int(os.cpu_count() or 0) + 4
 def std_est(
     x: NDArray[np.floating],
     ds: int = 1,
+    win_size: int = 20,
     axis: int = -1,
     method: str = "median_unbiased",
 ) -> NDArray[np.floating]:
@@ -45,12 +46,22 @@ def std_est(
     """
     if ds > 2 * x.shape[axis]:
         ds = 1
-    sl = [slice(None)] * len(x.shape)
     if ds > 1:
-        sl[axis] = slice(None, None, ds)
+        x = np.moveaxis(x, axis, -1)
+        x = x[..., : -1 * (x.shape[-1] % win_size)]
+        shape = list(x.shape) + [win_size]
+        shape[-2] = -1
+        x = x.reshape(tuple(shape))
+        x = np.moveaxis(x, -2, 0)
+        diff = np.diff(x[::ds], axis=-1)
+        diff = moveaxis(diff, 0, -2)
+        diff = diff.reshape(shape[:-1])
+        diff = np.moveaxis(diff, -1, axis)
+    else:
+        diff = np.diff(x, axis=axis)
     # Find ~1 sigma limits of differenced data
     lims = np.quantile(
-        np.diff(x, axis=axis)[tuple(sl)],
+        diff,
         np.array([0.159, 0.841]),
         axis=axis,
         method=method,
@@ -294,7 +305,6 @@ def estimate_heights(
         diff_buffed = _diff_buffed(signal, jumps, win_size, make_step)
 
     jumps = np.atleast_2d(jumps)
-    diff_buffed = np.atleast_2d(diff_buffed)
     if len(jumps.shape) > 2:
         raise ValueError("Only 1d and 2d arrays are supported")
     if twopi:
@@ -426,34 +436,40 @@ def twopi_jumps(
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
     if atol is None:
-        atol = nsigma * std_est(signal.astype(float), ds=win_size)
+        atol = nsigma * std_est(
+            signal.astype(float), ds=win_size * 10, win_size=win_size
+        )
         np.clip(atol, 1e-8, 1e-2)
 
     _signal = _filter(signal, **filter_pars)
-    diff_buffed = _diff_buffed(_signal, None, win_size, False)
-
-    if isinstance(atol, int):
-        atol = float(atol)
-    if isinstance(atol, float):
-        ratio = np.abs(diff_buffed) / (2 * np.pi)
-        jumps = (np.abs(ratio - np.round(ratio, 0)) <= atol) & (ratio >= 0.5)
-        jumps[..., :win_size] = False
-    elif isinstance(atol, np.ndarray):
-        jumps = np.atleast_2d(np.zeros_like(signal, dtype=bool))
-        diff_buffed = np.atleast_2d(diff_buffed)
-        if len(atol) != len(jumps):
-            raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
-        ratio = np.abs(diff_buffed / (2 * np.pi))
-        jumps = (np.abs(ratio - np.round(ratio, 0)) <= atol[..., None]) & (ratio >= 0.5)
-        jumps.reshape(signal.shape)
-    else:
+    _signal = np.atleast_2d(_signal)
+    if isinstance(atol, int) or isinstance(atol, float):
+        atol = np.ones(len(_signal), float) * float(atol)
+    elif np.isscalar(atol):
         raise TypeError(f"Invalid atol type: {type(atol)}")
+    if len(atol) != len(signal):
+        raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
+
+    msk = np.ptp(_signal) >= 2 * np.pi - atol
+    diff_buffed = _diff_buffed(_signal[msk], None, win_size, False)
+
+    jumps = np.atleast_2d(np.zeros_like(signal, dtype=bool))
+    ratio = diff_buffed / (2 * np.pi)
+    rounded = np.round(ratio, 0)
+    jumps[msk] = (np.abs(ratio - rounded) <= atol[..., None]) & (np.abs(ratio) >= 0.5)
+    jumps.reshape(signal.shape)
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
-    heights = estimate_heights(
-        signal, jumps, win_size=win_size, twopi=True, diff_buffed=diff_buffed
+    _heights = estimate_heights(
+        signal[msk],
+        jumps[msk],
+        win_size=win_size,
+        twopi=False,
+        diff_buffed=rounded * 2 * np.pi,
     )
+    heights = np.zeros_like(signal)
+    heights[msk] = _heights
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
@@ -701,7 +717,9 @@ def find_jumps(
         raise ValueError("Jumpfinder only works on 1D or 2D data")
 
     if min_size is None and min_sigma is not None:
-        min_size = min_sigma * std_est(signal, ds=win_size, axis=-1)
+        min_size = min_sigma * std_est(
+            signal, ds=win_size * 10, win_size=win_size, axis=-1
+        )
     if min_size is None:
         raise ValueError("min_size is somehow still None")
     if isinstance(min_size, np.ndarray) and np.ndim(min_size) > 1:  # type: ignore
