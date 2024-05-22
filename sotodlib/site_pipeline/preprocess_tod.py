@@ -147,8 +147,8 @@ def preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         try:
             aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
-        tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
-        aman.wrap('tags', tags)
+            tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
+            aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
         except Exception as e:
             error = f'{obs_id} {group}'
@@ -180,8 +180,8 @@ def preprocess_tod(obs_id,
         else:
             logger.info(f"Saving to database under {db_data}")
             if len(db.inspect(db_data)) == 0:
-            h5_path = os.path.relpath(dest_file,
-                    start=os.path.dirname(configs['archive']['index']))
+                h5_path = os.path.relpath(dest_file,
+                        start=os.path.dirname(configs['archive']['index']))
                 db.add_entry(db_data, h5_path)
     if run_parallel:
         return error, outputs        
@@ -407,6 +407,9 @@ def main(
             nfile += 1
             dest_file = os.path.splitext(dest_file) + '_'+str(nfile).zfill(3)+'.h5'
 
+        h5_path = os.path.relpath(dest_file,
+                        start=os.path.dirname(configs['archive']['index']))
+
         with h5py.File(dest_file,'w') as f_dest:
             for err, output in outputs:
                 if err is None:
@@ -419,7 +422,7 @@ def main(
                                         f_src.copy(f_src[f'{dts}/{member}'], f_dest,f'{dts}/{member}')
                         logger.info(f"Saving to database under {db_data}")
                         if len(db.inspect(db_data)) == 0:
-                            db.add_entry(db_data, dest_file)
+                            db.add_entry(db_data, h5_path)
                         all_files.append(src_file)
                 else:
                     f = open(errlog, 'a')
