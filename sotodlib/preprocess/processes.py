@@ -845,7 +845,21 @@ class SourceFlags(_Preprocess):
     name = "source_flags"
     
     def calc_and_save(self, aman, proc_aman):
-        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, **self.calc_cfgs)
+        center_on = self.calc_cfgs.get('center_on', 'planet')
+        # Get source from tags
+        if center_on == 'planet':
+            from sotodlib.coords.planets import SOURCE_LIST
+            matches = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(matches) != 0:
+                source = matches[0]
+            else:
+                raise ValueError("No tags match source list")
+        else:
+            source = center_on
+        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, center_on=source,
+                                                      mask=self.calc_cfgs.get('mask', None),
+                                                      res=self.calc_cfgs.get('res', None),
+                                                      max_pix=self.calc_cfgs.get('max_pix', None))
 
         source_aman = core.AxisManager(aman.dets, aman.samps)
         source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
