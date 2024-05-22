@@ -399,12 +399,15 @@ class LoadContext(Operator):
 
                 if self.analytic_bandpass:
                     # Add bandpass information to the focalplane
-                    band = fp_cols["det_info_band"]
+                    try:
+                        band = fp_cols["det_info_band"].data
+                    except KeyError:
+                        band = fp_cols["det_info_wafer_bandpass"].data
                     freq = [float(b[1:]) for b in band]
                     bandcenter = np.array(freq) * u.GHz
                     bandwidth = bandcenter * self.bandwidth
-                    fp_cols["bandcenter"] = bandcenter
-                    fp_cols["bandwidth"] = bandwidth
+                    fp_cols["bandcenter"] = Column(name="bandcenter", data=bandcenter)
+                    fp_cols["bandwidth"] = Column(name="bandwidth", data=bandwidth)
 
                 # Construct table
                 det_props = QTable(fp_cols)

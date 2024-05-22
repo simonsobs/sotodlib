@@ -190,37 +190,6 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
     log = toast.utils.Logger.get()
 
     if map_op.enabled:
-        # data.info()
-        # data.comm.comm_world.barrier()
-        # for ob in data.obs:
-        #     allsamps = ob.n_local_samples
-        #     if ob.comm.group_rank == 0:
-        #         msg = f"{ob.name}.P{data.comm.world_rank}"
-        #         for intr in ob.intervals["scanning"]:
-        #             msg += f" {intr.first}-{intr.last},"
-        #         log.debug(msg)
-        #         nb = np.count_nonzero(
-        #             ob.shared[defaults.shared_flags].data
-        #             & defaults.shared_mask_nonscience
-        #         )
-        #         ng = allsamps - nb
-        #         msg = f"{ob.name}.P{data.comm.world_rank}: {ng}/{allsamps} good shared samples"
-        #         log.debug(msg)
-        #     # n_det = len(ob.local_detectors)
-        #     # good_dets = dict()
-        #     # dflags = ob.local_detector_flags
-        #     # for d, dval in dflags.items():
-        #     #     if dval & defaults.det_mask_nonscience == 0:
-        #     #         # This detector is good
-        #     #         nb = np.count_nonzero(
-        #     #             ob.detdata[defaults.det_flags][d]
-        #     #             & defaults.det_mask_nonscience
-        #     #         )
-        #     #         good_dets[d] = allsamps - nb
-        #     # msg = f"{ob.name}.P{data.comm.world_rank}: {len(good_dets)}/{n_det} good dets"
-        #     # for d, ng in good_dets.items():
-        #     #     msg += f"\n    {d}: {ng} / {allsamps} good samples"
-        #     # log.debug(msg)
         do_obsmaps = hasattr(otherargs, "obsmaps") and otherargs.obsmaps
         do_intervalmaps = (
             hasattr(otherargs, "intervalmaps") and otherargs.intervalmaps
@@ -230,6 +199,10 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                 "--intervalmaps overrides --obsmaps", data.comm.comm_world
             )
         if do_obsmaps or do_intervalmaps:
+            log.debug_rank(
+                f"{data.comm.group}: Running observation or interval maps",
+                comm=data.comm.comm_world,
+            )
             # Map each observation separately
             timer_obs = toast.timing.Timer()
             timer_obs.start()
@@ -310,6 +283,10 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
             data._comm = orig_comm
             del new_comm
         else:
+            log.debug_rank(
+                f"{data.comm.group}: Calling mapmaker.apply() directly",
+                comm=data.comm.comm_world,
+            )
             map_op.apply(data)
 
 
