@@ -149,12 +149,10 @@ def preprocess_tod(obs_id,
             aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
             proc_aman, success = pipe.run(aman)
         except Exception as e:
-            error = f'{obs_id}'
+            error = f'{obs_id} {group}'
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
-            print(error)
-            print(errmsg)
-            print(tb)
+            logger.info(f"{error}\n{errmsg}\n{tb}")
             return error, [errmsg, tb]
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
