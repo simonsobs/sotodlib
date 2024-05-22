@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from pixell.utils import block_expand, block_reduce
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import matched_jumps, matched_jumps64
+from so3g import matched_jumps, matched_jumps64, clean_flag
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -111,19 +111,10 @@ def _jumpfinder(
 
     # Build a matched filter
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
+    half_win = int(win_size / 2)
     _x = np.ascontiguousarray(x[msk])
     x_step = np.ascontiguousarray(np.empty_like(_x))
     matched_filt(_x, x_step, win_size)
-    x_step = np.abs(x_step, out=x_step)
-
-    # If the jump is at a multiple of win_size we will miss it so also do a shifted filter
-    half_win = int(win_size / 2)
-    _x = np.ascontiguousarray(x[msk, half_win:])
-    x_step_shift = np.ascontiguousarray(np.empty_like(_x))
-    matched_filt(_x, x_step_shift, win_size)
-    x_step_shift = np.abs(x_step_shift, out=x_step_shift)
-    # TODO: Is there something better than using the max for this?
-    x_step[:, half_win:] = np.maximum(x_step[:, half_win:], x_step_shift)
 
     # Because of the shift the closest to a window edge we can be in win_size/4
     # In this case the slope of the shorter segment is ~3*height/4
@@ -135,27 +126,22 @@ def _jumpfinder(
     else:
         _min_size = (3 * win_size * min_size / 32) * np.ones((1, len(x)))
 
-    peak_msk = np.zeros_like(jumps, dtype=bool)
-    peak_msk[msk] = x_step > _min_size[msk]
-    has_peaks = np.any(peak_msk, -1)
+    jumps[msk] = x_step > _min_size[msk]
+    has_peaks = np.any(jumps, -1)
     if not np.any(has_peaks):
         return jumps.reshape(orig_shape)
 
     quarter_win = int(half_win / 2)
+    with_jumps = np.ascontiguousarray(jumps[has_peaks], "int32")
     # This is equivalent to this convolution
     # jumps[has_peaks] = (
-    #     sig.fftconvolve(np.ones((1, half_win)), peak_msk[has_peaks], axes=-1)[
-    #         :, : -1 * (half_win - 1)
+    #     sig.fftconvolve(np.ones((1, quarter_win)), with_jumps, axes=-1)[
+    #         :, : -1 * (quarter_win - 1)
     #     ]
-    #     > quarter_win
+    #     >= quarter_win
     # )
-    jumps[has_peaks] = (
-        np.cumsum(
-            _diff_buffed(peak_msk[has_peaks].astype(int), None, half_win, False),
-            axis=-1,
-        )
-        > quarter_win
-    )
+    clean_flag(with_jumps, quarter_win)
+    jumps[has_peaks] = with_jumps
 
     # Recall that we set _min_size to be half the actual peak min above
     jumps[has_peaks] *= x_step[has_peaks[msk]] >= 2 * _min_size[has_peaks]
