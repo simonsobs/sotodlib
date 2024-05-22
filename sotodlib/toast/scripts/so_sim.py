@@ -65,9 +65,12 @@ def simulate_data(job, otherargs, runargs, comm):
         wrk.load_data_context(job, otherargs, runargs, data)
         wrk.act_responsivity_sign(job, otherargs, runargs, data)
         wrk.create_az_intervals(job, otherargs, runargs, data)
+        wrk.apply_readout_filter(job, otherargs, runargs, data)
         # optionally zero out
         if otherargs.zero_loaded_data:
             toast.ops.Reset(detdata=[defaults.det_data])
+        # Append a weather model
+        wrk.append_weather_model(job, otherargs, runargs, data)
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
@@ -180,6 +183,13 @@ def main():
         help="Map each observation separately.",
     )
     parser.add_argument(
+        "--intervalmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each interval separately.",
+    )
+    parser.add_argument(
         "--zero_loaded_data",
         required=False,
         default=False,
@@ -204,7 +214,9 @@ def main():
 
     wrk.setup_pointing(operators)
     wrk.setup_az_intervals(operators)
+    wrk.setup_readout_filter(operators)
     wrk.setup_simple_noise_models(operators)
+    wrk.setup_weather_model(operators)
     wrk.setup_simulate_atmosphere_signal(operators)
     wrk.setup_simulate_sky_map_signal(operators)
     wrk.setup_simulate_conviqt_signal(operators)

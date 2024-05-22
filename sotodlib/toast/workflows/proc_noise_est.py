@@ -66,9 +66,7 @@ def noise_estimation(job, otherargs, runargs, data):
 
     if job_ops.noise_estim.enabled:
         # Estimate noise.
-        log.info_rank(
-            "  Building noise estimate...", comm=data.comm.comm_world
-        )
+        log.info_rank("  Building noise estimate...", comm=data.comm.comm_world)
         job_ops.noise_estim.apply(data)
         log.info_rank(
             "  Finished noise estimate in",
@@ -95,3 +93,45 @@ def noise_estimation(job, otherargs, runargs, data):
                 comm=data.comm.comm_world,
                 timer=timer,
             )
+
+
+def setup_diff_noise_estimation(operators):
+    """Add commandline args and operators for signal difference noise estimation.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.SignalDiffNoiseModel(
+            name="diff_noise_estim",
+            noise_model="diff_noise_estim",
+            enabled=False,
+        )
+    )
+
+
+@workflow_timer
+def diff_noise_estimation(job, otherargs, runargs, data):
+    """Estimate a simple white noise model for every detector.
+
+    This uses sample differences to estimate the white noise properties.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.diff_noise_estim.enabled:
+        job_ops.diff_noise_estim.apply(data)

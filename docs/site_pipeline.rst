@@ -295,6 +295,17 @@ Below is the full docs of the configuration class.
 
 .. autoclass:: sotodlib.site_pipeline.update_det_match.UpdateDetMatchesConfig
 
+update-hkdb
+----------------
+
+The update_hkdb site-pipeline script is used to scan through housekeeping files,
+and update the index database. Configuration for this script must be passed in
+through a config file, with fields that map to the HkConfig dataclass, described
+below:
+
+.. autoclass:: sotodlib.io.hkdb.HkConfig
+  :no-index:
+
 analyze-bright-ptsrc
 --------------------
 
@@ -693,6 +704,77 @@ Command line arguments
     :prog: make_hwp_solutions
 
 
+make-cosamp-hk
+------------------
+
+This element generates house-keeping data with timestamps co-sampled
+with detector timestamps. 
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_cosamp_hk
+    :func: get_parser
+    :prog: make-cosamp-hk
+    
+An example config for wiregrid is shown below.
+With the config file, ``wiregrid.sqlite`` and ``wiregrid_XXXX.h5``, 
+where XXXX is substituted with the first four digits of timestamps, 
+are generated on ``/path/to/manifests/wiregrid``. ``context_file``, 
+``input_dir``, ``output_dir``, ``fields``, ``aliases``, and ``output_prefix``
+are required::
+
+    context_file: '/path/to/context.yaml'
+    query_text: 'type == "obs"'
+    min_ctime: 1700000000
+    max_ctime: null
+    query_tags: ['wiregrid=1']
+    input_dir: '/path/to/level2/hk'
+    output_dir: '/path/to/manifests/wiregrid'
+    fields: 
+            ['satpX.wg-encoder.feeds.wgencoder_full.reference_count',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR2',]
+    aliases: 
+        ['encoder',
+         'LS1',
+         'LS2',
+         'LSR1',
+         'LSR2']
+    output_prefix: 'wiregrid'
+
+If you specifiy some of ``save_mean``, ``save_median``, ``save_rms``, ``save_ptp`` boolean
+in config file, those values are calculated for the first parameter of ``fields`` and 
+stored to columns of sqlite with name of like "{output_prefix}_mean". If you specify
+``min_valid_value``, ``max_valid_value``, ``max_valid_dvalue_dt`` in config file, values
+out of the range are set to ``np.nan`` and ``{output_prefix}_nan_fraction`` is added to
+columns of sqlite. A config below is an example for PWV data with its valid range is 
+0.3 < pwv < 3.0 mm and its valid time derivative is 0.01 mm/s::
+
+    context_file: '/path/to/context.yaml'
+    query_text: null
+    min_ctime: null 
+    max_ctime: null
+    update_delay: 1
+    query_tags: null
+    input_dir: '/path/to/level2/hk'
+    output_dir: '/path/to/manifests/pwv_clas'
+    fields: 
+        ['site.env-radiometer-class.feeds.pwvs.pwv',]
+    aliases: ['pwv_class',]
+    output_prefix: 'pwv_class'
+
+    save_mean: True
+    save_median: True
+    save_rms: True
+    save_ptp: True
+    min_valid_value: 0.3
+    max_valid_value: 3.0
+    max_valid_dvalue_dt: 0.01
+
+    
 make-ml-map
 -----------
 
