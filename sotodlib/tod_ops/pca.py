@@ -217,20 +217,23 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
-def find_pcabounds(aman, pca_signals_cal, xfac=2, yfac=1.5):
+def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
     """Finds the bounds of the pca box using IQR 
     statistics
 
     Parameters
     ----------
-    amans : list
-        list of observation axismanagers
+    aman : AxisManager
+        observation axismanagers
     pca_signals_cal : dict
         dictionary of pca axismanagers per observation
-    xfac:
+    signal : array
+        is the low pass filter signal array that's passed 
+        through
+    xfac : int
         multiplicative factor for the width of the pca box.
         Default is 2.
-    yfac:
+    yfac : int
         multiplicative factor for the height of the box.
         Default is 1.5. 
 
@@ -280,11 +283,14 @@ def find_pcabounds(aman, pca_signals_cal, xfac=2, yfac=1.5):
     yub = yub_norm * np.median(yfilt)
 
     # Calculate box width
-    xlb = medianx - xfac * iqrx
-    xub = medianx + xfac * iqrx
-    if xub > 0:
-        mad = np.median(np.abs(xfilt - medianx))
-        xub = medianx + xfac * mad
+    mad = np.median(np.abs(xfilt - medianx))
+    xlb = medianx - xfac * mad
+    xub = medianx + xfac * mad
+    #xlb = medianx - xfac * iqrx
+    #xub = medianx + xfac * iqrx
+    #if xub > 0:
+    #    mad = np.median(np.abs(xfilt - medianx))
+    #    xub = medianx + xfac * mad
 
     xbounds = [xlb, xub]
     ybounds = [ylb, yub]
@@ -296,20 +302,7 @@ def find_pcabounds(aman, pca_signals_cal, xfac=2, yfac=1.5):
     notbox = np.setdiff1d(np.arange(len(x)), box)
 
     goodids = aman.det_info.det_id[box]
-    cutids = [detid for detid in goodids if detid != 'NO_MATCH']
     badids = aman.det_info.det_id[notbox]
-    badcutids = [detid for detid in badids if detid != 'NO_MATCH']
-
-    bad_removed = len(badids) - len(badcutids)
-    good_removed = len(goodids) - len(cutids)
-
-    if bad_removed > 0 or good_removed > 0:
-        if bad_removed > 0:
-            print(
-                f'NO_MATCH detectors removed from the bad detectors: {bad_removed}')
-        if good_removed > 0:
-            print(
-                f'NO_MATCH detectors removed from the good detectors: {good_removed}')
 
     # populate results dictionary
     results['bounds'].setdefault(aman.obs_info.obs_id, {}).update({
