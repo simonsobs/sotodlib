@@ -5,7 +5,7 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional
-from multiprocessing import get_context
+import multiprocessing
 import h5py
 import copy
 
@@ -344,7 +344,7 @@ def main(
                 run_list.append( (obs, groups) )
 
     # Setup multiprocessing pool.
-    pool = get_context("spawn").Pool(processes=nproc) 
+    pool = multiprocessing.Pool(processes=nproc) 
 
     # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
@@ -400,4 +400,5 @@ def main(
             os.remove(tempfile)
 
 if __name__ == '__main__':
+    multiprocessing.set_start_method('spawn')
     sp_util.main_launcher(main, get_parser)
