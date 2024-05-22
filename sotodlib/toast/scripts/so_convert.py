@@ -99,6 +99,7 @@ def main():
     operators = list()
     wrk.setup_load_data_books(operators)
     wrk.setup_load_data_hdf5(operators)
+    wrk.setup_load_data_context(operators)
     wrk.setup_save_data_books(operators)
     wrk.setup_save_data_hdf5(operators)
 
@@ -127,6 +128,7 @@ def main():
     data = toast.Data(comm=toast_comm)
     wrk.load_data_books(job, otherargs, runargs, data)
     wrk.load_data_hdf5(job, otherargs, runargs, data)
+    wrk.load_data_context(job, otherargs, runargs, data)
 
     # Save data
     wrk.save_data_books(job, otherargs, runargs, data)

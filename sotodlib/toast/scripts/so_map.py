@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2021 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -62,6 +62,9 @@ def reduce_data(job, otherargs, runargs, data):
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
     wrk.create_az_intervals(job, otherargs, runargs, data)
+    wrk.apply_readout_filter(job, otherargs, runargs, data)
+    wrk.simple_deglitch(job, otherargs, runargs, data)
+    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
 
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
     wrk.filter_hwpss(job, otherargs, runargs, data)
@@ -156,6 +159,13 @@ def main():
         action="store_true",
         help="Map each observation separately.",
     )
+    parser.add_argument(
+        "--intervalmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each interval separately.",
+    )
 
     # The operators and templates we want to configure from the command line
     # or a parameter file.
@@ -173,9 +183,12 @@ def main():
     wrk.setup_simple_noise_models(operators)
     wrk.setup_flag_noise_outliers(operators)
 
+    wrk.setup_readout_filter(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_demodulate(operators)
     wrk.setup_noise_estimation(operators)
+    wrk.setup_simple_deglitch(operators)
+    wrk.setup_simple_jumpcorrect(operators)
     wrk.setup_flag_sso(operators)
     wrk.setup_hn_map(operators)
     wrk.setup_cadence_map(operators)

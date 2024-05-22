@@ -226,10 +226,14 @@ class CalInfo:
         return dtype
 
 
-class MissingSmurfInfo(Exception):
-    pass
+@dataclass
+class CalResult:
+    success: bool = False
+    fail_msg: str = ''
+    resset: Optional[core.metadata.ResultSet] = None
 
-def get_cal_resset(ctx: core.Context, obs_id):
+
+def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
     """
     Returns calibration ResultSet for a given ObsId. This pulls IV and bias step
     data for each detset in the observation, and uses that to compute CalInfo
@@ -240,8 +244,12 @@ def get_cal_resset(ctx: core.Context, obs_id):
             on_missing={'det_cal': 'skip'}
     )
     cals = [CalInfo(rid) for rid in am.det_info.readout_id]
+
+    if len(cals) == 0:
+        return CalResult(success=False, fail_msg="No detectors present in observation.")
+
     if 'smurf' not in am.det_info:
-        raise MissingSmurfInfo(f"Missing smurf info for {obs_id}")
+        return CalResult(success=False, fail_msg="Missing smurf info for observation")
 
     iv_obsids = get_cal_obsids(ctx, obs_id, 'iv')
 
@@ -347,7 +355,7 @@ def get_cal_resset(ctx: core.Context, obs_id):
     rset = core.metadata.ResultSet.from_friend(np.array(
         [astuple(c) for c in cals], dtype=CalInfo.dtype()
     ))
-    return rset
+    return CalResult(success=True, resset=rset)
 
 
 def get_obs_with_detsets(ctx, detset_idx):
@@ -449,29 +457,26 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                               key=(lambda s: s.split('_')[1]))
 
     logger.info("%d datasets to add", len(remaining_obsids))
-    # failed_obsid_cache = config['archive']['det_cal'].get('failed_obsid_cache')
     for obs_id in tqdm(remaining_obsids, disable=(not show_pb)):
         try:
-            rset = get_cal_resset(ctx, obs_id)
-        except MissingSmurfInfo:
-            logger.error("Missing smurf info for %s", obs_id)
-            if failed_obsid_cache is not None:
-                add_to_failed_cache(obs_id, failed_obsid_cache, 'MISSING_SMURF_INFO')
-            continue
+            result = get_cal_resset(ctx, obs_id)
+            if result.success:
+                logger.info("Writing metadata for %s", obs_id)
+                write_dataset(result.resset, h5_path, obs_id, overwrite=overwrite)
+                path = h5_relpath if write_relpath else h5_path
+                db.add_entry({
+                    'obs:obs_id': obs_id,
+                    'dataset': obs_id,
+                }, filename=path, replace=overwrite)
+            else:
+                logger.error("Failed on %s: %s", obs_id, result.fail_msg)
+                if failed_obsid_cache is not None:
+                    add_to_failed_cache(obs_id, failed_obsid_cache, result.fail_msg)
+
         except Exception as e:
             logger.error("Failed on %s: %s", obs_id, e)
             if format_exc:
                 logger.error(traceback.format_exc())
-            continue
-
-        logger.info("Writing metadata for %s", obs_id)
-        write_dataset(rset, h5_path, obs_id, overwrite=overwrite)
-
-        path = h5_relpath if write_relpath else h5_path
-        db.add_entry({
-            'obs:obs_id': obs_id,
-            'dataset': obs_id,
-        }, filename=path, replace=overwrite)
 
         if run_single:
             break
