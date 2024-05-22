@@ -168,6 +168,9 @@ Here is a list of the supported high-level operations:
 .. autofunction:: sotodlib.toast.workflows.setup_deconvolve_detector_timeconstant
 .. autofunction:: sotodlib.toast.workflows.deconvolve_detector_timeconstant
 
+.. autofunction:: sotodlib.toast.workflows.setup_readout_filter
+.. autofunction:: sotodlib.toast.workflows.apply_readout_filter
+
 .. autofunction:: sotodlib.toast.workflows.setup_filter_hwpss
 .. autofunction:: sotodlib.toast.workflows.filter_hwpss
 
