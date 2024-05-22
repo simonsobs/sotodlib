@@ -350,12 +350,13 @@ def main(
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
     # whenever the file size exceeds 10 GB.
     nfile = 0
-    dest_file = os.path.splitext(configs['archive']['policy']['filename'])[0]+'_'+str(nfile).zfill(3)+'.h5'
-    if not(os.path.exists(dest_file)):
-            os.makedirs(dest_file)
-    while os.path.getsize(dest_file) > 10e9:
+    folder = os.path.split(configs['archive']['policy']['filename'])[0]
+    dest_file = folder + '_'+str(nfile).zfill(3)+'.h5'
+    if not(os.path.exists(folder)):
+            os.makedirs(folder)
+    while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
         nfile += 1
-        dest_file = os.path.splitext(dest_file)[0]+str(nfile).zfill(3)+'.h5'
+        dest_file = os.path.splitext(dest_file)[0] + str(nfile).zfill(3)+'.h5'
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     for i in range(len(run_list)//write_block + 1):
@@ -372,11 +373,11 @@ def main(
         outputs = [r.get() for r in async_out]
         db = _get_preprocess_db(configs, group_by)
         all_files = []
-        if not(os.path.exists(dest_file)):
-            os.makedirs(dest_file)
-        if os.path.getsize(dest_file) >= 10e9:
+        if not(os.path.exists(folder)):
+            os.makedirs(folder)
+        if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
             nfile += 1
-            dest_file = os.path.splitext(dest_file)[0]+'_'+str(nfile).zfill(3)+'.h5'
+            dest_file = os.path.splitext(dest_file) + '_'+str(nfile).zfill(3)+'.h5'
 
         with h5py.File(dest_file,'w') as f_dest:
             for err, output in outputs:
