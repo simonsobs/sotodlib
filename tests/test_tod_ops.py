@@ -195,12 +195,21 @@ class FilterTest(unittest.TestCase):
         f0 = SAMPLE_FREQ_HZ
         fc = f0 / 4
 
+        def wrap_iir(N, wn, fs=f0):
+            b, a = scipy.signal.butter(N, wn, fs=fs)
+            iir_params = core.AxisManager()
+            iir_params.wrap('a', a)
+            iir_params.wrap('b', b)
+            iir_params.wrap('fscale', 1)
+            return iir_params
+
         # A simple IIR filter
-        b, a = scipy.signal.butter(4, fc, fs=f0)
-        iir_params = core.AxisManager()
-        iir_params.wrap('a', a)
-        iir_params.wrap('b', b)
-        iir_params.wrap('fscale', 1)
+        iir_params = wrap_iir(4, fc)
+
+        # Per-wafer IIR filter params (ok if uniform)
+        iir_params_multi = core.AxisManager()
+        iir_params_multi.wrap('wafer1', wrap_iir(4, fc))
+        iir_params_multi.wrap('wafer2', wrap_iir(4, fc))
 
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
@@ -210,8 +219,11 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.gaussian_filter(fc, f_sigma=f0 / 10),
                 tod_ops.filters.gaussian_filter(0, f_sigma=f0 / 10),
                 tod_ops.filters.iir_filter(iir_params=iir_params),
+                tod_ops.filters.iir_filter(iir_params=iir_params_multi),
                 tod_ops.filters.iir_filter(
                     a=iir_params.a, b=iir_params.b, fscale=iir_params.fscale),
+                tod_ops.filters.iir_filter(
+                    iir_params=dict(iir_params._fields.items())),
                 tod_ops.filters.identity_filter(),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
@@ -222,7 +234,14 @@ class FilterTest(unittest.TestCase):
             if not isinstance(filt, tod_ops.filters.identity_filter):
                 self.assertTrue(np.all(sigma1 < sigma0))
 
+        # Confirm fail if not uniform per-wafer
+        iir_params_multi.wrap('wafer3', wrap_iir(6, fc))
+        filt = tod_ops.filters.iir_filter(iir_params=iir_params_multi)
+        with self.assertRaises(ValueError):
+            y = filt(f, tod)
+
         # Check 1d
+        filt = tod_ops.filters.high_pass_butter4(fc)
         sig1f = tod_ops.fourier_filter(tod, filt, signal_name='sig1d',
                                        detrend='linear')
         self.assertEqual(sig1f.shape, tod['sig1d'].shape)
