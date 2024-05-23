@@ -159,7 +159,6 @@ def main():
     wrk.setup_deconvolve_detector_timeconstant(operators)
     wrk.setup_raw_statistics(operators)
 
-    wrk.setup_readout_filter(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_filter_common_mode(operators)
     wrk.setup_filter_ground(operators)
