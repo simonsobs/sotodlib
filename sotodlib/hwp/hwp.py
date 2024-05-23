@@ -489,7 +489,7 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
         signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
 
 
-def demod_tod(aman, signal_name='signal', demod_mode=4,
+def demod_tod(aman, signal_name='signal', hwp_angle=None, demod_mode=4,
               bpf_cfg=None, lpf_cfg=None):
     """
     Demodulate TOD based on HWP angle
@@ -524,8 +524,10 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         the demodulated signal imaginary component filtered with `lpf` and multiplied by 2.
 
     """
+    if hwp_angle is None:
+        hwp_angle = aman.hwp_angle
     # HWP speed in Hz
-    speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+    speed = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
     
     if bpf_cfg is None:
@@ -544,7 +546,7 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
                    'trans_width': 0.1}
     lpf = filters.get_lpf(lpf_cfg)
         
-    phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
+    phasor = np.exp(demod_mode * 1.j * hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
                                    signal_name=signal_name) * phasor
     
