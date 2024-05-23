@@ -839,6 +839,7 @@ class SourceFlags(_Preprocess):
             res: 0.005817764173314432 # np.radians(20/60)
             max_pix: 4e6
           save: True
+          select: True # optional
     
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
@@ -870,6 +871,15 @@ class SourceFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("sources", source_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_any_cuts(proc_aman.sources.source_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
 
 class HWPAngleModel(_Preprocess):
     """Apply hwp angle model to the TOD.
