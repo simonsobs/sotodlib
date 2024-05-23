@@ -16,7 +16,8 @@ from . import filters
 from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                       psat_range=(0, 15), merge=True, overwrite=True,
+                       psat_range=(0, 15), rn_range=None, si_nan=False,
+                       merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
@@ -33,6 +34,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
         P_SAT in the IV analysis is the bias power at 90% Rn in pW.
+    rn_range : Tuple
+        Tuple (lower_bound, upper_bound) for r_n det selection.
+    si_nan : bool
+        If true, flag dets where s_i is NaN. Default is false.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -64,13 +69,20 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         merge = False
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
+
+    ranges = [detcal.bg >= 0,
+              detcal.r_tes > 0,
+              detcal.r_frac >= rfrac_range[0],
+              detcal.r_frac <= rfrac_range[1],
+              detcal.p_sat*1e12 >= psat_range[0],
+              detcal.p_sat*1e12 <= psat_range[1]]
+    if rn_range is not None:
+        ranges.append(detcal.r_n >= rn_range[0])
+        ranges.append(detcal.r_n <= rn_range[1])
+    if si_nan:
+        ranges.append(np.isnan(detcal.s_i) == False)
     
-    msk = ~(np.all([detcal.bg >= 0,
-                    detcal.r_tes > 0,
-                    detcal.r_frac >= rfrac_range[0],
-                    detcal.r_frac <= rfrac_range[1],
-                    detcal.p_sat*1e12 >= psat_range[0],
-                    detcal.p_sat*1e12 <= psat_range[1]], axis=0))
+    msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     if 'samps' in aman:
         x = Ranges(aman.samps.count)
