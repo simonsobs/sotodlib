@@ -6,6 +6,7 @@ import argparse
 import traceback
 from typing import Optional
 import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import h5py
 import copy
 
@@ -290,12 +291,6 @@ def get_parser(parser=None):
         action='store_true',
     )
     parser.add_argument(
-        '--write-block',
-        help="How many obs before writing to db.",
-        type=int,
-        default=10
-    )
-    parser.add_argument(
         '--nproc',
         help="Number of parallel processes to run on.",
         type=int,
@@ -313,7 +308,6 @@ def main(
         update_delay: Optional[int] = None,
         tags: Optional[str] = None,
         planet_obs: bool = False,
-        write_block: Optional[int] = 10,
         nproc: Optional[int] = 4
  ):
     configs, context = _get_preprocess_context(configs)
@@ -371,48 +365,37 @@ def main(
                 [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
                 run_list.append( (obs, groups) )
 
-    # Setup multiprocessing pool.
-    pool = multiprocessing.Pool(processes=nproc) 
-
     # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
     # whenever the file size exceeds 10 GB.
     nfile = 0
     folder = os.path.dirname(configs['archive']['policy']['filename'])
-    dest_file = os.path.splitext(configs['archive']['policy']['filename'])[0] + \
-            '_' + str(nfile).zfill(3) + '.h5'
+    basename = os.path.splitext(configs['archive']['policy']['filename'])[0]
+    dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
     if not(os.path.exists(folder)):
             os.makedirs(folder)
     while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
         nfile += 1
-        dest_file = os.path.splitext(configs['archive']['policy']['filename'])[0] + \ 
-                   '_' + str(nfile).zfill(3) + '.h5'
+        dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    for i in range(len(run_list)//write_block + 1):
-        prun_list = run_list[i*write_block:(i+1)*write_block]
-        if len(prun_list) == 0:
-            break
-        async_out = [pool.apply_async(preprocess_tod, 
-                                      kwds = {'obs_id':pr[0]['obs_id'], 
-                                              'group_list':pr[1],
-                                              'configs': swap_archive(configs, f'temp/{pr[0]["obs_id"]}.h5'),
-                                              'logger': logger,
-                                              'overwrite': overwrite,
-                                              'run_parallel': True}) for pr in prun_list]
-        outputs = [r.get() for r in async_out]
-        db = _get_preprocess_db(configs, group_by)
-        all_files = []
-        if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
-            nfile += 1
-            dest_file = os.path.splitext(dest_file) + '_'+str(nfile).zfill(3)+'.h5'
+    with ProcessPoolExecutor(nproc) as exe:
+        futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+                     group_list=r[1], logger=logger,
+                     configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
+                     overwrite=overwrite, run_parallel=True) for r in run_list]
+        for future in as_completed(futures):
+            err, output = future.result()
+            db = _get_preprocess_db(configs, group_by)
+            if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
+                nfile += 1
+                dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
 
-        h5_path = os.path.relpath(dest_file,
-                        start=os.path.dirname(configs['archive']['index']))
+            h5_path = os.path.relpath(dest_file,
+                            start=os.path.dirname(configs['archive']['index']))
 
-        with h5py.File(dest_file,'a') as f_dest:
-            for err, output in outputs:
-                if err is None:
+            if err is None:
+                with h5py.File(dest_file,'a') as f_dest:
                     for db_data, src_file in output:
                         with h5py.File(src_file,'r') as f_src:
                             for dts in f_src.keys():
@@ -423,13 +406,11 @@ def main(
                         logger.info(f"Saving to database under {db_data}")
                         if len(db.inspect(db_data)) == 0:
                             db.add_entry(db_data, h5_path)
-                        all_files.append(src_file)
-                else:
-                    f = open(errlog, 'a')
-                    f.write(f'{time.time()}, {err}, {output[0]}\n{output[1]}')
-                    f.close()
-        for tempfile in np.unique(all_files):
-            os.remove(tempfile)
+                os.remove(src_file)
+            else:
+                f = open(errlog, 'a')
+                f.write(f'{time.time()}, {err}, {output[0]}\n{output[1]}')
+                f.close()
 
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
