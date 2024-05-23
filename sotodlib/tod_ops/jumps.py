@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from pixell.utils import block_expand, block_reduce, moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import matched_jumps, matched_jumps64, clean_flag
+from so3g import matched_jumps, matched_jumps64, clean_flag, scale_jumps, scale_jumps64
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -451,26 +451,18 @@ def twopi_jumps(
     if len(atol) != len(signal):
         raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
 
-    msk = np.ptp(_signal) >= 2 * np.pi - atol
-    diff_buffed = _diff_buffed(_signal[msk], None, win_size, False)
+    _signal = np.ascontiguousarray(_signal)
+    heights = np.empty_like(_signal)
+    atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
+    if _signal.dtype.name == "float32":
+        scale_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+    elif _signal.dtype.name == "float64":
+        scale_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+    else:
+        raise TypeError("signal must be float32 or float64")
 
-    jumps = np.atleast_2d(np.zeros_like(signal, dtype=bool))
-    ratio = diff_buffed / (2 * np.pi)
-    rounded = np.round(ratio, 0)
-    jumps[msk] = (np.abs(ratio - rounded) <= atol[..., None]) & (np.abs(ratio) >= 0.5)
-    jumps.reshape(signal.shape)
-
+    jumps = heights != 0
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
-    jumps = jump_ranges.mask()
-    _heights = estimate_heights(
-        signal[msk],
-        jumps[msk],
-        win_size=win_size,
-        twopi=False,
-        diff_buffed=rounded * 2 * np.pi,
-    )
-    heights = np.zeros_like(signal)
-    heights[msk] = _heights
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
