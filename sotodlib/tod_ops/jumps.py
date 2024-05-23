@@ -156,9 +156,9 @@ def _jumpfinder(
     jumps[has_peaks] = with_jumps
 
     # Recall that we set _min_size to be half the actual peak min above
-    # We allow for 1 sample worth of uncertainty here
+    # We allow for .5 samples worth of uncertainty here
     jumps[has_peaks] *= (
-        x_step[has_peaks[msk]] >= (2 - 8.0 / win_size) * _min_size[has_peaks]
+        x_step[has_peaks[msk]] >= (2 - (4.0 / win_size)) * _min_size[has_peaks]
     )
 
     if exact:

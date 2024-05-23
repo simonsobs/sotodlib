@@ -12,6 +12,7 @@ def get_block_moment(
     block_size: int,
     moment: int = 1,
     central: bool = True,
+    shift: int = 0,
     output: Optional[NDArray[np.floating]] = None,
 ) -> NDArray[np.floating]:
     """
@@ -32,6 +33,8 @@ def get_block_moment(
                 Must be >= 1.
 
         central: If True compute the mean centered moment.
+
+        shift: Sample to start the blocks at, will be 0 before this.
 
         output: Array to put the blocked moment into.
                 If provided must be the same shape as tod.
@@ -63,8 +66,8 @@ def get_block_moment(
         raise ValueError("moment must be at least 1")
 
     if dtype == "float32":
-        block_moment(tod, output, block_size, moment, central)
+        block_moment(tod, output, block_size, moment, central, shift)
     else:
-        block_moment64(tod, output, block_size, moment, central)
+        block_moment64(tod, output, block_size, moment, central, shift)
 
     return output.reshape(orig_shape)
