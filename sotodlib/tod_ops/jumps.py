@@ -156,7 +156,10 @@ def _jumpfinder(
     jumps[has_peaks] = with_jumps
 
     # Recall that we set _min_size to be half the actual peak min above
-    jumps[has_peaks] *= x_step[has_peaks[msk]] >= 2 * _min_size[has_peaks]
+    # We allow for 1 sample worth of uncertainty here
+    jumps[has_peaks] *= (
+        x_step[has_peaks[msk]] >= (2 - 8.0 / win_size) * _min_size[has_peaks]
+    )
 
     if exact:
         structure = np.array([[0, 0, 0], [1, 1, 1], [0, 0, 0]])
@@ -306,6 +309,7 @@ def estimate_heights(
         diff_buffed = _diff_buffed(signal, jumps, win_size, make_step)
 
     jumps = np.atleast_2d(jumps)
+    diff_buffed = np.atleast_2d(diff_buffed)
     if len(jumps.shape) > 2:
         raise ValueError("Only 1d and 2d arrays are supported")
     if twopi:
