@@ -17,6 +17,7 @@ def setup_load_or_simulate_observing(parser, operators):
     wrk.setup_az_intervals(operators)
     wrk.setup_weather_model(operators)
     wrk.setup_diff_noise_estimation(operators)
+    wrk.setup_readout_filter(operators)
 
     # Simulated observing
     wrk.setup_simulate_observing(parser, operators)
@@ -46,6 +47,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
         wrk.load_data_context(job, otherargs, runargs, data)
         wrk.act_responsivity_sign(job, otherargs, runargs, data)
         wrk.create_az_intervals(job, otherargs, runargs, data)
+        wrk.apply_readout_filter(job, otherargs, runargs, data)
         # Append a weather model
         wrk.append_weather_model(job, otherargs, runargs, data)
         # Before running simulations based on real data, we need
