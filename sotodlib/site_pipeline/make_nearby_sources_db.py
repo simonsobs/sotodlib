@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 import numpy as np
 from sotodlib import core
+from sotodlib.coords import optics
 import sotodlib.coords.planets as planets
 
 from sotodlib.site_pipeline import util
@@ -146,6 +147,16 @@ def main(config: str,
             raise ValueError('Invalid style of source')
     distance = config.get('distance', 1.)
     
+    # Other configurations
+    telescope = config.get('telescope', 'SAT')
+    if telescope == 'SAT':
+        wafer_slots = [f'ws{i}' for i in range(7)]
+    elif telescope == 'LAT':
+        wafer_slots = [f'ws{i}' for i in range(3)]
+    else:
+        raise NameError('Only "SAT" or "LAT" is supported.')
+    optics_config = config.get('optics_config', None)
+    
     # Load metadata sqlite
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -162,6 +173,8 @@ def main(config: str,
         scheme.add_data_field('dataset')
         for source_name in source_names:
             scheme.add_data_field(source_name)
+            for ws in wafer_slots:
+                scheme.add_data_field(f'{source_name}_{ws}')
         man_db = core.metadata.ManifestDb(man_db_filename, scheme=scheme)
     
     # query observations
@@ -185,45 +198,53 @@ def main(config: str,
     # output cosampled data for each obs_id
     for obs in obs_list:
         obs_id = obs['obs_id']
+        h5_filename = f"nearby_sources_{obs_id.split('_')[1][:4]}.h5"
+        output_filename = os.path.join(output_dir, h5_filename)
+        entry = {'obs:obs_id': obs_id, 'dataset': obs_id}
+        streamed_wafer_slots  = ['ws{}'.format(index) for index, bit in enumerate(obs_id.split('_')[-1]) if bit == '1']
         try:
-            meta = ctx.get_meta(obs_id)
-            _aman = ctx.get_obs(obs_id, dets=[])
-            aman = core.AxisManager(meta.dets, _aman.samps)
-            aman.wrap('timestamps', _aman.timestamps, [(0, 'samps')])
-            aman.wrap('boresight', _aman.boresight)
-            if not 'focal_plane' in list(meta._fields.keys()):
-                focal_plane = core.AxisManager(meta.dets)
-                focal_plane.wrap('xi', np.zeros(meta.dets.count), [(0, 'dets')])
-                focal_plane.wrap('eta', np.zeros(meta.dets.count), [(0, 'dets')])
-                focal_plane.wrap('gamma', np.zeros(meta.dets.count), [(0, 'dets')])
-                aman.wrap('focal_plane', focal_plane)
-            else:
-                aman.wrap('focal_plane', meta.focal_plane)
-                flag_fp_isnan = (np.isnan(aman.focal_plane.xi)) | \
-                                (np.isnan(aman.focal_plane.eta)) | \
-                                (np.isnan(aman.focal_plane.gamma))
-                aman.restrict('dets', aman.dets.vals[~flag_fp_isnan])
-            
-            nearby_sources = planets.get_nearby_sources(aman, source_list=source_list, distance=distance)
-            nearby_source_names = []
-            for _source in nearby_sources:
-                nearby_source_names.append(_source[0])
-                
-
-                
-            h5_filename = f"nearby_sources_{obs_id.split('_')[1][:4]}.h5"
-            output_filename = os.path.join(output_dir, h5_filename)
-            
-            entry = {'obs:obs_id': obs_id, 'dataset': obs_id}
-            for source_name in source_names:
-                if source_name in nearby_source_names:
-                    entry[source_name] = 1
+            for ws in wafer_slots:
+                if ws not in streamed_wafer_slots:
+                    for source_name in source_names:
+                        entry[f'{source_name}_{ws}'] = 0                    
                 else:
-                    entry[source_name] = 0
+                    meta = ctx.get_meta(obs_id, dets={'wafer_slot': ws})
+                    _aman = ctx.get_obs(obs_id, dets=[])
+                    aman = core.AxisManager(meta.dets, _aman.samps)
+                    aman.wrap('timestamps', _aman.timestamps, [(0, 'samps')])
+                    aman.wrap('boresight', _aman.boresight)
+                    
+                    if not 'focal_plane' in list(meta._fields.keys()):
+                        optics.get_focal_plane(aman, 
+                                               x = np.zeros(aman.dets.count),
+                                               y = np.zeros(aman.dets.count),
+                                               wafer_slot=ws,
+                                               config_path=optics_config)
+                    else:
+                        aman.wrap('focal_plane', meta.focal_plane)                        
+                    flag_fp_isnan = (np.isnan(aman.focal_plane.xi)) | \
+                                    (np.isnan(aman.focal_plane.eta)) | \
+                                    (np.isnan(aman.focal_plane.gamma))
+                    aman.restrict('dets', aman.dets.vals[~flag_fp_isnan])
+
+                    nearby_sources = planets.get_nearby_sources(aman, source_list=source_list, distance=distance)
+                    nearby_source_names = []
+                    for _source in nearby_sources:
+                        nearby_source_names.append(_source[0])
+                    for source_name in source_names:
+                        entry[f'{source_name}_{ws}'] = 1 if source_name in nearby_source_names else 0
+            
+            for source_name in source_names:
+                hit_any = False
+                for ws in wafer_slots:
+                    if entry[f'{source_name}_{ws}'] == 1:
+                        hit_any = True
+                entry[f'{source_name}'] = 1 if hit_any else 0
+            
             man_db.add_entry(entry, 
                      filename=output_filename, replace=overwrite)
-            logger.info(f"saved: {obs_id}")
-            
+            logger.info(f"saved: {obs_id}, {ws}")
+
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while processing {obs_id}")
             continue
