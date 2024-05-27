@@ -229,11 +229,11 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         for part_slice_ta_masked, part_slice_ta_unmasked in zip(part_slices_ta_masked, part_slices_ta_unmasked):
             daz_part = daz[part_slice_ta_masked]
             daz_part_mean, daz_part_std, daz_part_samps = daz_part.mean(), daz_part.std(), daz_part.shape[0]
-            if np.isclose(daz_part_mean, daz_right_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_right_samps)) and \
-                np.isclose(daz_part_std, daz_right_std, rtol=1, atol=0):
+            if np.isclose(daz_part_mean, daz_right_mean, rtol=0.01, atol=3.*daz_right_std/np.sqrt(daz_right_samps)) and \
+                np.isclose(daz_part_std, daz_right_std, rtol=3., atol=0):
                 _right_flag[part_slice_ta_unmasked] = True
-            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_left_samps)) and \
-                np.isclose(daz_part_std, daz_left_std, rtol=1, atol=0):
+            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0.01, atol=3.*daz_right_std/np.sqrt(daz_left_samps)) and \
+                np.isclose(daz_part_std, daz_left_std, rtol=3., atol=0):
                 _left_flag[part_slice_ta_unmasked] = True
             else:
                 _truncate_flag[part_slice_ta_unmasked] = True
