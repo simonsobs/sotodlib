@@ -45,8 +45,8 @@ def quick_scan(tod, n_samp):
     bs.wrap_new('roll', shape=('samps', ))[:] = 0. * az
     return bs
 
-def gen_1_over_f(n_samp, dt, fknee, seed=0):
-    np.random.seed(seed)
+def gen_1_over_f(n_samp, dt, fknee):
+    np.random.seed(0)
     tmp = np.random.random(size=n_samp) * 2 - 1
     S = np.fft.rfft(tmp)
 
