@@ -16,6 +16,39 @@ from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
 
+def dummy_preproc(obs_id, group_list, logger, 
+                  configs, overwrite, run_parallel):
+    error = None
+    outputs = []
+    context = core.Context(configs["context_file"])
+    group_by, groups = _get_groups(obs_id, configs, context)
+    pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
+    for group in groups:
+        logger.info(f"Beginning run for {obs_id}:{group}")
+        proc_aman = core.AxisManager(core.LabelAxis('dets', ['det%i' % i for i in range(3)]),
+                                     core.OffsetAxis('samps', 1000))
+        proc_aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
+        proc_aman.wrap_new('timestamps', ('samps',))[:] = (np.arange(proc_aman.samps.count) / 200)
+        policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+        dest_file, dest_dataset = policy.get_dest(obs_id)
+        for gb, g in zip(group_by, group):
+            if gb == 'detset':
+                dest_dataset += "_" + g
+            else:
+                dest_dataset += "_" + gb + "_" + str(g)
+        logger.info(f"Saving data to {dest_file}:{dest_dataset}")
+        proc_aman.save(dest_file, dest_dataset, overwrite)        
+        
+        # Collect index info.
+        db_data = {'obs:obs_id': obs_id,
+                   'dataset': dest_dataset}
+        for gb, g in zip(group_by, group):
+            db_data['dets:'+gb] = g
+        if run_parallel:
+            outputs.append((db_data, dest_file))
+    if run_parallel:
+        return error, outputs
+
 def _get_preprocess_context(configs, context=None):
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
@@ -380,7 +413,7 @@ def main(
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
-        futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+        futures = [exe.submit(dummy_preproc, obs_id=r[0]['obs_id'],
                      group_list=r[1], logger=logger,
                      configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
