@@ -42,7 +42,9 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
     signal : array-like
         The processed signal.
     """
-    
+    if method not in ["polyfit","legendre"] :
+        raise ValueError("Only polyfit and legendre are acceptable.")
+        
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
             logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
@@ -78,10 +80,6 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
         mask_array = ~mask_array
         
     is_matrix = len(mask_array.shape) > 1
-
-    if method not in ["polyfit","legendre"] :
-        raise ValueError("Only polyfit and legendre are acceptable.")
-
     elif method == "polyfit":
         t = aman.timestamps - aman.timestamps[0]
         for i_det in range(aman.dets.count):
@@ -123,11 +121,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             sub_time = time[start:end]
 
             # Generate legendre functions of each degree and store them in an array
-            arr_legendre = []
-            for deg in range(degree_corr) :
-                each_legendre = eval_legendre(deg, x)
-                arr_legendre.append(each_legendre)
-            arr_legendre = np.array(arr_legendre)
+            arr_legendre = np.array([eval_legendre(deg, x) for deg in degree_corr])
 
             # flag to know if the result is matrix formation
             flag_matrix = False
