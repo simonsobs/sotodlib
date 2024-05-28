@@ -266,7 +266,6 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             valid_slice = slice(*np.where(~_truncate_flag)[0][[0, -1]])
             valid_i_start, valid_i_end = np.where(~_truncate_flag)[0][0], np.where(~_truncate_flag)[0][-1]
             aman.restrict('samps', (aman.samps.offset + valid_i_start, aman.samps.offset+valid_i_end))
-            #aman.restrict('samps', valid_slice)
             ta_flag = Ranges.from_bitmask(_ta_flag[valid_slice])
         else:
             ta_flag = Ranges.from_bitmask(np.logical_or(_ta_flag, _truncate_flag))
