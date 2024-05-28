@@ -303,16 +303,18 @@ def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
 
     goodids = aman.det_info.det_id[box]
     badids = aman.det_info.det_id[notbox]
+    
+    bands = np.unique(aman.det_info.wafer.bandpass)
+    bands = bands[bands != 'NC']
+    mask = np.isin(aman.det_info.det_id, badids) #gooddets False, baddets True
+    pc_aman = core.AxisManager(aman.dets, aman.samps,
+                                   core.LabelAxis(name='bandpass', vals=bands))
+    pc_aman.wrap('pca_det_mask', mask, [(0, 'dets')])
+    pc_aman.wrap('xbounds', np.array(xbounds))
+    pc_aman.wrap('ybounds', np.array(ybounds))
 
-    # populate results dictionary
-    results['bounds'].setdefault(aman.obs_info.obs_id, {}).update({
-        'x': xbounds, 'y': ybounds})
-    results['good_dets']['det_ids'].setdefault(
-        aman.obs_info.obs_id, cutids)
-    results['baddets']['det_ids'].setdefault(
-        aman.obs_info.obs_id, badcutids)
+    # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
 
-    # saves with pca run this is (nominally, 1 or 2 but some might do > 2 runs)
-    results['pca_run_iteration'] = pca_signals_cal['pca_run_iteration']
-    return results
+
+    return pc_aman
 
