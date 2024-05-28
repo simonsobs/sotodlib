@@ -42,7 +42,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
     signal : array-like
         The processed signal.
     """
-    if method not in ["polyfit","legendre"] :
+    if method not in ["polyfit", "legendre"] :
         raise ValueError("Only polyfit and legendre are acceptable.")
         
     if exclude_turnarounds:
@@ -80,7 +80,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
         mask_array = ~mask_array
         
     is_matrix = len(mask_array.shape) > 1
-    elif method == "polyfit":
+    if method == "polyfit":
         t = aman.timestamps - aman.timestamps[0]
         for i_det in range(aman.dets.count):
             if is_matrix:
@@ -91,6 +91,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             for start, end in subscan_indices:
                 if np.count_nonzero(~each_det_mask[start:end]) < degree:
                     # If degree of freedom is lower than zero, just subtract mean
+                    logger.warning('polyfit degree is smaller than the number of valid data points')
                     signal[i_det, start:end] -= np.mean(signal[i_det, start:end])
                 else:
                     t_mean = np.mean(t[start:end])
