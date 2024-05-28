@@ -1,8 +1,9 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2024-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
-"""Interval operations.
+"""SAT-specific operations.
 """
 
+import os
 import numpy as np
 from astropy import units as u
 import toast
@@ -10,10 +11,11 @@ import toast.ops
 
 from .. import ops as so_ops
 from .job import workflow_timer
+from .proc_mapmaker import mapmaker_select_noise_and_binner, mapmaker_run
 
 
-def setup_az_intervals(operators):
-    """Add commandline args and operators for building Azimuth intervals.
+def setup_splits(operators):
+    """Add commandline args and operators for SAT mapmaking splits.
 
     Args:
         operators (list):  The list of operators to extend.
@@ -22,19 +24,12 @@ def setup_az_intervals(operators):
         None
 
     """
-    operators.append(
-        toast.ops.AzimuthIntervals(
-            name="az_intervals",
-            cut_short=True,
-            short_limit=5.0 * u.second,
-            enabled=False,
-        )
-    )
+    operators.append(so_ops.Splits(name="splits", enabled=False))
 
 
 @workflow_timer
-def create_az_intervals(job, otherargs, runargs, data):
-    """Pass through pointing and create Az intervals
+def splits(job, otherargs, runargs, data):
+    """Apply mapmaking splits.
 
     Args:
         job (namespace):  The configured operators and templates for this job.
@@ -46,8 +41,9 @@ def create_az_intervals(job, otherargs, runargs, data):
         None
 
     """
-    # Configured operators for this job
     job_ops = job.operators
 
-    if job_ops.az_intervals.enabled:
-        job_ops.az_intervals.apply(data)
+    if job_ops.splits.enabled:
+        mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
+        job_ops.splits.output_dir = otherargs.out_dir
+        mapmaker_run(job, otherargs, runargs, data, job_ops.splits)
