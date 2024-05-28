@@ -13,6 +13,11 @@ from so3g import hk
 import logging
 from .datapkg_utils import load_configs
 
+#logging.basicConfig(
+#    level=logging.DEBUG,
+#    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+#)
+
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
@@ -126,7 +131,7 @@ class HKFields(Base):
 
 
 class G3tHk:
-    def __init__(self, hkarchive_path, db_path=None, echo=False):
+    def __init__(self, hkarchive_path, finalize=None, db_path=None, echo=False): #finalization
         """
         Class to manage a housekeeping data archive
 
@@ -144,11 +149,35 @@ class G3tHk:
 
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
+        self.finalize = finalize
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.session = Session()
         Base.metadata.create_all(self.engine)
+
+    
+    @classmethod
+    def from_configs(cls, configs, **kwargs):
+        """
+        Create a G3tHK instance from a configs dictionary
+
+        Args
+        ----
+        configs - dictionary containing `data_prefix` and `g3thk_db` keys
+        """
+        if isinstance(configs, str):
+            configs = load_configs(configs)
+
+        print('configs from from_configs: ', configs)
+        
+        return cls(
+            os.path.join(configs["data_prefix"], "hk"), 
+            db_path=configs["g3thk_db"],
+            finalize=configs.get("finalization", None),
+            **kwargs
+        )
+
 
     def load_fields(self, hk_path):
         """
@@ -174,7 +203,12 @@ class G3tHk:
         fields, timelines = arc.get_fields()
         hkfs = []
         for key in fields.keys():
-            hkfs.append(key)
+            logger.debug(f'key is {key}')
+            if 'det-monitor-so3' in key:
+                hkfs.append(key)
+            else:
+                continue
+
 
         starts = []
         stops = []
@@ -346,14 +380,19 @@ class G3tHk:
             .one()
         )
 
-        db_agents = db_file.agents
-        db_fields = db_file.fields
 
-        agents = []
+        # Extract instance IDs from the finalization dictionary
+        instance_ids = []
+        for server in self.finalize.get("servers", []):
+            instance_ids.extend([value for key, value in server.items()])
+
+        db_agents = [a for a in db_file.agents if a.instance_id in instance_ids]
+        db_fields = db_file.fields
 
         out = self.load_fields(db_file.path)
         fields, starts, stops, medians, means, min_vals, max_vals, stds = out
 
+        agents = []
         for field in fields:
             agent = field.split(".")[1]
             agents.append(agent)
@@ -532,23 +571,7 @@ class G3tHk:
             .first()
         )
         return max([a.stop for a in last_file.agents])
-
-    @classmethod
-    def from_configs(cls, configs):
-        """
-        Create a G3tHK instance from a configs dictionary
-
-        Args
-        ----
-        configs - dictionary containing `data_prefix` and `g3thk_db` keys
-        """
-        if type(configs) == str:
-            configs = load_configs(configs)
-
-        return cls(
-            os.path.join(configs["data_prefix"], "hk"), 
-            configs["g3thk_db"]
-        )
+            
 
     def delete_file(self, hkfile, dry_run=False, my_logger=None):
         """WARNING: Removes actual files from file system.
