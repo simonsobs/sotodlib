@@ -122,7 +122,7 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             sub_time = time[start:end]
 
             # Generate legendre functions of each degree and store them in an array
-            arr_legendre = np.array([eval_legendre(deg, x) for deg in degree_corr])
+            arr_legendre = np.array([eval_legendre(deg, x) for deg in range(degree_corr)])
 
             # flag to know if the result is matrix formation
             flag_matrix = False
