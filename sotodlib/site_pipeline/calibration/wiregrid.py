@@ -17,7 +17,9 @@ from sotodlib.io import hk_utils
 from sotodlib.site_pipeline import util
 
 wg_counts2rad = 2*np.pi/52000
-#wg_degpercount = 360/52000
+wg_offset_satp1 = np.deg2rad(12.13) # SAT1, MF1
+wg_offset_satp2 = np.deg2rad(9.473) # SAT2, UHF
+wg_offset_satp3 = np.deg2rad(11.21) # TSAT, MF2
 
 logger = util.init_logger('wiregrid', 'wiregrid: ')
 
@@ -87,15 +89,18 @@ def _get_operation_range(tod):
     return idx_wg_inside
 
 # Correct wires' direction for each telescope
-def correct_wg_angle(tod, telescope=None):
+def correct_wg_angle(tod, telescope=None, restrict=True):
     """
-    Correct offset of wires' direction by the mechanical design and hardware testing. This function is still under construction.
+    Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first,
+    but developers need to implement offsets of other SATs as well.
 
     Parameters
     ----------
         tod : AxisManager
         telescope : telescope type, e.g. satp1, satp3, etc.
             this parameter will basically be filled by the obs_info wrapped in the axismanager.
+        restrict : bool (default, True)
+            this parameter restricts the sample of the axismanger by the operation range of the wire grid.
 
     Returns
     -------
@@ -110,12 +115,17 @@ def correct_wg_angle(tod, telescope=None):
             logger.info("Telescope assignment was failed in site_pipeline.calibrate.wiregrid.correct_wg_angle")
     tod = _wrap_wg_hk(tod)
     idx_wg_inside = _get_operation_range(tod)
+    if restrict: tod.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=True)
     #
-    if telescope == 'satp1': wg_offset = np.deg2rad(12.13)
-    if telescope == 'satp2': wg_offset = np.deg2rad(9.473)
-    if telescope == 'satp3': wg_offset = np.deg2rad(11.21)
-    tod.wg.wrap_new('enc_rad', dtype='float32', shape=('samps'))
-    tod.wg.enc_rad = -  tod.wg.enc_rad_raw + wg_offset
+    if telescope == 'satp1':
+        wg_offset = wg_offset_satp1
+    elif telescope == 'satp2':
+        wg_offset = wg_offset_satp2
+    elif telescope == 'satp3':
+        wg_offset = wg_offset_satp3
+    else:
+        logger.warning(f"No matched telescope name of {telescope} for wire grid offset value, wg_offset")
+    tod.wg.wrap('enc_rad', -tod.wg.enc_rad_raw + wg_offset, [(0, 'samps')])
     return (tod, idx_wg_inside)
 
 # Detect the motion of the wire grid
@@ -193,7 +203,7 @@ def _detect_steps(tod, stopped_time=10, thresholds=None):
     return (ts_step_start, ts_step_end), (angle_mean, angle_std)
 
 # Wrap the QU response during the operation of the Grid Loader
-def wrap_QUcal(tod, stopped_time, thresholds=None):
+def wrap_qu_cal(tod, stopped_time, thresholds=None):
     """
     Wrap QU signal by the wire grid. This method is based on the demodulation by HWP.
     Users have to apply some HWP process before calling this.
@@ -221,7 +231,7 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
             wg.Qerr, wg.Uerr : the standard deviations of Q (and U) signal
 
     """
-    if hasattr(tod, 'demodQ') == False:
+    if hasattr(tod, 'demodQ') is False:
         print("This AxisManager does not have demodQ/demodU. Please call this method after you have demodulated the signal.")
         logger.info("Attribution check of demod signal was failed in site_pipeline.calibrate.wiregrid.wrap_QUcal")
         return False
@@ -231,7 +241,7 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
     step_U = []
     step_Qerr = []
     step_Uerr = []
-    for _i in range(len(wg_rad[0])):
+    for _i, _ in enumerate(wg_rad[0]):
         instep = np.where(ts_step[0][_i] < tod.timestamps, True, False)
         instep = np.where(tod.timestamps < ts_step[1][_i+1], instep, False)
         #
@@ -260,7 +270,6 @@ def wrap_QUcal(tod, stopped_time, thresholds=None):
     tod.wg.wrap('cal_data', _QUcal_ax)
     return tod
 
-
 ### Circle fitting fucntions from here ###
 def _get_initial_param_circle(x):
     """
@@ -275,9 +284,9 @@ def _get_initial_param_circle(x):
         params : the initial paramters for the circle fit
     """
     if len(np.shape(x)) == 2:
-        A = np.average(x[0])
-        B = np.average(x[1])
-        C = np.average(x[0]**2+x[1]**2)
+        A = np.nanmean(x[0])
+        B = np.nanmean(x[1])
+        C = np.nanmean(x[0]**2+x[1]**2)
         params = np.array([A, B, C])
         return params
     else:
@@ -327,15 +336,6 @@ def _comp_plane_fit(obs_data, std_data, fitfunc, param0):
         myodr = odr.ODR(mydata, mdr, beta0=param0)
         myoutput = myodr.run()
         return myoutput
-    elif len(np.shape(obs_data)) == 3:
-        alloutput = []
-        for i in range(np.shape(obs_data)[1]):
-            mdr = odr.Model(fitfunc, implicit=True)
-            mydata = odr.RealData(obs_data[:, i, :], y=1, sx=std_data[:, i, :])
-            myodr = odr.ODR(mydata, mdr, beta0=param0[:, i])
-            myoutput = myodr.run()
-            alloutput.append(myoutput)
-        return alloutput
     else:
         print("This input vector is not valid shape.")
         return False
@@ -387,7 +387,7 @@ def fit_with_circle(tod):
     return tod
 ### Circle fitting fucntions to here ###
 
-def get_cal_gamma(tod, wrap_aman=False):
+def get_cal_gamma(tod, wrap_aman=False, remove_cal_data=False):
     """
     Calibrate detectors' polarization response angle by wire grid.
 
@@ -396,10 +396,13 @@ def get_cal_gamma(tod, wrap_aman=False):
     ----------
         tod : AxisManager
         wrap_aman : (default) False
+        remove_cal_data : (defalut) False
 
     Returns
     -------
-        (det_angle, det_angle_err) : polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
+        (gamma, gamma_err, cal_amp) :
+            polarization response angle of detectors in radian, which has the shape of (dets, wire's step)
+            also the input power of the calibration signal.
         (bg_amp, bg_theta) : The amplitude and the direction of the background polarization not about the wires' signal.
         tod : AxisManager
             which has calibrated angles(tod.wg.gamma_cal). Only returned this by wrap_aman==True
@@ -418,19 +421,25 @@ def get_cal_gamma(tod, wrap_aman=False):
         _det_angle_err.append(np.sqrt(_cal_data.Uerr.T[:,_i]**2 + _cal_data.Qerr.T[:,_i]**2))
     _det_angle = np.array(_det_angle).T
     _det_angle_err = np.array(_det_angle_err).T
-    _bg_theta = 0.5*np.arctan2(_cfit_result.cy0, _cfit_result.cx0)%np.pi - np.nanmean(_det_angle%np.pi, axis=1)
+    _cal_amp = _cfit_result.cr
+    gamma = np.nanmean(np.unwrap(_det_angle, period=np.pi), axis=1)%np.pi
+    gamma_err = np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1])
+    #
+    _bg_theta = 0.5*np.arctan2(_cfit_result.cy0, _cfit_result.cx0)%np.pi - gamma
     _bg_amp = np.sqrt(_cfit_result.cx0**2 + _cfit_result.cy0**2)
+    if remove_cal_data: tod.move('wg', None)
     if wrap_aman:
         if 'gamma_cal' in dir(tod): tod.move('gamma_cal', None)
         _gamma_ax = core.AxisManager(tod.dets)
         _gamma_ax.wrap('gamma_raw', _det_angle, [(0, 'dets')])
         _gamma_ax.wrap('gamma_raw_err', _det_angle_err, [(0, 'dets')])
-        _gamma_ax.wrap('gamma', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')])
-        _gamma_ax.wrap('gamma_err', np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1]), [(0, 'dets')])
+        _gamma_ax.wrap('wires_relative_power', _cal_amp, [(0, 'dets')])
+        _gamma_ax.wrap('gamma', gamma, [(0, 'dets')])
+        _gamma_ax.wrap('gamma_err', gamma_err, [(0, 'dets')])
         _gamma_ax.wrap('background_pol_rad', _bg_theta, [(0, 'dets')])
-        _gamma_ax.wrap('background_pol_relative_amp', _bg_amp, [(0, 'dets')])
-        _gamma_ax.wrap('theta_det_instr', np.nanmean(_det_angle%np.pi, axis=1), [(0, 'dets')]) # instumental angle of dets
+        _gamma_ax.wrap('background_pol_relative_power', _bg_amp, [(0, 'dets')])
+        _gamma_ax.wrap('theta_det_instr', 0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
         tod.wrap('gamma_cal', _gamma_ax)
         return tod
     else:
-        return (_det_angle, _det_angle_err), (_bg_amp, _bg_theta)
+        return (gamma, gamma_err, _cal_amp), (_bg_amp, _bg_theta)
