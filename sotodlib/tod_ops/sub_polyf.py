@@ -64,9 +64,6 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
     if subscan_indices[-1][-1] != aman.samps.count:
         subscan_indices = np.vstack([ subscan_indices, [subscan_indices[-1][-1], aman.samps.count]])
     
-    
-    print(subscan_indices)
-    
     signal = aman[signal_name]
     if not(in_place):
         signal = signal.copy()
@@ -116,11 +113,9 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             norm_vector = np.arange(degree_corr)
             norm_vector = 2./(2.*norm_vector+1)
             
-            # Get each subscan to be filtered & subtract mean
+            # Get each subscan to be filtered
             tod_mat = copy.deepcopy(signal[:, start:end])
-            tod_mat_org = copy.deepcopy(tod_mat)
-            means = np.mean(tod_mat,axis=1)[:,np.newaxis]
-            tod_mat -= means
+
 
             # Scale time range into [-1,1]
             x = np.linspace(-1, 1, tod_mat.shape[1])
@@ -143,44 +138,39 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             else :
                 # if mask is matrix like, we should interpolate TOD det by det.
                 if is_matrix :
-                    # Is maksed range overlapped with this subscan?
                     if np.sum((mask_array[:,start:end]).astype(np.int32)) > 0 :
-                        
-                        msk_indx = mask_array[:,start:end]
-                        
+                        msk_indx = mask_array[:,start:end]                        
                         for idet in range(tod_mat.shape[0]) : 
                             n_intep =  np.sum((mask_array[idet,start:end]).astype(np.int32))
                             if n_intep > 0:
                                 if n_intep == tod_mat.shape[1] : continue
                                 interped = np.interp(np.flatnonzero(msk_indx[idet]),np.flatnonzero(~msk_indx[idet]), tod_mat[idet][~msk_indx[idet]])
-                                tod_mat[idet,msk_indx[idet]] = interped
-                            
-                    # If mask does not affect this range, just go through.
-                    else :
+                                tod_mat[idet,msk_indx[idet]] = interped                            
+                    else:
+                        # If mask does not affect this range, just go through.
                         pass
+                    
                 # If mask is array like, same ranges of each det will be interpolated.
                 else :
                     n_intep =  np.sum((mask_array[start:end]).astype(np.int32))
                     if n_intep > 0 :
-                        
                         if n_intep == tod_mat.shape[1] : continue
                         msk_indx = mask_array[start:end]
-                        
                         for idet in range(tod_mat.shape[0]) : 
                             interped = np.interp(np.flatnonzero(msk_indx),np.flatnonzero(~msk_indx), tod_mat[idet][~msk_indx])
                             tod_mat[idet,msk_indx] = interped
                     else :
                         pass
             
+            
+            means = np.mean(tod_mat, axis=1)[:, np.newaxis]
+            tod_mat -= means
+            
             # Make model to be subtracted
             coeffs = np.dot(arr_legendre, tod_mat.T)
             model = np.dot((coeffs/norm_vector[:, np.newaxis]).T,arr_legendre)*dx
 
-            # We subtracted the mean at the start of this script. This should be corrected.
             model += means
-            tod_mat += means
-
-            signal[:,start:end] = tod_mat_org
             signal[:,start:end] -= model
 
     if in_place:
