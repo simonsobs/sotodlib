@@ -46,7 +46,7 @@ def quick_scan(tod, n_samp):
     return bs
 
 def gen_1_over_f(n_samp, dt, fknee, seed=0):
-    np.random.seed = seed
+    np.random.seed(seed)
     tmp = np.random.random(size=n_samp) * 2 - 1
     S = np.fft.rfft(tmp)
 
@@ -106,3 +106,4 @@ class SubpolyfTest(unittest.TestCase):
             
 if __name__ == '__main__':
     unittest.main()
+    
