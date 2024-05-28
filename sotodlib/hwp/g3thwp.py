@@ -837,7 +837,7 @@ class G3tHWP():
             logger.warning('Input data is empty.')
             return
 
-        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        aman = sotodlib.core.AxisManager(tod.samps)
         start = int(tod.timestamps[0])-self._margin
         end = int(tod.timestamps[-1])+self._margin
 
@@ -961,8 +961,7 @@ class G3tHWP():
 
         """
 
-        # write solution, metadata loader requires a dets axis
-        aman = sotodlib.core.AxisManager(tod.dets, tod.samps)
+        aman = sotodlib.core.AxisManager(tod.samps)
         aman.wrap_new('timestamps', ('samps', ))[:] = tod.timestamps
         self._set_empty_axes(aman)
 

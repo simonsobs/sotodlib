@@ -23,6 +23,27 @@ RESOURCE_URLS = {
     'de421.bsp': 'ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp',
 }
 
+# Default source list
+SOURCE_LIST = ['mercury',
+               'venus',
+               'moon',
+               'mars',
+               'jupiter',
+               'saturn',
+               'uranus',
+               'neptune',
+               ('tau_a', 83.6272579, 22.02159891),
+               ('rcw38', 134.7805107, -47.50911231),
+               ('iras16183-4958', 245.5154, -50.09168292),
+               ('iras19078+0901', 287.5575891, 9.107188994),
+               ('rcw122', 260.0339538, -38.95673421),
+               ('cenA', 201.3625336, -43.00797508),
+               ('3c279', 194.0409868, -5.79174024),
+               ('3c273', 187.2775626, 2.053532671),
+               ('G025.36-00.14', 279.5264042, -6.793169326),
+               ('QSO_J2253+1608', 343.4952422, 16.14301323),
+               ('galactic_center', -93.5833, -29.0078)]
+
 
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
@@ -392,16 +413,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
     w = enmap.enmap(w, wcs=wcs)
 
     if source_list is None:
-        source_list = [
-            'mercury',
-            'venus',
-            'mars',
-            'jupiter',
-            'saturn',
-            'uranus',
-            'neptune',
-            ('tau_a', 83.6331, 22.0145),
-        ]
+        source_list = SOURCE_LIST
 
     positions = []
     for source_name in source_list:

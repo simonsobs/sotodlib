@@ -23,6 +23,8 @@ from .pointing import setup_pointing, select_pointing
 from .proc_act import setup_act_responsivity_sign, act_responsivity_sign
 from .proc_demodulation import setup_demodulate, demodulate
 from .proc_filters import (
+    setup_readout_filter,
+    apply_readout_filter,
     setup_deconvolve_detector_timeconstant,
     deconvolve_detector_timeconstant,
     setup_filter_hwpss,
@@ -74,6 +76,7 @@ from .proc_characterize import (
     crosslinking_map,
 )
 from .sat import setup_splits, splits
+from .scripting import setup_load_or_simulate_observing, load_or_simulate_observing
 from .sim_observe import setup_simulate_observing, simulate_observing
 from .sim_noise_model import setup_simple_noise_models, simple_noise_models
 from .sim_sky import (

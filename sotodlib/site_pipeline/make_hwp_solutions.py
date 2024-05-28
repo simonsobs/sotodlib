@@ -90,7 +90,7 @@ def make_db(db_filename):
         )
     return db
 
-def save(aman, db, h5_filename, obs_id, overwrite, compression):
+def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
     """
     Save HDF5 file and add entry to sqlite database
     """
@@ -98,7 +98,7 @@ def save(aman, db, h5_filename, obs_id, overwrite, compression):
     wait_time = 5
     for i in range(1, max_trial + 1):
         try:
-            aman.save(h5_filename, obs_id, overwrite, compression)
+            aman.save(os.path.join(output_dir, h5_filename), obs_id, overwrite, compression)
             logger.info("Saved aman")
             db.add_entry(
                 {'obs:obs_id': obs_id, 'dataset': obs_id}, filename=h5_filename, replace=overwrite,
@@ -191,8 +191,8 @@ def main(
 
         # split h5 file by first 5 digits of unixtime
         unix = obs_id.split('_')[1][:5]
-        h5_encoder = os.path.join(output_dir, f'hwp_encoder_{unix}.h5')
-        h5_solution = os.path.join(output_dir, f'hwp_angle_{unix}.h5')
+        h5_encoder = f'hwp_encoder_{unix}.h5'
+        h5_solution = f'hwp_angle_{unix}.h5'
 
         # make angle solutions
         g3thwp = G3tHWP(HWPconfig)
@@ -202,12 +202,12 @@ def main(
         else:
             aman_encoder = g3thwp.set_data(tod)
         logger.info("Saving hwp_encoder")
-        save(aman_encoder, db_encoder, h5_encoder, obs_id, overwrite, 'gzip')
+        save(aman_encoder, db_encoder, h5_encoder, output_dir, obs_id, overwrite, 'gzip')
         del aman_encoder
 
         aman_solution = g3thwp.make_solution(tod)
         logger.info("Saving hwp_angle")
-        save(aman_solution, db_solution, h5_solution, obs_id, overwrite, 'gzip')
+        save(aman_solution, db_solution, h5_solution, output_dir, obs_id, overwrite, 'gzip')
         del aman_solution
         del g3thwp
 
