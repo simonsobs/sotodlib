@@ -45,9 +45,9 @@ def dummy_preproc(obs_id, group_list, logger,
         for gb, g in zip(group_by, group):
             db_data['dets:'+gb] = g
         if run_parallel:
-            outputs.append((db_data, dest_file))
+            outputs.append(db_data)
     if run_parallel:
-        return error, outputs
+        return error, dest_file, outputs
 
 def _get_preprocess_context(configs, context=None):
     if type(configs) == str:
@@ -168,7 +168,7 @@ def preprocess_tod(obs_id,
                         f"No analysis to run.")
             error = 'no_group_overlap'
             if run_parallel:
-                return error, [None, None]
+                return error, None, [None, None]
             else:
                 return
     
@@ -189,7 +189,7 @@ def preprocess_tod(obs_id,
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
             logger.info(f"{error}\n{errmsg}\n{tb}")
-            return error, [errmsg, tb]
+            return error, None, [errmsg, tb]
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
             continue
@@ -210,7 +210,7 @@ def preprocess_tod(obs_id,
         for gb, g in zip(group_by, group):
             db_data['dets:'+gb] = g
         if run_parallel:
-            outputs.append((db_data, dest_file))
+            outputs.append(db_data)
         else:
             logger.info(f"Saving to database under {db_data}")
             if len(db.inspect(db_data)) == 0:
@@ -218,7 +218,7 @@ def preprocess_tod(obs_id,
                         start=os.path.dirname(configs['archive']['index']))
                 db.add_entry(db_data, h5_path)
     if run_parallel:
-        return error, outputs        
+        return error, dest_file, outputs        
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
@@ -413,12 +413,12 @@ def main(
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
-        futures = [exe.submit(dummy_preproc, obs_id=r[0]['obs_id'],
+        futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                      group_list=r[1], logger=logger,
                      configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
-            err, output = future.result()
+            err, src_file, db_datasets = future.result()
             db = _get_preprocess_db(configs, group_by)
             if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
                 nfile += 1
@@ -429,20 +429,20 @@ def main(
 
             if err is None:
                 with h5py.File(dest_file,'a') as f_dest:
-                    for db_data, src_file in output:
-                        with h5py.File(src_file,'r') as f_src:
-                            for dts in f_src.keys():
-                                f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                                for member in f_src[dts]:
-                                    if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                                        f_src.copy(f_src[f'{dts}/{member}'], f_dest,f'{dts}/{member}')
-                        logger.info(f"Saving to database under {db_data}")
-                        if len(db.inspect(db_data)) == 0:
-                            db.add_entry(db_data, h5_path)
+                    with h5py.File(src_file,'r') as f_src:
+                        for dts in f_src.keys():
+                            f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
+                            for member in f_src[dts]:
+                                if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
+                                    f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
+                for db_data in db_datasets:
+                    logger.info(f"Saving to database under {db_data}")
+                    if len(db.inspect(db_data)) == 0:
+                        db.add_entry(db_data, h5_path)
                 os.remove(src_file)
             else:
                 f = open(errlog, 'a')
-                f.write(f'{time.time()}, {err}, {output[0]}\n{output[1]}')
+                f.write(f'{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}')
                 f.close()
 
 if __name__ == '__main__':
