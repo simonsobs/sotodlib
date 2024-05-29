@@ -845,7 +845,21 @@ class SourceFlags(_Preprocess):
     name = "source_flags"
     
     def calc_and_save(self, aman, proc_aman):
-        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, **self.calc_cfgs)
+        center_on = self.calc_cfgs.get('center_on', 'planet')
+        # Get source from tags
+        if center_on == 'planet':
+            from sotodlib.coords.planets import SOURCE_LIST
+            matches = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(matches) != 0:
+                source = matches[0]
+            else:
+                raise ValueError("No tags match source list")
+        else:
+            source = center_on
+        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, center_on=source,
+                                                      mask=self.calc_cfgs.get('mask', None),
+                                                      res=self.calc_cfgs.get('res', None),
+                                                      max_pix=self.calc_cfgs.get('max_pix', None))
 
         source_aman = core.AxisManager(aman.dets, aman.samps)
         source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
@@ -858,6 +872,95 @@ class SourceFlags(_Preprocess):
             proc_aman.wrap("sources", source_aman)
         
 
+class FourierFilter(_Preprocess):
+    """
+    Applies a fourier filter (defined in fft_ops) to the data.
+
+    Example config file entry::
+
+      - name: "fourier_filter"
+        process:
+          signal_name: "signal"
+          wrap_name: "lpf_sig"
+          filt_function: "low_pass_sine2"
+          trim_samps: 2000
+          filter_params:
+            cutoff: 1
+            width: 0.1
+
+    See :ref:`fourier-filters` documentation for more details.
+    """
+    name = 'fourier_filter'
+    def __init__(self, step_cfgs):
+        self.signal_name = step_cfgs.get('signal_name', 'signal')
+        # By default signal is overwritted by the filtered signal
+        self.wrap_name = step_cfgs.get('wrap_name', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        _f = getattr(tod_ops.filters,
+                self.process_cfgs.get('filt_function','high_pass_butter4'))
+        filt = _f(**self.process_cfgs.get('filter_params'))
+        aman[self.wrap_name] = tod_ops.filters.fourier_filter(aman, filt,
+                                        signal_name=self.signal_name)
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
+
+class PCARelCal(_Preprocess):
+    """
+    Estimate the relcal factor from the atmosphere using PCA.
+    
+    Example configuration file entry::
+
+      - name: 'pca_relcal'
+        signal: 'hwpss_remove'
+        calc: True
+        save: True
+
+    See :ref:`pca-background` for more details on the method.
+    """
+    name = 'pca_relcal'
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        pca_out = tod_ops.pca.get_pca(aman,signal=aman[self.signal])
+        pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
+                                       signal=aman[self.signal])
+        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = bands[bands != 'NC']
+        m0 = aman.det_info.wafer.bandpass == bands[0]
+        med0 = np.median(pca_signal.weights[m0,0])
+        med1 = np.median(pca_signal.weights[~m0,0])
+        relcal = np.zeros(aman.dets.count)
+        relcal[m0] = med0/pca_signal.weights[m0,0]
+        relcal[~m0] = med1/pca_signal.weights[~m0,0]
+
+        rc_aman = core.AxisManager(aman.dets, aman.samps,
+                                   core.LabelAxis(name='bandpass',
+                                                  vals=bands))
+        rc_aman.wrap('relcal', relcal, [(0,'dets')])
+        rc_aman.wrap('medians', np.asarray([med0, med1]),
+                     [(0, 'bandpass')])
+        rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
+        self.save(proc_aman, rc_aman)
+
+    def save(self, proc_aman, rc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.name, rc_aman)
+
+
+_Preprocess.register(PCARelCal)
+_Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
