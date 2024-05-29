@@ -1,5 +1,5 @@
 import numpy as np
-import scipy.stats as stats, kurtosis
+import scipy.stats as stats
 from scipy.signal import find_peaks
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
@@ -552,7 +552,7 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
     Returns
     -------
     mskptps : RangesMatrix
-        RangesMatrix of detectors acceptable peak-to-peaks. 
+        RangesMatrix of detectors with acceptable peak-to-peaks. 
         All ones if the detector should be cut.
 
     """
@@ -562,7 +562,7 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
             ptps = np.ptp(aman[signal_name][det_mask], axis=1)
         else:
             break
-        kurtosis_ptp = kurtosis(ptps)
+        kurtosis_ptp = stats.kurtosis(ptps)
         if kurtosis_ptp < kurtosis_threshold:
             print(f'dets:{len(aman.dets.vals[det_mask])}, ptp_kurt: {kurtosis_ptp:.1f}')
             break
@@ -587,3 +587,48 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
             aman.flags.wrap(ptp_flag_name, mskptps, [(0, 'dets'), (1, 'samps')])
 
     return mskptps
+
+def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
+                      merge=False, overwrite=False, inv_var_flag_name='inv_var_flag'):
+    """
+    Returns a ranges matrix that indicates if the inverse variance (inv_var) of
+    the tod is greater than ``nsigma`` away from the median.
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    signal_name : str
+        Signal to estimate flags off of. Default is ``signal``.
+    nsigma : float
+        Maximum allowable deviation from the median inverse variance.
+        Default is 5.
+    merge : bool
+        Merge RangesMatrix into ``aman.flags``. Default is False.
+    overwrite : bool
+        Whether to write over any existing data in ``aman.flags[inv_var_flag_name]`` 
+        if merge is True. Default is False.
+    inv_var_flag_name : str
+        Field name used when merge is True. Default is ``inv_var_flag``.
+
+    Returns
+    -------
+    mskptps : RangesMatrix
+        RangesMatrix of detectors with acceptable inverse variance. 
+        All ones if the detector should be cut.
+
+    """
+    ivar = 1.0/np.var(aman[signal_name], axis=-1)
+    sigma = (np.percentile(ivar,84) - np.percentile(ivar, 16))/2
+    det_mask = ivar > np.median(ivar) + nsigma*sigma
+    x = Ranges(aman.samps.count)
+    mskinvar = RangesMatrix([Ranges.ones_like(x) if Y
+                             else Ranges.zeros_like(x) for Y in det_mask])
+    if merge:
+        if inv_var_flag_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {inv_var_flag_name} already exists in aman.flags")
+        if inv_var_flag_name in aman.flags:
+            aman.flags[inv_var_flag_name] = mskinvar
+        else:
+            aman.flags.wrap(inv_var_flag_name, mskinvar, [(0, 'dets'), (1, 'samps')])
+
+    return mskinvar

@@ -1015,6 +1015,47 @@ class PTPFlags(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
+class InvVarFlags(_Preprocess):
+    """Find detectors with too high inverse variance.
+
+    Saves results in proc_aman under the "inv_var_flags" field. 
+
+     Example config block::
+
+        - name : "inv_var_flags"
+          calc:
+            signal_name: "demodQ"
+            nsigma: 6
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_inv_var_flags
+    """
+    name = "inv_var_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskptps = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
+        
+        ptp_aman = core.AxisManager(aman.dets, aman.samps)
+        ptp_aman.wrap('inv_var_flags', mskptps, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, ptp_aman)
+    
+    def save(self, proc_aman, dark_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("inv_var_flags", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+_Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(FourierFilter)
