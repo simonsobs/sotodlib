@@ -217,7 +217,7 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
-def find_pcabounds(aman, pca_aman, signal, xfac=2, yfac=1.5):
+def calc_pcabounds(aman, pca_aman, signal, xfac=2, yfac=1.5):
     """Finds the bounds of the pca box using IQR 
     statistics
 
