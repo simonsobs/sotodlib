@@ -532,6 +532,7 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
     Returns a ranges matrix that indicates if the peak-to-peak (ptp) of
     the tod is valid based on the kurtosis of the distribution of ptps. The
     threshold is set by ``kurtosis_threshold``.
+
     Parameters
     ----------
     aman : AxisManager
@@ -593,6 +594,7 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
     """
     Returns a ranges matrix that indicates if the inverse variance (inv_var) of
     the tod is greater than ``nsigma`` away from the median.
+    
     Parameters
     ----------
     aman : AxisManager
