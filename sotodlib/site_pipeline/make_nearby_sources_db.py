@@ -243,7 +243,7 @@ def main(config: str,
             
             man_db.add_entry(entry, 
                      filename=output_filename, replace=overwrite)
-            logger.info(f"saved: {obs_id}, {ws}")
+            logger.info(f"saved: {obs_id}")
 
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while processing {obs_id}")
