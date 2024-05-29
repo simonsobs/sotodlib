@@ -1,5 +1,5 @@
 import numpy as np
-import scipy.stats as stats
+import scipy.stats as stats, kurtosis
 from scipy.signal import find_peaks
 
 ## "temporary" fix to deal with scipy>1.8 changing the sparse setup
@@ -525,3 +525,65 @@ def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source
             aman.flags.wrap(source_flags_name, source_flags, [(0, 'dets'), (1, 'samps')])
 
     return source_flags
+
+def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
+                  merge=False, overwrite=False, ptp_flag_name='ptp_flag'):
+    """
+    Returns a ranges matrix that indicates if the peak-to-peak (ptp) of
+    the tod is valid based on the kurtosis of the distribution of ptps. The
+    threshold is set by ``kurtosis_threshold``.
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    signal_name : str
+        Signal to estimate flags off of. Default is ``signal``.
+    kurtosis_threshold : float
+        Maximum allowable kurtosis of the distribution of peak-to-peaks.
+        Default is 5.
+    merge : bool
+        Merge RangesMatrix into ``aman.flags``. Default is False.
+    overwrite : bool
+        Whether to write over any existing data in ``aman.flags[ptp_flag_name]`` 
+        if merge is True. Default is False.
+    ptp_flag_name : str
+        Field name used when merge is True. Default is ``ptp_flag``.
+
+    Returns
+    -------
+    mskptps : RangesMatrix
+        RangesMatrix of detectors acceptable peak-to-peaks. 
+        All ones if the detector should be cut.
+
+    """
+    det_mask = np.full(aman.dets.count, True, dtype=bool)
+    while True:
+        if len(aman.dets.vals[det_mask]) > 0:
+            ptps = np.ptp(aman[signal_name][det_mask], axis=1)
+        else:
+            break
+        kurtosis_ptp = kurtosis(ptps)
+        if kurtosis_ptp < kurtosis_threshold:
+            print(f'dets:{len(aman.dets.vals[det_mask])}, ptp_kurt: {kurtosis_ptp:.1f}')
+            break
+        else:
+            max_is_bad_factor = np.max(ptps)/np.median(ptps)
+            min_is_bad_factor = np.median(ptps)/np.min(ptps)
+            if max_is_bad_factor > min_is_bad_factor:
+                det_mask[ptps < np.max(ptps)] = False
+            else:
+                det_mask[ptps > np.min(ptps)] = False
+            print(f'dets:{len(aman.dets.vals[det_mask])}, ptp_kurt: {kurtosis_ptp:.1f}')
+    print(f'dets: {len(aman.dets.vals[det_mask])}')
+    x = Ranges(aman.samps.count)
+    mskptps = RangesMatrix([Ranges.zeros_like(x) if Y
+                             else Ranges.ones_like(x) for Y in det_mask])
+    if merge:
+        if ptp_flag_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {ptp_flag_name} already exists in aman.flags")
+        if ptp_flag_name in aman.flags:
+            aman.flags[ptp_flag_name] = mskptps
+        else:
+            aman.flags.wrap(ptp_flag_name, mskptps, [(0, 'dets'), (1, 'samps')])
+
+    return mskptps

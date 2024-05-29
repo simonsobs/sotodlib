@@ -442,6 +442,7 @@ class Calibrate(_Preprocess):
       - name: "calibrate"
         process:
           kind: "single_value"
+          divide: True # If true will divide instead of multiply.
           # phase_to_pA: 9e6/(2*np.pi)
           val: 1432394.4878270582
       - name: "calibrate"
@@ -459,11 +460,21 @@ class Calibrate(_Preprocess):
 
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
-            aman[self.signal] *= self.process_cfgs["val"]
+            if self.process_cfgs.get("divide", False):
+                aman[self.signal] /= self.process_cfgs["val"]
+            else:
+                aman[self.signal] *= self.process_cfgs["val"]
         elif self.process_cfgs["kind"] == "array":
             field = self.process_cfgs["cal_array"]
             _f = attrgetter(field)
-            aman[self.signal] = np.multiply(aman[self.signal].T, _f(aman)).T
+            if self.process_cfgs.get("proc_aman_cal", False):
+                cal_arr = _f(proc_aman)
+            else:
+                cal_arr = _f(aman)
+            if self.process_cfgs.get("divide", False):
+                aman[self.signal] = np.divide(aman[self.signal].T, cal_arr).T
+            else:
+                aman[self.signal] = np.multiply(aman[self.signal].T, cal_arr).T
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
@@ -630,7 +641,13 @@ class Demodulate(_Preprocess):
     name = "demodulate"
 
     def process(self, aman, proc_aman):
-        hwp.demod_tod(aman, **self.process_cfgs)
+        hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
 
 
 class EstimateAzSS(_Preprocess):
@@ -958,7 +975,47 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.name, rc_aman)
 
+class PTPFlags(_Preprocess):
+    """Find detectors with anomalous peak-to-peak signal.
 
+    Saves results in proc_aman under the "ptp_flags" field. 
+
+     Example config block::
+
+        - name : "ptp_flags"
+          calc:
+            signal_name: "dsT"
+            kurtosis_threshold: 6
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_ptp_flags
+    """
+    name = "ptp_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
+        
+        ptp_aman = core.AxisManager(aman.dets, aman.samps)
+        ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, ptp_aman)
+    
+    def save(self, proc_aman, dark_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("ptp_flags", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.ptp_flags.ptp_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+_Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
