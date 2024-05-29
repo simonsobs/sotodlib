@@ -296,16 +296,19 @@ def find_pcabounds(aman, pca_aman, signal, xfac=2, yfac=1.5):
     
     bands = np.unique(aman.det_info.wafer.bandpass)
     bands = bands[bands != 'NC']
-    
+    medianw = np.median(pca_aman.weights[:,0]) # it will just be for one bandpass at a time
+    relcal = medianw/pca_aman.weights[:,0]
+
     mask = np.isin(aman.det_info.det_id, badids)
     relcal = core.AxisManager(aman.dets, aman.samps,
                               core.LabelAxis(name='bandpass', vals=bands))
-
     relcal.wrap('pca_det_mask', mask, [(0, 'dets')])
     relcal.wrap('xbounds', np.array(xbounds))
     relcal.wrap('ybounds', np.array(ybounds))
     relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
     relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
+    relcal.wrap('relcal', relcal, [(0, 'dets')])
+    relcal.wrap('medians', np.asarray([medianw]), [(0, 'bandpass')])
 
     # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
 
