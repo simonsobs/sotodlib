@@ -217,7 +217,7 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
-def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
+def find_pcabounds(aman, pca_aman, signal, xfac=2, yfac=1.5):
     """Finds the bounds of the pca box using IQR 
     statistics
 
@@ -225,8 +225,8 @@ def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
     ----------
     aman : AxisManager
         observation axismanagers
-    pca_signals_cal : dict
-        dictionary of pca axismanagers per observation
+    pca_aman : AxisManager
+        output pca axismanager
     signal : array
         is the low pass filter signal array that's passed 
         through
@@ -245,14 +245,9 @@ def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
         aman that's wrapped with the x and y bounds and the good and bad dets
         
     """
-    results = {'good_dets': {'det_ids': {}},
-               'baddets': {'det_ids': {}},
-               'bounds': {}}
-    pca_signal = pca_signals_cal[aman.obs_info.obs_id]
-    print('obs', aman.obs_info.obs_id)
-
+    # TODO: I don't use signal; check preprocess code
     x = aman.det_cal.s_i
-    y = np.abs(pca_signal.weights[:, 0])
+    y = np.abs(pca_aman.weights[:, 0])
 
     # remove positive Si values
     filt = np.where(x < 0)[0]
@@ -286,11 +281,6 @@ def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
     mad = np.median(np.abs(xfilt - medianx))
     xlb = medianx - xfac * mad
     xub = medianx + xfac * mad
-    #xlb = medianx - xfac * iqrx
-    #xub = medianx + xfac * iqrx
-    #if xub > 0:
-    #    mad = np.median(np.abs(xfilt - medianx))
-    #    xub = medianx + xfac * mad
 
     xbounds = [xlb, xub]
     ybounds = [ylb, yub]
@@ -298,7 +288,7 @@ def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
     # Get indices of the values in the box (indices are wrt `x` array)
     box_xfilt_inds = np.where((xfilt >= xlb) & (
         xfilt <= xub) & (yfilt >= ylb) & (yfilt <= yub))[0]
-    box = filt[box_xfilt_inds] # think this is the boolean array length of the original detector length 
+    box = filt[box_xfilt_inds] 
     notbox = np.setdiff1d(np.arange(len(x)), box)
 
     goodids = aman.det_info.det_id[box]
@@ -306,15 +296,18 @@ def find_pcabounds(aman, pca_signals_cal, signal, xfac=2, yfac=1.5):
     
     bands = np.unique(aman.det_info.wafer.bandpass)
     bands = bands[bands != 'NC']
-    mask = np.isin(aman.det_info.det_id, badids) #gooddets False, baddets True
-    pc_aman = core.AxisManager(aman.dets, aman.samps,
-                                   core.LabelAxis(name='bandpass', vals=bands))
-    pc_aman.wrap('pca_det_mask', mask, [(0, 'dets')])
-    pc_aman.wrap('xbounds', np.array(xbounds))
-    pc_aman.wrap('ybounds', np.array(ybounds))
+    
+    mask = np.isin(aman.det_info.det_id, badids)
+    relcal = core.AxisManager(aman.dets, aman.samps,
+                              core.LabelAxis(name='bandpass', vals=bands))
+
+    relcal.wrap('pca_det_mask', mask, [(0, 'dets')])
+    relcal.wrap('xbounds', np.array(xbounds))
+    relcal.wrap('ybounds', np.array(ybounds))
+    relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
+    relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
 
     # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
 
-
-    return pc_aman
+    return pca_aman
 
