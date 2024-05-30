@@ -5,7 +5,7 @@ from sotodlib.tod_ops import filters, detrend
 import numpy as np
 
 def get_t2p_coeffs(aman, T_sig_name='dsT', Q_sig_name='demodQ', 
-                   U_sig_name='demodU', subtract_sig=True, trim_samps=2000,
+                   U_sig_name='demodU', subtract_sig=False, trim_samps=2000,
                    lpf_cfgs={'type':'sine2', 'cutoff':0.5, 'trans_width':0.1}):
     """
     Project Q and U onto T after lowpass filtering the signals so that the projection
