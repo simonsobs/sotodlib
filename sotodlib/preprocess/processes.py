@@ -934,9 +934,9 @@ class FourierFilter(_Preprocess):
     Example config file entry::
 
       - name: "fourier_filter"
+        wrap_name: "lpf_sig"
+        signal_name: "signal"
         process:
-          signal_name: "signal"
-          wrap_name: "lpf_sig"
           filt_function: "low_pass_sine2"
           trim_samps: 2000
           filter_params:
@@ -957,8 +957,11 @@ class FourierFilter(_Preprocess):
         _f = getattr(tod_ops.filters,
                 self.process_cfgs.get('filt_function','high_pass_butter4'))
         filt = _f(**self.process_cfgs.get('filter_params'))
-        aman[self.wrap_name] = tod_ops.filters.fourier_filter(aman, filt,
-                                        signal_name=self.signal_name)
+        filt_tod= tod_ops.filters.fourier_filter(aman, filt,
+                                                 signal_name=self.signal_name)
+        if self.wrap_name in aman._fields:
+            aman.move(self.wrap_name, None)
+        aman.wrap(self.wrap_name, filt_tod, [(0, 'dets'), (1, 'samps')])
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
             aman.restrict('samps', (aman.samps.offset + trim,
@@ -991,20 +994,42 @@ class PCARelCal(_Preprocess):
                                        signal=aman[self.signal])
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        m0 = aman.det_info.wafer.bandpass == bands[0]
-        med0 = np.median(pca_signal.weights[m0,0])
-        med1 = np.median(pca_signal.weights[~m0,0])
-        relcal = np.zeros(aman.dets.count)
-        relcal[m0] = med0/pca_signal.weights[m0,0]
-        relcal[~m0] = med1/pca_signal.weights[~m0,0]
+        if len(bands) == 2:
+            m0 = aman.det_info.wafer.bandpass == bands[0]
+            med0 = np.median(pca_signal.weights[m0,0])
+            med1 = np.median(pca_signal.weights[~m0,0])
+            relcal = np.zeros(aman.dets.count)
+            relcal[m0] = med0/pca_signal.weights[m0,0]
+            relcal[~m0] = med1/pca_signal.weights[~m0,0]
 
-        rc_aman = core.AxisManager(aman.dets, aman.samps,
-                                   core.LabelAxis(name='bandpass',
-                                                  vals=bands))
-        rc_aman.wrap('relcal', relcal, [(0,'dets')])
-        rc_aman.wrap('medians', np.asarray([med0, med1]),
-                     [(0, 'bandpass')])
-        rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
+            rc_aman = core.AxisManager(aman.dets, aman.samps,
+                                       core.LabelAxis(name='bandpass',
+                                                      vals=bands))
+            rc_aman.wrap('relcal', relcal, [(0,'dets')])
+            rc_aman.wrap('medians', np.asarray([med0, med1]),
+                        [(0, 'bandpass')])
+            rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
+        elif len(bands) == 1:
+            m0 = aman.det_info.wafer.bandpass == bands[0]
+            med0 = np.median(pca_signal.weights[m0])
+            relcal = np.zeros(aman.dets.count)
+            relcal[m0] = med0/pca_signal.weights[m0,0]
+
+            rc_aman = core.AxisManager(aman.dets, aman.samps,
+                                       core.LabelAxis(name='bandpass',
+                                                      vals=bands))
+            rc_aman.wrap('relcal', relcal, [(0,'dets')])
+            rc_aman.wrap('medians', np.asarray([med0]),
+                        [(0, 'bandpass')])
+            rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
+        else:
+            rc_aman = core.AxisManager(aman.dets, aman.samps,
+                                       core.LabelAxis(name='bandpass',
+                                                      vals=['NC']))
+            rc_aman.wrap('relcal', np.ones(aman.dets.count), [(0,'dets')])
+            rc_aman.wrap('medians', np.asarray([np.nan]),
+                        [(0, 'bandpass')])
+
         self.save(proc_aman, rc_aman)
 
     def save(self, proc_aman, rc_aman):
@@ -1142,7 +1167,7 @@ class SubtractT2P(_Preprocess):
 
     def process(self, aman, proc_aman):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
-                                        **self.calc_cfgs)
+                                        **self.process_cfgs)
 
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)

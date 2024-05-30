@@ -570,6 +570,7 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
 
     """
     det_mask = np.full(aman.dets.count, True, dtype=bool)
+    ptps_full = np.ptp(aman[signal_name], axis=1)
     while True:
         if len(aman.dets.vals[det_mask]) > 0:
             ptps = np.ptp(aman[signal_name][det_mask], axis=1)
@@ -577,16 +578,14 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
             break
         kurtosis_ptp = stats.kurtosis(ptps)
         if kurtosis_ptp < kurtosis_threshold:
-            print(f'dets:{len(aman.dets.vals[det_mask])}, ptp_kurt: {kurtosis_ptp:.1f}')
             break
         else:
             max_is_bad_factor = np.max(ptps)/np.median(ptps)
             min_is_bad_factor = np.median(ptps)/np.min(ptps)
             if max_is_bad_factor > min_is_bad_factor:
-                det_mask[ptps < np.max(ptps)] = False
+                det_mask[ptps_full >= np.max(ptps)] = False
             else:
-                det_mask[ptps > np.min(ptps)] = False
-            print(f'dets:{len(aman.dets.vals[det_mask])}, ptp_kurt: {kurtosis_ptp:.1f}')
+                det_mask[ptps_full <= np.min(ptps)] = False
     print(f'dets: {len(aman.dets.vals[det_mask])}')
     x = Ranges(aman.samps.count)
     mskptps = RangesMatrix([Ranges.zeros_like(x) if Y
