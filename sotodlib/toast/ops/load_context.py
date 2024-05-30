@@ -268,6 +268,13 @@ class LoadContext(Operator):
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
 
+        if not self.read_independent:
+            msg = "Parallel reading from a context is temporarily broken."
+            msg += " Forcing read_independent=True, but this will be very"
+            msg += " slow for more that ~64 processes."
+            self.read_independent = True
+            log.warning_rank(msg, comm=comm.comm_world)
+
         # Build our detector selection dictionary
         dets_select = None
         if len(self.dets_select) > 0:
@@ -399,12 +406,15 @@ class LoadContext(Operator):
 
                 if self.analytic_bandpass:
                     # Add bandpass information to the focalplane
-                    band = fp_cols["det_info_band"]
+                    try:
+                        band = fp_cols["det_info_band"].data
+                    except KeyError:
+                        band = fp_cols["det_info_wafer_bandpass"].data
                     freq = [float(b[1:]) for b in band]
                     bandcenter = np.array(freq) * u.GHz
                     bandwidth = bandcenter * self.bandwidth
-                    fp_cols["bandcenter"] = bandcenter
-                    fp_cols["bandwidth"] = bandwidth
+                    fp_cols["bandcenter"] = Column(name="bandcenter", data=bandcenter)
+                    fp_cols["bandwidth"] = Column(name="bandwidth", data=bandwidth)
 
                 # Construct table
                 det_props = QTable(fp_cols)

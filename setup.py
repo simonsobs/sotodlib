@@ -27,7 +27,6 @@ setup_opts["entry_points"] = {
         "so-data-package = sotodlib.io.imprinter_cli:main",
         "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
         "toast_so_map = sotodlib.toast.scripts.so_map:cli",
-        "toast_so_sat_transfer = sotodlib.toast.scripts.so_sat_transfer:cli",
         "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
         "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
