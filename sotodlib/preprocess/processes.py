@@ -921,7 +921,8 @@ class PCARelCal(_Preprocess):
         signal: 'lpf_sig'
         calc: True
         save: True
-
+    
+    # TODO: add xfac and yfac as options in config file entry?
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
@@ -934,29 +935,15 @@ class PCARelCal(_Preprocess):
         pca_out = tod_ops.pca.get_pca(aman,signal=aman[self.signal])
         pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
                                        signal=aman[self.signal])
-        bands = np.unique(aman.det_info.wafer.bandpass)
-        bands = bands[bands != 'NC']
-        m0 = aman.det_info.wafer.bandpass == bands[0]
-        med0 = np.median(pca_signal.weights[m0,0])
-        med1 = np.median(pca_signal.weights[~m0,0])
-        relcal = np.zeros(aman.dets.count)
-        relcal[m0] = med0/pca_signal.weights[m0,0]
-        relcal[~m0] = med1/pca_signal.weights[~m0,0]
+        
+        pcabox_aman = tod_ops.calc_pcabounds(aman[self.signal], pca_signal)
+        self.save(proc_aman, pcabox_aman)
 
-        rc_aman = core.AxisManager(aman.dets, aman.samps,
-                                   core.LabelAxis(name='bandpass',
-                                                  vals=bands))
-        rc_aman.wrap('relcal', relcal, [(0,'dets')])
-        rc_aman.wrap('medians', np.asarray([med0, med1]),
-                     [(0, 'bandpass')])
-        rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
-        self.save(proc_aman, rc_aman)
-
-    def save(self, proc_aman, rc_aman):
+    def save(self, proc_aman, pcabox_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.name, rc_aman)
+            proc_aman.wrap(self.name, pcabox_aman)
 
 
 _Preprocess.register(PCARelCal)
