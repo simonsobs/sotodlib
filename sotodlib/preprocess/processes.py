@@ -1054,7 +1054,60 @@ class InvVarFlags(_Preprocess):
         keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+    
+class EstimateT2P(_Preprocess):
+    """Estimate T to P leakage coefficients.
 
+    Saves results in proc_aman under the "t2p" field. 
+
+     Example config block::
+
+        - name : "estimate_t2p"
+          calc:
+            T_sig_name: 'dsT'
+            Q_sig_name: 'demodQ'
+            U_sig_name: 'demodU'
+            trim_samps: 2000
+            lpf_cfgs:
+              type: 'sine2'
+              cutoff: 0.5
+              trans_width: 0.1
+          save: True
+    
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
+    """
+    name = "estimate_t2p"
+
+    def calc_and_save(self, aman, proc_aman):
+        t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
+        self.save(proc_aman, t2p_aman)
+    
+    def save(self, proc_aman, t2p_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("t2p", t2p_aman)
+
+class SubtractT2P(_Preprocess):
+    """Subtract T to P leakage.
+
+     Example config block::
+
+        - name : "subtract_t2p"
+          process:
+            Q_sig_name: 'demodQ'
+            U_sig_name: 'demodU'
+    
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
+    """
+    name = "subtract_t2p"
+
+    def process(self, aman, proc_aman):
+        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
+                                        **self.calc_cfgs)
+
+_Preprocess.register(SubtractT2P)
+_Preprocess.register(EstimateT2P)
 _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
