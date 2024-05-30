@@ -67,7 +67,7 @@ def get_glitchy_tod(ts, noise_amp=0, ndets=2, npoly=3, poly_coeffs=None):
                   axis_map=[(0, 'dets'), (1, 'samps')])
     flgs = core.AxisManager()
     tod_fake.wrap('flags', flgs)
-    params = {'n_glitches': 10, 'sig_n_glitch': 10, 'h_glitc  h': 10,
+    params = {'n_glitches': 10, 'sig_n_glitch': 10, 'h_glitch': 10,
               'sig_h_glitch': 2}
     sim_flags.add_random_glitches(tod_fake, params=params, signal='signal',
                                   flag='glitches', overwrite=False)

@@ -192,13 +192,17 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
     if map_op.enabled:
         do_obsmaps = hasattr(otherargs, "obsmaps") and otherargs.obsmaps
         do_intervalmaps = (
-            hasattr(otherargs, "intervalmaps") and otherargs.intevalmaps
+            hasattr(otherargs, "intervalmaps") and otherargs.intervalmaps
         )
         if do_obsmaps and do_intervalmaps:
             log.warning_rank(
                 "--intervalmaps overrides --obsmaps", data.comm.comm_world
             )
         if do_obsmaps or do_intervalmaps:
+            log.debug_rank(
+                f"{data.comm.group}: Running observation or interval maps",
+                comm=data.comm.comm_world,
+            )
             # Map each observation separately
             timer_obs = toast.timing.Timer()
             timer_obs.start()
@@ -229,7 +233,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     for iview, view in enumerate(views):
                         # Add a view for this specific interval
                         single_view = f"{orig_view}-{iview}"
-                        ob.intervals[single_view] = IntervalList(
+                        ob.intervals[single_view] = toast.IntervalList(
                             times, timespans=[(view.start, view.stop)]
                         )
                         binner.pixel_pointing.view = single_view
@@ -279,6 +283,10 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
             data._comm = orig_comm
             del new_comm
         else:
+            log.debug_rank(
+                f"{data.comm.group}: Calling mapmaker.apply() directly",
+                comm=data.comm.comm_world,
+            )
             map_op.apply(data)
 
 

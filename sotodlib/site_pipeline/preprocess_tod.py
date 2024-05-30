@@ -324,6 +324,12 @@ def get_parser(parser=None):
         action='store_true',
     )
     parser.add_argument(
+        '--verbosity',
+        help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
+        default=2,
+        type=int
+    )
+    parser.add_argument(
         '--nproc',
         help="Number of parallel processes to run on.",
         type=int,
@@ -341,10 +347,12 @@ def main(
         update_delay: Optional[int] = None,
         tags: Optional[str] = None,
         planet_obs: bool = False,
+        verbosity: Optional[int] = None,
         nproc: Optional[int] = 4
  ):
     configs, context = _get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess")
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
 

@@ -76,6 +76,7 @@ from .proc_characterize import (
     crosslinking_map,
 )
 from .sat import setup_splits, splits
+from .scripting import setup_load_or_simulate_observing, load_or_simulate_observing
 from .sim_observe import setup_simulate_observing, simulate_observing
 from .sim_noise_model import setup_simple_noise_models, simple_noise_models
 from .sim_sky import (

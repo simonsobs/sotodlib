@@ -7,6 +7,7 @@ tod_ops submodule
 This submodule includes functions for processing time-ordered signals,
 including time and Fourier domain filtering, PCA, gap-filling, etc.
 
+.. _fourier-filters:
 
 Fourier space filters
 =====================
@@ -140,6 +141,7 @@ Class and function references should be auto-generated here.
 
 .. autofunction:: sotodlib.tod_ops.gapfill.get_contaminated_ranges
 
+.. _pca-background:
 
 tod_ops.pca
 ===========
