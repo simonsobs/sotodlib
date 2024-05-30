@@ -32,6 +32,7 @@ def get_planet_trajectry(tod, planet, _split=20, return_model=False):
         If return_model is False:
             array: Array of quaternions representing trajectry of the planet at each timestamp.
     """
+    print(planet)
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
     
     planet_az_sparse = np.zeros_like(timestamps_sparse)
