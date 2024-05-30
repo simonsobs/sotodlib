@@ -11,14 +11,10 @@ import numpy as np
 import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
+from scipy.stats import binned_statistic
 from sotodlib.coords import optics as op
-from sotodlib.coords.fp_containers import (
-    FocalPlane,
-    OpticsTube,
-    Receiver,
-    Template,
-    Transform,
-)
+from sotodlib.coords.fp_containers import (FocalPlane, OpticsTube, Receiver,
+                                           Template, Transform)
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
@@ -114,16 +110,59 @@ def _mk_plot(plot_dir, froot, nominal, measured, transformed):
 
     # Histogram of differences
     diff = measured - transformed
-    dist = np.linalg.norm(diff[np.isfinite(diff[:, 0]), :2], axis=1)
+    isfinite = np.isfinite(diff[:, 0])
+    dist = np.linalg.norm(diff[isfinite, :2], axis=1)
+    dist_thresh = np.percentile(dist, 97)
     bins = max(int(len(dist) / 20), 10)
-    plt.hist(dist[dist < np.percentile(dist, 97)], bins=bins)
+    plt.hist(dist[dist < dist_thresh], bins=bins)
     plt.xlabel("Distance Between Measured and Transformed (rad)")
     if plot_dir is None:
         plt.show()
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{froot}_dist.png"))
-        plt.clf()
+        plt.close()
+
+    # Diffs by gamma
+    gammas = nominal[np.isfinite(diff[:, 0]), 2] % np.pi
+    bins = np.linspace(0, np.pi, 13)
+    medians, *_ = binned_statistic(
+        gammas[dist < dist_thresh],
+        dist[dist < dist_thresh],
+        statistic="median",
+        bins=bins,
+    )
+    plt.scatter(gammas[dist < dist_thresh], dist[dist < dist_thresh], alpha=0.1)
+    plt.scatter(np.arange(7.5, 180, 15) * np.pi / 180.0, medians, color="black")
+    plt.xlabel("Nominal Gamma (rad)")
+    plt.ylabel("Distance Between Measured and Transformed (rad)")
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{froot}_dist_by_gamma.png"))
+        plt.close()
+
+    fig, axs = plt.subplots(1, 3, figsize=(9, 4), sharey=True)
+    im = None
+    for i, name in enumerate(("xi", "eta", "gamma")):
+        d = diff[isfinite, i][dist < dist_thresh]
+        axs[i].set_title(name)
+        if np.sum(isfinite) == 0:
+            continue
+        medians, *_ = binned_statistic(
+            gammas[dist < dist_thresh], d, statistic="median", bins=bins
+        )
+        axs[i].scatter(gammas[dist < dist_thresh], d, alpha=0.1)
+        axs[i].scatter(np.arange(7.5, 180, 15) * np.pi / 180.0, medians, color="black")
+    axs[0].set_ylabel("Diff (rad)")
+    axs[1].set_xlabel("Nominal Gamma (rad)")
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{froot}_diff_by_gamma.png"))
+        plt.close()
 
     # tricontourf of residuals, subplots for xi, eta, gamma
     fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True)
