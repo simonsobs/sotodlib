@@ -4,14 +4,14 @@ from operator import attrgetter
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 import sotodlib.obs_ops as obs_ops
-from sotodlib.hwp import hwp
+from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
                                     sparse_to_ranges_matrix)
 
-from .core import _Preprocess, _FracFlaggedMixIn
+from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
 
@@ -783,15 +783,132 @@ class SSOFootprint(_Preprocess):
                 planet_aman = proc_aman.sso_footprint[sso]
                 plot_sso_footprint(aman, planet_aman, sso, filename=filename.replace('{name}', f'{sso}_sso_footprint'), **self.plot_cfgs)
 
-class ReduceFlags(_Preprocess):
-    name = 'reduce_flags'
-    def process(self, aman, proc_aman):
-        aman.flags.reduce(**self.process_cfgs)
+class DarkDets(_Preprocess):
+    """Find dark detectors in the data.
+
+    Saves results in proc_aman under the "dark_dets" field. 
+
+     Example config block::
+
+        - name : "dark_dets"
+          signal: "signal" # optional
+          calc: True
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
+    """
+    name = "dark_dets"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskdarks = tod_ops.flags.get_dark_dets(aman, merge=False)
         
-class ComputeSourceFlags(_Preprocess):
-    name = 'compute_source_flags'
-    def process(self, aman, proc_aman):
-        planets.compute_source_flags(aman, **self.process_cfgs)
+        dark_aman = core.AxisManager(aman.dets, aman.samps)
+        dark_aman.wrap('darks', mskdarks, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, dark_aman)
+    
+    def save(self, proc_aman, dark_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("darks", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.darks.darks)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+class SourceFlags(_Preprocess):
+    """Calculate the source flags in the data.
+    All calculation configs go to `get_source_flags`.
+
+    Saves results in proc_aman under the "source_flags" field. 
+
+     Example config block::
+
+        - name : "source_flags"
+          signal: "signal" # optional
+          calc:
+            mask: {'shape': 'circle',
+                   'xyr': (0, 0, 1.)}
+            center_on: 'jupiter'
+            res: 0.005817764173314432 # np.radians(20/60)
+            max_pix: 4e6
+          save: True
+          select: True # optional
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
+    """
+    name = "source_flags"
+    
+    def calc_and_save(self, aman, proc_aman):
+        center_on = self.calc_cfgs.get('center_on', 'planet')
+        # Get source from tags
+        if center_on == 'planet':
+            from sotodlib.coords.planets import SOURCE_LIST
+            matches = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(matches) != 0:
+                source = matches[0]
+            else:
+                raise ValueError("No tags match source list")
+        else:
+            source = center_on
+        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, center_on=source,
+                                                      mask=self.calc_cfgs.get('mask', None),
+                                                      res=self.calc_cfgs.get('res', None),
+                                                      max_pix=self.calc_cfgs.get('max_pix', None))
+
+        source_aman = core.AxisManager(aman.dets, aman.samps)
+        source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, source_aman)
+    
+    def save(self, proc_aman, source_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("sources", source_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_any_cuts(proc_aman.sources.source_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+class HWPAngleModel(_Preprocess):
+    """Apply hwp angle model to the TOD.
+
+    Saves results in proc_aman under the "hwp_angle" field. 
+
+     Example config block::
+
+        - name : "hwp_angle_model"
+          calc:
+            on_sign_ambiguous: 'fail'
+          save: True
+    
+    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
+    """
+    name = "hwp_angle_model"
+    
+    def calc_and_save(self, aman, proc_aman):
+        hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+        hwp_angle_aman = core.AxisManager(aman.samps)
+        hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
+        self.save(proc_aman, hwp_angle_aman)
+    
+    def save(self, proc_aman, hwp_angle_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("hwp_angle", hwp_angle_aman)
+        
 
 class FourierFilter(_Preprocess):
     """
@@ -808,7 +925,6 @@ class FourierFilter(_Preprocess):
           filter_params:
             cutoff: 1
             width: 0.1
-
     """
     name = 'fourier_filter'
     def __init__(self, step_cfgs):
@@ -826,12 +942,28 @@ class FourierFilter(_Preprocess):
                                         signal_name=self.signal_name)
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
-            aman.restrict('samps',(trim, -trim))
-            proc_aman.restrict('samps', (trim, -trim))
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
+
+class ReduceFlags(_Preprocess):
+    name = 'reduce_flags'
+    def process(self, aman, proc_aman):
+        aman.flags.reduce(**self.process_cfgs)       
 
 class PCARelCal(_Preprocess):
     """
     Estimate the relcal factor from the atmosphere using PCA.
+    
+    Example configuration file entry::
+
+      - name: 'pca_relcal'
+        signal: 'hwpss_remove'
+        calc: True
+        save: True
+
+    See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
     def __init__(self, step_cfgs):
@@ -844,25 +976,23 @@ class PCARelCal(_Preprocess):
         pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
                                        signal=aman[self.signal])
         bands = np.unique(aman.det_info.wafer.bandpass)
-        bands = [bands != 'NC']
+        bands = bands[bands != 'NC']
         m0 = aman.det_info.wafer.bandpass == bands[0]
         med0 = np.median(pca_signal.weights[m0,0])
         med1 = np.median(pca_signal.weights[~m0,0])
-        relcal0 = np.zeros(aman.dets.count)
+        relcal = np.zeros(aman.dets.count)
         relcal[m0] = med0/pca_signal.weights[m0,0]
         relcal[~m0] = med1/pca_signal.weights[~m0,0]
 
-        rc_aman = core.AxisManager(aman.dets, 
+        rc_aman = core.AxisManager(aman.dets, aman.samps,
                                    core.LabelAxis(name='bandpass',
                                                   vals=bands))
         rc_aman.wrap('relcal', relcal, [(0,'dets')])
-        rc_aman.wrap('medians', [med0, med1], [(0, 'bandpass')])
+        rc_aman.wrap('medians', np.asarray([med0, med1]),
+                     [(0, 'bandpass')])
+        rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
         self.save(proc_aman, rc_aman)
-
-    def process(self, aman, proc_aman):
-        aman.signal = np.multiply(aman.signal.T,
-                                  proc_aman[self.name].relcal).T
-
+        
     def save(self, proc_aman, rc_aman):
         if self.save_cfgs is None:
             return
@@ -891,5 +1021,7 @@ _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
-_Preprocess.register(ComputeSourceFlags)
+_Preprocess.register(DarkDets)
+_Preprocess.register(SourceFlags)
+_Preprocess.register(HWPAngleModel)
 _Preprocess.register(ReduceFlags)

@@ -125,6 +125,8 @@ def preprocess_tod(
         logger.info(f"Beginning run for {obs_id}:{group}")
 
         aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
+        tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
+        aman.wrap('tags', tags)
         proc_aman, success = pipe.run(aman)
         if success != 'end':
             continue
@@ -147,7 +149,9 @@ def preprocess_tod(
         
         logger.info(f"Saving to database under {db_data}")
         if len(db.inspect(db_data)) == 0:
-            db.add_entry(db_data, dest_file)
+            h5_path = os.path.relpath(dest_file,
+                    start=os.path.dirname(configs['archive']['index']))
+            db.add_entry(db_data, h5_path)
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
@@ -241,6 +245,23 @@ def get_parser(parser=None):
         help="Number of days (unit is days) in the past to start observation list.",
         type=int
     )
+    parser.add_argument(
+        '--tags',
+        help="Observation tags. Ex: --tags 'jupiter' 'setting'",
+        nargs='*',
+        type=str
+    )
+    parser.add_argument(
+        '--planet-obs',
+        help="If true, takes all planet tags as logical OR and adjusts related configs",
+        action='store_true',
+    )
+    parser.add_argument(
+        '--verbosity',
+        help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
+        default=2,
+        type=int
+    )
     return parser
 
 def main(
@@ -251,9 +272,13 @@ def main(
         min_ctime: Optional[int] = None,
         max_ctime: Optional[int] = None,
         update_delay: Optional[int] = None,
+        tags: Optional[str] = None,
+        planet_obs: bool = False,
+        verbosity: Optional[int] = None,
  ):
     configs, context = _get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess")
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..
         # Otherwise it will use update_delay to set min_ctime.
@@ -272,8 +297,19 @@ def main(
         tot_query = tot_query[4:-4]
         if tot_query=="":
             tot_query="1"
-    
-    obs_list = context.obsdb.query(tot_query)
+
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tag.lower()
+            if '=' not in tag:
+                tags[i] += '=1'
+
+    if planet_obs:
+        obs_list = []
+        for tag in tags:
+            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+    else:
+        obs_list = context.obsdb.query(tot_query, tags=tags)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []

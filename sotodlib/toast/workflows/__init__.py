@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory workflow functions.
 
@@ -23,6 +23,8 @@ from .pointing import setup_pointing, select_pointing
 from .proc_act import setup_act_responsivity_sign, act_responsivity_sign
 from .proc_demodulation import setup_demodulate, demodulate
 from .proc_filters import (
+    setup_readout_filter,
+    apply_readout_filter,
     setup_deconvolve_detector_timeconstant,
     deconvolve_detector_timeconstant,
     setup_filter_hwpss,
@@ -37,8 +39,14 @@ from .proc_filters import (
     filter_common_mode,
 )
 from .proc_flagging import (
+    setup_simple_jumpcorrect,
+    simple_jumpcorrect,
+    setup_simple_deglitch,
+    simple_deglitch,
     setup_flag_sso,
     flag_sso,
+    setup_flag_diff_noise_outliers,
+    flag_diff_noise_outliers,
     setup_flag_noise_outliers,
     flag_noise_outliers,
     setup_processing_mask,
@@ -49,7 +57,12 @@ from .proc_mapmaker_filterbin import setup_mapmaker_filterbin, mapmaker_filterbi
 from .proc_mapmaker_madam import setup_mapmaker_madam, mapmaker_madam
 from .proc_mapmaker_ml import setup_mapmaker_ml, mapmaker_ml
 from .proc_mapmaker import setup_mapmaker, mapmaker
-from .proc_noise_est import setup_noise_estimation, noise_estimation
+from .proc_noise_est import (
+    setup_diff_noise_estimation,
+    diff_noise_estimation,
+    setup_noise_estimation,
+    noise_estimation,
+)
 from .proc_characterize import (
     setup_raw_statistics,
     raw_statistics,
@@ -62,6 +75,8 @@ from .proc_characterize import (
     setup_crosslinking_map,
     crosslinking_map,
 )
+from .sat import setup_splits, splits
+from .scripting import setup_load_or_simulate_observing, load_or_simulate_observing
 from .sim_observe import setup_simulate_observing, simulate_observing
 from .sim_noise_model import setup_simple_noise_models, simple_noise_models
 from .sim_sky import (
@@ -78,7 +93,12 @@ from .sim_sources import (
     setup_simulate_catalog_signal,
     simulate_catalog_signal,
 )
-from .sim_atm import setup_simulate_atmosphere_signal, simulate_atmosphere_signal
+from .sim_atm import (
+    setup_simulate_atmosphere_signal,
+    simulate_atmosphere_signal,
+    setup_weather_model,
+    append_weather_model,
+)
 from .sim_calibrator import (
     setup_simulate_wiregrid_signal,
     simulate_wiregrid_signal,

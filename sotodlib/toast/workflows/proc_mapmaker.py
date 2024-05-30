@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Template regression mapmaking.
 """
@@ -41,15 +41,14 @@ def setup_mapmaker(operators, templates):
             enabled=False,
         )
     )
-    # Uncomment after toast PR #736 is merged.
-    # templates.append(
-    #     toast.templates.Hwpss(
-    #         name="hwpss",
-    #         hwp_angle=defaults.hwp_angle,
-    #         harmonics=5,
-    #         enabled=False,
-    #     )
-    # )
+    templates.append(
+        toast.templates.Hwpss(
+            name="hwpss",
+            hwp_angle=defaults.hwp_angle,
+            harmonics=5,
+            enabled=False,
+        )
+    )
     templates.append(
         toast.templates.Fourier2D(
             name="fourier2d",
@@ -68,9 +67,8 @@ def setup_mapmaker(operators, templates):
     operators.append(toast.ops.MapMaker(name="mapmaker", det_data=defaults.det_data))
 
 
-@workflow_timer
-def mapmaker(job, otherargs, runargs, data):
-    """Run the TOAST mapmaker.
+def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
+    """Helper function to setup noise model and binner for mapmapking.
 
     Args:
         job (namespace):  The configured operators and templates for this job.
@@ -93,7 +91,7 @@ def mapmaker(job, otherargs, runargs, data):
     if job_ops.mapmaker.enabled:
         job_ops.mapmaker.binning = job_ops.binner
         job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
-            templates=[job_tmpls.baselines, job_tmpls.azss]
+            templates=[job_tmpls.baselines, job_tmpls.azss, job_tmpls.hwpss]
         )
         job_ops.mapmaker.map_binning = job_ops.binner_final
         job_ops.mapmaker.output_dir = otherargs.out_dir
@@ -113,14 +111,23 @@ def mapmaker(job, otherargs, runargs, data):
         # is found, then create a fake noise model with uniform weighting.
         noise_model = None
         if (
-                job_ops.demodulate.enabled
-                and job_ops.demod_noise_estim.enabled
-                and job_ops.demod_noise_estim_fit.enabled
-            ):
+            hasattr(job_ops, "demodulate")
+            and job_ops.demodulate.enabled
+            and job_ops.demod_noise_estim.enabled
+            and job_ops.demod_noise_estim_fit.enabled
+        ):
             # We will use the noise estimate made after demodulation
             log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.demod_noise_estim_fit.out_model
-        elif job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
+        elif hasattr(job_ops, "diff_noise_estim") and job_ops.diff_noise_estim.enabled:
+            # We have a signal-diff noise estimate
+            log.info_rank("  Using signal diff noise model", comm=data.comm.comm_world)
+            noise_model = job_ops.diff_noise_estim.noise_model
+        elif (
+            hasattr(job_ops, "noise_estim")
+            and job_ops.noise_estim.enabled
+            and job_ops.noise_estim_fit.enabled
+        ):
             # We have a noise estimate
             log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
             noise_model = job_ops.noise_estim_fit.out_model
@@ -161,26 +168,108 @@ def mapmaker(job, otherargs, runargs, data):
         if job_tmpls.baselines.enabled:
             job_tmpls.noise_model = noise_model
 
-        if otherargs.obsmaps:
+
+@workflow_timer
+def mapmaker_run(job, otherargs, runargs, data, map_op):
+    """Run a mapmaker, optionally per observation.
+
+    This runs the mapmaker either in single shot or per observation.  Currently
+    this supports instances of the `Mapmaker` and `Splits` operators.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+        map_op (Operator):  The operator to run.
+
+    Returns:
+        None
+
+    """
+    log = toast.utils.Logger.get()
+
+    if map_op.enabled:
+        do_obsmaps = hasattr(otherargs, "obsmaps") and otherargs.obsmaps
+        do_intervalmaps = (
+            hasattr(otherargs, "intervalmaps") and otherargs.intervalmaps
+        )
+        if do_obsmaps and do_intervalmaps:
+            log.warning_rank(
+                "--intervalmaps overrides --obsmaps", data.comm.comm_world
+            )
+        if do_obsmaps or do_intervalmaps:
+            log.debug_rank(
+                f"{data.comm.group}: Running observation or interval maps",
+                comm=data.comm.comm_world,
+            )
             # Map each observation separately
             timer_obs = toast.timing.Timer()
             timer_obs.start()
             group = data.comm.group
-            orig_name = job_ops.mapmaker.name
+            orig_name = map_op.name
             orig_comm = data.comm
             new_comm = toast.Comm(world=data.comm.comm_group)
             for iobs, obs in enumerate(data.obs):
                 log.info_rank(
-                    f"{group} : mapping observation {iobs + 1} / {len(data.obs)}.",
+                    f"{group} : mapping observation {iobs + 1} "
+                    f"/ {len(data.obs)}.",
                     comm=new_comm.comm_world,
                 )
                 # Data object that only covers one observation
                 obs_data = data.select(obs_uid=obs.uid)
                 # Replace comm_world with the group communicator
                 obs_data._comm = new_comm
-                job_ops.mapmaker.name = f"{orig_name}_{obs.name}"
-                job_ops.mapmaker.reset_pix_dist = True
-                job_ops.mapmaker.apply(obs_data)
+                binner = map_op.binning
+                orig_view = binner.pixel_pointing.view
+                if do_intervalmaps and orig_view is not None:
+                    if isinstance(map_op, so_ops.Splits):
+                        msg = "Interval mapping cannot be used with Splits"
+                        raise RuntimeError(msg)
+                    # Map each interval separately
+                    ob = obs_data.obs[0]
+                    times = ob.shared[defaults.times].data
+                    views = ob.intervals[orig_view]
+                    for iview, view in enumerate(views):
+                        # Add a view for this specific interval
+                        single_view = f"{orig_view}-{iview}"
+                        ob.intervals[single_view] = toast.IntervalList(
+                            times, timespans=[(view.start, view.stop)]
+                        )
+                        binner.pixel_pointing.view = single_view
+                        map_op.name = f"{orig_name}_{obs.name}-{iview}"
+                        map_op.reset_pix_dist = True
+                        try:
+                            map_op.apply(obs_data)
+                            log.info_rank(
+                                f"{group} : Mapped "
+                                f"{obs.name}-{iview} / {len(views)} in",
+                                comm=new_comm.comm_world,
+                                timer=timer_obs,
+                            )
+                        except Exception as e:
+                            log.info_rank(
+                                f"{group} : Failed to map "
+                                f"{obs.name}-{iview} / {len(views)} (e) in",
+                                comm=new_comm.comm_world,
+                                timer=timer_obs,
+                            )
+                    binner.pixel_pointing.view = orig_view
+                else:
+                    # Map the observation as a whole
+                    # Rename the operator with the observation suffix
+                    map_op.name = f"{orig_name}_{obs.name}"
+                    if isinstance(map_op, so_ops.Splits):
+                        # Reset the pixel distribution of the underlying
+                        # mapmaker
+                        map_op.mapmaker.reset_pix_dist = True
+                    else:
+                        # Reset the trait on this mapmaker
+                        map_op.reset_pix_dist = True
+
+                # Map this observation
+                map_op.apply(obs_data)
+
                 log.info_rank(
                     f"{group} : Mapped {obs.name} in",
                     comm=new_comm.comm_world,
@@ -190,6 +279,38 @@ def mapmaker(job, otherargs, runargs, data):
                 f"{group} : Done mapping {len(data.obs)} observations.",
                 comm=new_comm.comm_world,
             )
+            map_op.name = orig_name
             data._comm = orig_comm
+            del new_comm
         else:
-            job_ops.mapmaker.apply(data)
+            log.debug_rank(
+                f"{data.comm.group}: Calling mapmaker.apply() directly",
+                comm=data.comm.comm_world,
+            )
+            map_op.apply(data)
+
+
+@workflow_timer
+def mapmaker(job, otherargs, runargs, data):
+    """Run the TOAST mapmaker.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    log = toast.utils.Logger.get()
+
+    # Configured templates for this job
+    job_tmpls = job.templates
+
+    # Configured operators for this job
+    job_ops = job.operators
+
+    mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
+    mapmaker_run(job, otherargs, runargs, data, job_ops.mapmaker)

@@ -76,10 +76,13 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), filename='./4f_2f_counts.png'
     fig, axs = plt.subplots(3, 2, figsize=(15, 15))
     for i, band in enumerate(['f090', 'f150']):
         hwpss_ratsatp1[band] = {}
-        m90s = (np.isin(aman.det_cal.bg, [0,1,4,5,8,9]))
-        m150s = (np.isin(aman.det_cal.bg, [2,3,6,7,10,11]))
+        m90s = (aman.det_info.wafer.bandpass == 'f090')
+        m150s = (aman.det_info.wafer.bandpass == 'f150')
         m = [m90s, m150s]
         hwpss_aman = aman.restrict('dets', aman.dets.vals[m[i]], in_place=False)
+        if hwpss_aman.dets.count == 0:
+            print(f"No dets in {band} band")
+            continue
         stats = hwp.hwp.get_hwpss(hwpss_aman, modes=modes, merge_stats=False, merge_model=False)
         a_4f = np.sqrt(stats.coeffs[:,6]**2 + stats.coeffs[:,7]**2)
         a_2f = np.sqrt(stats.coeffs[:,2]**2 + stats.coeffs[:,3]**2)
