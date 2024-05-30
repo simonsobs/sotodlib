@@ -918,7 +918,7 @@ class PCARelCal(_Preprocess):
     Example configuration file entry::
 
       - name: 'pca_relcal'
-        signal: 'hwpss_remove'
+        signal: 'lpf_sig'
         calc: True
         save: True
 
