@@ -316,7 +316,7 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
     pipe = Pipeline(configs["process_pipe"], logger=logger)
     for pipe_component in pipe:
         if pipe_component.name == 'source_flags':
-            pipe_component.process_cfgs['center_on'] = sso_name
+            pipe_component.calc_cfgs['center_on'] = sso_name
     
     # Other parameters
     force_zero_roll = configs.get('force_zero_roll')
