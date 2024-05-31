@@ -32,7 +32,7 @@ SOURCE_LIST = ['mercury',
                'saturn',
                'uranus',
                'neptune',
-               ('tau_a', 83.6272579, 22.02159891),
+               ('tauA', 83.6272579, 22.02159891),
                ('rcw38', 134.7805107, -47.50911231),
                ('iras16183-4958', 245.5154, -50.09168292),
                ('iras19078+0901', 287.5575891, 9.107188994),
@@ -303,7 +303,6 @@ def _get_astrometric(source_name, timestamp, site='_default'):
     sf_timestamp = timescale.from_datetime(
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
     astrometric = observatory.at(sf_timestamp).observe(target)
-    planets.close()
     return astrometric
     
     
