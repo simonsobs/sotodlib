@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2023 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -113,10 +113,13 @@ def reduce_data(job, otherargs, runargs, data):
     wrk.cadence_map(job, otherargs, runargs, data)
     wrk.crosslinking_map(job, otherargs, runargs, data)
 
-    wrk.mapmaker_ml(job, otherargs, runargs, data)
-    wrk.mapmaker(job, otherargs, runargs, data)
-    wrk.mapmaker_filterbin(job, otherargs, runargs, data)
-    wrk.mapmaker_madam(job, otherargs, runargs, data)
+    if job.operators.splits.enabled:
+        wrk.splits(job, otherargs, runargs, data)
+    else:
+        wrk.mapmaker_ml(job, otherargs, runargs, data)
+        wrk.mapmaker(job, otherargs, runargs, data)
+        wrk.mapmaker_filterbin(job, otherargs, runargs, data)
+        wrk.mapmaker_madam(job, otherargs, runargs, data)
     wrk.filtered_statistics(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(
@@ -244,6 +247,7 @@ def main():
     wrk.setup_mapmaker(operators, templates)
     wrk.setup_mapmaker_filterbin(operators)
     wrk.setup_mapmaker_madam(operators)
+    wrk.setup_splits(operators)
     wrk.setup_filtered_statistics(operators)
 
     job, config, otherargs, runargs = wrk.setup_job(

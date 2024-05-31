@@ -42,8 +42,12 @@ def splits(job, otherargs, runargs, data):
 
     """
     job_ops = job.operators
+    splits = job.operators.splits
 
-    if job_ops.splits.enabled:
+    if splits.enabled:
+        if not job_ops.mapmaker.enabled:
+            raise RuntimeError(f"Cannot run Splits without MapMaker")
         mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
-        job_ops.splits.output_dir = otherargs.out_dir
-        mapmaker_run(job, otherargs, runargs, data, job_ops.splits)
+        splits.mapmaker = job_ops.mapmaker
+        splits.output_dir = otherargs.out_dir
+        mapmaker_run(job, otherargs, runargs, data, splits)
