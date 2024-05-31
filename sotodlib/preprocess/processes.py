@@ -845,6 +845,9 @@ class SourceFlags(_Preprocess):
     """
     name = "source_flags"
     
+    def process(self, aman, proc_aman):
+        tod_ops.flags.get_source_flags(aman, **self.process_cfgs)
+        
     def calc_and_save(self, aman, proc_aman):
         center_on = self.calc_cfgs.get('center_on', 'planet')
         # Get source from tags
