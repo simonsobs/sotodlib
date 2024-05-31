@@ -5,7 +5,7 @@ from sotodlib.core import Context,  metadata as metadata_core, FlagManager
 from sotodlib.core.flagman import has_any_cuts, has_all_cut
 from sotodlib.io import metadata
 from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca, fft_ops, sub_polyf
-from sotodlib.hwp import hwp
+from sotodlib.hwp import hwp, hwp_angle_model
 from sotodlib.obs_ops import splits
 from sotodlib.site_pipeline import preprocess_tod
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
@@ -164,37 +164,6 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
-# from Tomoki: https://docs.google.com/presentation/d/1_6b19UxTKsYiSnixXi6u2Y6B83Sv2eLxDNJhAnVNong/edit#slide=id.g26e92ae9d46_0_23 slide 3
-def correct_hwp(obs, bandpass='f090'):
-    telescope = obs.obs_info.telescope
-    if int(obs.hwp_solution.pid_direction) == 0:
-        sag_sign = int(np.sign(obs.hwp_solution.offcenter[0]))
-        pid_sign = -1 * sag_sign
-        obs.hwp_angle *= pid_sign
-    if telescope == 'satp1':
-        if obs.hwp_solution.primary_encoder == 1:
-            if bandpass == 'f090':
-                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.1-90), 2*np.pi)
-            elif bandpass == 'f150':
-                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.4-90), 2*np.pi)
-        elif obs.hwp_solution.primary_encoder == 2:
-            if bandpass == 'f090':
-                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.1+90), 2*np.pi)
-            elif bandpass == 'f150':
-                obs.hwp_angle = np.mod(obs.hwp_angle + np.deg2rad(-1.66+49.4+90), 2*np.pi)
-    elif telescope == 'satp3':
-        if obs.hwp_solution.primary_encoder == 1:
-            if bandpass == 'f090':
-                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-2.29+90), 2*np.pi)
-            elif bandpass == 'f150':
-                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-1.99+90), 2*np.pi)
-        elif obs.hwp_solution.primary_encoder == 2:
-            if bandpass == 'f090':
-                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-2.29-90), 2*np.pi)
-            elif bandpass == 'f150':
-                obs.hwp_angle = np.mod(-1*obs.hwp_angle + np.deg2rad(-1.66-1.99-90), 2*np.pi)
-    return;
-
 def ptp_cuts(aman, signal_name='dsT', kurtosis_threshold=5):
     while True:
         if aman.dets.count > 0:
@@ -322,7 +291,7 @@ def calibrate_obs_with_preprocessing(obs, dtype_tod=np.float32, site='so_sat1', 
         obs.restrict('dets', obs.dets.vals[~mask_det])
     return obs
 
-def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
+def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1'):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
     # Restrict non optical detectors, which have nans in their focal plane coordinates and will crash the mapmaking operation.
@@ -331,8 +300,6 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
     obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')]) # This is a glitch_flags full of 0s when we don't have the preprocess data base
     if obs.signal is not None:
         obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
-        splits.det_splits_relative(obs, det_left_right=det_left_right, det_upper_lower=det_upper_lower, det_in_out=det_in_out, wrap=True)
-
         #flags.get_turnaround_flags(obs, t_buffer=0.1, truncate=True)
         flags.get_turnaround_flags(obs) 
         flags.get_det_bias_flags(obs, rfrac_range=(0.05, 0.9), psat_range=(0, 20))
@@ -357,7 +324,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
         detrend_tod(obs, method='median', signal_name='hwpss_remove')
         # peak to peak 
         ptp_cuts(obs, signal_name='signal')
-        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW / obs.abscal.abscal_factor ).T
+        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor ).T
         obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW / obs.abscal.abscal_factor).T        
         #LPF and PCA
         filt = filters.low_pass_sine2(1, width=0.1)
@@ -372,6 +339,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=
         obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
         filt = filters.iir_filter(iir_params=obs.iir_params[f'ufm_{obs.det_info.wafer.array[0]}'], invert=True)
         obs.signal = filters.fourier_filter(obs, filt)
+        obs.signal = filters.fourier_filter(obs, filters.timeconst_filter(timeconst=obs.det_cal.tau_eff, invert=True))
         apodize.apodize_cosine(obs)
         hwp.demod_tod(obs)
         obs.restrict('samps',(30*200, -30*200))
@@ -726,13 +694,14 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
         else:
             obs = preprocess_tod.load_preprocess_tod(obs_id, configs=preprocess_config, dets={'wafer_slot':detset, 'wafer.bandpass':band}, )
-        correct_hwp(obs, bandpass=band)
-        #obs = calibrate_obs_tomoki(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        obs = hwp_angle_model.apply_hwp_angle_model(obs)
         if obs.dets.count <= 1: continue
         #obs = calibrate_obs_with_preprocessing(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)        
-        obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, site=site)
         if obs.dets.count <= 1: continue
-        
+
+        splits.det_splits_relative(obs, det_left_right=det_left_right, det_upper_lower=det_upper_lower, det_in_out=det_in_out, wrap=True)
+
         if obs.dets.count == 0: continue
         # And add it to the mapmaker
         if split_labels==None:
@@ -814,7 +783,7 @@ def handle_empty(prefix, tag, comm, e, L):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
 
-def main(config_file=None, defaults=defaults, **args):    
+def main(config_file=None, defaults=defaults, **args):
     cfg = dict(defaults)
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
