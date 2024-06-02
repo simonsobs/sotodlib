@@ -423,7 +423,10 @@ class ObsDb(object):
         
         try:
             extra_fields_main, joins_main, query_text_main = _generate_query_components_from_tags(query_text=query_text, tags=tags)
-
+            sort_text = ''
+            if sort is not None and len(sort):
+                sort_text = ' ORDER BY ' + ','.join(sort)
+                
             if subdbs_info_list is not None:
                 assert isinstance(subdbs_info_list, list)
                 extra_fields_sub = []
@@ -453,7 +456,7 @@ class ObsDb(object):
                 extra_fields_sub = ''.join([''+f for f in extra_fields_sub])
                 joins_sub = ''.join(' '+_j for _j in joins_sub)
                 query_text_sub = ''.join(' '+q for q in query_text_sub)
-                tot_query = f'SELECT obs.* {extra_fields_main} {extra_fields_sub} FROM obs {joins_main} {joins_sub} WHERE {query_text_main} {query_text_sub}'
+                tot_query = f'SELECT obs.* {extra_fields_main} {extra_fields_sub} FROM obs {joins_main} {joins_sub} WHERE {query_text_main} {query_text_sub} {sort_text}'
                 cursor = cursor.execute(tot_query)
                 results = ResultSet.from_cursor(cursor)
                 
@@ -461,7 +464,7 @@ class ObsDb(object):
                     cursor.execute(f"DETACH DATABASE {alias}")
                 
             else:
-                tot_query = f'SELECT obs.* {extra_fields_main} FROM obs {joins_main} WHERE {query_text_main}'
+                tot_query = f'SELECT obs.* {extra_fields_main} FROM obs {joins_main} WHERE {query_text_main} {sort_text}'
                 cursor = cursor.execute(tot_query)
                 results = ResultSet.from_cursor(cursor)
             
