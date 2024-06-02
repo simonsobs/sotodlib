@@ -263,7 +263,8 @@ def update_frame_index(hkcfg: HkConfig, session=None):
         session = hkdb.Session()
 
     files = session.query(HkFile).filter(HkFile.index_status == 'unindexed').all()
-    for file in tqdm(files, disable=(not hkcfg.show_index_pb)):
+    log.info(f"Indexing {len(files)} files")
+    for file in tqdm(files, disable=(not hkcfg.show_index_pb), ascii=True):
         frames = get_frames_from_file(file)
         file_start, file_end = 1<<32, 0
         for f in frames:

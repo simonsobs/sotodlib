@@ -59,63 +59,40 @@ pixell.fft.engine = "fftw"
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
 
-    wrk.select_pointing(job, otherargs, runargs, data)
-    wrk.simple_noise_models(job, otherargs, runargs, data)
-    wrk.create_az_intervals(job, otherargs, runargs, data)
-    wrk.simple_deglitch(job, otherargs, runargs, data)
     wrk.simple_jumpcorrect(job, otherargs, runargs, data)
+    wrk.simple_deglitch(job, otherargs, runargs, data)
 
+    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
+    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
+    wrk.raw_statistics(job, otherargs, runargs, data)
+
     wrk.filter_hwpss(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
 
     data = wrk.demodulate(job, otherargs, runargs, data)
 
+    wrk.processing_mask(job, otherargs, runargs, data)
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
     wrk.crosslinking_map(job, otherargs, runargs, data)
-    wrk.raw_statistics(job, otherargs, runargs, data)
-    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
 
     wrk.mapmaker_ml(job, otherargs, runargs, data)
-
-    wrk.filter_ground(job, otherargs, runargs, data)
-    wrk.filter_poly1d(job, otherargs, runargs, data)
-    wrk.filter_poly2d(job, otherargs, runargs, data)
-    wrk.filter_common_mode(job, otherargs, runargs, data)
-
     wrk.mapmaker(job, otherargs, runargs, data)
     wrk.mapmaker_filterbin(job, otherargs, runargs, data)
     wrk.mapmaker_madam(job, otherargs, runargs, data)
-
     wrk.filtered_statistics(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(
         msg="(whole node)", comm=data.comm.comm_world, silent=True
     )
     log.info_rank(f"After reducing data:  {mem}", data.comm.comm_world)
-
-
-def load_data(job, otherargs, runargs, data):
-    log = toast.utils.Logger.get()
-    job_ops = job.operators
-
-    # Timer for reporting the progress
-    timer = toast.timing.Timer()
-    timer.start()
-
-    job_ops.mem_count.prefix = "Before Data Load"
-    job_ops.mem_count.apply(data)
-
-    # Load data from all formats
-    wrk.load_data_hdf5(job, otherargs, runargs, data)
-    wrk.load_data_books(job, otherargs, runargs, data)
-    wrk.load_data_context(job, otherargs, runargs, data)
-    wrk.act_responsivity_sign(job, otherargs, runargs, data)
-
-    job_ops.mem_count.prefix = "After Data Load"
-    job_ops.mem_count.apply(data)
 
 
 def main():
@@ -172,32 +149,33 @@ def main():
     operators = list()
     templates = list()
 
-    wrk.setup_load_data_hdf5(operators)
-    wrk.setup_load_data_books(operators)
-    wrk.setup_load_data_context(operators)
-    wrk.setup_act_responsivity_sign(operators)
+    wrk.setup_load_or_simulate_observing(parser, operators)
 
-    wrk.setup_pointing(operators)
-    wrk.setup_az_intervals(operators)
-    wrk.setup_simple_noise_models(operators)
-    wrk.setup_flag_noise_outliers(operators)
-
-    wrk.setup_filter_hwpss(operators)
-    wrk.setup_demodulate(operators)
-    wrk.setup_noise_estimation(operators)
-    wrk.setup_simple_deglitch(operators)
     wrk.setup_simple_jumpcorrect(operators)
+    wrk.setup_simple_deglitch(operators)
+
+    wrk.setup_flag_diff_noise_outliers(operators)
+    wrk.setup_flag_noise_outliers(operators)
+    wrk.setup_deconvolve_detector_timeconstant(operators)
+    wrk.setup_raw_statistics(operators)
+
+    wrk.setup_readout_filter(operators)
+    wrk.setup_filter_hwpss(operators)
+    wrk.setup_filter_common_mode(operators)
+    wrk.setup_filter_ground(operators)
+    wrk.setup_filter_poly1d(operators)
+    wrk.setup_filter_poly2d(operators)
+    wrk.setup_noise_estimation(operators)
+
+    wrk.setup_demodulate(operators)
+
+    wrk.setup_processing_mask(operators)
     wrk.setup_flag_sso(operators)
     wrk.setup_hn_map(operators)
     wrk.setup_cadence_map(operators)
     wrk.setup_crosslinking_map(operators)
-    wrk.setup_raw_statistics(operators)
-    wrk.setup_deconvolve_detector_timeconstant(operators)
+
     wrk.setup_mapmaker_ml(operators)
-    wrk.setup_filter_ground(operators)
-    wrk.setup_filter_poly1d(operators)
-    wrk.setup_filter_poly2d(operators)
-    wrk.setup_filter_common_mode(operators)
     wrk.setup_mapmaker(operators, templates)
     wrk.setup_mapmaker_filterbin(operators)
     wrk.setup_mapmaker_madam(operators)
@@ -221,17 +199,8 @@ def main():
         log.info_rank("Dry-run complete", comm=comm)
         return
 
-    # Determine the process group size
-    group_size = wrk.reduction_group_size(job, runargs, comm)
-
-    # Create the toast communicator
-    toast_comm = toast.Comm(world=comm, groupsize=group_size)
-
-    # Empty data container
-    data = toast.Data(comm=toast_comm)
-
     # Load data
-    load_data(job, otherargs, runargs, data)
+    data = wrk.load_or_simulate_observing(job, otherargs, runargs, comm)
 
     # Reduce it
     reduce_data(job, otherargs, runargs, data)
