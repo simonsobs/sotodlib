@@ -346,8 +346,8 @@ def calc_masked_psd(
     hwpss=False,
     hwp_freq=None, 
     f_max=100, 
-    width_for_1f=(-0.4, +0.6), 
-    width_for_Nf=(-0.2, +0.2),
+    width_for_1f=(-0.5, +0.7), 
+    width_for_Nf=(-0.3, +0.3),
     peak=False,
     peak_freq=None, 
     peak_width=(-0.002, +0.002),
@@ -403,18 +403,13 @@ def calc_masked_psd(
         pxx_masked = []
         if hwp_freq is None:
             hwp_freq = np.median(aman['hwp_solution']['raw_approx_hwp_freq_1'][1])
-        for i in range(aman.dets.count):
-            masked_signal = mask_hwpss(f, pxx[i], hwp_freq, f_max=f_max, width_for_1f=width_for_1f, width_for_Nf=width_for_Nf)
-            pxx_masked.append(masked_signal.compressed())
-        pxx = np.array(pxx_masked)
-        f = np.ma.masked_array(f, mask=masked_signal.mask).compressed()
+        mask_idx = hwpss_mask(f, hwp_freq, f_max=f_max, width_for_1f=width_for_1f, width_for_Nf=width_for_Nf)
+        f = f[mask_idx]
+        pxx = pxx[:, mask_idx]
     if peak:
-        pxx_masked = []
-        for i in range(aman.dets.count):
-            masked_signal = mask_peak(f, pxx[i], peak_freq, peak_width=peak_width)
-            pxx_masked.append(masked_signal.compressed())
-        pxx = np.array(pxx_masked)
-        f = np.ma.masked_array(f, mask=masked_signal.mask).compressed()
+        mask_idx = peak_mask(f, peak_freq, peak_width=peak_width)
+        f = f[mask_idx]
+        pxx = pxx[:, mask_idx]
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("nusamps", len(f))))
         if overwrite:
@@ -612,17 +607,14 @@ def fit_noise_model(
         aman.wrap(merge_name, noise_fit_stats)
     return noise_fit_stats
 
-def mask_hwpss(f, p, hwp_freq, f_max=100, width_for_1f=(-0.4, +0.6), width_for_Nf=(-0.2, +0.2)):
+def hwpss_mask(f, hwp_freq, f_max=100, width_for_1f=(-0.4, +0.6), width_for_Nf=(-0.2, +0.2)):
     """
-    Function that masks hwpss in PSD.
+    Function that returns boolean array to mask hwpss in PSD.
 
     Arguments
     ---------
         f : nparray
             Frequency of PSD of signal.
-
-        p : nparray
-            PSD of signal.
 
         hwp_freq : float
             HWP frequency.
@@ -640,27 +632,23 @@ def mask_hwpss(f, p, hwp_freq, f_max=100, width_for_1f=(-0.4, +0.6), width_for_N
 
     Returns
     -------
-        p_mask: MaskedArray of the input PSD. p_mask.data returns the PSD before masking,
-            while p_mask.mask returns the bool array of the mask.
+        mask: Boolean array to mask frequency and power of the given PSD. 
+            False in this array stands for the index of hwpss to mask.
     """
-    mask_arrays = [((f > hwp_freq + width_for_1f[0]) & (f < hwp_freq + width_for_1f[1]))]
+    mask_arrays = [((f < hwp_freq + width_for_1f[0])|(f > hwp_freq + width_for_1f[1]))]
     for n in range(int(f_max//hwp_freq-1)):
-        mask_arrays.append(((f > hwp_freq*(n+2) + width_for_Nf[0]) & (f < hwp_freq*(n+2) + width_for_Nf[1])))
-    mask = np.any(np.array(mask_arrays), axis=0)
-    p_mask = np.ma.masked_where(mask, p)
-    return p_mask
+        mask_arrays.append(((f < hwp_freq*(n+2) + width_for_Nf[0])|(f > hwp_freq*(n+2) + width_for_Nf[1])))
+    mask = np.all(np.array(mask_arrays), axis=0)
+    return mask
 
-def mask_peak(f, p, peak_freq, peak_width=(-0.002, +0.002)):
+def peak_mask(f, peak_freq, peak_width=(-0.002, +0.002)):
     """
-    Function that masks single peak (e.g. scan synchronous signal) in PSD.
+    Function that returns boolean array to masks single peak (e.g. scan synchronous signal) in PSD.
 
     Arguments
     ---------
         f : nparray
             Frequency of PSD of signal.
-
-        p : nparray
-            PSD of signal.
 
         peak_freq : float
             Center frequency of the mask.
@@ -671,12 +659,11 @@ def mask_peak(f, p, peak_freq, peak_width=(-0.002, +0.002)):
 
     Returns
     -------
-        p_mask: MaskedArray of the input PSD. p_mask.data returns the PSD before masking,
-            while p_mask.mask returns the bool array of the mask.
+        mask: Boolean array to mask the given PSD. 
+            False in this array stands for the index of the single peak to mask.
     """
-    mask = (f > peak_freq + peak_width[0]) & (f < peak_freq + peak_width[1])
-    p_mask = np.ma.masked_where(mask, p)
-    return p_mask
+    mask = (f < peak_freq + peak_width[0])|(f > peak_freq + peak_width[1])
+    return mask
 
 def binning_psd(psd, unbinned_mode=10, base=2, drop_nan=False):
     """
@@ -704,15 +691,19 @@ def binning_psd(psd, unbinned_mode=10, base=2, drop_nan=False):
             Binned PSD.
     """
     binned_psd = []
-    for i in np.linspace(0, unbinned_mode, unbinned_mode+1, dtype = int):
+    for i in range(0, unbinned_mode+1):
         binned_psd.append(psd[i])
     N = int(np.emath.logn(base, len(psd)-unbinned_mode))
     binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
-    for i in range(N-1):
-        if binning_idx[i] == binning_idx[i+1]:
-            continue
-        else:
+    if base >= 2:
+        for i in range(N-1):
             binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
+    else:
+        for i in range(N-1):
+            if binning_idx[i] == binning_idx[i+1]:
+                continue
+            else:
+                binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
     binned_psd = np.array(binned_psd)
     if drop_nan:
         binned_psd = binned_psd[~np.isnan(binned_psd)]
