@@ -174,6 +174,12 @@ class Imprinter:
           librarian_conn: string (optional)
           build_hk: True 
           build_det: True
+          hk_fields:
+            az: acu.acu_udp_stream.Corrected_Azimuth
+            el: acu.acu_udp_stream.Corrected_Elevation
+            boresight: acu.acu_udp_stream.Corrected_Boresight
+            az_mode:  acu.acu_status.Azimuth_mode
+            hwp_freq: hwp-bbb-e1.HWPEncoder.approx_hwp_freq
 
           tel_tubes:
             tel_tube1:
