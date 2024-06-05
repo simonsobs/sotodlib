@@ -295,7 +295,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     map_op.apply(obs_data, detectors=detectors)
 
                     log.info_rank(
-                        f"{group} : Mapped det={det} {obs.name} in",
+                        f"{group} : Mapped det={det} obs={obs.name} in",
                         comm=new_comm.comm_world,
                         timer=timer_obs,
                     )
