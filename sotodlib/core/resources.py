@@ -11,8 +11,8 @@ RESOURCE_DEFAULTS = {
 
 def get_local_file(filename: str, cache: bool = True) -> str:
     """
-    This function utilizes RESOURCE_DEFAULTS or SOTODLIB_RESOURCES envinronment
-    variable to manage resource files such as a planet catalog from NASA
+    This function utilizes RESOURCE_DEFAULTS or SOTODLIB_RESOURCES environment
+    variable to manage resource files such as a planet catalog from NASA.
 
     RESOURCE_DEFAULTS and SOTODLIB_RESOURCES are dictionaries with key a filename
     and value either an FTP or absolute path to the file. The FTP path starts with
@@ -35,22 +35,22 @@ def get_local_file(filename: str, cache: bool = True) -> str:
     ahs verified that the file exists.
 
     The parameter cache sets the folder of the where a file will be downloaded.
-    When True fiels are stored under the user's home folder. When cache is set
+    When True, files are stored under the user's home folder. When cache is set
     to False, the files are downloaded under the tmp filesystem and their long
     term storage is not guaranteed.
 
     Args:
       filename: The name of the file to grab
-      cache: A path in the user's local folder to check for existing files and
-             cache them after a download
+      cache: A boolean indicating that downloaded files should be cached in user
+              home folder (~/.sotodlib/filecache/).
 
     Returns:
-      The aboslute path of the file.
+      The absolute path of the file.
 
     Exceptions:
         RuntimeError: when the requested resource file does not exist as a key
                       in SOTODLIB_RESOURCES env variable or RESOURCE_DEFAULTS.
-        RutimeErorr: When the value of a key is not an ftp or file path.
+        RuntimeErorr: When the value of a key is not an ftp or file path.
     """
 
     # Local cache. This is per user, however we may want to try and right in
@@ -66,10 +66,10 @@ def get_local_file(filename: str, cache: bool = True) -> str:
 
     if de_url is None:
         raise RuntimeError(
-            f"File {filename} does not exist in RESOURCE_DEFAULTS or in "
-            + "$SOTODLIB_RESOURCES. Please set $SOTODLIB_RESOURCES with a "
-            + "json where the key is the resource name and value either a "
-            + "local path or an ftp path."
+            f"File {filename} not registered in RESOURCE_DEFAULTS nor in "
+            + "$SOTODLIB_RESOURCES. Please ensure the URL to the file is "
+            + "in RESOURCE_DEFAULTS, and ask your system maintainer "
+            + "to expose a cached copy through $SOTODLIB_RESOURCES."
         )
 
     if de_url.startswith("ftp://"):
