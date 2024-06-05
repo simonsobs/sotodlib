@@ -488,6 +488,7 @@ def downsample_obs(obs, down):
     timestreams to avoid both aliasing noise and introducing
     a transfer function."""
     assert down == utils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    if down == 1: return obs
     # Compute how many samples we will end up with
     onsamp = (obs.samps.count+down-1)//down
     # Set up our output axis manager
@@ -512,7 +513,7 @@ def downsample_obs(obs, down):
     # The cuts
     # TODO: The TOD will include a Flagmanager with all the flags. Update this part
     # accordingly.
-    cut_keys = ["glitch_flag"]
+    cut_keys = ["glitch_flags"]
 
     if "source_flags" in obs:
         cut_keys.append("source_flags")
