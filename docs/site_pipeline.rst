@@ -135,27 +135,32 @@ resulting ManifestDbs should work for both level 2 and level 3 SMuRf data.
 
 make_det_info_wafer
 ```````````````````
-This script uses based array construction inputs to build detector IDs for a set of
-UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
-saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
-with a correctly formatted context file and a readout to detector id mapping.
-The detector info mapping created by this script will be stable as long as the
-same UFMs are used in the same optics tube positions, meaning it only needs to
-be re-made if the physical hardware setup changes. 
 
-Although the full config presented for ``make_read_det_match`` will
-work, here's a more basic example that will work::
+This script uses basic array construction inputs to assemble a table
+of information about a set of UFMs and save it toan HDF5 file.  The
+resulting datasets may be used to populate ``det_info.wafer``, once
+the ``det_id`` of the readout channels is known.  The detector info
+mapping created by this script is re-usable as long as the UFM
+continues to be associated with the same ``stream_id``.
 
-  det_db: "./det_info_wafer.db"
-  det_info: "./det_info_wafer.h5"
-  array_info_dir: "/home/so/git/site-pipeline-configs/shared/detmapping/design/"
+Here is a basic configuration file::
 
-  arrays:
-    - name: mv7
-      stream_id: ufm_mv7
-    - name: mv9
-      stream_id: ufm_mv9
+  output_dir: ./satp3_wafer_info_240305
+  array_info_dir: "/home/pipeline/site-pipeline-configs/shared/detmapping/design/"
 
+  stream_ids:
+    - ufm_mv5
+    - ufm_mv12
+    - ufm_mv17
+    - ufm_mv23
+    - ufm_mv27
+    - ufm_mv33
+    - ufm_mv35
+
+
+The output database ``wafer_info.sqlite`` and HDF5 file
+``wafer_info.h5`` are written to the ``output_dir``, which is created
+if it does not exist.
 
 make_read_det_match
 ```````````````````
