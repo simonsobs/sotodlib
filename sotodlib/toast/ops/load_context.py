@@ -652,7 +652,7 @@ class LoadContext(Operator):
         det_props.add_column(quat_col, index=0)
         gamma_col = Column(
             name="gamma",
-            data=det_props[gamma_key],
+            data=det_props[gamma_key] * u.radian,
         )
         det_props.add_column(gamma_col)
 
