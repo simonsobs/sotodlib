@@ -643,11 +643,18 @@ class LoadContext(Operator):
             )
             return
 
+        # Add a column for the quaternion offset of each detector, as well
+        # as the gamma angle with standard naming.
         quat_col = Column(
             name="quat",
             data=quat_data,
         )
         det_props.add_column(quat_col, index=0)
+        gamma_col = Column(
+            name="gamma",
+            data=det_props[gamma_key],
+        )
+        det_props.add_column(gamma_col)
 
         focalplane = toast.instrument.Focalplane(
             detector_data=det_props,
