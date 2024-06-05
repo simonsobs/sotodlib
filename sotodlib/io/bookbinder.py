@@ -126,6 +126,13 @@ class HkDataField:
         self.times =[]
         self.data = []
         self.finalized = False
+    
+    def __len__(self):
+        return len(self.times)
+    
+    @property
+    def addr(self):
+        return f"{self.instance_id}.{self.feed}.{self.field}"
 
     def process_frame(self, frame):
         """Update data based on G3Frame"""
@@ -152,12 +159,12 @@ class HkDataField:
         if len(self.times) != len(clean_times):
             if not drop_duplicates:
                 raise DuplicateAncillaryData(
-                    f"HK data from block {self.name} has" 
+                    f"HK data from {self.addr} has" 
                     " duplicate timestamps"
                 )
             self.times = self.times[idxs]
-        assert (np.all(np.diff(self.times)>0), 
-                f"Times from {self.name} are not increasing")
+        assert np.all(np.diff(self.times)>0), \
+               f"Times from {self.addr} are not increasing"
         
 @dataclass
 class HkData:
@@ -186,7 +193,6 @@ class HkData:
                                  "Must be formatted <instance_id>.<feed>.<field>")
             kw[k] = HkDataField(instance, feed, field)
         return cls(**kw)
->>>>>>> Stashed changes
 
     def process_frame(self, frame):
         """Processes G3frame, and updates relevant HkDataFields"""
@@ -195,12 +201,12 @@ class HkData:
             if isinstance(f, HkDataField):
                 f.process_frame(frame)
     
-    def finalize(self):
+    def finalize(self, drop_duplicates=True):
         """Finalizes HkDatafields"""
         for fld in fields(self): 
             f = getattr(self, fld.name)
             if isinstance(f, HkDataField):
-                f.finalize()
+                f.finalize(drop_duplicates=drop_duplicates)
 
 class AncilProcessor:
     """
@@ -235,8 +241,7 @@ class AncilProcessor:
         the detector frames. 
     """
     def __init__(self, files, book_id, hk_fields: Dict, drop_duplicates=False, log=None):
-        self.hkdata = HkData.from_dict(hk_fields)
-
+        self.hkdata: HkData = HkData.from_dict(hk_fields)
 
         self.files = files
         self.anc_frame_data = None
@@ -300,7 +305,7 @@ class AncilProcessor:
         cur_file_idx = None
         out_files = []
 
-        az, el, boresight, corotation = None, None, None, None
+        az, el, boresight, corotator_enc = None, None, None, None
         if self.hkdata.az is not None:
             m = (times[0] <= self.hkdata.az.times) & (self.hkdata.az.times <= times[-1])
             if not any(m):
@@ -613,7 +618,7 @@ class SmurfStreamProcessor:
                 #    >> arr_out[:, o0:o1] = arr_in[:, i0:i1]
                 # since numpy does not need to create a temporary copy of the
                 # data, and can just do a direct mem-map. This speeds up binding
-                # by a factory of ~4.
+                # by a factor of ~4.
                 #
                 # Here we are splitting outsamps and insamps into a list
                 # of ranges where both arrays are contiguous. Then we loop
@@ -763,16 +768,17 @@ class BookBinder:
         self.allow_bad_timing = allow_bad_timing
 
         if os.path.exists(outdir):
-            if len(os.listdir(outdir)) > 1:
+            # don't count hidden files, possibly fron NFS processes
+            nfiles = len([_ for f in os.listdir(outdir) if f[0] != '.'])
+            if nfiles > 1:
                 raise BookDirHasFiles(
                     f"Output directory {outdir} contains files. Delete to retry"
                       " bookbinding"
                 )
-            elif len(os.listdir(outdir)) == 1:
-                assert (os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', 
-                    f"only acceptable file in new book path {outdir} is "
+            elif nfiles == 1:
+                assert os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', \
+                    f"only acceptable file in new book path {outdir} is " \
                     " Z_bookbinder_log.txt"
-                )
         else:
             os.makedirs(outdir)
 
