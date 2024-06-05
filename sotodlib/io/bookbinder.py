@@ -137,6 +137,7 @@ class HkDataField:
     def process_frame(self, frame):
         """Update data based on G3Frame"""
         address = frame['address']
+        # address: "<site>.<instance_id>.feeds.<feed_name>""
         spl = address.split('.')
         instance_id, feed = spl[1], spl[3]
         if instance_id != self.instance_id or feed != self.feed:
@@ -769,7 +770,7 @@ class BookBinder:
 
         if os.path.exists(outdir):
             # don't count hidden files, possibly fron NFS processes
-            nfiles = len([_ for f in os.listdir(outdir) if f[0] != '.'])
+            nfiles = len([f for f in os.listdir(outdir) if f[0] != '.'])
             if nfiles > 1:
                 raise BookDirHasFiles(
                     f"Output directory {outdir} contains files. Delete to retry"
