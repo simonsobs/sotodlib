@@ -11,11 +11,13 @@ except ImportError:
 from so3g.proj import Ranges, RangesMatrix
 
 from .. import core
+from .. import coords
 from . import filters
 from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                       psat_range=(0, 15), merge=True, overwrite=True,
+                       psat_range=(0, 15), rn_range=None, si_nan=False,
+                       merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
@@ -32,6 +34,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
         P_SAT in the IV analysis is the bias power at 90% Rn in pW.
+    rn_range : Tuple
+        Tuple (lower_bound, upper_bound) for r_n det selection.
+    si_nan : bool
+        If true, flag dets where s_i is NaN. Default is false.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -63,13 +69,20 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         merge = False
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
+
+    ranges = [detcal.bg >= 0,
+              detcal.r_tes > 0,
+              detcal.r_frac >= rfrac_range[0],
+              detcal.r_frac <= rfrac_range[1],
+              detcal.p_sat*1e12 >= psat_range[0],
+              detcal.p_sat*1e12 <= psat_range[1]]
+    if rn_range is not None:
+        ranges.append(detcal.r_n >= rn_range[0])
+        ranges.append(detcal.r_n <= rn_range[1])
+    if si_nan:
+        ranges.append(np.isnan(detcal.s_i) == False)
     
-    msk = ~(np.all([detcal.bg >= 0,
-                    detcal.r_tes > 0,
-                    detcal.r_frac >= rfrac_range[0],
-                    detcal.r_frac <= rfrac_range[1],
-                    detcal.p_sat*1e12 >= psat_range[0],
-                    detcal.p_sat*1e12 <= psat_range[1]], axis=0))
+    msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     if 'samps' in aman:
         x = Ranges(aman.samps.count)
@@ -229,11 +242,11 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         for part_slice_ta_masked, part_slice_ta_unmasked in zip(part_slices_ta_masked, part_slices_ta_unmasked):
             daz_part = daz[part_slice_ta_masked]
             daz_part_mean, daz_part_std, daz_part_samps = daz_part.mean(), daz_part.std(), daz_part.shape[0]
-            if np.isclose(daz_part_mean, daz_right_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_right_samps)) and \
-                np.isclose(daz_part_std, daz_right_std, rtol=1, atol=0):
+            if np.isclose(daz_part_mean, daz_right_mean, rtol=0.01, atol=3.*daz_right_std/np.sqrt(daz_right_samps)) and \
+                np.isclose(daz_part_std, daz_right_std, rtol=3., atol=0):
                 _right_flag[part_slice_ta_unmasked] = True
-            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_left_samps)) and \
-                np.isclose(daz_part_std, daz_left_std, rtol=1, atol=0):
+            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0.01, atol=3.*daz_right_std/np.sqrt(daz_left_samps)) and \
+                np.isclose(daz_part_std, daz_left_std, rtol=3., atol=0):
                 _left_flag[part_slice_ta_unmasked] = True
             else:
                 _truncate_flag[part_slice_ta_unmasked] = True
@@ -263,7 +276,8 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         # truncate unstable scan before the first turnaround or after the last turnaround
         if truncate:
             valid_slice = slice(*np.where(~_truncate_flag)[0][[0, -1]])
-            aman.restrict('samps', valid_slice)
+            valid_i_start, valid_i_end = np.where(~_truncate_flag)[0][0], np.where(~_truncate_flag)[0][-1]
+            aman.restrict('samps', (aman.samps.offset + valid_i_start, aman.samps.offset+valid_i_end))
             ta_flag = Ranges.from_bitmask(_ta_flag[valid_slice])
         else:
             ta_flag = Ranges.from_bitmask(np.logical_or(_ta_flag, _truncate_flag))
@@ -275,7 +289,6 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         elif name in aman.flags:
             aman.flags[name] = ta_flag
         else:
-            print(ta_flag)
             aman.flags.wrap(name, ta_flag)   
     if method == 'az':
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
@@ -488,3 +501,39 @@ def get_trending_flags(aman,
         return cut, trends
 
     return cut
+
+def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
+    darks = np.array(aman.det_info.wafer.type != 'OPTC')
+    x = Ranges(aman.samps.count)
+    mskdarks = RangesMatrix([Ranges.ones_like(x) if Y
+                                else Ranges.zeros_like(x) for Y in darks])
+    
+    if merge:
+        if dark_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {dark_flags_name} already exists in aman.flags")
+        if dark_flags_name in aman.flags:
+            aman.flags[dark_flags_name] = mskdarks
+        else:
+            aman.flags.wrap(dark_flags_name, mskdarks, [(0, 'dets'), (1, 'samps')])
+
+    return mskdarks
+
+def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source_flags',
+                     mask=None, center_on=None, res=None, max_pix=None):
+    if merge:
+        wrap = source_flags_name
+    else:
+        wrap = None
+    if res:
+        res = np.radians(res/60)
+    source_flags = coords.planets.compute_source_flags(tod=aman, wrap=wrap, mask=mask, center_on=center_on, res=res, max_pix=max_pix)
+    
+    if merge:
+        if source_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {source_flags_name} already exists in aman.flags")
+        if source_flags_name in aman.flags:
+            aman.flags[source_flags_name] = source_flags
+        else:
+            aman.flags.wrap(source_flags_name, source_flags, [(0, 'dets'), (1, 'samps')])
+
+    return source_flags

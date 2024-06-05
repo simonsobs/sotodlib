@@ -168,6 +168,9 @@ Here is a list of the supported high-level operations:
 .. autofunction:: sotodlib.toast.workflows.setup_deconvolve_detector_timeconstant
 .. autofunction:: sotodlib.toast.workflows.deconvolve_detector_timeconstant
 
+.. autofunction:: sotodlib.toast.workflows.setup_readout_filter
+.. autofunction:: sotodlib.toast.workflows.apply_readout_filter
+
 .. autofunction:: sotodlib.toast.workflows.setup_filter_hwpss
 .. autofunction:: sotodlib.toast.workflows.filter_hwpss
 
@@ -183,11 +186,20 @@ Here is a list of the supported high-level operations:
 .. autofunction:: sotodlib.toast.workflows.setup_filter_common_mode
 .. autofunction:: sotodlib.toast.workflows.filter_common_mode
 
+.. autofunction:: sotodlib.toast.workflows.setup_simple_jumpcorrect
+.. autofunction:: sotodlib.toast.workflows.simple_jumpcorrect
+
+.. autofunction:: sotodlib.toast.workflows.setup_simple_deglitch
+.. autofunction:: sotodlib.toast.workflows.simple_deglitch
+
 .. autofunction:: sotodlib.toast.workflows.setup_flag_sso
 .. autofunction:: sotodlib.toast.workflows.flag_sso
 
 .. autofunction:: sotodlib.toast.workflows.setup_flag_noise_outliers
 .. autofunction:: sotodlib.toast.workflows.flag_noise_outliers
+
+.. autofunction:: sotodlib.toast.workflows.setup_flag_diff_noise_outliers
+.. autofunction:: sotodlib.toast.workflows.flag_diff_noise_outliers
 
 .. autofunction:: sotodlib.toast.workflows.setup_mapmaker_filterbin
 .. autofunction:: sotodlib.toast.workflows.mapmaker_filterbin
@@ -203,6 +215,9 @@ Here is a list of the supported high-level operations:
 
 .. autofunction:: sotodlib.toast.workflows.setup_noise_estimation
 .. autofunction:: sotodlib.toast.workflows.noise_estimation
+
+.. autofunction:: sotodlib.toast.workflows.setup_diff_noise_estimation
+.. autofunction:: sotodlib.toast.workflows.diff_noise_estimation
 
 .. autofunction:: sotodlib.toast.workflows.setup_raw_statistics
 .. autofunction:: sotodlib.toast.workflows.raw_statistics
@@ -239,6 +254,9 @@ Here is a list of the supported high-level operations:
 
 .. autofunction:: sotodlib.toast.workflows.setup_simulate_catalog_signal
 .. autofunction:: sotodlib.toast.workflows.simulate_catalog_signal
+
+.. autofunction:: sotodlib.toast.workflows.setup_weather_model
+.. autofunction:: sotodlib.toast.workflows.append_weather_model
 
 .. autofunction:: sotodlib.toast.workflows.setup_simulate_atmosphere_signal
 .. autofunction:: sotodlib.toast.workflows.simulate_atmosphere_signal

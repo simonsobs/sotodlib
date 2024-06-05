@@ -1,7 +1,10 @@
 import os
 import yaml
+import time
 import numpy as np
 import argparse
+import traceback
+from typing import Optional, List
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -88,7 +91,9 @@ def preprocess_obs(
     logger.info(f"Beginning run for {obs_id}")
 
     aman = context.get_obs(obs_id, no_signal=True)
-    proc_aman = pipe.run(aman)
+    proc_aman, success = pipe.run(aman)
+    if success != 'end':
+        return
 
     policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
     dest_file, dest_dataset = policy.get_dest(obs_id)
@@ -101,7 +106,9 @@ def preprocess_obs(
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
-        db.add_entry(db_data, dest_file)
+        h5_path = os.path.relpath(dest_file,
+                start=os.path.dirname(configs['archive']['index']))
+        db.add_entry(db_data, h5_path)
 
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
@@ -154,21 +161,41 @@ def get_parser(parser=None):
         '--max-ctime',
         help="Maximum timestamp for the beginning of an observation list",
     )
+    parser.add_argument(
+        '--update-delay',
+        help="Number of days (unit is days) in the past to start observation list.",
+        type=int
+    )
+    parser.add_argument(
+        '--tags',
+        help="Observation tags. Ex: --tags 'jupiter' 'setting'",
+        nargs='*',
+        type=str
+    )
+    parser.add_argument(
+        '--planet-obs',
+        help="If true, takes all planet tags as logical OR and adjusts related configs",
+        action='store_true',
+    )
     return parser
 
 def main(
-    configs, 
-    query=None, 
-    obs_id=None, 
-    overwrite=False,
-    min_ctime=None,
-    max_ctime=None,
-    logger=None,
+    configs: str,
+    query: Optional[str] = None, 
+    obs_id: Optional[str] = None, 
+    overwrite: bool = False,
+    min_ctime: Optional[int] = None,
+    max_ctime: Optional[int] = None,
+    update_delay: Optional[int] = None,
+    tags: Optional[List[str]] = None,
+    planet_obs: bool = False,
  ):
     configs, context = _get_preprocess_context(configs)
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
-    globals()['logger'] = logger
+    logger = sp_util.init_logger("preprocess")
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) + update_delay
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
@@ -184,7 +211,18 @@ def main(
         if tot_query=="":
             tot_query="1"
     
-    obs_list = context.obsdb.query(tot_query)
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tags[i].lower()
+            if '=' not in tags[i]:
+                tags[i] += '=1'
+
+    if planet_obs:
+        obs_list = []
+        for tag in tags:
+            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+    else:
+        obs_list = context.obsdb.query(tot_query, tags=tags)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
@@ -202,7 +240,13 @@ def main(
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs in run_list:
         logger.info(f"Processing obs_id: {obs_id}")
-        preprocess_obs(obs["obs_id"], configs, overwrite=overwrite, logger=logger)
+        try:
+            preprocess_obs(obs["obs_id"], configs, overwrite=overwrite, logger=logger)
+        except Exception as e:
+            logger.info(f"{type(e)}: {e}")
+            logger.info(''.join(traceback.format_tb(e.__traceback__)))
+            logger.info(f'Skiping obs:{obs["obs_id"]} and moving to the next')
+            continue
             
 
 if __name__ == '__main__':
