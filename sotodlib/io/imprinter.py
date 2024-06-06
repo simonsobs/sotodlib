@@ -868,7 +868,6 @@ class Imprinter:
                 session.commit()
             else:
                 session.rollback()
-
             raise e
 
     def get_book(self, bid, session=None):
@@ -1482,6 +1481,11 @@ class Imprinter:
         for obs_id, files in self.get_files_for_book(book).items():
             self.logger.debug(f"Retrieving readout_ids for {obs_id}...")
             status = SmurfStatus.from_file(files[0])
+            if not np.any(status.mask):
+                raise MissingReadoutIDError(
+                    f"Readout IDs not found for {obs_id}. SMuRF system was not "
+                    "set up for science observations."
+                )
             ch_info = get_channel_info(status, archive=SMURF)
             if "readout_id" not in ch_info:
                 raise MissingReadoutIDError(

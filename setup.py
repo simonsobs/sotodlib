@@ -60,7 +60,8 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
-    'numdifftools'
+    'numdifftools',
+    'psycopg2-binary',
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [

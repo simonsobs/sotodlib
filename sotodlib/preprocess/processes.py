@@ -4,7 +4,7 @@ from operator import attrgetter
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 import sotodlib.obs_ops as obs_ops
-from sotodlib.hwp import hwp
+from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
@@ -839,6 +839,7 @@ class SourceFlags(_Preprocess):
             res: 0.005817764173314432 # np.radians(20/60)
             max_pix: 4e6
           save: True
+          select: True # optional
     
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
@@ -856,8 +857,12 @@ class SourceFlags(_Preprocess):
                 raise ValueError("No tags match source list")
         else:
             source = center_on
-        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, center_on=source,
+        source_flags = tod_ops.flags.get_source_flags(aman, 
+                                                      merge=self.calc_cfgs.get('merge', False),
+                                                      overwrite=self.calc_cfgs.get('overwrite', True),
+                                                      source_flags_name=self.calc_cfgs.get('source_flags_name', 'source_flags'),
                                                       mask=self.calc_cfgs.get('mask', None),
+                                                      center_on=source,
                                                       res=self.calc_cfgs.get('res', None),
                                                       max_pix=self.calc_cfgs.get('max_pix', None))
 
@@ -870,6 +875,43 @@ class SourceFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("sources", source_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_any_cuts(proc_aman.sources.source_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+class HWPAngleModel(_Preprocess):
+    """Apply hwp angle model to the TOD.
+
+    Saves results in proc_aman under the "hwp_angle" field. 
+
+     Example config block::
+
+        - name : "hwp_angle_model"
+          calc:
+            on_sign_ambiguous: 'fail'
+          save: True
+    
+    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
+    """
+    name = "hwp_angle_model"
+    
+    def calc_and_save(self, aman, proc_aman):
+        hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+        hwp_angle_aman = core.AxisManager(aman.samps)
+        hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
+        self.save(proc_aman, hwp_angle_aman)
+    
+    def save(self, proc_aman, hwp_angle_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("hwp_angle", hwp_angle_aman)
         
 
 class FourierFilter(_Preprocess):
@@ -982,3 +1024,4 @@ _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
+_Preprocess.register(HWPAngleModel)
