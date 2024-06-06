@@ -1143,7 +1143,7 @@ class LoadContext(Operator):
                             det_data[self.det_data] = (key, dt, None)
                         elif data_key in det_flag_fields:
                             # One of the flag fields
-                            det_data[self.det_data] = (
+                            det_data[self.det_flags] = (
                                 key,
                                 dt,
                                 det_flag_fields[data_key],
