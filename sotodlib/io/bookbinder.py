@@ -1,8 +1,8 @@
+from typing import Optional, Dict
+from dataclasses import dataclass, fields
+
 import so3g
 from so3g.proj import Ranges
-from typing import Optional, Union, Dict
-
-from dataclasses import dataclass, fields, field
 from spt3g import core
 import itertools
 import numpy as np
@@ -10,7 +10,6 @@ from scipy.interpolate import interp1d
 from scipy.signal import convolve
 from tqdm.auto import tqdm
 import os
-import yaml
 import logging
 import sys
 import shutil
@@ -108,14 +107,13 @@ class HkDataField:
         Feed name for hk data feed.
     field: str
         Field name for hk data feed.
-    
     Attributes
     -----------
     times: np.ndarray
         Sample timestamps.
     data: np.ndarray
         Sample data
-    finalized: bool 
+    finalized: bool
         True if datas has been processed and finalized
     """
     def __init__(self, instance_id: str, feed: str, field: str):
@@ -126,12 +124,13 @@ class HkDataField:
         self.times =[]
         self.data = []
         self.finalized = False
-    
+
     def __len__(self):
         return len(self.times)
-    
+
     @property
     def addr(self):
+        """Returns full address of field"""
         return f"{self.instance_id}.{self.feed}.{self.field}"
 
     def process_frame(self, frame):
@@ -148,7 +147,7 @@ class HkDataField:
                 continue
             self.times.append(np.array(block.times) / core.G3Units.s)
             self.data.append(block[self.field])
-    
+
     def finalize(self, drop_duplicates=False):
         """Finalize data, and store in numpy array"""
         self.times = np.hstack(self.times, dtype=np.float64)
@@ -189,22 +188,22 @@ class HkData:
         for k, v in d.items():
             try:
                 instance, feed, field = v.split('.')
-            except Exception:
+            except Exception as exc:
                 raise ValueError(f"Could not parse field: {v}. "
-                                 "Must be formatted <instance_id>.<feed>.<field>")
+                                 "Must be formatted <instance_id>.<feed>.<field>") from exc
             kw[k] = HkDataField(instance, feed, field)
         return cls(**kw)
 
     def process_frame(self, frame):
         """Processes G3frame, and updates relevant HkDataFields"""
-        for fld in fields(self): 
+        for fld in fields(self):
             f = getattr(self, fld.name)
             if isinstance(f, HkDataField):
                 f.process_frame(frame)
-    
+
     def finalize(self, drop_duplicates=True):
         """Finalizes HkDatafields"""
-        for fld in fields(self): 
+        for fld in fields(self):
             f = getattr(self, fld.name)
             if isinstance(f, HkDataField):
                 f.finalize(drop_duplicates=drop_duplicates)
@@ -212,7 +211,7 @@ class HkData:
 class AncilProcessor:
     """
     Processor for ancillary (ACU) data
-    
+
     Params
     --------
     files : list
@@ -221,7 +220,7 @@ class AncilProcessor:
         ID of book being bound.
     hk_fields: dict
         Dictionary of fields corresponding to relevant HK Data. See the HkData class for what housekeeping fields are expecting and allowed.  For example::
-        
+
         >> hk_fields = {
              'az': 'acu.acu_udp_stream.Corrected_Azimuth',
              'el': 'acu.acu_udp_stream.Corrected_Elevation',
@@ -239,7 +238,7 @@ class AncilProcessor:
     anc_frame_data : List[G3TimestreamMap]
         List of G3TimestreamMaps saved for each bound frame. This will be
         populated on bind and should be used to add copies of the anc data to
-        the detector frames. 
+        the detector frames.
     """
     def __init__(self, files, book_id, hk_fields: Dict, drop_duplicates=False, log=None):
         self.hkdata: HkData = HkData.from_dict(hk_fields)
@@ -257,11 +256,11 @@ class AncilProcessor:
             self.log = log
 
         if self.hkdata.az is None:
-            self.log.warn("No ACU data specified in hk_fields!")
+            self.log.warning("No ACU data specified in hk_fields!")
 
         if self.hkdata.hwp_freq is None:
             self.log.info("No HWP Freq data is specified in hk_fields.")
-    
+
     def preprocess(self):
         """
         Preprocesses HK data and populates the `data` and `times` objects.
@@ -283,7 +282,7 @@ class AncilProcessor:
             raise NoMountData(
                 f"Did not find azimuth or elevation data in {self.files}",
             )
-        
+
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
         Binds ancillary data.
@@ -311,13 +310,12 @@ class AncilProcessor:
             m = (times[0] <= self.hkdata.az.times) & (self.hkdata.az.times <= times[-1])
             if not any(m):
                 raise NoMountData(
-                    f"Found no mount data overlapping with detector data"
+                    "Found no mount data overlapping with detector data"
                 )
-            if np.max(np.diff( self.hkdata.az.times[m])) > 10:
+            max_dt = np.max(np.diff(self.hkdata.az.times[m]))
+            if max_dt > 10:
                 raise NoMountData(
-                    f"Max ACU data spacing {np.max(np.diff( block.times[m]))}s" 
-                    f" is higher than 10s. Interpolation may be "
-                    "questionable."
+                    f"Max ACU data spacing {max_dt}s is higher than 10s. Interpolation may be questionable."
                 )
             az = np.interp(times, self.hkdata.az.times, self.hkdata.az.data)
 
@@ -325,7 +323,7 @@ class AncilProcessor:
             m = (times[0] <= self.hkdata.el.times) & (self.hkdata.el.times <= times[-1])
             if not any(m):
                 raise NoMountData(
-                    f"Found no mount data overlapping with detector data"
+                    "Found no mount data overlapping with detector data."
                 )
             el = np.interp(times, self.hkdata.el.times, self.hkdata.el.data)
 
@@ -373,7 +371,7 @@ class AncilProcessor:
         # Save this to be added to detector files
         self.anc_frame_data = anc_frame_data
         self.out_files = out_files
-    
+
     def add_acu_summary_info(self, frame, t0, t1):
         """
         Adds ACU summary information to a G3Frame. This will add the following
@@ -386,7 +384,7 @@ class AncilProcessor:
                 Mean and standard deviation of the az velocity (deg / sec)
             - elevation_velocity_mean / elevaction_velocity_std: (float / float)
                 Mean and standard deviation of the el velocity (deg / sec)
-            
+
         Params
         ----------
         frame : G3Frame
@@ -407,7 +405,7 @@ class AncilProcessor:
                 frame['azimuth_mode'] = 'ProgramTrack' # Scanning
             else:
                 frame['azimuth_mode'] = 'Preset'  # Slewing
-            
+
         if az is not None:
             m = (t0 <= az.times) & (az.times <= t1)
             if np.any(m):
@@ -415,7 +413,7 @@ class AncilProcessor:
                 az_vel = np.diff(az.data[m]) / dt
                 frame['azimuth_velocity_mean'] = np.mean(az_vel)
                 frame['azimuth_velocity_stdev'] = np.std(az_vel)
-            
+
         if el is not None:
             m = (t0 <= el.times) & (el.times <= t1)
             if np.any(m):
@@ -423,9 +421,9 @@ class AncilProcessor:
                 frame['elevation_velocity_mean'] = np.mean(el_vel)
                 frame['elevation_velocity_stdev'] = np.std(el_vel)
 
-        
+
 class SmurfStreamProcessor:
-    def __init__(self, obs_id, files, book_id, readout_ids, 
+    def __init__(self, obs_id, files, book_id, readout_ids,
                  log=None, allow_bad_timing=False):
         self.files = files
         self.obs_id = obs_id
