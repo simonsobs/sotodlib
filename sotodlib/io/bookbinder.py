@@ -135,8 +135,7 @@ class HkDataField:
 
     def process_frame(self, frame):
         """Update data based on G3Frame"""
-        address = frame['address']
-        # address: "<site>.<instance_id>.feeds.<feed_name>""
+        address = frame['address']  # "<site>.<instance_id>.feeds.<feed_name>""
         spl = address.split('.')
         instance_id, feed = spl[1], spl[3]
         if instance_id != self.instance_id or feed != self.feed:
@@ -219,15 +218,16 @@ class AncilProcessor:
     book_id: str
         ID of book being bound.
     hk_fields: dict
-        Dictionary of fields corresponding to relevant HK Data. See the HkData class for what housekeeping fields are expecting and allowed.  For example::
+        Dictionary of fields corresponding to relevant HK Data. See the HkData
+        class for what housekeeping fields are allowed.  For example::
 
-        >> hk_fields = {
-             'az': 'acu.acu_udp_stream.Corrected_Azimuth',
-             'el': 'acu.acu_udp_stream.Corrected_Elevation',
-             'boresight': 'acu.acu_udp_stream.Corrected_Boresight',
-             'az_mode':  'acu.acu_status.Azimuth_mode',
-             'hwp_freq': 'hwp-bbb-e1.HWPEncoder.approx_hwp_freq',
-           }
+            >> hk_fields = {
+                'az': 'acu.acu_udp_stream.Corrected_Azimuth',
+                'el': 'acu.acu_udp_stream.Corrected_Elevation',
+                'boresight': 'acu.acu_udp_stream.Corrected_Boresight',
+                'az_mode':  'acu.acu_status.Azimuth_mode',
+                'hwp_freq': 'hwp-bbb-e1.HWPEncoder.approx_hwp_freq',
+            }
 
     Attributes
     -----------
@@ -767,7 +767,7 @@ class BookBinder:
         self.allow_bad_timing = allow_bad_timing
 
         if os.path.exists(outdir):
-            # don't count hidden files, possibly fron NFS processes
+            # don't count hidden files, possibly from NFS processes
             nfiles = len([f for f in os.listdir(outdir) if f[0] != '.'])
             if nfiles > 1:
                 raise BookDirHasFiles(
