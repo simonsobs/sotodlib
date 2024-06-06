@@ -278,10 +278,11 @@ class AncilProcessor:
         self.hkdata.finalize(drop_duplicates=self.drop_duplicates)
         self.preprocessed = True
 
-        if len(self.hkdata.az) == 0 or len(self.hkdata.el) == 0:
-            raise NoMountData(
-                f"Did not find azimuth or elevation data in {self.files}",
-            )
+        if self.hkdata.az is not None:
+            if len(self.hkdata.az) == 0:
+                raise NoMountData(
+                    f"Did not find ACU data in {self.files}",
+                )
 
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
@@ -305,32 +306,32 @@ class AncilProcessor:
         cur_file_idx = None
         out_files = []
 
+        def validate_mount_field(hk_field: HkDataField, max_dt=None):
+            m = (times[0] <= hk_field.times) & (hk_field.times <= times[-1])
+            if not np.any(m):
+                raise NoMountData(
+                    f"No mount data overlappiing with detector data: {hk_field.addr}"
+                )
+            if max_dt is not None:
+                _max_dt = np.max(np.diff(hk_field.times[m]))
+                if _max_dt > max_dt:
+                    raise NoMountData(
+                        f"Max data spacing {_max_dt}s is higher than {max_dt}s for {hk_field.addr}. "
+                        "Interpolation may be questionable."
+                    )
+
         az, el, boresight, corotator_enc = None, None, None, None
         if self.hkdata.az is not None:
-            m = (times[0] <= self.hkdata.az.times) & (self.hkdata.az.times <= times[-1])
-            if not any(m):
-                raise NoMountData(
-                    "Found no mount data overlapping with detector data"
-                )
-            max_dt = np.max(np.diff(self.hkdata.az.times[m]))
-            if max_dt > 10:
-                raise NoMountData(
-                    f"Max ACU data spacing {max_dt}s is higher than 10s. Interpolation may be questionable."
-                )
+            validate_mount_field(self.hkdata.az, max_dt=10)
             az = np.interp(times, self.hkdata.az.times, self.hkdata.az.data)
-
         if self.hkdata.el is not None:
-            m = (times[0] <= self.hkdata.el.times) & (self.hkdata.el.times <= times[-1])
-            if not any(m):
-                raise NoMountData(
-                    "Found no mount data overlapping with detector data."
-                )
+            validate_mount_field(self.hkdata.el, max_dt=10)
             el = np.interp(times, self.hkdata.el.times, self.hkdata.el.data)
-
         if self.hkdata.boresight is not None:
+            validate_mount_field(self.hkdata.boresight, max_dt=10)
             boresight = np.interp(times, self.hkdata.boresight.times, self.hkdata.boresight.data)
-
         if self.hkdata.corotator_enc is not None:
+            validate_mount_field(self.hkdata.corotator_enc, max_dt=10)
             corotator_enc = np.interp(
                 times, self.hkdata.corotator_enc.times, self.hkdata.corotator_enc.data)
 
