@@ -427,6 +427,7 @@ def main(
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
             err, src_file, db_datasets = future.result()
+            futures.remove(future)
             db = _get_preprocess_db(configs, group_by)
             if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
                 nfile += 1
