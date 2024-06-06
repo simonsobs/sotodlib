@@ -13,10 +13,6 @@ from so3g import hk
 import logging
 from .datapkg_utils import load_configs
 
-#logging.basicConfig(
-#    level=logging.DEBUG,
-#    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-#)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +135,8 @@ class G3tHk:
         ____
         hkarchive_path : path
             Path to the data directory
+        iids : list
+            List of agent instance ids
         db_path : path, optional
             Path to the sqlite file
         echo : bool, optional
@@ -150,7 +148,6 @@ class G3tHk:
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
         self.iids = iids
-        print('self.iids', self.iids)
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -177,17 +174,11 @@ class G3tHk:
         hkas.process_file(hk_path)
         
         arc = hkas.finalize()
-        #data = arc.simple(iids)
-
-        #for dat in data:
-        #    print('dat', dat)
 
         # get fields from .g3 file
         fields, timelines = arc.get_fields()
         hkfs = []
-        print('iids', self.iids)
         for key in fields.keys():
-        # Check if any iid in iids is in the key
             if any(iid in key for iid in iids):
                 hkfs.append(key)
 
@@ -361,12 +352,7 @@ class G3tHk:
             .one()
         )
 
-
-        # Extract instance IDs from the finalization dictionary
-        #instance_ids = []
-        #for server in self.finalization.get("servers", []):
-        #    instance_ids.extend([value for key, value in server.items()])
-
+        # line below may not be needed; is redundant
         db_agents = [a for a in db_file.agents if a.instance_id in self.iids]
         db_fields = db_file.fields
 
@@ -565,20 +551,13 @@ class G3tHk:
         if type(configs) == str:
             configs = load_configs(configs)
 
-        #print('configs from from_configs: ', configs)
-        #print('configs from finalize: ', configs["finalization"]["servers"])
-        keys = configs["finalization"]["servers"][0].keys()#["pysmurf-monitor"]
-        #print('iids', iids)
+        keys = configs["finalization"]["servers"][0].keys()
         
         iids = []
-        #iids = list(iids)
         for key in keys:
-            #print(key)
-            field = configs["finalization"]["servers"][0][key]
-            iids.append(field)
+            agent = configs["finalization"]["servers"][0][key]
+            iids.append(agent)
 
-        print('fields', iids)
-            
         return cls(
             hkarchive_path = os.path.join(configs["data_prefix"], "hk"), 
             db_path = configs["g3thk_db"],
