@@ -102,19 +102,20 @@ class HkDataField:
     Args
     -----
     instance_id: str
-        Instance id of the agent producing the data
+        Instance id of the agent producing the data.
     feed: str
         Feed name for hk data feed.
     field: str
         Field name for hk data feed.
+
     Attributes
     -----------
     times: np.ndarray
-        Sample timestamps.
+        HK sample timestamps.
     data: np.ndarray
-        Sample data
+        HK sample data.
     finalized: bool
-        True if datas has been processed and finalized
+        True if datas has been processed and finalized.
     """
     def __init__(self, instance_id: str, feed: str, field: str):
         self.instance_id = instance_id
