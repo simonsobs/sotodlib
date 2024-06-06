@@ -43,7 +43,6 @@ from .load_context_utils import (
     parse_metadata,
     read_and_preprocess_wafers,
     open_context,
-    close_context,
     distribute_detector_data,
     distribute_detector_props,
 )
@@ -377,7 +376,8 @@ class LoadContext(Operator):
                             meta["det_info"][self.ax_detinfo_wafer_key] == wf
                         )
                         obs_props.append(oprops)
-            close_context(ctx, context_file=self.context_file)
+            if self.context_file is not None:
+                del ctx
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
@@ -466,6 +466,7 @@ class LoadContext(Operator):
                 timer=otimer,
             )
 
+    @function_timer
     def _load_metadata(self, obs_name, session_name, gcomm, dets_select, preproc_conf):
         """Load observation metadata and the focalplane properties.
 
@@ -501,7 +502,8 @@ class LoadContext(Operator):
             # Load metadata
             ctx = open_context(context=self.context, context_file=self.context_file)
             meta = ctx.get_meta(session_name, dets=dets_select)
-            close_context(ctx, context_file=self.context_file)
+            if self.context_file is not None:
+                del ctx
             n_samp = meta["samps"].count
 
             if self.preprocess_config is not None:
@@ -576,6 +578,7 @@ class LoadContext(Operator):
         )
         return (obs_meta, det_props, n_samp)
 
+    @function_timer
     def _create_obs_instrument(self, obs_name, gcomm, det_props):
         """Create telescope, session, and focalplane flags.
 
@@ -670,6 +673,7 @@ class LoadContext(Operator):
         )
         return telescope, fp_flags
 
+    @function_timer
     def _create_observation(
         self, obs_name, session_name, comm, telescope, n_samp, fp_flags
     ):
@@ -812,6 +816,7 @@ class LoadContext(Operator):
         )
         return ob, have_pointing
 
+    @function_timer
     def _load_data(self, ob, have_pointing, pconf):
         """Recursively load AxisManager data.
 
@@ -1127,7 +1132,12 @@ class LoadContext(Operator):
                     elif field_axes[1] == self.axis_sample:
                         # This is detector data.  See if it is one of the standard
                         # fields we are parsing.
-                        dt = axman[key].dtype
+                        if hasattr(axman[key], "dtype"):
+                            # This is an array
+                            dt = axman[key].dtype
+                        else:
+                            # This is a RangesMatrix of flags
+                            dt = np.dtype(np.uint8)
                         if data_key == self.ax_det_signal:
                             # Detector signal
                             det_data[self.det_data] = (key, dt, None)

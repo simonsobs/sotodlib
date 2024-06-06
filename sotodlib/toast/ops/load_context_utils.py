@@ -32,13 +32,7 @@ def open_context(context=None, context_file=None):
         return context
 
 
-def close_context(context=None, context_file=None):
-    if context_file is None:
-        # We are using a pre-created context, do nothing
-        return
-    del context
-
-
+@function_timer
 def read_and_preprocess_wafers(
     obs_name,
     session_name,
@@ -81,7 +75,8 @@ def read_and_preprocess_wafers(
         if reader == rank:
             ctx = open_context(context=context, context_file=context_file)
             axtod = ctx.get_obs(session_name, dets=wafer_dets[wf])
-            close_context(ctx, context_file=context_file)
+            if context_file is not None:
+                del ctx
             timer.stop()
             elapsed = timer.seconds()
             timer.start()
@@ -265,6 +260,7 @@ def distribute_detector_props(obs, wafer_key):
     return (wafer_dets, wafer_readers, wafer_proc_dets, proc_wafer_dets)
 
 
+@function_timer
 def distribute_detector_data(
     obs,
     field,
@@ -406,6 +402,7 @@ def distribute_detector_data(
     del send_data
 
 
+@function_timer
 def compute_boresight_pointing(
     obs,
     times_key,
