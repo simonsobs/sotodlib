@@ -131,7 +131,7 @@ class HKFields(Base):
 
 
 class G3tHk:
-    def __init__(self, hkarchive_path, finalize=None, db_path=None, echo=False): #finalization
+    def __init__(self, hkarchive_path, iids, db_path=None, echo=False):
         """
         Class to manage a housekeeping data archive
 
@@ -149,37 +149,16 @@ class G3tHk:
 
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
-        self.finalize = finalize
+        self.iids = iids
+        print('self.iids', self.iids)
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.session = Session()
         Base.metadata.create_all(self.engine)
 
-    
-    @classmethod
-    def from_configs(cls, configs, **kwargs):
-        """
-        Create a G3tHK instance from a configs dictionary
 
-        Args
-        ----
-        configs - dictionary containing `data_prefix` and `g3thk_db` keys
-        """
-        if isinstance(configs, str):
-            configs = load_configs(configs)
-
-        print('configs from from_configs: ', configs)
-        
-        return cls(
-            os.path.join(configs["data_prefix"], "hk"), 
-            db_path=configs["g3thk_db"],
-            finalize=configs.get("finalization", None),
-            **kwargs
-        )
-
-
-    def load_fields(self, hk_path):
+    def load_fields(self, hk_path, iids):
         """
         Load fields from .g3 file and start and end time for each field.
 
@@ -196,19 +175,21 @@ class G3tHk:
         # enact HKArchiveScanner
         hkas = hk.HKArchiveScanner()
         hkas.process_file(hk_path)
-
+        
         arc = hkas.finalize()
+        #data = arc.simple(iids)
+
+        #for dat in data:
+        #    print('dat', dat)
 
         # get fields from .g3 file
         fields, timelines = arc.get_fields()
         hkfs = []
+        print('iids', self.iids)
         for key in fields.keys():
-            logger.debug(f'key is {key}')
-            if 'det-monitor-so3' in key:
+        # Check if any iid in iids is in the key
+            if any(iid in key for iid in iids):
                 hkfs.append(key)
-            else:
-                continue
-
 
         starts = []
         stops = []
@@ -382,14 +363,14 @@ class G3tHk:
 
 
         # Extract instance IDs from the finalization dictionary
-        instance_ids = []
-        for server in self.finalize.get("servers", []):
-            instance_ids.extend([value for key, value in server.items()])
+        #instance_ids = []
+        #for server in self.finalization.get("servers", []):
+        #    instance_ids.extend([value for key, value in server.items()])
 
-        db_agents = [a for a in db_file.agents if a.instance_id in instance_ids]
+        db_agents = [a for a in db_file.agents if a.instance_id in self.iids]
         db_fields = db_file.fields
 
-        out = self.load_fields(db_file.path)
+        out = self.load_fields(db_file.path, self.iids)
         fields, starts, stops, medians, means, min_vals, max_vals, stds = out
 
         agents = []
@@ -571,7 +552,38 @@ class G3tHk:
             .first()
         )
         return max([a.stop for a in last_file.agents])
+
+    @classmethod
+    def from_configs(cls, configs):
+        """
+        Create a G3tHK instance from a configs dictionary
+
+        Args
+        ----
+        configs - dictionary containing `data_prefix` and `g3thk_db` keys
+        """
+        if type(configs) == str:
+            configs = load_configs(configs)
+
+        #print('configs from from_configs: ', configs)
+        #print('configs from finalize: ', configs["finalization"]["servers"])
+        keys = configs["finalization"]["servers"][0].keys()#["pysmurf-monitor"]
+        #print('iids', iids)
+        
+        iids = []
+        #iids = list(iids)
+        for key in keys:
+            #print(key)
+            field = configs["finalization"]["servers"][0][key]
+            iids.append(field)
+
+        print('fields', iids)
             
+        return cls(
+            hkarchive_path = os.path.join(configs["data_prefix"], "hk"), 
+            db_path = configs["g3thk_db"],
+            iids = iids
+        )
 
     def delete_file(self, hkfile, dry_run=False, my_logger=None):
         """WARNING: Removes actual files from file system.
