@@ -18,9 +18,6 @@ from spt3g import core
 
 import sotodlib
 from .bookbinder import BookBinder
-import sotodlib.io.bookbinder as bb
-from importlib import reload
-reload(bb)
 from .load_smurf import (
     G3tSmurf,
     Observations as G3tObservations,
@@ -660,7 +657,7 @@ class Imprinter:
                 raise ValueError("`hk_fields` entry required for bookbinding.")
 
             # bind book using bookbinder library
-            bookbinder = bb.BookBinder(
+            bookbinder = BookBinder(
                 book, obsdb, filedb, lvl2_data_root, readout_ids, book_path, hk_fields,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
