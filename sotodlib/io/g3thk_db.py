@@ -551,12 +551,11 @@ class G3tHk:
         if type(configs) == str:
             configs = load_configs(configs)
 
-        keys = configs["finalization"]["servers"][0].keys()
-        
         iids = []
-        for key in keys:
-            agent = configs["finalization"]["servers"][0][key]
-            iids.append(agent)
+        for server in configs["finalization"]["servers"]:
+            for key in server.keys():
+                # Append the value (iid) to the iids list
+                iids.append(server[key])
 
         return cls(
             hkarchive_path = os.path.join(configs["data_prefix"], "hk"), 
