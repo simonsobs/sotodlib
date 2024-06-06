@@ -230,8 +230,8 @@ def calibrate_obs_with_preprocessing(obs, dtype_tod=np.float32, site='so_sat1', 
         # peak to peak 
         ptp_cuts(obs, signal_name='signal')
         detrend_tod(obs, method='median', signal_name='hwpss_remove')
-        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW / obs.abscal.abscal_factor).T
-        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW / obs.abscal.abscal_factor).T
+        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor).T
+        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor).T
         # PCA relcal
         filt = filters.low_pass_sine2(1, width=0.1)
         sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
@@ -325,7 +325,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1'):
         # peak to peak 
         ptp_cuts(obs, signal_name='signal')
         obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor ).T
-        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW / obs.abscal.abscal_factor).T        
+        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor).T        
         #LPF and PCA
         filt = filters.low_pass_sine2(1, width=0.1)
         sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
