@@ -65,7 +65,7 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None,
         tod.ancil.
       wrap (str): If specified, the name in tod where corrected
         boresight should be stored.  If None, the default of
-        'boresight' is used.  Pass boresight=False to not store the
+        'boresight' is used.  Pass wrap=False to not store the
         result in tod.
 
     Returns:
@@ -74,7 +74,8 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None,
     """
     if pointing_model is None and 'pointing_model' not in tod:
         logger.warning('No pointing_model found -- applying basic model.')
-        assert wrap in (None, 'boresight')
+        assert wrap in (None, 'boresight'), \
+            'When using naive pointing model, wrap=... not supported'
         return apply_basic_pointing_model(tod)
 
     pointing_model = _valid_arg(pointing_model, 'pointing_model',
