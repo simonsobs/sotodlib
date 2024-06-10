@@ -244,7 +244,10 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     obs_data = data.select(obs_uid=obs.uid)
                     # Replace comm_world with the group communicator
                     obs_data._comm = new_comm
-                    binner = map_op.binning
+                    if isinstance(map_op, so_ops.Splits):
+                        binner = map_op.mapmaker.binning
+                    else:
+                        binner = map_op.binning
                     orig_view = binner.pixel_pointing.view
                     if do_intervalmaps and orig_view is not None:
                         if isinstance(map_op, so_ops.Splits):
