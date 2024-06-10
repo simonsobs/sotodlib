@@ -97,8 +97,9 @@ def setup_simulate_observing(parser, operators):
             detset_key="pixel",
             session_split_key="wafer_slot",
             enabled=False,
-            # Flagging turnarounds as invalid (bit#1)
-            # breaks the atmospheric simulation
+            # Only raise the second bit for turnarounds.
+            # Marking them as invalid breaks the
+            # atmospheric simulation
             turnaround_mask=2,
         )
     )
