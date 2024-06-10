@@ -14,6 +14,45 @@ from .. import ops as so_ops
 from .job import workflow_timer
 
 
+def setup_splits(operators):
+    """Add commandline args and operators for SAT mapmaking splits.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(so_ops.Splits(name="splits", enabled=False))
+
+
+@workflow_timer
+def splits(job, otherargs, runargs, data):
+    """Apply mapmaking splits.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    job_ops = job.operators
+    splits = job.operators.splits
+
+    if splits.enabled:
+        if not job_ops.mapmaker.enabled:
+            raise RuntimeError(f"Cannot run Splits without MapMaker")
+        mapmaker_select_noise_and_binner(job, otherargs, runargs, data)
+        splits.mapmaker = job_ops.mapmaker
+        splits.output_dir = otherargs.out_dir
+        mapmaker_run(job, otherargs, runargs, data, splits)
+
+
 def setup_mapmaker(operators, templates):
     """Add commandline args, operators, and templates for TOAST mapmaker.
 
