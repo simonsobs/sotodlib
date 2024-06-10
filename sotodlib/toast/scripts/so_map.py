@@ -136,6 +136,13 @@ def main():
         help="Map each observation separately.",
     )
     parser.add_argument(
+        "--detmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each detector separately.",
+    )
+    parser.add_argument(
         "--intervalmaps",
         required=False,
         default=False,

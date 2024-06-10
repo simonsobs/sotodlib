@@ -6,6 +6,7 @@
 import numpy as np
 from astropy import units as u
 import toast
+from toast.mpi import flatten
 import toast.ops
 from toast.observation import default_values as defaults
 
@@ -173,8 +174,9 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
 def mapmaker_run(job, otherargs, runargs, data, map_op):
     """Run a mapmaker, optionally per observation.
 
-    This runs the mapmaker either in single shot or per observation.  Currently
-    this supports instances of the `Mapmaker` and `Splits` operators.
+    This runs the mapmaker either in single shot or per
+    detector/observation.  Currently this supports instances of the
+    `Mapmaker` and `Splits` operators.
 
     Args:
         job (namespace):  The configured operators and templates for this job.
@@ -191,103 +193,126 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
 
     if map_op.enabled:
         do_obsmaps = hasattr(otherargs, "obsmaps") and otherargs.obsmaps
+        do_detmaps = hasattr(otherargs, "detmaps") and otherargs.detmaps
         do_intervalmaps = (
             hasattr(otherargs, "intervalmaps") and otherargs.intervalmaps
         )
+        # See if user wants separate detector maps
+        if do_detmaps:
+            my_dets = data.all_local_detectors(flagmask=defaults.det_mask_invalid)
+            if data.comm.comm_world is None:
+                all_dets = my_dets
+            else:
+                all_dets = data.comm.comm_world.allgather(my_dets)
+                all_dets = sorted(set(flatten(all_dets)))
+        else:
+            all_dets = [None]
         if do_obsmaps and do_intervalmaps:
             log.warning_rank(
                 "--intervalmaps overrides --obsmaps", data.comm.comm_world
             )
-        if do_obsmaps or do_intervalmaps:
-            log.debug_rank(
-                f"{data.comm.group}: Running observation or interval maps",
-                comm=data.comm.comm_world,
-            )
-            # Map each observation separately
-            timer_obs = toast.timing.Timer()
-            timer_obs.start()
-            group = data.comm.group
-            orig_name = map_op.name
-            orig_comm = data.comm
-            new_comm = toast.Comm(world=data.comm.comm_group)
-            for iobs, obs in enumerate(data.obs):
-                log.info_rank(
-                    f"{group} : mapping observation {iobs + 1} "
-                    f"/ {len(data.obs)}.",
-                    comm=new_comm.comm_world,
+
+        mapmaker_name = map_op.name
+        for det in all_dets:
+            if det is None:
+                # Map all detectors together
+                detectors = None
+            else:
+                # Single detector mode, append detector name to all
+                # data products
+                map_op.name = f"{mapmaker_name}_{det}"
+                detectors = [det]
+            if do_obsmaps or do_intervalmaps:
+                log.debug_rank(
+                    f"{data.comm.group}: Running observation or interval maps",
+                    comm=data.comm.comm_world,
                 )
-                # Data object that only covers one observation
-                obs_data = data.select(obs_uid=obs.uid)
-                # Replace comm_world with the group communicator
-                obs_data._comm = new_comm
-                binner = map_op.binning
-                orig_view = binner.pixel_pointing.view
-                if do_intervalmaps and orig_view is not None:
-                    if isinstance(map_op, so_ops.Splits):
-                        msg = "Interval mapping cannot be used with Splits"
-                        raise RuntimeError(msg)
-                    # Map each interval separately
-                    ob = obs_data.obs[0]
-                    times = ob.shared[defaults.times].data
-                    views = ob.intervals[orig_view]
-                    for iview, view in enumerate(views):
-                        # Add a view for this specific interval
-                        single_view = f"{orig_view}-{iview}"
-                        ob.intervals[single_view] = toast.IntervalList(
-                            times, timespans=[(view.start, view.stop)]
-                        )
-                        binner.pixel_pointing.view = single_view
-                        map_op.name = f"{orig_name}_{obs.name}-{iview}"
-                        map_op.reset_pix_dist = True
-                        try:
-                            map_op.apply(obs_data)
-                            log.info_rank(
-                                f"{group} : Mapped "
-                                f"{obs.name}-{iview} / {len(views)} in",
-                                comm=new_comm.comm_world,
-                                timer=timer_obs,
+                # Map each observation separately
+                timer_obs = toast.timing.Timer()
+                timer_obs.start()
+                group = data.comm.group
+                orig_name = map_op.name
+                orig_comm = data.comm
+                new_comm = toast.Comm(world=data.comm.comm_group)
+                for iobs, obs in enumerate(data.obs):
+                    log.info_rank(
+                        f"{group} : mapping observation {iobs + 1} "
+                        f"/ {len(data.obs)}.",
+                        comm=new_comm.comm_world,
+                    )
+                    # Data object that only covers one observation
+                    obs_data = data.select(obs_uid=obs.uid)
+                    # Replace comm_world with the group communicator
+                    obs_data._comm = new_comm
+                    binner = map_op.binning
+                    orig_view = binner.pixel_pointing.view
+                    if do_intervalmaps and orig_view is not None:
+                        if isinstance(map_op, so_ops.Splits):
+                            msg = "Interval mapping cannot be used with Splits"
+                            raise RuntimeError(msg)
+                        # Map each interval separately
+                        ob = obs_data.obs[0]
+                        times = ob.shared[defaults.times].data
+                        views = ob.intervals[orig_view]
+                        for iview, view in enumerate(views):
+                            # Add a view for this specific interval
+                            single_view = f"{orig_view}-{iview}"
+                            ob.intervals[single_view] = toast.IntervalList(
+                                times, timespans=[(view.start, view.stop)]
                             )
-                        except Exception as e:
-                            log.info_rank(
-                                f"{group} : Failed to map "
-                                f"{obs.name}-{iview} / {len(views)} (e) in",
-                                comm=new_comm.comm_world,
-                                timer=timer_obs,
-                            )
-                    binner.pixel_pointing.view = orig_view
-                else:
-                    # Map the observation as a whole
-                    # Rename the operator with the observation suffix
-                    map_op.name = f"{orig_name}_{obs.name}"
-                    if isinstance(map_op, so_ops.Splits):
-                        # Reset the pixel distribution of the underlying
-                        # mapmaker
-                        map_op.mapmaker.reset_pix_dist = True
+                            binner.pixel_pointing.view = single_view
+                            map_op.name = f"{orig_name}_{obs.name}-{iview}"
+                            map_op.reset_pix_dist = True
+                            try:
+                                map_op.apply(obs_data, detectors=detectors)
+                                log.info_rank(
+                                    f"{group} : Mapped det={det} "
+                                    f"{obs.name}-{iview} / {len(views)} in",
+                                    comm=new_comm.comm_world,
+                                    timer=timer_obs,
+                                )
+                            except Exception as e:
+                                log.info_rank(
+                                    f"{group} : Failed to map "
+                                    f"{obs.name}-{iview} / {len(views)} (e) in",
+                                    comm=new_comm.comm_world,
+                                    timer=timer_obs,
+                                )
+                        binner.pixel_pointing.view = orig_view
                     else:
-                        # Reset the trait on this mapmaker
-                        map_op.reset_pix_dist = True
+                        # Map the observation as a whole
+                        # Rename the operator with the observation suffix
+                        map_op.name = f"{orig_name}_{obs.name}"
+                        if isinstance(map_op, so_ops.Splits):
+                            # Reset the pixel distribution of the underlying
+                            # mapmaker
+                            map_op.mapmaker.reset_pix_dist = True
+                        else:
+                            # Reset the trait on this mapmaker
+                            map_op.reset_pix_dist = True
 
-                # Map this observation
-                map_op.apply(obs_data)
+                    # Map this observation
+                    map_op.apply(obs_data, detectors=detectors)
 
+                    log.info_rank(
+                        f"{group} : Mapped det={det} obs={obs.name} in",
+                        comm=new_comm.comm_world,
+                        timer=timer_obs,
+                    )
                 log.info_rank(
-                    f"{group} : Mapped {obs.name} in",
+                    f"{group} : Done mapping {len(data.obs)} observations.",
                     comm=new_comm.comm_world,
-                    timer=timer_obs,
                 )
-            log.info_rank(
-                f"{group} : Done mapping {len(data.obs)} observations.",
-                comm=new_comm.comm_world,
-            )
-            map_op.name = orig_name
-            data._comm = orig_comm
-            del new_comm
-        else:
-            log.debug_rank(
-                f"{data.comm.group}: Calling mapmaker.apply() directly",
-                comm=data.comm.comm_world,
-            )
-            map_op.apply(data)
+                map_op.name = orig_name
+                data._comm = orig_comm
+                del new_comm
+            else:
+                log.debug_rank(
+                    f"{data.comm.group}: Calling mapmaker.apply() directly, "
+                    f"det={det}",
+                    comm=data.comm.comm_world,
+                )
+                map_op.apply(data, detectors=detectors)
 
 
 @workflow_timer
