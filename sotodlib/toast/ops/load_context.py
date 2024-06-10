@@ -956,7 +956,7 @@ class LoadContext(Operator):
         (rate, dt, dt_min, dt_max, dt_std) = toast.utils.rate_from_times(
             ob.shared[self.times].data
         )
-        ob.telescope.focalplane.rate = rate * u.Hz
+        ob.telescope.focalplane.sample_rate = rate * u.Hz
 
         ob.session.start = datetime.fromtimestamp(
             ob.shared[self.times].data[0]
