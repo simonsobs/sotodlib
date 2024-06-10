@@ -19,10 +19,11 @@ import healpy as hp
 from scipy.constants import au as AU
 from scipy.interpolate import RectBivariateSpline, splrep, splev
 
+import toast.rng
 from toast.timing import function_timer
 from toast import qarray as qa
 from toast.data import Data
-from toast.traits import trait_docs, Int, Unicode, Instance
+from toast.traits import trait_docs, Float, Int, Unicode, Instance
 from toast.ops.operator import Operator
 from toast.utils import Logger, unit_conversion
 from toast.observation import default_values as defaults
@@ -42,6 +43,11 @@ class SimHWPSS(Operator):
     """
 
     API = Int(0, help="Internal interface version for this operator")
+
+    times = Unicode(
+        defaults.times,
+        help="Observation shared key for timestamps, only used for drift.",
+    )
 
     hwp_angle = Unicode(
         defaults.hwp_angle, help="Observation shared key for HWP angle"
@@ -65,6 +71,15 @@ class SimHWPSS(Operator):
         ),
         help="File containing measured or estimated HWPSS profiles",
     )
+
+    drift_rate = Float(
+        None,
+        allow_none=True,
+        help="If non-zero, the width of the Gaussian distribution to draw "
+        "drift rate [1/hour] from.  All detectors will observe the same drift rate."
+    )
+
+    realization = Int(0, help="Realization ID")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -97,6 +112,26 @@ class SimHWPSS(Operator):
             det_scale = unit_conversion(u.K, det_units)
 
             focalplane = obs.telescope.focalplane
+
+            if self.drift_rate is not None and self.drift_rate != 0:
+                # Randomize the drift in a reproducible manner
+                counter1 = obs.session.uid
+                counter2 = self.realization
+                key1 = 683584
+                key2 = 476365
+                x = toast.rng.random(
+                    1,
+                    sampler="gaussian",
+                    key=(key1, key2),
+                    counter=(counter1, counter2),
+                )[0]
+                drift_rate = self.drift_rate * x
+                # Translate to actual drift
+                t = obs.shared[self.times].data
+                tmean = np.mean(t)  # Assumes data distribution by detector
+                drift = 1 + drift_rate * (t - tmean) / 3600
+            else:
+                drift = 1
 
             # Get HWP angle
             chi = obs.shared[self.hwp_angle].data
@@ -192,7 +227,7 @@ class SimHWPSS(Operator):
 
                 # Co-add with the cached signal
 
-                signal += det_scale * iquss
+                signal += det_scale * iquss * drift
 
         return
 
