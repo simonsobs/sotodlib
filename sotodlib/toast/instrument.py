@@ -127,6 +127,9 @@ class SOFocalplane(Focalplane):
         thinfp (int):  The factor by which to reduce the number of detectors.
         creation_time (float):  Optional timestamp to use when building readout_id.
         comm (MPI.Comm):  Optional MPI communicator.
+        apply_net_corr (bool):  Degrade NETs according to the correlation factors.
+            If False, the correlation factors are just recorded in the instrument
+            model.
 
     """
 
