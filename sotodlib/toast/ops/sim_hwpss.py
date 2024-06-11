@@ -23,7 +23,7 @@ import toast.rng
 from toast.timing import function_timer
 from toast import qarray as qa
 from toast.data import Data
-from toast.traits import trait_docs, Float, Int, Unicode, Instance
+from toast.traits import trait_docs, Float, Int, Unicode, Instance, Bool
 from toast.ops.operator import Operator
 from toast.utils import Logger, unit_conversion
 from toast.observation import default_values as defaults
@@ -79,6 +79,28 @@ class SimHWPSS(Operator):
         "drift rate [1/hour] from.  All detectors will observe the same drift rate."
     )
 
+    hwpss_random_drift = Bool(
+        False,
+        help="If True, the hwpss drift will be a random signal"
+        "following a 1/f^alpha spectrum, and fully correlated between detectors."
+    )
+
+    hwpss_drift_alpha = Float(
+        None,
+        allow_none=True,
+        help="The power law exponent of the HWPSS random drift."
+    )
+
+    hwpss_drift_coupling_center = Float(
+        1.0,
+        help="Mean coupling strength between the detectors and the HWPSS random drift mode."
+    )
+
+    hwpss_drift_coupling_width = Float(
+        0.0,
+        help="Width of the coupling strength distribution between the detectors and the HWPSS random drift mode."
+    )
+
     realization = Int(0, help="Realization ID")
 
     def __init__(self, **kwargs):
@@ -112,6 +134,7 @@ class SimHWPSS(Operator):
             det_scale = unit_conversion(u.K, det_units)
 
             focalplane = obs.telescope.focalplane
+            fs = focalplane.sample_rate.to_value(u.Hz)
 
             if self.drift_rate is not None and self.drift_rate != 0:
                 # Randomize the drift in a reproducible manner
@@ -130,6 +153,23 @@ class SimHWPSS(Operator):
                 t = obs.shared[self.times].data
                 tmean = np.mean(t)  # Assumes data distribution by detector
                 drift = 1 + drift_rate * (t - tmean) / 3600
+            elif self.hwpss_random_drift and self.hwpss_drift_alpha is not None:
+                # Generate the HWPSS random drift common mode
+                counter1 = obs.session.uid
+                counter2 = self.realization
+                key1 = 683584
+                key2 = 476365
+                nsamp = obs.shared[self.times].data.size
+                w = toast.rng.random(
+                    nsamp,
+                    sampler="gaussian",
+                    key=(key1, key2),
+                    counter=(counter1, counter2),
+                ).array()
+                freqs = np.fft.rfftfreq(nsamp, 1/fs)
+                drift_psd = np.zeros_like(freqs)
+                drift_psd[1:] = np.abs(1/freqs[1:])**self.hwpss_drift_alpha
+                drift = np.fft.irfft(np.fft.rfft(w) * np.sqrt(drift_psd))      
             else:
                 drift = 1
 
@@ -225,9 +265,28 @@ class SimHWPSS(Operator):
 
                 iquss -= np.median(iquss)
 
+                if self.hwpss_random_drift:
+                    # Apply detector couplings to HWPSS random drift common mode
+                    key1 = obs.telescope.uid
+                    key2 = obs.session.uid
+                    counter1 = self.realization
+                    counter2 = focalplane[det]["uid"]
+                    gaussian = toast.rng.random(
+                        1,
+                        sampler="gaussian",
+                        key=(key1, key2),
+                        counter=(counter1, counter2),
+                    )[0]
+                    coupling = (
+                        self.hwpss_drift_coupling_center
+                        + gaussian * self.hwpss_drift_coupling_width
+                    )
+                else:
+                    coupling = 1.0
+                
                 # Co-add with the cached signal
 
-                signal += det_scale * iquss * drift
+                signal += det_scale * iquss * drift * coupling
 
         return
 
