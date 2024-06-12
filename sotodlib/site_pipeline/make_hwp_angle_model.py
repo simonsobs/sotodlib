@@ -43,30 +43,25 @@ def make_model(telescope):
         tod.hwp_angle = sign * (hwp_solution.hwp_angle + time_offset)
                       + mechanical_offset
     """
+    out = core.AxisManager()
     if telescope == 'satp1':
         sign = core.AxisManager()
         sign.wrap('pid', 1)
         sign.wrap('offcenter', -1)
-
-        mechanical_offset = core.AxisManager()
-        mechanical_offset.wrap('1', np.deg2rad(-1.66 - 90 + 49.1))
-        mechanical_offset.wrap('2', np.deg2rad(-1.66 + 90 + 49.1))
+        out.wrap('mechanical_offset_1', np.deg2rad(-1.66 - 90 + 49.1))
+        out.wrap('mechanical_offset_2', np.deg2rad(-1.66 + 90 + 49.1))
 
     elif telescope == 'satp3':
         sign = core.AxisManager()
         sign.wrap('pid', -1)
         sign.wrap('offcenter', 1)
-
-        mechanical_offset = core.AxisManager()
-        mechanical_offset.wrap('1', np.deg2rad(-1.66 + 90 - 2.29))
-        mechanical_offset.wrap('2', np.deg2rad(-1.66 - 90 - 2.29))
+        out.wrap('mechanical_offset_1', np.deg2rad(-1.66 + 90 - 2.29))
+        out.wrap('mechanical_offset_2', np.deg2rad(-1.66 - 90 - 2.29))
 
     else:
         raise ValueError('Not supported yet')
 
-    out = core.AxisManager()
     out.wrap('sign_matrix', sign)
-    out.wrap('mechanical_offset', mechanical_offset)
     out.wrap('time_offset', np.deg2rad(-1. * 360 / 1140 * 3 / 2))
     return out
 
