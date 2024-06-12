@@ -76,29 +76,37 @@ class SimHWPSS(Operator):
         None,
         allow_none=True,
         help="If non-zero, the width of the Gaussian distribution to draw "
-        "drift rate [1/hour] from.  All detectors will observe the same drift rate."
+        "drift rate [1/hour] from.  All detectors will observe the same "
+        "drift rate."
     )
 
     hwpss_random_drift = Bool(
         False,
         help="If True, the hwpss drift will be a random signal"
-        "following a 1/f^alpha spectrum, and fully correlated between detectors."
+        "following a 1/f^alpha spectrum, and fully correlated between "
+        "detectors."
     )
 
     hwpss_drift_alpha = Float(
-        None,
-        allow_none=True,
+        1.0,
         help="The power law exponent of the HWPSS random drift."
+    )
+
+    hwpss_drift_rms = Float(
+        0.01,
+        help="RMS of the relative HWPSS fluctuations."
     )
 
     hwpss_drift_coupling_center = Float(
         1.0,
-        help="Mean coupling strength between the detectors and the HWPSS random drift mode."
+        help="Mean coupling strength between the detectors and the HWPSS "
+        "random drift mode."
     )
 
     hwpss_drift_coupling_width = Float(
         0.0,
-        help="Width of the coupling strength distribution between the detectors and the HWPSS random drift mode."
+        help="Width of the coupling strength distribution between the "
+        "detectors and the HWPSS random drift mode."
     )
 
     realization = Int(0, help="Realization ID")
@@ -152,7 +160,7 @@ class SimHWPSS(Operator):
                 # Translate to actual drift
                 t = obs.shared[self.times].data
                 tmean = np.mean(t)  # Assumes data distribution by detector
-                drift = 1 + drift_rate * (t - tmean) / 3600
+                drift = drift_rate * (t - tmean) / 3600
             elif self.hwpss_random_drift and self.hwpss_drift_alpha is not None:
                 # Generate the HWPSS random drift common mode
                 counter1 = obs.session.uid
@@ -168,10 +176,11 @@ class SimHWPSS(Operator):
                 ).array()
                 freqs = np.fft.rfftfreq(nsamp, 1/fs)
                 drift_psd = np.zeros_like(freqs)
-                drift_psd[1:] = np.abs(1/freqs[1:])**self.hwpss_drift_alpha
-                drift = np.fft.irfft(np.fft.rfft(w) * np.sqrt(drift_psd))      
+                drift_psd[1:] = np.abs(1 / freqs[1:])**self.hwpss_drift_alpha
+                drift = np.fft.irfft(np.fft.rfft(w) * np.sqrt(drift_psd))
+                drift *= self.hwpss_drift_rms / np.std(drift)
             else:
-                drift = 1
+                drift = 0
 
             # Get HWP angle
             chi = obs.shared[self.hwp_angle].data
@@ -283,10 +292,10 @@ class SimHWPSS(Operator):
                     )
                 else:
                     coupling = 1.0
-                
+
                 # Co-add with the cached signal
 
-                signal += det_scale * iquss * drift * coupling
+                signal += det_scale * iquss * (1 + drift * coupling)
 
         return
 
