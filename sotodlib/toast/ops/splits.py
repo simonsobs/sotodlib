@@ -3,6 +3,7 @@
 
 import os
 
+import astropy.units as u
 import numpy as np
 
 import toast
@@ -14,10 +15,13 @@ from toast.observation import default_values as defaults
 from toast.ops import Operator
 from toast.pixels_io_healpix import write_healpix_fits, write_healpix_hdf5
 from toast.pixels_io_wcs import write_wcs_fits
+from toast import qarray as qa
 
 
 class Split(object):
     """Base class for objects implementing a particular split."""
+
+    _det_mask = 128
 
     def __init__(self, name="N/A"):
         self._name = name
@@ -32,7 +36,7 @@ class Split(object):
     def split_intervals(self):
         return self._split_intervals
 
-    def _create_split(self, obs):
+    def _create_split(self, obs, det_mask_save):
         pass
 
     def _remove_split(self, obs):
@@ -43,8 +47,8 @@ class Split(object):
             obs.set_local_detector_flags(obs[self._saved_det_flags])
             del obs[self._saved_det_flags]
 
-    def create_split(self, obs):
-        self._create_split(obs)
+    def create_split(self, obs, det_mask_save):
+        self._create_split(obs, det_mask_save)
 
     def remove_split(self, obs):
         self._remove_split(obs)
@@ -60,7 +64,7 @@ class SplitAll(Split):
     def name(self):
         return "all"
 
-    def _create_split(self, obs):
+    def _create_split(self, obs, det_mask_save):
         timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
         obs.intervals[self._split_intervals] = IntervalList(
             obs.shared[defaults.times],
@@ -78,7 +82,7 @@ class SplitLeftGoing(Split):
     def name(self):
         return "left_going"
 
-    def _create_split(self, obs):
+    def _create_split(self, obs, det_mask_save):
         timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
         obs.intervals[self._split_intervals] = IntervalList(
             obs.shared[defaults.times],
@@ -96,7 +100,95 @@ class SplitRightGoing(Split):
     def name(self):
         return "right_going"
 
-    def _create_split(self, obs):
+    def _create_split(self, obs, det_mask_save):
+        timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
+        obs.intervals[self._split_intervals] = IntervalList(
+            obs.shared[defaults.times],
+            timespans=timespans,
+        )
+
+
+class SplitOuterDetectors(Split):
+    """Split to process only detectors on the edge of the focalplane."""
+
+    def __init__(
+            self,
+            name,
+            radial_cut=0.7071067811865476,
+            interval=defaults.scanning_interval,
+    ):
+        """ Args:
+        name (str) : Name of the split
+        radial_cut (float) : radial distance from boresight to cut.
+            In units of FOV/2
+        """
+        super().__init__(name)
+        self._radial_cut = radial_cut
+        self._interval = interval
+
+    def name(self):
+        return "outer_detectors"
+
+    def _create_split(self, obs, det_mask_save):
+        focalplane = obs.telescope.focalplane
+        fp_radius = focalplane.field_of_view / 2
+        limit = fp_radius.to_value(u.rad) * self._radial_cut
+        dets = obs.select_local_detectors()
+        for det in dets:
+            det_quat = focalplane[det]["quat"]
+            det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
+            if det_theta < limit:
+                # Cut the detector, raise the mask bits
+                obs.local_detector_flags[det] |= self._det_mask
+            else:
+                # set the mask bits to zero, unless they are already used
+                if self._det_mask & det_mask_save == 0:
+                    obs.local_detector_flags[det] &= ~self._det_mask
+        # Uncut intervals
+        timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
+        obs.intervals[self._split_intervals] = IntervalList(
+            obs.shared[defaults.times],
+            timespans=timespans,
+        )
+
+
+class SplitInnerDetectors(Split):
+    """Split to process only detectors on the inner part of the focalplane."""
+
+    def __init__(
+            self,
+            name,
+            radial_cut=0.7071067811865476,
+            interval=defaults.scanning_interval,
+    ):
+        """ Args:
+        name (str) : Name of the split
+        radial_cut (float) : radial distance from boresight to cut.
+            In units of FOV/2
+        """
+        super().__init__(name)
+        self._radial_cut = radial_cut
+        self._interval = interval
+
+    def name(self):
+        return "inner_detectors"
+
+    def _create_split(self, obs, det_mask_save):
+        focalplane = obs.telescope.focalplane
+        fp_radius = focalplane.field_of_view / 2
+        limit = fp_radius.to_value(u.rad) * self._radial_cut
+        dets = obs.select_local_detectors()
+        for det in dets:
+            det_quat = focalplane[det]["quat"]
+            det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
+            if det_theta >= limit:
+                # Cut the detector, raise the mask bits
+                obs.local_detector_flags[det] |= self._det_mask
+            else:
+                # set the mask bits to zero, unless they are already used
+                if self._det_mask & det_mask_save == 0:
+                    obs.local_detector_flags[det] &= ~self._det_mask
+        # Uncut intervals
         timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
         obs.intervals[self._split_intervals] = IntervalList(
             obs.shared[defaults.times],
@@ -147,6 +239,10 @@ class Splits(Operator):
                 self._split_obj[split_name] = SplitLeftGoing(split_name)
             elif split_name == "right_going":
                 self._split_obj[split_name] = SplitRightGoing(split_name)
+            elif split_name == "outer_detectors":
+                self._split_obj[split_name] = SplitOuterDetectors(split_name)
+            elif split_name == "inner_detectors":
+                self._split_obj[split_name] = SplitInnerDetectors(split_name)
             else:
                 msg = f"Unsupported split '{split_name}'"
                 log.error(msg)
@@ -184,6 +280,9 @@ class Splits(Operator):
             if hasattr(self.mapmaker, trt):
                 setattr(self.mapmaker, trt, True)
 
+        det_mask_save = self.mapmaker.binning.det_mask
+        self.mapmaker.binning.det_mask |= Split._det_mask
+
         # Loop over splits
         for split_name, spl in self._split_obj.items():
             # Set mapmaker name based on split and the name of this
@@ -193,7 +292,7 @@ class Splits(Operator):
 
             # Apply this split
             for ob in data.obs:
-                spl.create_split(ob)
+                spl.create_split(ob, det_mask_save)
 
             # Set mapmaking tools to use the current split interval list
             map_binner = self.mapmaker.map_binning
@@ -219,6 +318,8 @@ class Splits(Operator):
         # Restore mapmaker traits
         for k, v in mapmaker_save_traits.items():
             setattr(self.mapmaker, k, v)
+
+        self.mapmaker.binning.det_mask = det_mask_save
 
     def write_splits(self, data, split_name=None):
         """Write out all split products."""
