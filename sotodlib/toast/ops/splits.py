@@ -138,8 +138,6 @@ class Splits(Operator):
             log.error(msg)
             raise RuntimeError(msg)
 
-        data.info()
-
         # Build splits we are using
         self._split_obj = dict()
         for split_name in self.splits:
@@ -153,9 +151,6 @@ class Splits(Operator):
                 msg = f"Unsupported split '{split_name}'"
                 log.error(msg)
                 raise RuntimeError(msg)
-
-        if data.comm.world_rank == 0:
-            print(self._split_obj, flush=True)
 
         # Save starting mapmaker parameters, to restore later
         mapmaker_save_traits = dict()

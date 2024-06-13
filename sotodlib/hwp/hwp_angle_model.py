@@ -62,6 +62,11 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
         'satp1': {1: -90, 2: 90},
         'satp3': {1: 90, 2: -90},
     }
+    # Added small origin offset correction
+    # (center of reference slot to next edge)
+    # June 2024; value confirmed by WG measurememnts CW vs. CCW.
+    encoder_origin_offset = -1 * sign * 360 / 1140 * 3 / 2
+
     # angle offset of the optical axis of the achromatic hwp
     # This will be loaded from hwp_angle_model metadata
     ahwp_offset = {
@@ -71,7 +76,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
 
     offset = encoder_offset + \
         encoder_assembly_offset[telescope][hwp.primary_encoder] + \
-        ahwp_offset[telescope]
+        encoder_origin_offset + ahwp_offset[telescope]
 
     # apply correction
     hwp_angle = np.mod(sign*hwp.hwp_angle + np.deg2rad(offset), 2*np.pi)
