@@ -25,7 +25,7 @@ class ActSign(Operator):
     )
 
     fp_column = Unicode(
-        "det_info_optical_sign", help="Focalplane table column with sign factor"
+        "det_info:optical_sign", help="Focalplane table column with sign factor"
     )
 
     def __init__(self, **kwargs):

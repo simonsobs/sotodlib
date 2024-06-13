@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2019-2023 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -49,34 +49,15 @@ import pixell.fft
 pixell.fft.engine = "fftw"
 
 
-def simulate_data(job, otherargs, runargs, comm):
+def simulate_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
-    job_ops = job.operators
 
-    if job_ops.sim_ground.enabled:
-        data = wrk.simulate_observing(job, otherargs, runargs, comm)
-    else:
-        group_size = wrk.reduction_group_size(job, runargs, comm)
-        toast_comm = toast.Comm(world=comm, groupsize=group_size)
-        data = toast.Data(comm=toast_comm)
-        # Load data from all formats
-        wrk.load_data_hdf5(job, otherargs, runargs, data)
-        wrk.load_data_books(job, otherargs, runargs, data)
-        wrk.load_data_context(job, otherargs, runargs, data)
-        wrk.act_responsivity_sign(job, otherargs, runargs, data)
-        wrk.create_az_intervals(job, otherargs, runargs, data)
-        # optionally zero out
-        if otherargs.zero_loaded_data:
-            toast.ops.Reset(detdata=[defaults.det_data])
-
-    wrk.select_pointing(job, otherargs, runargs, data)
-    wrk.simple_noise_models(job, otherargs, runargs, data)
     wrk.simulate_atmosphere_signal(job, otherargs, runargs, data)
 
     # Shortcut if we are only caching the atmosphere.  If this job is only caching
     # (not observing) the atmosphere, then return at this point.
     if job.operators.sim_atmosphere.cache_only:
-        return data
+        return
 
     wrk.simulate_sky_map_signal(job, otherargs, runargs, data)
     wrk.simulate_conviqt_signal(job, otherargs, runargs, data)
@@ -94,6 +75,8 @@ def simulate_data(job, otherargs, runargs, comm):
     wrk.simulate_calibration_error(job, otherargs, runargs, data)
     wrk.simulate_readout_effects(job, otherargs, runargs, data)
 
+    comm = data.comm.comm_world
+
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After simulating data:  {mem}", comm)
 
@@ -102,31 +85,41 @@ def simulate_data(job, otherargs, runargs, comm):
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After saving data:  {mem}", comm)
 
-    return data
-
 
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
 
+    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
+    wrk.simple_deglitch(job, otherargs, runargs, data)
+
+    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
     wrk.flag_noise_outliers(job, otherargs, runargs, data)
+    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
+    wrk.raw_statistics(job, otherargs, runargs, data)
+
     wrk.filter_hwpss(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
+
     data = wrk.demodulate(job, otherargs, runargs, data)
+
     wrk.processing_mask(job, otherargs, runargs, data)
     wrk.flag_sso(job, otherargs, runargs, data)
     wrk.hn_map(job, otherargs, runargs, data)
     wrk.cadence_map(job, otherargs, runargs, data)
     wrk.crosslinking_map(job, otherargs, runargs, data)
-    wrk.raw_statistics(job, otherargs, runargs, data)
-    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
-    wrk.mapmaker_ml(job, otherargs, runargs, data)
-    wrk.filter_ground(job, otherargs, runargs, data)
-    wrk.filter_poly1d(job, otherargs, runargs, data)
-    wrk.filter_poly2d(job, otherargs, runargs, data)
-    wrk.filter_common_mode(job, otherargs, runargs, data)
-    wrk.mapmaker(job, otherargs, runargs, data)
-    wrk.mapmaker_filterbin(job, otherargs, runargs, data)
-    wrk.mapmaker_madam(job, otherargs, runargs, data)
+
+    if job.operators.splits.enabled:
+        wrk.splits(job, otherargs, runargs, data)
+    else:
+        wrk.mapmaker_ml(job, otherargs, runargs, data)
+        wrk.mapmaker(job, otherargs, runargs, data)
+        wrk.mapmaker_filterbin(job, otherargs, runargs, data)
+        wrk.mapmaker_madam(job, otherargs, runargs, data)
     wrk.filtered_statistics(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(
@@ -180,6 +173,20 @@ def main():
         help="Map each observation separately.",
     )
     parser.add_argument(
+        "--detmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each detector separately.",
+    )
+    parser.add_argument(
+        "--intervalmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each interval separately.",
+    )
+    parser.add_argument(
         "--zero_loaded_data",
         required=False,
         default=False,
@@ -193,18 +200,8 @@ def main():
     operators = list()
     templates = list()
 
-    # Loading data from disk is disabled by default
-    wrk.setup_load_data_hdf5(operators)
-    wrk.setup_load_data_books(operators)
-    wrk.setup_load_data_context(operators)
-    wrk.setup_act_responsivity_sign(operators)
+    wrk.setup_load_or_simulate_observing(parser, operators)
 
-    # Simulated observing is enabled by default
-    wrk.setup_simulate_observing(parser, operators)
-
-    wrk.setup_pointing(operators)
-    wrk.setup_az_intervals(operators)
-    wrk.setup_simple_noise_models(operators)
     wrk.setup_simulate_atmosphere_signal(operators)
     wrk.setup_simulate_sky_map_signal(operators)
     wrk.setup_simulate_conviqt_signal(operators)
@@ -223,25 +220,34 @@ def main():
     wrk.setup_simulate_readout_effects(operators)
     wrk.setup_save_data_hdf5(operators)
 
+    wrk.setup_simple_jumpcorrect(operators)
+    wrk.setup_simple_deglitch(operators)
+
+    wrk.setup_flag_diff_noise_outliers(operators)
     wrk.setup_flag_noise_outliers(operators)
+    wrk.setup_deconvolve_detector_timeconstant(operators)
+    wrk.setup_raw_statistics(operators)
+
     wrk.setup_filter_hwpss(operators)
-    wrk.setup_demodulate(operators)
+    wrk.setup_filter_common_mode(operators)
+    wrk.setup_filter_ground(operators)
+    wrk.setup_filter_poly1d(operators)
+    wrk.setup_filter_poly2d(operators)
     wrk.setup_noise_estimation(operators)
+
+    wrk.setup_demodulate(operators)
+
     wrk.setup_processing_mask(operators)
     wrk.setup_flag_sso(operators)
     wrk.setup_hn_map(operators)
     wrk.setup_cadence_map(operators)
     wrk.setup_crosslinking_map(operators)
-    wrk.setup_raw_statistics(operators)
-    wrk.setup_deconvolve_detector_timeconstant(operators)
+
     wrk.setup_mapmaker_ml(operators)
-    wrk.setup_filter_ground(operators)
-    wrk.setup_filter_poly1d(operators)
-    wrk.setup_filter_poly2d(operators)
-    wrk.setup_filter_common_mode(operators)
     wrk.setup_mapmaker(operators, templates)
     wrk.setup_mapmaker_filterbin(operators)
     wrk.setup_mapmaker_madam(operators)
+    wrk.setup_splits(operators)
     wrk.setup_filtered_statistics(operators)
 
     job, config, otherargs, runargs = wrk.setup_job(
@@ -262,7 +268,9 @@ def main():
         log.info_rank("Dry-run complete", comm=comm)
         return
 
-    data = simulate_data(job, otherargs, runargs, comm)
+    data = wrk.load_or_simulate_observing(job, otherargs, runargs, comm)
+
+    simulate_data(job, otherargs, runargs, data)
 
     if not job.operators.sim_atmosphere.cache_only:
         # Reduce the data

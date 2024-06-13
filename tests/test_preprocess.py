@@ -11,7 +11,7 @@ import pylab as pl
 import scipy.signal
 
 from sotodlib import core, tod_ops
-from sotodlib.preprocess.core import _expand
+from sotodlib.preprocess.pcore import _expand
 
 from numpy.testing import assert_array_equal
 
@@ -53,14 +53,15 @@ class TestExpand(unittest.TestCase):
         proc_aman.flag2.add_interval( 450,700 )
 
         # wrap a csr_array
-        proc_aman.wrap('csr_thing', 
-            csr_array( (aman.dets.count,aman.samps.count), dtype=float),
-            [(0,'dets'), (1,'samps')],
-        )
+        proc_aman.wrap_new('sparse_thing', shape=('dets', 'samps'))[:] = \
+            1.* (np.random.uniform(size=(aman.dets.count, aman.samps.count)) > .05)
+        proc_aman.wrap('csr_thing', csr_array(proc_aman['sparse_thing']),
+            [(0,'dets'), (1,'samps')])
 
         ## test same size expansion
         out = _expand( proc_aman, full)
         assert_array_equal( out.flag1[0].ranges()[0] , [100,700] )
+        assert_array_equal( out.sparse_thing, out.csr_thing.toarray() )
 
         ## test with detectors cut
         aman.restrict( 'dets', aman.dets.vals[3:5])
@@ -68,12 +69,14 @@ class TestExpand(unittest.TestCase):
         out = _expand( proc_aman, full)
         self.assertTrue( proc_aman.dets.vals[0] == out.dets.vals[3])
         assert_array_equal( out.flag1[3].ranges()[0] , [110,800] )
+        assert_array_equal( out.sparse_thing, out.csr_thing.toarray() )
 
         aman.restrict( 'samps', (300,None))
         proc_aman.restrict( 'samps', (300,None))
         out = _expand( proc_aman, full)
         assert_array_equal( proc_aman.flag1[0].ranges()[0] , [0,500] )
         assert_array_equal( out.flag1[3].ranges()[0] , [300,800] )
+        assert_array_equal( out.sparse_thing, out.csr_thing.toarray() )
 
         ## test with a wrapped axis manager
         dummy = core.AxisManager(
@@ -99,6 +102,7 @@ class TestExpand(unittest.TestCase):
         ## test with no detectors
         proc_aman.restrict('dets', [])
         out = _expand( proc_aman, full)
+        assert_array_equal( out.sparse_thing, out.csr_thing.toarray() )
 
 
 
