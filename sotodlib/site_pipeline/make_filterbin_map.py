@@ -301,7 +301,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1'):
     if obs.signal is not None:
         obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
         #flags.get_turnaround_flags(obs, t_buffer=0.1, truncate=True)
-        flags.get_turnaround_flags(obs) 
+        flags.get_turnaround_flags(obs)
         flags.get_det_bias_flags(obs, rfrac_range=(0.05, 0.9), psat_range=(0, 20))
         bad_dets = has_all_cut(obs.flags.det_bias_flags)
         obs.restrict('dets', obs.dets.vals[~bad_dets])
