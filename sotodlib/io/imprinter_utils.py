@@ -52,12 +52,20 @@ def set_book_wont_bind(imprint, book, message=None, session=None):
         imprint.logger.warning(
             f"Book {book} has not failed before being set not to WONT_BIND"
         )
+    
+    book_dir = imprint.get_book_abs_path(book)
+    if op.exists(book_dir):
+        print(f"Removing all files from {book_dir}")
+        shutil.rmtree(book_dir)
+    else: 
+        print(f"Found no files in {book_dir} to remove")
+
     book.status = WONT_BIND 
     if message is not None:
         book.message = message
     session.commit()
 
-def set_book_rebind(imprint, book):
+def set_book_rebind(imprint, book, update_level2=False):
     """ Delete any existing staged files for a book as 
     set it's status to UNBOUND
 
@@ -65,27 +73,93 @@ def set_book_rebind(imprint, book):
     -----------
     imprint: Imprinter instance
     book: str or Book 
+    update_level2: bool
+        if true, update all the level 2 observation entries for the book. This is sometimes the reason books fail to bind
     """
-    try:
-        # find appropriate binder for the book type
-        binder = imprint._get_binder_for_book(
-            book, 
-            ignore_tags=False,
-        )
-    except:
-         # if binder making failed there's no files
-        binder = None
-    if binder is not None:
-        book_dir = op.abspath(binder.outdir)
-        del binder
-        time.sleep(1)
-        if op.exists(book_dir):
-            print(f"Removing all files from {book_dir}")
-            shutil.rmtree(book_dir)
+    book_dir = imprint.get_book_abs_path(book)
+
+    if op.exists(book_dir):
+        print(f"Removing all files from {book_dir}")
+        shutil.rmtree(book_dir)
+    else: 
+        print(f"Found no files in {book_dir} to remove")
+
     book.status = UNBOUND
     imprint.get_session().commit()
 
+    if update_level2:
+        g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
+        obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+        print(f"Updating level 2 observations")
+        for _, obs in obs_dict.items():
+            SMURF.update_observation_files(obs, g3session, force=True)
+
+def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
+    """ helper function for when a level 2 observation could span multiple
+    books. Creates a list of ObsSets with that obs_id, prints info to screen and
+    returns the list. imprinter then has a function
+    imprinter.register_book(obsset, commit=True) that can be used to register
+    the desired observation. Example usage::
+
+        rsets = utils.find_overlaps(
+            imprint, 'obs_ufm_mv9_1714406208', <- obs id from error message
+            min_ctime, max_ctime
+        )
+        imprint.register_book( rsets[0], commit=True)
+
+    obs_id: level 2 obs_id that overlaps multiple observations
+    """
+    obsset = imprint.update_bookdb_from_g3tsmurf(
+        min_ctime=min_ctime, max_ctime=max_ctime,
+        return_obsset=True,
+    )
+    rsets = []
+    for o in obsset:
+        if obs_id in o.obs_ids:
+            rsets.append(o)
+    for i,r in enumerate(rsets):
+        print(f"-----ObsSet {i}----------")
+        for o in r:
+            print("\t", o)
+
+    return rsets
+
+def block_fix_duplicate_timestamps(imprint):
+    """Run through and fix all the books with duplicated ancillary timestamps"""
+
+    failed_books = imprint.get_failed_books()
+    fix_list = []
+    for book in failed_books:
+        if "duplicate timestamps" in book.message:
+            fix_list.append(book)
+    imprint.logger.info(
+        f"Found {len(fix_list)} books with duplicate HK data to fix"
+    )
+
+    for book in fix_list:
+        imprint.logger.info(f"Setting book {book.bid} for rebinding")
+        set_book_rebind(imprint, book)
+        imprint.logger.info(
+            f"Binding book {book.bid} dropping duplicate HK data"
+        )
+        imprint.bind_book(book, ancil_drop_duplicates=True)
+
+def block_set_rebind(imprint, update_level2=False):
+    """Run through and set all books with files errors to be rebound"""
+
+    failed_books = imprint.get_failed_books()
     
+    fix_list = []
+    for book in failed_books:
+        if "Delete to retry bookbinding" in book.message:
+            fix_list.append(book)
+    imprint.logger.info(
+        f"Found {len(fix_list)} books with files to be removed"
+    )
+    for book in fix_list:
+        imprint.logger.info(f"Setting book {book.bid} for rebinding")
+        set_book_rebind(imprint, book, update_level2=update_level2)    
+
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
     smurf or stray book regisitration.

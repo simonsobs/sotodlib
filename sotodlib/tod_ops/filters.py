@@ -76,7 +76,7 @@ def fourier_filter(tod, filt_function,
         n = fft_ops.find_superior_integer(axis.count)
         logger.info('fourier_filter: padding %i -> %i' % (axis.count, n))
     elif resize == 'trim':
-        n = fft.find_inferior_integer(axis.count)
+        n = fft_ops.find_inferior_integer(axis.count)
         logger.info('fourier_filter: trimming %i -> %i' % (axis.count, n))
     elif resize is None:
         n = axis.count
@@ -473,7 +473,12 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
       If the filter parameters (b, a, fscale) are not passed in
       explicitly, they will be extracted from an AxisManager based on
       the argument iir_params, which must be a dict or AxisManager
-      with keys "b", "a", and "fscale", but note that:
+      with keys "b", "a", and "fscale", or an AxisManager including 
+      the sub-iir_params of each stream_id. In the later case, if 
+      the filter parameters of each stream_id is different,
+      raises an error.
+      
+      But note that:
 
       - If iir_params is a string, tod[iir_params] is used (and must
         be an AxisManager or dict).
@@ -487,6 +492,21 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
             iir_params = 'iir_params'
         if isinstance(iir_params, str):
             iir_params = tod[iir_params]
+        if (isinstance(iir_params, core.AxisManager)
+            and 'a' not in iir_params._fields):
+            # Check iir_param's uniformity
+            _a = None
+            for _field, _sub_iir_params in iir_params._fields.items():
+                if isinstance(_sub_iir_params, core.AxisManager) and 'a' in _sub_iir_params._fields:
+                    sub_iir_params = _sub_iir_params
+                    if _a is None:
+                        _a, _b, _fscale = sub_iir_params['a'], sub_iir_params['b'], sub_iir_params['fscale']
+                    else:
+                        if np.any(np.hstack([sub_iir_params['a'] != _a,
+                                             sub_iir_params['b'] != _b,
+                                             sub_iir_params['fscale'] != _fscale,])):
+                            raise ValueError('iir parameters are not uniform.')
+            iir_params = sub_iir_params
         try:
             a = iir_params['a']
             b = iir_params['b']

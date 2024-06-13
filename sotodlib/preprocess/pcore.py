@@ -190,6 +190,29 @@ def _zeros_cls( item ):
     else:
         raise ValueError(f"Cannot find zero type for {type(item)}")
 
+def _reform_csr_array(arr, oidx, nidx, shape):
+    # Support function for _expand, to efficiently embed a csr_array
+    # in an expanded frame.  Assumptions are that arr is 2d, with
+    # shape (dets, samps).  So oidx and nidx each contain (array of
+    # idx, slice).
+    row_map = {n: o for n, o in zip(nidx[0], oidx[0])}
+    col_shift = oidx[1].start - nidx[1].start
+
+    # For coo array you have:
+    #    r, c, v = arr.row, arr.col, arr.data
+    # and the equivalent for csr is:
+    #    r = np.repeat(np.arange(arr.shape[0]), np.diff(arr.indptr))
+    #    c = arr.indices
+    #    v = arr.data
+    # So the expression for r1, here, is equivalent to
+    #    r = np.repeat(np.arange(arr.shape[0]), np.diff(arr.indptr))
+    #    r1 = [row_map[_r] for _r in r]
+    r1 = np.repeat([row_map[_r] for _r in range(arr.shape[0])],
+                   np.diff(arr.indptr))
+    c1 = arr.indices + col_shift
+    v = arr.data
+    return csr_array((v, (r1, c1)), shape=shape, dtype=arr.dtype)
+
 def _ranges_matrix_match( o, n, oidx, nidx):
     """align RangesMatrix n entries to RangesMatrix o"""
     assert len(oidx)==len(nidx)
@@ -219,6 +242,8 @@ def _expand(new, full, wrap_valid=True):
             new.dets, 
             return_slices=True
         )
+    else:
+        fs_dets = range(full.dets.count)
     if 'samps' in new._axes:
         _, fs_samps, ns_samps = full.samps.intersection(
             new.samps, 
@@ -259,6 +284,9 @@ def _expand(new, full, wrap_valid=True):
             elif isinstance(out[k], Ranges):
                 assert new._assignments[k][0] == 'samps'
                 out[k] = _ranges_match( out[k], v, oidx, nidx)
+            elif isinstance(out[k], csr_array):
+                assert tuple(new._assignments[k]) == ('dets', 'samps')
+                out[k] = _reform_csr_array(v, oidx, nidx, out[k].shape)
             else:
                 out[k][oidx] = v[nidx]
     if wrap_valid:
@@ -401,7 +429,7 @@ class Pipeline(list):
         
         success = 'end'
         for step, process in enumerate(self):
-            self.logger.info(f"Running {process.name}")
+            self.logger.debug(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
@@ -418,3 +446,103 @@ class Pipeline(list):
         
         return full, success
         
+
+class _FracFlaggedMixIn(object):
+
+    @classmethod
+    def gen_metric(
+        cls,
+        meta,
+        proc_aman,
+        flags_key=None,
+        percentiles=[0, 50, 75, 90, 95, 100],
+        tags=[],
+    ):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+        flags_key : str or tuple
+            The keys to access the flag dataset. e.g. 'glitches.glitch_flags'.
+            If a single term is passed, the first item will be inferred to be the
+            process name.
+        percentiles : list
+            Percentiles to compute across detectors
+        tags : list
+            Keys into `metadata.det_info` to record as tags with the Influx line.
+            Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        # parse key for flags dataset
+        if flags_key is None:
+            raise ValueError("The flags_key parameter must be specified in the config.")
+        else:
+            keys = flags_key.split(".")
+            if len(keys) == 1:
+                key1, key2 = cls.name, keys[0]
+            elif len(keys) == 2:
+                key1, key2 = keys
+            else:
+                raise ValueError(f"Could not parse flags_key {flags_key}")
+
+        # add specified tags
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys += [t for t in tags if t not in tag_keys]
+
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        # record one metric per wafer slot, per bandpass
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                # Compute the number of samples that were flagged
+                frac_flagged = np.array([
+                    np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1][key2][subset]
+                ], dtype=float)
+                num_valid = np.array([
+                    np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1].valid[subset]
+                ])
+                with np.errstate(divide="ignore"):
+                    frac_flagged *= np.where(num_valid > 0, 1 / num_valid, 0)
+
+                # record percentiles over detectors and fraction of samples flagged
+                perc = np.percentile(frac_flagged, percentiles)
+                mean = frac_flagged.mean()
+
+                # get the tags for this wafer (all detectors in this subset share these)
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+
+                # add tags and values to respective lists in order
+                tags_perc = [tags_base.copy() for i in range(perc.size)]
+                for i, t in enumerate(tags_perc):
+                    t["det_stat"] = f"percentile_{percentiles[i]}"
+                vals += list(perc)
+                tags += tags_perc
+                tags_mean = tags_base.copy()
+                tags_mean["det_stat"] = "mean"
+                vals.append(mean)
+                tags.append(tags_mean)
+
+        obs_time = [meta.obs_info.timestamp] * len(vals)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }

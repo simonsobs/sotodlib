@@ -19,6 +19,25 @@ log = logging.getLogger('bookbinder')
 if not log.hasHandlers():
     init_logger('bookbinder')
 
+class TimingSystemOff(Exception):
+    """Exception raised when we try to bind books where the timing system is found to be off and the books have imprecise timing counters"""
+    pass
+
+class NoScanFrames(Exception):
+    """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
+    pass
+
+class NoMountData(Exception):
+    """Exception raised when we cannot find mount data"""
+    pass
+
+class DuplicateAncillaryData(Exception):
+    """Exception raised when we find the HK data has copies of the same timestamps"""
+    pass
+
+class BookDirHasFiles(Exception):
+    """Exception raised when files already exist in a book directory"""
+    pass
 
 def setup_logger(logfile=None):
     """
@@ -99,8 +118,10 @@ class HKBlock:
             clean_times, idxs = np.unique(self.times, return_index=True)
             if len(self.times) != len(clean_times):
                 if not drop_duplicates:
-                    raise ValueError(f"HK data from block {self.name} has" 
-                                    " duplicate timestamps")
+                    raise DuplicateAncillaryData(
+                        f"HK data from block {self.name} has" 
+                        " duplicate timestamps"
+                    )
                 self.times = self.times[idxs]
             assert (np.all(np.diff(self.times)>0), f"Times from {self.name} are"
                             " not increasing")
@@ -172,7 +193,17 @@ class AncilProcessor:
             block.finalize(drop_duplicates=self.drop_duplicates)
         self.preprocessed = True
 
-    
+        if 'ACU_broadcast' not in self.blocks:
+            raise NoMountData(
+                f"Did not find ACU data in {self.files}",
+            )
+        block = self.blocks['ACU_broadcast']
+        if ('Corrected_Azimuth' not in block.data or 
+            'Corrected_Elevation' not in block.data):
+            raise NoMountData(
+                f"Did not find azimuth or elevation data in {self.files}",
+            )
+        
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
         Binds ancillary data.
@@ -198,6 +229,17 @@ class AncilProcessor:
         az, el, boresight, corotation = None, None, None, None
         block = self.blocks['ACU_broadcast']
         if 'Corrected_Azimuth' in block.data:
+            m = np.all([block.times >= times[0], block.times<=times[-1]],axis=0)
+            if not any(m):
+                raise NoMountData(
+                    f"Found no mount data overlapping with detector data"
+                )
+            if np.max(np.diff( block.times[m])) > 10:
+                raise NoMountData(
+                    f"Max ACU data spacing {np.max(np.diff( block.times[m]))}s" 
+                    f" is higher than 10s. Interpolation may be "
+                    "questionable."
+                )
             az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
             el = np.interp(times, block.times, block.data['Corrected_Elevation'])
         if 'Corrected_Boresight' in block.data:
@@ -213,7 +255,7 @@ class AncilProcessor:
                 block.times, 
                 block.data['Corotator_current_position']
             )
-
+        
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
             # Update file writer if starting a new output file
@@ -302,7 +344,8 @@ class AncilProcessor:
 
         
 class SmurfStreamProcessor:
-    def __init__(self, obs_id, files, book_id, readout_ids, log=None):
+    def __init__(self, obs_id, files, book_id, readout_ids, 
+                 log=None, allow_bad_timing=False):
         self.files = files
         self.obs_id = obs_id
         self.stream_id = None
@@ -319,6 +362,7 @@ class SmurfStreamProcessor:
         self.readout_ids = readout_ids
         self.out_files = []
         self.book_id = book_id
+        self.allow_bad_timing = allow_bad_timing
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -340,6 +384,7 @@ class SmurfStreamProcessor:
         fc_idx = None
         frame_idxs = []
         frame_idx = 0
+        timing = True
         for frame in get_frame_iter(self.files):
             if frame.type != core.G3FrameType.Scan:
                 continue
@@ -357,7 +402,8 @@ class SmurfStreamProcessor:
                 self.sostream_version = frame['sostream_version']
                 self.stream_id = frame['sostream_id']
 
-            t = get_frame_times(frame)[1]
+            good, t = get_frame_times(frame, self.allow_bad_timing)
+            timing = timing and good
             ts.append(t)
             smurf_frame_counters.append(frame['primary'].data[fc_idx])
             frame_idxs.append(np.full(len(t), frame_idx, dtype=np.int32))
@@ -365,14 +411,24 @@ class SmurfStreamProcessor:
             self.nframes += 1
             frame_idx += 1
 
+        if len(ts) == 0:
+            raise NoScanFrames(f"{self.obs_id} has no detector data")
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
 
+        timing = timing and (not self.timing_paradigm=='Low Precision')
+        
+        if (not self.allow_bad_timing) and (not timing):
+            raise TimingSystemOff(
+                f"Observation {self.obs_id} does not have high precision timing"
+                " information. Pass `allow_bad_timing=True` to bind anyway"
+            )
+        
         # If low-precision, we need to linearize timestamps in order for
         # bookbinder to work properly
-        if self.timing_paradigm == 'Low Precision':
-            self.log.info(
+        if not timing:
+            self.log.warning(
                 "Timestamps are Low Precision, linearizing from frame-counter"
             )
             dt, offset = np.polyfit(self.smurf_frame_counters, self.times, 1)
@@ -596,7 +652,8 @@ class BookBinder:
         if true, will drop duplicate timestamp data from ancillary files. added
         to deal with an occassional hk aggregator error where it is picking up
         multiple copies of the same data
-
+    allow_bad_time: bool, optional
+        if not true, books will not be bound if the timing systems signals are not found. 
     
     Attributes
     -----------
@@ -613,13 +670,13 @@ class BookBinder:
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
                  max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False, ancil_drop_duplicates=False):
+                ignore_tags=False, ancil_drop_duplicates=False, allow_bad_timing=False):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
         self.hk_root = os.path.join(data_root, 'hk')
         self.meta_root = os.path.join(data_root, 'smurf')
-        self.hkfiles = get_hk_files(os.path.join(data_root, 'hk'), 
+        self.hkfiles = get_hk_files(self.hk_root, 
                                     book.start.timestamp(),
                                     book.stop.timestamp())
         self.obsdb = obsdb
@@ -628,8 +685,20 @@ class BookBinder:
         self.max_samps_per_frame = max_samps_per_frame
         self.max_file_size = max_file_size
         self.ignore_tags = ignore_tags
+        self.allow_bad_timing = allow_bad_timing
 
-        if not os.path.exists(outdir):
+        if os.path.exists(outdir):
+            if len(os.listdir(outdir)) > 1:
+                raise BookDirHasFiles(
+                    f"Output directory {outdir} contains files. Delete to retry"
+                      " bookbinding"
+                )
+            elif len(os.listdir(outdir)) == 1:
+                assert (os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', 
+                    f"only acceptable file in new book path {outdir} is "
+                    " Z_bookbinder_log.txt"
+                )
+        else:
             os.makedirs(outdir)
 
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
@@ -643,9 +712,16 @@ class BookBinder:
         )
         self.streams = {}
         for obs_id, files in filedb.items():
-            stream_id = '_'.join(obs_id.split('_')[1:-1])
+            obs = self.obsdb[obs_id]
+            stream_id = obs.stream_id
+            if not obs.timing and not self.allow_bad_timing:
+                raise TimingSystemOff(
+                    f"Observation {obs_id} does not have high precision timing "
+                    "information. Pass `allow_bad_timing=True` to bind anyway"
+                )
             self.streams[stream_id] = SmurfStreamProcessor(
-                obs_id, files, book.bid, readout_ids[obs_id], log=self.log
+                obs_id, files, book.bid, readout_ids[obs_id], log=self.log,
+                allow_bad_timing=self.allow_bad_timing,
             )
 
         self.times = None
@@ -910,7 +986,7 @@ def fill_time_gaps(ts):
 
 
 _primary_idx_map = {}
-def get_frame_times(frame):
+def get_frame_times(frame, allow_bad_timing=False):
     """
     Returns timestamps for a G3Frame of detector data.
 
@@ -918,6 +994,8 @@ def get_frame_times(frame):
     --------------
     frame : G3Frame
         Scan frame containing detector data
+    allow_bad_timing: bool, optional
+        if not true, raises an error if it finds data with imprecise timing
 
     Returns
     --------------
@@ -936,10 +1014,15 @@ def get_frame_times(frame):
     c0 = frame['primary'].data[_primary_idx_map['Counter0']]
     c2 = frame['primary'].data[_primary_idx_map['Counter2']]
 
-    if np.any(c0):
+    counters = np.all( np.diff(c0)!=0 ) and np.all( np.diff( c2 )!=0)
+
+    if counters:
         return True, counters_to_timestamps(c0, c2)
-    else:
+    elif allow_bad_timing:
         return False, np.array(frame['data'].times) / core.G3Units.s
+    else:
+        ## don't change this error message. used in Imprinter CLI
+        raise TimingSystemOff("Timing counters not incrementing")
 
 
 def split_ts_bits(c):
@@ -1013,14 +1096,21 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
         files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
 
     files = np.array(sorted(files))
-    file_times = np.array([int(os.path.basename(f).split('.')[0]) for f in files])
+    file_times = np.array(
+        [int(os.path.basename(f).split('.')[0]) for f in files]
+    )
 
     m = (start-tbuff <= file_times) & (file_times < stop+tbuff)
     if not np.any(m):
-        return []
-
+        check = np.where( file_times <= start )
+        if len(check) < 1:
+            raise ValueError("Cannot find HK files we need")
+        fidxs = [check[0][-1]]
+        m[fidxs] = 1
+    else:
+        fidxs = np.where(m)[0]
     # Add files before and after for good measure
-    fidxs = np.where(m)[0]
+    
     i0, i1 = fidxs[0], fidxs[-1]
     if i0 > 0:
         m[i0 - 1] = 1
