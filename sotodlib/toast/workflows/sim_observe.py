@@ -96,6 +96,7 @@ def setup_simulate_observing(parser, operators):
             weather="atacama",
             detset_key="pixel",
             session_split_key="wafer_slot",
+            enabled=False,
         )
     )
     operators.append(so_ops.CoRotator(name="corotate_lat"))
