@@ -325,7 +325,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat1'):
         # peak to peak 
         ptp_cuts(obs, signal_name='signal')
         obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor ).T
-        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor).T        
+        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW * obs.abscal.abscal_factor).T
         #LPF and PCA
         filt = filters.low_pass_sine2(1, width=0.1)
         sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
@@ -694,7 +694,10 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
         else:
             obs = preprocess_tod.load_preprocess_tod(obs_id, configs=preprocess_config, dets={'wafer_slot':detset, 'wafer.bandpass':band}, )
-        obs = hwp_angle_model.apply_hwp_angle_model(obs)
+        try:
+            obs = hwp_angle_model.apply_hwp_angle_model(obs)
+        except ValueError:
+            continue # this is to skip the "hwp rotation direction is ambiguous" error
         if obs.dets.count <= 1: continue
         #obs = calibrate_obs_with_preprocessing(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)        
         obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, site=site)
