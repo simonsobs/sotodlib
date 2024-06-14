@@ -168,3 +168,46 @@ def select_pointing(job, otherargs, runargs, data):
         # same one as the solve.
         if not job_ops.binner_final.enabled:
             job_ops.binner_final = job_ops.binner
+
+
+def setup_drone_source(operators):
+    """Add commandline args and operators for loading drone position.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    # Detector quaternion pointing
+    operators.append(
+        so_ops.DroneSource(name="drone_source", enabled=False)
+    )
+
+
+def drone_source(job, otherargs, runargs, data):
+    """Load drone az / el pointing
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    log = toast.utils.Logger.get()
+
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.drone_source.enabled:
+        timer = toast.timing.Timer()
+        timer.start()
+        job_ops.drone_source.apply(data)
+        log.info_rank(
+            "  Loaded drone position data in", comm=data.comm.comm_world
+        )

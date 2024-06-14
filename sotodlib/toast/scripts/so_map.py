@@ -160,6 +160,7 @@ def main():
     templates = list()
 
     wrk.setup_load_or_simulate_observing(parser, operators)
+    wrk.setup_drone_source(operators)
 
     wrk.setup_simple_jumpcorrect(operators)
     wrk.setup_simple_deglitch(operators)
@@ -211,6 +212,7 @@ def main():
 
     # Load data
     data = wrk.load_or_simulate_observing(job, otherargs, runargs, comm)
+    wrk.drone_source(job, otherargs, runargs, data)
 
     # Reduce it
     reduce_data(job, otherargs, runargs, data)

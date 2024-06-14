@@ -19,7 +19,12 @@ from .data import (
     setup_save_data_books,
     save_data_books,
 )
-from .pointing import setup_pointing, select_pointing
+from .pointing import (
+    setup_pointing,
+    select_pointing,
+    setup_drone_source,
+    drone_source,
+)
 from .proc_act import setup_act_responsivity_sign, act_responsivity_sign
 from .proc_demodulation import setup_demodulate, demodulate
 from .proc_filters import (
