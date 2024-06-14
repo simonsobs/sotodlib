@@ -321,9 +321,7 @@ def get_glitches(obs, signal_name):
                                     t_glitch=1e-5, buffer=10,
                                     hp_fc=1, n_sig=10, overwrite=True)
     gstats = obs.flags.glitches.get_stats()
-    print('before glitches: ',obs.dets.count)
     obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10]) #50 
-    print('after glitches: ',obs.dets.count)
     ## TODO: add fill glitches
     #gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1,
     #                                signal=obs[signal_name],
@@ -539,32 +537,38 @@ def log_fit_func(x, sigma, fk, alpha):
     return np.log(model_func(x, sigma, fk, alpha))
 
 
-def high_pass_correct(obs):
+def high_pass_correct(obs, get_params_from_data=False):
     obs.move('hwpss_model', None)
     obs.move('hwpss_remove', None)
     #obs.move('gap_filled', None)
+    
+    if get_params_from_data:
+        # wrap psd
+        get_psd(obs)
 
-    # wrap psd
-    get_psd(obs)
-
-    # Fit for fknee and alpha from data
-    mask_valid_freqs = (1e-4<obs.freqs) & (obs.freqs < 1.9)
-    x = obs.freqs[mask_valid_freqs]
-    obs.wrap_new('sigma', ('dets', ))
-    obs.wrap_new('fk', ('dets', ))
-    obs.wrap_new('alpha', ('dets', ))
-    for di, det in enumerate(obs.dets.vals):
-        y = obs.Pxx_demodQ[di, mask_valid_freqs]
-        alpha_guess = -1.
-        fk_guess = 0.01
-        popt, pcov = curve_fit(log_fit_func, x, np.log(y), p0=(np.sqrt(np.median(y[x>0.2])), fk_guess, alpha_guess),
-                               maxfev=100000)
-        obs.sigma[di] = popt[0]
-        obs.fk[di] = popt[1]
-        obs.alpha[di] = popt[2]
-
+        # Fit for fknee and alpha from data
+        mask_valid_freqs = (1e-4<obs.freqs) & (obs.freqs < 1.9)
+        x = obs.freqs[mask_valid_freqs]
+        obs.wrap_new('sigma', ('dets', ))
+        obs.wrap_new('fk', ('dets', ))
+        obs.wrap_new('alpha', ('dets', ))
+        for di, det in enumerate(obs.dets.vals):
+            y = obs.Pxx_demodQ[di, mask_valid_freqs]
+            alpha_guess = -1.
+            fk_guess = 0.01
+            popt, pcov = curve_fit(log_fit_func, x, np.log(y), p0=(np.sqrt(np.median(y[x>0.2])), fk_guess, alpha_guess),
+                                   maxfev=100000)
+            obs.sigma[di] = popt[0]
+            obs.fk[di] = popt[1]
+            obs.alpha[di] = popt[2]
+        fknee = np.median(obs.fk)
+        alpha = -1*np.median(obs.alpha)
+    else:
+        fknee = 0.1
+        alpha = 2
+        
     # High-pass filter
-    hpf = filters.counter_1_over_f(np.median(obs.fk), -1*np.median(obs.alpha))
+    hpf = filters.counter_1_over_f(fknee, alpha)
     hpf_Q = filters.fourier_filter(obs, hpf, signal_name='demodQ')
     hpf_U = filters.fourier_filter(obs, hpf, signal_name='demodU')
     
