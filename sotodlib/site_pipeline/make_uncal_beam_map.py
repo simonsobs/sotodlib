@@ -338,7 +338,7 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
 
         # Make the maps.
         logger.info(f'Calling mapmaker.')
-        cuts = tod.get('glitch_flags', None)
+        cuts = tod.flags.get('glitch_flags', None)
         output = coords.planets.make_map(tod, center_on=source_name,
                                          res=res_deg*coords.DEG,
                                          data_splits=band_splits,
