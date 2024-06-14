@@ -204,8 +204,8 @@ def main(config_file=None, defaults=defaults, **args):
             utils.deslope(obs.signal, w=5, inplace=True)
             obs.signal = obs.signal.astype(dtype_tod)
 
-            if "glitch_flags" not in obs:
-                obs.wrap_new('glitch_flags', shape=('dets', 'samps'),
+            if "glitch_flags" not in obs.flags:
+                obs.flags.wrap_new('glitch_flags', shape=('dets', 'samps'),
                         cls=so3g.proj.RangesMatrix.zeros)
 
             # Optionally skip all the calibration. Useful for sims.
@@ -217,7 +217,7 @@ def main(config_file=None, defaults=defaults, **args):
                     L.debug("Skipped %s (all dets cut)" % (name))
                     continue
                 # Gapfill glitches. This function name isn't the clearest
-                tod_ops.get_gap_fill(obs, flags=obs.glitch_flags, swap=True)
+                tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                 # Gain calibration
                 gain  = 1
                 for gtype in ["relcal","abscal"]:
