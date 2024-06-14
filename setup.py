@@ -24,9 +24,9 @@ setup_opts["entry_points"] = {
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
         "so-metadata = sotodlib.core.metadata.cli:main",
         "so-site-pipeline = sotodlib.site_pipeline.cli:main",
+        "so-data-package = sotodlib.io.imprinter_cli:main",
         "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
         "toast_so_map = sotodlib.toast.scripts.so_map:cli",
-        "toast_so_sat_transfer = sotodlib.toast.scripts.so_sat_transfer:cli",
         "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
         "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
@@ -60,12 +60,13 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
-    'numdifftools'
+    'numdifftools',
+    'psycopg2-binary',
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
-        "venn",
+        "venn"
     ],
     "tests": [
         "socs",

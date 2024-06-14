@@ -4,8 +4,7 @@ import time
 import numpy as np
 import argparse
 import traceback
-from typing import Optional
-
+from typing import Optional, List
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
@@ -106,8 +105,11 @@ def preprocess_obs(
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
-        db.add_entry(db_data, dest_file)
+        h5_path = os.path.relpath(dest_file,
+                start=os.path.dirname(configs['archive']['index']))
+        db.add_entry(db_data, h5_path)
 
+        
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline. 
@@ -170,6 +172,11 @@ def get_parser(parser=None):
         nargs='*',
         type=str
     )
+    parser.add_argument(
+        '--planet-obs',
+        help="If true, takes all planet tags as logical OR and adjusts related configs",
+        action='store_true',
+    )
     return parser
 
 def main(
@@ -180,7 +187,8 @@ def main(
     min_ctime: Optional[int] = None,
     max_ctime: Optional[int] = None,
     update_delay: Optional[int] = None,
-    tags: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    planet_obs: bool = False,
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess")
@@ -203,12 +211,19 @@ def main(
         if tot_query=="":
             tot_query="1"
     
-    for i, tag in enumerate(tags):
-        tags[i] = tags[i].lower()
-        if '=' not in tags[i]:
-            tags[i] += '=1'
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tags[i].lower()
+            if '=' not in tags[i]:
+                tags[i] += '=1'
 
-    obs_list = context.obsdb.query(tot_query, tags=tags)
+    if planet_obs:
+        obs_list = []
+        for tag in tags:
+            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+    else:
+        obs_list = context.obsdb.query(tot_query, tags=tags)
+
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
