@@ -196,6 +196,118 @@ class SplitInnerDetectors(Split):
         )
 
 
+class SplitByFile(Split):
+    """Split to process only detectors listed in a file."""
+
+    def __init__(
+            self,
+            name,
+            path,
+            interval=defaults.scanning_interval,
+    ):
+        """ Args:
+        name (str) : Name of the split
+        path (str) : Path to the list of detectors
+        """
+        super().__init__(name)
+        self.dets = set()
+        with open(path, "r") as f:
+            for line in f:
+                self.dets.add(line.strip())
+        self._interval = interval
+
+    def name(self):
+        return self.name
+
+    def _create_split(self, obs, det_mask_save):
+        for det in obs.select_local_detectors():
+            if det not in self.dets:
+                # Cut the detector, raise the mask bits
+                obs.local_detector_flags[det] |= self._det_mask
+            else:
+                # set the mask bits to zero, unless they are already used
+                if self._det_mask & det_mask_save == 0:
+                    obs.local_detector_flags[det] &= ~self._det_mask
+        # Uncut intervals
+        timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
+        obs.intervals[self._split_intervals] = IntervalList(
+            obs.shared[defaults.times],
+            timespans=timespans,
+        )
+
+
+class SplitPolA(Split):
+    """Split to process only detector with A polarization"""
+
+    def __init__(
+            self,
+            name,
+            interval=defaults.scanning_interval,
+    ):
+        """ Args:
+        name (str) : Name of the split
+        """
+        super().__init__(name)
+        self._interval = interval
+
+    def name(self):
+        return "polA"
+
+    def _create_split(self, obs, det_mask_save):
+        focalplane = obs.telescope.focalplane
+        for det in obs.select_local_detectors():
+            pol = focalplane[det]["pol"]
+            if pol != "A":
+                # Cut the detector, raise the mask bits
+                obs.local_detector_flags[det] |= self._det_mask
+            else:
+                # set the mask bits to zero, unless they are already used
+                if self._det_mask & det_mask_save == 0:
+                    obs.local_detector_flags[det] &= ~self._det_mask
+        # Uncut intervals
+        timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
+        obs.intervals[self._split_intervals] = IntervalList(
+            obs.shared[defaults.times],
+            timespans=timespans,
+        )
+
+
+class SplitPolB(Split):
+    """Split to process only detector with B polarization"""
+
+    def __init__(
+            self,
+            name,
+            interval=defaults.scanning_interval,
+    ):
+        """ Args:
+        name (str) : Name of the split
+        """
+        super().__init__(name)
+        self._interval = interval
+
+    def name(self):
+        return "polB"
+
+    def _create_split(self, obs, det_mask_save):
+        focalplane = obs.telescope.focalplane
+        for det in obs.select_local_detectors():
+            pol = focalplane[det]["pol"]
+            if pol != "B":
+                # Cut the detector, raise the mask bits
+                obs.local_detector_flags[det] |= self._det_mask
+            else:
+                # set the mask bits to zero, unless they are already used
+                if self._det_mask & det_mask_save == 0:
+                    obs.local_detector_flags[det] &= ~self._det_mask
+        # Uncut intervals
+        timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
+        obs.intervals[self._split_intervals] = IntervalList(
+            obs.shared[defaults.times],
+            timespans=timespans,
+        )
+
+
 @trait_docs
 class Splits(Operator):
     """Apply a sequence of splits to the data, and make a map of each."""
@@ -243,6 +355,15 @@ class Splits(Operator):
                 self._split_obj[split_name] = SplitOuterDetectors(split_name)
             elif split_name == "inner_detectors":
                 self._split_obj[split_name] = SplitInnerDetectors(split_name)
+            elif os.path.isfile(split_name):
+                # List of detectors in a file
+                # Get the split name from the filename
+                name = os.path.basename(split_name).split(".")[0]
+                self._split_obj[name] = SplitByFile(name, split_name)
+            elif split_name == "polA":
+                self._split_obj[split_name] = SplitPolA(split_name)
+            elif split_name == "polB":
+                self._split_obj[split_name] = SplitPolB(split_name)
             else:
                 msg = f"Unsupported split '{split_name}'"
                 log.error(msg)
