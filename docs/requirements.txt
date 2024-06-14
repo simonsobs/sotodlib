@@ -1,0 +1,22 @@
+# readthedocs works better if you pin things
+sphinx>=5.0.0
+sphinx_rtd_theme>=2.0.0
+sphinx-argparse>=0.4.0
+
+# Required because it is used at root level in some modules.
+numpy
+so3g
+
+# Required in order to support using Quantities for default function
+# argument values like:
+#
+#  def myfunc(val=5.0*u.meter):
+#      pass
+#
+# Similarly for pixell, whose units are also used in such a way.
+#
+astropy
+pixell
+
+# Before you add anything else to docs/requirements.txt, consider
+# adding it to the "missing" module list in conf.py.

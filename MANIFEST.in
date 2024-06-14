@@ -1,0 +1,4 @@
+include versioneer.py
+include sotodlib/_version.py
+include sotodlib/toast/ops/data/planet_data.h5
+include sotodlib/toast/ops/data/hwpss_per_chi.pck
