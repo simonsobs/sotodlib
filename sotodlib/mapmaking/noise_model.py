@@ -33,6 +33,28 @@ class Nmat:
     @staticmethod
     def from_bunch(data): return Nmat()
 
+class NmatWhite(Nmat):
+    def __init__(self, ivar=None):
+        self.ivar = ivar
+        self.ready= ivar is not None
+    def build(self, tod, srate, **kwargs):
+        ivar = 1/np.var(tod,1)
+        return NmatWhite(ivar)
+    def apply(self, tod, inplace=False):
+        if inplace: tod = np.array(tod)
+        tod *= self.ivar[:,None]
+        return tod
+    def white(self, tod, inplace=True):
+        return self.apply(tod, inplace=inplace)
+    def write(self, fname):
+        data = bunch.Bunch(type="NmatWhite")
+        for field in ["ivar"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
+    @staticmethod
+    def from_bunch(data):
+        return NmatWhite(ivar=data.ivar)
+
 class NmatUncorr(Nmat):
     def __init__(self, spacing="exp", nbin=100, nmin=10, window=2, bins=None, ips_binned=None, ivar=None, nwin=None):
         self.spacing    = spacing

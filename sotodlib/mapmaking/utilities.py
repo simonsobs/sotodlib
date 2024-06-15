@@ -478,7 +478,7 @@ def downsample_cut(cut, down):
     factor down."""
     return so3g.proj.ranges.RangesMatrix([downsample_ranges(r,down) for r in cut.ranges])
 
-def downsample_obs(obs, down):
+def downsample_obs(obs, down, skip_signal=False):
     """Downsample AxisManager obs by the integer factor down.
 
     This implementation is quite specific and probably needs
@@ -492,23 +492,20 @@ def downsample_obs(obs, down):
     # Compute how many samples we will end up with
     onsamp = (obs.samps.count+down-1)//down
     # Set up our output axis manager
-    res    = core.AxisManager(obs.dets, core.IndexAxis("samps", onsamp))
+    axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
+    res    = core.AxisManager(core.IndexAxis("samps", onsamp), *axes)
     # Stuff without sample axes
     for key, axes in obs._assignments.items():
         if "samps" not in axes:
-            val = getattr(obs, key)
-            if isinstance(val, core.AxisManager):
-                res.wrap(key, val)
-            else:
-                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
-                res.wrap(key, val, axdesc)
+            res.wrap(*get_wrappable(obs, key))
     # The normal sample stuff
     res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
     bore = core.AxisManager(core.IndexAxis("samps", onsamp))
     for key in ["az", "el", "roll"]:
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
-    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    if not skip_signal:
+        res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
 
     # The cuts
     # TODO: The TOD will include a Flagmanager with all the flags. Update this part
@@ -524,3 +521,12 @@ def downsample_obs(obs, down):
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
+
+def get_wrappable(axman, key):
+    val = getattr(axman, key)
+    if isinstance(val, core.AxisManager):
+        return key,val
+    else:
+        axes   = axman._assignments[key]
+        axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+        return key, val, axdesc
