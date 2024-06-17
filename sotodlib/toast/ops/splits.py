@@ -318,7 +318,7 @@ class SplitByList(Split):
             self._dets = set(dets)
         self._interval = interval
 
-    def _create_split(self, obs, det_mask_save):
+    def _create_split(self, obs):
         # Flag detectors
         if self._dets is not None:
             # We have some selection
@@ -349,7 +349,7 @@ class SplitPolA(Split):
         super().__init__(name)
         self._interval = interval
 
-    def _create_split(self, obs, det_mask_save):
+    def _create_split(self, obs):
         focalplane = obs.telescope.focalplane
 
         # Flag detectors
@@ -381,7 +381,7 @@ class SplitPolB(Split):
         super().__init__(name)
         self._interval = interval
 
-    def _create_split(self, obs, det_mask_save):
+    def _create_split(self, obs):
         focalplane = obs.telescope.focalplane
 
         # Flag detectors
@@ -509,6 +509,7 @@ class Splits(Operator):
 
         # Loop over splits
         for split_name, spl in self._split_obj.items():
+            log.info_rank(f"Running Split '{split_name}'", comm=data.comm.comm_world)
             # Set mapmaker name based on split and the name of this
             # Splits operator.
             mname = f"{self.name}_{split_name}"
