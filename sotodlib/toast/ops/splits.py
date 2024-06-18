@@ -8,7 +8,7 @@ import numpy as np
 
 import toast
 from toast.utils import Logger
-from toast.traits import trait_docs, Int, Unicode, Instance, List
+from toast.traits import trait_docs, Int, Unicode, Instance, List, Bool
 from toast.timing import function_timer
 from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
@@ -475,6 +475,12 @@ class Splits(Operator):
                 # Just a normal split type
                 self._split_obj[split_name] = Split.create(split_name, **split_kw)
 
+        if data.comm.world_rank == 0:
+            msg = "Using splits: "
+            for sname in self._split_obj.keys():
+                msg += f"{sname}, "
+            log.info(msg)
+
         # Save starting mapmaker parameters, to restore later
         mapmaker_save_traits = dict()
         for trait_name, trait in self.mapmaker.traits().items():
@@ -491,13 +497,29 @@ class Splits(Operator):
             "write_rcond",
             "write_solver_products",
             "save_cleaned",
+            "reset_pix_dist",
         ]
 
         # Possible traits we want to enable
         mapmaker_enable_traits = [
             "keep_final_products",
-            "reset_pix_dist",
         ]
+
+        if hasattr(self.mapmaker, "map_binning"):
+            map_binner = self.mapmaker.map_binning
+        else:
+            map_binner = self.mapmaker.binning
+        pointing_view_save = map_binner.pixel_pointing.view
+
+        # If the pixel distribution does yet exit, we create it once prior to
+        # doing any splits.
+        if map_binner.pixel_dist not in data:
+            pix_dist = toast.ops.BuildPixelDistribution(
+                pixel_dist=map_binner.pixel_dist,
+                pixel_pointing=map_binner.pixel_pointing,
+                save_pointing=map_binner.full_pointing,
+            )
+            pix_dist.apply(data)
 
         for trt in mapmaker_disable_traits:
             if hasattr(self.mapmaker, trt):
@@ -520,15 +542,17 @@ class Splits(Operator):
                 spl.create_split(ob)
 
             # Set mapmaking tools to use the current split interval list
-            map_binner = self.mapmaker.map_binning
             map_binner.pixel_pointing.view = spl.split_intervals
-            toast.ops.Delete(
-                detdata=[
-                    map_binner.pixel_pointing.pixels,
-                    map_binner.stokes_weights.weights,
-                    map_binner.pixel_pointing.detector_pointing.quats,
-                ],
-            ).apply(data)
+            if not map_binner.full_pointing:
+                # We are not using full pointing and so we clear the
+                # residual pointing for this split
+                toast.ops.Delete(
+                    detdata=[
+                        map_binner.pixel_pointing.pixels,
+                        map_binner.stokes_weights.weights,
+                        map_binner.pixel_pointing.detector_pointing.quats,
+                    ],
+                ).apply(data)
 
             # Run mapmaking
             self.mapmaker.apply(data)
@@ -543,6 +567,7 @@ class Splits(Operator):
         # Restore mapmaker traits
         for k, v in mapmaker_save_traits.items():
             setattr(self.mapmaker, k, v)
+        map_binner.pixel_pointing.view = pointing_view_save
 
     def write_splits(self, data, split_name=None):
         """Write out all split products."""
