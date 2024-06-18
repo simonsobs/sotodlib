@@ -7,7 +7,7 @@ from astropy.table import QTable
 from astropy import units as u
 
 from toast.utils import Logger
-from toast.traits import trait_docs, Int, Unicode, List
+from toast.traits import trait_docs, Int, Unicode, List, Quantity
 from toast.timing import function_timer
 from toast.observation import default_values as defaults
 from toast.ops import Operator
@@ -50,6 +50,11 @@ class DroneSource(Operator):
 
     drone_files = List(
         [], help="List of drone alt/az ecsv files"
+    )
+
+    drone_max_separation_angle = Quantity(
+        30.0 * u.degree,
+        help="Maximum boresight angle separation from the drone to consider pointing as good",
     )
 
     def __init__(self, **kwargs):
