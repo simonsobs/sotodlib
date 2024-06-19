@@ -51,7 +51,6 @@ from . import (
     update_g3tsmurf_db,
     update_obsdb,
     make_cosamp_hk
-    update_obsdb
 )
 
 # Dictionary matching element name to a submodule (which must have
