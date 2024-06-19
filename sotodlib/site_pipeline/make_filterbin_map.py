@@ -21,7 +21,7 @@ from sotodlib import core
 
 defaults = {"query": "1",
             "odir": "./output",
-            "preprocess_config":None,
+            "preprocess_config": None,
             "comps": "TQU",
             "mode": "per_obs",
             "ntod": None,
@@ -61,7 +61,7 @@ def get_parser(parser=None):
     parser.add_argument("--odir", help='output directory')
     parser.add_argument("--preprocess_config", type=str, help='file with the config file to run the preprocessing pipeline')
     parser.add_argument("--mode", type=str, )
-    parser.add_argument("--comps",   type=str,)
+    parser.add_argument("--comps", type=str,)
     parser.add_argument("--singlestream", action="store_true")
     parser.add_argument("--only_hits", action="store_true") # this will work only when we don't request splits, since I want to avoid loading the signal
     
@@ -73,20 +73,20 @@ def get_parser(parser=None):
     # time samples splits
     parser.add_argument("--scan_left_right", action="store_true")
     
-    parser.add_argument("--ntod",    type=int, )
-    parser.add_argument("--tods",    type=str, )
-    parser.add_argument("--nset",    type=int, )
-    parser.add_argument("--wafer",   type=str, help="Detector set to map with")
-    parser.add_argument("--freq",    type=str, help="Frequency band to map with")
-    parser.add_argument("--max-dets",type=int, )
+    parser.add_argument("--ntod", type=int, )
+    parser.add_argument("--tods", type=str, )
+    parser.add_argument("--nset", type=int, )
+    parser.add_argument("--wafer", type=str, help="Detector set to map with")
+    parser.add_argument("--freq", type=str, help="Frequency band to map with")
+    parser.add_argument("--max-dets", type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
     parser.add_argument("--mindur", type=int, )
-    parser.add_argument("--site",    type=str, )
+    parser.add_argument("--site", type=str, )
     parser.add_argument("--verbose", action="count", )
-    parser.add_argument("--quiet",   action="count", )
-    parser.add_argument("--window",  type=float, )
-    parser.add_argument("--dtype_tod",  )
-    parser.add_argument("--dtype_map",  )
+    parser.add_argument("--quiet", action="count", )
+    parser.add_argument("--window", type=float, )
+    parser.add_argument("--dtype_tod", )
+    parser.add_argument("--dtype_map", )
     parser.add_argument("--atomic_db", help='name of the atomic map database, will be saved where make_filterbin_map is being run')
     return parser
 
@@ -287,22 +287,6 @@ def get_trending_cuts(obs):
     print('dets after trending cuts: ', {obs.dets.count})
 
     
-def ptp_cuts(obs, signal_name='dsT', kurtosis_threshold=5):
-    while True:
-        ptps = np.ptp(obs[signal_name], axis=1)
-        kurtosis_ptp = kurtosis(ptps)
-        if kurtosis_ptp < kurtosis_threshold:
-            print(f'dets:{obs.dets.count}, ptp_kurt: {kurtosis_ptp:.1f}')
-            break
-        else:
-            max_is_bad_factor = np.max(ptps)/np.median(ptps)
-            min_is_bad_factor = np.median(ptps)/np.min(ptps)
-            if max_is_bad_factor > min_is_bad_factor:
-                obs.restrict('dets', obs.dets.vals[ptps < np.max(ptps)])
-            else:
-                obs.restrict('dets', obs.dets.vals[ptps > np.min(ptps)])
-
-    
 def get_jumps(obs, signal_name):
     jflags, _, jfix = jumps.twopi_jumps(obs,
                                         signal=obs[signal_name],
@@ -380,16 +364,11 @@ def cal_rel(obs, signal_name):
     pca_out = pca.get_pca(obs, signal=obs[f'lpf_{signal_name}'])
     pca_signal = pca.get_pca_model(obs, pca_out, signal=obs[f'lpf_{signal_name}'])
 
-    m90 = obs.det_match.det_bandpass == '90'
-    m150 = ~m90
-    med90 = np.median(pca_signal.weights[m90,0])
-    med150 = np.median(pca_signal.weights[m150,0])
+    med = np.median(pca_signal.weights[:,0])
     
     # Relative calib
-    obs.signal[m90] = np.divide(obs.signal[m90].T, pca_signal.weights[m90,0]/med90).T
-    obs.signal[m150] = np.divide(obs.signal[m150].T, pca_signal.weights[m150,0]/med150).T
-    obs[f'{signal_name}'][m90] = np.divide(obs.signal[m90].T, pca_signal.weights[m90,0]/med90).T
-    obs[f'{signal_name}'][m150] = np.divide(obs.signal[m150].T, pca_signal.weights[m150,0]/med150).T
+    obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/med).T
+    obs[f'{signal_name}'] = np.divide(obs.signal.T, pca_signal.weights[:,0]/med).T
 
     
 def calibrate_data(obs, remove_hwpss=True):
@@ -496,7 +475,7 @@ def pca_dsT(obs):
     return
 
 
-def counter_1_over_f_dsT(obs):
+def high_pass_correct_dsT(obs, get_params_from_data=False):
     speed = (np.sum(np.abs(np.diff(np.unwrap(obs.hwp_angle)))) /
             (obs.timestamps[-1] - obs.timestamps[0])) / (2 * np.pi)
 
@@ -506,7 +485,14 @@ def counter_1_over_f_dsT(obs):
                'trans_width': 0.1}
     lpf = filters.get_lpf(lpf_cfg)
 
-    c1f_filter = filters.counter_1_over_f(0.1, -1*np.median(obs.alpha)) #-2*alpha
+    if get_params_from_data:
+        fknee = np.median(obs.fk)
+        alpha = -1*np.median(obs.alpha)
+    else:
+        fknee = 0.1
+        alpha = 2
+
+    c1f_filter = filters.counter_1_over_f(fknee, alpha) 
     filt = lpf*c1f_filter
     obs.dsT = filters.fourier_filter(obs, filt, signal_name='dsT', detrend=None)
     return
@@ -590,7 +576,7 @@ def filter_data(obs):
     # PCA
     pca_dsT(obs)
     # Counter 1/f
-    counter_1_over_f_dsT(obs)
+    high_pass_correct_dsT(obs)
     
     # Cut detectors with wigh variance
     cut_outlier_detectors(obs)
@@ -621,32 +607,6 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     filter_data(obs)
 
     return obs
-
-def save_obs_nosig(obs, prefix, freq, wafer):
-    oid = obs.obs_info.obs_id
-    save_dir = os.path.join(prefix, f'amans/')    
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    obs.move('signal', None)
-    obs.move('ancil', None)
-    obs.move('biases', None)
-    obs.move('boresight', None)
-    obs.move('demodQ', None)
-    obs.move('demodU', None)
-    obs.move('det_cal', None)
-    obs.move('det_flags', None)
-    obs.move('det_info', None)
-    obs.move('dsT', None)
-    obs.move('flags', None)
-    obs.move('focal_plane', None)
-    obs.move('gap_filled', None)
-    obs.move('hwp_angle', None)
-    obs.move('hwp_solution', None)
-    obs.move('iir_params', None)
-    obs.move('obs_info', None)
-    obs.move('primary', None)
-    obs.save(os.path.join(save_dir, f'{oid}_{wafer}_{freq}.hdf'), overwrite=True)
-    return
 
 
 def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.float32, only_hits=False, site='so_sat3'):
@@ -725,7 +685,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             print("Elapsed time make_depth1_map get_obs:", elapsed_time, "seconds")
         else:
             obs = preprocess_tod.load_preprocess_tod(obs_id, configs=preprocess_config, dets={'wafer_slot':detset, 'wafer.bandpass':band}, )
-
+            # TODO: modify below according to processes included in database
+            
         # Correct HWP and PID polarization angles
         obs = hwp_angle_model.apply_hwp_angle_model(obs)
         
@@ -740,7 +701,9 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             # this is the case of no splits
             mapmaker.add_obs(name, obs)
         else:
-            # this is the case of having splits. We need to pass the split_labels at least. If we have detector splits fixed in time, then we pass the masks in det_split_masks. Otherwise, det_split_masks will be None
+            # this is the case of having splits. We need to pass the split_labels at least.
+            # If we have detector splits fixed in time, then we pass the masks in det_split_masks.
+            # Otherwise, det_split_masks will be None
             mapmaker.add_obs(name, obs, split_labels=split_labels)
 
         nobs_kept += 1
