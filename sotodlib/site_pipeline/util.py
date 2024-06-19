@@ -267,6 +267,7 @@ def init_logger(name, announce='', verbosity=2):
         formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
 
         ch.setLevel(level)
+        #ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
         i, r = formatter.start_time // 1, formatter.start_time % 1
@@ -278,7 +279,6 @@ def init_logger(name, announce='', verbosity=2):
           if isinstance(handler, logging.StreamHandler):
               handler.setLevel(level)
               break
-
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
 
