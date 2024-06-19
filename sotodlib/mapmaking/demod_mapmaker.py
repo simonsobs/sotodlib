@@ -3,8 +3,7 @@ from pixell import enmap, utils, tilemap, bunch
 import so3g.proj
 
 from .. import coords
-from .utilities import *
-from .pointing_matrix import *
+from .utilities import recentering_to_quat_lonlat, evaluate_recentering
 
 class DemodMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, comps='TQU', singlestream=False):
@@ -68,7 +67,6 @@ class DemodMapmaker:
             i.e. we will produce one map 
 
         """
-        # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
         if not(self.singlestream):
