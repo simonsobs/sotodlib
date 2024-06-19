@@ -18,6 +18,11 @@ logger = sp_util.init_logger("preprocess")
 
 def dummy_preproc(obs_id, group_list, logger, 
                   configs, overwrite, run_parallel):
+    """
+    Dummy function that can be put in place of preprocess_tod in the
+    main function for testing issues in the processpoolexecutor
+    (multiprocessing).
+    """
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
@@ -119,6 +124,84 @@ def swap_archive(config, fpath):
     if not(os.path.exists(dname)):
         os.makedirs(dname)
     return tc
+
+def preproc_or_load_mpi(obs_id, configs, logger, dets=None,
+                        context=None, overwrite=False):
+    error = None
+    outputs = {}
+    if dets is None:
+        group_list = None:
+    else:
+        group_list = [k for k in dets.keys()]
+    if logger is None: 
+        logger = sp_util.init_logger("preprocess")
+    
+    configs, context = _get_preprocess_context(configs, context)
+    group_by, groups = _get_groups(obs_id, configs, context)
+    all_groups = groups.copy()
+    if group_list is not None:
+        for g in all_groups:
+            if g not in group_list:
+                groups.remove(g)
+
+        if len(groups) == 0:
+            logger.warning(f"group_list:{group_list} contains no overlap with "
+                        f"groups in observation: {obs_id}:{all_groups}. "
+                        f"No analysis to run.")
+            error = 'no_group_overlap'
+            return error, None, None
+    
+    db = core.metadata.ManifestDb(configs['archive']['index'])
+    dbix = {'obs:obs_id':obs}
+    for gb, g in zip(group_by, group):
+        dbix[f'dets:{gb}'] = g
+
+    if (len(db.inspect(dbix)) != 0) and (not overwrite):
+        _, aman = load_preprocess_tod(obs_id=obs_id, dets=dets,
+                                              configs=configs, context=context)
+        return error, None, aman
+    else:
+        pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
+
+        for group in groups:
+            outputs[f'{group}'] = {}
+            logger.info(f"Beginning run for {obs_id}:{group}")
+            try:
+                aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
+                tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
+                aman.wrap('tags', tags)
+                proc_aman, success = pipe.run(aman)
+            except Exception as e:
+                error = f'{obs_id} {group}'
+                errmsg = f'{type(e)}: {e}'
+                tb = ''.join(traceback.format_tb(e.__traceback__))
+                logger.info(f"{error}\n{errmsg}\n{tb}")
+                return error, [errmsg, tb], None
+            if success != 'end':
+                # If a single group fails we don't log anywhere just mis an entry in the db.
+                continue
+
+            policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+            dest_file, dest_dataset = policy.get_dest(obs_id)
+            for gb, g in zip(group_by, group):
+                if gb == 'detset':
+                    dest_dataset += "_" + g
+                else:
+                    dest_dataset += "_" + gb + "_" + str(g)
+
+            # Collect info for saving h5 file.
+            outputs[f'{group}']['dest_file'] = dest_file
+            outputs[f'{group}']['dest_dataset'] = dest_dataset
+            outputs[f'{group}']['overwrite'] = overwrite
+            outputs[f'{group}']['proc_aman'] = proc_aman
+            
+            # Collect index info.
+            db_data = {'obs:obs_id': obs_id,
+                       'dataset': dest_dataset}
+            for gb, g in zip(group_by, group):
+                db_data['dets:'+gb] = g
+            outputs[f'{group}']['db_data'] = db_data
+          
 
 def preprocess_tod(obs_id, 
                     configs, 
@@ -266,7 +349,6 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
     """
-
     configs, context = _get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
 
