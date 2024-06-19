@@ -1,10 +1,13 @@
-# this class intends to produce a obslists dictionary that will be feed to the mapmaker. Every element of obslists will be mapped.
+"""
+This class intends to produce a obslists dictionary that will be feed to the mapmaker. Every element of obslists will be mapped
+as an individual map. For example, we could request depth-1 maps which are continous scans one after the other that will be mapped
+together as a single maps, we could request per-obs which will be individual observations mapped individually, etc.
+"""
 import numpy as np
 from pixell import utils
 from scipy import ndimage
-import so3g.proj
 
-from .utilities import *
+from .utilities import get_ids
 
 def find_scan_periods(obs_info, ttol=60, atol=2*utils.degree, mindur=120):
     """Given an obslist , return the set of contiguous scanning periods in the form
