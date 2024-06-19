@@ -13,7 +13,6 @@ from scipy import ndimage, interpolate
 from scipy.optimize import curve_fit
 from scipy.stats import kurtosis, skew
 from . import util
-from memory_profiler import profile
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from sotodlib.hwp import hwp_angle_model
 from scipy.signal import welch
