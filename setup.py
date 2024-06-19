@@ -24,10 +24,16 @@ setup_opts["entry_points"] = {
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
         "so-metadata = sotodlib.core.metadata.cli:main",
         "so-site-pipeline = sotodlib.site_pipeline.cli:main",
+<<<<<<< HEAD
         "so-data-package = sotodlib.io.imprinter_cli:main",
         "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
         "toast_so_map = sotodlib.toast.scripts.so_map:cli",
         "toast_so_transfer = sotodlib.toast.scripts.so_transfer:cli",
+=======
+        "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
+        "toast_so_map = sotodlib.toast.scripts.so_map:cli",
+        "toast_so_sat_transfer = sotodlib.toast.scripts.so_sat_transfer:cli",
+>>>>>>> 54af5613 (clean filter-bin and fixed bugs)
         "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
         "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
@@ -61,13 +67,21 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
+<<<<<<< HEAD
     'numdifftools',
     'psycopg2-binary',
+=======
+    'numdifftools'
+>>>>>>> 54af5613 (clean filter-bin and fixed bugs)
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
+<<<<<<< HEAD
         "venn"
+=======
+        "venn",
+>>>>>>> 54af5613 (clean filter-bin and fixed bugs)
     ],
     "tests": [
         "socs",
