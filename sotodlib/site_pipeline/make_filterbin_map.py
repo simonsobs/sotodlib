@@ -47,6 +47,7 @@ defaults = {"query": "1",
             "atomic_db": "atomic_maps.db",
             "fixed_time": None,
             "mindur": None,
+            "calc_hpf_params": False,
            }
 
 def get_parser(parser=None):
@@ -55,11 +56,16 @@ def get_parser(parser=None):
     parser.add_argument("--config-file", type=str, default=None, 
                      help="Path to mapmaker config.yaml file")
     
-    parser.add_argument("--context", help='context file')    
-    parser.add_argument("--query", help='query, can be a file (list of obs_id) or selection string')
-    parser.add_argument("--area", help='wcs geometry')
-    parser.add_argument("--odir", help='output directory')
-    parser.add_argument("--preprocess_config", type=str, help='file with the config file to run the preprocessing pipeline')
+    parser.add_argument("--context",
+                        help='context file')    
+    parser.add_argument("--query",
+                        help='query, can be a file (list of obs_id) or selection string')
+    parser.add_argument("--area",
+                        help='wcs geometry')
+    parser.add_argument("--odir",
+                        help='output directory')
+    parser.add_argument("--preprocess_config", type=str,
+                        help='file with the config file to run the preprocessing pipeline')
     parser.add_argument("--mode", type=str, )
     parser.add_argument("--comps", type=str,)
     parser.add_argument("--singlestream", action="store_true")
@@ -76,8 +82,10 @@ def get_parser(parser=None):
     parser.add_argument("--ntod", type=int, )
     parser.add_argument("--tods", type=str, )
     parser.add_argument("--nset", type=int, )
-    parser.add_argument("--wafer", type=str, help="Detector set to map with")
-    parser.add_argument("--freq", type=str, help="Frequency band to map with")
+    parser.add_argument("--wafer", type=str,
+                        help="Detector set to map with")
+    parser.add_argument("--freq", type=str,
+                        help="Frequency band to map with")
     parser.add_argument("--max-dets", type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
     parser.add_argument("--mindur", type=int, )
@@ -87,7 +95,10 @@ def get_parser(parser=None):
     parser.add_argument("--window", type=float, )
     parser.add_argument("--dtype_tod", )
     parser.add_argument("--dtype_map", )
-    parser.add_argument("--atomic_db", help='name of the atomic map database, will be saved where make_filterbin_map is being run')
+    parser.add_argument("--atomic_db",
+                        help='name of the atomic map database, will be saved where make_filterbin_map is being run')
+    parser.add_argument("--calc_hpf_params", action="store_true",
+                        help='Set to calculate the parameters used in the high-pass-filter from the data')
     return parser
 
 
@@ -101,7 +112,8 @@ def get_ra_ref(obs, site='so_sat3'):
     #t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
     t_start = obs.obs_info.start_time
     t_stop = obs.obs_info.stop_time
-    az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree, (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, 0.5*utils.degree)
+    az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*utils.degree,
+                   (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*utils.degree, 0.5*utils.degree)
     el = obs.obs_info.el_center*utils.degree
     
     csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
@@ -367,7 +379,7 @@ def cal_rel(obs, signal_name):
     med = np.median(pca_signal.weights[:,0])
     
     # Relative calib
-    obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/med).T
+    #obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/med).T
     obs[f'{signal_name}'] = np.divide(obs.signal.T, pca_signal.weights[:,0]/med).T
 
     
@@ -475,7 +487,7 @@ def pca_dsT(obs):
     return
 
 
-def high_pass_correct_dsT(obs, get_params_from_data=False):
+def high_pass_correct_dsT(obs, get_params_from_data):
     speed = (np.sum(np.abs(np.diff(np.unwrap(obs.hwp_angle)))) /
             (obs.timestamps[-1] - obs.timestamps[0])) / (2 * np.pi)
 
@@ -523,7 +535,7 @@ def log_fit_func(x, sigma, fk, alpha):
     return np.log(model_func(x, sigma, fk, alpha))
 
 
-def high_pass_correct(obs, get_params_from_data=False):
+def high_pass_correct(obs, get_params_from_data):
     obs.move('hwpss_model', None)
     obs.move('hwpss_remove', None)
     #obs.move('gap_filled', None)
@@ -564,19 +576,19 @@ def high_pass_correct(obs, get_params_from_data=False):
     return obs
 
     
-def filter_data(obs):
+def filter_data(obs, calc_hpf_params):
     """ All the post-demodulation operations """
     ### Polarization
     # Correct for IP leakage at TOD level
     IP_correct(obs)
     # Custom high-pass filter
-    high_pass_correct(obs)
+    high_pass_correct(obs, calc_hpf_params)
 
     ### Temperature
     # PCA
     pca_dsT(obs)
     # Counter 1/f
-    high_pass_correct_dsT(obs)
+    high_pass_correct_dsT(obs, calc_hpf_params)
     
     # Cut detectors with wigh variance
     cut_outlier_detectors(obs)
@@ -591,7 +603,7 @@ def filter_data(obs):
 
 def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
                       det_left_right=False, det_in_out=False, det_upper_lower=False,
-                      remove_hwpss=True):
+                      remove_hwpss=True, calc_hpf_params=False):
     preprocess_data(obs, dtype_tod, site,
                     det_left_right, det_in_out, det_upper_lower,
                     remove_hwpss)
@@ -604,7 +616,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     
     demodulate_hwp(obs)
     
-    filter_data(obs)
+    filter_data(obs, calc_hpf_params)
 
     return obs
 
@@ -635,7 +647,8 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.flo
     return my_tods, my_inds, my_ra_ref
 
 
-def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag="", verbose=0, site='so_sat3'):
+def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD,
+                   tag="", verbose=0, site='so_sat3'):
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     
@@ -646,29 +659,41 @@ def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag=
         name = "%s:%s:%s" % (obs_id, detset, band)
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
-        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=True)
+        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band},
+                              no_signal=True)
         obs = calibrate_obs_otf(obs, site=site)
         rot = None
-        pmap_local = coords.pmat.P.for_tod(obs, comps='T', geom=hits.geometry, rot=rot, threads="domdir", weather=mapmaking.unarr(obs.weather), site=mapmaking.unarr(obs.site), hwp=True)
+        pmap_local = coords.pmat.P.for_tod(obs, comps='T', geom=hits.geometry, rot=rot,
+                                           threads="domdir", weather=mapmaking.unarr(obs.weather), site=mapmaking.unarr(obs.site), hwp=True)
         obs_hits = pmap_local.to_weights(obs, comps='T', )
         hits = hits.insert(obs_hits[0,0], op=np.ndarray.__iadd__)
     return bunch.Bunch(hits=hits)
 
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, preprocess_config=None, split_labels=None, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False, site='so_sat3', recenter=None):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
+                    t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD,
+                    tag="", verbose=0, preprocess_config=None, split_labels=None,
+                    singlestream=False, det_in_out=False, det_left_right=False,
+                    det_upper_lower=False, site='so_sat3', recenter=None, calc_hpf_params=False):
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
     if split_labels==None:
         # this is the case where we did not request any splits at all
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", singlestream=singlestream, recenter=recenter )
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map,
+                                              tiled=False, ofmt="", singlestream=singlestream,
+                                              recenter=recenter )
     else:
-        # this is the case where we asked for at least 2 splits (1 split set). We count how many split we'll make, we need to define the Nsplits maps inside the DemodSignalMap
+        # this is the case where we asked for at least 2 splits (1 split set). We count how many
+        # split we'll make, we need to define the Nsplits maps inside the DemodSignalMap
         Nsplits = len(split_labels)
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", Nsplits=Nsplits, singlestream=singlestream, recenter=recenter)
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map,
+                                              tiled=False, ofmt="", Nsplits=Nsplits,
+                                              singlestream=singlestream, recenter=recenter)
     signals    = [signal_map]
-    mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0, singlestream=singlestream)
+    mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod,
+                                         verbose=verbose>0, singlestream=singlestream)
     if comm.rank == 0: L.info(pre + "Building RHS")
     # And feed it with our observations
     nobs_kept  = 0
@@ -684,14 +709,17 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
             elapsed_time = end_time - start_time
             print("Elapsed time make_depth1_map get_obs:", elapsed_time, "seconds")
         else:
-            obs = preprocess_tod.load_preprocess_tod(obs_id, configs=preprocess_config, dets={'wafer_slot':detset, 'wafer.bandpass':band}, )
+            obs = preprocess_tod.load_preprocess_tod(obs_id, configs=preprocess_config,
+                                                     dets={'wafer_slot':detset, 'wafer.bandpass':band}, )
             # TODO: modify below according to processes included in database
             
         # Correct HWP and PID polarization angles
         obs = hwp_angle_model.apply_hwp_angle_model(obs)
         
         if obs.dets.count <= 1: continue
-        obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, det_in_out=det_in_out,
+                                det_left_right=det_left_right, det_upper_lower=det_upper_lower,
+                                site=site, calc_hpf_params=calc_hpf_params)
         
         if obs.dets.count <= 1: continue
         
@@ -830,9 +858,14 @@ def main(config_file=None, defaults=defaults, **args):
     L.addHandler(ch)
 
     context = Context(args['context'])
-    # obslists is a dict, obskeys is a list, periods is an array, only rank 0 will do this and broadcast to others.
+    # obslists is a dict, obskeys is a list, periods is an array, only rank 0
+    # will do this and broadcast to others.
     if comm.rank==0:
-        obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], freq=args['freq'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
+        obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'],
+                                                                         mode=args['mode'], nset=args['nset'],
+                                                                         wafer=args['wafer'], freq=args['freq'],
+                                                                         ntod=args['ntod'], tods=args['tods'],
+                                                                         fixed_time=args['fixed_time'], mindur=args['mindur'])
         L.info('Done with build_obslists')
     else:
         obslists = None ; obskeys = None; periods=None ; obs_infos = None
@@ -893,7 +926,8 @@ def main(config_file=None, defaults=defaults, **args):
     my_costs     = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
     valid        = np.where(my_costs>0)[0]
     my_tods_2, my_inds_2, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
-    # we will do the profile and footprint here, and then allgather the subshapes and subwcs. This way we don't have to communicate the massive arrays such as timestamps
+    # we will do the profile and footprint here, and then allgather the subshapes and subwcs.
+    # This way we don't have to communicate the massive arrays such as timestamps
     subshapes = [] ; subwcses = []
     for idx,oi in enumerate(my_inds_2):
         pid, detset, band = obskeys[oi]
@@ -945,16 +979,25 @@ def main(config_file=None, defaults=defaults, **args):
         if not args['only_hits']:
             if split_labels is None:
                 # this means the mapmaker was run without any splits requested
-                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
+                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t),
+                              'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center,
+                              obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
             else:
                 # splits were requested and we loop over them
                 for split_label in split_labels:
-                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
+                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label,
+                                  '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center,
+                                  obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
 
         if not args['only_hits']:
             try:
                 # 5. make the maps
-                mapdata = make_depth1_map(context, obslist, subshape, subwcs, noise_model, t0=t, comm=comm_intra, tag=tag, preprocess_config=args['preprocess_config'], recenter=recenter, dtype_map=args['dtype_map'], dtype_tod=args['dtype_tod'], comps=args['comps'], verbose=args['verbose'], split_labels=split_labels, singlestream=args['singlestream'], det_in_out=args['det_in_out'], det_left_right=args['det_left_right'], det_upper_lower=args['det_upper_lower'], site=args['site'])
+                mapdata = make_depth1_map(context, obslist, subshape, subwcs, noise_model, t0=t, comm=comm_intra, tag=tag,
+                                          preprocess_config=args['preprocess_config'], recenter=recenter,
+                                          dtype_map=args['dtype_map'], dtype_tod=args['dtype_tod'], comps=args['comps'],
+                                          verbose=args['verbose'], split_labels=split_labels, singlestream=args['singlestream'],
+                                          det_in_out=args['det_in_out'], det_left_right=args['det_left_right'],
+                                          det_upper_lower=args['det_upper_lower'], site=args['site'], calc_hpf_params=args["calc_hpf_params"])
                 # 6. write them
                 write_depth1_map(prefix, mapdata, split_labels=split_labels, )
             except DataMissing as e:
