@@ -231,8 +231,26 @@ class NmatDetvecs(Nmat):
                 bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
 
 class NmatWhite(Nmat):
-    # This is a noise model for a bin map, with weights per det being the variance across time samples
     def __init__(self, window=2, ivar=None, nwin=None):
+        """
+        This is a noise model for a bin map, with weights per det being the variance across time samples
+        
+        Parameters
+        ----------
+        window : int, optional
+            Size of the window in seconds to apply before taking the FFT and applying the model 
+            in harmonic space
+        ivar : numpy.ndarray or None, optional
+            Overwrite the inverse variance per detector
+        nwin: int or None, optional
+            Overwrite the window size in number of samples
+        
+        Returns
+        -------
+        noise_model : An Nmat object with the noise model
+
+        """
+        
         self.ivar  = ivar
         self.window     = window
         self.nwin       = nwin
