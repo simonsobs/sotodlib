@@ -7,7 +7,7 @@ import so3g.proj
 from .utilities import *
 
 def find_scan_periods(obs_info, ttol=60, atol=2*utils.degree, mindur=120):
-    """Given a scan db, return the set of contiguous scanning periods in the form
+    """Given an obslist , return the set of contiguous scanning periods in the form
     [:,{ctime_from,ctime_to}]."""
     atol = atol/utils.degree
     info = np.array([obs_info[a] for a in ["az_center", "el_center", "az_throw", "timestamp", "duration"]]).T
@@ -33,10 +33,6 @@ def find_scan_periods(obs_info, ttol=60, atol=2*utils.degree, mindur=120):
     gap_times = np.mean(find_period_gaps(np.array([t1,t2]).T, ttol=ttol),1)
     gap_inds  = np.searchsorted(t1, gap_times)
     jumps[gap_inds] = True
-    # raw:  aaaabbbbcccc
-    # diff: 00010001000
-    # 0pre: 000010001000
-    # cum:  000011112222
     labels  = np.cumsum(jumps)
     linds   = np.arange(np.max(labels)+1)
     t1s     = ndimage.minimum(t1, labels, linds)
@@ -47,7 +43,7 @@ def find_scan_periods(obs_info, ttol=60, atol=2*utils.degree, mindur=120):
     return periods
 
 def find_scan_periods_perobs(obs_info, mindur=120):
-    """Given a scan db, return the periods per obs, i.e. start and stop of each scan. This is a simplified version of find_scan_periods
+    """Given a obslist, return the periods per obs, i.e. start and stop of each scan. This is a simplified version of find_scan_periods
     [:,{ctime_from,ctime_to}]."""
     info = np.array([obs_info[a] for a in ["timestamp", "duration"]]).T
     # Get rid of nan entries
@@ -68,7 +64,7 @@ def find_period_gaps(periods, ttol=60):
     the individual scans, returns the times at which the gap between the end of
     a tod and the start of the next is greater than ttol (default 60 seconds)."""
     # We want to sort these and look for any places
-    # where a to is followed by a from too far away. To to this we need to keep
+    # where a to is followed by a from too far away. To do this we need to keep
     # track of which entries in the combined, sorted array was a from or a to
     periods = np.asarray(periods)
     types   = np.zeros(periods.shape, int)
@@ -116,7 +112,8 @@ def build_period_obslists(obs_info, periods, context, nset=None, wafer=None, fre
         if freq is not None:
             band_list = [freq]
         else:
-            band_list = ['f090','f150']
+            if 'meta' not in locals(): meta = context.get_meta(row.obs_id)
+            band_list = np.unique(meta.det_info.wafer.bandpass)
         for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)
@@ -129,32 +126,38 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None, freq=None, 
     Return an obslists dictionary (described in build_period_obslists), along with all ancillary data necessary for the mapmaker
     
     Parameters
-    __________
+    ----------
     context : sotodlib.core.Context
             A context object
     query : str
             A list of tods. Can be a file with one obs_id per line, or a query that context.obsdb.query() will understand
-    mode : str or none
+    mode : str or none, optional
             Optional, mode for selecting tods. Can be 'per_obs', 'fixed_interval', 'depth_1'. Default is 'per_obs'
-    nset : int or None 
+    nset : int or None, optional
             Optional, the first nset sets will be mapped
-    ntod : int or None
+    wafer : str or None, optional
+            Specific wafer to retrieve, overrides nset
+    freq : str or None, optional
+            Retrieve a specific frequency bandpass
+    ntod : int or None, optional
             Optional, the first ntod observations listed in query will be mapped
-    tods : str or None
+    tods : str or None, optional
             Optional, a string with specific tods that will be mapped
-    fixed_time : int or None
+    fixed_time : int or None, optional
             Optional, if mode=='fixed_interval', this is the fixed time in seconds
-    mindur : int or None
+    mindur : int or None, optional
             Optional, minimum duration of an observation to be included in the mapping. If not defined it will be 120 seconds
            
-    Output
-    ______
-    
+    Returns
+    -------
+    obslists : A dict that contains a list of observations that will be mapped in each individual map (atomic, depth-1, etc.)
+    obskeys : A list of the keys of the obslists dict.
+    periods : A list with the ctimes edges for the individual maps (atomic, depth-1, etc.)
+    obs_infos : A list where each element is another list of the obs_info for each observation
     """
     
     # Get the full list of tods we will work with
     ids = get_ids(query, context=context)
-    #print(ids)
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if tods: ids = np.array(eval("ids"+tods)).reshape(-1)
     if ntod: ids = ids[:ntod]
@@ -168,14 +171,11 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None, freq=None, 
     
     if mode is None or mode == 'per_obs':
         # We simply need to make and obslists dict with each key being one obs
-        # In the future we will add sub-time and sub-focal plane splits, that would go here
         periods = find_scan_periods_perobs(obs_infos)
     elif mode=='depth_1':
-        # In the future we will add sub-time and sub-focal plane splits, that would go here
         periods   = find_scan_periods(obs_infos, ttol=12*3600)
         periods   = split_periods(periods, 24*3600)
     elif mode=='fixed_interval':
-        # In the future we will add sub-time and sub-focal-plane splits, that would go here
         if fixed_time is not None:
             periods   = find_scan_periods(obs_infos, ttol=12*3600)
             periods   = split_periods(periods, fixed_time)
