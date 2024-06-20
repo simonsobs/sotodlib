@@ -553,7 +553,6 @@ class AxisManager:
     # Add and remove data while maintaining internal consistency.
 
     def wrap(self, name, data, axis_map=None,
-             accept_new=True, accept_merge=True,
              overwrite=False):
         """Add data into the AxisManager.
 
@@ -572,8 +571,8 @@ class AxisManager:
             index of the dimension being described, name is a string
             giving the name of an axis already described in the
             present object, and ax is an AxisInterface object.
-
-        overwrite (bool): If True then will write over existing data
+            
+          overwrite (bool): If True then will write over existing data
             in field ``name`` if present.
 
         """
