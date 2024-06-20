@@ -117,6 +117,7 @@ def build_period_obslists(obs_info, periods, context, nset=None, wafer=None, fre
         else:
             if 'meta' not in locals(): meta = context.get_meta(row.obs_id)
             band_list = np.unique(meta.det_info.wafer.bandpass)
+            band_list.remove('NC')
         for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)
@@ -153,10 +154,14 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None, freq=None, 
            
     Returns
     -------
-    obslists : A dict that contains a list of observations that will be mapped in each individual map (atomic, depth-1, etc.)
-    obskeys : A list of the keys of the obslists dict.
-    periods : A list with the ctimes edges for the individual maps (atomic, depth-1, etc.)
-    obs_infos : A list where each element is another list of the obs_info for each observation
+    obslists : dict
+        A dict that contains a list of observations that will be mapped in each individual map (atomic, depth-1, etc.)
+    obskeys : list
+        A list of the keys of the obslists dict.
+    periods : list
+        A list with the ctimes edges for the individual maps (atomic, depth-1, etc.)
+    obs_infos : list
+        A list where each element is another list of the obs_info for each observation
     """
     
     # Get the full list of tods we will work with
