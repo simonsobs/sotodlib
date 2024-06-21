@@ -113,7 +113,7 @@ def _jumpfinder(
     else:
         raise TypeError("x must be float32 or float64")
 
-    jumps = np.zeros(x.shape, dtype=bool)
+    jumps = np.zeros(x.shape, dtype=bool, order="C")
     if x.shape[-1] < win_size:
         return jumps.reshape(orig_shape)
 
@@ -121,50 +121,27 @@ def _jumpfinder(
     if not np.any(msk):
         return jumps.reshape(orig_shape)
 
-    # Build a matched filter
+    # Flag with a matched filter
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
-    half_win = int(win_size / 2)
     _x = np.ascontiguousarray(x[msk])
-    x_step = np.ascontiguousarray(np.empty_like(_x))
-    matched_filt(_x, x_step, win_size)
-
-    # Because of the shift the closest to a window edge we can be in win_size/4
-    # In this case the slope of the shorter segment is ~3*height/4
-    # So the peaks should be at least (3*win_size*min_size)/16
-    # We want to include peaks of that size so we use a denominator of 32
-    # Note that after this filtering we are left with at least win_size/4 width
+    _jumps = np.ascontiguousarray(np.empty_like(_x), "int32")
     if isinstance(min_size, np.ndarray):
-        _min_size = (3 * win_size * min_size / 32)[..., None]
+        _min_size = min_size[msk].astype(_x.dtype)
+    elif min_size is None:
+        raise TypeError("min_size is None")
     else:
-        _min_size = (3 * win_size * min_size / 32) * np.ones((1, len(x)))
-
-    jumps[msk] = x_step > _min_size[msk]
-    has_peaks = np.any(jumps, -1)
-    if not np.any(has_peaks):
-        return jumps.reshape(orig_shape)
-
-    quarter_win = int(half_win / 2)
-    with_jumps = np.ascontiguousarray(jumps[has_peaks], "int32")
-    # This is equivalent to this convolution
-    # jumps[has_peaks] = (
-    #     sig.fftconvolve(np.ones((1, quarter_win)), with_jumps, axes=-1)[
-    #         :, : -1 * (quarter_win - 1)
-    #     ]
-    #     >= quarter_win
-    # )
-    clean_flag(with_jumps, quarter_win)
-    jumps[has_peaks] = with_jumps
-
-    # Recall that we set _min_size to be half the actual peak min above
-    # We allow for .5 samples worth of uncertainty here
-    jumps[has_peaks] *= (
-        x_step[has_peaks[msk]] >= (2 - (4.0 / win_size)) * _min_size[has_peaks]
-    )
+        _min_size = (min_size * np.ones(len(_x))).astype(_x.dtype)
+    matched_filt(_x, _jumps, _min_size, win_size)
+    jumps[msk] = _jumps > 0
 
     if exact:
         structure = np.array([[0, 0, 0], [1, 1, 1], [0, 0, 0]])
         labels, _ = simg.label(jumps, structure)
-        peak_idx = np.array(simg.maximum_position(x_step, labels))
+        peak_idx = np.array(
+            simg.maximum_position(
+                np.diff(_x, axis=-1, prepend=np.zeros(len(_x))), labels
+            )
+        )
         jump_rows = [peak_idx[:, 0]]
         jump_cols = peak_idx[:, 1]
         jumps[:] = False
