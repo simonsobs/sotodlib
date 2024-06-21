@@ -743,9 +743,15 @@ def write_depth1_map(prefix, data, split_labels=None):
             data.signal.write(prefix, "%s_weights"%split_labels[n_split], data.weights[n_split])
             data.signal.write(prefix, "%s_hits"%split_labels[n_split], data.signal.hits[n_split])
 
-def write_depth1_info(oname, info):
+def write_depth1_info(oname, info, split_labels=None):
     utils.mkdir(os.path.dirname(oname))
-    bunch.write(oname, info)
+    if split_labels==None:
+        bunch.write(oname+'_full_info.hdf', info[0])
+    else:
+        # we have splits
+        Nsplits = len(split_labels)
+        for n_split in range(Nsplits):
+            bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,'INFO':colors.lgreen,'WARNING':colors.lbrown,'ERROR':colors.lred, 'CRITICAL':colors.lpurple}):
@@ -839,7 +845,6 @@ def main(config_file=None, defaults=defaults, **args):
         obslists = None ; obskeys = None; periods=None ; obs_infos = None
     obslists = comm.bcast(obslists, root=0) ; obskeys = comm.bcast(obskeys, root=0) ; periods = comm.bcast(periods, root=0) ; obs_infos = comm.bcast(obs_infos, root=0)
 
-    tags = []
     cwd = os.getcwd()
     
     split_labels = []
@@ -942,64 +947,62 @@ def main(config_file=None, defaults=defaults, **args):
         L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
 
         my_ra_ref_atomic = [my_ra_ref[idx]]
-        # this is for the tags
+        # Save file for data base of atomic maps. We will write an individual file, another script will loop over those files and write into sqlite data base
         if not args['only_hits']:
+            info = []
             if split_labels is None:
                 # this means the mapmaker was run without any splits requested
-                tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
+                info.append(bunch.Bunch(pid=pid,
+                                 obs_id=obslist[0][0].encode(),
+                                 telescope=obs_infos[obslist[0][3]].telescope.encode(),
+                                 freq_channel=band.encode(),
+                                 wafer=detset.encode(),
+                                 ctime=int(t),
+                                 split_label='full'.encode(),
+                                 split_detail='full'.encode(),
+                                 prefix_path=str(cwd+'/'+prefix+'_full').encode(),
+                                 elevation=obs_infos[obslist[0][3]].el_center,
+                                 azimuth=obs_infos[obslist[0][3]].az_center,
+                                 RA_ref_start=my_ra_ref_atomic[0][0],
+                                 RA_ref_stop=my_ra_ref_atomic[0][1],
+                                 pwv=0.0
+                                ))
             else:
                 # splits were requested and we loop over them
                 for split_label in split_labels:
-                    tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), split_label, '', cwd+'/'+prefix+'_%s'%split_label, obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref_atomic[0][0], my_ra_ref_atomic[0][1], 0.0) )
-
+                    info.append(bunch.Bunch(pid=pid,
+                                 obs_id=obslist[0][0].encode(),
+                                 telescope=obs_infos[obslist[0][3]].telescope.encode(),
+                                 freq_channel=band.encode(),
+                                 wafer=detset.encode(),
+                                 ctime=int(t),
+                                 split_label=split_label.encode(),
+                                 split_detail=''.encode(),
+                                 prefix_path=str(cwd+'/'+prefix+'_%s'%split_label).encode(),
+                                 elevation=obs_infos[obslist[0][3]].el_center,
+                                 azimuth=obs_infos[obslist[0][3]].az_center,
+                                 RA_ref_start=my_ra_ref_atomic[0][0],
+                                 RA_ref_stop=my_ra_ref_atomic[0][1],
+                                 pwv=0.0
+                                ))
         if not args['only_hits']:
             try:
                 # 5. make the maps
                 mapdata = make_depth1_map(context, obslist, subshape, subwcs, noise_model, t0=t, comm=comm_intra, tag=tag, preprocess_config=args['preprocess_config'], recenter=recenter, dtype_map=args['dtype_map'], dtype_tod=args['dtype_tod'], comps=args['comps'], verbose=args['verbose'], split_labels=split_labels, singlestream=args['singlestream'], det_in_out=args['det_in_out'], det_left_right=args['det_left_right'], det_upper_lower=args['det_upper_lower'], site=args['site'])
                 # 6. write them
-                write_depth1_map(prefix, mapdata, split_labels=split_labels, )
+                if comm_intra.rank == 0:
+                    write_depth1_map(prefix, mapdata, split_labels=split_labels, )
+                    write_depth1_info(prefix, info, split_labels=split_labels )
             except DataMissing as e:
                 # This will happen if we decide to abort a map while we are doing the preprocessing.
-                handle_empty(prefix, tag, comm_intra, e, L)
+                #handle_empty(prefix, tag, comm_intra, e, L)
                 continue
         else:
             mapdata = write_hits_map(context, obslist, subshape, subwcs, t0=t, comm=comm_intra, tag=tag, verbose=args['verbose'],)
             if comm_intra.rank == 0:
                 oname = "%s_%s.%s" % (prefix, "full_hits", 'fits')
                 enmap.write_map(oname, mapdata.hits)
-    comm.Barrier()
-    # gather the tags for writing into the sqlite database
-    tags_total = comm.gather(tags, root=0)
-    if comm.rank == 0 and not args['only_hits']:
-        tags_total = list(itertools.chain.from_iterable(tags_total)) # this is because tags_total is a list of lists of tuples, and we want a list of tuples
-        # Write into the atomic map database.
-        conn = sqlite3.connect('./'+args['atomic_db']) # open the conector, if the database exists then it will be opened, otherwise it will be created
-        cursor = conn.cursor()
-        
-        # Check if the table exists, if not create it
-        # the tags will be telescope, frequency channel, wafer, ctime, split_label, split_details, prefix_path, elevation, pwv
-        cursor.execute("""CREATE TABLE IF NOT EXISTS atomic (
-                          obs_id TEXT,
-                          telescope TEXT, 
-                          freq_channel TEXT, 
-                          wafer TEXT, 
-                          ctime INTEGER,
-                          split_label TEXT,
-                          split_detail TEXT,
-                          prefix_path TEXT,
-                          elevation REAL,
-                          azimuth REAL,
-                          RA_ref_start REAL,
-                          RA_ref_stop REAL,
-                          pwv REAL
-                          )""")
-        conn.commit()
-        
-        for tuple_ in tags_total:
-            cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)
-        conn.commit()
-        
-        conn.close()
+    if comm.rank == 0:
         print("Done")
     return True
 
