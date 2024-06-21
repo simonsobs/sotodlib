@@ -117,7 +117,7 @@ def build_period_obslists(obs_info, periods, context, nset=None, wafer=None, fre
         else:
             if 'meta' not in locals(): meta = context.get_meta(row.obs_id)
             band_list = np.unique(meta.det_info.wafer.bandpass)
-            band_list.remove('NC')
+            band_list = np.delete(band_list,np.where(band_list=='NC'))
         for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)
