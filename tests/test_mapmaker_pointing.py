@@ -148,8 +148,8 @@ class MapmakerPointingTest(unittest.TestCase):
             # Direct comparison of pointing
             obs = data.obs[0]
             pmap = mapmaker._signal_map.data[obs.name].pmap
-            det_quats = pmap._get_asm().dets
-            coords = np.array(pmap.sight.coords(det_quats))
+            fplane = pmap._get_asm().fplane
+            coords = np.array(pmap.sight.coords(fplane))
             dets = mapmaker._mapmaker.data[0].dets
             ndet = len(dets)
 

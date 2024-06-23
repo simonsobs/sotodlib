@@ -521,7 +521,6 @@ def downsample_obs(obs, down, skip_signal=False):
     res.wrap("boresight", bore)
     if not skip_signal:
         res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
-
     # The cuts
     # TODO: The TOD will include a Flagmanager with all the flags. Update this part
     # accordingly.
