@@ -7,7 +7,6 @@ from pixell import fft, utils, bunch
 
 from .utilities import *
 
-
 class Nmat:
     def __init__(self):
         """Initialize the noise model. In subclasses this will typically set up parameters, but not
@@ -121,7 +120,8 @@ class NmatUncorr(Nmat):
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
-            downweight=[], window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None):
+            downweight=[], window=2, nwin=None, verbose=False, bins=None,
+            D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000):
         # This is all taken from act, not tuned to so yet
         if bin_edges is None: bin_edges = np.array([
             0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
@@ -142,6 +142,7 @@ class NmatDetvecs(Nmat):
         self.bins = bins
         self.window = window
         self.nwin   = nwin
+        self.bmin_eigvec = bmin_eigvec
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
 
@@ -156,16 +157,18 @@ class NmatDetvecs(Nmat):
         nsamp = tod.shape[1]
         # First build our set of eigenvectors in two bins. The first goes from
         # 0.25 to 4 Hz the second from 4Hz and up
-        mode_bins = makebins(self.mode_bins, srate, nfreq, 1000, rfun=np.round)[1:]
+        mode_bins = makebins(self.mode_bins, srate, nfreq, nmin=self.bmin_eigvec, rfun=np.ceil, cap=False)
         if np.any(np.diff(mode_bins) < 0):
             raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
         # Then use these to get our set of basis vectors
+        print("mode_bins", mode_bins)
         vecs = find_modes_jon(ft, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, verbose=self.verbose)
         nmode= vecs.shape[1]
         if vecs.size == 0: raise errors.ModelError("Could not find any noise modes")
         # Cut bins that extend beyond our max frequency
         bin_edges = self.bin_edges[self.bin_edges < srate/2 * 0.99]
-        bins      = makebins(bin_edges, srate, nfreq, nmin=2*nmode, rfun=np.round)
+        bins      = makebins(bin_edges, srate, nfreq, nmin=5, rfun=np.round)
+        print("bins", bins[:4], "nmode", nmode)
         nbin      = len(bins)
         # Now measure the power of each basis vector in each bin. The residual
         # noise will be modeled as uncorrelated
@@ -196,13 +199,12 @@ class NmatDetvecs(Nmat):
         iD   *= nsamp
         iV   *= nsamp**0.5
         ivar *= nsamp
-
         # Fix dtype
         bins = np.ascontiguousarray(bins.astype(np.int32))
-        D    = np.ascontiguousarray(iD.astype(tod.dtype))
-        V    = np.ascontiguousarray(iV.astype(tod.dtype))
-        iD   = np.ascontiguousarray(D.astype(tod.dtype))
-        iV   = np.ascontiguousarray(V.astype(tod.dtype))
+        D    = np.ascontiguousarray(D.astype(tod.dtype))
+        V    = np.ascontiguousarray(V.astype(tod.dtype))
+        iD   = np.ascontiguousarray(iD.astype(tod.dtype))
+        iV   = np.ascontiguousarray(iV.astype(tod.dtype))
 
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,

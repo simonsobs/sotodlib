@@ -157,17 +157,24 @@ def project_out_from_matrix(A, V):
 
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
 
-def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
+def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None, cap=True):
+    # Urk, this function is ugly. It's an old one from when I
+    # first started learning python.
     # Translate from frequency to index
-    binds  = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
+    binds = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
+    if cap: binds = np.concatenate([[0],binds,[nfreq]])
+    # Cap at nfreq and eliminate any resulting empty bins
+    binds = np.unique(np.minimum(binds,nfreq))
     # Make sure no bins have two few entries
     if nmin > 0:
         binds2 = [binds[0]]
-        for b in binds:
+        for b in binds[1:-1]:
             if b-binds2[-1] >= nmin: binds2.append(b)
+        binds2.append(binds[-1])
+        # If the last bin is too short, remove the second-to-last entry
+        if binds2[-1]-binds2[-2] < nmin:
+            del binds2[-2]
         binds = binds2
-    # Cap at nfreq and eliminate any resulting empty bins
-    binds = np.unique(np.minimum(np.concatenate([[0],binds,[nfreq]]),nfreq))
     # Go from edges to [:,{from,to}]
     bins  = np.array([binds[:-1],binds[1:]]).T
     return bins
@@ -212,7 +219,11 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbos
         vecs = np.concatenate([vecs,v],1)
     return vecs
 
-def measure_detvecs(ft, vecs):
+def measure_detvecs(ft, vecs, nper=2):
+    # Allow too narrow bins
+    nfull = vecs.shape[1]
+    n     = min(nfull, ft.shape[-1]//nper+1)
+    vecs  = vecs[:,:n]
     # Measure amps when we have non-orthogonal vecs
     rhs  = vecs.T.dot(ft)
     div  = vecs.T.dot(vecs)
@@ -224,6 +235,10 @@ def measure_detvecs(ft, vecs):
     Nu = np.mean(np.abs(dclean)**2,1)
     # The total auto-power
     Nd = np.mean(np.abs(ft)**2,1)
+    # Expand E to full requested len with low but
+    # non-zero power so we don't need to special-case elsewhere
+    small = np.min(Nu)*1e-6
+    E  = np.pad(E, (0,nfull-n), constant_values=small)
     return E, Nu, Nd
 
 def sichol(A):
