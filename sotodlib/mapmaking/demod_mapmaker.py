@@ -18,7 +18,8 @@ class DemodMapmaker:
         noise_model : sotodlib.mapmaking.Nmat or None
             A noise model constructor which will be used to initialize the
             noise model for each observation. Can be overriden in add_obs.
-            Noises other than NmatWhite not implemented.
+            Noises other than NmatWhite not implemented. If None, a white noise 
+            model is used.
         dtype : numpy.dtype
             The data type to use for the time-ordered data. Only tested with float32
         verbose : Bool
@@ -61,7 +62,8 @@ class DemodMapmaker:
         obs : AxisManager
             An observation (axismanager) object to be accumulated.
         noise_model : sotodlib.mapmaking.Nmat or None, optional
-            A noise model to apply to the TOD, if you want to override the model
+            If a noise model is passed, the model in the Demodmapmaker object will be overriden,
+            if None, the default model defined in the Demodmapmaker object is used.
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
             i.e. we will produce one map 
@@ -208,18 +210,17 @@ class DemodSignalMap(DemodSignal):
                 else: rot = None
                 if split_labels is None:
                     # this is the case with no splits
-                    rangesmatrix = obs.flags.glitch_flags
-                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
+                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=obs.flags.glitch_flags, hwp=True)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector, samples), build the RangesMatrix mask and create the pmap.
                     if split_labels[n_split] in ['det_left','det_right','det_in','det_out','det_upper','det_lower']:
                         # then we are in a detector fixed in time split.
-                        rangesmatrix = obs.flags.glitch_flags + obs.det_flags[split_labels[n_split]]
+                        cuts = obs.flags.glitch_flags + obs.det_flags[split_labels[n_split]]
                     elif split_labels[n_split] == 'scan_left':
-                        rangesmatrix = obs.flags.glitch_flags + obs.flags.left_scan
+                        cuts = obs.flags.glitch_flags + obs.flags.left_scan
                     elif split_labels[n_split] == 'scan_right':
-                        rangesmatrix = obs.flags.glitch_flags + obs.flags.right_scan
-                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
+                        cuts = obs.flags.glitch_flags + obs.flags.right_scan
+                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
             else:
                 pmap_local = pmap
                     
