@@ -250,10 +250,6 @@ def select_data(obs,
     # coordinates and will crash the mapmaking operation.
     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
 
-    splits.det_splits_relative(obs, det_left_right=det_left_right,
-                               det_upper_lower=det_upper_lower, det_in_out=det_in_out,
-                               wrap=True)
-
     status = get_detector_cuts_flags(obs)
     if not(status):
         return False
@@ -618,6 +614,9 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     
     filter_data(obs, calc_hpf_params)
 
+    splits.det_splits_relative(obs, det_left_right=det_left_right,
+                               det_upper_lower=det_upper_lower, det_in_out=det_in_out,
+                               wrap=True)
     return obs
 
 
