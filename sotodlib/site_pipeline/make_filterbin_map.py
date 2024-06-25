@@ -511,7 +511,7 @@ def get_psd(obs):
     dt = obs.timestamps - obs.timestamps[0]
     freq, Pxx_demodQ = welch(obs.demodQ, fs=1/np.mean(np.diff(dt)), nperseg=10*60*1/np.mean(np.diff(dt)))
     _, Pxx_demodU = welch(obs.demodQ, fs=1/np.mean(np.diff(dt)), nperseg=10*60*1/np.mean(np.diff(dt)))
-    obs.merge( core.AxisManager(core.OffsetAxis("nusamps", len(freq))))
+    obs.merge( AxisManager(OffsetAxis("nusamps", len(freq))))
     obs.wrap("freqs", freq, [(0,"nusamps")])
     obs.wrap('Pxx_demodQ', Pxx_demodQ, [(0, 'dets'), (1, 'nusamps')])
     obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
