@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g, logging, yaml, sqlite3, itertools
 from sotodlib import coords, mapmaking
-from sotodlib.core import Context,  metadata as metadata_core, FlagManager
+from sotodlib.core import Context,  metadata as metadata_core, FlagManager, AxisManager, OffsetAxis
 from sotodlib.core.flagman import has_any_cuts, has_all_cut
 from sotodlib.io import metadata
 from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca, fft_ops, sub_polyf
