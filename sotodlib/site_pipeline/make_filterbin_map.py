@@ -17,6 +17,7 @@ from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from sotodlib.hwp import hwp_angle_model
 from scipy.signal import welch
 from sotodlib import core
+from pixell import utils as pixut
 
 defaults = {"query": "1",
             "odir": "./output",
@@ -191,22 +192,28 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     else: return shape, wcs
 
 
-def ptp_cuts(aman, signal_name='dsT', kurtosis_threshold=5):
-    while True:
-        if aman.dets.count > 0:
-            ptps = np.ptp(aman[signal_name], axis=1)
-        else:
-            break
-        kurtosis_ptp = kurtosis(ptps)
-        if kurtosis_ptp < kurtosis_threshold:
-            break
-        else:
-            max_is_bad_factor = np.max(ptps)/np.median(ptps)
-            min_is_bad_factor = np.median(ptps)/np.min(ptps)
-            if max_is_bad_factor > min_is_bad_factor:
-                aman.restrict('dets', aman.dets.vals[ptps < np.max(ptps)])
-            else:
-                aman.restrict('dets', aman.dets.vals[ptps > np.min(ptps)])
+def ptp_cuts(obs, signal_name='dsT'): #, kurtosis_threshold=5):
+    # Find the typical noise level in the filtered tod, ignoring glitches
+    bsize  = 100
+    rms  = np.percentile(pixut.block_reduce(obs.signal, bsize,
+                                            inclusive=False, op=np.var),
+                         10, -1)**0.5
+    typical = np.median(rms)
+    # Take away dets with extreme noise
+    rmstol = 10
+    good = (rms>typical/rmstol)&(rms<typical*rmstol)
+    obs.restrict("dets", obs.dets.vals[good])
+    rms = rms[good]
+    # Build cuts, based on maximum allowed fraction of data values
+    # above the threshold.
+    cuttol = 1000
+    maxcut = 0.05
+    cutmask = np.abs(obs.signal)>rms[:,None]*cuttol
+    cutfrac = np.mean(cutmask,1)
+    good = cutfrac <= maxcut
+    print("all dets: ", obs.dets.count)
+    print("good: ", good.shape)
+    obs.restrict("dets", obs.dets.vals[good])
 
 
 def wrap_info(obs, site):
@@ -404,7 +411,9 @@ def deconvolve_detector_tconst(obs, remove_hwpss=True):
     obs[signal_name] = filters.fourier_filter(obs, filt, signal_name=signal_name)
         
         
-def demodulate_hwp(obs):
+def demodulate_hwp(obs, remove_hwpss=True):
+    if remove_hwpss:
+        obs.signal = obs.hwpss_remove
     apodize.apodize_cosine(obs)
     hwp.demod_tod(obs)
     obs.restrict('samps',(30*200, -30*200))
@@ -605,7 +614,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
 
     deconvolve_detector_tconst(obs, remove_hwpss)
     
-    demodulate_hwp(obs)
+    demodulate_hwp(obs, remove_hwpss)
     
     filter_data(obs, calc_hpf_params)
 
