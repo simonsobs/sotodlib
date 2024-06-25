@@ -3,7 +3,7 @@ import numpy as np, sys, time, warnings, os, so3g, logging, yaml, sqlite3, itert
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context,  metadata as metadata_core, FlagManager, AxisManager, OffsetAxis
 from sotodlib.core.flagman import has_any_cuts, has_all_cut
-from sotodlib.io import metadata
+from sotodlib.io import metadata, hk_utils
 from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca, fft_ops, sub_polyf
 from sotodlib.hwp import hwp
 from sotodlib.obs_ops import splits
@@ -592,7 +592,8 @@ def filter_data(obs, calc_hpf_params):
     
 
 def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
-                      det_left_right=False, det_in_out=False, det_upper_lower=False,
+                      det_left_right=False, det_in_out=False,
+                      det_upper_lower=False,
                       remove_hwpss=True, calc_hpf_params=False):
     status = preprocess_data(obs, dtype_tod, site,
                     det_left_right, det_in_out, det_upper_lower,
@@ -615,22 +616,36 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     filter_data(obs, calc_hpf_params)
 
     splits.det_splits_relative(obs, det_left_right=det_left_right,
-                               det_upper_lower=det_upper_lower, det_in_out=det_in_out,
+                               det_upper_lower=det_upper_lower,
+                               det_in_out=det_in_out,
                                wrap=True)
     return obs
+
+
+def get_pwv(obs, data_dir='/global/cfs/cdirs/sobs/untracked/data/site/hk'):
+    ### TODO: modify data dir                                                                                                 
+    pwv_info = hk_utils.get_detcosamp_hkaman(obs, alias=['pwv'],
+                                        fields = ['site.env-radiometer-class.feeds.pwvs.pwv',],
+                                        data_dir = data_dir)
+    pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
+    pwv = np.nanmedian(pwv_all)
+    return pwv
 
 
 def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.float32, only_hits=False, site='so_sat3'):
     my_tods = []
     my_inds = []
     my_ra_ref = []
+    pwvs = []
     if inds is None: inds = list(range(comm.rank, len(obslist), comm.size))
     for ind in inds:
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
-            tod = context.get_obs(obs_id, dets={"wafer_slot":detset,
-                                                "wafer.bandpass":band},
-                                  no_signal=True)
+            meta = context.get_meta(obs_id, dets={"wafer_slot":detset,                                                                                                                                               "wafer.bandpass":band},)
+            tod = context.get_obs(meta, no_signal=True)
+            #tod = context.get_obs(obs_id, dets={"wafer_slot":detset,
+            #                                    "wafer.bandpass":band},
+            #                      no_signal=True)
             to_remove = []
             for field in tod._fields:
                 if field!='obs_info' and field!='flags' and field!='signal' and field!='focal_plane' and field!='timestamps' and field!='boresight': to_remove.append(field)
@@ -645,8 +660,14 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.flo
                 my_ra_ref.append(None)
             my_tods.append(tod)
             my_inds.append(ind)
+
+            tod_temp = tod.restrict('dets', meta.dets.vals[:1], in_place=False)
+            datadir = "/scratch/gpfs/SIMONSOBS/so/untracked/data/site/hk"
+            pwvs.append(get_pwv(tod_temp, data_dir=datadir))
+            del tod_temp
+            
         except RuntimeError: continue
-    return my_tods, my_inds, my_ra_ref
+    return my_tods, my_inds, my_ra_ref, pwvs
 
 
 def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD,
@@ -975,7 +996,7 @@ def main(config_file=None, defaults=defaults, **args):
         conn.close() # I close since I only wanted to read
 
     obslist = [item[0] for key, item in obslists.items()]
-    my_tods, my_inds, my_ra_ref = read_tods(context, obslist, comm=comm, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'])
+    my_tods, my_inds, my_ra_ref, pwvs = read_tods(context, obslist, comm=comm, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'])
     my_costs     = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
     valid        = np.where(my_costs>0)[0]
     my_tods_2, my_inds_2, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
@@ -997,17 +1018,20 @@ def main(config_file=None, defaults=defaults, **args):
     all_inds              = utils.allgatherv(my_inds_2, comm)
     all_costs             = utils.allgatherv(my_costs, comm)
     all_ra_ref            = comm.allgather(my_ra_ref)
+    all_pwvs              = comm.allgather(pwvs)
     all_subshapes         = comm.allgather(subshapes)
     all_subwcses          = comm.allgather(subwcses)
     all_ra_ref_flatten    = [x for xs in all_ra_ref for x in xs]
+    all_pwvs_flatten    = [x for xs in all_pwvs for x in xs]
     all_subshapes_flatten = [x for xs in all_subshapes for x in xs]
     all_subwcses_flatten  = [x for xs in all_subwcses for x in xs]
     mask_weights = utils.equal_split(all_costs, comm.size)[comm.rank]
     my_inds_2    = all_inds[mask_weights]
     my_ra_ref    = [all_ra_ref_flatten[idx] for idx in mask_weights]
+    pwvs         = [all_pwvs_flatten[idx] for idx in mask_weights]
     my_subshapes = [all_subshapes_flatten[idx] for idx in mask_weights]
     my_subwcses  = [all_subwcses_flatten[idx] for idx in mask_weights]
-    del obslist, my_inds, my_tods, my_costs, valid, all_inds, all_costs, all_ra_ref, all_ra_ref_flatten, mask_weights, all_subshapes_flatten, all_subwcses_flatten, my_tods_2
+    del obslist, my_inds, my_tods, my_costs, valid, all_inds, all_costs, all_ra_ref, all_ra_ref_flatten, mask_weights, all_subshapes_flatten, all_subwcses_flatten, my_tods_2, all_pwvs, all_pwvs_flatten
 
     for idx,oi in enumerate(my_inds_2):
         pid, detset, band = obskeys[oi]
@@ -1030,6 +1054,7 @@ def main(config_file=None, defaults=defaults, **args):
         L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
 
         my_ra_ref_atomic = [my_ra_ref[idx]]
+        pwv_atomic = [pwvs[idx]]
         # Save file for data base of atomic maps. We will write an individual file,
         # another script will loop over those files and write into sqlite data base
         if not args['only_hits']:
@@ -1049,7 +1074,7 @@ def main(config_file=None, defaults=defaults, **args):
                                  azimuth=obs_infos[obslist[0][3]].az_center,
                                  RA_ref_start=my_ra_ref_atomic[0][0],
                                  RA_ref_stop=my_ra_ref_atomic[0][1],
-                                 pwv=0.0
+                                 pwv=pwv_atomic
                                 ))
             else:
                 # splits were requested and we loop over them
@@ -1067,7 +1092,7 @@ def main(config_file=None, defaults=defaults, **args):
                                  azimuth=obs_infos[obslist[0][3]].az_center,
                                  RA_ref_start=my_ra_ref_atomic[0][0],
                                  RA_ref_stop=my_ra_ref_atomic[0][1],
-                                 pwv=0.0
+                                 pwv=pwv_atomic
                                 ))
 
         if not args['only_hits']:
@@ -1104,7 +1129,7 @@ def main(config_file=None, defaults=defaults, **args):
             if comm_intra.rank == 0:
                 oname = "%s_%s.%s" % (prefix, "full_hits", 'fits')
                 enmap.write_map(oname, mapdata.hits)
-if comm.rank == 0:
+    if comm.rank == 0:
         print("Done")
     return True
 
