@@ -48,6 +48,7 @@ defaults = {"query": "1",
             "fixed_time": None,
             "mindur": None,
             "calc_hpf_params": False,
+            "l2_data_path": "/global/cfs/cdirs/sobs/untracked/data/site/hk",
            }
 
 def get_parser(parser=None):
@@ -99,6 +100,8 @@ def get_parser(parser=None):
                         help='name of the atomic map database, will be saved where make_filterbin_map is being run')
     parser.add_argument("--calc_hpf_params", action="store_true",
                         help='Set to calculate the parameters used in the high-pass-filter from the data')
+    parser.add_argument("--l2_data_path",
+                        help='Path to level-2 data')
     return parser
 
 
@@ -622,8 +625,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     return obs
 
 
-def get_pwv(obs, data_dir='/global/cfs/cdirs/sobs/untracked/data/site/hk'):
-    ### TODO: modify data dir                                                                                                 
+def get_pwv(obs, data_dir):
     pwv_info = hk_utils.get_detcosamp_hkaman(obs, alias=['pwv'],
                                         fields = ['site.env-radiometer-class.feeds.pwvs.pwv',],
                                         data_dir = data_dir)
@@ -632,7 +634,9 @@ def get_pwv(obs, data_dir='/global/cfs/cdirs/sobs/untracked/data/site/hk'):
     return pwv
 
 
-def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.float32, only_hits=False, site='so_sat3'):
+def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD,
+              dtype_tod=np.float32, only_hits=False, site='so_sat3',
+              l2_data='/global/cfs/cdirs/sobs/untracked/data/site/hk'):
     my_tods = []
     my_inds = []
     my_ra_ref = []
@@ -662,8 +666,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, dtype_tod=np.flo
             my_inds.append(ind)
 
             tod_temp = tod.restrict('dets', meta.dets.vals[:1], in_place=False)
-            datadir = "/scratch/gpfs/SIMONSOBS/so/untracked/data/site/hk"
-            pwvs.append(get_pwv(tod_temp, data_dir=datadir))
+            pwvs.append(get_pwv(tod_temp, data_dir=l2_data))
             del tod_temp
             
         except RuntimeError: continue
@@ -996,7 +999,11 @@ def main(config_file=None, defaults=defaults, **args):
         conn.close() # I close since I only wanted to read
 
     obslist = [item[0] for key, item in obslists.items()]
-    my_tods, my_inds, my_ra_ref, pwvs = read_tods(context, obslist, comm=comm, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'])
+    my_tods, my_inds, my_ra_ref, pwvs = read_tods(context, obslist,
+                                                  comm=comm,
+                                                  dtype_tod=args['dtype_tod'],
+                                                  only_hits=args['only_hits'],
+                                                  l2_data=args['l2_data_path'])
     my_costs     = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
     valid        = np.where(my_costs>0)[0]
     my_tods_2, my_inds_2, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
