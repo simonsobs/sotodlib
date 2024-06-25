@@ -35,6 +35,7 @@ from sotodlib.io import load_book
 import os
 import glob
 import yaml
+import re
 import numpy as np
 import time
 import argparse
@@ -42,7 +43,7 @@ import logging
 from sotodlib.site_pipeline import util
 from typing import Optional
 
-logger = util.init_logger(__name__, 'update-obsdb: ')
+logger = util.init_logger('update_obsdb', 'update-obsdb: ')
 
 def check_meta_type(bookpath: str):
     metapath = os.path.join(bookpath, "M_index.yaml")
@@ -158,27 +159,24 @@ def main(config: str,
     for bd in base_dir:
         #Find folders that are book-like and recent
         for dirpath, _, _ in os.walk(bd):
-            last_mod = max(os.path.getmtime(root) for root, _, _ in os.walk(dirpath))
-            if last_mod < tback:#Ignore older directories
-                continue
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
                 _, book_id = os.path.split(dirpath)
                 if book_id in existing and not overwrite:
                     continue
-                #Looks like a book folder
-                bookcart.append(dirpath)
+                found_timestamp = re.search(r"\d{10}", book_id)#Find the rough timestamp
+                if found_timestamp and int(found_timestamp.group())>tback:
+                    #Looks like a book folder and young enough
+                    bookcart.append(dirpath)
+    
+    logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
     #Check the books for the observations we want
-
-
     for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
-
+            t1 = time.time()
             try:
                 #obsfiledb creation
-                checkbook(
-                    bookpath, config, add=True, 
-                    overwrite=True
-                )
+                checkbook(bookpath, config, add=True, overwrite=True)
+                logger.info(f"Ran check_book for {bookpath} in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
                     logger.warning(f"failed to add {bookpath}")
@@ -235,6 +233,16 @@ def main(config: str,
                 very_clean["duration"] = end - start
             except KeyError:
                 logger.error("Incomplete timing information for obs_id {obs_id}")
+            
+            #SAT HWP
+            if very_clean["telescope_flavor"] == "sat":
+                try:
+                    very_clean["hwp_freq_mean"] = index["hwp_freq_mean"]
+                    very_clean["hwp_freq_stdev"] = index["hwp_freq_stdev"]
+                    bookcartobsdb.add_obs_columns(["hwp_freq_mean float", 
+                                                   "hwp_freq_stdev float"])
+                except KeyError:
+                    logger.error(f"No HWP frequency info for obs_id {obs_id}")
 
             #Scanning motion
             stream_file = os.path.join(bookpath,"*{}*.g3".format(stream_ids[0]))
@@ -271,7 +279,7 @@ def main(config: str,
             tags = [t.strip() for t in tags if t.strip() != '']
 
             bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
-           
+            logger.info(f"Added {obs_id} in {time.time()-t1} s")
         else:
             bookcart.remove(bookpath)
 

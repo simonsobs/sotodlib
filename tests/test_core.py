@@ -255,6 +255,20 @@ class TestAxisManager(unittest.TestCase):
         b.wrap('a', a)
         self.assertNotIn('a', a.b)
 
+    def test_180_overwrite(self):
+        dets = ['det0', 'det1', 'det2']
+        a1 = np.zeros((len(dets), 100))
+        a1[1, 10] = 1.
+        aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                core.OffsetAxis('samps', a1.shape[1]))
+        aman.wrap('a1', a1, [(0, 'dets'), (1, 'samps')])
+        a2 = np.zeros((len(dets), 100))
+        a2[2, 11] = 1.
+        aman.wrap('a1', a2, [(0, 'dets'), (1, 'samps')],
+                  overwrite=True)
+        self.assertNotEqual(aman.a1[2,11], 0)
+        self.assertNotEqual(aman.a1[1,10], 1.)
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):
@@ -394,6 +408,11 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('quantity', np.ones(5) << u.m)
         aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
+        aman.wrap('subaman', core.AxisManager(
+            aman.dets, core.LabelAxis('bands', ['f090', 'f150'])))
+        aman['subaman'].wrap_new('subtest1', shape=[('dets', 'bands')])
+        aman['subaman'].wrap_new('subtest2', shape=(100,))
+
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.
         for dataset in ['path/to/my_axisman', '/', None]:
@@ -418,6 +437,24 @@ class TestAxisManager(unittest.TestCase):
                     self.assertEqual(aman[k].shape, aman2[k].shape)
                 else:
                     self.assertEqual(aman[k], aman2[k])  # scalar
+
+        # Test field subset load
+        with tempfile.TemporaryDirectory() as tempdir:
+            filename = os.path.join(tempdir, 'test.h5')
+            aman.save(filename, dataset)
+            aman2 = aman.load(filename, dataset, fields=['test1', 'flags'])
+            aman3 = aman.load(filename, dataset, fields=['test1', 'subaman'])
+            aman4 = aman.load(filename, dataset, fields=['test1', 'subaman.subtest1'])
+        for target, keys, subkeys in [
+                (aman2, ['test1', 'flags'], None),
+                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2']),
+                (aman4, ['test1', 'subaman'], ['subtest1']),
+        ]:
+            self.assertCountEqual(target._fields.keys(),
+                                  keys)
+            if subkeys:
+                self.assertCountEqual(target['subaman']._fields.keys(),
+                                      subkeys)
 
     def test_900_everything(self):
         tod = core.AxisManager(

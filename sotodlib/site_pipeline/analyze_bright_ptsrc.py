@@ -8,18 +8,21 @@ from sotodlib.toast.ops import sim_sso
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset, read_dataset
 from sotodlib.tod_ops.filters import high_pass_sine2, low_pass_sine2, fourier_filter
-
+import pickle
 from astropy import units as u
+from copy import deepcopy
 import numpy as np
 import scipy.signal
 import time
 import ephem
 import os
-from scipy.optimize import curve_fit
+from tqdm.auto import tqdm
+from scipy.optimize import curve_fit, minimize
 from datetime import datetime
 import argparse as ap
 import yaml
 from sotodlib.site_pipeline import util
+from dataclasses import dataclass
 import matplotlib
 matplotlib.use('agg')
 
@@ -28,7 +31,121 @@ opj = os.path.join
 logger = util.init_logger(__name__)
 
 
-def get_xieta_src_centered(ctime, az, el, data, sso_name, threshold):
+def find_source(
+        tod,
+        sso_name,
+        beamsize=30,
+        height=0.1,
+        distance=10000,
+        npeaks=3):
+    """Find the detectors that see the source
+
+    Args
+    ------
+    height: minimum required amplitude of a peak
+    max_amp: over this amplitude it can only be a spike
+    distance: distance between adjacent peaks -- depends on scan speed
+    npeaks: number of required peaks to be found of certain amplitude
+    beamsize: cluster of peaks with lower width than this is considered a spike
+
+    Return
+    ------
+    good_dets : array of indices of the detectors that see the source
+    """
+    az = tod.boresight.az
+    el = tod.boresight.el
+    ctime = tod.timestamps
+
+    good_dets = []
+
+    for det_idx in range(len(tod.dets.vals)):
+
+        data = tod.signal[det_idx, :]
+        data -= np.mean(data)
+        # find npeaks over some amplitude and sort them
+        r, _ = scipy.signal.find_peaks(data, height=height, distance=distance)
+        sorted_r = np.argsort(data[r])[::-1]
+        # to avoid high amplitude spikes
+        if len(r) < npeaks or np.nanmax(data) > 100 * height:
+            continue
+
+        peak_idxs = r[sorted_r[:npeaks]]
+        peak_idxs_sorted = np.sort(peak_idxs)
+
+        try:
+            argmax = np.argmax(data[peak_idxs_sorted])
+        except BaseException:
+            continue
+
+        # Separate between peaks left and right from the highest peak
+        left_d = [data[i] for i in peak_idxs_sorted[:argmax + 1]]
+        right_d = [data[i] for i in peak_idxs_sorted[argmax:]]
+        # Assert the monotony changes at the highest peak to make sure
+        # the source center is included
+        if len(left_d) >= 2 and len(right_d) >= 2:
+            if np.all(
+                left_d == np.sort(left_d)) and np.all(
+                right_d == np.sort(right_d)[
+                    ::-1]):
+                # Turn to source-centred coordinates
+                all_coords = get_xieta_src_centered(
+                    ctime, az, el, data, sso_name=sso_name, threshold=height, distance=distance)
+                [xi, eta], [xi_det, eta_det] = all_coords
+                # Attempt an estimation of the width to determine if we
+                # are seeing a point source crossing or random spikes
+                max_peak = np.nanmax(data) / 2
+                sorted_idx = np.argsort(np.abs(data - max_peak))[:1000]
+
+                xi_min = np.nanmin(xi[sorted_idx])
+                xi_max = np.nanmax(xi[sorted_idx])
+                eta_min = np.nanmin(eta[sorted_idx])
+                eta_max = np.nanmax(eta[sorted_idx])
+
+                fwhm_xi = np.degrees(xi_max - xi_min) * 60
+                fwhm_eta = np.degrees(eta_max - eta_min) * 60
+
+                # If it is smaller than 3/4 * beam size is a spike
+                # we can't do narrower than the diffraction limit
+                # + some effect from the filtering
+                if fwhm_xi < 3 / 4 * beamsize and fwhm_eta < 3 / 4 * beamsize:
+                    continue
+
+                xi_det_center = xi - xi_det
+                eta_det_center = eta - eta_det
+                radius_main = np.radians(2.5)
+                radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
+                idx_out = np.where(radius > radius_main)[0]
+                snr = np.nanmax(data) / np.nanstd(data[idx_out])
+
+                # Something extra we can do but not necessary - targetted to Moon data
+                # Get the first sorted 20 peaks and assert the difference in amplitude
+                # between the first and last is big (otherwise we caught some periodical
+                # spikes and were unlucky enough to agree with the previous criteria)
+                # r, _ = scipy.signal.find_peaks(data, height=height/3, distance=10000)
+                # sorted_r = np.argsort(data[r])[::-1]
+
+                # if len(r)<npeaks:
+                #     continue
+
+                # peak_idxs = r[sorted_r[:20]]
+                # ratio = data[peak_idxs[-1]]/data[peak_idxs[0]]
+
+                # As a subsequent sanity check look at the SNR
+                if snr > 25:
+                    good_dets.append(det_idx)
+
+    return good_dets
+
+
+def get_xieta_src_centered(
+        ctime,
+        az,
+        el,
+        data,
+        sso_name,
+        threshold,
+        distance,
+        prior_pos=None):
     """Create a planet centered coordinate system for single detector data
 
     Args
@@ -36,22 +153,20 @@ def get_xieta_src_centered(ctime, az, el, data, sso_name, threshold):
     ctime, az, el: unix time and boresight position coordinates
     data: single detector data
     sso_name: celestial source to insert to pyephem
-    threshold: minimal peak amplitude required to assume the
-               timestream includes the source of interest.
-               The amplitude is given as number of times the
-               standard deviation of the data.
+    threshold: minimal peak amplitude required
 
     Return
     ------
-    xi_total, eta_total : source's centre projected on the telescope
-    xi0, eta0 : source's centre projected on the detector
+    xi_total, eta_total : source's centre projected on the focal plane coords
+    xi0, eta0 : source's centre projected on the detector coords
     """
 
     csl = so3g.proj.CelestialSightLine.az_el(ctime, az, el, weather="typical")
     q_bore = csl.Q
 
     # Signal strength criterion - a chance to flag detectors
-    peaks, _ = scipy.signal.find_peaks(data, height=threshold * np.std(data))
+    peaks, _ = scipy.signal.find_peaks(
+        data, height=threshold, distance=distance)
     if not list(peaks):
         return
 
@@ -63,20 +178,24 @@ def get_xieta_src_centered(ctime, az, el, data, sso_name, threshold):
     ra0, dec0 = planet.pos(d1_unix)
     q_obj = so3g.proj.quat.rotation_lonlat(ra0, dec0)
 
-    # find peak amplitude from the detector timestream
-    q_det = coords.quat.quat(*np.array(~q_bore * q_obj)[src_idx])
-    q_total = ~q_bore * q_obj
+    # find max point in term of the source's coord system if no prior
+    # positions arrer given
+    if prior_pos is not None:
+        xi0, eta0 = prior_pos
+    else:
+        q_det = coords.quat.quat(*np.array(~q_bore * q_obj)[src_idx])
+        xi0, eta0, gamma0 = quat.decompose_xieta(q_det)
 
-    xi, eta, _ = quat.decompose_xieta(q_total)
-    xi0, eta0, _ = quat.decompose_xieta(q_det)
+    q_total = ~q_bore * q_obj
+    xi, eta, gamma = quat.decompose_xieta(q_total)
 
     return np.array([xi, eta]), np.array([xi0, eta0])
 
 
-def define_fit_params(config_file_path, tele, tube, sso_name):
+def define_fit_params(config_file_path, band, tele, tube, sso_name):
     """
     Define initial position and allowed offsets for detector centroids,
-    beam parameters and time constant as read from configuration file
+    beam parameters, and time constant as read from configuration file
     located at 'config_file_path'.
 
     Args
@@ -92,34 +211,48 @@ def define_fit_params(config_file_path, tele, tube, sso_name):
     """
     with open(config_file_path, "r") as stream:
         config_file = yaml.safe_load(stream)
-
     tube_idx = config_file['telescopes'][tele]['tube'].index(tube)
-    beamsize = config_file['telescopes'][tele]['beamsize'][tube_idx]
-    # Provided in terms of the beam size
+
+    # Pointing - initial guess at zero
     offset_bound = config_file['telescopes'][tele]['pointing_error'][tube_idx]
+    # Beam
+    beamsize = np.radians(
+        config_file['telescopes'][tele]['beamsize'][tube_idx] / 60)
     fwhm_bound_frac = config_file['telescopes'][tele]['beam_error'][tube_idx]
-    # Planet expected temperature measured by the detector
+    # Amplitude
     amp = config_file['telescopes'][tele]['detector_response'][sso_name][tube_idx]
     amp_error = config_file['telescopes'][tele]['amp_error'][tube_idx]
-
+    # Beam angle
     theta_min, theta_init, theta_max = np.radians(
         np.array(config_file['telescopes'][tele]['theta']))
+    # Time constant
     tau = config_file['telescopes'][tele]['tau']
-    beamsize = np.radians(beamsize / 60)
-    offset_bound *= beamsize
-
-    fwhm_bound = fwhm_bound_frac * beamsize
-    fwhm_min = beamsize - fwhm_bound
-    fwhm_max = beamsize + fwhm_bound
 
     initial_guess = [amp, 0, 0, beamsize, beamsize, theta_init]
+    errors = [amp_error, offset_bound, offset_bound, fwhm_bound_frac,
+              fwhm_bound_frac, theta_min, theta_max]
+
+    return initial_guess, errors, tau
+
+
+def set_bounds(initial_guess, errors):
+    """Synthesize the bounds from the initial guess
+       and allowed errors"""
+    amp, xi0, eta0, fwhm_xi, fwhm_eta, theta_init = initial_guess
+    amp_error, offset_bound, offset_bound, fwhm_bound_frac, fwhm_bound_frac, theta_min, theta_max = errors
+
+    fwhm_min_xi = fwhm_xi - (fwhm_bound_frac * fwhm_xi)
+    fwhm_max_xi = fwhm_xi + (fwhm_bound_frac * fwhm_xi)
+    fwhm_min_eta = fwhm_eta - (fwhm_bound_frac * fwhm_eta)
+    fwhm_max_eta = fwhm_eta + (fwhm_bound_frac * fwhm_eta)
+
     bounds_min = (amp - (amp_error * amp), -offset_bound, -
-                  offset_bound, fwhm_min, fwhm_min, theta_min)
-    bounds_max = (amp + (amp_error * amp), offset_bound, offset_bound,
-                  fwhm_max, fwhm_max, theta_max)
+                  offset_bound, fwhm_min_xi, fwhm_min_eta, theta_min)
+    bounds_max = (amp + (amp_error * amp), offset_bound,
+                  offset_bound, fwhm_max_xi, fwhm_max_eta, theta_max)
     bounds = np.array((bounds_min, bounds_max,))
 
-    return initial_guess, bounds, beamsize, tau
+    return bounds
 
 
 def gaussian2d(xi, eta, a, xi0, eta0, fwhm_xi, fwhm_eta, phi):
@@ -185,7 +318,7 @@ def tod_sim(xietat, a, xi0, eta0, fwhm_xi, fwhm_eta, phi, idx_main, tau):
     a, xi0, eta0, fwhm_xi, fwhm_eta, phi: all floats
         parameters for the beam model, as elaborated in the gaussian2d function
     idx_main: range of integers serving as data indices to select a region around
-              the peak of radius = 2*FWHM.
+              the peak of radius = 2*FWHM (reduce data volume - speed the fitting).
     tau: float
         time constant
     """
@@ -206,10 +339,15 @@ def fit_params(
         ctime,
         az,
         el,
+        band,
         sso_name,
         threshold_src,
+        distance,
         init_params,
-        representative_dets,
+        fit_pointing=False,
+        fit_beam=False,
+        prior_pointing=None,
+        representative_dets='no_detectors',
         **kwargs):
     """Function that fits individual time-streams and returns the readout id,
        peak amplitude, detector centroids, beam size in both directions and
@@ -238,8 +376,16 @@ def fit_params(
     failed_params = np.array([readout_id, *np.full(7, np.nan)])
 
     data -= np.mean(data)
+
+    if prior_pointing is not None and readout_id in prior_pointing.keys():
+        prior_pos = [
+            prior_pointing[readout_id]['xi0'],
+            prior_pointing[readout_id]['eta0']]
+    else:
+        prior_pos = None
+
     coord_transforms = get_xieta_src_centered(
-        ctime, az, el, data, sso_name, threshold_src)
+        ctime, az, el, data, sso_name, threshold_src, distance, prior_pos=prior_pos)
 
     if coord_transforms is None:
         return failed_params
@@ -249,9 +395,34 @@ def fit_params(
     xi_det_center -= xi0
     eta_det_center -= eta0
 
-    p0, bounds, beamsize, tau = init_params
+    p0, errors, tau = init_params
+
+    if sso_name == 'Moon':
+        max_peak = np.nanmax(data) / 2
+        sorted_idx = np.argsort(np.abs(data - max_peak))[:1000]
+
+        xi_min = np.nanmin(xi_det_center[sorted_idx])
+        xi_max = np.nanmax(xi_det_center[sorted_idx])
+
+        eta_min = np.nanmin(eta_det_center[sorted_idx])
+        eta_max = np.nanmax(eta_det_center[sorted_idx])
+
+        fwhm_xi = xi_max - xi_min
+        fwhm_eta = eta_max - eta_min
+
+        p0[3:5] = fwhm_xi, fwhm_eta
+
+        # Set the pointing error (optionally) as the difference
+        # between two adjacent peaks / detector hits on the source
+        # peak_idxs, _ = scipy.signal.find_peaks(data, distance=100)
+        # peak_idxs_sorted = np.argsort(data[peak_idxs])[::-1][:6]
+        # offset_bound_xi = np.abs(np.mean(np.diff(xi_det_center[peak_idxs_sorted])))
+        # offset_bound_eta = np.abs(np.mean(np.diff(eta_det_center[peak_idxs_sorted])))
+
+    # Trim the data around the source
+    beamsize = np.nanmax([p0[3], p0[4]])
     radius_main = 2 * beamsize
-    radius_cut = 2 * radius_main
+    radius_cut = 2.5 * radius_main
 
     radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
     # take a small piece of the data around the peak
@@ -263,72 +434,88 @@ def fit_params(
 
     xi_eta_ctime = np.vstack((xi_det_center, eta_det_center, ctime))
 
-    f = lambda xyt, *pointing: tod_sim(
-        xyt, pointing[0], pointing[1], pointing[2], p0[3], p0[4], p0[5], idx_main_in, tau)
-    try:
-        popt_pointing, _ = curve_fit(
-            f, xi_eta_ctime, data_main, p0=p0[:3], bounds=bounds[:, :3])
-    except BaseException:
-        return failed_params
+    # append amplitude of max peak - safer for now
+    # until we have insanely strict criteria on the source's amplitude/
+    # efficiency
+    p0[0] = np.nanmax(data_main)
+    bounds = set_bounds(p0, errors)
 
-    # Re-centering the data after fitting for the pointing
-    p0[0] = popt_pointing[0]
-    xi_det_center += popt_pointing[1]
-    eta_det_center += popt_pointing[2]
-    xi_eta_ctime = np.vstack((xi_det_center, eta_det_center, ctime))
+    if fit_pointing is True:
+        #  Fit the pointing
+        f = lambda xyt, *pointing: tod_sim(
+            xyt, pointing[0], pointing[1], pointing[2], p0[3], p0[4], p0[5], idx_main_in, tau)
+        try:
+            popt_pointing, _ = curve_fit(
+                f, xi_eta_ctime, data_main, p0=p0[:3], bounds=bounds[:, :3])
+            # logger.warning(f"fitted pointing {} {}".format(p0,bounds))
+        except BaseException:
+            return failed_params
 
-    radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
-    idx_main_in = np.where(radius < radius_main)[0]
-    idx_main_out = np.where(radius > radius_main)[0]
-    xi_main = xi_det_center[idx_main_in]
-    eta_main = eta_det_center[idx_main_in]
-    data_main = data[idx_main_in]
+        # Re-centering the data after fitting for the pointing
+        p0[0] = popt_pointing[0]
+        xi_det_center += popt_pointing[1]
+        eta_det_center += popt_pointing[2]
+        xi_eta_ctime = np.vstack((xi_det_center, eta_det_center, ctime))
 
-    # Fitting fwhm_xi, fwhm_eta, phi
-    f = lambda xyt, * \
-        beam: tod_sim(xyt, p0[0], p0[1], p0[2], beam[0], beam[1], beam[2],
-                      idx_main_in, tau)
-    try:
-        popt_beam, _ = curve_fit(
-            f, xi_eta_ctime, data_main, p0=p0[3:], bounds=bounds[:, 3:])
-    except BaseException:
-        return failed_params
+        radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
+        idx_main_in = np.where(radius < radius_main)[0]
+        idx_main_out = np.where(radius > radius_main)[0]
+        xi_main = xi_det_center[idx_main_in]
+        eta_main = eta_det_center[idx_main_in]
+        data_main = data[idx_main_in]
 
-    # Updating the initial guess after fitting for beam parameters
-    p0[3:] = popt_beam[:]
+        amp = popt_pointing[0]
+        # The detector centroids are the initial positions we determined from the
+        # peak amplitude plus the fitted offsets
+        xi0_fitted = xi0 + popt_pointing[1]
+        eta0_fitted = eta0 + popt_pointing[2]
 
-    # Fitting all six parameters simultaneously
-    f = lambda xyt, *all_params: tod_sim(xyt, all_params[0], all_params[1],
-                                         all_params[2], all_params[3],
-                                         all_params[4], all_params[5],
-                                         idx_main_in, tau)
-    try:
-        popt, _ = curve_fit(f, xi_eta_ctime, data_main, p0=p0, bounds=bounds)
-    except BaseException:
-        return failed_params
+    if fit_beam is True:
+        # Fit the beam parameters
+        f = lambda xyt, * \
+            beam: tod_sim(xyt, p0[0], p0[1], p0[2], beam[0], beam[1], beam[2],
+                          idx_main_in, tau)
+        try:
+            popt_beam, _ = curve_fit(
+                f, xi_eta_ctime, data_main, p0=p0[3:], bounds=bounds[:, 3:])
+            # logger.warning(f"fitted beam {} {}".format(p0,bounds))
+        except BaseException:
+            return failed_params
 
-    # Define as noise the sigma of the data outside a region of radius 4*FWHM
+        fwhm_xi, fwhm_eta, phi = popt_beam
+
+    # Estimate the noise as the sigma of the data outside a region of
+    # radius>radius_cut
     noise = np.nanstd(data[np.where(radius > radius_cut)[0]])
-    snr = popt[0] / noise
+    snr = amp / noise
+
+    # If pointing / beam were not fitted return the initial guess
+    # for this parameters
+    if fit_pointing is False:
+        amp, xi0_fitted, eta0_fitted = p0[0], xi0, eta0
+
+    if fit_beam is False:
+        fwhm_xi, fwhm_eta, phi = p0[3:6]
 
     # Plot the raw vs fitted tod for some representative detectors
     if readout_id in representative_dets:
-        xi_det_center += popt[1]
-        eta_det_center += popt[2]
+        xi_det_center += popt_pointing[1]
+        eta_det_center += popt_pointing[2]
         radius = np.sqrt(xi_det_center ** 2 + eta_det_center ** 2)
         idx_main_in = np.where(radius < radius_main)[0]
         xi_main = xi_det_center[idx_main_in]
         eta_main = eta_det_center[idx_main_in]
         data_main = data[idx_main_in]
+
         data_sim_main = gaussian2d(
             xi_main,
             eta_main,
-            popt[0],
+            amp,
             0,
             0,
-            popt[3],
-            popt[4],
-            popt[5])
+            fwhm_xi,
+            fwhm_eta,
+            phi)
 
         plot_tods(
             readout_id,
@@ -338,38 +525,35 @@ def fit_params(
             data_sim_main,
             **kwargs)
 
-    # The detector centroids are the initial positions we determined from the
-    # peak amplitude plus fitted offsets
-    popt[1] = xi0 + popt_pointing[1] + popt[1]
-    popt[2] = eta0 + popt_pointing[2] + popt[2]
-
-    return np.array([readout_id, *popt, snr])
+    return np.array([readout_id, amp, xi0_fitted,
+                    eta0_fitted, fwhm_xi, fwhm_eta, phi, snr])
 
 
-def get_hw_positions(tele):
+def get_hw_positions(tele, band, tube=None):
     """ Get the hardware xi, eta, gamma positions and detector names
     that belong to a specific tube."""
 
     from sotodlib.sim_hardware import sim_nominal, sim_detectors_toast
 
-    freq_band = {
-        'SAT4': 'f030',
-        'SAT1': 'f090',
-        'SAT2': 'f090',
-        'SAT3': 'f230',
-        'LAT_o6': 'f030',
-        'LAT_i1': 'f090',
-        'LAT_i3': 'f090',
-        'LAT_i4': 'f090',
-        'LAT_i6': 'f090',
-        'LAT_i5': 'f230',
-        'LAT_c1': 'f230'}
+    # Tube can be defined here for the SAT but should be provided for LAT
+    tube_sat = {
+        'f030': 'SAT4',
+        'f040': 'SAT4',
+        'f090': 'SAT1',
+        'f150': 'SAT1',
+        'f230': 'SAT3',
+        'f290': 'SAT3',
+    }
+
+    if tube is None:
+        tube = tube_sat['f' + str(band).zfill(3)]
+
     hw = sim_nominal()
-    sim_detectors_toast(hw, tele)
+    sim_detectors_toast(hw, tube)
 
     qdr, det_names_hw = [], []
     for names in hw.data['detectors'].keys():
-        if freq_band[tele] in names:
+        if band in names:
             det_names_hw.append(names)
             qdr.append([hw.data['detectors'][names]['quat'][3]] +
                        list(hw.data['detectors'][names]['quat'][:3]))
@@ -380,22 +564,20 @@ def get_hw_positions(tele):
     return xi_hw, eta_hw, gamma_hw, np.array(det_names_hw)
 
 
-def plot_planet_footprints(tod, sso, tele, tube, **kwargs):
+def plot_planet_footprints(tod, sso_name, tele, tube, band, hw_pos, **kwargs):
     """ Plot the source's footprint on the focal plane """
 
     fig = plt.figure(dpi=300)
     ax = fig.add_subplot(111)
 
-    if 'xi_hw' in kwargs.keys() and 'eta_hw' in kwargs.keys():
-        xi_hw, eta_hw = kwargs['xi_hw'], kwargs['eta_hw']
-    else:
-        xi_hw, eta_hw, _, _ = get_hw_positions(tele)
+    xi_hw, eta_hw, _, dets_hw = hw_pos
     ax.plot(np.degrees(xi_hw), np.degrees(eta_hw), '.')
 
     csl = so3g.proj.CelestialSightLine.az_el(
         tod.timestamps, tod.boresight.az, tod.boresight.el, weather="typical")
     q_bore = csl.Q
-    planet = planets.SlowSource.for_named_source(sso, tod.timestamps[0] * 1.)
+    planet = planets.SlowSource.for_named_source(
+        sso_name, tod.timestamps[0] * 1.)
     ra0, dec0 = planet.pos(tod.timestamps[0])
     planet_q = so3g.proj.quat.rotation_lonlat(ra0, dec0)
     q_total = ~q_bore * planet_q
@@ -411,33 +593,26 @@ def plot_planet_footprints(tod, sso, tele, tube, **kwargs):
     plt.close()
 
 
-def make_fpu_plots(df, tele, band,
-                   input_param=None, fitted_par='pointing', **kwargs):
+def make_fpu_plots(df, hw_pos,
+                   input_param=None, fitted_par='beam', **kwargs):
     """ Make focal plane plots where the detectors are color-coded according
-        to their fitted pointing bias or fitted beam size bias with respect
+        to their (fitted pointing bias or) fitted beam size bias with respect
         to the input"""
 
-    if 'xi_hw' in kwargs.keys() and 'eta_hw' in kwargs.keys():
-       if 'dets_hw' in kwargs.keys():
-           xi_hw, eta_hw, dets_hw = kwargs['xi_hw'], kwargs['eta_hw'], kwargs['dets_hw']
-       else:
-           xi_hw, eta_hw, _, dets_hw = get_hw_positions(tele)
+    xi_hw, eta_hw, _, dets_hw = hw_pos
     df_det_idxs = [np.where(dets_hw == df['dets:readout_id'][i])[0][0]
                    for i in range(len(df['dets:readout_id']))]
     delta_xis = np.full(len(xi_hw), np.nan)
     delta_etas = np.full(len(eta_hw), np.nan)
 
-    if fitted_par == 'pointing':
-        par1, par2 = 'xi0', 'eta0'
-        x_hw_fitted, y_hw_fitted = xi_hw[df_det_idxs], eta_hw[df_det_idxs]
+    # if fitted_par == 'pointing':
+    #     par1, par2 = 'xi0', 'eta0'
+    #     x_hw_fitted, y_hw_fitted = xi_hw[df_det_idxs], eta_hw[df_det_idxs]
 
-    elif fitted_par == 'beam':
-        par1, par2 = 'fwhm_xi', 'fwhm_eta'
-        beamsize = input_param
-        x_hw_fitted, y_hw_fitted = beamsize, beamsize
-
-    else:
-        logger.warning('No plotting quantity is specified')
+    # elif fitted_par == 'beam':
+    par1, par2 = 'fwhm_xi', 'fwhm_eta'
+    beamsize = input_param
+    x_hw_fitted, y_hw_fitted = beamsize, beamsize
 
     x_df_fitted = df[par1].to_numpy().astype(float)
     y_df_fitted = df[par2].to_numpy().astype(float)
@@ -481,11 +656,8 @@ def plot_tods(readout_id, xi_main, eta_main, data_main, data_sim_main,
     show the detector's position on the fpu provided a set
     of detector names"""
 
-    xi_hw, eta_hw, dets_hw = kwargs['xi_hw'], kwargs['eta_hw'], kwargs['dets_hw']
-    det_idx = np.where(dets_hw == readout_id)[0][0]
-
-    fig, (ax1, ax2, ax3) = plt.subplots(
-        1, 3, figsize=(10, 4), width_ratios=[1, 1, 2], dpi=300)
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=(10, 4), dpi=300)
     ax1.plot(xi_main, data_main, lw=2, label='Raw data')
     ax1.plot(xi_main, data_sim_main, '--', lw=1)
     ax1.set_xlabel(r"$\xi$[deg]")
@@ -496,10 +668,10 @@ def plot_tods(readout_id, xi_main, eta_main, data_main, data_sim_main,
     ax2.set_xlabel(r"$\eta$[deg]")
     ax2.set_ylabel('T(K)')
     ax2.legend(loc='upper left', frameon=False)
-    ax3.scatter(xi_hw, eta_hw, c='gray')
-    ax3.scatter(xi_hw[det_idx], eta_hw[det_idx], c='r')
-    ax3.set_xlabel(r"$\xi$[rad]")
-    ax3.set_ylabel(r"$\eta$[rad]")
+    # ax3.scatter(xi_hw, eta_hw, c='gray')
+    # ax3.scatter(xi_hw[det_idx], eta_hw[det_idx], c='r')
+    # ax3.set_xlabel(r"$\xi$[rad]")
+    # ax3.set_ylabel(r"$\eta$[rad]")
     fig.subplots_adjust(wspace=0.31)
     plt.savefig(opj(kwargs['img_dir'], 'tod_det_' +
                     readout_id +
@@ -509,9 +681,191 @@ def plot_tods(readout_id, xi_main, eta_main, data_main, data_sim_main,
     plt.close()
 
 
+@dataclass
+class QuickFitResult:
+    """
+    results for pointing_quickfit function
+
+    Args
+    ----
+    xi: float
+        fitted detector xi [rad] relative to boresight center
+    eta: float
+        fitted detector eta [rad] relative to boresight center
+    amp: float
+        Amplitude used in the fit. This will be in the same units as
+        ``am.signal``, which is generally detector phase.
+    fwhm: float
+        gaussian FHWM [rad] used in the fit.
+    fit_aman: AxisManager
+        AxisManager containing xi and eta of source relative to boresight center,
+        fitted signal, and model.
+    """
+    xi: float
+    eta: float
+    amp: float
+    fwhm: float
+    fit_aman: core.AxisManager
+
+def pointing_quickfit(
+        am_full, chan_idx, downsample_factor=20, bandpass_range=(0.01, 1.8),
+        fwhm=np.deg2rad(0.5), max_rad=None
+    ):
+    """
+    Fits pointing for a bright source such as the moon for a single detector.
+
+    Args
+    -----
+    am_full: AxisManager
+        AxisManager containing unfiltered detector signal. This won't be modified.
+    chan_idx: int
+        Channel index in the axis manager to fit
+    downsample_factor: int
+        If set, the signal and model will be downsampled by this factor when fitting.
+    bandpass_range: tuple[float, float]
+        Low and high cutoff frequencies [Hz, Hz] for bandpass. If either are None, will not apply
+        the corresponding highpass/lowpass.
+    fwhm: float
+        Full width half max [radians] of the beam to use for the model. This should be roughly the beam
+        size of the telescope.
+    max_rad: float
+        Only data where the angular distance [radians] between the src and the estimated det location
+        is less than ``max_rad`` will be used in the fit. If None, will use 5 *
+        fwhm.
+
+    Returns
+    --------
+        result: QuickFitResult
+            Result object containing fitted xi and eta, along with amp and fwhm
+            used in the fit.
+    """
+
+    if max_rad is None:
+        max_rad = 5 * fwhm
+
+    am = am_full.restrict('dets', [am_full.dets.vals[chan_idx]], in_place=False)
+
+    def filter_tod(am, signal_name='signal'):
+        filt_kw = dict(
+            detrend='linear', resize='zero_pad', axis_name='samps',
+            signal_name=signal_name, time_name='timestamps'
+        )
+        if bandpass_range[0] is not None:
+            highpass = high_pass_sine2(cutoff=bandpass_range[0])
+            am[signal_name] = fourier_filter(am, highpass, **filt_kw)
+        if bandpass_range[1] is not None:
+            lowpass = low_pass_sine2(cutoff=bandpass_range[1])
+            am[signal_name] = fourier_filter(am, lowpass, **filt_kw)
+        return am
+
+    filter_tod(am)
+    sl = slice(None, None, downsample_factor)
+
+    ts = am.timestamps[sl]
+    az = am.boresight.az[sl]
+    el = am.boresight.el[sl]
+    sig = am.signal[0, sl]
+
+    xieta_src_rel_fp, xieta_det_rel_fp_est = get_xieta_src_centered(ts, az, el, sig, 'moon', 5)
+    xieta_src_rel_det = xieta_src_rel_fp - xieta_det_rel_fp_est[:, None]
+
+    m = np.sqrt(xieta_src_rel_det[0] ** 2 + xieta_src_rel_det[1] ** 2) < max_rad
+    amp = np.ptp(sig[m]) * 3
+
+    model_tod = gaussian2d(
+        xieta_src_rel_det[0, m], xieta_src_rel_det[1, m], amp, 0, 0, fwhm, fwhm, 0
+    )
+    fit_am = core.AxisManager().wrap('timestamps', ts[m], [(0, core.IndexAxis('samps'))])
+    fit_am.wrap('signal', np.array([sig[m]]), [(0, deepcopy(am.dets)), (1, 'samps')])
+    fit_am.wrap('model', np.array([model_tod]), [(0, 'dets'), (1, 'samps')])
+
+    def fit_func(xi0, eta0):
+        fit_am.model[0] = gaussian2d(
+            xieta_src_rel_det[0, m], xieta_src_rel_det[1, m], amp, xi0, eta0, fwhm, fwhm, 0
+        )
+        filter_tod(fit_am, signal_name='model')
+        return np.sum((fit_am.signal[0] - fit_am.model[0])**2)
+
+    res = minimize(lambda x: fit_func(*x), [0, 0])
+
+    xi_det_rel_fp = xieta_det_rel_fp_est[0] + res.x[0]
+    eta_det_rel_fp = xieta_det_rel_fp_est[1] + res.x[1]
+
+    fit_am.model[0] = gaussian2d(
+        xieta_src_rel_det[0, m], xieta_src_rel_det[1, m], amp, res.x[0], res.x[1], fwhm, fwhm, 0
+    )
+    fit_am.wrap('xi', xieta_src_rel_fp[0, m])
+    fit_am.wrap('eta', xieta_src_rel_fp[1, m])
+
+    result = QuickFitResult(
+        xi=xi_det_rel_fp,
+        eta=eta_det_rel_fp,
+        amp=amp,
+        fwhm=fwhm,
+        fit_aman=fit_am
+    )
+    return result
+
+def plot_quickfit_res(result: QuickFitResult, eta_scale=50):
+    """
+    Makes cool pseudo-3d source plot
+    """
+    fig, ax = plt.subplots()
+    fit = result.fit_aman
+    ax.plot(fit.xi, fit.signal[0] + fit.eta* eta_scale, label='Signal')
+    ax.plot(fit.xi, fit.model[0] + fit.eta * eta_scale, label='Model', alpha=0.8)
+    ax.legend()
+    ax.set_xlabel("Xi (rad, relative to boresight)")
+    ax.set_ylabel("Amplitude + scale * eta")
+    return fig, ax
+
+
+def quickfit_and_save_pointing(output_path, am, chan_idxs, show_pb=False, h5_address='fit_results'):
+    """
+    Run pointing_quickfit for a list of dets and save results to a ResultSet
+
+    Args
+    -----
+    output_path: str
+        Path to h5 file to save results
+    am: AxisManager
+        Axis manager with unfiltered TODs
+    chan_idxs: list
+        List of channel indexes of the axis manager to fit pointing
+    show_pb: bool
+        If True, enable tqdm progress bar
+    h5_address: str
+        Address in the h5 to save result set to.
+    """
+    dtype = [
+        ('readout_id', '<U40'),
+        ('xi', 'f8'),
+        ('eta', 'f8'),
+    ]
+    res_arr = np.array([], dtype=dtype)
+    rset= core.metadata.ResultSet.from_friend(res_arr)
+    for i in tqdm(chan_idxs, disable=(not show_pb)):
+        try:
+            result = pointing_quickfit(am, i)
+        except Exception:
+            continue
+        rset.append(
+            {'readout_id': am.det_info.readout_id[i], 'xi': result.xi, 'eta': result.eta}
+        )
+        write_dataset(rset, output_path, h5_address, overwrite=True)
+    return rset
+
+
 def main(
     ctx_file,
     obs_id,
+    sso_name,
+    band,
+    tele,
+    tube,
+    ufm,
+    max_samps,
+    scan_rate,
     config_file_path,
     outdir,
     highpass,
@@ -519,8 +873,12 @@ def main(
     lowpass,
     cutoff_low,
     threshold_src,
+    distance,
     do_abs_cal,
-    representative_dets,
+    fit_pointing,
+    fit_beam,
+    pointing_dict=None,
+    representative_dets='no_detectors',
     test_mode=False,
     plot_results=False,
 ):
@@ -528,7 +886,6 @@ def main(
     Initiate an MPI environment and fit a simulation in the time domain
     """
     # Two local imports, to avoid docs depenency.
-    from mpi4py import MPI
     import pandas as pd
 
     kwargs = dict()
@@ -542,92 +899,122 @@ def main(
 
     t1 = time.time()
 
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    ntask = comm.Get_size()
+    # Get the initial parameters
+    init_params = define_fit_params(
+        config_file_path, band, tele, tube, sso_name)
 
+    # Load prior on pointing if provided
+    if pointing_dict is not None:
+        prior_pointing = pickle.load(open(pointing_dict, 'rb'))
+    else:
+        prior_pointing = None
+
+    # Set context, ufm, chunk size
     ctx = core.Context(ctx_file)
     obs = ctx.obsdb.query()
 
-    logger.warning(f'Loading {obs_id} in task {rank}')
+    stream_id = f'ufm_{ufm}'
+    meta = ctx.get_meta(obs_id)
 
-    obs_idx = np.where(obs['obs_id'] == obs_id)[0][0]
-    sso_name = obs[obs_idx]['target']
-    tele = obs[obs_idx]['telescope']
-    tube = obs[obs_idx]['tube_slot']
-    tod = ctx.get_obs(obs_id, no_signal=False)
-    rd_ids = tod.dets.vals
+    if 'stream_id' in meta.det_info:
+        meta.restrict(
+            'dets',
+            meta.dets.vals[meta.det_info.stream_id == stream_id]
+        )
 
-    # Get the initial parameters
-    init_params = define_fit_params(config_file_path, tele[:3], tube, sso_name)
-    ctime, az, el = tod.timestamps, tod.boresight.az, tod.boresight.el
+    if 'n_samps' in meta.obs_info:
+        n_samps = meta.obs_info.n_samples
+    else:
+        d1 = datetime.fromtimestamp(meta.obs_info.start_time)
+        d2 = datetime.fromtimestamp(meta.obs_info.stop_time)
+        # If we are looking at simulation we need info on the scan
+        # rate to estimate total number of samples from metadata
+        n_samps = (d2 - d1).seconds * scan_rate
 
-    nrd = len(rd_ids)
-    nsample_task = nrd // ntask + 1
-    rd_idx_rng = np.arange(rank * nsample_task,
-                           min((rank + 1) * nsample_task, nrd))
+    n_chunks = n_samps // max_samps
 
-    df = pd.DataFrame(
-        columns=[
-            "dets:readout_id",
-            "amp",
-            "xi0",
-            "eta0",
-            "fwhm_xi",
-            "fwhm_eta",
-            "phi",
-            "snr",
-        ], index=rd_idx_rng,)
+    for i in range(n_chunks - 1):
+        start = max_samps * i
+        stop = max_samps * (i + 1)
+        if i == max_samps - 1:
+            stop = n_samps
+        tod = ctx.get_obs(meta, samples=[start, stop], no_signal=False)
 
-    # Load signal for only my dets.
-    tod = ctx.get_obs(obs_id, dets=np.array(rd_ids)[rd_idx_rng])
+        logger.warning(f'Loading {obs_id} of {max_samps} samples for {ufm}')
 
-    # Filter
-    if highpass and cutoff_high is not None:
-        tod.signal = fourier_filter(
+        ctime, az, el = tod.timestamps, tod.boresight.az, tod.boresight.el
+
+        # Filter
+        if highpass and cutoff_high is not None:
+            tod.signal = fourier_filter(
+                tod,
+                filt_function=high_pass_sine2(
+                    cutoff=cutoff_high),
+                detrend='linear',
+                resize='zero_pad',
+                axis_name='samps',
+                signal_name='signal',
+                time_name='timestamps')
+
+        if lowpass and cutoff_low is not None:
+            tod.signal = fourier_filter(
+                tod,
+                filt_function=low_pass_sine2(
+                    cutoff=cutoff_low),
+                detrend='linear',
+                resize='zero_pad',
+                axis_name='samps',
+                signal_name='signal',
+                time_name='timestamps')
+
+        tod.signal[tod.signal < 0] = 0
+
+        # Choose one band and calibrate to pW
+        if 'det_match' in tod and 'det_cal' in tod:
+            tod.restrict('dets',
+                         tod.dets.vals[tod.det_match.det_bandpass == band])
+            tod.signal = np.multiply(tod.signal.T, tod.det_cal.phase_to_pW).T
+
+        # Find detectors with source
+        dets_w_src = find_source(
             tod,
-            filt_function=high_pass_sine2(
-                cutoff=cutoff_high),
-            detrend='linear',
-            resize='zero_pad',
-            axis_name='samps',
-            signal_name='signal',
-            time_name='timestamps')
+            sso_name=sso_name,
+            height=threshold_src,
+            distance=distance)
+        rd_ids = tod.dets.vals[dets_w_src]
+        logger.warning(f'got good dets')
 
-    if lowpass and cutoff_low is not None:
-        tod.signal = fourier_filter(
-            tod,
-            filt_function=low_pass_sine2(
-                cutoff=cutoff_low),
-            detrend='linear',
-            resize='zero_pad',
-            axis_name='samps',
-            signal_name='signal',
-            time_name='timestamps')
+        if len(dets_w_src) == 0:
+            continue
 
-    if representative_dets != 'no detectors':
-        xi_hw, eta_hw, _, dets_hw = get_hw_positions(tele)
-        kwargs['xi_hw'], kwargs['eta_hw'], kwargs['dets_hw'] = xi_hw, eta_hw, dets_hw
+        # Initiate a dataframe
+        full_df = pd.DataFrame(
+            columns=[
+                "dets:readout_id",
+                "amp",
+                "xi0",
+                "eta0",
+                "fwhm_xi",
+                "fwhm_eta",
+                "phi",
+                "snr",
+            ], index=rd_ids,)
 
-    count = 0
-    for _i, rd_idx in enumerate(rd_idx_rng):
-        rd_id = rd_ids[rd_idx]
-        params = fit_params(rd_id, tod.signal[_i, :],
-                            ctime, az, el,
-                            sso_name, threshold_src, init_params,
-                            representative_dets, **kwargs)
-        snr = float(params[-1])
-        logger.info(f'Solved {rd_idx:<5d} "{rd_id}" with S/N={snr:.2f}')
-        df.loc[rd_idx, :] = np.array(params)
-        count += 1
-        if test_mode and count >= 2:
-            break
-    all_dfs = comm.gather(df, root=0)
-
-    if rank == 0:
-        full_df = pd.concat(all_dfs)
-        full_df = full_df.dropna(subset=['snr'])
-        full_df = full_df.set_index(full_df["dets:readout_id"])
+        count = 0
+        for _i, rd_idx in enumerate(dets_w_src):
+            logger.warning(f'Starting to fit the detectors')
+            rd_id = rd_ids[_i]
+            params = fit_params(rd_id, tod.signal[rd_idx, :],
+                                ctime, az, el, band,
+                                sso_name, threshold_src, distance, init_params,
+                                fit_pointing, fit_beam, prior_pointing,
+                                representative_dets, **kwargs)
+            snr = float(params[-1])
+            logger.info(f'Solved {rd_idx:<5d} "{rd_id}" with S/N={snr:.2f}')
+            full_df.loc[_i, :] = np.array(params)
+            count += 1
+            if test_mode and count >= 2:
+                break
 
         new_dtypes = {
             "dets:readout_id": str,
@@ -639,9 +1026,13 @@ def main(
             "phi": np.float64,
             "snr": np.float64,
         }
+
         full_df = full_df.astype(new_dtypes)
-        full_df.to_hdf(opj(outdir, 'parameter_fits.h5'),
+
+        # Store dataframe
+        full_df.to_hdf(opj(outdir, 'parameter_fits_' + obs_id + '.h5'),
                        key='full_df', mode='w')
+
         # calculating relative and absolute calibration
         amp = full_df.amp.values
         full_df["rel_cal"] = amp / np.mean(amp)
@@ -675,14 +1066,16 @@ def main(
         print("Time to run fittings for %s is %.2f seconds." %
               (obs_id, t2 - t1))
 
+        # Plot planet footprint, bias across focal plane
         if plot_results:
-            plot_planet_footprints(tod, sso_name, tele, tube, **kwargs)
-            make_fpu_plots(full_df, tele, tube,
-                           input_param=None, fitted_par='pointing', **kwargs)
+            hw_pos = get_hw_positions(tele, band)
+            plot_planet_footprints(
+                tod, sso_name, tele, tube, band, hw_pos, **kwargs)
+            # make_fpu_plots(full_df, tele, band,
+            #                input_param=None, fitted_par='pointing', **kwargs)
             make_fpu_plots(
                 full_df,
-                tele,
-                tube,
+                hw_pos=hw_pos,
                 input_param=init_params[2],
                 fitted_par='beam',
                 **kwargs)
@@ -708,6 +1101,70 @@ def get_parser(parser=None):
         required=True,
         help="Observation id in the context file.",
         type=str,
+    )
+
+    parser.add_argument(
+        "--sso_name",
+        action="store",
+        dest="sso_name",
+        required=True,
+        help="Source name.",
+        type=str,
+    )
+
+    parser.add_argument(
+        "--band",
+        action="store",
+        dest="band",
+        required=True,
+        help="Frequency band.",
+        type=str,
+    )
+
+    parser.add_argument(
+        "--tele",
+        action="store",
+        dest="tele",
+        required=True,
+        help="Telescope name (SAT/LAT).",
+        type=str,
+    )
+
+    parser.add_argument(
+        "--tube",
+        action="store",
+        dest="tube",
+        required=True,
+        help="Telescope tube.",
+        type=str,
+    )
+
+    parser.add_argument(
+        "--ufm",
+        action="store",
+        dest="ufm",
+        required=True,
+        help="Telescope ufm.",
+        type=str,
+    )
+
+    parser.add_argument(
+        "--max_samps",
+        action="store",
+        dest="max_samps",
+        required=True,
+        help="Number of maximum samples to load",
+        type=int,
+    )
+
+    parser.add_argument(
+        "--scan_rate",
+        action="store",
+        dest="scan_rate",
+        required=False,
+        default=200,
+        help="Scan rate, required for simulations",
+        type=int,
     )
 
     parser.add_argument(
@@ -770,8 +1227,16 @@ def get_parser(parser=None):
         action="store",
         dest="threshold_src",
         default=10,
-        help="The max amplitude required for the peak finding, \
-              given as times the standard deviation of the data.",
+        help="The max amplitude required for the peak finding",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--distance",
+        action="store",
+        dest="distance",
+        default=50000,
+        help="The max amplitude required for the peak finding",
         type=float,
     )
 
@@ -784,10 +1249,35 @@ def get_parser(parser=None):
     )
 
     parser.add_argument(
+        "--fit_pointing",
+        action="store_true",
+        dest="fit_pointing",
+        default=False,
+        help="Fit the pointing parameters.",
+    )
+
+    parser.add_argument(
+        "--fit_beam",
+        action="store_true",
+        dest="fit_beam",
+        default=False,
+        help="Fit the beam parameters.",
+    )
+
+    parser.add_argument(
+        "--pointing_dict",
+        action="store",
+        dest="pointing_dict",
+        required=False,
+        type=str,
+        help="Path to a pickle file of a pointing dictionary.",
+    )
+
+    parser.add_argument(
         "--representative_dets",
         action="store",
         dest="representative_dets",
-        default='no detectors',
+        default='no_detectors',
         nargs='+',
         help="Representative detectors across the focal plane whose \
               raw and fitted data should be plotted, given as a list of \

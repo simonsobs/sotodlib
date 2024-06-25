@@ -22,7 +22,14 @@ def setup_az_intervals(operators):
         None
 
     """
-    operators.append(toast.ops.AzimuthIntervals(name="az_intervals", enabled=False))
+    operators.append(
+        toast.ops.AzimuthIntervals(
+            name="az_intervals",
+            cut_short=True,
+            short_limit=5.0 * u.second,
+            enabled=False,
+        )
+    )
 
 
 @workflow_timer

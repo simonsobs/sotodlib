@@ -7,6 +7,7 @@ tod_ops submodule
 This submodule includes functions for processing time-ordered signals,
 including time and Fourier domain filtering, PCA, gap-filling, etc.
 
+.. _fourier-filters:
 
 Fourier space filters
 =====================
@@ -140,6 +141,7 @@ Class and function references should be auto-generated here.
 
 .. autofunction:: sotodlib.tod_ops.gapfill.get_contaminated_ranges
 
+.. _pca-background:
 
 tod_ops.pca
 ===========
@@ -165,14 +167,24 @@ using this submodule.
 tod_ops.jumps
 =============
 
-Functions to find jumps in data. The jumps are found by taking the cumulative
-sum of mean subtracted data (which may be filtered) and looking for peaks in the
-output. Taking the cumulative sum is functionally the same as convolving with
-an unit step, so it is acting as a matched filter.
+Functions to find and fix jumps in data.
+There are currently three jump finders included here each targeting a different use case:
 
-This jumpfinder supports recursion, this is a feature intended to find smaller jumps
-hiding between larger jumps that skew peak finding statistics.
-The recursive calls to the jumpfinder are not fully vectorized, so using it can hurt performance.
+* :func:`sotodlib.tod_ops.twopi_jumps`: For jumps that are a multiple of 2pi, these are a byproduct of the readout.
+* :func:`sotodlib.tod_ops.slow_jumps`: For things that look like jumps when zoomed out, but happen on longer time scales (ie: a short unlock, timing issues, etc.). 
+* :func:`sotodlib.tod_ops.find_jumps`: For all other jumps, note here that we expect these to be "true" jumps and happen in a small number of samples. 
+
+
+When running multiple jump finders in a row it is advisible for performance reasons to cache the noise level used to compute the thresholds
+(ie: the output of :func:`sotodlib.tod_ops.std_est`) to avoid recomputing it. This can then be used to pass in variables like `min_size` and `abs_thresh`. 
+Another way to increase performance is the set the `NUM_FUTURES` system variable to control how many futures are used to parallelize jump finding and fixing
+(currently only used by :func:`sotodlib.tod_ops.find_jumps` and :func:`sotodlib.tod_ops.jumpfix_subtract_heights`).
+Remember that at a certain point the overhead from increased parallelization will be greater than the speedup, so use with caution.
+
+Historically the jump finder included options to do multiple passes with recursion and/or iteration.
+This was because in very jumpy data smaller jumps can be hard enough to find smaller jumps near large jumps.
+This was removed for the practical reason that the detectors that this helps with usually have low enough data quality that they should be cut anyways.
+If you would like to use iterative jump finding you can do so with a for loop or similar but remember to jumpfix and gapfill between each itteration.
 
 .. automodule:: sotodlib.tod_ops.jumps
    :members:

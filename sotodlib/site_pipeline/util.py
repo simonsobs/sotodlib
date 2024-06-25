@@ -244,7 +244,7 @@ class _ReltimeFormatter(logging.Formatter):
             datefmt = '%8.3f'
         return datefmt % (record.created - self.start_time)
 
-def init_logger(name, announce=''):
+def init_logger(name, announce='', verbosity=2):
     """Configure and return a logger for site_pipeline elements.  It is
     disconnected from general sotodlib (propagate=False) and displays
     relative instead of absolute timestamps.
@@ -252,22 +252,36 @@ def init_logger(name, announce=''):
     """
     logger = logging.getLogger(name)
 
+    if verbosity == 0:
+        level = logging.ERROR
+    elif verbosity == 1:
+        level = logging.WARNING
+    elif verbosity == 2:
+        level = logging.INFO
+    elif verbosity == 3:
+        level = logging.DEBUG
+
     # add handler only if it doesn't exist
     if len(logger.handlers) == 0:
-      ch = logging.StreamHandler(sys.stdout)
-      formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
+        ch = logging.StreamHandler(sys.stdout)
+        formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
 
-      ch.setLevel(logging.INFO)
-      ch.setFormatter(formatter)
-      logger.addHandler(ch)
+        ch.setLevel(level)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+        i, r = formatter.start_time // 1, formatter.start_time % 1
+        text = (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(i))
+              + (',%03d' % (r*1000)))
+        logger.info(f'{announce}Log timestamps are relative to {text}')
+    else:
+        for handler in logger.handlers:
+          if isinstance(handler, logging.StreamHandler):
+              handler.setLevel(level)
+              break
 
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
 
-    i, r = formatter.start_time // 1, formatter.start_time % 1
-    text = (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(i))
-            + (',%03d' % (r*1000)))
-    logger.info(f'{announce}Log timestamps are relative to {text}')
 
     return logger
 

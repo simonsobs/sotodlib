@@ -274,6 +274,12 @@ Planet Mapmaking support
 .. automodule:: sotodlib.coords.planets
    :members:
 
+Mapmaking for HWP data
+----------------------
+
+.. automodule:: sotodlib.coords.demod
+   :members:
+
 Local coordinate systems
 ------------------------
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2023 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -89,6 +89,7 @@ class SOSite(GroundSite):
         lat=SITES["so"].lat * u.degree,
         lon=SITES["so"].lon * u.degree,
         alt=SITES["so"].elev * u.meter,
+        weather="atacama",
         **kwargs,
     ):
         super().__init__(
@@ -126,6 +127,9 @@ class SOFocalplane(Focalplane):
         thinfp (int):  The factor by which to reduce the number of detectors.
         creation_time (float):  Optional timestamp to use when building readout_id.
         comm (MPI.Comm):  Optional MPI communicator.
+        apply_net_corr (bool):  Degrade NETs according to the correlation factors.
+            If False, the correlation factors are just recorded in the instrument
+            model.
 
     """
 
@@ -143,6 +147,7 @@ class SOFocalplane(Focalplane):
         thinfp=None,
         creation_time=None,
         comm=None,
+        apply_net_corr=True,
     ):
         log = Logger.get()
         meta = dict()
@@ -338,13 +343,16 @@ class SOFocalplane(Focalplane):
             )
             # Get noise parameters.  If detector-specific entries are
             # absent, use band averages
-            nets.append(
-                get_par_float(det_data, "NET", band_data["NET"])
-                * 1.0e-6
-                * u.K
-                * u.s**0.5
+            net_corr = get_par_float(
+                det_data, "NET_corr", band_data["NET_corr"]
             )
-            net_corrs.append(get_par_float(det_data, "NET_corr", band_data["NET_corr"]))
+            net = get_par_float(det_data, "NET", band_data["NET"]) \
+                * 1.0e-6 * u.K * u.s**0.5
+            if apply_net_corr:
+                net *= net_corr
+                net_corr = 1.0
+            nets.append(net)
+            net_corrs.append(net_corr)
             fknees.append(get_par_float(det_data, "fknee", band_data["fknee"]) * u.mHz)
             fmins.append(get_par_float(det_data, "fmin", band_data["fmin"]) * u.mHz)
             alphas.append(get_par_float(det_data, "alpha", band_data["alpha"]))

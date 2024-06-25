@@ -1,9 +1,9 @@
-from typing import Optional
+import os
 import traceback
 import argparse
-
+import datetime as dt
+from typing import Optional
 from sotodlib.io.imprinter import Imprinter
-
 
 def main(config: str):
     """Make books based on imprinter db
@@ -13,13 +13,17 @@ def main(config: str):
     config : str
         path to imprinter configuration file
     """
-    imprinter = Imprinter(config, db_args={'connect_args': {'check_same_thread': False}})
+    imprinter = Imprinter(
+        config, 
+        db_args={'connect_args': {'check_same_thread': False}}
+    )
+
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
     
     print(f"Found {len(unbound_books)} unbound books and "
-          f"{len(already_failed_books)} failed books")
+        f"{len(already_failed_books)} failed books")
     for book in unbound_books:
         print(f"Binding book {book.bid}")
         try:
@@ -47,7 +51,11 @@ def main(config: str):
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
-    parser.add_argument('config', type=str, help="Path to imprinter configuration file")
+    parser.add_argument(
+        'config', 
+        type=str, 
+        help="Path to imprinter configuration file"
+    )
     parser.add_argument('output_root', type=str, help="Root path of the books")
     return parser
 
