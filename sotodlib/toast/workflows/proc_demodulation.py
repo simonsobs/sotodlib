@@ -11,6 +11,7 @@ from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
 from .job import workflow_timer
+from .proc_noise_est import select_current_noise_model
 
 
 def setup_demodulate(operators):
@@ -77,27 +78,7 @@ def demodulate(job, otherargs, runargs, data):
         return data
 
     # The pre-demodulation noise model to use
-    if job_ops.noise_estim.enabled and job_ops.noise_estim_fit.enabled:
-        # We have a noise estimate
-        log.info_rank(
-            "Demodulation using estimated noise model",
-            comm=data.comm.comm_world,
-        )
-        noise_model = job_ops.noise_estim_fit.out_model
-    else:
-        have_noise = True
-        for ob in data.obs:
-            if "noise_model" not in ob:
-                have_noise = False
-        if have_noise:
-            log.info_rank(
-                "Demodulation using noise model from data files",
-                comm=data.comm.comm_world
-            )
-            noise_model = "noise_model"
-        else:
-            # Use the synthetic elevation weighted model
-            noise_model = "elevation_model"
+    noise_model = select_current_noise_model(job, otherargs, runargs, data)
 
     # The Demodulation operator is special because it returns a
     # new TOAST data object
