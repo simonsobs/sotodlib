@@ -171,6 +171,12 @@ class Imprinter:
           librarian_conn: string (optional)
           build_hk: True 
           build_det: True
+          hk_fields:
+            az: acu.acu_udp_stream.Corrected_Azimuth
+            el: acu.acu_udp_stream.Corrected_Elevation
+            boresight: acu.acu_udp_stream.Corrected_Boresight
+            az_mode:  acu.acu_status.Azimuth_mode
+            hwp_freq: hwp-bbb-e1.HWPEncoder.approx_hwp_freq
 
           tel_tubes:
             tel_tube1:
@@ -645,10 +651,14 @@ class Imprinter:
             filedb = self.get_files_for_book(book)
             obsdb = self.get_g3tsmurf_obs_for_book(book)
             readout_ids = self.get_readout_ids_for_book(book)
+            hk_fields = self.config.get('hk_fields')
+
+            if hk_fields is None:
+                raise ValueError("`hk_fields` entry required for bookbinding.")
 
             # bind book using bookbinder library
             bookbinder = BookBinder(
-                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
+                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path, hk_fields,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
