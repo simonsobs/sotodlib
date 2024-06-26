@@ -56,18 +56,60 @@ import pixell.fft
 pixell.fft.engine = "fftw"
 
 
+def preprocess(job, otherargs, runargs, data):
+    """Apply flags and cuts based on data quality."""
+    log = toast.utils.Logger.get()
+    job_ops = job.operators
+
+    if otherargs.preprocess_copy:
+        prename = "preprocess"
+        toast.ops.Copy(detdata=[(defaults.det_data, prename)]).apply(data)
+    else:
+        prename = defaults.det_data
+
+    def _run_pre_op(op, wrkf):
+        save_op_detdata = op.det_data
+        op.det_data = prename
+        wrkf(job, otherargs, runargs, data)
+        op.det_data = save_op_detdata
+
+    # Ensure that we run the HWPSS filter for preprocessing, even if we
+    # are not using it on the original data.
+    if otherargs.preprocess_copy:
+        save_hwpf_state = job_ops.hwpfilter.enabled
+        job_ops.hwpfilter.enabled = True
+    _run_pre_op(job_ops.hwpfilter, wrk.filter_hwpss)
+    if otherargs.preprocess_copy:
+        job_ops.hwpfilter.enabled = save_hwpf_state
+
+    _run_pre_op(job_ops.simple_jumpcorrect, wrk.simple_jumpcorrect)
+
+    _run_pre_op(job_ops.simple_deglitch, wrk.simple_deglitch)
+
+    _run_pre_op(job_ops.diff_noise_cut, wrk.flag_diff_noise_outliers)
+
+    _run_pre_op(job_ops.noise_cut, wrk.flag_noise_outliers)
+
+    if otherargs.preprocess_copy:
+        toast.ops.Delete(detdata=[prename,]).apply(data)
+        # FIXME:  Although the glitches / jumps are flagged, the original
+        # data has not been filled / corrected.  Not sure how to do this
+        # without applying the hwpfilter to the original data, which we
+        # might want to avoid if solving for that template in the mapmaking.
+
+
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
+    job_ops = job.operators
+    job_tmpl = job.templates
 
-    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
-    wrk.simple_deglitch(job, otherargs, runargs, data)
+    # Preprocess data to get flags / cuts
+    preprocess(job, otherargs, runargs, data)
 
-    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
-    wrk.flag_noise_outliers(job, otherargs, runargs, data)
+    # Now apply preprocessing to good detectors
     wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
     wrk.raw_statistics(job, otherargs, runargs, data)
 
-    wrk.filter_hwpss(job, otherargs, runargs, data)
     wrk.filter_common_mode(job, otherargs, runargs, data)
     wrk.filter_ground(job, otherargs, runargs, data)
     wrk.filter_poly1d(job, otherargs, runargs, data)
@@ -151,6 +193,13 @@ def main():
         default=False,
         action="store_true",
         help="Map each interval separately.",
+    )
+    parser.add_argument(
+        "--preprocess_copy",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Perform preprocessing on a copy of the data.",
     )
 
     # The operators and templates we want to configure from the command line

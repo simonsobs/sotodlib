@@ -521,6 +521,10 @@ def compute_boresight_pointing(
 
         if gcomm is None:
             all_data = local_data
+            if nnz == 1:
+                final_data = all_data
+            else:
+                final_data = all_data.reshape((-1, nnz))
         else:
             counts = [x * nnz for x in sample_count]
             displ = [x * nnz for x in sample_displ]
