@@ -95,7 +95,7 @@ def get_t2p_coeffs(aman,
     errorsU = np.zeros(aman.dets.count)
     redchi2sU = np.zeros(aman.dets.count)
     
-    for di, det in enumerate(tqdm(aman.dets.vals)):
+    for di, det in enumerate(aman.dets.vals):
         mask_ds_det = mask_ds[di]
         ts_ds_det = ts_ds[mask_ds_det]
         T_lpf_ds_det = T_lpf_ds[di, mask_ds_det]
@@ -149,7 +149,7 @@ def get_t2p_coeffs(aman,
     if subtract_sig:
         subtract_t2p(aman, out_aman)
     if merge_stats:
-        aman.wrap(t2p_stats_name, out_aman, [(0, 'dets')])
+        aman.wrap(t2p_stats_name, out_aman)
     
     return out_aman
 
