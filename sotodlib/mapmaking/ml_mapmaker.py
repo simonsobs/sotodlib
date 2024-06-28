@@ -28,6 +28,25 @@ class MLMapmaker:
         self.ready        = False
 
     def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None):
+        """
+        Add observations that will be used for mapmaking
+
+        Arguments
+        ---------
+        id : str
+            Observation ID
+        obs: AxisManager
+            The observation(s) to be used for mapmaking.
+        noise_model: sotodlib.mapmaking.Nmat or None, optional
+            If a noise model is passed, the model in the Demodmapmaker object will be overriden,
+            if None, the default model defined in the Demodmapmaker object is used.
+        signal_estimate: float32
+            An estimate of the TOD value, that is subtracted out from the 
+            provided TOD before caculated the noise model. 
+        
+        """
+
+
         # Prepare our tod
         ctime  = obs.timestamps
         srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
@@ -73,6 +92,7 @@ class MLMapmaker:
         self.ready = True
 
     def A(self, x):
+
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
         #t0 = time()
@@ -108,6 +128,10 @@ class MLMapmaker:
         return result
 
     def M(self, x):
+        """
+        Pre-conditioner matrix.
+        """
+
         #t1 = time()
         iwork = self.dof.unzip(x)
         #t2 = time(); print(f" M    iwork : {t2-t1:8.3f}s", flush=True)
@@ -116,6 +140,21 @@ class MLMapmaker:
         return result
 
     def solve(self, maxiter=500, maxerr=1e-6, x0=None):
+        """
+        Function containing the Conjugate Gradient (CG) solver
+
+        Arguments
+        ---------
+        maxiter: int
+            Maximum number of iterations the solver will solve over
+            before ceasing 
+
+        maxerr: float
+            If the model error is found to be below this value, the CG
+            solver stops iterating.
+        """
+
+
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         if x0 is not None: x0 = self.dof.zip(*x0)
