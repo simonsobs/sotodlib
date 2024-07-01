@@ -8,6 +8,7 @@
 
 from .act_sign import ActSign
 from .corotator import CoRotator
+from .drone_source import DroneSource
 from .sim_sso import SimSSO
 from .sim_catalog import SimCatalog
 from .sim_hwpss import SimHWPSS
