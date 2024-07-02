@@ -11,7 +11,8 @@ from pixell import enmap, utils, tilemap, bunch
 import so3g.proj
 
 from .. import coords
-from .utilities import recentering_to_quat_lonlat, evaluate_recentering
+from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper
+from .noise_model import NmatWhite
 
 class DemodMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, comps='TQU', singlestream=False):
