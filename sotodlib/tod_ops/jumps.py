@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from pixell.utils import block_expand, block_reduce, moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import matched_jumps, matched_jumps64, clean_flag, scale_jumps, scale_jumps64
+from so3g import matched_jumps, matched_jumps64, clean_flag, find_quantized_jumps, find_quantized_jumps64
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -436,9 +436,9 @@ def twopi_jumps(
     heights = np.empty_like(_signal)
     atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
     if _signal.dtype.name == "float32":
-        scale_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+        find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
     elif _signal.dtype.name == "float64":
-        scale_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+        find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
     else:
         raise TypeError("signal must be float32 or float64")
 
