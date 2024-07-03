@@ -300,6 +300,7 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
     relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
     relcal.wrap('relcal', relcal, [(0, 'dets')])
     relcal.wrap('median', medianw)
+    relcal.wrap('badids', badids)
 
     # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
 

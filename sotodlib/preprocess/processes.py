@@ -921,6 +921,7 @@ class PCARelCal(_Preprocess):
         signal: 'lpf_sig'
         calc: True
         save: True
+        plot: True
     
     # TODO: add xfac and yfac as options in config file entry?
     See :ref:`pca-background` for more details on the method.
@@ -934,8 +935,8 @@ class PCARelCal(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        pca_aman = core.AxisManager(aman.dets, aman.samps,
-                              core.LabelAxis(name='bandpass', vals=bands))
+        pca_aman = core.AxisManager()
+        badids = []
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
@@ -944,8 +945,10 @@ class PCARelCal(_Preprocess):
                                         signal=band_aman[self.signal])
             
             result_aman = tod_ops.calc_pcabounds(band_aman[self.signal], pca_signal)
+            badids.append(result_aman['badids'])
             pca_aman.wrap(f'{band}', result_aman)
 
+        pca_aman.wrap('badids', badids)
         self.save(proc_aman, pca_aman)
 
     def save(self, proc_aman, pca_aman):
@@ -953,6 +956,26 @@ class PCARelCal(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap(self.name, pca_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~np.isin(proc_aman.det_info.det_id, proc_aman[self.name]['badids'])
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_pcabounds
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            for band in proc_aman[self.name]._assignments.keys():
+                if band != 'badids':
+                    plot_pcabounds(aman, proc_aman[self.name], proc_aman[self.name][band], filename=filename.replace('{name}', f'{band}_pca'))
 
 
 _Preprocess.register(PCARelCal)

@@ -247,7 +247,7 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     plt.savefig(filename)
 
 
-def plot_pcabounds(aman, pca_aman, relcal, ghz):
+def plot_pcabounds(aman, pca_aman, ghz, filename):
     """Subplot of pca bounds as well as the good and bad detector
     timestreams with 0th mode weight overplotted
 
@@ -256,11 +256,11 @@ def plot_pcabounds(aman, pca_aman, relcal, ghz):
     amans : AxisManager
         input AxisManager
     pca_aman : AxisManager
-        output PCA output AxisManager
-    relcal : AxisManager
-        relcal output 
+        Relcal output AxisManager
     ghz : str
         Bandpass (for plotting purposes)
+    filename : str
+        Full filename with direct path to plot output directory.
     
     """
     pca_dets = pca_aman.pca_det_mask
@@ -329,9 +329,8 @@ def plot_pcabounds(aman, pca_aman, relcal, ghz):
     ax3.legend()
     ax3.grid()
 
-    fig.suptitle(f'{ghz} {aman.obs_info.obs_id[0:20]}')
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{ghz}')
     plt.tight_layout()
-    plt.savefig(
-        f'{ghz}_{aman.obs_info.obs_id[0:20]}_pca.png')
-
-    plt.figure()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
