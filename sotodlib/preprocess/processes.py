@@ -932,18 +932,27 @@ class PCARelCal(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        pca_out = tod_ops.pca.get_pca(aman,signal=aman[self.signal])
-        pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
-                                       signal=aman[self.signal])
-        
-        pcabox_aman = tod_ops.calc_pcabounds(aman[self.signal], pca_signal)
-        self.save(proc_aman, pcabox_aman)
+        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = bands[bands != 'NC']
+        pca_aman = core.AxisManager(aman.dets, aman.samps,
+                              core.LabelAxis(name='bandpass', vals=bands))
+        for band in bands:
+            m0 = aman.det_info.wafer.bandpass == band
+            band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+            pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
+            pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
+                                        signal=band_aman[self.signal])
+            
+            result_aman = tod_ops.calc_pcabounds(band_aman[self.signal], pca_signal)
+            pca_aman.wrap(f'{band}', result_aman)
 
-    def save(self, proc_aman, pcabox_aman):
+        self.save(proc_aman, pca_aman)
+
+    def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.name, pcabox_aman)
+            proc_aman.wrap(self.name, pca_aman)
 
 
 _Preprocess.register(PCARelCal)

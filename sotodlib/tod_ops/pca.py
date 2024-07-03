@@ -312,5 +312,5 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
 
     # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
 
-    return pca_aman
+    return relcal
 
