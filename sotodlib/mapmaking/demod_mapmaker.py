@@ -1,3 +1,11 @@
+"""
+This submodule contains classes to perform filter+bin mapmaking for 
+demodulated data. The DemodMapmaker class creates a mapmaker object.
+DemodSignalMap creates a signal you want to solve for, over which 
+you accumulate observations into the div and rhs maps. For examples
+how to use look at docstring of DemodMapmaker.
+"""
+__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap']
 import numpy as np
 from pixell import enmap, utils, tilemap, bunch
 import so3g.proj
@@ -13,28 +21,32 @@ class DemodMapmaker:
         Arguments
         ---------
         signals : list 
-            List of Signal-objects representing the models that will be solved
-            jointly for. Currently this would be a DemodSignal
+            List of Signal-objects representing the models that will be 
+            solved jointly for. Currently this would be a DemodSignal
         noise_model : sotodlib.mapmaking.Nmat or None
             A noise model constructor which will be used to initialize the
             noise model for each observation. Can be overriden in add_obs.
-            Noises other than NmatWhite not implemented. If None, a white noise 
-            model is used.
+            Noises other than NmatWhite not implemented. If None, a white 
+            noise model is used.
         dtype : numpy.dtype
-            The data type to use for the time-ordered data. Only tested with float32
+            The data type to use for the time-ordered data. Only tested
+            with float32
         verbose : Bool
             Whether to print progress messages. Not implemented
         comps : str
-            String with the components to solve for. Not implemented for anything other than TQU
+            String with the components to solve for. Not implemented for 
+            anything other than TQU
         singlestream : Bool
-            If True, do not perform demodulated filter+bin mapmaking but rather regular 
-            filter+bin mapmaking, i.e. map from obs.signal rather than from obs.dsT, 
-            obs.demodQ, obs.demodU
+            If True, do not perform demodulated filter+bin mapmaking but 
+            rather regular filter+bin mapmaking, i.e. map from obs.signal
+            rather than from obs.dsT, obs.demodQ, obs.demodU
         
-        Example usage: 
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm)
-        signals    = [signal_map]
-        mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model)
+        Example usage :: 
+            signal_map = mapmaking.DemodSignalMap(shape, wcs, comm)
+            signals    = [signal_map]
+            mapmaker   = mapmaking.DemodMapmaker(signals, 
+                         noise_model=noise_model)
+        
         """
         
         if noise_model is None:
