@@ -97,7 +97,7 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
         else:
             periods   = find_scan_periods(obs_infos, ttol=12*3600)
             periods   = split_periods(periods, 24*3600) # If fixed_time was not set, 
-            then we do 24 hrs by default and it will be the same as depth_1
+            #then we do 24 hrs by default and it will be the same as depth_1
     else:
         print("Invalid mode!")
         sys.exit(1)

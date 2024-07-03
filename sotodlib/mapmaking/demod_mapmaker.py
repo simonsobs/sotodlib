@@ -11,7 +11,7 @@ from pixell import enmap, utils, tilemap, bunch
 import so3g.proj
 
 from .. import coords
-from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr
+from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
 from .noise_model import NmatWhite
 
 class DemodMapmaker:
@@ -297,6 +297,11 @@ class DemodSignalMap(DemodSignal):
                 self.rhs  = utils.allreduce(self.rhs, self.comm)
                 self.div  = utils.allreduce(self.div, self.comm)
                 self.hits = utils.allreduce(self.hits,self.comm)
+        self.idiv  = safe_invert_div(self.div)
+        if self.tiled:
+            self.map = tilemap.map_mul(self.idiv, self.rhs)
+        else: 
+            self.map = enmap.map_mul(self.idiv, self.rhs)
         self.ready = True
 
     @property
