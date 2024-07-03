@@ -247,7 +247,7 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     plt.savefig(filename)
 
 
-def plot_pcabounds(aman, pca_aman, relcal):
+def plot_pcabounds(aman, pca_aman, relcal, ghz):
     """Subplot of pca bounds as well as the good and bad detector
     timestreams with 0th mode weight overplotted
 
@@ -259,7 +259,9 @@ def plot_pcabounds(aman, pca_aman, relcal):
         output PCA output AxisManager
     relcal : AxisManager
         relcal output 
-
+    ghz : str
+        Bandpass (for plotting purposes)
+    
     """
     pca_dets = pca_aman.pca_det_mask
     good_indices = np.where(~pca_dets)[0]
@@ -308,36 +310,16 @@ def plot_pcabounds(aman, pca_aman, relcal):
     weight = np.abs(pca_aman.weight0)
     Si = aman.det_cal.s_i
     ax3.plot(Si[good_indices], weight[good_indices], '.', color='#D8BFD8', markersize=10,
-             label=f'Good dets ({len(goodids)} dets)', alpha=0.3)
+             label=f'Good dets ({len(good_indices)} dets)', alpha=0.3)
 
     ax3.plot(Si[bad_indices], weight[bad_indices], '.', color='#FFA07A', markersize=10,
-             label=f'Bad dets ({len(badids)} dets)', alpha=0.3)
+             label=f'Bad dets ({len(bad_indices)} dets)', alpha=0.3)
 
     ax3.plot([xbounds[0], xbounds[1], xbounds[1], xbounds[0], xbounds[0]],
              [ybounds[0], ybounds[0], ybounds[1], ybounds[1], ybounds[0]],
              color='navy', linestyle='-.', linewidth=1.5, label='Boundary',
              alpha=1)
 
-    # Todo: incorporate bias groups into Si vs weight plot
-    # unique_bias_groups = sorted(set(aman.det_cal.bg))
-    # bias_groups = aman.det_cal.bg
-    # markers = ['o', '^', '^', 'D', 'x', '+']
-    # bias_group_markers = {
-    #    bg: markers[i % len(markers)] for i, bg in enumerate(unique_bias_groups)}
-    # legend_handles = []
-    # for bg in unique_bias_groups:
-    #  marker = bias_group_markers[bg]
-    #  if marker == 'o':
-    #      legend_handles.append(plt.Line2D([0], [0], marker=marker, color='gray', markersize=7, label=f'Bias Group {bg}', markerfacecolor='none', markeredgewidth=1))
-    #   else:
-    #       legend_handles.append(plt.Line2D([0], [0], marker=marker, color='gray', markersize=7, label=f'Bias Group {bg}', markerfacecolor='none', markeredgewidth=1))
-    # for i in range(len(bias_groups)):
-    #   bg = bias_groups[i]
-    #    marker = bias_group_markers[bg]  # Get marker for the bias group
-    #    # Choose color based on whether the index is in good_indices or not
-    #    color = '#D8BFD8' if i in good_indices else '#FFA07A'
-    #    ax3.plot(Si[i], weight[i], marker, color=color, alpha=0.3)
-    # ax3.legend(handles=legend_handles, loc='upper right')
     ax3.set_xlabel('Si')
     ax3.set_ylabel('0th Mode Weights')
 
@@ -347,9 +329,9 @@ def plot_pcabounds(aman, pca_aman, relcal):
     ax3.legend()
     ax3.grid()
 
-    fig.suptitle(f'{ufm} {ghz} {aman.obs_info.obs_id[0:20]}')
+    fig.suptitle(f'{ghz} {aman.obs_info.obs_id[0:20]}')
     plt.tight_layout()
     plt.savefig(
-        f'{ufm}_{ghz}_{aman.obs_info.obs_id[0:20]}_pca{pca_run}.png')
+        f'{ghz}_{aman.obs_info.obs_id[0:20]}_pca.png')
 
     plt.figure()
