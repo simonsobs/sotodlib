@@ -227,9 +227,6 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
         observation axismanagers
     pca_aman : AxisManager
         output pca axismanager
-    signal : array
-        is the low pass filter signal array that's passed 
-        through
     xfac : int
         multiplicative factor for the width of the pca box.
         Default is 2.
@@ -237,15 +234,12 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
         multiplicative factor for the height of the box.
         Default is 1.5. 
 
-    TODO: needs more args used in preprocess config file setup
-
     Returns
     -------
     aman
         aman that's wrapped with the x and y bounds and the good and bad dets
         
     """
-    # TODO: I don't use signal; check preprocess code
     x = aman.det_cal.s_i
     y = np.abs(pca_aman.weights[:, 0])
 
@@ -294,21 +288,18 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
     goodids = aman.det_info.det_id[box]
     badids = aman.det_info.det_id[notbox]
     
-    bands = np.unique(aman.det_info.wafer.bandpass)
-    bands = bands[bands != 'NC']
-    medianw = np.median(pca_aman.weights[:,0]) # it will just be for one bandpass at a time
+    medianw = np.median(pca_aman.weights[:,0])
     relcal = medianw/pca_aman.weights[:,0]
 
     mask = np.isin(aman.det_info.det_id, badids)
-    relcal = core.AxisManager(aman.dets, aman.samps,
-                              core.LabelAxis(name='bandpass', vals=bands))
+    relcal = core.AxisManager(aman.dets, aman.samps)
     relcal.wrap('pca_det_mask', mask, [(0, 'dets')])
     relcal.wrap('xbounds', np.array(xbounds))
     relcal.wrap('ybounds', np.array(ybounds))
     relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
     relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
     relcal.wrap('relcal', relcal, [(0, 'dets')])
-    relcal.wrap('medians', np.asarray([medianw]), [(0, 'bandpass')])
+    relcal.wrap('median', medianw)
 
     # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
 
