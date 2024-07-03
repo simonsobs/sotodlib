@@ -921,9 +921,9 @@ class FourierFilter(_Preprocess):
     Example config file entry::
 
       - name: "fourier_filter"
+        signal_name: "signal"
+        wrap_name: "lpf_sig"
         process:
-          signal_name: "signal"
-          wrap_name: "lpf_sig"
           filt_function: "low_pass_sine2"
           trim_samps: 2000
           filter_params:
@@ -944,8 +944,8 @@ class FourierFilter(_Preprocess):
         _f = getattr(tod_ops.filters,
                 self.process_cfgs.get('filt_function','high_pass_butter4'))
         filt = _f(**self.process_cfgs.get('filter_params'))
-        aman[self.wrap_name] = tod_ops.filters.fourier_filter(aman, filt,
-                                        signal_name=self.signal_name)
+        aman.wrap(self.wrap_name, tod_ops.filters.fourier_filter(aman, filt,
+                                        signal_name=self.signal_name), [(0, 'dets'), (1, 'samps')])
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
             aman.restrict('samps', (aman.samps.offset + trim,
@@ -986,7 +986,7 @@ class PCARelCal(_Preprocess):
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
             
-            result_aman = tod_ops.calc_pcabounds(band_aman[self.signal], pca_signal)
+            result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal)
             badids.append(result_aman['badids'])
             pca_aman.wrap(f'{band}', result_aman)
 
@@ -1017,7 +1017,7 @@ class PCARelCal(_Preprocess):
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             for band in proc_aman[self.name]._assignments.keys():
                 if band != 'badids':
-                    plot_pcabounds(aman, proc_aman[self.name], proc_aman[self.name][band], filename=filename.replace('{name}', f'{band}_pca'))
+                    plot_pcabounds(proc_aman, proc_aman[self.name], filename=filename.replace('{name}', f'{band}_pca'))
 
 
 _Preprocess.register(PCARelCal)

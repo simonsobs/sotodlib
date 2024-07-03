@@ -289,7 +289,7 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
     badids = aman.det_info.det_id[notbox]
     
     medianw = np.median(pca_aman.weights[:,0])
-    relcal = medianw/pca_aman.weights[:,0]
+    relcal_val = medianw/pca_aman.weights[:,0]
 
     mask = np.isin(aman.det_info.det_id, badids)
     relcal = core.AxisManager(aman.dets, aman.samps)
@@ -298,7 +298,7 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
     relcal.wrap('ybounds', np.array(ybounds))
     relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
     relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
-    relcal.wrap('relcal', relcal, [(0, 'dets')])
+    relcal.wrap('relcal', relcal_val, [(0, 'dets')])
     relcal.wrap('median', medianw)
     relcal.wrap('badids', badids)
 
