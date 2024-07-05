@@ -773,8 +773,11 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
             # TODO: modify below according to processes included in database
             
         # Correct HWP and PID polarization angles
-        obs = hwp_angle_model.apply_hwp_angle_model(obs)
-        
+        try:
+            obs = hwp_angle_model.apply_hwp_angle_model(obs)
+        except ValueError:
+            continue # this is to skip the "hwp rotation direction is ambiguous" error
+
         if obs.dets.count <= 1: continue
         obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, det_in_out=det_in_out,
                                 det_left_right=det_left_right,
