@@ -975,39 +975,55 @@ class PCARelCal(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        print('aman: ', aman)
+        print('proc_aman: ', proc_aman)
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        finalrelcal_aman = core.AxisManager()
+        finalrelcal_aman = core.AxisManager(aman.dets, aman.samps)
+        pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
+        relcal = np.zeros(aman.dets.count)
+        pca_weight0 = np.zeros(aman.dets.count)
         badids = []
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
+            finalrelcal_aman.wrap(f'{band}_idx', np.where(m0)[0])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            
             result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal)
-            badids.append(result_aman['badids'])
 
+            badids.append(result_aman['badids'])
+            pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
+            relcal[m0] = result_aman['relcal']
+            pca_weight0[m0] = result_aman['pca_weight0']
+            finalrelcal_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'])
+            finalrelcal_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+            finalrelcal_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+            finalrelcal_aman.wrap(f'{band}_median', result_aman['median'])
             
             print(f'{band} len of pca det mask from result_aman is {len(result_aman["pca_det_mask"])}')
-            finalrelcal_aman.wrap(f'{band}', result_aman)
+            # finalrelcal_aman.wrap(f'{band}', result_aman)
             print("%%%%%%%%%%%%%%%%% COMPARING LABEL AXES: %%%%%%%%%%%%%%%%%%%%")
             print(f'result_aman for {band}, note the labelaxis: ', result_aman)
-
-       
-        print("%%%%%%%%%% Length of pca_det_mask of amans in final_aman %%%%%%%%%")
-        print(f'f150s pca det mask length: ', len(finalrelcal_aman['f150']['pca_det_mask']))
-        print(f'f90s pca det mask length: ', len(finalrelcal_aman['f090']['pca_det_mask']))
         
         badids_comb = np.concatenate(badids)
-        final_aman.wrap('badids', badids_comb)
+        finalrelcal_aman.wrap('badids', badids_comb)
+        finalrelcal_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
+        finalrelcal_aman.wrap('relcal', relcal, [(0, 'dets')])
+        finalrelcal_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
+
+        print('finalrelcal_aman: ', finalrelcal_aman)
+
+        self.save(proc_aman, finalrelcal_aman)
 
     def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.name, pca_aman)
+            print('finalrelcal_aman in proc_aman: ', proc_aman[self.name])
 
 
     def select(self, meta, proc_aman=None):
@@ -1015,7 +1031,7 @@ class PCARelCal(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~np.isin(aman.det_info.det_id, proc_aman[self.name]['badids'])
+        keep = ~np.isin(proc_aman.det_info.det_id, proc_aman[self.name]['badids'])
         print('len of keep which shoulnt be same as badids len: ', len(keep))
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
@@ -1025,16 +1041,20 @@ class PCARelCal(_Preprocess):
             return
         if self.plot_cfgs:
             from .preprocess_plot import plot_pcabounds
+            print('aman: ', aman)
+            print('proc_aman: ', proc_aman)
             filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
-            for band in proc_aman[self.name]._assignments.keys():
-                if band != 'badids':
-                    band_data = getattr(proc_aman[self.name], band)
-             #       print(f"Plotting data for band: {band}")
-             #       print('band_data: ', band_data)
-             #       print(f"Length of band data pca_mode0: {len(band_data.pca_mode0)}")
-             #       print(f"Length of aman timestamps: {len(aman.timestamps)}")
-                    plot_pcabounds(aman, band_data, band, filename=filename.replace('{name}', f'{band}_pca'))
+
+            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = bands[bands != 'NC']
+            for band in bands:
+                band_aman = proc_aman[self.name].restrict('dets', aman.dets.vals[proc_aman[self.name][f'{band}_idx']], in_place=False)
+            #       print(f"Plotting data for band: {band}")
+            #       print('band_data: ', band_data)
+            #       print(f"Length of band data pca_mode0: {len(band_data.pca_mode0)}")
+            #       print(f"Length of aman timestamps: {len(aman.timestamps)}")
+                plot_pcabounds(aman, band_aman, filename=filename.replace('{name}', f'{band}_pca'), signal=self.signal, band=band)
 
 
 _Preprocess.register(PCARelCal)

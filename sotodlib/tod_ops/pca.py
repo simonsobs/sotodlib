@@ -217,13 +217,13 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
-def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
+def calc_pcabounds(tod, pca_aman, xfac=2, yfac=1.5):
     """Finds the bounds of the pca box using IQR 
     statistics
 
     Parameters
     ----------
-    aman : AxisManager
+    tod : AxisManager
         observation axismanagers
     pca_aman : AxisManager
         output pca axismanager
@@ -240,7 +240,7 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
         aman that's wrapped with the x and y bounds and the good and bad dets
         
     """
-    x = aman.det_cal.s_i
+    x = tod.det_cal.s_i
     y = np.abs(pca_aman.weights[:, 0])
 
     # remove positive Si values
@@ -285,14 +285,14 @@ def calc_pcabounds(aman, pca_aman, xfac=2, yfac=1.5):
     box = filt[box_xfilt_inds] 
     notbox = np.setdiff1d(np.arange(len(x)), box)
 
-    goodids = aman.det_info.det_id[box]
-    badids = aman.det_info.det_id[notbox]
+    goodids = tod.det_info.det_id[box]
+    badids = tod.det_info.det_id[notbox]
     
     medianw = np.median(pca_aman.weights[:,0])
     relcal_val = medianw/pca_aman.weights[:,0]
 
-    mask = np.isin(aman.det_info.det_id, badids)
-    relcal = core.AxisManager(aman.dets, aman.samps)
+    mask = np.isin(tod.det_info.det_id, badids)
+    relcal = core.AxisManager(tod.dets, tod.samps)
     relcal.wrap('pca_det_mask', mask, [(0, 'dets')])
     relcal.wrap('xbounds', np.array(xbounds))
     relcal.wrap('ybounds', np.array(ybounds))

@@ -247,7 +247,7 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     plt.savefig(filename)
 
 
-def plot_pcabounds(aman, pca_aman, ghz, filename):
+def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None):
     """Subplot of pca bounds as well as the good and bad detector
     timestreams with 0th mode weight overplotted
 
@@ -263,15 +263,25 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
         Full filename with direct path to plot output directory.
     
     """
+    if signal is None:
+        signal = aman.signal
+    else:
+        signal = aman[signal]
+
+    if band is None:
+        xbounds = pca_aman.xbounds
+        ybounds = pca_aman.ybounds
+        modes = pca_aman.pca_mode0
+    else:
+        xbounds = pca_aman[f'{band}_xbounds']
+        ybounds = pca_aman[f'{band}_ybounds']
+        modes = pca_aman[f'{band}_pca_mode0']
+
     pca_dets = pca_aman.pca_det_mask
     good_indices = np.where(~pca_dets)[0]
     bad_indices = np.where(pca_dets)[0]
 
-    xbounds = pca_aman.xbounds
-    ybounds = pca_aman.ybounds
-
     timestamps = aman.timestamps  # should assume lpf signal though
-    modes = pca_aman.pca_mode0
 
     fig = plt.figure(figsize=(10, 6))
 
@@ -287,7 +297,7 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
 
     for ind in good_indices:
         weight = pca_aman.pca_weight0[ind] #, 0]
-        signals = aman.signal[ind]
+        signals = signal[ind]
         ax1.plot(timestamps, signals / weight,
                  zorder=1, color='#D8BFD8', alpha=0.3)
 
@@ -300,7 +310,7 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
              label='0th mode', zorder=2, alpha=0.4)
     for ind in bad_indices:
         weight = pca_aman.pca_weight0[ind]
-        signals = aman.signal[ind]
+        signals = signal[ind]
         ax2.plot(timestamps, signals / weight,
                  zorder=1, color='#FFA07A', alpha=0.3)
     ax2.set_title(f'Bad Detector Batch: ({len(bad_indices)} dets)')
@@ -330,7 +340,7 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
     ax3.legend()
     ax3.grid()
 
-    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{ghz}')
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{band}')
     plt.tight_layout()
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
