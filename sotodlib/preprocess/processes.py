@@ -977,7 +977,7 @@ class PCARelCal(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        pca_aman = core.AxisManager()
+        finalrelcal_aman = core.AxisManager()
         badids = []
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
@@ -988,10 +988,20 @@ class PCARelCal(_Preprocess):
             
             result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal)
             badids.append(result_aman['badids'])
-            pca_aman.wrap(f'{band}', result_aman)
 
-        pca_aman.wrap('badids', badids)
-        self.save(proc_aman, pca_aman)
+            
+            print(f'{band} len of pca det mask from result_aman is {len(result_aman["pca_det_mask"])}')
+            finalrelcal_aman.wrap(f'{band}', result_aman)
+            print("%%%%%%%%%%%%%%%%% COMPARING LABEL AXES: %%%%%%%%%%%%%%%%%%%%")
+            print(f'result_aman for {band}, note the labelaxis: ', result_aman)
+
+       
+        print("%%%%%%%%%% Length of pca_det_mask of amans in final_aman %%%%%%%%%")
+        print(f'f150s pca det mask length: ', len(finalrelcal_aman['f150']['pca_det_mask']))
+        print(f'f90s pca det mask length: ', len(finalrelcal_aman['f90']['pca_det_mask']))
+        
+        badids_comb = np.concatenate(badids)
+        final_aman.wrap('badids', badids_comb)
 
     def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:
@@ -999,12 +1009,14 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.name, pca_aman)
 
+
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~np.isin(proc_aman.det_info.det_id, proc_aman[self.name]['badids'])
+        keep = ~np.isin(aman.det_info.det_id, proc_aman[self.name]['badids'])
+        print('len of keep which shoulnt be same as badids len: ', len(keep))
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -1017,7 +1029,12 @@ class PCARelCal(_Preprocess):
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             for band in proc_aman[self.name]._assignments.keys():
                 if band != 'badids':
-                    plot_pcabounds(proc_aman, proc_aman[self.name], filename=filename.replace('{name}', f'{band}_pca'))
+                    band_data = getattr(proc_aman[self.name], band)
+             #       print(f"Plotting data for band: {band}")
+             #       print('band_data: ', band_data)
+             #       print(f"Length of band data pca_mode0: {len(band_data.pca_mode0)}")
+             #       print(f"Length of aman timestamps: {len(aman.timestamps)}")
+                    plot_pcabounds(aman, band_data, band, filename=filename.replace('{name}', f'{band}_pca'))
 
 
 _Preprocess.register(PCARelCal)

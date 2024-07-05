@@ -279,7 +279,8 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
     ax1 = plt.subplot2grid((2, 2), (1, 0), colspan=1, rowspan=1)
     ax2 = plt.subplot2grid((2, 2), (1, 1), colspan=1, rowspan=1)
     ax3 = plt.subplot2grid((2, 2), (0, 0), colspan=2, rowspan=1)
-
+    
+    #print('len of times', len(timestamps), 'len modes', len(modes))
     # ax1: good signals
     ax1.plot(timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
@@ -298,7 +299,7 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
     ax2.plot(timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
     for ind in bad_indices:
-        weight = pca_aman.weight0[ind]
+        weight = pca_aman.pca_weight0[ind]
         signals = aman.signal[ind]
         ax2.plot(timestamps, signals / weight,
                  zorder=1, color='#FFA07A', alpha=0.3)
@@ -307,7 +308,7 @@ def plot_pcabounds(aman, pca_aman, ghz, filename):
     ax2.grid()
 
     # ax3: box
-    weight = np.abs(pca_aman.weight0)
+    weight = np.abs(pca_aman.pca_weight0)
     Si = aman.det_cal.s_i
     ax3.plot(Si[good_indices], weight[good_indices], '.', color='#D8BFD8', markersize=10,
              label=f'Good dets ({len(good_indices)} dets)', alpha=0.3)
