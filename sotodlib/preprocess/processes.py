@@ -998,7 +998,7 @@ class PCARelCal(_Preprocess):
        
         print("%%%%%%%%%% Length of pca_det_mask of amans in final_aman %%%%%%%%%")
         print(f'f150s pca det mask length: ', len(finalrelcal_aman['f150']['pca_det_mask']))
-        print(f'f90s pca det mask length: ', len(finalrelcal_aman['f90']['pca_det_mask']))
+        print(f'f90s pca det mask length: ', len(finalrelcal_aman['f090']['pca_det_mask']))
         
         badids_comb = np.concatenate(badids)
         final_aman.wrap('badids', badids_comb)
