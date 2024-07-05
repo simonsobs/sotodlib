@@ -243,9 +243,10 @@ def get_detector_cuts_flags(obs, rfrac_range=(0.05,0.9), psat_range=(0,20)):
     flags.get_det_bias_flags(obs, rfrac_range=rfrac_range, psat_range=psat_range)
     bad_dets = has_all_cut(obs.flags.det_bias_flags)
     obs.restrict('dets', obs.dets.vals[~bad_dets])
-    #if obs.dets.count<=1: return obs # check if I cut all the detectors after the det bias flags
+    if obs.dets.count<=1: return False # check if I cut all the detectors after the det bias flags
     return True
-            
+
+
 def select_data(obs,
                 det_left_right, det_in_out, det_upper_lower):
 
@@ -278,15 +279,20 @@ def get_trending_cuts(obs):
 
     
 def get_jumps(obs, signal_name):
-    jflags, _, jfix = jumps.twopi_jumps(obs,
-                                        signal=obs[signal_name],
-                                        fix=True, overwrite=True)
+    try:
+        jflags, _, jfix = jumps.twopi_jumps(obs,
+                                            signal=obs[signal_name],
+                                            fix=True, overwrite=True)
+    except IndexError:
+        return False
     obs[signal_name] = jfix
     gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1,
                                     signal=obs[signal_name],
                                     glitch_flags=obs.flags.jumps_2pi)
     obs[signal_name] = gfilled
     jdets = has_any_cuts(jflags)
+
+    return True
         
 
 def get_glitches(obs, signal_name):
@@ -312,8 +318,7 @@ def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3',
     if obs.signal is not None:
         # Data cuts
         status = select_data(obs, det_left_right, det_in_out, det_upper_lower)
-        if not(status):
-            return False
+        if not(status): return False
     
         # Detrend, subtract hwpss
         detrend_tod(obs, method='median', signal_name='signal')
@@ -327,7 +332,8 @@ def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3',
         get_trending_cuts(obs)
 
         # Jump detection
-        get_jumps(obs, signal_name=signal_name)
+        status = get_jumps(obs, signal_name=signal_name)
+        if not(status): return False
     
         # Glitches detection
         get_glitches(obs, signal_name=signal_name)
@@ -336,6 +342,10 @@ def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3',
         if remove_hwpss:
             detrend_tod(obs, method='median', signal_name=signal_name)
     
+        # check if all detectors are cut before going into p2p cuts
+        if obs.dets.count == 0:
+            return False
+
         # P2P cuts
         ptp_cuts(obs, signal_name)
     return True
@@ -626,11 +636,14 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
 
 
 def get_pwv(obs, data_dir):
-    pwv_info = hk_utils.get_detcosamp_hkaman(obs, alias=['pwv'],
+    try:
+        pwv_info = hk_utils.get_detcosamp_hkaman(obs, alias=['pwv'],
                                         fields = ['site.env-radiometer-class.feeds.pwvs.pwv',],
                                         data_dir = data_dir)
-    pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
-    pwv = np.nanmedian(pwv_all)
+        pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
+        pwv = np.nanmedian(pwv_all)
+    except (KeyError, ValueError):
+        pwv = 0.0
     return pwv
 
 
