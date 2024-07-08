@@ -13,7 +13,7 @@ def get_apodize_window_for_ends(aman, apodize_samps=1600):
     """
     w = np.ones(aman.samps.count)
     cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
-    w[-apodize_samps:] = cosedgejujj
+    w[-apodize_samps:] = cosedge
     w[:apodize_samps] = np.flip(cosedge)
     return w
     

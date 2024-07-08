@@ -4,7 +4,7 @@ from numpy.polynomial import legendre as L
 from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, apodize
+from sotodlib.tod_ops import bin_signal, apodize, filters
 import logging
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,9 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
         if flags is not None:
-            weight_for_signal = weight_for_signal[:, np.newaxis] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+            weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+    else:
+        weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
                                range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
@@ -110,8 +112,9 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     return azss_stats, L.legval(x_legendre, coeffs.T)
     
     
-def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
+def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=None,
             apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200,
+             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
             merge_stats=True, azss_stats_name='azss_stats',
             merge_model=True, azss_model_name='azss_model'):
@@ -162,8 +165,16 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
         - model_sig_tod: numpy.array
             - azss model as a function of time either from fits or interpolation depending on ``method`` argument.
     """
-    if signal is None:
-        signal = aman.signal
+    if prefilt_cfg is None:
+        prefilt_cfg = {'type': 'sine2', 'cutoff': 0.005, 'trans_width': 0.005}
+    prefilt = filters.get_hpf(prefilt_cfg)
+    
+    if apply_prefilt:
+        signal = np.array(tod_ops.fourier_filter(
+            aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name))
+    else:
+        signal = aman[signal_name]
+            
     if az is None:
         az = aman.boresight.az
         
@@ -196,7 +207,7 @@ def get_azss(aman, signal=None, az=None, range=None, bins=100, flags=None,
     if merge_model:
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
-        aman.signal = np.subtract(signal, model_sig_tod, dtype='float32')
+        aman[signal_name] = np.subtract(signal, model_sig_tod, dtype='float32')
     return azss_stats, model_sig_tod
 
 def subtract_azss(aman, signal=None, azss_template=None,

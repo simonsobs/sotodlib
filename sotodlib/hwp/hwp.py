@@ -215,6 +215,8 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
         if flags is not None:
             weight_for_signal = weight_for_signal[:, np.newaxis] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+    else:
+        weight_for_signal = None
     
     binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
