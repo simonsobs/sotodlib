@@ -8,9 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
-              lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
+              lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
-              apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200,
+              apodize_edges=True, apodize_edges_samps=1600, 
+              apodize_flags=True, apodize_flags_samps=200,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
     """
@@ -115,7 +116,8 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
             aman, signal, hwp_angle=None, bins=bins, flags=flags, 
-            apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, apodize_flags_samps=apodize_flags_samps,)
+            apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
+            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
         
         # check bin count
         num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
@@ -181,7 +183,9 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
 
 
 def get_binned_hwpss(aman, signal=None, hwp_angle=None,
-               bins=360, flags=None, apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200):
+                     bins=360, flags=None, 
+                     apodize_edges=True, apodize_edges_samps=1600,
+                     apodize_flags=True, apodize_flags_samps=200):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
@@ -198,6 +202,14 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     flags : None or RangesMatrix
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
+    apodize_edges : bool, optional
+        If True, applies an apodization window to the edges of the signal. Defaults to True.
+    apodize_edges_samps : int, optional
+        The number of samples over which to apply the edge apodization window. Defaults to 1600.
+    apodize_flags : bool, optional
+        If True, applies an apodization window based on the flags. Defaults to True.
+    apodize_flags_samps : int, optional
+        The number of samples over which to apply the flags apodization window. Defaults to 200.
 
     Returns
     -------
@@ -213,10 +225,13 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         hwp_angle = aman['hwp_angle']
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
-        if flags is not None:
-            weight_for_signal = weight_for_signal[:, np.newaxis] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
     else:
-        weight_for_signal = None
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+        else:
+            weight_for_signal = None
     
     binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
