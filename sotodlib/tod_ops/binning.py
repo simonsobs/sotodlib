@@ -27,7 +27,8 @@ def bin_signal(aman, bin_by, signal=None,
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
     weight_for_signal : array-like, optional
-        Array of weights for the signal values. If None, all weights are assumed to be 1.
+        Array of weights for the signal values. If None, all weights are assumed to be 1. You can get a apodizing window by
+        'sotodlib.tod_ops.apodize.get_apodize_window_for_ends' or 'get_apodize_window_from_flags'.
 
     Returns
     -------

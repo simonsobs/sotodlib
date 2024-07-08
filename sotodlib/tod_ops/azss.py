@@ -10,7 +10,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None, 
-              apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200):
+              apodize_edges=True, apodize_edges_samps=1600, 
+              apodize_flags=True, apodize_flags_samps=200):
     """
     Bins a signal by azimuth angle.
 
@@ -25,11 +26,21 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
     range: array-like, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to None.
         If None, [min(az), max(az)] will be used for binning.
-    bins: integer
-        The number of bins to divide the azimuth angle range into. Defaults to 360.
+    bins: int or sequence of scalars
+        If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
+        If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
+        If `bins` is a sequence, `bins` overwrite `range`.
     flags: RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
+    apodize_edges : bool, optional
+        If True, applies an apodization window to the edges of the signal. Defaults to True.
+    apodize_edges_samps : int, optional
+        The number of samples over which to apply the edge apodization window. Defaults to 1600.
+    apodize_flags : bool, optional
+        If True, applies an apodization window based on the flags. Defaults to True.
+    apodize_flags_samps : int, optional
+        The number of samples over which to apply the flags apodization window. Defaults to 200.
 
     Returns
     -------
@@ -45,10 +56,13 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
     
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
-        if flags is not None:
+        if (flags is not None) and apodize_flags:
             weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
     else:
-        weight_for_signal = None
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+        else:
+            weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
                                range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
@@ -113,7 +127,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     
     
 def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=None,
-            apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200,
+            apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
             merge_stats=True, azss_stats_name='azss_stats',
@@ -133,11 +147,27 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
     range: list, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
-    bins: integer
-        The number of bins to divide the azimuth angle range into. Defaults to 360.
+    bins: int or sequence of scalars
+        If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
+        If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
+        If `bins` is a sequence, `bins` overwrite `range`.
     flags : RangesMatrix, optinal
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
+    apodize_edges : bool, optional
+        If True, applies an apodization window to the edges of the signal. Defaults to True.
+    apodize_edges_samps : int, optional
+        The number of samples over which to apply the edge apodization window. Defaults to 1600.
+    apodize_flags : bool, optional
+        If True, applies an apodization window based on the flags. Defaults to True.
+    apodize_flags_samps : int, optional
+        The number of samples over which to apply the flags apodization window. Defaults to 200.
+    apply_prefilt : bool, optional
+        If True, applies a pre-filter to the signal before azss extraction. Defaults to True.
+    prefilt_cfg : dict, optional
+        Configuration for the pre-filter. Defaults to {'type': 'sine2', 'cutoff': 0.005, 'trans_width': 0.005}.
+    prefilt_detrend : str, optional
+        Method for detrending before filtering. Defaults to 'linear'.
     method: str
         The method to use for azss modeling. Options are 'interpolate' and 'fit'. 
         In 'interpolate', binned signal is used directly.
@@ -181,7 +211,7 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
     # do binning
     binning_dict = bin_by_az(aman, signal=signal, az=az, range=range, bins=bins, flags=flags,
                             apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
-                             apodize_flags_samps=apodize_flags_samps,)
+                            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
     bin_centers = binning_dict['bin_centers']
     binned_signal = binning_dict['binned_signal']
     binned_signal_sigma = binning_dict['binned_signal_sigma']
