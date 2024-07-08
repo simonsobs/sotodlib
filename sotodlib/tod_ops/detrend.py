@@ -79,7 +79,6 @@ def detrend_tod(
                 signal[i, :] -= slopes[i] * x
         else:
             signal -= slopes[..., None] * x
-        signal -= np.mean(signal, axis=-1)[..., None]
     else:
         raise ValueError("method flag must be linear, mean, or median")
 
