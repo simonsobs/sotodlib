@@ -17,7 +17,7 @@ from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from sotodlib.hwp import hwp_angle_model
 from scipy.signal import welch
 from sotodlib import core
-from pixell import utils as pixut
+
 
 defaults = {"query": "1",
             "odir": "./output",
@@ -195,10 +195,10 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     else: return shape, wcs
 
 
-def ptp_cuts(obs, signal_name='dsT'): #, kurtosis_threshold=5):
+def ptp_cuts(obs, signal_name='dsT'):
     # Find the typical noise level in the filtered tod, ignoring glitches
     bsize  = 100
-    rms  = np.percentile(pixut.block_reduce(obs.signal, bsize,
+    rms  = np.percentile(utils.block_reduce(obs.signal, bsize,
                                             inclusive=False, op=np.var),
                          10, -1)**0.5
     typical = np.median(rms)
