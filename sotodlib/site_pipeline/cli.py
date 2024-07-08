@@ -70,6 +70,7 @@ ELEMENTS = {
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
+    'update-obsdb': update_obsdb
 }
 
 CLI_NAME = 'so-site-pipeline'
