@@ -377,7 +377,10 @@ def leastsq(params, x, y, y_err, **fixed_param):
         return 1.0e30
     return output    
 
-
+def get_hwp_freq(timestamps=None, hwp_angle=None):
+    hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
+            (timestamps[-1] - timestamps[0])) / (2 * np.pi)
+    return hwp_freq
 
 def calc_psd_mask(
     aman,
@@ -385,9 +388,8 @@ def calc_psd_mask(
     pxx=None,
     hwpss=False,
     hwp_freq=None, 
-    f_max=100, 
-    width_for_1f=(-0.5, +0.7), 
-    width_for_Nf=(-0.3, +0.3),
+    max_hwpss_mode=10, 
+    hwpss_width=((-0.4, 0.6),(-0.2, 0.2)),
     peak=False,
     peak_freq=None, 
     peak_width=(-0.002, +0.002),
@@ -410,15 +412,18 @@ def calc_psd_mask(
             If True, hwpss are masked.
         hwp_freq : float
             HWP frequency.
-        f_max : float
-            Maximum frequency to include in the hwpss masking. 
-        width_for_1f : tuple
-            Range to mask 1f hwpss. The default masked range will be 
-            (hwp_freq - 0.4) < f < (hwp_freq + 0.6).
+        max_hwpss_mode : int
+            Maximum hwpss mode to subtract. 
+        hwpss_width : float/tuple/list/array
+            If given in float, hwpss will be masked like
+            (hwp_freq - width/2) < f < (hwp_freq + width/2).
+            If given in array like [1.0, 0.4], 1f hwpss is masked like
+            (hwp_freq - 0.5) < f < (hwp_freq + 0.5) and Nf hwpss are masked like
+            (hwp_freq - 0.2) < f < (hwp_freq + 0.2).
+            If given in array like [[-0.4, 0.6], [-0.2, 0.3]],
+            1f hwpss is masked like (hwp_freq - 0.4) < f < (hwp_freq + 0.6)
+            and Nf are masked like (hwp_freq - 0.2) < f < (hwp_freq + 0.3).
             Usually 1f hwpss distrubites wider than other hwpss.
-        width_for_Nf : tuple
-            Range to mask Nf hwpss. The default masked range will be 
-            (hwp_freq*N - 0.2) < f < (hwp_freq*N + 0.2).
         peak : bool
             If True, single peak is masked.
         peak_freq : float
@@ -444,10 +449,10 @@ def calc_psd_mask(
         pxx = aman.Pxx
     if hwpss:
         if hwp_freq is None:
-            hwp_freq = np.median(aman['hwp_solution']['raw_approx_hwp_freq_1'][1])
-        PSD_mask = PSD_mask | hwpss_mask(f, hwp_freq, f_max=f_max, width_for_1f=width_for_1f, width_for_Nf=width_for_Nf)
+            hwp_freq = get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
+        PSD_mask = PSD_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
     if peak:
-        PSD_mask = PSD_mask | peak_mask(f, peak_freq, peak_width=peak_width)
+        PSD_mask = PSD_mask | get_mask_for_single_peak(f, peak_freq, peak_width=peak_width)
     if mode == "add":
         if "PSD_mask" in aman:
             PSD_mask = PSD_mask | aman.PSD_mask.mask()
@@ -907,41 +912,70 @@ def fit_binned_noise_model(
         aman.wrap(merge_name, noise_fit_stats)
     return noise_fit_stats
 
-def hwpss_mask(f, hwp_freq, f_max=100, width_for_1f=(-0.4, +0.6), width_for_Nf=(-0.2, +0.2)):
+def get_mask_for_hwpss(freq, hwp_freq, max_mode=10, width=((-0.4, 0.6), (-0.2, 0.2))):
     """
     Function that returns boolean array to mask hwpss in PSD.
 
     Arguments
     ---------
-        f : nparray
+        freq : nparray
             Frequency of PSD of signal.
 
         hwp_freq : float
             HWP frequency.
 
-        f_max : float
-        Maximum frequency to include in the fitting. 
+        max_mode : int
+            Maximum hwpss mode to subtract. 
 
-        width_for_1f : tuple
-            Range to mask 1f hwpss. The default masked range will be 
-            (hwp_freq - 0.4) < f < (hwp_freq + 0.6).
+        width : float/tuple/list/array
+            If given in float, hwpss will be masked like
+            (hwp_freq - width/2) < f < (hwp_freq + width/2).
+            If given in array like [1.0, 0.4], 1f hwpss is masked like
+            (hwp_freq - 0.5) < f < (hwp_freq + 0.5) and Nf hwpss are masked like
+            (hwp_freq - 0.2) < f < (hwp_freq + 0.2).
+            If given in array like [[-0.4, 0.6], [-0.2, 0.3]],
+            1f hwpss is masked like (hwp_freq - 0.4) < f < (hwp_freq + 0.6)
+            and Nf are masked like (hwp_freq - 0.2) < f < (hwp_freq + 0.3).
             Usually 1f hwpss distrubites wider than other hwpss.
-        width_for_Nf : tuple
-            Range to mask Nf hwpss. The default masked range will be 
-            (hwp_freq*N - 0.2) < f < (hwp_freq*N + 0.2).
 
     Returns
     -------
         mask: Boolean array to mask frequency and power of the given PSD. 
             True in this array stands for the index of hwpss to mask.
     """
-    mask_arrays = [((f > hwp_freq + width_for_1f[0])&(f < hwp_freq + width_for_1f[1]))]
-    for n in range(int(f_max//hwp_freq-1)):
-        mask_arrays.append(((f > hwp_freq*(n+2) + width_for_Nf[0])&(f < hwp_freq*(n+2) + width_for_Nf[1])))
+    if isinstance(width, (float, int)):
+        width_minus = -width/2
+        width_plus = width/2
+        mask_arrays = []
+        for n in range(max_mode):
+            mask_arrays.append(get_mask_for_single_peak(freq, hwp_freq*(n+1), peak_width=(width_minus, width_plus)))
+    elif isinstance(width, (np.ndarray, list, tuple)):
+        width = np.array(width)
+        if len(width.shape) == 1:
+            # mask for 1f
+            width_minus = -width[0]/2
+            width_plus = width[0]/2
+            mask_arrays = [get_mask_for_single_peak(freq, hwp_freq, peak_width=(width_minus, width_plus))]
+            # masks for Nf
+            width_minus = -width[1]/2
+            width_plus = width[1]/2
+            for n in range(max_mode-1):
+                mask_arrays.append(get_mask_for_single_peak(freq, hwp_freq*(n+2), peak_width=(width_minus, width_plus)))
+        elif len(width.shape) == 2:
+            # mask for 1f
+            width_minus = width[0][0]
+            width_plus = width[0][1]
+            mask_arrays = [get_mask_for_single_peak(freq, hwp_freq, peak_width=(width_minus, width_plus))]
+            # masks for Nf
+            width_minus = width[1][0]
+            width_plus = width[1][1]
+            for n in range(max_mode-1):
+                mask_arrays.append(get_mask_for_single_peak(freq, hwp_freq*(n+2), peak_width=(width_minus, width_plus)))
     mask = np.any(np.array(mask_arrays), axis=0)
     return mask
-
-def peak_mask(f, peak_freq, peak_width=(-0.002, +0.002)):
+        
+        
+def get_mask_for_single_peak(f, peak_freq, peak_width=(-0.002, +0.002)):
     """
     Function that returns boolean array to masks single peak (e.g. scan synchronous signal) in PSD.
 
