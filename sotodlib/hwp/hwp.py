@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters
+from sotodlib.tod_ops import bin_signal, filters, apodize
 import logging
 
 logger = logging.getLogger(__name__)
@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
               lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
+              apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
     """
@@ -113,7 +114,8 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
         hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
-            aman, signal, hwp_angle=None, bins=bins, flags=flags)
+            aman, signal, hwp_angle=None, bins=bins, flags=flags, 
+            apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, apodize_flags_samps=apodize_flags_samps,)
         
         # check bin count
         num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
@@ -179,7 +181,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
 
 
 def get_binned_hwpss(aman, signal=None, hwp_angle=None,
-               bins=360, flags=None):
+               bins=360, flags=None, apodize_edges=True, apodize_edges_samps=1600, apodize_flags_samps=200):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
@@ -209,9 +211,13 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
-        
+    if apodize_edges:
+        weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
+        if flags is not None:
+            weight_for_signal = weight_for_signal[:, np.newaxis] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+    
     binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
-                              bins=bins, signal=signal, flags=flags)
+                              bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
     binned_hwpss = binning_dict['binned_signal']
