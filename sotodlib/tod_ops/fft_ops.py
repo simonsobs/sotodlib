@@ -4,6 +4,7 @@ import numdifftools as ndt
 import numpy as np
 import pyfftw
 import so3g
+from so3g.proj import Ranges, RangesMatrix
 from scipy.optimize import minimize
 from scipy.signal import welch
 from sotodlib import core
@@ -324,22 +325,61 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     return wn
 
 
-def noise_model(f, p):
+def noise_model(f, params, **fixed_param):
     """
     Noise model for power spectrum with white noise, and 1/f noise.
+    If any fixed param is handed, that parameter is fixed in the fit.
+    'alpha' or 'wn' can be fixed.
     """
-    fknee, w, alpha = p[0], p[1], p[2]
-    return w * (1 + (fknee / f) ** alpha)
+    if 'alpha' in fixed_param.keys():
+        if len(params)==2:
+            alpha = fixed_param['alpha']
+            fknee, wn = params[0], params[1]
+        else:
+            raise ValueError('The number of fit parameters are invalid.')
+            return
+    elif 'wn' in fixed_param.keys():
+        if len(params)==2:
+            wn = fixed_param['wn']
+            fknee, alpha = params[0], params[1]
+        else:
+            raise ValueError('The number of fit parameters are invalid.')
+            return
+    elif len(fixed_param)==0:
+        if len(params)==3:
+            fknee, wn, alpha = params[0], params[1], params[2]
+        else:
+            raise ValueError('The number of fit parameters are invalid.')
+            return
+    else:
+        raise ValueError('"alpha" or "wn" can be a fixed parameter.')
+        return
+    return wn * (1 + (fknee / f) ** alpha)
 
 
-def neglnlike(params, x, y):
-    model = noise_model(x, params)
+def neglnlike(params, x, y, **fixed_param):
+    """
+    For unbinned PSD fitting
+    """
+    model = noise_model(x, params, **fixed_param)
     output = np.sum(np.log(model) + y / model)
     if not np.isfinite(output):
         return 1.0e30
     return output
 
-def calc_masked_psd(
+def leastsq(params, x, y, y_err, **fixed_param):
+    """
+    For binned PSD fitting
+    """
+    model = noise_model(x, params, **fixed_param)
+    output = np.sum((model-y)**2/y_err**2)
+    if not np.isfinite(output):
+        return 1.0e30
+    return output    
+
+
+
+def calc_psd_mask(
     aman,
     f=None,
     pxx=None,
@@ -351,11 +391,12 @@ def calc_masked_psd(
     peak=False,
     peak_freq=None, 
     peak_width=(-0.002, +0.002),
-    merge=False, 
-    overwrite=True,
+    merge=True, 
+    mode="add",
+    overwrite=True
 ):
     """
-    Function that masks hwpss or single peak in PSD.
+    Function that calculates masks for hwpss or single peak in PSD.
 
     Arguments
     ---------
@@ -387,46 +428,49 @@ def calc_masked_psd(
             (peak_freq - 0.002) < f < (peak_freq + 0.002).
         merge : bool
             if True merge results into axismanager.
+        mode: str
+            if "replace", existing PSD mask is replaced to new mask.
+            If "add", new mask range is added to the existing one.
         overwrite: bool
-            if true will overwrite f, pxx axes. You cannot overwrite with data
-            longer than before.
+            if true will overwrite aman.PSD_mask.
 
     Returns
     -------
-        p_mask: MaskedArray of the input PSD. p_mask.data returns the PSD before masking,
-            while p_mask.mask returns the bool array of the mask.
+        PSD_mask (nusamps): Ranges array. If merge == True, "PSD_mask" is added to the aman.  
     """
+    PSD_mask = np.zeros(aman.nusamps.count, dtype=bool)
     if f is None or pxx is None:
         f = aman.freqs
         pxx = aman.Pxx
     if hwpss:
-        pxx_masked = []
         if hwp_freq is None:
             hwp_freq = np.median(aman['hwp_solution']['raw_approx_hwp_freq_1'][1])
-        mask_idx = hwpss_mask(f, hwp_freq, f_max=f_max, width_for_1f=width_for_1f, width_for_Nf=width_for_Nf)
-        f = f[mask_idx]
-        pxx = pxx[:, mask_idx]
+        PSD_mask = PSD_mask | hwpss_mask(f, hwp_freq, f_max=f_max, width_for_1f=width_for_1f, width_for_Nf=width_for_Nf)
     if peak:
-        mask_idx = peak_mask(f, peak_freq, peak_width=peak_width)
-        f = f[mask_idx]
-        pxx = pxx[:, mask_idx]
+        PSD_mask = PSD_mask | peak_mask(f, peak_freq, peak_width=peak_width)
+    if mode == "add":
+        if "PSD_mask" in aman:
+            PSD_mask = PSD_mask | aman.PSD_mask.mask()
+    elif mode == "replace":
+        pass
+    else:
+        print('Select mode from "add" or "replace".')
+    PSD_mask = Ranges.from_bitmask(PSD_mask)
     if merge:
-        aman.merge( core.AxisManager(core.OffsetAxis("nusamps", len(f))))
         if overwrite:
-            if "freqs" in aman._fields:
-                aman.move("freqs", None)
-            if "Pxx" in aman._fields:
-                aman.move("Pxx", None)
-        aman.wrap("freqs", f, [(0,"nusamps")])
-        aman.wrap("Pxx", pxx, [(0,"dets"),(1,"nusamps")])
-    return f, pxx
+            if "PSD_mask" in aman:
+                aman.move("PSD_mask", None)
+        aman.wrap("PSD_mask", PSD_mask, [(0,"nusamps")])
+    return PSD_mask
 
 def calc_binned_psd(
     aman,
     f=None,
     pxx=None,
-    unbinned_mode=10,
-    base=2,
+    mask=False,
+    unbinned_mode=3,
+    base=1.2,
+    limit_N=5,
     merge=False, 
     overwrite=True,
 ):
@@ -441,12 +485,16 @@ def calc_binned_psd(
             Frequency of PSD of signal.
         pxx : nparray
             PSD of signal.
-        hwpss : bool
-            If True, hwpss are masked.
+        mask : bool
+            if True calculate binned psd with mask.
         unbinned_mode : int
             First Fourier modes up to this number are left un-binned.
         base : float (> 1)
             Base of the logspace bins. 
+        limit_N : int
+            If data points in a bin is less than limit_N, that bin is handled with
+            chi2 distribution and its error is <psd>. Otherwise the central limit theorem
+            is applied to the bin and the error of the bin is std(psd)/sqrt(len(psd)).
         merge : bool
             if True merge results into axismanager.
         overwrite: bool
@@ -454,27 +502,41 @@ def calc_binned_psd(
 
     Returns
     -------
-        p_mask: MaskedArray of the input PSD. p_mask.data returns the PSD before masking,
-            while p_mask.mask returns the bool array of the mask.
+        f_binned, pxx_binned, pxx_err: binned frequency and PSD.
     """
     if f is None or pxx is None:
         f = aman.freqs
         pxx = aman.Pxx
-    f_binned = binning_psd(f, unbinned_mode=unbinned_mode, base=base)
-    pxx_binned = []
+    if mask:
+        if 'PSD_mask' in aman:
+            mask = ~aman.PSD_mask.mask()
+            f = f[mask]
+            pxx = pxx[:, mask]
+        else:
+            print('"PSD_mask" is not in aman. Masking is skipped.')
+            
+    f_bin = binning_psd(f, unbinned_mode=unbinned_mode, base=base, limit_N=limit_N, err=False)
+    pxx_bin = []
+    pxx_err = []
     for i in range(aman.dets.count):
-        pxx_binned.append(binning_psd(pxx[i], unbinned_mode=unbinned_mode, base=base))
-    pxx_binned = np.array(pxx_binned)
+        binned, err = binning_psd(pxx[i], unbinned_mode=unbinned_mode, base=base, limit_N=limit_N, err=True)
+        pxx_bin.append(binned)
+        pxx_err.append(err)
+    pxx_bin = np.array(pxx_bin)
+    pxx_err = np.array(pxx_err)
     if merge:
-        aman.merge( core.AxisManager(core.OffsetAxis("nusamps_bin", len(f_binned))))
+        aman.merge(core.AxisManager(core.OffsetAxis("nusamps_bin", len(f_bin))))
         if overwrite:
             if "freqs_bin" in aman._fields:
                 aman.move("freqs_bin", None)
             if "Pxx_bin" in aman._fields:
                 aman.move("Pxx_bin", None)
-        aman.wrap("freqs_bin", f_binned, [(0,"nusamps_bin")])
-        aman.wrap("Pxx_bin", pxx_binned, [(0,"dets"),(1,"nusamps_bin")])
-    return f_binned, pxx_binned
+            if "Pxx_bin_err" in aman._fields:
+                aman.move("Pxx_bin_err", None)
+        aman.wrap("freqs_bin", f_bin, [(0,"nusamps_bin")])
+        aman.wrap("Pxx_bin", pxx_bin, [(0,"dets"),(1,"nusamps_bin")])
+        aman.wrap("Pxx_bin_err", pxx_err, [(0,"dets"),(1,"nusamps_bin")])
+    return f_bin, pxx_bin, pxx_err
 
 def fit_noise_model(
     aman,
@@ -489,6 +551,8 @@ def fit_noise_model(
     f_max=100,
     merge_name="noise_fit_stats",
     merge_psd=True,
+    mask=False,
+    fixed_parameter=None,
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of signal.
@@ -530,7 +594,12 @@ def fit_noise_model(
     merge_name : bool
         If ``merge_fit`` is True then addes into axis manager with merge_name.
     merge_psd : bool
-        If ``merg_psd`` is True then adds fres and Pxx to the axis manager.
+        If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
+    mask : bool
+        If ``mask`` is True then PSD is masked with ``aman.PSD_mask``.
+    fixed_parameter : str
+        This accepts None or 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
+        white noise level (alpha) is fixed to the initially estimated value.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -554,6 +623,14 @@ def fit_noise_model(
                 merge=merge_psd,
                 **psdargs,
             )
+    if mask:
+        if 'PSD_mask' in aman:
+            mask = ~aman.PSD_mask.mask()
+            f = f[mask]
+            pxx = pxx[:, mask]
+        else:
+            print('"PSD_mask" is not in aman. Masking is skipped.')
+
     eix = np.argmin(np.abs(f - f_max))
     if f_min is None:
         six = 1
@@ -564,30 +641,253 @@ def fit_noise_model(
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
     covout = np.zeros((aman.dets.count, 3, 3))
+    fixed_param = {}
     for i in range(aman.dets.count):
         p = pxx[i]
-        wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])
-        pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
-        fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-        p0 = [f[fidx], wnest, -pfit[0]]
-        res = minimize(neglnlike, p0, args=(f, p), method="Nelder-Mead")
+        wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
+        if fixed_parameter == None:
+            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
+            p0 = [f[fidx], wnest, -pfit[0]]
+        elif fixed_parameter == 'wn':
+            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
+            p0 = [f[fidx], -pfit[0]]
+            fixed_param['wn'] = wnest
+        elif fixed_parameter == 'alpha':
+            pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
+            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
+            p0 = [f[fidx], wnest]
+            fixed_param['alpha'] = -pfit[0]
+        else:
+            print('"fixed_parameter" is invalid. Parameter fix is skipped.')
+            p0 = [f[fidx], wnest, -pfit[0]]
+        res = minimize(lambda params: neglnlike(params, f, p, **fixed_param), 
+               p0, method="Nelder-Mead")
         try:
-            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
+            #Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
+            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, **fixed_param), full_output=True)
             hessian_ndt, _ = Hfun(res["x"])
             # Inverse of the hessian is an estimator of the covariance matrix
             # sqrt of the diagonals gives you the standard errors.
-            covout[i] = np.linalg.inv(hessian_ndt)
+            covout_i = np.linalg.inv(hessian_ndt)            
         except np.linalg.LinAlgError:
             print(
                 f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
             )
-            covout[i] = np.full((3, 3), np.nan)
+            covout_i = np.full((len(p0), len(p0)), np.nan)
         except IndexError:
             print(
                 f"Cannot fit 1/f curve for detector {aman.dets.vals[i]} skipping."
             )
-            covout[i] = np.full((3, 3), np.nan)
-        fitout[i] = res.x
+            covout_i = np.full((len(p0), len(p0)), np.nan)
+        fitout_i = res.x
+        if fixed_parameter == 'alpha':
+            alpha_err = np.sqrt(vfit[0][0])
+            covout_i = np.insert(covout_i, 2, 0, axis=0)
+            covout_i = np.insert(covout_i, 2, 0, axis=1)
+            covout_i[2][2] = alpha_err
+            fitout_i = np.insert(fitout_i, 2, -pfit[0])
+        elif fixed_parameter == 'wn':
+            wnest_err = np.std(p[((f > fwhite[0]) & (f < fwhite[1]))])
+            covout_i = np.insert(covout_i, 1, 0, axis=0)
+            covout_i = np.insert(covout_i, 1, 0, axis=1)
+            covout_i[1][1] = wnest_err
+            fitout_i = np.insert(fitout_i, 1, wnest)
+        covout[i] = covout_i
+        fitout[i] = fitout_i
+
+    noise_model_coeffs = ["fknee", "white_noise", "alpha"]
+    noise_fit_stats = core.AxisManager(
+        aman.dets,
+        core.LabelAxis(
+            name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U8")
+        ),
+    )
+    noise_fit_stats.wrap("fit", fitout, [(0, "dets"), (1, "noise_model_coeffs")])
+    noise_fit_stats.wrap(
+        "cov",
+        covout,
+        [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")],
+    )
+
+    if merge_fit:
+        aman.wrap(merge_name, noise_fit_stats)
+    return noise_fit_stats
+
+
+def fit_binned_noise_model(
+    aman,
+    signal=None,
+    f=None,
+    pxx=None,
+    psdargs=None,
+    fwhite=(10, 100),
+    lowf=1,
+    merge_fit=False,
+    f_min=None,
+    f_max=100,
+    merge_name="noise_fit_stats",
+    merge_psd=True,
+    mask=False,
+    fixed_parameter=None,
+    unbinned_mode=3,
+    base=1.2,
+    limit_N=5,
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of binned signal.
+    This uses a least square method since the distrubition of binned points 
+    is close to the standard distribution.
+
+    Args
+    ----
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    signal : nparray
+        Signal sized ndets x nsamps to fit noise model to.
+        Default is None which corresponds to aman.signal.
+    f : nparray
+        Frequency of PSD of signal.
+        Default is None which calculates f, pxx from signal.
+    pxx : nparray
+        PSD sized ndets x len(f) which is fit to with model.
+        Default is None which calculates f, pxx from signal.
+    psdargs : dict
+        Dictionary of optional argument for ``scipy.signal.welch``
+    fwhite : tuple
+        Low and high frequency used to estimate white noise for initial
+        guess passed to ``scipy.signal.curve_fit``.
+    lowf : tuple
+        Frequency below which estimate of 1/f noise index and knee are estimated
+        for initial guess passed to ``scipy.signal.curve_fit``.
+    merge_fit : bool
+        Merges fit and fit statistics into input axis manager.
+    f_min : float
+        Minimum frequency to include in the fitting.
+        Default is None which selects f_min as the second index of f.
+    f_max : float
+        Maximum frequency to include in the fitting. This is particularly
+        important for lowpass filtered data such as that post demodulation
+        if the data is not downsampled after lowpass filtering.
+    merge_name : bool
+        If ``merge_fit`` is True then addes into axis manager with merge_name.
+    merge_psd : bool
+        If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
+    mask : bool
+        If ``mask`` is True then PSD is masked with ``aman.PSD_mask``.
+    fixed_parameter : str
+        This accepts None or 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
+        white noise level (alpha) is fixed to the initially estimated value.
+    unbinned_mode : int
+        First Fourier modes up to this number are left un-binned.
+    base : float (> 1)
+        Base of the logspace bins.
+    limit_N : int
+        If the number of data points in a bin is less than ``limit_N``, that bin is handled with
+        chi2 distribution and its error is <psd>. Otherwise the central limit theorem
+        is applied to the bin and the error of the bin is std(psd)/sqrt(len(psd)).
+
+    Returns
+    -------
+    noise_fit_stats : AxisManager
+        If merge_fit is False then axis manager with fit and fit statistics
+        is returned otherwise nothing is returned and axis manager is wrapped
+        into input aman.
+    """
+    if signal is None:
+        signal = aman.signal
+
+    if f is None or pxx is None:
+        if psdargs is None:
+            f, pxx = calc_psd(
+                aman, signal=signal, timestamps=aman.timestamps, merge=merge_psd
+            )
+        else:
+            f, pxx = calc_psd(
+                aman,
+                signal=signal,
+                timestamps=aman.timestamps,
+                merge=merge_psd,
+                **psdargs,
+            )
+    if mask:
+        if 'PSD_mask' in aman:
+            mask = ~aman.PSD_mask.mask()
+            f = f[mask]
+            pxx = pxx[:, mask]
+        else:
+            print('"PSD_mask" is not in aman. Masking is skipped.')
+
+    eix = np.argmin(np.abs(f - f_max))
+    if f_min is None:
+        six = 1
+    else:
+        six = np.argmin(np.abs(f - f_min))
+    f = f[six:eix]
+    pxx = pxx[:, six:eix]
+    # binning
+    f, pxx, pxx_err = calc_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
+                                              base=base, limit_N=limit_N, merge=False)
+    fitout = np.zeros((aman.dets.count, 3))
+    # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
+    covout = np.zeros((aman.dets.count, 3, 3))
+    fixed_param = {}
+    for i in range(aman.dets.count):
+        p = pxx[i]
+        p_err = pxx_err[i]
+        wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
+        if fixed_parameter == None:
+            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
+            p0 = [f[fidx], wnest, -pfit[0]]
+        elif fixed_parameter == 'wn':
+            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
+            p0 = [f[fidx], -pfit[0]]
+            fixed_param['wn'] = wnest
+        elif fixed_parameter == 'alpha':
+            pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
+            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
+            p0 = [f[fidx], wnest]
+            fixed_param['alpha'] = -pfit[0]
+        else:
+            print('"fixed_parameter" is invalid. Parameter fix is skipped.')
+            p0 = [f[fidx], wnest, -pfit[0]]
+        res = minimize(lambda params: leastsq(params, f, p, p_err, **fixed_param), 
+               p0, method="Nelder-Mead")
+        try:
+            #Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
+            Hfun = ndt.Hessian(lambda params: leastsq(params, f, p, p_err, **fixed_param), full_output=True)
+            hessian_ndt, _ = Hfun(res["x"])
+            # Inverse of the hessian is an estimator of the covariance matrix
+            # sqrt of the diagonals gives you the standard errors.
+            covout_i = np.linalg.inv(hessian_ndt)            
+        except np.linalg.LinAlgError:
+            print(
+                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
+            )
+            covout_i = np.full((len(p0), len(p0)), np.nan)
+        except IndexError:
+            print(
+                f"Cannot fit 1/f curve for detector {aman.dets.vals[i]} skipping."
+            )
+            covout_i = np.full((len(p0), len(p0)), np.nan)
+        fitout_i = res.x
+        if fixed_parameter == 'alpha':
+            alpha_err = np.sqrt(vfit[0][0])
+            covout_i = np.insert(covout_i, 2, 0, axis=0)
+            covout_i = np.insert(covout_i, 2, 0, axis=1)
+            covout_i[2][2] = alpha_err
+            fitout_i = np.insert(fitout_i, 2, -pfit[0])
+        elif fixed_parameter == 'wn':
+            wnest_err = np.std(p[((f > fwhite[0]) & (f < fwhite[1]))])
+            covout_i = np.insert(covout_i, 1, 0, axis=0)
+            covout_i = np.insert(covout_i, 1, 0, axis=1)
+            covout_i[1][1] = wnest_err
+            fitout_i = np.insert(fitout_i, 1, wnest)
+        covout[i] = covout_i
+        fitout[i] = fitout_i
 
     noise_model_coeffs = ["fknee", "white_noise", "alpha"]
     noise_fit_stats = core.AxisManager(
@@ -633,12 +933,12 @@ def hwpss_mask(f, hwp_freq, f_max=100, width_for_1f=(-0.4, +0.6), width_for_Nf=(
     Returns
     -------
         mask: Boolean array to mask frequency and power of the given PSD. 
-            False in this array stands for the index of hwpss to mask.
+            True in this array stands for the index of hwpss to mask.
     """
-    mask_arrays = [((f < hwp_freq + width_for_1f[0])|(f > hwp_freq + width_for_1f[1]))]
+    mask_arrays = [((f > hwp_freq + width_for_1f[0])&(f < hwp_freq + width_for_1f[1]))]
     for n in range(int(f_max//hwp_freq-1)):
-        mask_arrays.append(((f < hwp_freq*(n+2) + width_for_Nf[0])|(f > hwp_freq*(n+2) + width_for_Nf[1])))
-    mask = np.all(np.array(mask_arrays), axis=0)
+        mask_arrays.append(((f > hwp_freq*(n+2) + width_for_Nf[0])&(f < hwp_freq*(n+2) + width_for_Nf[1])))
+    mask = np.any(np.array(mask_arrays), axis=0)
     return mask
 
 def peak_mask(f, peak_freq, peak_width=(-0.002, +0.002)):
@@ -660,12 +960,12 @@ def peak_mask(f, peak_freq, peak_width=(-0.002, +0.002)):
     Returns
     -------
         mask: Boolean array to mask the given PSD. 
-            False in this array stands for the index of the single peak to mask.
+            True in this array stands for the index of the single peak to mask.
     """
-    mask = (f < peak_freq + peak_width[0])|(f > peak_freq + peak_width[1])
+    mask = (f > peak_freq + peak_width[0])&(f < peak_freq + peak_width[1])
     return mask
 
-def binning_psd(psd, unbinned_mode=10, base=2, drop_nan=False):
+def binning_psd(psd, unbinned_mode=3, base=1.2, limit_N=5, err=True, drop_nan=False):
     """
     Function to bin PSD.
     First several Fourier modes are left un-binned.
@@ -675,12 +975,20 @@ def binning_psd(psd, unbinned_mode=10, base=2, drop_nan=False):
     ---------
         psd : nparray
             PSD of signal.
-
+            
         unbinned_mode : int
             First Fourier modes up to this number are left un-binned.
 
         base : float (> 1)
-            Base of the logspace bins. 
+            Base of the logspace bins.
+
+        limit_N : int
+            If data points in a bin is less than limit_N, that bin is handled with
+            chi2 distribution and its error is <psd>. Otherwise the central limit theorem
+            is applied to the bin and the error of the bin is std(psd)/sqrt(len(psd)).
+            
+        err : bool
+            If True, standard deviations are calculated for bins.
 
         drop_nan : bool
             If True, drop the index where p is nan.
@@ -688,23 +996,44 @@ def binning_psd(psd, unbinned_mode=10, base=2, drop_nan=False):
     Returns
     -------
         binned_psd: nparray
-            Binned PSD.
+        binned_psd_err: nparray
     """
     binned_psd = []
-    for i in range(0, unbinned_mode+1):
-        binned_psd.append(psd[i])
-    N = int(np.emath.logn(base, len(psd)-unbinned_mode))
-    binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
-    if base >= 2:
+    if err == True:
+        binned_psd_err = []
+        for i in range(0, unbinned_mode+1):
+            binned_psd.append(psd[i])
+            binned_psd_err.append(psd[i])
+        N = int(np.emath.logn(base, len(psd)-unbinned_mode))
+        binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
         for i in range(N-1):
-            binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
-    else:
-        for i in range(N-1):
-            if binning_idx[i] == binning_idx[i+1]:
-                continue
+            # chi2 distributed bins
+            if limit_N > binning_idx[i+1] - binning_idx[i]:
+                binned_psd.append(psd[binning_idx[i]])
+                binned_psd_err.append(psd[binning_idx[i]])
             else:
                 binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
-    binned_psd = np.array(binned_psd)
-    if drop_nan:
-        binned_psd = binned_psd[~np.isnan(binned_psd)]
-    return binned_psd
+                binned_psd_err.append(np.std(psd[binning_idx[i]:binning_idx[i+1]])/np.sqrt(binning_idx[i+1]-binning_idx[i]+1))
+
+        binned_psd = np.array(binned_psd)
+        binned_psd_err = np.array(binned_psd_err)
+        if drop_nan:
+            binned_psd = binned_psd[~np.isnan(binned_psd)]
+            binned_psd_err = binned_psd_err[~np.isnan(binned_psd_err)]
+        return binned_psd, binned_psd_err
+
+    else:
+        for i in range(0, unbinned_mode+1):
+            binned_psd.append(psd[i])
+        N = int(np.emath.logn(base, len(psd)-unbinned_mode))
+        binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
+        for i in range(N-1):
+            if limit_N > binning_idx[i+1] - binning_idx[i]:
+                binned_psd.append(psd[binning_idx[i]])
+            else:
+                binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
+
+        binned_psd = np.array(binned_psd)
+        if drop_nan:
+            binned_psd = binned_psd[~np.isnan(binned_psd)]
+        return binned_psd
