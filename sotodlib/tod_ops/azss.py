@@ -29,7 +29,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
     bins: int or sequence of scalars
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
-        If `bins` is a sequence, `bins` overwrite `range`.
+        If ``bins`` is a sequence, ``bins`` overwrite ``range``.
     flags: RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
