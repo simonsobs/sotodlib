@@ -45,7 +45,9 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
     Returns
     -------
     binning_dict: A dictionary containing the binned signal values.
+        * 'bin_edges' : float array of bin edges
         * 'bin_centers': center of each bin of azimuth
+        * 'bin_counts': counts of binned samples
         * 'binned_signal': binned signal
         * 'binned_signal_sigma': estimated sigma of binned signal
     """
@@ -190,7 +192,7 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
     -------
     Tuple:
         - azss_stats: core.AxisManager
-            - azss statistics including: azumith bin centers, binned signal, std of each detector-az bin, std of each detector.
+            - azss statistics including: azumith bin centers, bin counts, binned signal, std of each detector-az bin, std of each detector.
             - If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
         - model_sig_tod: numpy.array
             - azss model as a function of time either from fits or interpolation depending on ``method`` argument.
@@ -213,12 +215,14 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
                             apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
                             apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
     bin_centers = binning_dict['bin_centers']
+    bin_counts = binning_dict['bin_counts']
     binned_signal = binning_dict['binned_signal']
     binned_signal_sigma = binning_dict['binned_signal_sigma']
     uniform_binned_signal_sigma = np.nanmedian(binned_signal_sigma, axis=-1)
     
     azss_stats = core.AxisManager(aman.dets)
     azss_stats.wrap('binned_az', bin_centers, [(0, core.IndexAxis('bin_samps', count=bins))])
+    azss_stats.wrap('bin_counts', bin_counts, [(0, 'dets'), (1, 'bin_samps')])
     azss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_samps')])
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])

@@ -77,6 +77,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
             **In the binned case the following are returned:**
             
             - **binned_angle** (n_bins) : binned version of hwp_angle in range (0, 2pi] with number of bins set by bins argument.
+            - **bin_counts** (n_dets x n_bins): sample counts of each bin for each detector.
             - **binned_signal** (n_dets x n_bins) : binned signal for each detector.
             - **sigma_bin** (n_dets) : average over all bins of the standard deviation of the signal within each bin.
         
@@ -114,7 +115,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
+        hwp_angle_bin_centers, bin_counts, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
             aman, signal, hwp_angle=None, bins=bins, flags=flags, 
             apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
             apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
@@ -129,6 +130,8 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         # wrap
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
+        hwpss_stats.wrap('bin_counts', bin_counts, [
+                       (0, 'dets'), (1, 'bin_samps')])
         hwpss_stats.wrap('binned_signal', binned_hwpss, [
                        (0, 'dets'), (1, 'bin_samps')])
         hwpss_stats.wrap('sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
@@ -237,13 +240,14 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
+    bin_counts = binning_dict['bin_counts']
     binned_hwpss = binning_dict['binned_signal']
     binned_hwpss_sigma = binning_dict['binned_signal_sigma']
     
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
     
-    return bin_centers, binned_hwpss, hwpss_sigma
+    return bin_centers, bin_counts, binned_hwpss, hwpss_sigma
 
 
 def hwpss_linreg(x, ys, yerrs, modes):

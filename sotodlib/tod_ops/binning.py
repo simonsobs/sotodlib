@@ -35,6 +35,7 @@ def bin_signal(aman, bin_by, signal=None,
     Dictionary:
         - **bin_edges** (dict key): float array of bin edges length(bin_centers)+1.
         - **bin_centers** (dict key): center of each bin.
+        - **bin_counts** (dict key): counts of binned samples. 
         - **binned_signal** (dict key): binned signal.
         - **binned_signal_sigma** (dict key): estimated sigma of binned signal.
     """
@@ -72,8 +73,10 @@ def bin_signal(aman, bin_by, signal=None,
             
         binned_signal_sigma[:, mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[:,mcnts] - binned_signal[:,mcnts]**2)
                                      ) / np.sqrt(bin_counts[mcnts])
+        bin_counts_dets = np.tile(bin_counts, (aman.dets.count, 1))
             
     else:
+        bin_counts_dets = np.full([aman.dets.count, nbins], np.nan)
         for i, dets in enumerate(aman.dets.vals):
             if flags.shape == (aman.dets.count, aman.samps.count):
                 m = ~flags.mask()[i]
@@ -93,6 +96,7 @@ def bin_signal(aman, bin_by, signal=None,
             bin_counts_masked, _ = np.histogram(bin_by[m], bins=bins, range=range, weights=weight_for_signal_det[m])
             mcnts_masked = bin_counts_masked > 0
             
+            bin_counts_dets[i] = bin_counts_masked
             binned_signal[i][mcnts_masked] = np.histogram(bin_by[m], bins=bins, range=range,
                                               weights=signal[i][m] * weight_for_signal_det[m])[0][mcnts_masked] / bin_counts_masked[mcnts_masked]
 
@@ -102,5 +106,5 @@ def bin_signal(aman, bin_by, signal=None,
             binned_signal_sigma[i, mcnts_masked] = np.sqrt(np.abs(binned_signal_squared_mean[i,mcnts_masked] - binned_signal[i,mcnts_masked]**2)
                                          ) / np.sqrt(bin_counts_masked[mcnts_masked])
 
-    return {'bin_edges': bin_edges, 'bin_centers': bin_centers, 'binned_signal': binned_signal,
-            'binned_signal_sigma': binned_signal_sigma}
+    return {'bin_edges': bin_edges, 'bin_centers': bin_centers, 'bin_counts': bin_counts_dets,
+            'binned_signal': binned_signal, 'binned_signal_sigma': binned_signal_sigma}
