@@ -19,7 +19,8 @@ def get_apodize_window_for_ends(aman, apodize_samps=1600):
     
 def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
     """
-    Generate an apodization window based on flag values.
+    Generate an apodization window based on flag values. Apply cosine tapering every 
+    continuous portion of data between flagged region.
 
     Args:
         aman: An axismanager
