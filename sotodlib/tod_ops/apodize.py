@@ -63,14 +63,15 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
                 apodizer[di][_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
     return apodizer
     
-def apodize_cosine(aman, signal='signal', apodize_samps=1600, in_place=True,
+def apodize_cosine(aman, signal_name='signal', apodize_samps=1600, in_place=True,
                    apo_axis='apodized', window=None):
     """
     Function to smoothly filter the timestream to 0's on the ends with a
-    cosine function. If window is 
+    cosine function. If window is provided, multiply the window function to 
+    aman[signal_name].
 
     Args:
-        signal (str): Axis to apodize
+        signal_name (str): Axis to apodize
         apodize_samps (int): Number of samples on tod ends to apodize.
         in_place (bool): writes over signal with apodized version
         apo_axis (str): Axis to store the apodized signal if not in place.
@@ -80,8 +81,8 @@ def apodize_cosine(aman, signal='signal', apodize_samps=1600, in_place=True,
         w = get_apodize_window_for_ends(aman, apodize_samps)
         
     if in_place:
-        aman[signal] *= w
+        aman[signal_name] *= w
     else:
         aman.wrap_new(apo_axis, dtype='float32', shape=('dets', 'samps'))
-        aman[apo_axis] = aman[signal]*w
+        aman[apo_axis] = aman[signal_name]*w
     return
