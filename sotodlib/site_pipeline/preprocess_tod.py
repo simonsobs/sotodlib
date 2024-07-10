@@ -131,8 +131,11 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
     outputs = {}
     if logger is None: 
         logger = sp_util.init_logger("preprocess")
-    
-    configs, context = _get_preprocess_context(configs, context)
+
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+
+    context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
@@ -146,28 +149,36 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
                            f"No analysis to run.")
             error = 'no_group_overlap'
             return error, [obs_id, dets], None
-    
-    db = core.metadata.ManifestDb(configs['archive']['index'])
-    dbix = {'obs:obs_id':obs_id}
-    for gb, g in zip(group_by, groups):
-        dbix[f'dets:{gb}'] = g
 
-    if (len(db.inspect(dbix)) != 0) and (not overwrite):
-        _, aman = load_preprocess_tod(obs_id=obs_id, dets=dets,
-                                              configs=configs, context=context)
+    dbexist = True
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        dbix = {'obs:obs_id':obs_id}
+        for gb, g in zip(group_by, cur_groups[0]):
+            dbix[f'dets:{gb}'] = g
+        print(dbix)
+        if len(db.inspect(dbix)) == 0:
+            dbexist = False
+    else:
+        dbexist = False
+
+    if dbexist and (not overwrite):
+        logger.info(f"db exists for {obs_id} {dets} loading data and applying preprocessing.")
+        aman = load_preprocess_tod(obs_id=obs_id, dets=dets,
+                                   configs=configs, context=context)
+        error = 'load_success'
         return error, [obs_id, dets], aman
     else:
+        logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
         pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
-
-        logger.info(f"Beginning run for {obs_id}:{group}")
         try:
-            aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
+            aman = context.get_obs(obs_id, dets=dets)
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
             aman.wrap('preprocess', proc_aman)
         except Exception as e:
-            error = f'Failed to load: {obs_id} {group}'
+            error = f'Failed to load: {obs_id} {dets}'
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
             logger.info(f"{error}\n{errmsg}\n{tb}")
@@ -178,10 +189,10 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
         newpath = f'temp/{obs_id}'
         for cg in cur_groups[0]:
             newpath += f'_{cg}'
-        swap_archive(configs, newpath+'.h5')
-        policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+        temp_config = swap_archive(configs, newpath+'.h5')
+        policy = sp_util.ArchivePolicy.from_params(temp_config['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
-        for gb, g in zip(group_by, group):
+        for gb, g in zip(group_by, cur_groups[0]):
             if gb == 'detset':
                 dest_dataset += "_" + g
             else:
@@ -194,7 +205,7 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
         # Collect index info.
         db_data = {'obs:obs_id': obs_id,
                     'dataset': dest_dataset}
-        for gb, g in zip(group_by, group):
+        for gb, g in zip(group_by, cur_groups[0]):
             db_data['dets:'+gb] = g
         outputs['db_data'] = db_data
         return error, outputs, aman
@@ -213,33 +224,33 @@ def cleanup_mandb_mpi(error, outputs, configs, logger):
         while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-            group_by =  [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
-            db = _get_preprocess_db(configs, group_by)
-            if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
-                nfile += 1
-                dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
+        group_by =  [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
+        db = _get_preprocess_db(configs, group_by)
+        h5_path = os.path.relpath(dest_file,
+                                  start=os.path.dirname(configs['archive']['index']))
 
-            h5_path = os.path.relpath(dest_file,
-                                      start=os.path.dirname(configs['archive']['index']))
-
-            src_file = outputs['temp_file']
-            with h5py.File(dest_file,'a') as f_dest:
-                with h5py.File(src_file,'r') as f_src:
-                    for dts in f_src.keys():
-                        f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                        for member in f_src[dts]:
-                            if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                                f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-            logger.info(f"Saving to database under {db_data}")
-            if len(db.inspect(outputs['db_data'])) == 0:
-                db.add_entry(outputs['db_data'], h5_path)
-            os.remove(src_file)
+        src_file = outputs['temp_file']
+        with h5py.File(dest_file,'a') as f_dest:
+            with h5py.File(src_file,'r') as f_src:
+                for dts in f_src.keys():
+                    f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
+                    for member in f_src[dts]:
+                        if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
+                            f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
+        logger.info(f"Saving to database under {outputs['db_data']}")
+        if len(db.inspect(outputs['db_data'])) == 0:
+            db.add_entry(outputs['db_data'], h5_path)
+        os.remove(src_file)
+    elif error == 'load_success':
+        return
     else:
-        errlog = os.path.join(os.path.dirname(configs['archive']['index']),
-                              'errlog.txt')
+        folder = os.path.dirname(configs['archive']['index'])
+        if not(os.path.exists(folder)):
+            os.makedirs(folder)
+        errlog = os.path.join(folder, 'errlog.txt')
         f = open(errlog, 'a')
         f.write(f'{time.time()}, {error}\n')
-        f.write(f'\t{outputs[0]}\n\t{outputs[1]}')
+        f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
 
 def preprocess_tod(obs_id, 
@@ -397,7 +408,8 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta)
-        pipe.run(aman, aman.preprocess)
+        # select applied in load_preprocess_det_select
+        pipe.run(aman, aman.preprocess, select=False)
         return aman
 
 
