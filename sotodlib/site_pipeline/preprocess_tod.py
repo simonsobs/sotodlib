@@ -363,6 +363,10 @@ def preprocess_tod(obs_id,
                 return error, None, [None, None]
             else:
                 return
+    if 'wafer.bandpass' in group_by:
+        for g in all_groups:
+            if 'NC' in g:
+                groups.remove(g)
     
     if not(run_parallel):
         db = _get_preprocess_db(configs, group_by)

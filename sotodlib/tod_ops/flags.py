@@ -572,7 +572,6 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
         All ones if the detector should be cut.
 
     """
-    print(f'dets before ptp cuts: {aman.dets.count}')
     det_mask = np.full(aman.dets.count, True, dtype=bool)
     ptps_full = np.ptp(aman[signal_name], axis=1)
     ratio = ptps_full/np.median(ptps_full)
@@ -593,7 +592,6 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
                 det_mask[ptps_full >= np.max(ptps)] = False
             else:
                 det_mask[ptps_full <= np.min(ptps)] = False
-    print(f'dets after ptp cuts: {len(aman.dets.vals[det_mask])}')
     x = Ranges(aman.samps.count)
     mskptps = RangesMatrix([Ranges.zeros_like(x) if Y
                              else Ranges.ones_like(x) for Y in det_mask])

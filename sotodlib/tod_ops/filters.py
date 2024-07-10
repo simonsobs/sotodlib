@@ -365,7 +365,7 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        _f = attrgetter(field)
+        _f = attrgetter(timeconst)
         timeconst = _f(tod)
 
     if target is None:

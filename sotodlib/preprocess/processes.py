@@ -980,8 +980,8 @@ class FourierFilter(_Preprocess):
             trim = self.process_cfgs["trim_samps"]
             aman.restrict('samps', (aman.samps.offset + trim,
                                     aman.samps.offset + aman.samps.count - trim))
-            proc_aman.restrict('samps', (aman.samps.offset + trim,
-                                         aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
+                                         proc_aman.samps.offset + proc_aman.samps.count - trim))
 
 class PCARelCal(_Preprocess):
     """
