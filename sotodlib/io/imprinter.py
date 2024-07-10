@@ -812,7 +812,7 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
-        ## LATs don't have HWPs we can change this if we ever make LAT HWPs :D
+        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
         ## or if we ever plan to run the SATs without HWPs
         if 'lat' in self.daq_node:
             require_hwp = False

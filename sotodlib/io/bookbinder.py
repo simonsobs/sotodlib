@@ -376,6 +376,7 @@ class AncilProcessor:
                     if self.require_acu:
                         raise e
                     else:
+                        log.warning(e)
                         acu_interp_data[fld] = None
             else: 
                 acu_interp_data[fld] = None
@@ -468,6 +469,7 @@ class AncilProcessor:
         if el is not None:
             m = (t0 <= el.times) & (el.times <= t1)
             if np.any(m):
+                dt = np.diff(el.times[m]).mean()
                 el_vel = np.diff(el.data[m]) / dt
                 frame['elevation_velocity_mean'] = np.mean(el_vel)
                 frame['elevation_velocity_stdev'] = np.std(el_vel)
