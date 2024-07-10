@@ -910,20 +910,28 @@ class HWPAngleModel(_Preprocess):
      Example config block::
 
         - name : "hwp_angle_model"
+          process: True
           calc:
             on_sign_ambiguous: 'fail'
           save: True
-    
+          
     .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
     """
     name = "hwp_angle_model"
-    
+
+    def process(self, aman, proc_aman):
+        if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
+            aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
+                      [(0, 'samps')])
+        else:
+            return
+
     def calc_and_save(self, aman, proc_aman):
         hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
         hwp_angle_aman = core.AxisManager(aman.samps)
         hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
         self.save(proc_aman, hwp_angle_aman)
-    
+
     def save(self, proc_aman, hwp_angle_aman):
         if self.save_cfgs is None:
             return
