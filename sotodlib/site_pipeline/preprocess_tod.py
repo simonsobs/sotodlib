@@ -127,6 +127,51 @@ def swap_archive(config, fpath):
 
 def preproc_or_load_mpi(obs_id, configs, dets, logger=None, 
                         context=None, overwrite=False):
+    """
+    Function to be dropped into the ML mapmaker run in an MPI framework.
+    This function is expected to receive a single obs_id, and dets dictionary
+    which is expected to be processed by a single MPI rank. The dets dictionary
+    must match the grouping specified in the preprocess config file. If the
+    preprocess database entry for this obsid-dets group already exists then this
+    function will just load back the processed tod calling the ``load_preprocess_tod``
+    function. If the db entry does not exist of the overwrite flag is set to True then
+    the full preprocessing steps defined in the configs are run and the outputs are
+    written to a unique h5 file. Any errors, the info to populate the database, 
+    the file path of the h5 file, and the process tod are returned from this function.
+    This function is expected to be run in conjunction with the ``cleanup_mandb_mpi``
+    function which consumes all of the outputs (except the processed tod) and writes
+    to the database, and moves the multiple h5 files into fewer h5 files (each <= 10 GB).
+
+    Arguments
+    ---------
+    obs_id: str
+        Obs id to process or load
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    dets: dict
+        Dictionary specifying which detectors/wafers to load see ``Context.obsdb.get_obs``.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    context: fpath or core.Context
+        Optional. Filepath or context object used for data loading/querying.
+    overwrite: bool
+        Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
+
+    Returns
+    -------
+    error: str
+        String indicating if the function succeeded in its execution or failed.
+        If ``None`` then it succeeded in processing and the mandB should be updated.
+        If ``'load_success'`` then axis manager was successfully loaded from existing preproc db.
+        If any other string then processing failed and output will be logged in the error log.
+    output: list
+        Varies depending on the value of ``error``.
+        If ``error == None`` then output is the info needed to update the manifest db.
+        If ``error == 'load_success'`` then output is just ``[obs_id, dets]``.
+        If ``error`` is anything else then output stores what to save in the error log.
+    aman: Core.AxisManager
+        Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
+    """
     error = None
     outputs = {}
     if logger is None: 
@@ -211,6 +256,20 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
         return error, outputs, aman
           
 def cleanup_mandb_mpi(error, outputs, configs, logger):
+    """
+    Function to update the manifest db when database generation run in parrallel using MPI.
+    This function is expected to be run from rank 0 after a ``comm.gather`` call and consumes
+    the outputs from ``preproc_or_load_mpi``. See the ``preproc_or_load_mpi`` docstring for
+    the varying expected values of ``error`` and the associated ``outputs``. This function
+    will either: 
+    
+    1) Update the mandb sqlite file and move the h5 archive from its temporary
+    location to its permanent path if error is ``None``.
+    
+    2) Return nothing if error is ``load_success``.
+    
+    3) Update the error log if error is anything else.
+    """
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
