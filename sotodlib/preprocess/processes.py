@@ -617,9 +617,9 @@ class SubtractHWPSS(_Preprocess):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
             template = hwp.harms_func(aman.hwp_angle, modes,
                                   proc_aman[self.hwpss_stats].coeffs)
+            aman.wrap('hwpss_model', template, [(0, 'dets'), (1, 'samps')])
             hwp.subtract_hwpss(
                 aman,
-                hwpss_template = template,
                 subtract_name = self.process_cfgs["subtract_name"]
                 )
 
