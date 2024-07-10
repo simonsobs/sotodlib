@@ -129,7 +129,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     
     
 def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=None,
-            apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
+            apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
             merge_stats=True, azss_stats_name='azss_stats',
@@ -244,8 +244,8 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
         aman[signal_name] = np.subtract(signal, model_sig_tod, dtype='float32')
     return azss_stats, model_sig_tod
 
-def subtract_azss(aman, signal=None, azss_template=None,
-                 subtract_name='azss_remove'):
+def subtract_azss(aman, signal_name='signal', azss_template_name='azss_model',
+                  subtract_name='azss_remove', in_place=False, remove_template=True):
     """
     Subtract the scan synchronous signal (azss) template from the
     signal in the given axis manager.
@@ -253,27 +253,33 @@ def subtract_azss(aman, signal=None, azss_template=None,
     Parameters
     ----------
     aman : AxisManager
-        The axis manager containing the signal to which the azss template will
-        be applied.
-    signal : ndarray, optional
-        The signal from which the azss template will be subtracted. If ``signal`` is
-        None (default), the signal contained in the axis manager will be used.
-    azss_template : ndarray, optional
-        The azss template to be subtracted from the signal. If `azss_template`
-        is None (default), the azss template stored in the axis manager under
-        the key ``azss_extract`` will be used.
+        The axis manager containing the signal and the azss template.
+    signal_name : str, optional
+        The name of the field in the axis manager containing the signal to be processed.
+        Defaults to 'signal'.
+    azss_template_name : str, optional
+        The name of the field in the axis manager containing the azss template.
+        Defaults to 'azss_model'.
     subtract_name : str, optional
-        The name of the output axis manager field that will contain the azss-subtracted 
-        signal. Defaults to ``azss_remove``.
+        The name of the field in the axis manager that will store the azss-subtracted signal.
+        Only used if in_place is False. Defaults to 'azss_remove'.
+    in_place : bool, optional
+        If True, the subtraction is done in place, modifying the original signal in the axis manager.
+        If False, the result is stored in a new field specified by subtract_name. Defaults to False.
+    remove_template : bool, optional
+        If True, the azss template field is removed from the axis manager after subtraction.
+        Defaults to True.
 
     Returns
     -------
     None
     """
-    if signal is None:
-        signal = aman.signal
-    if azss_template is None:
-        azss_template = aman['azss_model']
-
-    aman.wrap(subtract_name, np.subtract(
-              signal, azss_template, dtype='float32'), [(0, 'dets'), (1, 'samps')])
+    if in_place:
+        aman[signal_name] = np.subtract(aman[signal_name], aman[azss_template_name], dtype='float32')
+    else:
+        aman.wrap(subtract_name, 
+                  np.subtract(aman[signal_name], aman[azss_template_name], dtype='float32'),
+                  [(0, 'dets'), (1, 'samps')])
+        
+    if remove_template:
+        aman.move(azss_template_name, None)

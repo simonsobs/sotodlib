@@ -481,8 +481,8 @@ def estimate_sigma_tod(signal, hwp_angle):
     return hwpss_sigma_tod
 
 
-def subtract_hwpss(aman, signal=None, hwpss_template=None,
-                   subtract_name='hwpss_remove'):
+def subtract_hwpss(aman, signal_name='signal', hwpss_template_name='hwpss_model',
+                   subtract_name='hwpss_remove', in_place=False, remove_template=True):
     """
     Subtract the half-wave plate synchronous signal (HWPSS) template from the
     signal in the given axis manager.
@@ -490,33 +490,39 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     Parameters
     ----------
     aman : AxisManager
-        The axis manager containing the signal to which the HWPSS template will
-        be applied.
-    signal : ndarray, optional
-        The signal to which the HWPSS template will be applied. If `signal` is
-        None (default), the signal contained in the axis manager will be used.
-    hwpss_template : ndarray, optional
-        The HWPSS template to be subtracted from the signal. If `hwpss_template`
-        is None (default), the HWPSS template stored in the axis manager under
-        the key 'hwpss_extract' will be used.
+        The axis manager containing the signal and the HWPSS template.
+    signal_name : str, optional
+        The name of the field in the axis manager containing the signal to be processed.
+        Defaults to 'signal'.
+    hwpss_template_name : str, optional
+        The name of the field in the axis manager containing the HWPSS template.
+        Defaults to 'hwpss_model'.
     subtract_name : str, optional
-        The name of the output axis manager that will contain the HWPSS-
-        subtracted signal. Defaults to 'hwpss_remove'.
+        The name of the field in the axis manager that will store the HWPSS-subtracted signal.
+        Only used if in_place is False. Defaults to 'hwpss_remove'.
+    in_place : bool, optional
+        If True, the subtraction is done in place, modifying the original signal in the axis manager.
+        If False, the result is stored in a new field specified by subtract_name. Defaults to False.
+    remove_template : bool, optional
+        If True, the HWPSS template field is removed from the axis manager after subtraction.
+        Defaults to True.
 
     Returns
     -------
     None
     """
-    if signal is None:
-        signal = aman.signal
-    if hwpss_template is None:
-        hwpss_template = aman['hwpss_model']
-    
-    if subtract_name in aman._fields:
-        aman[subtract_name] = np.subtract(signal, hwpss_template)
+    if in_place:
+        aman[signal_name] = np.subtract(aman[signal_name], aman[hwpss_template_name], dtype='float32')
     else:
-        aman.wrap(subtract_name, np.subtract(
-            signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
+        if subtract_name in aman._fields:
+            aman[subtract_name] = np.subtract(aman[signal_name], aman[hwpss_template_name], dtype='float32')
+        else:
+            aman.wrap(subtract_name, np.subtract(
+                    aman[signal_name], aman[hwpss_template_name], dtype='float32'),
+                    [(0, 'dets'), (1, 'samps')])
+    
+    if remove_template:
+        aman.move(hwpss_template_name, None)
 
 
 def demod_tod(aman, signal_name='signal', demod_mode=4,
