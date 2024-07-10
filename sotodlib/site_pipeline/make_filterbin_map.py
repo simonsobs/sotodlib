@@ -370,7 +370,7 @@ def cal_rel(obs, signal_name):
     med = np.median(pca_signal.weights[:,0])
     
     # Relative calib
-    obs[f'{signal_name}'] = np.divide(obs.signal.T, pca_signal.weights[:,0]/med).T
+    obs[f'{signal_name}'] = np.divide(obs[f'{signal_name}'].T, pca_signal.weights[:,0]/med).T
 
     
 def calibrate_data(obs, remove_hwpss=True):
@@ -477,7 +477,7 @@ def IP_correct(obs):
 def cut_outlier_detectors(obs):
     ivar = 1.0/np.var(obs.demodQ, axis=-1)
     sigma = (np.percentile(ivar,84) - np.percentile(ivar, 16))/2
-    mask_det = ivar > np.median(ivar) + 5*sigma
+    mask_det = ivar > np.median(ivar) + 2*sigma
     obs.restrict('dets', obs.dets.vals[~mask_det])
 
     
