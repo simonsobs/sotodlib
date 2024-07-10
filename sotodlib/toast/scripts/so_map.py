@@ -83,10 +83,13 @@ def reduce_data(job, otherargs, runargs, data):
     wrk.cadence_map(job, otherargs, runargs, data)
     wrk.crosslinking_map(job, otherargs, runargs, data)
 
-    wrk.mapmaker_ml(job, otherargs, runargs, data)
-    wrk.mapmaker(job, otherargs, runargs, data)
-    wrk.mapmaker_filterbin(job, otherargs, runargs, data)
-    wrk.mapmaker_madam(job, otherargs, runargs, data)
+    if job.operators.splits.enabled:
+        wrk.splits(job, otherargs, runargs, data)
+    else:
+        wrk.mapmaker_ml(job, otherargs, runargs, data)
+        wrk.mapmaker(job, otherargs, runargs, data)
+        wrk.mapmaker_filterbin(job, otherargs, runargs, data)
+        wrk.mapmaker_madam(job, otherargs, runargs, data)
     wrk.filtered_statistics(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(
@@ -136,6 +139,13 @@ def main():
         help="Map each observation separately.",
     )
     parser.add_argument(
+        "--detmaps",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Map each detector separately.",
+    )
+    parser.add_argument(
         "--intervalmaps",
         required=False,
         default=False,
@@ -159,7 +169,6 @@ def main():
     wrk.setup_deconvolve_detector_timeconstant(operators)
     wrk.setup_raw_statistics(operators)
 
-    wrk.setup_readout_filter(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_filter_common_mode(operators)
     wrk.setup_filter_ground(operators)
@@ -179,6 +188,7 @@ def main():
     wrk.setup_mapmaker(operators, templates)
     wrk.setup_mapmaker_filterbin(operators)
     wrk.setup_mapmaker_madam(operators)
+    wrk.setup_splits(operators)
     wrk.setup_filtered_statistics(operators)
 
     job, config, otherargs, runargs = wrk.setup_job(

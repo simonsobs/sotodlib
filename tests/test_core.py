@@ -255,6 +255,20 @@ class TestAxisManager(unittest.TestCase):
         b.wrap('a', a)
         self.assertNotIn('a', a.b)
 
+    def test_180_overwrite(self):
+        dets = ['det0', 'det1', 'det2']
+        a1 = np.zeros((len(dets), 100))
+        a1[1, 10] = 1.
+        aman = core.AxisManager(core.LabelAxis('dets', dets),
+                                core.OffsetAxis('samps', a1.shape[1]))
+        aman.wrap('a1', a1, [(0, 'dets'), (1, 'samps')])
+        a2 = np.zeros((len(dets), 100))
+        a2[2, 11] = 1.
+        aman.wrap('a1', a2, [(0, 'dets'), (1, 'samps')],
+                  overwrite=True)
+        self.assertNotEqual(aman.a1[2,11], 0)
+        self.assertNotEqual(aman.a1[1,10], 1.)
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):

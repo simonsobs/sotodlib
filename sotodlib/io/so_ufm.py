@@ -9,7 +9,8 @@ def get_wafer_info(array_name, base_config={}, array_config={}, raw=False,
     csv files and tracing the connections between them.
 
     Args:
-      array_name (str): e.g. 'mv7'.
+      array_name (str): e.g. 'Mv7'.  Capitalization is important, as
+        this is used in filenames.
       base_config (dict): Used to find ``array_info_dir``; if not
         found then ./ will be used.
       array_config (dict): Used to override names of specific input
@@ -32,9 +33,6 @@ def get_wafer_info(array_name, base_config={}, array_config={}, raw=False,
       absolute.  See source code for default filenames.
 
     """
-    # Tradition has been to use "Mv7" for array_name here.
-    array_name = array_name.capitalize()
-
     # Figure out the filenames and read the csv.
     base_dir = base_config.get('array_info_dir', './')
     filenames = [

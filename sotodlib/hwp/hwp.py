@@ -1,15 +1,17 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters
+from sotodlib.tod_ops import bin_signal, filters, apodize
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
-              lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
+              lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
+              apodize_edges=True, apodize_edges_samps=1600, 
+              apodize_flags=True, apodize_flags_samps=200,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
     """
@@ -75,6 +77,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
             **In the binned case the following are returned:**
             
             - **binned_angle** (n_bins) : binned version of hwp_angle in range (0, 2pi] with number of bins set by bins argument.
+            - **bin_counts** (n_dets x n_bins): sample counts of each bin for each detector.
             - **binned_signal** (n_dets x n_bins) : binned signal for each detector.
             - **sigma_bin** (n_dets) : average over all bins of the standard deviation of the signal within each bin.
         
@@ -112,8 +115,10 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
-            aman, signal, hwp_angle=None, bins=bins, flags=flags)
+        hwp_angle_bin_centers, bin_counts, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
+            aman, signal, hwp_angle=None, bins=bins, flags=flags, 
+            apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
+            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
         
         # check bin count
         num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
@@ -125,6 +130,8 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         # wrap
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
                        (0, core.IndexAxis('bin_samps', count=bins))])
+        hwpss_stats.wrap('bin_counts', bin_counts, [
+                       (0, 'dets'), (1, 'bin_samps')])
         hwpss_stats.wrap('binned_signal', binned_hwpss, [
                        (0, 'dets'), (1, 'bin_samps')])
         hwpss_stats.wrap('sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
@@ -179,7 +186,9 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
 
 
 def get_binned_hwpss(aman, signal=None, hwp_angle=None,
-               bins=360, flags=None):
+                     bins=360, flags=None, 
+                     apodize_edges=True, apodize_edges_samps=1600,
+                     apodize_flags=True, apodize_flags_samps=200):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
@@ -196,6 +205,14 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     flags : None or RangesMatrix
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
+    apodize_edges : bool, optional
+        If True, applies an apodization window to the edges of the signal. Defaults to True.
+    apodize_edges_samps : int, optional
+        The number of samples over which to apply the edge apodization window. Defaults to 1600.
+    apodize_flags : bool, optional
+        If True, applies an apodization window based on the flags. Defaults to True.
+    apodize_flags_samps : int, optional
+        The number of samples over which to apply the flags apodization window. Defaults to 200.
 
     Returns
     -------
@@ -209,18 +226,28 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
-        
+    if apodize_edges:
+        weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+    else:
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+        else:
+            weight_for_signal = None
+    
     binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
-                              bins=bins, signal=signal, flags=flags)
+                              bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
+    bin_counts = binning_dict['bin_counts']
     binned_hwpss = binning_dict['binned_signal']
     binned_hwpss_sigma = binning_dict['binned_signal_sigma']
     
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
     
-    return bin_centers, binned_hwpss, hwpss_sigma
+    return bin_centers, bin_counts, binned_hwpss, hwpss_sigma
 
 
 def hwpss_linreg(x, ys, yerrs, modes):
@@ -454,8 +481,8 @@ def estimate_sigma_tod(signal, hwp_angle):
     return hwpss_sigma_tod
 
 
-def subtract_hwpss(aman, signal=None, hwpss_template=None,
-                   subtract_name='hwpss_remove'):
+def subtract_hwpss(aman, signal_name='signal', hwpss_template_name='hwpss_model',
+                   subtract_name='hwpss_remove', in_place=False, remove_template=True):
     """
     Subtract the half-wave plate synchronous signal (HWPSS) template from the
     signal in the given axis manager.
@@ -463,33 +490,39 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     Parameters
     ----------
     aman : AxisManager
-        The axis manager containing the signal to which the HWPSS template will
-        be applied.
-    signal : ndarray, optional
-        The signal to which the HWPSS template will be applied. If `signal` is
-        None (default), the signal contained in the axis manager will be used.
-    hwpss_template : ndarray, optional
-        The HWPSS template to be subtracted from the signal. If `hwpss_template`
-        is None (default), the HWPSS template stored in the axis manager under
-        the key 'hwpss_extract' will be used.
+        The axis manager containing the signal and the HWPSS template.
+    signal_name : str, optional
+        The name of the field in the axis manager containing the signal to be processed.
+        Defaults to 'signal'.
+    hwpss_template_name : str, optional
+        The name of the field in the axis manager containing the HWPSS template.
+        Defaults to 'hwpss_model'.
     subtract_name : str, optional
-        The name of the output axis manager that will contain the HWPSS-
-        subtracted signal. Defaults to 'hwpss_remove'.
+        The name of the field in the axis manager that will store the HWPSS-subtracted signal.
+        Only used if in_place is False. Defaults to 'hwpss_remove'.
+    in_place : bool, optional
+        If True, the subtraction is done in place, modifying the original signal in the axis manager.
+        If False, the result is stored in a new field specified by subtract_name. Defaults to False.
+    remove_template : bool, optional
+        If True, the HWPSS template field is removed from the axis manager after subtraction.
+        Defaults to True.
 
     Returns
     -------
     None
     """
-    if signal is None:
-        signal = aman.signal
-    if hwpss_template is None:
-        hwpss_template = aman['hwpss_model']
-    
-    if subtract_name in aman._fields:
-        aman[subtract_name] = np.subtract(signal, hwpss_template)
+    if in_place:
+        aman[signal_name] = np.subtract(aman[signal_name], aman[hwpss_template_name], dtype='float32')
     else:
-        aman.wrap(subtract_name, np.subtract(
-            signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
+        if subtract_name in aman._fields:
+            aman[subtract_name] = np.subtract(aman[signal_name], aman[hwpss_template_name], dtype='float32')
+        else:
+            aman.wrap(subtract_name, np.subtract(
+                    aman[signal_name], aman[hwpss_template_name], dtype='float32'),
+                    [(0, 'dets'), (1, 'samps')])
+    
+    if remove_template:
+        aman.move(hwpss_template_name, None)
 
 
 def demod_tod(aman, signal_name='signal', demod_mode=4,

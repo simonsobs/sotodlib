@@ -874,8 +874,12 @@ class SourceFlags(_Preprocess):
                 raise ValueError("No tags match source list")
         else:
             source = center_on
-        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, center_on=source,
+        source_flags = tod_ops.flags.get_source_flags(aman, 
+                                                      merge=self.calc_cfgs.get('merge', False),
+                                                      overwrite=self.calc_cfgs.get('overwrite', True),
+                                                      source_flags_name=self.calc_cfgs.get('source_flags_name', 'source_flags'),
                                                       mask=self.calc_cfgs.get('mask', None),
+                                                      center_on=source,
                                                       res=self.calc_cfgs.get('res', None),
                                                       max_pix=self.calc_cfgs.get('max_pix', None))
 
