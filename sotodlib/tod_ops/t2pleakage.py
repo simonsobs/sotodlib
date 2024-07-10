@@ -51,13 +51,13 @@ def get_t2p_coeffs(aman,
     filt = filters.get_lpf(lpf_cfgs)
     
     # apply lowpass filter with apodization
-    apodize.apodize_cosine(aman, signal=T_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
+    apodize.apodize_cosine(aman, signal_name=T_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
     T_lpf = filters.fourier_filter(aman, filt, signal_name='apodized')
     aman.move('apodized', None)
-    apodize.apodize_cosine(aman, signal=Q_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
+    apodize.apodize_cosine(aman, signal_name=Q_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
     Q_lpf = filters.fourier_filter(aman, filt, signal_name='apodized')
     aman.move('apodized', None)
-    apodize.apodize_cosine(aman, signal=U_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
+    apodize.apodize_cosine(aman, signal_name=U_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
     U_lpf = filters.fourier_filter(aman, filt, signal_name='apodized')
     aman.move('apodized', None)
     
