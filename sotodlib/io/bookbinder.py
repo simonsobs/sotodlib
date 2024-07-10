@@ -32,6 +32,10 @@ class NoMountData(Exception):
     """Exception raised when we cannot find mount data"""
     pass
 
+class NoHWPData(Exception):
+    """Exception raised when we cannot find HWP data"""
+    pass
+
 class DuplicateAncillaryData(Exception):
     """Exception raised when we find the HK data has copies of the same timestamps"""
     pass
@@ -162,7 +166,12 @@ class HkDataField:
                     f"HK data from {self.addr} has" 
                     " duplicate timestamps"
                 )
+            else:
+                log.warning(
+                    f"HK data from {self.addr} has duplicate timestamps"
+                )
             self.times = self.times[idxs]
+            self.data = self.data[idxs]
         assert np.all(np.diff(self.times)>0), \
                f"Times from {self.addr} are not increasing"
         
@@ -226,6 +235,7 @@ class AncilProcessor:
                 'az': 'acu.acu_udp_stream.Corrected_Azimuth',
                 'el': 'acu.acu_udp_stream.Corrected_Elevation',
                 'boresight': 'acu.acu_udp_stream.Corrected_Boresight',
+                # corotator_enc: acu.acu_status.Corotator_current_position # (For LAT)
                 'az_mode':  'acu.acu_status.Azimuth_mode',
                 'hwp_freq': 'hwp-bbb-e1.HWPEncoder.approx_hwp_freq',
             }
@@ -241,7 +251,10 @@ class AncilProcessor:
         populated on bind and should be used to add copies of the anc data to
         the detector frames.
     """
-    def __init__(self, files, book_id, hk_fields: Dict, drop_duplicates=False, log=None):
+    def __init__(self, files, book_id, hk_fields: Dict, 
+                 drop_duplicates=False, require_hwp=True, 
+                 require_acu=True, log=None
+                 ):
         self.hkdata: HkData = HkData.from_dict(hk_fields)
 
         self.files = files
@@ -250,17 +263,19 @@ class AncilProcessor:
         self.book_id = book_id
         self.preprocessed = False
         self.drop_duplicates = drop_duplicates
+        self.require_hwp = require_hwp
+        self.require_acu = require_acu
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
         else:
             self.log = log
 
-        if self.hkdata.az is None:
+        if self.require_acu and self.hkdata.az is None:
             self.log.warning("No ACU data specified in hk_fields!")
 
-        if self.hkdata.hwp_freq is None:
-            self.log.info("No HWP Freq data is specified in hk_fields.")
+        if self.require_hwp and self.hkdata.hwp_freq is None:
+            self.log.warning("No HWP Freq data is specified in hk_fields.")
 
     def preprocess(self):
         """
@@ -276,14 +291,40 @@ class AncilProcessor:
             if fr['hkagg_type'] != 2:
                 continue
             self.hkdata.process_frame(fr)
+
+        # look for ACU fields that are configured but not found in HK data files
+        # will not check fields that are not in the configuration file
+        for fld in ['az', 'el', 'boresight', 'corotator_enc']:
+            f = getattr(self.hkdata, fld)
+            if f is not None:
+                if self.require_acu and len(f) == 0:
+                    raise NoMountData(
+                        f"Did not find ACU data in {self.files} for {fld}",
+                    )
+                elif len(f) == 0:
+                    ## requiring Az data is fails and we didn't find any
+                    log.warning(
+                        f"Did not find ACU data for {fld}. Bypassed because "
+                        "require_acu is false"
+                    )
+                    setattr(self.hkdata, fld, None)
+
+        # look for HWP data if HWP fields are in configuration file
+        if self.hkdata.hwp_freq is not None:
+            if self.require_hwp and len(self.hkdata.hwp_freq) == 0:
+                raise NoHWPData(
+                    f"Did not find HWP data in {self.files}",
+                )
+            elif len(self.hkdata.hwp_freq) == 0:
+                ## requiring HWP data is false and we didn't find any
+                log.warning(
+                    f"Did not find HWP data in data. Bypassed because "
+                    "require_hwp is false"
+                )
+                self.hkdata.hwp_freq = None
+        
         self.hkdata.finalize(drop_duplicates=self.drop_duplicates)
         self.preprocessed = True
-
-        if self.hkdata.az is not None:
-            if len(self.hkdata.az) == 0:
-                raise NoMountData(
-                    f"Did not find ACU data in {self.files}",
-                )
 
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
@@ -309,9 +350,9 @@ class AncilProcessor:
 
         def validate_mount_field(hk_field: HkDataField, max_dt=None):
             m = (times[0] <= hk_field.times) & (hk_field.times <= times[-1])
-            if not np.any(m):
+            if m.sum() < 2:
                 raise NoMountData(
-                    f"No mount data overlappiing with detector data: {hk_field.addr}"
+                    f"No mount data overlapping with detector data: {hk_field.addr}"
                 )
             if max_dt is not None:
                 _max_dt = np.max(np.diff(hk_field.times[m]))
@@ -321,20 +362,28 @@ class AncilProcessor:
                         "Interpolation may be questionable."
                     )
 
-        az, el, boresight, corotator_enc = None, None, None, None
-        if self.hkdata.az is not None:
-            validate_mount_field(self.hkdata.az, max_dt=10)
-            az = np.interp(times, self.hkdata.az.times, self.hkdata.az.data)
-        if self.hkdata.el is not None:
-            validate_mount_field(self.hkdata.el, max_dt=10)
-            el = np.interp(times, self.hkdata.el.times, self.hkdata.el.data)
-        if self.hkdata.boresight is not None:
-            validate_mount_field(self.hkdata.boresight, max_dt=10)
-            boresight = np.interp(times, self.hkdata.boresight.times, self.hkdata.boresight.data)
-        if self.hkdata.corotator_enc is not None:
-            validate_mount_field(self.hkdata.corotator_enc, max_dt=10)
-            corotator_enc = np.interp(
-                times, self.hkdata.corotator_enc.times, self.hkdata.corotator_enc.data)
+        # go through and interpolate ACU times to detector times
+        acu_interp_data = {}
+        for fld in ['az', 'el', 'boresight', 'corotator_enc']:
+            f = getattr(self.hkdata, fld)
+            if f is not None:
+                try:
+                    validate_mount_field(f, max_dt=10)
+                    acu_interp_data[fld] = np.interp(
+                        times, f.times, f.data
+                    )
+                except NoMountData as e:
+                    if self.require_acu:
+                        raise e
+                    else:
+                        acu_interp_data[fld] = None
+            else: 
+                acu_interp_data[fld] = None
+
+        az = acu_interp_data['az']
+        el = acu_interp_data['el']
+        boresight = acu_interp_data['boresight']
+        corotator_enc = acu_interp_data['corotator_enc']
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
@@ -401,7 +450,7 @@ class AncilProcessor:
         el = self.hkdata.el
         if az_mode is not None:
             m = (t0 <= az_mode.times) & (az_mode.times <= t1)
-            if not np.any(m):
+            if m.sum() >= 2:
                 frame['azimuth_mode'] = 'None'
             elif 'ProgramTrack' in az_mode.data[m]:
                 frame['azimuth_mode'] = 'ProgramTrack' # Scanning
@@ -733,6 +782,10 @@ class BookBinder:
         if true, will drop duplicate timestamp data from ancillary files. added
         to deal with an occassional hk aggregator error where it is picking up
         multiple copies of the same data
+    require_acu: bool, optional
+        if true, will throw error if we do not find Mount data
+    require_hwp: bool, optional
+        if true, will throw error if we do not find HWP data
     allow_bad_time: bool, optional
         if not true, books will not be bound if the timing systems signals are not found. 
     
@@ -751,7 +804,9 @@ class BookBinder:
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir, hk_fields,
                  max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False, ancil_drop_duplicates=False, allow_bad_timing=False):
+                ignore_tags=False, ancil_drop_duplicates=False, 
+                require_hwp=True, require_acu=True,
+                allow_bad_timing=False):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -791,7 +846,9 @@ class BookBinder:
             book.bid, 
             hk_fields,
             log=self.log, 
-            drop_duplicates=ancil_drop_duplicates
+            drop_duplicates=ancil_drop_duplicates,
+            require_hwp=require_hwp,
+            require_acu=require_acu,
         )
         self.streams = {}
         for obs_id, files in filedb.items():

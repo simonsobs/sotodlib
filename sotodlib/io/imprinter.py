@@ -636,7 +636,9 @@ class Imprinter:
         book, 
         ignore_tags=False,
         ancil_drop_duplicates=False,
-        allow_bad_timing=False
+        allow_bad_timing=False,
+        require_hwp=True,
+        require_acu=True,
     ):
         """get the appropriate bookbinder for the book based on its type"""
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
@@ -662,6 +664,8 @@ class Imprinter:
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
+                require_hwp=require_hwp,
+                require_acu=require_acu,
             )
             return bookbinder
 
@@ -762,6 +766,8 @@ class Imprinter:
         ignore_tags=False,
         ancil_drop_duplicates=False,
         allow_bad_timing=False,
+        require_hwp=True,
+        require_acu=True,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -806,6 +812,11 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
+        ## LATs don't have HWPs we can change this if we ever make LAT HWPs :D
+        ## or if we ever plan to run the SATs without HWPs
+        if 'lat' in self.daq_node:
+            require_hwp = False
+
         try:
             # find appropriate binder for the book type
             binder = self._get_binder_for_book(
@@ -813,6 +824,8 @@ class Imprinter:
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
+                require_acu=require_acu,
+                require_hwp=require_hwp,
             )
             binder.bind(pbar=pbar)
 
