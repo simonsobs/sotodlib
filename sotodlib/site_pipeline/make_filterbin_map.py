@@ -364,13 +364,17 @@ def cal_rel(obs, signal_name):
     obs.wrap(f'lpf_{signal_name}', sigfilt, [(0,'dets'),(1,'samps')])
     obs.restrict('samps',(10*400, -10*400))
 
-    pca_out = pca.get_pca(obs, signal=obs[f'lpf_{signal_name}'])
+    try:
+        pca_out = pca.get_pca(obs, signal=obs[f'lpf_{signal_name}'])
+    except np.linalg.LinAlgError:
+        return False
     pca_signal = pca.get_pca_model(obs, pca_out, signal=obs[f'lpf_{signal_name}'])
 
     med = np.median(pca_signal.weights[:,0])
     
     # Relative calib
     obs[f'{signal_name}'] = np.divide(obs[f'{signal_name}'].T, pca_signal.weights[:,0]/med).T
+    return True
 
     
 def calibrate_data(obs, remove_hwpss=True):
@@ -383,13 +387,15 @@ def calibrate_data(obs, remove_hwpss=True):
     cal_pW(obs, signal_name=signal_name)
     
     # Get relative calibrated data
-    cal_rel(obs, signal_name=signal_name)
-
+    status = cal_rel(obs, signal_name=signal_name)
+    if not(status):
+        return False
+    
     # Get absolute calibrated data
     obs[f'{signal_name}'] = np.multiply(obs[f'{signal_name}'].T,
                                         obs.abscal.abscal_factor).T
     
-    return obs
+    return True
 
 
 def readout_filter(obs, remove_hwpss=True):
@@ -616,7 +622,9 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     if obs.dets.count<=1:
         return obs # this will happen when ptp_cuts cuts all detectors
 
-    calibrate_data(obs, remove_hwpss)
+    status = calibrate_data(obs, remove_hwpss)
+    if not(status):
+        return False
     
     status = readout_filter(obs, remove_hwpss)
     if not(status):
