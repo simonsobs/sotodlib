@@ -29,6 +29,7 @@ setup_opts["entry_points"] = {
         "toast_so_map = sotodlib.toast.scripts.so_map:cli",
         "toast_so_transfer = sotodlib.toast.scripts.so_transfer:cli",
         "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
+        "toast_so_batch_control = sotodlib.toast.scripts.so_batch_control:cli",
         "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
 }

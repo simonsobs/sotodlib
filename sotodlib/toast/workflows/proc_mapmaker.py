@@ -2,6 +2,7 @@
 # Full license can be found in the top level "LICENSE" file.
 """Template regression mapmaking.
 """
+import os
 
 import numpy as np
 from astropy import units as u
@@ -245,6 +246,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                 timer_obs.start()
                 group = data.comm.group
                 orig_name = map_op.name
+                orig_outdir = map_op.output_dir
                 orig_comm = data.comm
                 new_comm = toast.Comm(world=data.comm.comm_group)
                 for iobs, obs in enumerate(data.obs):
@@ -255,6 +257,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     )
                     # Data object that only covers one observation
                     obs_data = data.select(obs_uid=obs.uid)
+                    map_op.output_dir = os.path.join(orig_outdir, obs.name)
                     # Replace comm_world with the group communicator
                     obs_data._comm = new_comm
                     if isinstance(map_op, so_ops.Splits):
@@ -320,6 +323,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     comm=new_comm.comm_world,
                 )
                 map_op.name = orig_name
+                map_op.output_dir = orig_outdir
                 data._comm = orig_comm
                 del new_comm
             else:

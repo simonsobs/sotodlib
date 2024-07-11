@@ -54,7 +54,9 @@ def setup_deconvolve_detector_timeconstant(operators):
     """
     operators.append(
         toast.ops.TimeConstant(
-            name="deconvolve_time_constant", deconvolve=True, enabled=False
+            name="deconvolve_time_constant",
+            deconvolve=True,
+            enabled=False,
         )
     )
 

@@ -18,6 +18,7 @@ def setup_load_or_simulate_observing(parser, operators):
     wrk.setup_weather_model(operators)
     wrk.setup_diff_noise_estimation(operators)
     wrk.setup_readout_filter(operators)
+    wrk.setup_deconvolve_detector_timeconstant(operators)
 
     # Simulated observing
     wrk.setup_simulate_observing(parser, operators)
@@ -48,6 +49,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
         wrk.act_responsivity_sign(job, otherargs, runargs, data)
         wrk.create_az_intervals(job, otherargs, runargs, data)
         wrk.apply_readout_filter(job, otherargs, runargs, data)
+        wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
         # Append a weather model
         wrk.append_weather_model(job, otherargs, runargs, data)
         # Before running simulations based on real data, we need
@@ -63,3 +65,52 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
 
     return data
 
+
+def setup_preprocess(parser, operators):
+    wrk.setup_filter_hwpss(operators)
+    wrk.setup_simple_jumpcorrect(operators)
+    wrk.setup_simple_deglitch(operators)
+    wrk.setup_flag_diff_noise_outliers(operators)
+    wrk.setup_flag_noise_outliers(operators)
+
+
+def preprocess(job, otherargs, runargs, data):
+    """Apply flags and cuts based on data quality."""
+    log = toast.utils.Logger.get()
+    job_ops = job.operators
+
+    if otherargs.preprocess_copy:
+        prename = "preprocess"
+        toast.ops.Copy(detdata=[(defaults.det_data, prename)]).apply(data)
+    else:
+        prename = defaults.det_data
+
+    def _run_pre_op(op, wrkf):
+        save_op_detdata = op.det_data
+        op.det_data = prename
+        wrkf(job, otherargs, runargs, data)
+        op.det_data = save_op_detdata
+
+    # Ensure that we run the HWPSS filter for preprocessing, even if we
+    # are not using it on the original data.
+    if otherargs.preprocess_copy:
+        save_hwpf_state = job_ops.hwpfilter.enabled
+        job_ops.hwpfilter.enabled = True
+    _run_pre_op(job_ops.hwpfilter, wrk.filter_hwpss)
+    if otherargs.preprocess_copy:
+        job_ops.hwpfilter.enabled = save_hwpf_state
+
+    _run_pre_op(job_ops.simple_jumpcorrect, wrk.simple_jumpcorrect)
+
+    _run_pre_op(job_ops.simple_deglitch, wrk.simple_deglitch)
+
+    _run_pre_op(job_ops.diff_noise_cut, wrk.flag_diff_noise_outliers)
+
+    _run_pre_op(job_ops.noise_cut, wrk.flag_noise_outliers)
+
+    if otherargs.preprocess_copy:
+        toast.ops.Delete(detdata=[prename,]).apply(data)
+        # FIXME:  Although the glitches / jumps are flagged, the original
+        # data has not been filled / corrected.  Not sure how to do this
+        # without applying the hwpfilter to the original data, which we
+        # might want to avoid if solving for that template in the mapmaking.
