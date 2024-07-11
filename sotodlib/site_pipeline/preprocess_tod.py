@@ -349,24 +349,28 @@ def preprocess_tod(obs_id,
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
     all_groups = groups.copy()
-    if group_list is not None:
-        for g in all_groups:
+    for g in all_groups:
+        if group_list is not None:
             if g not in group_list:
                 groups.remove(g)
-
-        if len(groups) == 0:
-            logger.warning(f"group_list:{group_list} contains no overlap with "
-                        f"groups in observation: {obs_id}:{all_groups}. "
-                        f"No analysis to run.")
-            error = 'no_group_overlap'
-            if run_parallel:
-                return error, None, [None, None]
-            else:
-                return
-    if 'wafer.bandpass' in group_by:
-        for g in all_groups:
+                continue
+        if 'wafer.bandpass' in group_by:
             if 'NC' in g:
                 groups.remove(g)
+                continue
+        meta = context.get_meta(obs_id, dets = {gb:gg for gb, gg in zip(group_by, g)})
+        if meta.dets.count == 0:
+            groups.remove(g)
+
+    if len(groups) == 0:
+        logger.warning(f"group_list:{group_list} contains no overlap with "
+                       f"groups in observation: {obs_id}:{all_groups}. "
+                       f"No analysis to run.")
+        error = 'no_group_overlap'
+        if run_parallel:
+            return error, None, [None, None]
+        else:
+            return
     
     if not(run_parallel):
         db = _get_preprocess_db(configs, group_by)
