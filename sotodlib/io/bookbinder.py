@@ -303,7 +303,7 @@ class AncilProcessor:
                     )
                 elif len(f) == 0:
                     ## requiring Az data is fails and we didn't find any
-                    log.warning(
+                    self.log.warning(
                         f"Did not find ACU data for {fld}. Bypassed because "
                         "require_acu is false"
                     )
@@ -317,7 +317,7 @@ class AncilProcessor:
                 )
             elif len(self.hkdata.hwp_freq) == 0:
                 ## requiring HWP data is false and we didn't find any
-                log.warning(
+                self.log.warning(
                     f"Did not find HWP data in data. Bypassed because "
                     "require_hwp is false"
                 )
@@ -376,7 +376,7 @@ class AncilProcessor:
                     if self.require_acu:
                         raise e
                     else:
-                        log.warning(e)
+                        self.log.warning(e)
                         acu_interp_data[fld] = None
             else: 
                 acu_interp_data[fld] = None
