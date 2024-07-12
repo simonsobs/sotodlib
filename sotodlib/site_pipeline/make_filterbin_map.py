@@ -5,19 +5,16 @@ from sotodlib.core import Context,  metadata as metadata_core, FlagManager, Axis
 from sotodlib.core.flagman import has_any_cuts, has_all_cut
 from sotodlib.io import metadata, hk_utils
 from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca, fft_ops, sub_polyf
-from sotodlib.hwp import hwp
+from sotodlib.hwp import hwp, hwp_angle_model
 from sotodlib.obs_ops import splits
 from sotodlib.site_pipeline import preprocess_tod
+from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy import ndimage, interpolate
 from scipy.optimize import curve_fit
 from scipy.stats import kurtosis, skew
-from . import util
-from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
-from sotodlib.hwp import hwp_angle_model
 from scipy.signal import welch
-from sotodlib import core
-
+from . import util
 
 defaults = {"query": "1",
             "odir": "./output",
@@ -222,6 +219,9 @@ def ptp_cuts(obs, signal_name='dsT'):
 def wrap_info(obs, site):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
+
+    if 'flags' not in obs._fields:
+        obs.wrap('flags', FlagManager.for_tod(obs))
 
     # Union of flags into glitch_flags.
     # Use this if not using pre-process database:
@@ -666,7 +666,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD,
     for ind in inds:
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
-            meta = context.get_meta(obs_id, dets={"wafer_slot":detset,                                                                                                                                               "wafer.bandpass":band},)
+            meta = context.get_meta(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band},)
             tod = context.get_obs(meta, no_signal=True)
             #tod = context.get_obs(obs_id, dets={"wafer_slot":detset,
             #                                    "wafer.bandpass":band},
@@ -795,10 +795,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
             L.info('tod %s:%s:%s failed in the preprocessing'%(obs_id,detset,band)
             )
             continue
-        
         if obs.dets.count <= 1: continue
-        
-        if obs.dets.count == 0: continue
+
         # And add it to the mapmaker
         if split_labels==None:
             # this is the case of no splits
