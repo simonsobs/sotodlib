@@ -2,8 +2,10 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import os
+
 import astropy.units as u
 import numpy as np
+
 import toast
 from toast.utils import Logger
 from toast.traits import trait_docs, Int, Unicode, Instance, List, Bool
@@ -157,9 +159,6 @@ class SplitAll(Split):
         super().__init__(name)
         self._interval = interval
 
-    def name(self):
-        return "all"
-
     def _create_split(self, obs):
         timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]
         obs.intervals[self._split_intervals] = IntervalList(
@@ -179,9 +178,6 @@ class SplitLeftGoing(Split):
     def __init__(self, name, interval=defaults.scan_rightleft_interval):
         super().__init__(name)
         self._interval = interval
-
-    def name(self):
-        return "left_going"
 
     def _create_split(self, obs):
         timespans = [(x.start, x.stop) for x in obs.intervals[self._interval]]

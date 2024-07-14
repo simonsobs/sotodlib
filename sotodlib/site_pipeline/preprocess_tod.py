@@ -9,6 +9,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import h5py
 import copy
+
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
@@ -73,7 +74,6 @@ def _get_preprocess_context(configs, context=None):
             {
                 "db" : configs["archive"]["index"],
                 "unpack" : "preprocess"
-                #"name" : "preprocess"
             }
         )
     return configs, context
@@ -164,8 +164,8 @@ def preprocess_tod(obs_id,
 
         if len(groups) == 0:
             logger.warning(f"group_list:{group_list} contains no overlap with "
-                           f"groups in observation: {obs_id}:{all_groups}. "
-                           f"No analysis to run.")
+                        f"groups in observation: {obs_id}:{all_groups}. "
+                        f"No analysis to run.")
             error = 'no_group_overlap'
             if run_parallel:
                 return error, None, [None, None]
@@ -174,23 +174,6 @@ def preprocess_tod(obs_id,
     
     if not(run_parallel):
         db = _get_preprocess_db(configs, group_by)
- 
-    #if os.path.exists(configs['archive']['index']):
-    #    logger.info(f"Mapping {configs['archive']['index']} for the "
-    #                "archive index.")
-    #    db = core.metadata.ManifestDb(configs['archive']['index'])
-    #else:
-    #    logger.info(f"Creating {configs['archive']['index']} for the "
-    #                 "archive index.")
-    #    scheme = core.metadata.ManifestScheme()
-    #    scheme.add_exact_match('obs:obs_id')
-    #    for gb in group_by:
-    #        scheme.add_exact_match('dets:' + gb)
-    #    scheme.add_data_field('dataset')
-    #    db = core.metadata.ManifestDb(
-    #        configs['archive']['index'],
-    #        scheme=scheme
-    #    )
 
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
 
@@ -469,19 +452,6 @@ def main(
                 f = open(errlog, 'a')
                 f.write(f'{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}')
                 f.close()
-
-    #logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
-    #for obs, groups in run_list:
-    #    logger.info(f"Processing obs_id: {obs_id}")
-    #    try:
-    #        preprocess_tod(obs["obs_id"], configs, overwrite=overwrite,
-    #                       group_list=groups, logger=logger)
-    #    except Exception as e:
-    #        logger.info(f"{type(e)}: {e}")
-    #        logger.info(''.join(traceback.format_tb(e.__traceback__)))
-    #        logger.info(f'Skiping obs:{obs["obs_id"]} and moving to the next')
-    #        continue
-            
 
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
