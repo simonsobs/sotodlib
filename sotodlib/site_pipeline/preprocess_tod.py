@@ -174,7 +174,7 @@ def preprocess_tod(obs_id,
     
     if not(run_parallel):
         db = _get_preprocess_db(configs, group_by)
-
+    
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
 
     for group in groups:
