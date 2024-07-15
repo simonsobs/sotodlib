@@ -55,6 +55,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
         if (flags is not None) and apodize_flags:
             flag_mask = flags.mask()
+            # check the flags dimension
             if flag_mask.ndim == 1:
                 flag_is_1d = True
             else:
@@ -64,6 +65,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
                     flag_mask = flags_mask[0]
                 else:
                     flag_is_1d = False
+                    
             if flag_is_1d:
                 weight_for_signal = weight_for_signal * apodize.get_apodize_window_from_flags(aman, 
                                                                                               flags=flags,
@@ -72,11 +74,11 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
                 weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
                                                                                                              flags=flags, 
                                                                                                              apodize_samps=apodize_flags_samps)
+    else:
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
         else:
-            if (flags is not None) and apodize_flags:
-                weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
-            else:
-                weight_for_signal = None
+            weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
                                range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
