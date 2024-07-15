@@ -10,9 +10,7 @@ from sotodlib.obs_ops import splits
 from sotodlib.site_pipeline import preprocess_tod
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
-from scipy import ndimage, interpolate
 from scipy.optimize import curve_fit
-from scipy.stats import kurtosis, skew
 from scipy.signal import welch
 from . import util
 
@@ -119,14 +117,10 @@ def get_ra_ref(obs, site='so_sat3'):
     
     csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    #spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
     ra_ref_start = np.interp(-40*utils.degree, dec_, ra_)
-    #ra_ref_start = spline(-40*utils.degree, nu=0)
     
     csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    #spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    #ra_ref_stop = spline(-40*utils.degree, nu=0)
     ra_ref_stop = np.interp(-40*utils.degree, dec_, ra_)
     return ra_ref_start, ra_ref_stop
 
@@ -157,9 +151,7 @@ def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat3"):
     res    = res.reshape(dshape[1:]+coords.shape[1:]+(4,))
     return res
 
-
 class DataMissing(Exception): pass
-
 
 def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=False, pad=1):
     # Measure the pixel bounds of each observation relative to our
@@ -191,7 +183,6 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
-
 def ptp_cuts(obs, signal_name='dsT'):
     # Find the typical noise level in the filtered tod, ignoring glitches
     bsize  = 100
@@ -211,10 +202,7 @@ def ptp_cuts(obs, signal_name='dsT'):
     cutmask = np.abs(obs.signal)>rms[:,None]*cuttol
     cutfrac = np.mean(cutmask,1)
     good = cutfrac <= maxcut
-    print("all dets: ", obs.dets.count)
-    print("good: ", good.shape)
     obs.restrict("dets", obs.dets.vals[good])
-
 
 def wrap_info(obs, site):
     obs.wrap("weather", np.full(1, "toco"))
@@ -234,7 +222,6 @@ def wrap_info(obs, site):
     ## TODO add --preprocess to args
     return
 
-
 def get_detector_cuts_flags(obs, rfrac_range=(0.05,0.9), psat_range=(0,20)):
     try:
         flags.get_turnaround_flags(obs) 
@@ -245,7 +232,6 @@ def get_detector_cuts_flags(obs, rfrac_range=(0.05,0.9), psat_range=(0,20)):
     obs.restrict('dets', obs.dets.vals[~bad_dets])
     if obs.dets.count<=1: return False # check if I cut all the detectors after the det bias flags
     return True
-
 
 def select_data(obs,
                 det_left_right, det_in_out, det_upper_lower):
@@ -258,15 +244,11 @@ def select_data(obs,
     if not(status):
         return False
 
-    #if obs.dets.count<=1: return obs # check if I cut all the detectors after the det bias flags
-
     return True
-
 
 def subtract_hwpss(obs):
     hwp.get_hwpss(obs)
     hwp.subtract_hwpss(obs)
-
     
 def get_trending_cuts(obs):
     # Note: n_pieces should be dependent on the length of the observation
@@ -275,8 +257,6 @@ def get_trending_cuts(obs):
                              max_trend=2.5) #,max_samples=obs.samps.count)
     tdets = has_any_cuts(obs.flags.trends)
     obs.restrict('dets', obs.dets.vals[~tdets])
-    #print('dets after trending cuts: ', {obs.dets.count})
-
     
 def get_jumps(obs, signal_name):
     try:
@@ -293,7 +273,6 @@ def get_jumps(obs, signal_name):
     jdets = has_any_cuts(jflags)
 
     return True
-        
 
 def get_glitches(obs, signal_name):
     gflags = flags.get_glitch_flags(obs,
@@ -306,7 +285,6 @@ def get_glitches(obs, signal_name):
     #gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1,
     #                                signal=obs[signal_name],
     #                                glitch_flags=obs.flags.jumps_2pi)
-
     
 def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3',
                     det_left_right=False, det_in_out=False, det_upper_lower=False,
@@ -350,19 +328,17 @@ def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3',
         ptp_cuts(obs, signal_name)
     return True
 
-
 def cal_pW(obs, signal_name):
     obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
     if signal_name == 'hwpss_remove':
         obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW).T
 
-        
 def cal_rel(obs, signal_name):
     # LPF + PCA
     filt = filters.low_pass_sine2(1, width=0.1)
     sigfilt = filters.fourier_filter(obs, filt, signal_name=signal_name)
     obs.wrap(f'lpf_{signal_name}', sigfilt, [(0,'dets'),(1,'samps')])
-    obs.restrict('samps',(10*400, -10*400))
+    obs.restrict('samps',(10*200, -10*200))
 
     try:
         pca_out = pca.get_pca(obs, signal=obs[f'lpf_{signal_name}'])
@@ -376,7 +352,6 @@ def cal_rel(obs, signal_name):
     obs[f'{signal_name}'] = np.divide(obs[f'{signal_name}'].T, pca_signal.weights[:,0]/med).T
     return True
 
-    
 def calibrate_data(obs, remove_hwpss=True):
     if remove_hwpss:
         signal_name = 'hwpss_remove'
@@ -397,7 +372,6 @@ def calibrate_data(obs, remove_hwpss=True):
     
     return True
 
-
 def readout_filter(obs, remove_hwpss=True):
     if remove_hwpss:
         signal_name = 'hwpss_remove'
@@ -413,7 +387,6 @@ def readout_filter(obs, remove_hwpss=True):
     
     return True
 
-
 def deconvolve_detector_tconst(obs, remove_hwpss=True):
     if remove_hwpss:
         signal_name = 'hwpss_remove'
@@ -424,8 +397,7 @@ def deconvolve_detector_tconst(obs, remove_hwpss=True):
                                         invert=True)
     
     obs[signal_name] = filters.fourier_filter(obs, filt, signal_name=signal_name)
-        
-        
+
 def demodulate_hwp(obs, remove_hwpss=True):
     if remove_hwpss:
         obs.signal = obs.hwpss_remove
@@ -434,7 +406,6 @@ def demodulate_hwp(obs, remove_hwpss=True):
     obs.restrict('samps',(30*200, -30*200))
 
     return obs    
-
 
 def IP_correct(obs):
     filt = filters.low_pass_sine2(0.5, width=0.1)
@@ -479,20 +450,17 @@ def IP_correct(obs):
 
     return 
 
-
 def cut_outlier_detectors(obs):
     ivar = 1.0/np.var(obs.demodQ, axis=-1)
     sigma = (np.percentile(ivar,84) - np.percentile(ivar, 16))/2
     mask_det = ivar > np.median(ivar) + 2*sigma
     obs.restrict('dets', obs.dets.vals[~mask_det])
 
-    
 def pca_dsT(obs):
     n_modes = 2
     model = pca.get_pca_model(obs, signal=obs.dsT, n_modes=n_modes)
     obs.dsT = pca.add_model(obs, model, signal=obs.dsT, scale=-1.)
     return
-
 
 def high_pass_correct_dsT(obs, get_params_from_data):
     speed = (np.sum(np.abs(np.diff(np.unwrap(obs.hwp_angle)))) /
@@ -516,7 +484,6 @@ def high_pass_correct_dsT(obs, get_params_from_data):
     obs.dsT = filters.fourier_filter(obs, filt, signal_name='dsT', detrend=None)
     return
 
-
 def get_psd(obs):
     #freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=True)
     #_, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=True)
@@ -532,15 +499,12 @@ def get_psd(obs):
     obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
     return
 
-
 def model_func(x, sigma, fk, alpha):
     #return sigma**2 * (1 + (fk/x)**alpha)
     return sigma**2 * (1 + (x/fk)**alpha)
 
-
 def log_fit_func(x, sigma, fk, alpha):
     return np.log(model_func(x, sigma, fk, alpha))
-
 
 def high_pass_correct(obs, get_params_from_data):
     obs.move('hwpss_model', None)
@@ -583,7 +547,6 @@ def high_pass_correct(obs, get_params_from_data):
     obs.demodU = hpf_U
 
     return obs
-
     
 def filter_data(obs, calc_hpf_params):
     """ All the post-demodulation operations """
@@ -609,7 +572,6 @@ def filter_data(obs, calc_hpf_params):
                      method='union', wrap=True, new_flag='glitch_flags',
                      remove_reduced=True)
     
-
 def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
                       det_left_right=False, det_in_out=False,
                       det_upper_lower=False,
@@ -642,7 +604,6 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
                                wrap=True)
     return obs
 
-
 def get_pwv(obs, data_dir):
     try:
         pwv_info = hk_utils.get_detcosamp_hkaman(obs, alias=['pwv'],
@@ -653,7 +614,6 @@ def get_pwv(obs, data_dir):
     except (KeyError, ValueError):
         pwv = 0.0
     return pwv
-
 
 def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD,
               dtype_tod=np.float32, only_hits=False, site='so_sat3',
@@ -693,7 +653,6 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD,
         except RuntimeError: continue
     return my_tods, my_inds, my_ra_ref, pwvs
 
-
 def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD,
                    tag="", verbose=0, site='so_sat3'):
     L = logging.getLogger(__name__)
@@ -722,7 +681,6 @@ def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD,
         obs_hits = pmap_local.to_weights(obs, comps='T', )
         hits = hits.insert(obs_hits[0,0], op=np.ndarray.__iadd__)
     return bunch.Bunch(hits=hits)
-
 
 def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
                     t0=0, dtype_tod=np.float32, dtype_map=np.float64,
@@ -770,8 +728,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
                                                 "wafer.bandpass":band}, )
             end_time = time.time()
             elapsed_time = end_time - start_time
-            print("Elapsed time make_depth1_map get_obs:", elapsed_time,
-                  "seconds")
+            #print("Elapsed time make_depth1_map get_obs:", elapsed_time,
+            #      "seconds")
         else:
             obs = preprocess_tod.load_preprocess_tod(obs_id,
                                                      configs=preprocess_config,
@@ -822,7 +780,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
         weights.append(signal_map.div[n_split])
     return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0 )
 
-
 def write_depth1_map(prefix, data, split_labels=None):
     if split_labels==None:
         # we have no splits, so we save index 0 of the lists
@@ -839,7 +796,6 @@ def write_depth1_map(prefix, data, split_labels=None):
                               data.weights[n_split])
             data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                               data.signal.hits[n_split])
-
             
 def write_depth1_info(oname, info, split_labels=None):
     utils.mkdir(os.path.dirname(oname))
@@ -850,7 +806,6 @@ def write_depth1_info(oname, info, split_labels=None):
         Nsplits = len(split_labels)
         for n_split in range(Nsplits):
             bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
-
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,
@@ -867,7 +822,6 @@ class ColoredFormatter(logging.Formatter):
             col = colors.reset
         return col + logging.Formatter.format(self, record) + colors.reset
 
-    
 class LogInfoFilter(logging.Filter):
     def __init__(self, rank=0):
         self.rank = rank
@@ -889,7 +843,6 @@ class LogInfoFilter(logging.Filter):
         record.memmax= memory.max()/1024.**3
         return record
 
-    
 def handle_empty(prefix, tag, comm, e, L):
     # This happens if we ended up with no valid tods for some reason
     if comm.rank == 0:
