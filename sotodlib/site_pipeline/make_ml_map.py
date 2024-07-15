@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g
-from sotodlib.core import Context, AxisManager, IndexAxis
+from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
 from sotodlib import mapmaking
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops
@@ -203,10 +203,12 @@ def main(config_file=None, defaults=defaults, **args):
             # to potential high offses in the raw tod.
             utils.deslope(obs.signal, w=5, inplace=True)
             obs.signal = obs.signal.astype(dtype_tod)
-
+            if 'flags' not in obs._fields:
+                obs.wrap('flags', FlagManager.for_tod(obs))
+             
             if "glitch_flags" not in obs.flags:
-                obs.flags.wrap_new('glitch_flags', shape=('dets', 'samps'),
-                        cls=so3g.proj.RangesMatrix.zeros)
+                obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.signal.shape),
+                        [(0,'dets'),(1,'samps')])
 
             # Optionally skip all the calibration. Useful for sims.
             if not args['nocal']:
