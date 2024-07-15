@@ -376,7 +376,8 @@ def preprocess_tod(obs_id,
         db = _get_preprocess_db(configs, group_by)
     
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
-
+    
+    n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
         try:
@@ -389,9 +390,13 @@ def preprocess_tod(obs_id,
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
             logger.info(f"{error}\n{errmsg}\n{tb}")
-            return error, None, [errmsg, tb]
+            # return error, None, [errmsg, tb]
+            # need a better way to log if just one group fails.
+            n_fail += 1
+            continue
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
+            n_fail += 1
             continue
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
@@ -418,7 +423,12 @@ def preprocess_tod(obs_id,
                         start=os.path.dirname(configs['archive']['index']))
                 db.add_entry(db_data, h5_path)
     if run_parallel:
-        return error, dest_file, outputs        
+        if n_fail == len(groups):
+            # If no groups make it to the end of the processing return error.
+            error = 'all_fail'
+            return error, None, [obs_id, 'all groups']
+        else:
+            return error, dest_file, outputs
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
