@@ -1,6 +1,7 @@
 import os
 import yaml
 import time
+import logging
 import numpy as np
 import argparse
 import traceback
@@ -315,6 +316,7 @@ def cleanup_mandb_mpi(error, outputs, configs, logger):
 def preprocess_tod(obs_id, 
                     configs, 
                     logger,
+                    verbosity=0,
                     group_list=None, 
                     overwrite=False,
                     run_parallel=False):
@@ -338,13 +340,16 @@ def preprocess_tod(obs_id,
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
-    error = None
+    #error = None
     outputs = []
     if logger is None: 
         logger = sp_util.init_logger("preprocess")
     
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
+  
+    logger.handlers[0].setLevel(logging.DEBUG)
+    logger.debug('Hi from preprocess_tod')
 
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
@@ -386,10 +391,10 @@ def preprocess_tod(obs_id,
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
         except Exception as e:
-            error = f'{obs_id} {group}'
+            #error = f'{obs_id} {group}'
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
-            logger.info(f"{error}\n{errmsg}\n{tb}")
+            logger.info(f"ERROR: {obs_id} {group}\n{errmsg}\n{tb}")
             # return error, None, [errmsg, tb]
             # need a better way to log if just one group fails.
             n_fail += 1
@@ -425,9 +430,12 @@ def preprocess_tod(obs_id,
     if run_parallel:
         if n_fail == len(groups):
             # If no groups make it to the end of the processing return error.
+            logger.info(f'ERROR: all groups failed for {obs_id}')
             error = 'all_fail'
             return error, None, [obs_id, 'all groups']
         else:
+            logger.info('Returning data to futures')
+            error = None
             return error, dest_file, outputs
 
 def load_preprocess_det_select(obs_id, configs, context=None,
@@ -562,6 +570,7 @@ def main(
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger.debug('Hi')
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
@@ -616,6 +625,8 @@ def main(
                 [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
                 run_list.append( (obs, groups) )
 
+    logger.info(f'Run list created with {len(run_list)} obsids')
+
     # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
     # whenever the file size exceeds 10 GB.
@@ -629,23 +640,30 @@ def main(
         nfile += 1
         dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
 
+    logger.info(f'Starting dest_file set to {dest_file}')
+
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                     group_list=r[1], logger=logger,
+                     group_list=r[1], logger=logger, verbosity=verbosity,
                      configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
+            logger.info('New future as_completed result')
             err, src_file, db_datasets = future.result()
+            logger.info(f'Processing future result db_dataset: {db_datasets}')
             db = _get_preprocess_db(configs, group_by)
+            logger.info('Database connected')
             if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
                 nfile += 1
                 dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
+                logger.info('Starting a new h5 file.')
 
             h5_path = os.path.relpath(dest_file,
                             start=os.path.dirname(configs['archive']['index']))
 
             if err is None:
+                logger.info(f'Moving files from temp to final destination.')
                 with h5py.File(dest_file,'a') as f_dest:
                     with h5py.File(src_file,'r') as f_src:
                         for dts in f_src.keys():
@@ -657,8 +675,10 @@ def main(
                     logger.info(f"Saving to database under {db_data}")
                     if len(db.inspect(db_data)) == 0:
                         db.add_entry(db_data, h5_path)
+                logger.info(f'Deleting {src_file}.')
                 os.remove(src_file)
             else:
+                logger.info(f'Writing {db_datasets[0]} to error log')
                 f = open(errlog, 'a')
                 f.write(f'{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}')
                 f.close()
