@@ -222,6 +222,11 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         * binned hwp synchrounous signal
         * estimated sigma of binned signal
     """
+    if signal is None:
+        signal = aman.signal
+    if hwp_angle is None:
+        hwp_angle = aman['hwp_angle']
+        
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
         if (flags is not None) and apodize_flags:
