@@ -51,20 +51,32 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         * 'binned_signal': binned signal
         * 'binned_signal_sigma': estimated sigma of binned signal
     """
-    if signal is None:
-        signal = aman.signal
-    if az is None:
-        az = aman.boresight.az
-    
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
         if (flags is not None) and apodize_flags:
-            weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
-    else:
-        if (flags is not None) and apodize_flags:
-            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+            flag_mask = flags.mask()
+            if flag_mask.ndim == 1:
+                flag_is_1d = True
+            else:
+                all_columns_same = np.all(np.all(flags_mask == flags_mask[0, :], axis=0))
+                if all_columns_same:
+                    flag_is_1d = True
+                    flag_mask = flags_mask[0]
+                else:
+                    flag_is_1d = False
+            if flag_is_1d:
+                weight_for_signal = weight_for_signal * apodize.get_apodize_window_from_flags(aman, 
+                                                                                              flags=flags,
+                                                                                              apodize_samps=apodize_flags_samps)
+            else:
+                weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
+                                                                                                             flags=flags, 
+                                                                                                             apodize_samps=apodize_flags_samps)
         else:
-            weight_for_signal = None
+            if (flags is not None) and apodize_flags:
+                weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+            else:
+                weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
                                range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
