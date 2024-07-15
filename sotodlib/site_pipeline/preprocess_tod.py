@@ -315,7 +315,6 @@ def cleanup_mandb_mpi(error, outputs, configs, logger):
 
 def preprocess_tod(obs_id, 
                     configs, 
-                    logger,
                     verbosity=0,
                     group_list=None, 
                     overwrite=False,
@@ -334,23 +333,18 @@ def preprocess_tod(obs_id,
         list of groups to run if you only want to run a partial update
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
-    logger: logging instance
-        the logger to print to
+    verbosity: log level
+        0 = error, 1 = warn, 2 = info, 3 = debug
     run_parallel: Bool
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
-    #error = None
     outputs = []
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
   
-    logger.handlers[0].setLevel(logging.DEBUG)
-    logger.debug('Hi from preprocess_tod')
-
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
     all_groups = groups.copy()
@@ -570,7 +564,6 @@ def main(
  ):
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    logger.debug('Hi')
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
@@ -645,7 +638,7 @@ def main(
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                     group_list=r[1], logger=logger, verbosity=verbosity,
+                     group_list=r[1], verbosity=verbosity,
                      configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
