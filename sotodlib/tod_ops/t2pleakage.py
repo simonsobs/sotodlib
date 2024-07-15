@@ -8,7 +8,7 @@ from scipy.odr import ODR, Model, RealData
 
 def get_t2p_coeffs(aman, 
                    T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demodU', wn_demod=None,
-                   apodize_samps=2000, lpf_cfgs=None, flag_name=None, 
+                   f_lpf_cutoff=2.0, flag_name=None, 
                    subtract_sig=False, merge_stats=True, t2p_stats_name='t2p_stats'):
     """
     Apply a lowpass filter to the temperature and polarization signals, apodize them,
@@ -28,10 +28,9 @@ def get_t2p_coeffs(aman,
         Name of the U polarization signal in `aman`. Default is 'demodU'.
     wn_demod : float or None
         Precomputed white noise level for demodulated signals. If None, it will be calculated.
-    apodize_samps : int
-        Number of samples over which to apodize at the start and end of the signals. Default is 2000.
-    lpf_cfgs : dict or None
-        Configuration for the lowpass filter. If None, defaults to {'type':'sine2', 'cutoff':1.0, 'trans_width':0.01}.
+    f_lpf_cutoff: float
+        Cutoff frequency of low pass filter in demodulation. Used for error bar estimation by
+        combination with wn_demod. Default is 2.0.
     flag_name : str or None
         Name of the flag field in `aman` to use for masking data. If None, no masking is applied.
     subtract_sig : bool
@@ -45,41 +44,26 @@ def get_t2p_coeffs(aman,
     -------
     out_aman : AxisManager
         An AxisManager containing leakage coefficients, their errors, and reduced chi-squared statistics.
-    """
-    if lpf_cfgs is None:
-        lpf_cfgs = {'type':'sine2', 'cutoff':1.0, 'trans_width':0.01}
-    filt = filters.get_lpf(lpf_cfgs)
-    
-    # apply lowpass filter with apodization
-    apodize.apodize_cosine(aman, signal_name=T_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
-    T_lpf = filters.fourier_filter(aman, filt, signal_name='apodized')
-    aman.move('apodized', None)
-    apodize.apodize_cosine(aman, signal_name=Q_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
-    Q_lpf = filters.fourier_filter(aman, filt, signal_name='apodized')
-    aman.move('apodized', None)
-    apodize.apodize_cosine(aman, signal_name=U_sig_name, apodize_samps=apodize_samps, in_place=False, apo_axis='apodized')
-    U_lpf = filters.fourier_filter(aman, filt, signal_name='apodized')
-    aman.move('apodized', None)
-    
+    """    
     # get white noise level of demod for error estimation
     if wn_demod is None:
         freqs, Pxx_demod = calc_psd(aman, signal=aman[Q_sig_name], merge=False)
         wn_demod = calc_wn(aman, pxx=Pxx_demod, freqs=freqs, low_f=0.5, high_f=1.5)
         
     # integrate the white noise level over frequencies to get error bar of each point
-    sigma_demod = wn_demod * np.sqrt(lpf_cfgs['cutoff']) 
+    sigma_demod = wn_demod * np.sqrt(f_lpf_cutoff)
     sigma_T = sigma_demod/np.sqrt(2)
     
     # get downsampled data
-    ds_factor = int(np.mean(1/np.diff(aman.timestamps)) / (2 * lpf_cfgs['cutoff']) )
-    ds_slice = slice(apodize_samps, -apodize_samps, ds_factor)
+    ds_factor = int(np.mean(1/np.diff(aman.timestamps)) / (f_lpf_cutoff) )
+    ds_slice = slice(None, None, ds_factor)
     ts_ds = aman.timestamps[ds_slice]
-    T_lpf_ds = T_lpf[:, ds_slice]
-    Q_lpf_ds = Q_lpf[:, ds_slice]
-    U_lpf_ds = U_lpf[:, ds_slice]
+    T_ds = aman[T_sig_name][:, ds_slice]
+    Q_ds = aman[Q_sig_name][:, ds_slice]
+    U_ds = aman[U_sig_name][:, ds_slice]
 
     if flag_name is None:
-        mask_ds = np.ones_like(T_lpf_ds, dtype=bool)
+        mask_ds = np.ones_like(T_ds, dtype=bool)
     elif flag_name in aman.flags._fields.keys():
         mask_ds = ~aman.flags[flag_name].mask()[:, ds_slice]
     else:
@@ -98,22 +82,22 @@ def get_t2p_coeffs(aman,
     for di, det in enumerate(aman.dets.vals):
         mask_ds_det = mask_ds[di]
         ts_ds_det = ts_ds[mask_ds_det]
-        T_lpf_ds_det = T_lpf_ds[di, mask_ds_det]
-        Q_lpf_ds_det = Q_lpf_ds[di, mask_ds_det]
-        U_lpf_ds_det = U_lpf_ds[di, mask_ds_det]
+        T_ds_det = T_ds[di, mask_ds_det]
+        Q_ds_det = Q_ds[di, mask_ds_det]
+        U_ds_det = U_ds[di, mask_ds_det]
         
         # fitting for Q
         try:
             model = Model(linear_model)
-            data = RealData(x=T_lpf_ds_det, 
-                            y=Q_lpf_ds_det, 
-                            sx=np.ones_like(T_lpf_ds_det) * sigma_T[di], 
-                            sy=np.ones_like(T_lpf_ds_det) * sigma_demod[di])
-            odr = ODR(data, model, beta0=[np.mean(Q_lpf_ds_det), 1e-3])
+            data = RealData(x=T_ds_det, 
+                            y=Q_ds_det, 
+                            sx=np.ones_like(T_ds_det) * sigma_T[di], 
+                            sy=np.ones_like(T_ds_det) * sigma_demod[di])
+            odr = ODR(data, model, beta0=[np.mean(Q_ds_det), 1e-3])
             output = odr.run()
             coeffsQ[di] = output.beta[0]
             errorsQ[di] = output.sd_beta[0]
-            redchi2sQ[di] = output.sum_square / (len(T_lpf_ds_det) - 2)
+            redchi2sQ[di] = output.sum_square / (len(T_ds_det) - 2)
         except:
             coeffsQ[di] = np.nan
             errorsQ[di] = np.nan
@@ -122,15 +106,15 @@ def get_t2p_coeffs(aman,
         # fitting for U
         try:
             model = Model(linear_model)
-            data = RealData(x=T_lpf_ds_det, 
-                            y=U_lpf_ds_det, 
-                            sx=np.ones_like(T_lpf_ds_det) * sigma_T[di], 
-                            sy=np.ones_like(T_lpf_ds_det) * sigma_demod[di])
-            odr = ODR(data, model, beta0=[np.mean(U_lpf_ds_det), 1e-3])
+            data = RealData(x=T_ds_det, 
+                            y=U_ds_det, 
+                            sx=np.ones_like(T_ds_det) * sigma_T[di], 
+                            sy=np.ones_like(T_ds_det) * sigma_demod[di])
+            odr = ODR(data, model, beta0=[np.mean(U_ds_det), 1e-3])
             output = odr.run()
             coeffsU[di] = output.beta[0]
             errorsU[di] = output.sd_beta[0]
-            redchi2sU[di] = output.sum_square / (len(T_lpf_ds_det) - 2)
+            redchi2sU[di] = output.sum_square / (len(T_ds_det) - 2)
         except:
             coeffsU[di] = np.nan
             errorsU[di] = np.nan
