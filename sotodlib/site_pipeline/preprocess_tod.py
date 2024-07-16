@@ -357,7 +357,15 @@ def preprocess_tod(obs_id,
             if 'NC' in g:
                 groups.remove(g)
                 continue
-        meta = context.get_meta(obs_id, dets = {gb:gg for gb, gg in zip(group_by, g)})
+        try:
+            meta = context.get_meta(obs_id, dets = {gb:gg for gb, gg in zip(group_by, g)})
+        except Exception as e:
+            errmsg = f'{type(e)}: {e}'
+            tb = ''.join(traceback.format_tb(e.__traceback__))
+            logger.info(f"ERROR: {obs_id} {g}\n{errmsg}\n{tb}")
+            groups.remove(g)
+            continue
+
         if meta.dets.count == 0:
             groups.remove(g)
 
@@ -395,6 +403,7 @@ def preprocess_tod(obs_id,
             continue
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
+            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}") 
             n_fail += 1
             continue
 
@@ -487,8 +496,7 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta)
-        # select applied in load_preprocess_det_select
-        pipe.run(aman, aman.preprocess, select=False)
+        pipe.run(aman, aman.preprocess)
         return aman
 
 
@@ -643,7 +651,17 @@ def main(
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
             logger.info('New future as_completed result')
-            err, src_file, db_datasets = future.result()
+            try:
+                err, src_file, db_datasets = future.result()
+            except Exception as e:
+                errmsg = f'{type(e)}: {e}'
+                tb = ''.join(traceback.format_tb(e.__traceback__))
+                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+                f = open(errlog, 'a')
+                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+                f.close()
+                continue
+
             logger.info(f'Processing future result db_dataset: {db_datasets}')
             db = _get_preprocess_db(configs, group_by)
             logger.info('Database connected')
@@ -673,7 +691,7 @@ def main(
             else:
                 logger.info(f'Writing {db_datasets[0]} to error log')
                 f = open(errlog, 'a')
-                f.write(f'{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}')
+                f.write(f'\n{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}\n')
                 f.close()
 
 if __name__ == '__main__':
