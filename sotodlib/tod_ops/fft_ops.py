@@ -357,25 +357,12 @@ def noise_model(f, params, **fixed_param):
     return wn * (1 + (fknee / f) ** alpha)
 
 
-def neglnlike(params, x, y, **fixed_param):
-    """
-    For unbinned PSD fitting
-    """
+def neglnlike(params, x, y, bin_size=1, **fixed_param):
     model = noise_model(x, params, **fixed_param)
-    output = np.sum(np.log(model) + y / model)
+    output = np.sum((np.log(model) + y / model)*bin_size)
     if not np.isfinite(output):
         return 1.0e30
-    return output
-
-def leastsq(params, x, y, y_err, **fixed_param):
-    """
-    For binned PSD fitting
-    """
-    model = noise_model(x, params, **fixed_param)
-    output = np.sum((model-y)**2/y_err**2)
-    if not np.isfinite(output):
-        return 1.0e30
-    return output    
+    return output   
 
 def get_hwp_freq(timestamps=None, hwp_angle=None):
     hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
@@ -475,7 +462,6 @@ def calc_binned_psd(
     mask=False,
     unbinned_mode=3,
     base=1.2,
-    limit_N=5,
     merge=False, 
     overwrite=True,
 ):
@@ -496,10 +482,6 @@ def calc_binned_psd(
             First Fourier modes up to this number are left un-binned.
         base : float (> 1)
             Base of the logspace bins. 
-        limit_N : int
-            If data points in a bin is less than limit_N, that bin is handled with
-            chi2 distribution and its error is <psd>. Otherwise the central limit theorem
-            is applied to the bin and the error of the bin is std(psd)/sqrt(len(psd)).
         merge : bool
             if True merge results into axismanager.
         overwrite: bool
@@ -507,7 +489,7 @@ def calc_binned_psd(
 
     Returns
     -------
-        f_binned, pxx_binned, pxx_err: binned frequency and PSD.
+        f_binned, pxx_binned, bin_size: binned frequency and PSD.
     """
     if f is None or pxx is None:
         f = aman.freqs
@@ -520,15 +502,12 @@ def calc_binned_psd(
         else:
             print('"PSD_mask" is not in aman. Masking is skipped.')
             
-    f_bin = binning_psd(f, unbinned_mode=unbinned_mode, base=base, limit_N=limit_N, err=False)
+    f_bin, bin_size = binning_psd(f, unbinned_mode=unbinned_mode, base=base, return_bin_size=True)
     pxx_bin = []
-    pxx_err = []
     for i in range(aman.dets.count):
-        binned, err = binning_psd(pxx[i], unbinned_mode=unbinned_mode, base=base, limit_N=limit_N, err=True)
+        binned = binning_psd(pxx[i], unbinned_mode=unbinned_mode, base=base)
         pxx_bin.append(binned)
-        pxx_err.append(err)
     pxx_bin = np.array(pxx_bin)
-    pxx_err = np.array(pxx_err)
     if merge:
         aman.merge(core.AxisManager(core.OffsetAxis("nusamps_bin", len(f_bin))))
         if overwrite:
@@ -536,12 +515,12 @@ def calc_binned_psd(
                 aman.move("freqs_bin", None)
             if "Pxx_bin" in aman._fields:
                 aman.move("Pxx_bin", None)
-            if "Pxx_bin_err" in aman._fields:
-                aman.move("Pxx_bin_err", None)
+            if "bin_size" in aman._fields:
+                aman.move("bin_size", None)
         aman.wrap("freqs_bin", f_bin, [(0,"nusamps_bin")])
         aman.wrap("Pxx_bin", pxx_bin, [(0,"dets"),(1,"nusamps_bin")])
-        aman.wrap("Pxx_bin_err", pxx_err, [(0,"dets"),(1,"nusamps_bin")])
-    return f_bin, pxx_bin, pxx_err
+        aman.wrap("bin_size", bin_size, [(0,"dets"),(1,"nusamps_bin")])
+    return f_bin, pxx_bin, bin_size
 
 def fit_noise_model(
     aman,
@@ -738,7 +717,6 @@ def fit_binned_noise_model(
     fixed_parameter=None,
     unbinned_mode=3,
     base=1.2,
-    limit_N=5,
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -832,15 +810,14 @@ def fit_binned_noise_model(
     f = f[six:eix]
     pxx = pxx[:, six:eix]
     # binning
-    f, pxx, pxx_err = calc_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
-                                              base=base, limit_N=limit_N, merge=False)
+    f, pxx, bin_size = calc_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
+                                       base=base, merge=False)
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
     covout = np.zeros((aman.dets.count, 3, 3))
     fixed_param = {}
-    for i in range(aman.dets.count):
+    for i in range(len(pxx)):
         p = pxx[i]
-        p_err = pxx_err[i]
         wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
         if fixed_parameter == None:
             pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
@@ -859,11 +836,11 @@ def fit_binned_noise_model(
         else:
             print('"fixed_parameter" is invalid. Parameter fix is skipped.')
             p0 = [f[fidx], wnest, -pfit[0]]
-        res = minimize(lambda params: leastsq(params, f, p, p_err, **fixed_param), 
+        res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_param), 
                p0, method="Nelder-Mead")
         try:
             #Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
-            Hfun = ndt.Hessian(lambda params: leastsq(params, f, p, p_err, **fixed_param), full_output=True)
+            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_param), full_output=True)
             hessian_ndt, _ = Hfun(res["x"])
             # Inverse of the hessian is an estimator of the covariance matrix
             # sqrt of the diagonals gives you the standard errors.
@@ -875,7 +852,7 @@ def fit_binned_noise_model(
             covout_i = np.full((len(p0), len(p0)), np.nan)
         except IndexError:
             print(
-                f"Cannot fit 1/f curve for detector {aman.dets.vals[i]} skipping."
+                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         fitout_i = res.x
@@ -999,7 +976,7 @@ def get_mask_for_single_peak(f, peak_freq, peak_width=(-0.002, +0.002)):
     mask = (f > peak_freq + peak_width[0])&(f < peak_freq + peak_width[1])
     return mask
 
-def binning_psd(psd, unbinned_mode=3, base=1.2, limit_N=5, err=True, drop_nan=False):
+def binning_psd(psd, unbinned_mode=3, base=1.2, return_bin_size=False, drop_nan=False):
     """
     Function to bin PSD.
     First several Fourier modes are left un-binned.
@@ -1015,14 +992,9 @@ def binning_psd(psd, unbinned_mode=3, base=1.2, limit_N=5, err=True, drop_nan=Fa
 
         base : float (> 1)
             Base of the logspace bins.
-
-        limit_N : int
-            If data points in a bin is less than limit_N, that bin is handled with
-            chi2 distribution and its error is <psd>. Otherwise the central limit theorem
-            is applied to the bin and the error of the bin is std(psd)/sqrt(len(psd)).
-            
-        err : bool
-            If True, standard deviations are calculated for bins.
+        
+        return_bin_size : bool
+            If True, the numbers of data points in the bins are returned.
 
         drop_nan : bool
             If True, drop the index where p is nan.
@@ -1030,43 +1002,38 @@ def binning_psd(psd, unbinned_mode=3, base=1.2, limit_N=5, err=True, drop_nan=Fa
     Returns
     -------
         binned_psd: nparray
-        binned_psd_err: nparray
+        bin_size: int
     """
     binned_psd = []
-    if err == True:
-        binned_psd_err = []
+    if return_bin_size == True:
+        bin_size = []
         for i in range(0, unbinned_mode+1):
             binned_psd.append(psd[i])
-            binned_psd_err.append(psd[i])
+            bin_size.append(1)
         N = int(np.emath.logn(base, len(psd)-unbinned_mode))
-        binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
+        binning_idx = np.logspace(base, N, N, base=base, dtype=int)+unbinned_mode-1
         for i in range(N-1):
-            # chi2 distributed bins
-            if limit_N > binning_idx[i+1] - binning_idx[i]:
-                binned_psd.append(psd[binning_idx[i]])
-                binned_psd_err.append(psd[binning_idx[i]])
+            if binning_idx[i+1] == binning_idx[i]:
+                continue
             else:
                 binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
-                binned_psd_err.append(np.std(psd[binning_idx[i]:binning_idx[i+1]])/np.sqrt(binning_idx[i+1]-binning_idx[i]+1))
-
+                bin_size.append(binning_idx[i+1] - binning_idx[i])
         binned_psd = np.array(binned_psd)
-        binned_psd_err = np.array(binned_psd_err)
+        bin_size = np.array(bin_size)
         if drop_nan:
             binned_psd = binned_psd[~np.isnan(binned_psd)]
-            binned_psd_err = binned_psd_err[~np.isnan(binned_psd_err)]
-        return binned_psd, binned_psd_err
-
+            bin_size = bin_size[~np.isnan(bin_size)]
+        return binned_psd, bin_size
     else:
         for i in range(0, unbinned_mode+1):
             binned_psd.append(psd[i])
         N = int(np.emath.logn(base, len(psd)-unbinned_mode))
         binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
         for i in range(N-1):
-            if limit_N > binning_idx[i+1] - binning_idx[i]:
-                binned_psd.append(psd[binning_idx[i]])
+            if binning_idx[i+1] == binning_idx[i]:
+                continue
             else:
                 binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
-
         binned_psd = np.array(binned_psd)
         if drop_nan:
             binned_psd = binned_psd[~np.isnan(binned_psd)]
