@@ -618,6 +618,8 @@ def fit_noise_model(
     eix = np.argmin(np.abs(f - f_max))
     if f_min is None:
         six = 1
+    elif f_min < f[0]:
+        six = 1
     else:
         six = np.argmin(np.abs(f - f_min))
     f = f[six:eix]
@@ -630,22 +632,46 @@ def fit_noise_model(
         p = pxx[i]
         wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
         if fixed_parameter == None:
-            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            try:
+                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
+                )
+                covout[i] = np.full((3, 3), np.nan)
+                fitout[i] = np.full(3, np.nan)
+                continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], wnest, -pfit[0]]
         elif fixed_parameter == 'wn':
-            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            try:
+                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
+                )
+                covout[i] = np.full((3, 3), np.nan)
+                fitout[i] = np.full(3, np.nan)
+                continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], -pfit[0]]
             fixed_param['wn'] = wnest
         elif fixed_parameter == 'alpha':
-            pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
+            try:
+                pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
+                )
+                covout[i] = np.full((3, 3), np.nan)
+                fitout[i] = np.full(3, np.nan)
+                continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], wnest]
             fixed_param['alpha'] = -pfit[0]
         else:
-            print('"fixed_parameter" is invalid. Parameter fix is skipped.')
-            p0 = [f[fidx], wnest, -pfit[0]]
+            print('"fixed_parameter" is invalid.')
+            return
         res = minimize(lambda params: neglnlike(params, f, p, **fixed_param), 
                p0, method="Nelder-Mead")
         try:
@@ -657,12 +683,12 @@ def fit_noise_model(
             covout_i = np.linalg.inv(hessian_ndt)            
         except np.linalg.LinAlgError:
             print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
+                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         except IndexError:
             print(
-                f"Cannot fit 1/f curve for detector {aman.dets.vals[i]} skipping."
+                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         fitout_i = res.x
@@ -820,22 +846,46 @@ def fit_binned_noise_model(
         p = pxx[i]
         wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
         if fixed_parameter == None:
-            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            try:
+                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
+                )
+                covout[i] = np.full((3, 3), np.nan)
+                fitout[i] = np.full(3, np.nan)
+                continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], wnest, -pfit[0]]
         elif fixed_parameter == 'wn':
-            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            try:
+                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
+                )
+                covout[i] = np.full((3, 3), np.nan)
+                fitout[i] = np.full(3, np.nan)
+                continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], -pfit[0]]
             fixed_param['wn'] = wnest
         elif fixed_parameter == 'alpha':
-            pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
+            try:
+                pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
+                )
+                covout[i] = np.full((3, 3), np.nan)
+                fitout[i] = np.full(3, np.nan)
+                continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], wnest]
             fixed_param['alpha'] = -pfit[0]
         else:
-            print('"fixed_parameter" is invalid. Parameter fix is skipped.')
-            p0 = [f[fidx], wnest, -pfit[0]]
+            print('"fixed_parameter" is invalid.')
+            return
         res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_param), 
                p0, method="Nelder-Mead")
         try:
@@ -847,12 +897,12 @@ def fit_binned_noise_model(
             covout_i = np.linalg.inv(hessian_ndt)            
         except np.linalg.LinAlgError:
             print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
+                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         except IndexError:
             print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
+                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         fitout_i = res.x
