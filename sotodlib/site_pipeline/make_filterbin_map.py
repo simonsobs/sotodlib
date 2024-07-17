@@ -777,7 +777,9 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
     weights = []
     for n_split in range(signal_map.Nsplits):
         wmap.append( signal_map.rhs[n_split] )
-        weights.append(signal_map.div[n_split])
+        div = np.diagonal(signal_map.div[n_split], axis1=0, axis2=1)
+        div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
+        weights.append(div)
     return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0 )
 
 def write_depth1_map(prefix, data, split_labels=None):
