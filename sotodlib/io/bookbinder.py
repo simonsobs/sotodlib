@@ -451,7 +451,7 @@ class AncilProcessor:
         el = self.hkdata.el
         if az_mode is not None:
             m = (t0 <= az_mode.times) & (az_mode.times <= t1)
-            if m.sum() >= 2:
+            if not np.any(m):
                 frame['azimuth_mode'] = 'None'
             elif 'ProgramTrack' in az_mode.data[m]:
                 frame['azimuth_mode'] = 'ProgramTrack' # Scanning
@@ -460,19 +460,25 @@ class AncilProcessor:
 
         if az is not None:
             m = (t0 <= az.times) & (az.times <= t1)
-            if np.any(m):
+            if m.sum() >= 2:
                 dt = np.diff(az.times[m]).mean()
                 az_vel = np.diff(az.data[m]) / dt
                 frame['azimuth_velocity_mean'] = np.mean(az_vel)
                 frame['azimuth_velocity_stdev'] = np.std(az_vel)
+        for k in ['azimuth_velocity_mean', 'azimuth_velocity_stdev']:
+            if k not in frame:
+                frame[k] = np.nan
 
         if el is not None:
             m = (t0 <= el.times) & (el.times <= t1)
-            if np.any(m):
+            if m.sum() >= 2:
                 dt = np.diff(el.times[m]).mean()
                 el_vel = np.diff(el.data[m]) / dt
                 frame['elevation_velocity_mean'] = np.mean(el_vel)
                 frame['elevation_velocity_stdev'] = np.std(el_vel)
+        for k in ['elevation_velocity_mean', 'elevation_velocity_stdev']:
+            if k not in frame:
+                frame[k] = np.nan
 
 
 class SmurfStreamProcessor:
@@ -1030,9 +1036,9 @@ class BookBinder:
         meta['az_speed_stdev'] = None
         if az is not None:
             m = (t0 < az.times) & (az.times <= t1)
-            dt = np.diff(az.times[m]).mean()
-            az_speed = np.abs(np.diff(az.data[m]) / dt)
-            if m.any():
+            if np.sum(m) >= 2:
+                dt = np.diff(az.times[m]).mean()
+                az_speed = np.abs(np.diff(az.data[m]) / dt)
                 meta['az_speed_mean'] = float(np.mean(az_speed))
                 meta['az_speed_stdev'] = float(np.std(az_speed))
 
