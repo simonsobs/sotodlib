@@ -67,6 +67,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
 
 
 def setup_preprocess(parser, operators):
+    wrk.setup_filter_hwpss_relcal(operators)
     wrk.setup_filter_hwpss(operators)
     wrk.setup_simple_jumpcorrect(operators)
     wrk.setup_simple_deglitch(operators)
@@ -78,6 +79,10 @@ def preprocess(job, otherargs, runargs, data):
     """Apply flags and cuts based on data quality."""
     log = toast.utils.Logger.get()
     job_ops = job.operators
+
+    # Run these on the original data
+    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
+    wrk.simple_deglitch(job, otherargs, runargs, data)
 
     if otherargs.preprocess_copy:
         prename = "preprocess"
@@ -91,18 +96,28 @@ def preprocess(job, otherargs, runargs, data):
         wrkf(job, otherargs, runargs, data)
         op.det_data = save_op_detdata
 
+    # _run_pre_op(job_ops.simple_jumpcorrect, wrk.simple_jumpcorrect)
+
+    # _run_pre_op(job_ops.simple_deglitch, wrk.simple_deglitch)
+
     # Ensure that we run the HWPSS filter for preprocessing, even if we
     # are not using it on the original data.
+    if job_ops.hwpfilter.enabled and job_ops.hwpssfilter.enabled:
+        raise RuntimeError("Cannot enable both hwpfilter and hwpssfilter")
+    # Select which hwp filter we are using
+    if job_ops.hwpfilter.enabled:
+        hwp_op = job_ops.hwpfilter
+        hwp_wrk = wrk.filter_hwpss
+    else:
+        hwp_op = job_ops.hwpssfilter
+        hwp_wrk = wrk.filter_hwpss_relcal
+    # Save state, run, and restore
     if otherargs.preprocess_copy:
-        save_hwpf_state = job_ops.hwpfilter.enabled
-        job_ops.hwpfilter.enabled = True
-    _run_pre_op(job_ops.hwpfilter, wrk.filter_hwpss)
+        save_hwpf_state = hwp_op.enabled
+        hwp_op.enabled = True
+    _run_pre_op(hwp_op, hwp_wrk)
     if otherargs.preprocess_copy:
-        job_ops.hwpfilter.enabled = save_hwpf_state
-
-    _run_pre_op(job_ops.simple_jumpcorrect, wrk.simple_jumpcorrect)
-
-    _run_pre_op(job_ops.simple_deglitch, wrk.simple_deglitch)
+        hwp_op.enabled = save_hwpf_state
 
     _run_pre_op(job_ops.diff_noise_cut, wrk.flag_diff_noise_outliers)
 
@@ -114,3 +129,6 @@ def preprocess(job, otherargs, runargs, data):
         # data has not been filled / corrected.  Not sure how to do this
         # without applying the hwpfilter to the original data, which we
         # might want to avoid if solving for that template in the mapmaking.
+        if job_ops.hwpsscal.enabled:
+            job_ops.hwpsscal.cal_name = job_ops.hwpssfilter.relcal
+            job_ops.hwpsscal.apply(data)

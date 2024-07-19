@@ -15,6 +15,7 @@ import argparse
 import datetime
 import os
 import re
+import sys
 
 import numpy as np
 
@@ -59,7 +60,7 @@ def get_obs_state(out_root, obs):
     if os.path.isfile(state_file):
         with open(state_file, "r") as f:
             state = f.readline()
-        return state
+        return state.rstrip()
     return None
 
 
@@ -67,7 +68,7 @@ def clear_obs_state(out_root, obs):
     """Clear the current processing state of an observation.
     """
     obs_dir = os.path.join(out_root, obs)
-    if not os.isdir(obs_dir):
+    if not os.path.isdir(obs_dir):
         return
     state_file = os.path.join(obs_dir, "state")
     if os.path.isfile(state_file):
@@ -102,10 +103,11 @@ def find_obs(all_obs, n_job_obs, out_root, ignore_running=False):
     selected = list()
     for obs in all_obs:
         state = get_obs_state(out_root, obs)
-        if state == "done":
-            continue
-        if state == "running" and not ignore_running:
-            continue
+        if state is not None:
+            if state == "done":
+                continue
+            if state == "running" and not ignore_running:
+                continue
         # We are going to consider this obs
         selected.append(obs)
         if len(selected) >= n_job_obs:
@@ -172,6 +174,13 @@ def main():
         default=None,
         help="Clear the state of this observation",
     )
+    parser.add_argument(
+        "--cleanup",
+        required=False,
+        action="store_true",
+        default=False,
+        help="Remove the running state from all observations",
+    )
 
     args = parser.parse_args()
 
@@ -195,6 +204,12 @@ def main():
             set_obs_state(args.out_root, args.set_state_done, "done")
         elif args.set_state_running is not None:
             set_obs_state(args.out_root, args.set_state_running, "running")
+        elif args.cleanup:
+            all_obs = load_obs_file(args.observations)
+            for obs in all_obs:
+                state = get_obs_state(args.out_root, obs)
+                if state is not None and state == "running":
+                    clear_obs_state(args.out_root, obs)
 
     if comm is not None:
         comm.barrier()

@@ -118,6 +118,58 @@ def filter_hwpss(job, otherargs, runargs, data):
     if job_ops.hwpfilter.enabled:
         job_ops.hwpfilter.apply(data)
 
+def setup_filter_hwpss_relcal(operators):
+    """Add commandline args and operators for HWPSS filter and calibration.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.HWPSynchronousFilter(
+            name="hwpssfilter",
+            harmonics=8,
+            relcal="calibration",
+            enabled=False,
+        )
+    )
+    operators.append(
+        toast.ops.CalibrateDetectors(
+            name="hwpsscal",
+            enabled=False,
+        )
+    )
+
+
+@workflow_timer
+def filter_hwpss_relcal(job, otherargs, runargs, data):
+    """Filter HWP synchronous signal.
+
+    This filters the HWPSS and optionally applies a relative calibration based
+    on the 2f magnitude.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.hwpssfilter.enabled:
+        job_ops.hwpssfilter.apply(data)
+    if job_ops.hwpsscal.enabled:
+        job_ops.hwpsscal.cal_name = job_ops.hwpssfilter.relcal
+        job_ops.hwpsscal.apply(data)
+
 
 def setup_filter_ground(operators):
     """Add commandline args and operators for ground filters.
