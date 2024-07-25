@@ -38,7 +38,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         Whether to use linear regression to extract HWPSS from the binned signal. If `False`, curve-fitting will be used instead.
         Default is `True`.
     modes : list of int, optional
-        The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 6, 8].
+        The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 5, 6, 7, 8].
     apply_prefilt : bool, optional
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
         If run through preprocess and `signal` is not `aman.signal` then default to `False`.
