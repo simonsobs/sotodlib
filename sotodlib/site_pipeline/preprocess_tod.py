@@ -350,6 +350,7 @@ def main(
         verbosity: Optional[int] = None,
         nproc: Optional[int] = 4
  ):
+    multiprocessing.set_start_method('spawn')
     configs, context = _get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -454,5 +455,4 @@ def main(
                 f.close()
 
 if __name__ == '__main__':
-    multiprocessing.set_start_method('spawn')
     sp_util.main_launcher(main, get_parser)
