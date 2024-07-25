@@ -575,6 +575,7 @@ def main(
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
+    multiprocessing.set_start_method('spawn')
 
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..
@@ -661,6 +662,7 @@ def main(
                 f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
                 f.close()
                 continue
+            futures.remove(future)
 
             logger.info(f'Processing future result db_dataset: {db_datasets}')
             db = _get_preprocess_db(configs, group_by)
@@ -695,5 +697,4 @@ def main(
                 f.close()
 
 if __name__ == '__main__':
-    multiprocessing.set_start_method('spawn')
     sp_util.main_launcher(main, get_parser)
