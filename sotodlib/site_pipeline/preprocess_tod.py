@@ -1,6 +1,7 @@
 import os
 import yaml
 import time
+import logging
 import numpy as np
 import argparse
 import traceback
@@ -127,12 +128,60 @@ def swap_archive(config, fpath):
 
 def preproc_or_load_mpi(obs_id, configs, dets, logger=None, 
                         context=None, overwrite=False):
+    """
+    Function to be dropped into the ML mapmaker run in an MPI framework.
+    This function is expected to receive a single obs_id, and dets dictionary
+    which is expected to be processed by a single MPI rank. The dets dictionary
+    must match the grouping specified in the preprocess config file. If the
+    preprocess database entry for this obsid-dets group already exists then this
+    function will just load back the processed tod calling the ``load_preprocess_tod``
+    function. If the db entry does not exist of the overwrite flag is set to True then
+    the full preprocessing steps defined in the configs are run and the outputs are
+    written to a unique h5 file. Any errors, the info to populate the database, 
+    the file path of the h5 file, and the process tod are returned from this function.
+    This function is expected to be run in conjunction with the ``cleanup_mandb_mpi``
+    function which consumes all of the outputs (except the processed tod) and writes
+    to the database, and moves the multiple h5 files into fewer h5 files (each <= 10 GB).
+
+    Arguments
+    ---------
+    obs_id: str
+        Obs id to process or load
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    dets: dict
+        Dictionary specifying which detectors/wafers to load see ``Context.obsdb.get_obs``.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    context: fpath or core.Context
+        Optional. Filepath or context object used for data loading/querying.
+    overwrite: bool
+        Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
+
+    Returns
+    -------
+    error: str
+        String indicating if the function succeeded in its execution or failed.
+        If ``None`` then it succeeded in processing and the mandB should be updated.
+        If ``'load_success'`` then axis manager was successfully loaded from existing preproc db.
+        If any other string then processing failed and output will be logged in the error log.
+    output: list
+        Varies depending on the value of ``error``.
+        If ``error == None`` then output is the info needed to update the manifest db.
+        If ``error == 'load_success'`` then output is just ``[obs_id, dets]``.
+        If ``error`` is anything else then output stores what to save in the error log.
+    aman: Core.AxisManager
+        Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
+    """
     error = None
     outputs = {}
     if logger is None: 
         logger = sp_util.init_logger("preprocess")
-    
-    configs, context = _get_preprocess_context(configs, context)
+
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+
+    context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
@@ -146,28 +195,36 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
                            f"No analysis to run.")
             error = 'no_group_overlap'
             return error, [obs_id, dets], None
-    
-    db = core.metadata.ManifestDb(configs['archive']['index'])
-    dbix = {'obs:obs_id':obs_id}
-    for gb, g in zip(group_by, groups):
-        dbix[f'dets:{gb}'] = g
 
-    if (len(db.inspect(dbix)) != 0) and (not overwrite):
-        _, aman = load_preprocess_tod(obs_id=obs_id, dets=dets,
-                                              configs=configs, context=context)
+    dbexist = True
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        dbix = {'obs:obs_id':obs_id}
+        for gb, g in zip(group_by, cur_groups[0]):
+            dbix[f'dets:{gb}'] = g
+        print(dbix)
+        if len(db.inspect(dbix)) == 0:
+            dbexist = False
+    else:
+        dbexist = False
+
+    if dbexist and (not overwrite):
+        logger.info(f"db exists for {obs_id} {dets} loading data and applying preprocessing.")
+        aman = load_preprocess_tod(obs_id=obs_id, dets=dets,
+                                   configs=configs, context=context)
+        error = 'load_success'
         return error, [obs_id, dets], aman
     else:
+        logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
         pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
-
-        logger.info(f"Beginning run for {obs_id}:{group}")
         try:
-            aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
+            aman = context.get_obs(obs_id, dets=dets)
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
             aman.wrap('preprocess', proc_aman)
         except Exception as e:
-            error = f'Failed to load: {obs_id} {group}'
+            error = f'Failed to load: {obs_id} {dets}'
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
             logger.info(f"{error}\n{errmsg}\n{tb}")
@@ -178,10 +235,10 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
         newpath = f'temp/{obs_id}'
         for cg in cur_groups[0]:
             newpath += f'_{cg}'
-        swap_archive(configs, newpath+'.h5')
-        policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+        temp_config = swap_archive(configs, newpath+'.h5')
+        policy = sp_util.ArchivePolicy.from_params(temp_config['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
-        for gb, g in zip(group_by, group):
+        for gb, g in zip(group_by, cur_groups[0]):
             if gb == 'detset':
                 dest_dataset += "_" + g
             else:
@@ -194,12 +251,26 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
         # Collect index info.
         db_data = {'obs:obs_id': obs_id,
                     'dataset': dest_dataset}
-        for gb, g in zip(group_by, group):
+        for gb, g in zip(group_by, cur_groups[0]):
             db_data['dets:'+gb] = g
         outputs['db_data'] = db_data
         return error, outputs, aman
           
 def cleanup_mandb_mpi(error, outputs, configs, logger):
+    """
+    Function to update the manifest db when database generation run in parrallel using MPI.
+    This function is expected to be run from rank 0 after a ``comm.gather`` call and consumes
+    the outputs from ``preproc_or_load_mpi``. See the ``preproc_or_load_mpi`` docstring for
+    the varying expected values of ``error`` and the associated ``outputs``. This function
+    will either: 
+    
+    1) Update the mandb sqlite file and move the h5 archive from its temporary
+    location to its permanent path if error is ``None``.
+    
+    2) Return nothing if error is ``load_success``.
+    
+    3) Update the error log if error is anything else.
+    """
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
@@ -213,38 +284,38 @@ def cleanup_mandb_mpi(error, outputs, configs, logger):
         while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-            group_by =  [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
-            db = _get_preprocess_db(configs, group_by)
-            if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
-                nfile += 1
-                dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
+        group_by =  [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
+        db = _get_preprocess_db(configs, group_by)
+        h5_path = os.path.relpath(dest_file,
+                                  start=os.path.dirname(configs['archive']['index']))
 
-            h5_path = os.path.relpath(dest_file,
-                                      start=os.path.dirname(configs['archive']['index']))
-
-            src_file = outputs['temp_file']
-            with h5py.File(dest_file,'a') as f_dest:
-                with h5py.File(src_file,'r') as f_src:
-                    for dts in f_src.keys():
-                        f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                        for member in f_src[dts]:
-                            if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                                f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-            logger.info(f"Saving to database under {db_data}")
-            if len(db.inspect(outputs['db_data'])) == 0:
-                db.add_entry(outputs['db_data'], h5_path)
-            os.remove(src_file)
+        src_file = outputs['temp_file']
+        with h5py.File(dest_file,'a') as f_dest:
+            with h5py.File(src_file,'r') as f_src:
+                for dts in f_src.keys():
+                    f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
+                    for member in f_src[dts]:
+                        if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
+                            f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
+        logger.info(f"Saving to database under {outputs['db_data']}")
+        if len(db.inspect(outputs['db_data'])) == 0:
+            db.add_entry(outputs['db_data'], h5_path)
+        os.remove(src_file)
+    elif error == 'load_success':
+        return
     else:
-        errlog = os.path.join(os.path.dirname(configs['archive']['index']),
-                              'errlog.txt')
+        folder = os.path.dirname(configs['archive']['index'])
+        if not(os.path.exists(folder)):
+            os.makedirs(folder)
+        errlog = os.path.join(folder, 'errlog.txt')
         f = open(errlog, 'a')
         f.write(f'{time.time()}, {error}\n')
-        f.write(f'\t{outputs[0]}\n\t{outputs[1]}')
+        f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
 
 def preprocess_tod(obs_id, 
                     configs, 
-                    logger,
+                    verbosity=0,
                     group_list=None, 
                     overwrite=False,
                     run_parallel=False):
@@ -262,43 +333,58 @@ def preprocess_tod(obs_id,
         list of groups to run if you only want to run a partial update
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
-    logger: logging instance
-        the logger to print to
+    verbosity: log level
+        0 = error, 1 = warn, 2 = info, 3 = debug
     run_parallel: Bool
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
-    error = None
     outputs = []
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
-
+  
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
     all_groups = groups.copy()
-    if group_list is not None:
-        for g in all_groups:
+    for g in all_groups:
+        if group_list is not None:
             if g not in group_list:
                 groups.remove(g)
+                continue
+        if 'wafer.bandpass' in group_by:
+            if 'NC' in g:
+                groups.remove(g)
+                continue
+        try:
+            meta = context.get_meta(obs_id, dets = {gb:gg for gb, gg in zip(group_by, g)})
+        except Exception as e:
+            errmsg = f'{type(e)}: {e}'
+            tb = ''.join(traceback.format_tb(e.__traceback__))
+            logger.info(f"ERROR: {obs_id} {g}\n{errmsg}\n{tb}")
+            groups.remove(g)
+            continue
 
-        if len(groups) == 0:
-            logger.warning(f"group_list:{group_list} contains no overlap with "
-                        f"groups in observation: {obs_id}:{all_groups}. "
-                        f"No analysis to run.")
-            error = 'no_group_overlap'
-            if run_parallel:
-                return error, None, [None, None]
-            else:
-                return
+        if meta.dets.count == 0:
+            groups.remove(g)
+
+    if len(groups) == 0:
+        logger.warning(f"group_list:{group_list} contains no overlap with "
+                       f"groups in observation: {obs_id}:{all_groups}. "
+                       f"No analysis to run.")
+        error = 'no_group_overlap'
+        if run_parallel:
+            return error, None, [None, None]
+        else:
+            return
     
     if not(run_parallel):
         db = _get_preprocess_db(configs, group_by)
     
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
-
+    
+    n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
         try:
@@ -307,13 +393,18 @@ def preprocess_tod(obs_id,
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
         except Exception as e:
-            error = f'{obs_id} {group}'
+            #error = f'{obs_id} {group}'
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
-            logger.info(f"{error}\n{errmsg}\n{tb}")
-            return error, None, [errmsg, tb]
+            logger.info(f"ERROR: {obs_id} {group}\n{errmsg}\n{tb}")
+            # return error, None, [errmsg, tb]
+            # need a better way to log if just one group fails.
+            n_fail += 1
+            continue
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
+            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}") 
+            n_fail += 1
             continue
 
         policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
@@ -340,7 +431,15 @@ def preprocess_tod(obs_id,
                         start=os.path.dirname(configs['archive']['index']))
                 db.add_entry(db_data, h5_path)
     if run_parallel:
-        return error, dest_file, outputs        
+        if n_fail == len(groups):
+            # If no groups make it to the end of the processing return error.
+            logger.info(f'ERROR: all groups failed for {obs_id}')
+            error = 'all_fail'
+            return error, None, [obs_id, 'all groups']
+        else:
+            logger.info('Returning data to futures')
+            error = None
+            return error, dest_file, outputs
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
@@ -476,6 +575,7 @@ def main(
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
+    multiprocessing.set_start_method('spawn')
 
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..
@@ -527,6 +627,8 @@ def main(
                 [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
                 run_list.append( (obs, groups) )
 
+    logger.info(f'Run list created with {len(run_list)} obsids')
+
     # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
     # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
     # whenever the file size exceeds 10 GB.
@@ -540,23 +642,41 @@ def main(
         nfile += 1
         dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
 
+    logger.info(f'Starting dest_file set to {dest_file}')
+
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                     group_list=r[1], logger=logger,
+                     group_list=r[1], verbosity=verbosity,
                      configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
-            err, src_file, db_datasets = future.result()
+            logger.info('New future as_completed result')
+            try:
+                err, src_file, db_datasets = future.result()
+            except Exception as e:
+                errmsg = f'{type(e)}: {e}'
+                tb = ''.join(traceback.format_tb(e.__traceback__))
+                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+                f = open(errlog, 'a')
+                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+                f.close()
+                continue
+            futures.remove(future)
+
+            logger.info(f'Processing future result db_dataset: {db_datasets}')
             db = _get_preprocess_db(configs, group_by)
+            logger.info('Database connected')
             if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
                 nfile += 1
                 dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
+                logger.info('Starting a new h5 file.')
 
             h5_path = os.path.relpath(dest_file,
                             start=os.path.dirname(configs['archive']['index']))
 
             if err is None:
+                logger.info(f'Moving files from temp to final destination.')
                 with h5py.File(dest_file,'a') as f_dest:
                     with h5py.File(src_file,'r') as f_src:
                         for dts in f_src.keys():
@@ -568,12 +688,13 @@ def main(
                     logger.info(f"Saving to database under {db_data}")
                     if len(db.inspect(db_data)) == 0:
                         db.add_entry(db_data, h5_path)
+                logger.info(f'Deleting {src_file}.')
                 os.remove(src_file)
             else:
+                logger.info(f'Writing {db_datasets[0]} to error log')
                 f = open(errlog, 'a')
-                f.write(f'{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}')
+                f.write(f'\n{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}\n')
                 f.close()
 
 if __name__ == '__main__':
-    multiprocessing.set_start_method('spawn')
     sp_util.main_launcher(main, get_parser)

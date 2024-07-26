@@ -617,9 +617,11 @@ class SubtractHWPSS(_Preprocess):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
             template = hwp.harms_func(aman.hwp_angle, modes,
                                   proc_aman[self.hwpss_stats].coeffs)
+            if 'hwpss_model' in aman._fields:
+                aman.move('hwpss_model', None)
+            aman.wrap('hwpss_model', template, [(0, 'dets'), (1, 'samps')])
             hwp.subtract_hwpss(
                 aman,
-                hwpss_template = template,
                 subtract_name = self.process_cfgs["subtract_name"]
                 )
 
@@ -910,20 +912,28 @@ class HWPAngleModel(_Preprocess):
      Example config block::
 
         - name : "hwp_angle_model"
+          process: True
           calc:
             on_sign_ambiguous: 'fail'
           save: True
-    
+          
     .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
     """
     name = "hwp_angle_model"
-    
+
+    def process(self, aman, proc_aman):
+        if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
+            aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
+                      [(0, 'samps')])
+        else:
+            return
+
     def calc_and_save(self, aman, proc_aman):
         hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
         hwp_angle_aman = core.AxisManager(aman.samps)
         hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
         self.save(proc_aman, hwp_angle_aman)
-    
+
     def save(self, proc_aman, hwp_angle_aman):
         if self.save_cfgs is None:
             return
@@ -970,8 +980,8 @@ class FourierFilter(_Preprocess):
             trim = self.process_cfgs["trim_samps"]
             aman.restrict('samps', (aman.samps.offset + trim,
                                     aman.samps.offset + aman.samps.count - trim))
-            proc_aman.restrict('samps', (aman.samps.offset + trim,
-                                         aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
+                                         proc_aman.samps.offset + proc_aman.samps.count - trim))
 
 class PCARelCal(_Preprocess):
     """

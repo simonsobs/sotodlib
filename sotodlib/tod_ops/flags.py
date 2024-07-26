@@ -539,7 +539,8 @@ def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source
     return source_flags
 
 def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
-                  merge=False, overwrite=False, ptp_flag_name='ptp_flag'):
+                  merge=False, overwrite=False, ptp_flag_name='ptp_flag',
+                  outlier_range=(0.5, 2.)):
     """
     Returns a ranges matrix that indicates if the peak-to-peak (ptp) of
     the tod is valid based on the kurtosis of the distribution of ptps. The
@@ -561,6 +562,8 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
         if merge is True. Default is False.
     ptp_flag_name : str
         Field name used when merge is True. Default is ``ptp_flag``.
+    outlier_range : tuple
+        (lower, upper) bound of the initial cut before estimating the kurtosis.
 
     Returns
     -------
@@ -571,13 +574,16 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
     """
     det_mask = np.full(aman.dets.count, True, dtype=bool)
     ptps_full = np.ptp(aman[signal_name], axis=1)
+    ratio = ptps_full/np.median(ptps_full)
+    outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
+    det_mask[outlier_mask] = False
     while True:
         if len(aman.dets.vals[det_mask]) > 0:
             ptps = np.ptp(aman[signal_name][det_mask], axis=1)
         else:
             break
         kurtosis_ptp = stats.kurtosis(ptps)
-        if kurtosis_ptp < kurtosis_threshold:
+        if np.abs(kurtosis_ptp) < kurtosis_threshold:
             break
         else:
             max_is_bad_factor = np.max(ptps)/np.median(ptps)
@@ -586,7 +592,6 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
                 det_mask[ptps_full >= np.max(ptps)] = False
             else:
                 det_mask[ptps_full <= np.min(ptps)] = False
-    print(f'dets: {len(aman.dets.vals[det_mask])}')
     x = Ranges(aman.samps.count)
     mskptps = RangesMatrix([Ranges.zeros_like(x) if Y
                              else Ranges.ones_like(x) for Y in det_mask])

@@ -2,6 +2,7 @@ import numpy as np
 import pyfftw
 import inspect
 import scipy.signal as signal
+from operator import attrgetter
 
 import logging
 
@@ -364,7 +365,8 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        timeconst = tod[timeconst]
+        _f = attrgetter(timeconst)
+        timeconst = _f(tod)
 
     if target is None:
         filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]
