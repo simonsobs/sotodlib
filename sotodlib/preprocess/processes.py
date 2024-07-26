@@ -1003,47 +1003,23 @@ class PCARelCal(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        pca_out = tod_ops.pca.get_pca(aman,signal=aman[self.signal])
-        pca_signal = tod_ops.pca.get_pca_model(aman, pca_out,
-                                       signal=aman[self.signal])
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        if len(bands) == 2:
-            m0 = aman.det_info.wafer.bandpass == bands[0]
-            med0 = np.median(pca_signal.weights[m0,0])
-            med1 = np.median(pca_signal.weights[~m0,0])
-            relcal = np.zeros(aman.dets.count)
-            relcal[m0] = med0/pca_signal.weights[m0,0]
-            relcal[~m0] = med1/pca_signal.weights[~m0,0]
+        rc_aman = core.AxisManager(aman.dets, aman.samps)
+        relcal = np.zeros(aman.dets.count)
+        for band in bands:
+            m0 = aman.det_info.wafer.bandpass == band
+            rc_aman.wrap(f'{band}_idx', np.where(m0)[0])
+            band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+            pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
+            pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
+                                        signal=band_aman[self.signal])
+            med = np.median(pca_signal.weights[:,0])
+            relcal[m0] = med/pca_signal.weights[:,0]
 
-            rc_aman = core.AxisManager(aman.dets, aman.samps,
-                                       core.LabelAxis(name='bandpass',
-                                                      vals=bands))
-            rc_aman.wrap('relcal', relcal, [(0,'dets')])
-            rc_aman.wrap('medians', np.asarray([med0, med1]),
-                        [(0, 'bandpass')])
-            rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
-        elif len(bands) == 1:
-            m0 = aman.det_info.wafer.bandpass == bands[0]
-            med0 = np.median(pca_signal.weights[m0])
-            relcal = np.zeros(aman.dets.count)
-            relcal[m0] = med0/pca_signal.weights[m0,0]
-
-            rc_aman = core.AxisManager(aman.dets, aman.samps,
-                                       core.LabelAxis(name='bandpass',
-                                                      vals=bands))
-            rc_aman.wrap('relcal', relcal, [(0,'dets')])
-            rc_aman.wrap('medians', np.asarray([med0]),
-                        [(0, 'bandpass')])
-            rc_aman.wrap('pca_mode0', pca_signal.modes[0], [(0, 'samps')])
-        else:
-            rc_aman = core.AxisManager(aman.dets, aman.samps,
-                                       core.LabelAxis(name='bandpass',
-                                                      vals=['NC']))
-            rc_aman.wrap('relcal', np.ones(aman.dets.count), [(0,'dets')])
-            rc_aman.wrap('medians', np.asarray([np.nan]),
-                        [(0, 'bandpass')])
-
+            rc_aman.wrap(f'{band}_median', med)
+            rc_aman.wrap(f'{band}_pca_mode0', pca_signal.modes[0], [(0, 'samps')])
+        rc_aman.wrap('relcal', relcal, [(0,'dets')])
         self.save(proc_aman, rc_aman)
 
     def save(self, proc_aman, rc_aman):
