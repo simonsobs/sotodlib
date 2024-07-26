@@ -365,6 +365,7 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
+        # attrgetter used to retrieve a field multiple layers deep.
         _f = attrgetter(timeconst)
         timeconst = _f(tod)
 
