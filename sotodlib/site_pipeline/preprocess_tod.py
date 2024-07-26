@@ -126,22 +126,22 @@ def swap_archive(config, fpath):
         os.makedirs(dname)
     return tc
 
-def preproc_or_load_mpi(obs_id, configs, dets, logger=None, 
-                        context=None, overwrite=False):
+def preproc_or_load_group(obs_id, configs, dets, logger=None, 
+                          context=None, overwrite=False):
     """
-    Function to be dropped into the ML mapmaker run in an MPI framework.
-    This function is expected to receive a single obs_id, and dets dictionary
-    which is expected to be processed by a single MPI rank. The dets dictionary
-    must match the grouping specified in the preprocess config file. If the
-    preprocess database entry for this obsid-dets group already exists then this
-    function will just load back the processed tod calling the ``load_preprocess_tod``
-    function. If the db entry does not exist of the overwrite flag is set to True then
-    the full preprocessing steps defined in the configs are run and the outputs are
-    written to a unique h5 file. Any errors, the info to populate the database, 
-    the file path of the h5 file, and the process tod are returned from this function.
-    This function is expected to be run in conjunction with the ``cleanup_mandb_mpi``
-    function which consumes all of the outputs (except the processed tod) and writes
-    to the database, and moves the multiple h5 files into fewer h5 files (each <= 10 GB).
+    This function is expected to receive a single obs_id, and dets dictionary.
+    The dets dictionary must match the grouping specified in the preprocess
+    config file. If the preprocess database entry for this obsid-dets group
+    already exists then this function will just load back the processed tod
+    calling the ``load_preprocess_tod`` function. If the db entry does not
+    exist of the overwrite flag is set to True then the full preprocessing
+    steps defined in the configs are run and the outputs are written to a
+    unique h5 file. Any errors, the info to populate the database, the file
+    path of the h5 file, and the process tod are returned from this function.
+    This function is expected to be run in conjunction with the
+    ``cleanup_mandb`` function which consumes all of the outputs (except the
+    processed tod), writes to the database, and moves the multiple h5 files
+    into fewer h5 files (each <= 10 GB).
 
     Arguments
     ---------
@@ -256,13 +256,14 @@ def preproc_or_load_mpi(obs_id, configs, dets, logger=None,
         outputs['db_data'] = db_data
         return error, outputs, aman
           
-def cleanup_mandb_mpi(error, outputs, configs, logger):
+def cleanup_mandb(error, outputs, configs, logger):
     """
-    Function to update the manifest db when database generation run in parrallel using MPI.
-    This function is expected to be run from rank 0 after a ``comm.gather`` call and consumes
-    the outputs from ``preproc_or_load_mpi``. See the ``preproc_or_load_mpi`` docstring for
-    the varying expected values of ``error`` and the associated ``outputs``. This function
-    will either: 
+    Function to update the manifest db when data is collected from the
+    ``preproc_or_load_group`` function. If used in an mpi framework this
+    function is expected to be run from rank 0 after a ``comm.gather``.
+    See the ``preproc_or_load_group`` docstring for the varying expected
+    values of ``error`` and the associated ``outputs``. This function will
+    either: 
     
     1) Update the mandb sqlite file and move the h5 archive from its temporary
     location to its permanent path if error is ``None``.
