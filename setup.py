@@ -50,7 +50,7 @@ setup_opts["package_data"] = {
 }
 setup_opts["include_package_data"] = True
 setup_opts["install_requires"] = [
-    'numpy',
+    'numpy<2',
     'scipy',
     'matplotlib',
     'quaternionarray',
