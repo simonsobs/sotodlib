@@ -5,6 +5,7 @@ from . import util
 
 defaults = {"odir": "./output",
             "atomic_db": "atomic_maps.db",
+            "delete": False,
             }
 
 def get_parser(parser=None):
@@ -16,6 +17,10 @@ def get_parser(parser=None):
                         help='output directory')
     parser.add_argument("--atomic_db",
                         help='name of the atomic map database')
+    parser.add_argument("--delete",
+                        action="store_true",
+                        help='delete the h5 files after reading them'
+                       )
     return parser
 
 def _get_config(config_file):
@@ -59,28 +64,37 @@ def main(config_file=None, defaults=defaults, **args):
                       azimuth REAL,
                       RA_ref_start REAL,
                       RA_ref_stop REAL,
-                      pwv REAL
+                      pwv REAL,
+                      PRIMARY KEY(obs_id, freq_channel, wafer, split_label)
                       )""")
     conn.commit()
     
     # make a list of all *.hdf files
     files = glob.glob('%s/*/*.hdf'%args['odir'])
+    list_ = []
+    INSERT_COMMAND = """
+    INSERT INTO atomic (obs_id, telescope, freq_channel, wafer, ctime, split_label, split_detail, prefix_path, elevation, azimuth, RA_ref_start, RA_ref_stop, pwv)
+    VALUES ( :obs_id, :telescope, :freq_channel, :wafer, :ctime, :split_label, :split_detail, :prefix_path, :elevation, :azimuth, :RA_ref_start, :RA_ref_stop, :pwv);
+    """
     for file in files:
         f = bunch.read(file)
-        tuple_ = (f['obs_id'].decode(), 
-                  f['telescope'].decode(), 
-                  f['freq_channel'].decode(), 
-                  f['wafer'].decode(), 
-                  float(f['ctime']), 
-                  f['split_label'].decode(), 
-                  f['split_detail'].decode(), 
-                  f['prefix_path'].decode(), 
-                  f['elevation'], 
-                  f['azimuth'], 
-                  f['RA_ref_start'], 
-                  f['RA_ref_stop'], 
-                  float(f['pwv']))    
-        cursor.execute("INSERT INTO atomic VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple_)    
+        tuple_ = {"obs_id": f['obs_id'].decode(), 
+                  "telescope": f['telescope'].decode(), 
+                  "freq_channel": f['freq_channel'].decode(), 
+                  "wafer": f['wafer'].decode(), 
+                  "ctime":  float(f['ctime']), 
+                  "split_label": f['split_label'].decode(), 
+                  "split_detail": f['split_detail'].decode(), 
+                  "prefix_path": f['prefix_path'].decode(), 
+                  "elevation": f['elevation'], 
+                  "azimuth": f['azimuth'], 
+                  "RA_ref_start": f['RA_ref_start'], 
+                  "RA_ref_stop": f['RA_ref_stop'], 
+                  "pwv": float(f['pwv'])}
+        list_.append(tuple_)
+        if args['delete']:
+            os.remove(file) # delete the files
+    cursor.executemany(INSERT_COMMAND, list_)
     conn.commit()    
     conn.close()
 
