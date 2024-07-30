@@ -105,6 +105,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         # This requires signal to be a string.
         signal = np.array(tod_ops.fourier_filter(
                 aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name)
+                )
 
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle

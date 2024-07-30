@@ -1009,7 +1009,7 @@ class PCARelCal(_Preprocess):
         relcal = np.zeros(aman.dets.count)
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            rc_aman.wrap(f'{band}_idx', np.where(m0)[0])
+            rc_aman.wrap(f'{band}_mask', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
