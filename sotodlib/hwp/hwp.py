@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
+def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
               lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
               apodize_edges=True, apodize_edges_samps=1600, 
@@ -25,7 +25,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     ----------
     aman : AxisManager object
         The TOD to extract HWPSS from.
-    signal_name : str
+    signal : str or None
         The field name in the axis manager to use for the TOD signal.
         If not provided, ``signal`` will be used.
     hwp_angle : array-like, optional
@@ -89,19 +89,22 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         prefilt_cfg = {'type': 'sine2', 'cutoff': 1.0, 'trans_width': 1.0}
 
     prefilt = filters.get_hpf(prefilt_cfg)
-
-    if signal_name is None:
-        if apply_prefilt:
-            signal = np.array(tod_ops.fourier_filter(
-                aman, prefilt, detrend=prefilt_detrend, signal_name='signal'))
-        else:
-            signal = aman.signal
+    if signal is None:
+        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        raise TypeError("Currently ndarray not supported, need update to tod_ops.fourier_filter module to remove signal_name argument.")
     else:
-        if apply_prefilt:
-            signal = np.array(tod_ops.fourier_filter(
-                aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name))
-        else:
-            signal = aman[signal_name]
+        raise TypeError("Signal must be None, str, or ndarray")
+
+    if apply_prefilt:
+        # This requires signal to be a string.
+        signal = np.array(tod_ops.fourier_filter(
+                aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name)
 
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
@@ -481,7 +484,7 @@ def estimate_sigma_tod(signal, hwp_angle):
     return hwpss_sigma_tod
 
 
-def subtract_hwpss(aman, signal_name='signal', hwpss_template_name='hwpss_model',
+def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
                    subtract_name='hwpss_remove', in_place=False, remove_template=True):
     """
     Subtract the half-wave plate synchronous signal (HWPSS) template from the
@@ -491,7 +494,7 @@ def subtract_hwpss(aman, signal_name='signal', hwpss_template_name='hwpss_model'
     ----------
     aman : AxisManager
         The axis manager containing the signal and the HWPSS template.
-    signal_name : str, optional
+    signal : str, optional
         The name of the field in the axis manager containing the signal to be processed.
         Defaults to 'signal'.
     hwpss_template_name : str, optional
@@ -511,21 +514,37 @@ def subtract_hwpss(aman, signal_name='signal', hwpss_template_name='hwpss_model'
     -------
     None
     """
+    if signal is None:
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        if np.shape(np.ndarray) != (aman.dets.count, aman.samps.count):
+            raise ValueError("When passing signal as ndarray shape must match (n_dets x n_samps).")
+        signal_name = None
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
+
     if in_place:
-        aman[signal_name] = np.subtract(aman[signal_name], aman[hwpss_template_name], dtype='float32')
+        if signal_name is None:
+            signal = np.subtract(signal, aman[hwpss_template_name], dtype='float32')
+        else:
+            aman[signal_name] = np.subtract(signal, aman[hwpss_template_name], dtype='float32')
     else:
         if subtract_name in aman._fields:
-            aman[subtract_name] = np.subtract(aman[signal_name], aman[hwpss_template_name], dtype='float32')
+            aman[subtract_name] = np.subtract(signal, aman[hwpss_template_name], dtype='float32')
         else:
-            aman.wrap(subtract_name, np.subtract(
-                    aman[signal_name], aman[hwpss_template_name], dtype='float32'),
-                    [(0, 'dets'), (1, 'samps')])
+            aman.wrap(subtract_name, np.subtract(signal,
+                      aman[hwpss_template_name], dtype='float32'),
+                      [(0, 'dets'), (1, 'samps')])
     
     if remove_template:
         aman.move(hwpss_template_name, None)
 
 
-def demod_tod(aman, signal_name='signal', demod_mode=4,
+def demod_tod(aman, signal=None, demod_mode=4,
               bpf_cfg=None, lpf_cfg=None):
     """
     Demodulate TOD based on HWP angle
@@ -534,10 +553,10 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     ----------
     aman : AxisManager
         The AxisManager object
-    signal_name : str, optional
-        Axis name of the demodulated signal in aman. Default is 'signal'.
+    signal : str, optional
+        Axis name of the signal to demodulate in aman. Default is 'signal'.
     demod_mode : int, optional
-        Demodulation mode. Default is 4.
+        Demodulation mode. Default is 4 (i.e. 4th harmonic of HWP).
     bpf_cfg : dict
         Configuration for Band-pass filter applied to the TOD data before demodulation.
         If not specified, a 4th-order Butterworth filter of 
@@ -560,6 +579,18 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         the demodulated signal imaginary component filtered with `lpf` and multiplied by 2.
 
     """
+    if signal is None:
+        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        raise TypeError("Currently ndarray not supported, need update to tod_ops.fourier_filter module to remove signal_name argument.")
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
+    
     # HWP speed in Hz
     speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
