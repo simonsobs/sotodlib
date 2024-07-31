@@ -13,8 +13,13 @@ from scipy.cluster import vq
 from scipy.optimize import minimize
 from scipy.stats import binned_statistic
 from sotodlib.coords import optics as op
-from sotodlib.coords.fp_containers import (FocalPlane, OpticsTube, Receiver,
-                                           Template, Transform)
+from sotodlib.coords.fp_containers import (
+    FocalPlane,
+    OpticsTube,
+    Receiver,
+    Template,
+    Transform,
+)
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
@@ -724,19 +729,18 @@ def main():
             centers_transformed = np.vstack(
                 [fp.center_transformed for fp in ot.focal_planes]
             )
-            if centers.shape[-1] < 3:
+            if centers.shape[0] < 3:
                 logger.warning(
                     "\tToo few wafers fit to compute common mode, transform will be approximated"
                 )
                 centers = np.vstack([ot.center, ot.center - 1, ot.center + 1])
-                centers_transformed = np.mean(
+                centers_transformed = np.vstack(
                     [
                         mt.apply_transform(
                             centers, fp.transform.affine, fp.transform.shift
                         )
                         for fp in ot.focal_planes
                     ],
-                    axis=1,
                 )
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
@@ -778,14 +782,13 @@ def main():
                 centers = np.vstack(
                     [np.roll(np.arange(3, dtype=float), i) for i in range(3)]
                 )
-                centers_transformed = np.mean(
+                centers_transformed = np.vstack(
                     [
                         mt.apply_transform(
                             centers, ot.transform.affine, ot.transform.shift
                         )
                         for ot in ots.values()
                     ],
-                    axis=1,
                 )
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
