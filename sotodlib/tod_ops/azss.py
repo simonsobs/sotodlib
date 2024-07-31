@@ -134,8 +134,8 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     sum_of_squares = np.sum(((azss_stats.binned_signal[:, m] - binned_model[:,m])**2), axis=-1)
     redchi2s = sum_of_squares/azss_stats.uniform_binned_signal_sigma**2 / ( len(x_legendre_bin_centers[m]) - max_mode - 1)
     
-    azss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_samps')])
-    azss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_samps')])
+    azss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_az_samps')])
+    azss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_az_samps')])
     azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U10')))])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
     
@@ -247,10 +247,10 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
     uniform_binned_signal_sigma = np.nanmedian(binned_signal_sigma, axis=-1)
     
     azss_stats = core.AxisManager(aman.dets)
-    azss_stats.wrap('binned_az', bin_centers, [(0, core.IndexAxis('bin_samps', count=bins))])
-    azss_stats.wrap('bin_counts', bin_counts, [(0, 'dets'), (1, 'bin_samps')])
-    azss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_samps')])
-    azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_samps')])
+    azss_stats.wrap('binned_az', bin_centers, [(0, core.IndexAxis('bin_az_samps', count=bins))])
+    azss_stats.wrap('bin_counts', bin_counts, [(0, 'dets'), (1, 'bin_az_samps')])
+    azss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_az_samps')])
+    azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     
     if method == 'fit':

@@ -133,11 +133,11 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         
         # wrap
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
-                       (0, core.IndexAxis('bin_samps', count=bins))])
+                       (0, core.IndexAxis('bin_hwp_samps', count=bins))])
         hwpss_stats.wrap('bin_counts', bin_counts, [
-                       (0, 'dets'), (1, 'bin_samps')])
+                       (0, 'dets'), (1, 'bin_hwp_samps')])
         hwpss_stats.wrap('binned_signal', binned_hwpss, [
-                       (0, 'dets'), (1, 'bin_samps')])
+                       (0, 'dets'), (1, 'bin_hwp_samps')])
         hwpss_stats.wrap('sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
 
         if lin_reg:
@@ -153,7 +153,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
 
         # wrap the optimal values and stats
         hwpss_stats.wrap('binned_model', fitsig_binned,
-                       [(0, 'dets'), (1, 'bin_samps')])
+                       [(0, 'dets'), (1, 'bin_hwp_samps')])
         hwpss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
         hwpss_stats.wrap('covars', covars, [
                        (0, 'dets'), (1, 'modes'), (2, 'modes')])
