@@ -548,9 +548,9 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
 
     if in_place:
         if signal_name is None:
-            signal = np.subtract(signal, aman[hwpss_template_name], dtype='float32')
+            signal -= aman[hwpss_template_name].astype(signal.dtype)
         else:
-            aman[signal_name] = np.subtract(signal, aman[hwpss_template_name], dtype='float32')
+            aman[signal_name] -= aman[hwpss_template_name].astype(aman[signal_name].dtype)
     else:
         if subtract_name in aman._fields:
             aman[subtract_name] = np.subtract(signal, aman[hwpss_template_name], dtype='float32')

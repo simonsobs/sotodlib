@@ -658,6 +658,18 @@ class EstimateAzSS(_Preprocess):
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
     fitting will be applied and used as AzSS model.
 
+    Example configuration block::
+
+      - name: "estimate_azss"
+        calc:
+          signal: 'demodQ'
+          azss_stats_name: 'azss_statsQ'
+          range: [-1.57079, 7.85398]
+          bins: 1080
+          merge_stats: False
+          merge_model: False
+        save: True
+
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"

@@ -142,7 +142,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     return azss_stats, L.legval(x_legendre, coeffs.T)
     
     
-def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=None,
+def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
             apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
@@ -214,13 +214,25 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
     if prefilt_cfg is None:
         prefilt_cfg = {'type': 'sine2', 'cutoff': 0.005, 'trans_width': 0.005}
     prefilt = filters.get_hpf(prefilt_cfg)
-    
-    if apply_prefilt:
-        signal = np.array(tod_ops.fourier_filter(
-            aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name))
-    else:
+
+    if signal is None:
+        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        signal_name = 'signal'
         signal = aman[signal_name]
-            
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        raise TypeError("Currently ndarray not supported, need update to tod_ops.fourier_filter module to remove signal_name argument.")
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
+
+    if apply_prefilt:
+        # This requires signal to be a string.
+        signal = np.array(tod_ops.fourier_filter(
+                aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name)
+                )
+
     if az is None:
         az = aman.boresight.az
         
@@ -258,7 +270,7 @@ def get_azss(aman, signal_name='signal', az=None, range=None, bins=100, flags=No
         aman[signal_name] = np.subtract(signal, model_sig_tod, dtype='float32')
     return azss_stats, model_sig_tod
 
-def subtract_azss(aman, signal_name='signal', azss_template_name='azss_model',
+def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
                   subtract_name='azss_remove', in_place=False, remove_template=True):
     """
     Subtract the scan synchronous signal (azss) template from the
@@ -268,7 +280,7 @@ def subtract_azss(aman, signal_name='signal', azss_template_name='azss_model',
     ----------
     aman : AxisManager
         The axis manager containing the signal and the azss template.
-    signal_name : str, optional
+    signal : str, optional
         The name of the field in the axis manager containing the signal to be processed.
         Defaults to 'signal'.
     azss_template_name : str, optional
@@ -288,8 +300,24 @@ def subtract_azss(aman, signal_name='signal', azss_template_name='azss_model',
     -------
     None
     """
+    if signal is None:
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        if np.shape(np.ndarray) != (aman.dets.count, aman.samps.count):
+            raise ValueError("When passing signal as ndarray shape must match (n_dets x n_samps).")
+        signal_name = None
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
+
     if in_place:
-        aman[signal_name] = np.subtract(aman[signal_name], aman[azss_template_name], dtype='float32')
+        if signal_name is None:
+            signal -= aman[azss_template_name].astype(signal.dtype)
+        else:
+            aman[signal_name] -= aman[azss_template_name].astype(aman[signal_name].dtype)
     else:
         aman.wrap(subtract_name, 
                   np.subtract(aman[signal_name], aman[azss_template_name], dtype='float32'),
