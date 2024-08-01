@@ -10,9 +10,7 @@ from sotodlib.obs_ops import splits
 from sotodlib.site_pipeline import preprocess_tod
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
-from scipy.optimize import curve_fit
 from scipy.signal import welch
-from scipy import stats
 from . import util
 
 defaults = {"query": "1",
@@ -184,72 +182,6 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
-def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
-                  merge=False, overwrite=False, ptp_flag_name='ptp_flag',
-                  outlier_range=(0.5, 2.)):
-    """
-    Returns a ranges matrix that indicates if the peak-to-peak (ptp) of
-    the tod is valid based on the kurtosis of the distribution of ptps. The
-    threshold is set by ``kurtosis_threshold``.
-
-    Parameters
-    ----------
-    aman : AxisManager
-        The tod
-    signal_name : str
-        Signal to estimate flags off of. Default is ``signal``.
-    kurtosis_threshold : float
-        Maximum allowable kurtosis of the distribution of peak-to-peaks.
-        Default is 5.
-    merge : bool
-        Merge RangesMatrix into ``aman.flags``. Default is False.
-    overwrite : bool
-        Whether to write over any existing data in ``aman.flags[ptp_flag_name]``
-        if merge is True. Default is False.
-    ptp_flag_name : str
-        Field name used when merge is True. Default is ``ptp_flag``.
-    outlier_range : tuple
-        (lower, upper) bound of the initial cut before estimating the kurtosis.
-
-    Returns
-    -------
-    mskptps : RangesMatrix
-        RangesMatrix of detectors with acceptable peak-to-peaks.
-        All ones if the detector should be cut.
-
-    """
-    det_mask = np.full(aman.dets.count, True, dtype=bool)
-    ptps_full = np.ptp(aman[signal_name], axis=1)
-    ratio = ptps_full/np.median(ptps_full)
-    outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
-    det_mask[outlier_mask] = False
-    while True:
-        if len(aman.dets.vals[det_mask]) > 0:
-            ptps = np.ptp(aman[signal_name][det_mask], axis=1)
-        else:
-            break
-        kurtosis_ptp = stats.kurtosis(ptps)
-        if np.abs(kurtosis_ptp) < kurtosis_threshold:
-            break
-        else:
-            max_is_bad_factor = np.max(ptps)/np.median(ptps)
-            min_is_bad_factor = np.median(ptps)/np.min(ptps)
-            if max_is_bad_factor > min_is_bad_factor:
-                det_mask[ptps_full >= np.max(ptps)] = False
-            else:
-                det_mask[ptps_full <= np.min(ptps)] = False
-    x = so3g.proj.Ranges(aman.samps.count)
-    mskptps = so3g.proj.RangesMatrix([so3g.proj.Ranges.zeros_like(x) if Y
-                             else so3g.proj.Ranges.ones_like(x) for Y in det_mask])
-    if merge:
-        if ptp_flag_name in aman.flags and not overwrite:
-            raise ValueError(f"Flag name {ptp_flag_name} already exists in aman.flags")
-        if ptp_flag_name in aman.flags:
-            aman.flags[ptp_flag_name] = mskptps
-        else:
-            aman.flags.wrap(ptp_flag_name, mskptps, [(0, 'dets'), (1, 'samps')])
-    return mskptps
-
 def wrap_info(obs, site):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
@@ -362,7 +294,7 @@ def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3', remove_hwpss=True
             return False
 
         # P2P cuts
-        ptp_flags = get_ptp_flags(obs, signal_name='signal')
+        ptp_flags = flags.get_ptp_flags(obs, signal_name='signal')
         bad_dets = has_all_cut(ptp_flags)
         obs.restrict('dets', obs.dets.vals[~bad_dets])
     return True
@@ -516,8 +448,6 @@ def get_psd(obs):
     return
 
 def high_pass_correct(obs, get_params_from_data):
-    obs.move('hwpss_model', None)
-    
     if get_params_from_data:
         # wrap psd
         get_psd(obs)
