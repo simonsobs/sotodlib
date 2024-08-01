@@ -488,11 +488,8 @@ def calc_binned_psd(
         pxx = aman.Pxx
             
     f_bin, bin_size = binning_psd(f, unbinned_mode=unbinned_mode, base=base, return_bin_size=True)
-    pxx_bin = []
-    for i in range(aman.dets.count):
-        binned = binning_psd(pxx[i], unbinned_mode=unbinned_mode, base=base)
-        pxx_bin.append(binned)
-    pxx_bin = np.array(pxx_bin)
+    pxx_bin = binning_psd(pxx, unbinned_mode=unbinned_mode, base=base, return_bin_size=False)
+
     if merge:
         aman.merge(core.AxisManager(core.OffsetAxis("nusamps_bin", len(f_bin))))
         if overwrite:
