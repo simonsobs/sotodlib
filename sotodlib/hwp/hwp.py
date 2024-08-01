@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters
+from sotodlib.tod_ops import filters
 import logging
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,7 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
         
-    binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
+    binning_dict = tod_ops.bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags)
     
     bin_centers = binning_dict['bin_centers']
@@ -544,7 +544,7 @@ def demod_tod(aman, signal_name='signal', hwp_angle=None, demod_mode=4,
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
     # HWP speed in Hz
-    speed = get_hwp_freq(timestamps=aman.timestamps, hwp_angle=hwp_angle):
+    speed = get_hwp_freq(timestamps=aman.timestamps, hwp_angle=hwp_angle)
     
     if bpf_cfg is None:
         bpf_center = demod_mode * speed

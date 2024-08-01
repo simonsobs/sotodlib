@@ -7,10 +7,8 @@ import so3g
 from so3g.proj import Ranges, RangesMatrix
 from scipy.optimize import minimize
 from scipy.signal import welch
-from sotodlib import core
-from sotodlib.hwp.hwp import get_hwp_freq
-
-from . import detrend_tod
+from sotodlib import core, hwp
+from sotodlib.tod_ops import detrend_tod
 
 
 def _get_num_threads():
@@ -431,7 +429,7 @@ def calc_psd_mask(
         f = aman.freqs
         pxx = aman.Pxx
     if hwpss:
-        hwp_freq = get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
+        hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
         PSD_mask = PSD_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
     if peak:
         PSD_mask = PSD_mask | get_mask_for_single_peak(f, peak_freq, peak_width=peak_width)
