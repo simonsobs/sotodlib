@@ -452,7 +452,7 @@ def calc_binned_psd(
     f=None,
     pxx=None,
     unbinned_mode=3,
-    base=1.2,
+    base=1.05,
     merge=False, 
     overwrite=True,
 ):
@@ -487,8 +487,8 @@ def calc_binned_psd(
     if pxx is None:
         pxx = aman.Pxx
             
-    f_bin, bin_size = binning_psd(f, unbinned_mode=unbinned_mode, base=base, return_bin_size=True)
-    pxx_bin = binning_psd(pxx, unbinned_mode=unbinned_mode, base=base, return_bin_size=False)
+    f_bin, bin_size = log_binning(f, unbinned_mode=unbinned_mode, base=base, return_bin_size=True)
+    pxx_bin = log_binning(pxx, unbinned_mode=unbinned_mode, base=base, return_bin_size=False)
 
     if merge:
         aman.merge(core.AxisManager(core.OffsetAxis("nusamps_bin", len(f_bin))))
@@ -724,7 +724,7 @@ def fit_binned_noise_model(
     mask=False,
     fixed_parameter=None,
     unbinned_mode=3,
-    base=1.2,
+    base=1.05,
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -1008,20 +1008,23 @@ def get_mask_for_single_peak(f, peak_freq, peak_width=(-0.002, +0.002)):
     mask = (f > peak_freq + peak_width[0])&(f < peak_freq + peak_width[1])
     return mask
 
-def binning_psd(psd, unbinned_mode=3, base=1.2, return_bin_size=False, drop_nan=False):
+def log_binning(psd, unbinned_mode=3, base=1.05, mask=None,
+                return_bin_size=False, drop_nan=False):
     """
-    Function to bin PSD.
-    First several Fourier modes are left un-binned.
+    Function to bin PSD or frequency. First several Fourier modes are left un-binned.
     Fourier modes higher than that are averaged into logspace bins.
 
     Parameters
     ----------
     psd : numpy.ndarray
-        PSD of the signal. Can be a 1D or 2D array.
+        PSD (or frequency) to be binned. Can be a 1D or 2D array.
     unbinned_mode : int, optional
         First Fourier modes up to this number are left un-binned. Defaults to 3.
     base : float, optional
-        Base of the logspace bins. Must be greater than 1. Defaults to 1.2.
+        Base of the logspace bins. Must be greater than 1. Defaults to 1.05.
+    mask : numpy.ndarray, optional
+        Mask for psd. If all values in a bin are masked, the value becomes np.nan.
+        Should be a 1D array.
     return_bin_size : bool, optional
         If True, the number of data points in the bins are returned. Defaults to False.
     drop_nan : bool, optional
@@ -1037,9 +1040,18 @@ def binning_psd(psd, unbinned_mode=3, base=1.2, return_bin_size=False, drop_nan=
     if base <= 1:
         raise ValueError("base must be greater than 1")
 
+    is_1d = psd.ndim == 1
+
     # Ensure psd is at least 2D for consistent processing
     psd = np.atleast_2d(psd)
     num_signals, num_samples = psd.shape
+    
+    if mask is not None:
+        # Ensure mask is at least 2D and has the same shape as psd
+        mask = np.atleast_2d(mask)
+        if mask.shape[1] != num_samples:
+            raise ValueError("Mask must have the same number of columns as psd")
+        psd = np.ma.masked_array(psd, mask=np.tile(mask, (num_signals, 1)))
     
     # Initialize the binned PSD and optionally the bin sizes
     binned_psd = np.zeros((num_signals, unbinned_mode + 1))
@@ -1054,11 +1066,10 @@ def binning_psd(psd, unbinned_mode=3, base=1.2, return_bin_size=False, drop_nan=
     new_binned_psd = []
     new_bin_size = []
     for start, end in zip(binning_idx[:-1], binning_idx[1:]):
-        if start < end:  # Ensure the slice is not empty
-            bin_mean = np.nanmean(psd[:, start:end], axis=1)
-            new_binned_psd.append(bin_mean)
-            if return_bin_size:
-                new_bin_size.append(end - start)
+        bin_mean = np.nanmean(psd[:, start:end], axis=1)
+        new_binned_psd.append(bin_mean)
+        if return_bin_size:
+            new_bin_size.append(end - start)
     
     # Convert lists to numpy arrays and concatenate with initial values
     new_binned_psd = np.array(new_binned_psd).T  # Transpose to match dimensions
@@ -1073,6 +1084,12 @@ def binning_psd(psd, unbinned_mode=3, base=1.2, return_bin_size=False, drop_nan=
         if return_bin_size:
             bin_size = bin_size[:, valid_indices]
 
+    if is_1d:
+        binned_psd = binned_psd.flatten()
+        if return_bin_size:
+            bin_size = bin_size.flatten()
+
     if return_bin_size:
         return binned_psd, bin_size
     return binned_psd
+
