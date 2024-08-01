@@ -484,9 +484,12 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
         signal = aman.signal
     if hwpss_template is None:
         hwpss_template = aman['hwpss_model']
-
-    aman.wrap(subtract_name, np.subtract(
-        signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
+    
+    if subtract_name in aman._fields:
+        aman[subtract_name] = np.subtract(signal, hwpss_template)
+    else:
+        aman.wrap(subtract_name, np.subtract(
+            signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
 
 
 def demod_tod(aman, signal_name='signal', hwp_angle=None, demod_mode=4,
