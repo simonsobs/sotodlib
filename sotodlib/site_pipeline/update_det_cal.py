@@ -7,6 +7,7 @@ from tqdm.auto import tqdm
 import logging
 import sys
 from typing import Optional, Union, Dict, List
+from queue import Queue
 
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset
@@ -85,14 +86,18 @@ class DetCalCfg:
     failed_cache_file: str = 'failed_obsids.yaml'
     show_pb: bool = True
 
-    nprocs_obs_info: int = 20
-    nprocs_result_set: int = 80
+    run_method: str = 'site'
+    nprocs_obs_info: int = 1
+    nprocs_result_set: int = 10
 
     num_obs: Optional[int] = None
     log_level: str = 'DEBUG'
     param_correction_config: tpc.AnalysisCfg = None
 
     def __post_init__(self):
+        if self.run_method not in ['site', 'nersc']:
+            raise ValueError("run_method must be in: ['site', 'nersc']")
+
         self.root_dir = os.path.expandvars(self.root_dir)
         if not os.path.exists(self.root_dir):
             raise ValueError(f"Root dir does not exist: {self.root_dir}")
@@ -109,7 +114,7 @@ class DetCalCfg:
         self.h5_path = parse_path(self.h5_path)
         self.failed_cache_file = parse_path(self.failed_cache_file)
 
-        kw = {'show_pb': False, 'default_nprocs': self.num_processes}
+        kw = {'show_pb': False, 'default_nprocs': self.nprocs_result_set}
         if self.param_correction_config is None:
             self.param_correction_config = tpc.AnalysisCfg(**kw)
         elif isinstance(self.param_correction_config, dict):
@@ -216,6 +221,23 @@ class CalInfo:
 
 @dataclass
 class ObsInfo:
+    """
+    Class containing observation gathered from obsdbs and the file system
+    required to compute calibration results.
+
+    Attributes
+    ------------
+    obs_id: str
+        Obs id.
+    iv_obsids: dict
+        Dict mapping detset to IV obs-id.
+    bs_obsids: dict
+        Dict mapping detset to bias step obs-id.
+    iva_files: dict
+        Dict mapping detset to IV analysis file path.
+    bsa_files: dict
+        Dict mapping detset to bias step analysis file path.
+    """
     obs_id: str
     am: core.AxisManager
 
@@ -225,7 +247,8 @@ class ObsInfo:
     iva_files: Dict[str, str]
     bsa_files: Dict[str, str]
 
-def get_obs_info(cfg: DetCalCfg, obs_id: str):
+
+def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfo:
     ctx = core.Context(cfg.context_path)
     am = ctx.get_obs(
             obs_id, samples=(0, 1), ignore_missing=True, no_signal=True,
@@ -253,7 +276,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str):
         if oid is not None:
             timecode = oid.split('_')[1][:5]
             zsmurf_dir = os.path.join(
-                cfg.data_root, 'oper', timecode, oid, f'Z_smurf'
+                cfg.data_root, 'oper', timecode, oid, 'Z_smurf'
             )
             for f in os.listdir(zsmurf_dir):
                 if 'iv' in f:
@@ -270,7 +293,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str):
         if oid is not None:
             timecode = oid.split('_')[1][:5]
             zsmurf_dir = os.path.join(
-                cfg.data_root, 'oper', timecode, oid, f'Z_smurf'
+                cfg.data_root, 'oper', timecode, oid, 'Z_smurf'
             )
             for f in os.listdir(zsmurf_dir):
                 if 'bias_step' in f:
@@ -293,6 +316,25 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str):
         iva_files=iva_files, bsa_files=bsa_files,
     )
 
+@dataclass
+class ObsInfoResult:
+    obs_id: str
+    success: False
+    traceback: Optional[str] = None
+    obs_info: Optional[ObsInfo] = None
+
+def get_obs_info_result(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
+    """
+    Gets an obs infor result. Returns even if there is an exception.
+    """
+    res = ObsInfoResult(obs_id)
+    try:
+        res.obs_info = get_obs_info(cfg, obs_id)
+        res.success = True
+    except Exception:
+        res.traceback = traceback.format_exc()
+    return res
+
 
 @dataclass
 class CalRessetResult:
@@ -308,11 +350,21 @@ class CalRessetResult:
     result_set: Optional[np.ndarray] = None
 
 
-def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo) -> CalRessetResult:
+def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetResult:
     """
     Returns calibration ResultSet for a given ObsId. This pulls IV and bias step
     data for each detset in the observation, and uses that to compute CalInfo
     for each detector in the observation.
+
+    Args
+    ------
+    cfg: DetCalCfg
+        DetCal configuration object.
+    obs_info: ObsInfo
+        ObsInfo object.
+    pool: Optional[multiprocessing.Pool]
+        If specified, will run TES param correction in parallel using processes
+        from this pool.
     """
 
     obs_id = obs_info.obs_id
@@ -388,11 +440,14 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo) -> CalRessetResult:
             for dset in bsas:
                 # logger.debug(f"Applying correction for {dset}")
                 rs = []
-                for b, c in zip(ivas[dset]['bands'], ivas[dset]['channels']):
-                    chdata = tpc.RpFitChanData.from_data(
-                        ivas[dset], bsas[dset], b, c
-                    )
-                    rs.append(tpc.run_correction(chdata, cfg.param_correction_config))
+                if pool is None:
+                    for b, c in zip(ivas[dset]['bands'], ivas[dset]['channels']):
+                        chdata = tpc.RpFitChanData.from_data(
+                            ivas[dset], bsas[dset], b, c
+                        )
+                        rs.append(tpc.run_correction(chdata, cfg.param_correction_config))
+                else:
+                    rs = tpc.run_corrections_parallel(ivas[dset], bsas[dset], cfg.param_correction_config, pool=pool)
                 correction_results[dset] = rs
         res.correction_results = correction_results
 
@@ -463,6 +518,11 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo) -> CalRessetResult:
 
 
 def get_obsids_to_run(cfg: DetCalCfg) -> List:
+    """
+    Returns list of obs-ids to process, based on the configuration object.
+    This will included non-processed obs-ids that are not found in the fail cache,
+    and will be limitted to cfg.num_obs.
+    """
     ctx = core.Context(cfg.context_path)
     # Find all obs_ids that have not been processed
     with open(cfg.failed_cache_file, 'r') as f:
@@ -479,6 +539,10 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List:
 
 
 def handle_result(result: CalRessetResult, cfg: DetCalCfg):
+    """
+    Handles a CalRessetResult. If successful, this will add to the manifestdb,
+    if not this will add to the failed cache if cfg.cache_failed_obsids is True.
+    """
     obs_id = str(result.obs_info.obs_id)
     if not result.success:
         logger.error(f"Failed on obs_id: {obs_id}")
@@ -496,6 +560,7 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg):
             with open(cfg.failed_cache_file, 'w') as f:
                 yaml.dump(d, f)
             return
+
     rset = core.metadata.ResultSet.from_friend(result.result_set)
     logger.debug(f"Adding obs_id {obs_id} to dataset")
     write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
@@ -505,19 +570,55 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg):
         filename=cfg.h5_path, replace=True
     )
 
-def get_obs_info_or_none(cfg, obs_id):
-    try:
-        get_obs_info(cfg, obs_id)
-    except:
-        tb = traceback.format_exc()
-        logger.error(tb)
-        return None
 
-
-def run_update(cfg: Union[DetCalCfg, str]):
+def run_update_site(cfg: Union[DetCalCfg, str]):
     """
-    Update the det_cal database with metadata from unprocessed observations.
-    See the ``DetCalCfg`` class for run configuration options.
+    Main run script for computing det-cal results at the site. This will
+    loop over obs-ids and serially gather the ObsInfo from the filesystem and
+    sqlite dbs, and then compute the calibration results. A processing pool
+    of cfg.nprocs_result_set processes will be used to parallelize the TES
+    correction computation. If you have lots of compute power, and are limitted
+    by filesystem or sqlite access, consider using the 'nersc' update function.
+
+    Args:
+    ------
+    cfg: DetCalCfg or str
+        DetCalCfg object or path to config yaml file
+    """
+    if isinstance(cfg, str):
+        cfg = DetCalCfg.from_yaml(cfg)
+
+    logger.setLevel(getattr(logging, cfg.log_level.upper()))
+    for ch in logger.handlers:
+        ch.setLevel(getattr(logging, cfg.log_level.upper()))
+
+    cfg.setup()
+    obs_ids = get_obsids_to_run(cfg)
+
+    logger.info(f"Processing {len(obs_ids)} obsids...")
+
+    with mp.get_context('fork').Pool(cfg.nprocs_result_set) as pool:
+        for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
+            try:
+                obs_info = get_obs_info(cfg, oid)
+            except Exception:
+                logger.info(f"Could not get obs info for obs id: {oid}")
+                continue
+
+            result_set = get_cal_resset(cfg, obs_info, pool=pool)
+            handle_result(result_set, cfg)
+
+
+def run_update_nersc(cfg: Union[DetCalCfg, str]):
+    """
+    Main run script for computing det-cal results. This does the same thing as
+    ``run_update_site`` however instantiates two separate pools for gathering
+    ObsInfo and computing the ResultSets. This is useful in situations where
+    sqlite/filesystem access are bottlenecks (such as nersc) so that ObsInfo can
+    be gathered in parallel, and this can be done while ResultSet computation is
+    ongoing. Because concurrent sqlite access can be limitted, it is recommended
+    to keep cfg.nprocs_obs_info low (<10), while ``cfg.nprocs_result_set`` can be
+    set arbitrarily large as to use remaining available resources.
 
     Args:
     ------
@@ -551,21 +652,29 @@ def run_update(cfg: Union[DetCalCfg, str]):
     pool1 = mp.get_context('fork').Pool(cfg.nprocs_obs_info)
     pool2 = mp.get_context('fork').Pool(cfg.nprocs_result_set)
 
-    def get_obs_info_callback(obs_info):
-        if obs_info is None:
+    resset_async_results = Queue()
+    def get_obs_info_callback(res: ObsInfoResult):
+        if not res.success:
+            logger.error(f"Failed to get obs_info for {res.obs_id}")
+            logger.error(res.traceback)
+            pb.update()
             return
 
         a = pool2.apply_async(
-            get_cal_resset, args=(cfg, obs_info), callback=callback, error_callback=errback
+            get_cal_resset, args=(cfg, res.obs_info), callback=callback, error_callback=errback
         )
+        resset_async_results.put(a)
 
     try:
         for obs_id in obs_ids:
             a = pool1.apply_async(
-                get_obs_info_or_none, args=(cfg, obs_id), callback=get_obs_info_callback, 
+                get_obs_info_result, args=(cfg, obs_id), callback=get_obs_info_callback, 
                 error_callback=errback
             )
         a.wait()
+        while not resset_async_results.empty():
+            resset_async_results.get().wait()
+
     finally:
         pool1.close()
         pool1.join()
@@ -575,7 +684,22 @@ def run_update(cfg: Union[DetCalCfg, str]):
     logger.info("Finished updates")
 
 
+def run(cfg: Union[DetCalCfg, str]):
+    """
+    Run update function. This will chose the correct method to run based on
+    ``cfg.run_method``.
+    """
+    if isinstance(cfg, str):
+        cfg = DetCalCfg.from_yaml(cfg)
+    if cfg.run_method == 'site':
+        run_update_site(cfg)
+    elif cfg.run_method == 'nersc':
+        run_update_nersc(cfg)
+    else:
+        raise ValueError(f"Unknown run_method: {cfg.run_method}")
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         raise ValueError("Must provide a config file")
-    run_update(sys.argv[1])
+    run(sys.argv[1])
