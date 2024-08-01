@@ -451,7 +451,6 @@ def calc_binned_psd(
     aman,
     f=None,
     pxx=None,
-    mask=False,
     unbinned_mode=3,
     base=1.2,
     merge=False, 
@@ -483,16 +482,10 @@ def calc_binned_psd(
     -------
         f_binned, pxx_binned, bin_size: binned frequency and PSD.
     """
-    if f is None or pxx is None:
+    if f is None:
         f = aman.freqs
+    if pxx is None:
         pxx = aman.Pxx
-    if mask:
-        if 'psd_mask' in aman:
-            mask = ~aman.psd_mask.mask()
-            f = f[mask]
-            pxx = pxx[:, mask]
-        else:
-            print('"psd_mask" is not in aman. Masking is skipped.')
             
     f_bin, bin_size = binning_psd(f, unbinned_mode=unbinned_mode, base=base, return_bin_size=True)
     pxx_bin = []
@@ -1024,59 +1017,65 @@ def binning_psd(psd, unbinned_mode=3, base=1.2, return_bin_size=False, drop_nan=
     First several Fourier modes are left un-binned.
     Fourier modes higher than that are averaged into logspace bins.
 
-    Arguments
-    ---------
-        psd : nparray
-            PSD of signal.
-            
-        unbinned_mode : int
-            First Fourier modes up to this number are left un-binned.
-
-        base : float (> 1)
-            Base of the logspace bins.
-        
-        return_bin_size : bool
-            If True, the numbers of data points in the bins are returned.
-
-        drop_nan : bool
-            If True, drop the index where p is nan.
+    Parameters
+    ----------
+    psd : numpy.ndarray
+        PSD of the signal. Can be a 1D or 2D array.
+    unbinned_mode : int, optional
+        First Fourier modes up to this number are left un-binned. Defaults to 3.
+    base : float, optional
+        Base of the logspace bins. Must be greater than 1. Defaults to 1.2.
+    return_bin_size : bool, optional
+        If True, the number of data points in the bins are returned. Defaults to False.
+    drop_nan : bool, optional
+        If True, drop the indices where psd is NaN. Defaults to False.
 
     Returns
     -------
-        binned_psd: nparray
-        bin_size: int
+    binned_psd : numpy.ndarray
+        The binned PSD. If the input is 2D, the output will also be 2D with the same number of rows.
+    bin_size : numpy.ndarray, optional
+        The number of data points in each bin, only returned if return_bin_size is True.
     """
-    binned_psd = []
-    if return_bin_size == True:
-        bin_size = []
-        for i in range(0, unbinned_mode+1):
-            binned_psd.append(psd[i])
-            bin_size.append(1)
-        N = int(np.emath.logn(base, len(psd)-unbinned_mode))
-        binning_idx = np.logspace(base, N, N, base=base, dtype=int)+unbinned_mode-1
-        for i in range(N-1):
-            if binning_idx[i+1] == binning_idx[i]:
-                continue
-            else:
-                binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
-                bin_size.append(binning_idx[i+1] - binning_idx[i])
-        binned_psd = np.array(binned_psd)
-        bin_size = np.array(bin_size)
-        if drop_nan:
-            binned_psd = binned_psd[~np.isnan(binned_psd)]
-            bin_size = bin_size[~np.isnan(bin_size)]
+    if base <= 1:
+        raise ValueError("base must be greater than 1")
+
+    # Ensure psd is at least 2D for consistent processing
+    psd = np.atleast_2d(psd)
+    num_signals, num_samples = psd.shape
+    
+    # Initialize the binned PSD and optionally the bin sizes
+    binned_psd = np.zeros((num_signals, unbinned_mode + 1))
+    binned_psd[:, :unbinned_mode + 1] = psd[:, :unbinned_mode + 1]
+    bin_size = np.ones((num_signals, unbinned_mode + 1)) if return_bin_size else None
+
+    # Determine the number of bins and their indices
+    N = int(np.ceil(np.emath.logn(base, num_samples - unbinned_mode)))
+    binning_idx = np.unique(np.logspace(base, N, N, base=base, dtype=int) + unbinned_mode - 1)
+    
+    # Bin the PSD values for each signal
+    new_binned_psd = []
+    new_bin_size = []
+    for start, end in zip(binning_idx[:-1], binning_idx[1:]):
+        if start < end:  # Ensure the slice is not empty
+            bin_mean = np.nanmean(psd[:, start:end], axis=1)
+            new_binned_psd.append(bin_mean)
+            if return_bin_size:
+                new_bin_size.append(end - start)
+    
+    # Convert lists to numpy arrays and concatenate with initial values
+    new_binned_psd = np.array(new_binned_psd).T  # Transpose to match dimensions
+    binned_psd = np.hstack([binned_psd, new_binned_psd])
+    if return_bin_size:
+        new_bin_size = np.array(new_bin_size)
+        bin_size = np.hstack([bin_size, np.tile(new_bin_size, (num_signals, 1))])
+
+    if drop_nan:
+        valid_indices = ~np.isnan(binned_psd).any(axis=0)
+        binned_psd = binned_psd[:, valid_indices]
+        if return_bin_size:
+            bin_size = bin_size[:, valid_indices]
+
+    if return_bin_size:
         return binned_psd, bin_size
-    else:
-        for i in range(0, unbinned_mode+1):
-            binned_psd.append(psd[i])
-        N = int(np.emath.logn(base, len(psd)-unbinned_mode))
-        binning_idx = np.logspace(base, N, N, base=base, dtype = int)+unbinned_mode-1
-        for i in range(N-1):
-            if binning_idx[i+1] == binning_idx[i]:
-                continue
-            else:
-                binned_psd.append(np.mean(psd[binning_idx[i]:binning_idx[i+1]]))
-        binned_psd = np.array(binned_psd)
-        if drop_nan:
-            binned_psd = binned_psd[~np.isnan(binned_psd)]
-        return binned_psd
+    return binned_psd
