@@ -742,6 +742,7 @@ def main():
                         for fp in ot.focal_planes
                     ],
                 )
+                centers = np.repeat(centers, len(ot.focal_planes), 0)
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
             ot.transform_fullcm = Transform.from_split(
@@ -790,6 +791,7 @@ def main():
                         for ot in ots.values()
                     ],
                 )
+                centers = np.repeat(centers, len(ots), 0)
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
             recv_transform = Transform.from_split(
