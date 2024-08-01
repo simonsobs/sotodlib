@@ -434,9 +434,6 @@ def fit_noise_model(
             # sqrt of the diagonals gives you the standard errors.
             covout[i] = np.linalg.inv(hessian_ndt)
         except np.linalg.LinAlgError:
-            print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
-            )
             covout[i] = np.full((3, 3), np.nan)
         fitout[i] = res.x
 
