@@ -491,6 +491,20 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
         aman.wrap(subtract_name, np.subtract(
             signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
 
+def get_hwp_freq(timestamps, hwp_angle):
+    """
+    Calculate the frequency of HWP rotation.
+
+    Parameters:
+    timestamps (array-like): An array of timestamps.
+    hwp_angle (array-like): An array of HWP angles in radian
+
+    Returns:
+    float: The frequency of the HWP rotation in Hz.
+    """
+    hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
+            (timestamps[-1] - timestamps[0])) / (2 * np.pi)
+    return hwp_freq
 
 def demod_tod(aman, signal_name='signal', hwp_angle=None, demod_mode=4,
               bpf_cfg=None, lpf_cfg=None):
@@ -530,8 +544,7 @@ def demod_tod(aman, signal_name='signal', hwp_angle=None, demod_mode=4,
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
     # HWP speed in Hz
-    speed = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
-            (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+    speed = get_hwp_freq(timestamps=aman.timestamps, hwp_angle=hwp_angle):
     
     if bpf_cfg is None:
         bpf_center = demod_mode * speed
