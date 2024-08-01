@@ -373,20 +373,10 @@ def neglnlike(params, x, y, bin_size=1, **fixed_param):
         return 1.0e30
     return output
 
-def calc_psd_mask(
-    aman,
-    f=None,
-    pxx=None,
-    hwpss=False,
-    hwp_freq=None, 
-    max_hwpss_mode=10, 
-    hwpss_width=((-0.4, 0.6),(-0.2, 0.2)),
-    peak=False,
-    peak_freq=None, 
-    peak_width=(-0.002, +0.002),
-    merge=True, 
-    mode="add",
-    overwrite=True
+def calc_psd_mask(aman, psd_mask=None, f=None, pxx=None,
+                mask_hwpss=True, hwp_freq=None, max_hwpss_mode=10, hwpss_width=((-0.4, 0.6), (-0.2, 0.2)),
+                mask_peak=False, peak_freq=None, peak_width=(-0.002, +0.002),
+                merge=True, overwrite=True
 ):
     """
     Function that calculates masks for hwpss or single peak in PSD.
@@ -394,28 +384,29 @@ def calc_psd_mask(
     Arguments
     ---------
         aman : AxisManager
-            Axis manager which has samps axis aligned with signal.
+            Axis manager which has 'nusamps' axis.
+        psd_mask : numpy.ndarray or Ranges
+            Existing psd_mask to be updated. If None, a new mask is created.
         f : nparray
-            Frequency of PSD of signal.
+            Frequency of PSD of signal. If None, aman.freqs are used.
         pxx : nparray
-            PSD of signal.
-        hwpss : bool
-            If True, hwpss are masked.
+            PSD of signal. If None, aman.Pxx are used.
+        mask_hwpss : bool
+            If True, hwpss are masked. Defaults to True.
         hwp_freq : float
-            HWP frequency.
+            HWP frequency. If None, calculated based on aman.hwp_angle
         max_hwpss_mode : int
             Maximum hwpss mode to subtract. 
-        hwpss_width : float/tuple/list/array
-            If given in float, hwpss will be masked like
-            (hwp_freq - width/2) < f < (hwp_freq + width/2).
-            If given in array like [1.0, 0.4], 1f hwpss is masked like
-            (hwp_freq - 0.5) < f < (hwp_freq + 0.5) and Nf hwpss are masked like
-            (hwp_freq - 0.2) < f < (hwp_freq + 0.2).
+        hwpss_width : array-like
+            If given in float, 
+            nf-hwpss will be masked like (n * hwp_freq - width/2) < f < (n * hwp_freq + width/2).
+            If given in array like [1.0, 0.4], 
+            1f hwpss is masked like (hwp_freq - 0.5) < f < (hwp_freq + 0.5) and 
+            nf hwpss are masked like (n * hwp_freq - 0.2) < f < (n * hwp_freq + 0.2).
             If given in array like [[-0.4, 0.6], [-0.2, 0.3]],
-            1f hwpss is masked like (hwp_freq - 0.4) < f < (hwp_freq + 0.6)
-            and Nf are masked like (hwp_freq - 0.2) < f < (hwp_freq + 0.3).
-            Usually 1f hwpss distrubites wider than other hwpss.
-        peak : bool
+            1f hwpss is masked like (hwp_freq - 0.4) < f < (hwp_freq + 0.6) and
+            nf are masked like (n * hwp_freq - 0.2) < f < (n * hwp_freq + 0.3).
+        mask_peak : bool
             If True, single peak is masked.
         peak_freq : float
             Center frequency of the mask.
@@ -428,35 +419,33 @@ def calc_psd_mask(
             if "replace", existing PSD mask is replaced to new mask.
             If "add", new mask range is added to the existing one.
         overwrite: bool
-            if true will overwrite aman.PSD_mask.
+            if true will overwrite aman.psd_mask.
 
     Returns
     -------
-        PSD_mask (nusamps): Ranges array. If merge == True, "PSD_mask" is added to the aman.  
+        psd_mask (nusamps): Ranges array. If merge == True, "psd_mask" is added to the aman.  
     """
-    PSD_mask = np.zeros(aman.nusamps.count, dtype=bool)
-    if f is None or pxx is None:
+    if psd_mask is None:
+        psd_mask = np.zeros(aman.nusamps.count, dtype=bool)
+    elif isinstance(psd_mask, so3g.RangesInt32):
+        psd_mask = psd_mask.mask()
+    if f is None:
         f = aman.freqs
+    if pxx is None:
         pxx = aman.Pxx
-    if hwpss:
+    if mask_hwpss:
         hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
-        PSD_mask = PSD_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
-    if peak:
-        PSD_mask = PSD_mask | get_mask_for_single_peak(f, peak_freq, peak_width=peak_width)
-    if mode == "add":
-        if "PSD_mask" in aman:
-            PSD_mask = PSD_mask | aman.PSD_mask.mask()
-    elif mode == "replace":
-        pass
-    else:
-        print('Select mode from "add" or "replace".')
-    PSD_mask = Ranges.from_bitmask(PSD_mask)
+        psd_mask = psd_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
+    if mask_peak:
+        psd_mask = psd_mask | get_mask_for_single_peak(f, peak_freq, peak_width=peak_width)
+
+    psd_mask = Ranges.from_bitmask(psd_mask)
     if merge:
         if overwrite:
-            if "PSD_mask" in aman:
-                aman.move("PSD_mask", None)
-        aman.wrap("PSD_mask", PSD_mask, [(0,"nusamps")])
-    return PSD_mask
+            if "psd_mask" in aman:
+                aman.move("psd_mask", None)
+        aman.wrap("psd_mask", psd_mask, [(0,"nusamps")])
+    return psd_mask
 
 def calc_binned_psd(
     aman,
@@ -498,12 +487,12 @@ def calc_binned_psd(
         f = aman.freqs
         pxx = aman.Pxx
     if mask:
-        if 'PSD_mask' in aman:
-            mask = ~aman.PSD_mask.mask()
+        if 'psd_mask' in aman:
+            mask = ~aman.psd_mask.mask()
             f = f[mask]
             pxx = pxx[:, mask]
         else:
-            print('"PSD_mask" is not in aman. Masking is skipped.')
+            print('"psd_mask" is not in aman. Masking is skipped.')
             
     f_bin, bin_size = binning_psd(f, unbinned_mode=unbinned_mode, base=base, return_bin_size=True)
     pxx_bin = []
@@ -583,7 +572,7 @@ def fit_noise_model(
     merge_psd : bool
         If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
     mask : bool
-        If ``mask`` is True then PSD is masked with ``aman.PSD_mask``.
+        If ``mask`` is True then PSD is masked with ``aman.psd_mask``.
     fixed_parameter : str
         This accepts None or 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
         white noise level (alpha) is fixed to the initially estimated value.
@@ -611,12 +600,12 @@ def fit_noise_model(
                 **psdargs,
             )
     if mask:
-        if 'PSD_mask' in aman:
-            mask = ~aman.PSD_mask.mask()
+        if 'psd_mask' in aman:
+            mask = ~aman.psd_mask.mask()
             f = f[mask]
             pxx = pxx[:, mask]
         else:
-            print('"PSD_mask" is not in aman. Masking is skipped.')
+            print('"psd_mask" is not in aman. Masking is skipped.')
 
     eix = np.argmin(np.abs(f - f_max))
     if f_min is None:
@@ -787,7 +776,7 @@ def fit_binned_noise_model(
     merge_psd : bool
         If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
     mask : bool
-        If ``mask`` is True then PSD is masked with ``aman.PSD_mask``.
+        If ``mask`` is True then PSD is masked with ``aman.psd_mask``.
     fixed_parameter : str
         This accepts None or 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
         white noise level (alpha) is fixed to the initially estimated value.
@@ -824,12 +813,12 @@ def fit_binned_noise_model(
                 **psdargs,
             )
     if mask:
-        if 'PSD_mask' in aman:
-            mask = ~aman.PSD_mask.mask()
+        if 'psd_mask' in aman:
+            mask = ~aman.psd_mask.mask()
             f = f[mask]
             pxx = pxx[:, mask]
         else:
-            print('"PSD_mask" is not in aman. Masking is skipped.')
+            print('"psd_mask" is not in aman. Masking is skipped.')
 
     eix = np.argmin(np.abs(f - f_max))
     if f_min is None:
