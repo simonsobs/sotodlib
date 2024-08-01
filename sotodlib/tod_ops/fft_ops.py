@@ -211,6 +211,7 @@ def calc_psd(
     prefer='center',
     freq_spacing=None,
     merge=False, 
+    merge_suffix=None,
     overwrite=True, 
     **kwargs
 ):
@@ -231,7 +232,8 @@ def calc_psd(
             If None the default nperseg of ~1/50th the signal length is used.
             If an nperseg is explicitly passed then that will be used.
         merge (bool): if True merge results into axismanager.
-        overwrite (bool): if true will overwrite f, pxx axes.
+        merge_suffix (str, optional): Suffix to append to the Pxx field name in aman. Defaults to None (merged as Pxx).
+        overwrite (bool): if true will overwrite f, Pxx axes.
         **kwargs: keyword args to be passed to signal.welch().
 
     Returns:
@@ -269,15 +271,23 @@ def calc_psd(
 
     freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
     if merge:
+        if 'nusamps' not in list(aman._axes.keys()):
+            aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
+            aman.wrap("freqs", freqs, [(0,"nusamps")])
+        else:
+            if len(freqs) != aman.nusamps.count:
+                raise ValueError('New freqs does not match the shape of nusamps\
+                                To avoid this, use the same value for nperseg')
+        
+        if merge_suffix is None:
+            Pxx_name = 'Pxx'
+        else:
+            Pxx_name = f'Pxx_{merge_suffix}'
+        
         if overwrite:
-            
-            if "freqs" in aman._fields:
-                aman.move("freqs", None)
-            if "Pxx" in aman._fields:
-                aman.move("Pxx", None)
-        aman.merge( core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
-        aman.wrap("freqs", freqs, [(0,"nusamps")])
-        aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"nusamps")])
+            if Pxx_name in aman._fields:
+                aman.move(Pxx_name, None)
+        aman.wrap(Pxx_name, Pxx, [(0,"dets"), (1,"nusamps")])
     return freqs, Pxx
 
 
