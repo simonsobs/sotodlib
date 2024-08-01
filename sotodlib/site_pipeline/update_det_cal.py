@@ -6,7 +6,7 @@ import numpy as np
 from tqdm.auto import tqdm
 import logging
 import sys
-from typing import Optional, Union, Dict, List
+from typing import Optional, Union, Dict, List, cast
 from queue import Queue
 
 from sotodlib import core
@@ -14,7 +14,7 @@ from sotodlib.io.metadata import write_dataset
 from sotodlib.io.load_book import get_cal_obsids
 import sotodlib.site_pipeline.util as sp_util
 import multiprocessing as mp
-import sodetlib.tes_param_correction as tpc
+import sodetlib.tes_param_correction as tpc  # type: ignore
 
 
 # stolen  from pysmurf, max bias volt / num_bits
@@ -232,7 +232,7 @@ class ObsInfo:
     obs_id: str
         Obs id.
     iv_obsids: dict
-        Dict mapping detset to IV obs-id.
+        Dict mapping detset to iv obs-id.
     bs_obsids: dict
         Dict mapping detset to bias step obs-id.
     iva_files: dict
@@ -278,6 +278,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfo:
 
     iva_files = {}
     bsa_files = {}
+    cfg.data_root = cast(str, cfg.data_root)
     for dset, oid in iv_obsids.items():
         if oid is not None:
             timecode = oid.split("_")[1][:5]
@@ -325,7 +326,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfo:
 @dataclass
 class ObsInfoResult:
     obs_id: str
-    success: False
+    success: bool = False
     traceback: Optional[str] = None
     obs_info: Optional[ObsInfo] = None
 
@@ -354,7 +355,7 @@ class CalRessetResult:
     traceback: Optional[str] = None
     fail_msg: Optional[str] = None
 
-    correction_results: Optional[List[tpc.CorrectionResults]] = None
+    correction_results: Optional[Dict[str, List[tpc.CorrectionResults]]] = None
     result_set: Optional[np.ndarray] = None
 
 
@@ -444,7 +445,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                     bias_line_is_valid[bl_label] = False
 
         # Add TES corrected params
-        correction_results: Dict[List[tpc.CorrectionResults]] = {}
+        correction_results: Dict[str, List[tpc.CorrectionResults]] = {}
         if cfg.apply_cal_correction:
             logger.debug("Applying TES param corrections (%s)", obs_id)
             for dset in bsas:
@@ -511,6 +512,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 cal.v_bias = bsa["Vbias"][bg]
 
             if use_correction:
+                correction = cast(tpc.CorrectionResults, correction)
                 cal.r_tes = correction.corrected_R0
                 cal.r_frac = correction.corrected_R0 / cal.r_n
                 cal.s_i = correction.corrected_Si
@@ -586,7 +588,7 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg):
     )
 
 
-def run_update_site(cfg: Union[DetCalCfg, str]):
+def run_update_site(cfg: DetCalCfg):
     """
     Main run script for computing det-cal results at the site. This will
     loop over obs-ids and serially gather the ObsInfo from the filesystem and
@@ -600,9 +602,6 @@ def run_update_site(cfg: Union[DetCalCfg, str]):
     cfg: DetCalCfg or str
         DetCalCfg object or path to config yaml file
     """
-    if isinstance(cfg, str):
-        cfg = DetCalCfg.from_yaml(cfg)
-
     logger.setLevel(getattr(logging, cfg.log_level.upper()))
     for ch in logger.handlers:
         ch.setLevel(getattr(logging, cfg.log_level.upper()))
@@ -624,7 +623,7 @@ def run_update_site(cfg: Union[DetCalCfg, str]):
             handle_result(result_set, cfg)
 
 
-def run_update_nersc(cfg: Union[DetCalCfg, str]):
+def run_update_nersc(cfg: DetCalCfg):
     """
     Main run script for computing det-cal results. This does the same thing as
     ``run_update_site`` however instantiates two separate pools for gathering
@@ -640,9 +639,6 @@ def run_update_nersc(cfg: Union[DetCalCfg, str]):
     cfg: DetCalCfg or str
         DetCalCfg object or path to config yaml file
     """
-    if isinstance(cfg, str):
-        cfg = DetCalCfg.from_yaml(cfg)
-
     logger.setLevel(getattr(logging, cfg.log_level.upper()))
     for ch in logger.handlers:
         ch.setLevel(getattr(logging, cfg.log_level.upper()))
@@ -667,7 +663,8 @@ def run_update_nersc(cfg: Union[DetCalCfg, str]):
     pool1 = mp.get_context("fork").Pool(cfg.nprocs_obs_info)
     pool2 = mp.get_context("fork").Pool(cfg.nprocs_result_set)
 
-    resset_async_results = Queue()
+    resset_async_results: Queue = Queue()
+    obsinfo_async_results: Queue = Queue()
 
     def get_obs_info_callback(res: ObsInfoResult):
         if not res.success:
@@ -692,7 +689,10 @@ def run_update_nersc(cfg: Union[DetCalCfg, str]):
                 callback=get_obs_info_callback,
                 error_callback=errback,
             )
-        a.wait()
+            obsinfo_async_results.put(a)
+
+        while not obsinfo_async_results.empty():
+            obsinfo_async_results.get().wait()
         while not resset_async_results.empty():
             resset_async_results.get().wait()
 
@@ -712,6 +712,8 @@ def run(cfg: Union[DetCalCfg, str]):
     """
     if isinstance(cfg, str):
         cfg = DetCalCfg.from_yaml(cfg)
+        cfg = cast(DetCalCfg, cfg)
+
     if cfg.run_method == "site":
         run_update_site(cfg)
     elif cfg.run_method == "nersc":
