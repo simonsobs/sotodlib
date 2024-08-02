@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
 import argparse
+import time
 
 from sotodlib.coords import det_match, optics
 from sotodlib import core
@@ -75,6 +76,10 @@ class UpdateDetMatchesConfig:
         have a res-set npy file for each stream_id that is expected in the
         matching, formatted like ``<resonator_set_dir>/<stream_id>.npy``, which
         contains the result from ``np.save(fname, match.merged.as_array())``.
+    time_before_cache_failure: float
+        Time in seconds before a failed detset will be added to the cache. This
+        is to prevent new detsets still acquiring data from being added right
+        away.
     
     Attributes
     -------------
@@ -95,6 +100,7 @@ class UpdateDetMatchesConfig:
     write_relpath: bool = True
     solution_type: str = 'kaiwen_handmade'
     resonator_set_dir: Optional[str] = None
+    time_before_cache_failure: float = float(3600 * 24 * 7)
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -138,10 +144,17 @@ class Runner:
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
 
         for d in self.ctx['metadata']:
-            if d['name'] == cfg.detset_meta_name:
+            if 'name' in d:
+                entry_name = d['name']
+            elif 'label' in d:
+                entry_name = d['label']
+            else:
+                continue
+            if entry_name == cfg.detset_meta_name:
                 self.detset_db = core.metadata.ManifestDb(d['db'])
-            elif d['name'] == cfg.detcal_meta_name:
+            elif entry_name == cfg.detcal_meta_name:
                 self.detcal_db = core.metadata.ManifestDb(d['db'])
+
         if self.detset_db is None:
             raise Exception(
                 f"Could not find detset metadata entry with name: {cfg.detset_meta_name}")
@@ -187,7 +200,18 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         rs.name = 'sol'
         return rs
 
-def add_to_failed_cache(cache_file, detset, msg):
+def get_detset_time(detset: str) -> float:
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
+    return float(detset.split('_')[-2])
+
+def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
+    if time.time() - get_detset_time(detset) < cfg.time_before_cache_failure:
+        logger.info(f"{detset} is too recent to add to failed cache")
+        return
+
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
             x = yaml.safe_load(f)
@@ -246,7 +270,7 @@ def run_match(runner: Runner, detset: str):
         key=lambda s:s.split('_')[1])[::-1]
     if len(obs_ids) == 0:
         add_to_failed_cache(
-            runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL"
+            runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL", runner.cfg
         )
         logger.error(f"Cannot find obsid for detset {detset}")
         return None
