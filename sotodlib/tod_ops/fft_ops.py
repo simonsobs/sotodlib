@@ -454,3 +454,13 @@ def fit_noise_model(
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
     return noise_fit_stats
+
+def params_from_noise_model_fit(
+    aman,
+    noise_fit_array,
+    noise_fit_params
+):
+    """
+    """
+    median_params = np.median(noise_fit_array, axis=0)
+    return {k: median_params[i] for i, k in enumerate(noise_fit_params)}
