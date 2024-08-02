@@ -123,8 +123,8 @@ class HKBlock:
                         " duplicate timestamps"
                     )
                 self.times = self.times[idxs]
-            assert (np.all(np.diff(self.times)>0), f"Times from {self.name} are"
-                            " not increasing")
+            assert np.all(np.diff(self.times)>0), \
+                f"Times from {self.name} are not increasing"
             for k, v in self.data.items():
                 self.data[k] = np.hstack(v)[idxs]
         else:
@@ -694,10 +694,9 @@ class BookBinder:
                       " bookbinding"
                 )
             elif len(os.listdir(outdir)) == 1:
-                assert (os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', 
-                    f"only acceptable file in new book path {outdir} is "
-                    " Z_bookbinder_log.txt"
-                )
+                assert os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', \
+                    (f"only acceptable file in new book path {outdir} is "
+                     "Z_bookbinder_log.txt")
         else:
             os.makedirs(outdir)
 

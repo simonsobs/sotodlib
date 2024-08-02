@@ -264,6 +264,10 @@ def _expand(new, full, wrap_valid=True):
         if isinstance(v, core.AxisManager):
             out.wrap( k, _expand( v, full) )
         else:
+            if np.isscalar(v):
+                # Skip expansion for wrapped scalars.
+                out.wrap(k, v)
+                continue
             out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
             oidx=[]; nidx=[]
             for a in new._assignments[k]:
