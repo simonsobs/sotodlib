@@ -10,7 +10,8 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import h5py
 import copy
-
+from sotodlib.coords import demod as demod_mm
+from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
@@ -467,6 +468,47 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     logger.info(f"Cutting on the last process: {pipe[-1].name}")
     pipe[-1].select(meta)
     return meta
+
+def load_preprocess_tod_sim(obs_id, sim_map,
+                            configs="preprocess_configs.yaml",
+                            context=None, dets=None,
+                            meta=None, modulated=True):
+    """ Loads the saved information from the preprocessing pipeline and runs the
+    processing section of the pipeline. 
+
+    Assumes preprocess_tod has already been run on the requested observation. 
+    
+    Arguments
+    ----------
+    obs_id: multiple
+        passed to `context.get_obs` to load AxisManager, see Notes for 
+        `context.get_obs`
+    configs: string or dictionary
+        config file or loaded config directory
+    dets: dict
+        dets to restrict on from info in det_info. See context.get_meta.
+    meta: AxisManager
+        Contains supporting metadata to use for loading.
+        Can be pre-restricted in any way. See context.get_meta.
+    """
+    configs, context = _get_preprocess_context(configs, context)
+    meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
+
+    if meta.dets.count == 0:
+        logger.info(f"No detectors left after cuts in obs {obs_id}")
+        return None
+    else:
+        pipe = Pipeline(configs["process_pipe"], logger=logger)
+        aman = context.get_obs(meta, no_signal=True)
+        if modulated:
+            # Apply the HWP angle model here
+            # WARNING : should be turned off in the config file
+            # to filter simulations
+            aman = hwp_angle_model.apply_hwp_angle_model(aman)
+            aman.move("signal", None)
+        demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated)
+        pipe.run(aman, aman.preprocess, sim=True)
+        return aman
 
 def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
                         context=None, dets=None, meta=None):
