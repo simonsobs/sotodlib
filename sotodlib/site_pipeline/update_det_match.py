@@ -144,10 +144,17 @@ class Runner:
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
 
         for d in self.ctx['metadata']:
-            if d['name'] == cfg.detset_meta_name:
+            if 'name' in d:
+                entry_name = d['name']
+            elif 'label' in d:
+                entry_name = d['label']
+            else:
+                continue
+            if entry_name == cfg.detset_meta_name:
                 self.detset_db = core.metadata.ManifestDb(d['db'])
-            elif d['name'] == cfg.detcal_meta_name:
+            elif entry_name == cfg.detcal_meta_name:
                 self.detcal_db = core.metadata.ManifestDb(d['db'])
+
         if self.detset_db is None:
             raise Exception(
                 f"Could not find detset metadata entry with name: {cfg.detset_meta_name}")
@@ -194,7 +201,10 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         return rs
 
 def get_detset_time(detset: str) -> float:
-    "Detsets are of the form <stream_id>_<time>_tune"
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
     return float(detset.split('_')[-2])
 
 def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
