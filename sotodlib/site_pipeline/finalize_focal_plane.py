@@ -4,22 +4,16 @@ from copy import deepcopy
 from typing import List, Optional
 
 import h5py
-import matplotlib.pyplot as plt
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
 import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
-from scipy.stats import binned_statistic
 from sotodlib.coords import optics as op
-from sotodlib.coords.fp_containers import (
-    FocalPlane,
-    OpticsTube,
-    Receiver,
-    Template,
-    Transform,
-)
+from sotodlib.coords.fp_containers import (FocalPlane, OpticsTube, Receiver,
+                                           Template, Transform, plot_by_gamma,
+                                           plot_ot, plot_receiver, plot_ufm)
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
@@ -81,126 +75,6 @@ def _log_vals(shift, scale, shear, rot, axis):
             )
     logger.info("\tShear param is %f", shear)
     logger.info("\tRotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
-
-
-def _mk_plot(plot_dir, froot, nominal, measured, transformed):
-    plt.style.use("tableau-colorblind10")
-    # Plot pointing
-    plt.scatter(
-        nominal[:, 0],
-        nominal[:, 1],
-        alpha=0.4,
-        color="blue",
-        label="nominal",
-        marker="P",
-    )
-    plt.scatter(
-        transformed[:, 0],
-        transformed[:, 1],
-        alpha=0.4,
-        color="black",
-        label="transformed",
-        marker="X",
-    )
-    plt.scatter(measured[:, 0], measured[:, 1], alpha=0.4, color="orange", label="fit")
-    plt.xlabel("Xi (rad)")
-    plt.ylabel("Eta (rad)")
-    plt.legend()
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
-        plt.cla()
-
-    # Histogram of differences
-    diff = measured - transformed
-    isfinite = np.isfinite(diff[:, 0])
-    dist = np.linalg.norm(diff[isfinite, :2], axis=1)
-    dist_thresh = np.percentile(dist, 97)
-    bins = max(int(len(dist) / 20), 10)
-    plt.hist(dist[dist < dist_thresh], bins=bins)
-    plt.xlabel("Distance Between Measured and Transformed (rad)")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_dist.png"))
-        plt.close()
-
-    # Diffs by gamma
-    gammas = nominal[np.isfinite(diff[:, 0]), 2] % np.pi
-    bins = np.linspace(0, np.pi, 13)
-    medians, *_ = binned_statistic(
-        gammas[dist < dist_thresh],
-        dist[dist < dist_thresh],
-        statistic="median",
-        bins=bins,
-    )
-    plt.scatter(gammas[dist < dist_thresh], dist[dist < dist_thresh], alpha=0.1)
-    plt.scatter(np.arange(7.5, 180, 15) * np.pi / 180.0, medians, color="black")
-    plt.xlabel("Nominal Gamma (rad)")
-    plt.ylabel("Distance Between Measured and Transformed (rad)")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_dist_by_gamma.png"))
-        plt.close()
-
-    fig, axs = plt.subplots(1, 3, figsize=(9, 4), sharey=True)
-    im = None
-    for i, name in enumerate(("xi", "eta", "gamma")):
-        d = diff[isfinite, i][dist < dist_thresh]
-        axs[i].set_title(name)
-        if np.sum(isfinite) == 0:
-            continue
-        medians, *_ = binned_statistic(
-            gammas[dist < dist_thresh], d, statistic="median", bins=bins
-        )
-        axs[i].scatter(gammas[dist < dist_thresh], d, alpha=0.1)
-        axs[i].scatter(np.arange(7.5, 180, 15) * np.pi / 180.0, medians, color="black")
-    axs[0].set_ylabel("Diff (rad)")
-    axs[1].set_xlabel("Nominal Gamma (rad)")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_diff_by_gamma.png"))
-        plt.close()
-
-    # tricontourf of residuals, subplots for xi, eta, gamma
-    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True)
-    flat_diff = np.abs(diff.ravel())
-    max_diff = np.percentile(flat_diff[np.isfinite(flat_diff)], 99)
-    im = None
-    for i, name in enumerate(("xi", "eta", "gamma")):
-        isfinite = np.isfinite(diff[:, i])
-        axs[i].set_title(name)
-        axs[i].set_xlim(np.nanmin(transformed[:, 0]), np.nanmax(transformed[:, 0]))
-        axs[i].set_ylim(np.nanmin(transformed[:, 1]), np.nanmax(transformed[:, 1]))
-        axs[i].set_aspect("equal")
-        if np.sum(isfinite) == 0:
-            continue
-        im = axs[i].tricontourf(
-            transformed[isfinite, 0],
-            transformed[isfinite, 1],
-            diff[isfinite, i],
-            levels=20,
-            vmin=-1 * max_diff,
-            vmax=max_diff,
-        )
-    if im is not None:
-        fig.colorbar(im, ax=axs.ravel().tolist())
-    axs[0].set_ylabel("Eta (rad)")
-    axs[1].set_xlabel("Xi (rad)")
-    fig.suptitle("Residuals from Fit")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_res.png"), bbox_inches="tight")
-        plt.close()
 
 
 def gamma_fit(src, dst):
@@ -390,9 +264,7 @@ def _load_rset(config):
     return (
         amans,
         obs_ids,
-        [
-            stream_id,
-        ],
+        [stream_id],
     )
 
 
@@ -502,6 +374,11 @@ def main():
     outdir = os.path.join(config["outdir"], subdir)
     dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
     os.makedirs(outdir, exist_ok=True)
+    plot_dir_base = config.get("plot_dir", None)
+    if plot_dir_base is not None:
+        plot_dir_base = os.path.join(plot_dir_base, subdir + bool(append)*'_' + append)
+        plot_dir_base = os.path.abspath(plot_dir_base)
+        os.makedirs(plot_dir_base, exist_ok=True)
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
@@ -521,6 +398,10 @@ def main():
     else:
         batches = [(amans, obs_ids)]
     for amans, obs_ids in batches:
+        plot_dir = plot_dir_base
+        if per_obs:
+            plot_dir = os.path.join(plot_dir_base, obs_ids[0])
+            os.makedirs(plot_dir, exist_ok=True)
         froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
         outpath = os.path.join(outdir, f"{froot}.h5")
         outpath = os.path.abspath(outpath)
@@ -572,7 +453,12 @@ def main():
                     config["wafer_info"], stream_id, **pointing_cfg
                 )
                 template = Template(
-                    template_det_ids, template, is_optical, pointing_cfg
+                    template_det_ids,
+                    template,
+                    is_optical,
+                    pointing_cfg,
+                    winfo_path,
+                    stream_id,
                 )
             elif have_template:
                 logger.info("\tLoading template from %s", template_path)
@@ -582,7 +468,7 @@ def main():
                     "No template provided and unable to generate one for some reason"
                 )
 
-            focal_plane = FocalPlane.empty(template, stream_id, len(amans))
+            focal_plane = FocalPlane.empty(template, stream_id, ws, len(amans))
             if focal_plane.template is None:
                 raise ValueError("Template is somehow None")
 
@@ -606,6 +492,7 @@ def main():
 
                 # Mapping to template
                 fp, template_msk = focal_plane.map_by_det_id(aman)
+                focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
                 try:
@@ -702,19 +589,8 @@ def main():
             )
 
             if config.get("plot", False):
-                plot_dir = config.get("plot_dir", None)
-                proot = f"{stream_id}{append}"
-                if plot_dir is not None:
-                    plot_dir = os.path.join(plot_dir, subdir, per_obs * obs_ids[0])
-                    plot_dir = os.path.abspath(plot_dir)
-                    os.makedirs(plot_dir, exist_ok=True)
-                _mk_plot(
-                    plot_dir,
-                    proot,
-                    focal_plane.template.fp,
-                    focal_plane.avg_fp,
-                    focal_plane.transformed,
-                )
+                plot_ufm(focal_plane, plot_dir)
+                plot_by_gamma(focal_plane, plot_dir)
             ots[ot].focal_planes.append(focal_plane)
 
         # Per OT common mode
@@ -725,6 +601,7 @@ def main():
                 logger.error("\tNo focal planes found! Skipping...")
                 todel.append(name)
                 continue
+            plot_ot(ot, plot_dir)
             centers = np.vstack([fp.template.center for fp in ot.focal_planes])
             centers_transformed = np.vstack(
                 [fp.center_transformed for fp in ot.focal_planes]
@@ -807,6 +684,7 @@ def main():
             recv_transform.rot,
             ("xi", "eta", "gamma"),
         )
+        plot_receiver(receiver, plot_dir)
 
         # Now compute correction only transform for each ufm
         # Transforms are composed as ufm(ot(rx(focal_plane)))
