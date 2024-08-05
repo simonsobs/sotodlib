@@ -245,3 +245,103 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
+
+
+def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None):
+    """Subplot of pca bounds as well as the good and bad detector
+    timestreams with 0th mode weight overplotted
+
+    Parameters
+    ----------
+    amans : AxisManager
+        input AxisManager
+    pca_aman : AxisManager
+        Relcal output AxisManager
+    ghz : str
+        Bandpass (for plotting purposes)
+    filename : str
+        Full filename with direct path to plot output directory.
+    
+    """
+    if signal is None:
+        signal = aman.signal
+    else:
+        signal = aman[signal]
+
+    if band is None:
+        xbounds = pca_aman.xbounds
+        ybounds = pca_aman.ybounds
+        modes = pca_aman.pca_mode0
+    else:
+        xbounds = pca_aman[f'{band}_xbounds']
+        ybounds = pca_aman[f'{band}_ybounds']
+        modes = pca_aman[f'{band}_pca_mode0']
+
+    pca_dets = pca_aman.pca_det_mask
+    good_indices = np.where(~pca_dets)[0]
+    bad_indices = np.where(pca_dets)[0]
+
+    timestamps = aman.timestamps  # should assume lpf signal though
+
+    fig = plt.figure(figsize=(10, 6))
+
+    # Define axes
+    ax1 = plt.subplot2grid((2, 2), (1, 0), colspan=1, rowspan=1)
+    ax2 = plt.subplot2grid((2, 2), (1, 1), colspan=1, rowspan=1)
+    ax3 = plt.subplot2grid((2, 2), (0, 0), colspan=2, rowspan=1)
+    
+    #print('len of times', len(timestamps), 'len modes', len(modes))
+    # ax1: good signals
+    ax1.plot(timestamps, modes, color='black', linewidth=3,
+             label='0th mode', zorder=2, alpha=0.4)
+
+    for ind in good_indices:
+        weight = pca_aman.pca_weight0[ind] #, 0]
+        signals = signal[ind]
+        ax1.plot(timestamps, signals / weight,
+                 zorder=1, color='#D8BFD8', alpha=0.3)
+
+    ax1.set_title(f'Good Detector Batch: ({len(good_indices)} dets)')
+    ax1.legend(loc='upper left')
+    ax1.grid()
+
+    # ax2: bad signals
+    ax2.plot(timestamps, modes, color='black', linewidth=3,
+             label='0th mode', zorder=2, alpha=0.4)
+    for ind in bad_indices:
+        weight = pca_aman.pca_weight0[ind]
+        signals = signal[ind]
+        ax2.plot(timestamps, signals / weight,
+                 zorder=1, color='#FFA07A', alpha=0.3)
+    ax2.set_title(f'Bad Detector Batch: ({len(bad_indices)} dets)')
+    ax2.legend(loc='upper left')
+    ax2.grid()
+
+    # ax3: box
+    weight = np.abs(pca_aman.pca_weight0)
+    Si = aman.det_cal.s_i
+    ax3.plot(Si[good_indices], weight[good_indices], '.', color='#D8BFD8', markersize=10,
+             label=f'Good dets ({len(good_indices)} dets)', alpha=0.3)
+
+    ax3.plot(Si[bad_indices], weight[bad_indices], '.', color='#FFA07A', markersize=10,
+             label=f'Bad dets ({len(bad_indices)} dets)', alpha=0.3)
+
+    ax3.plot([xbounds[0], xbounds[1], xbounds[1], xbounds[0], xbounds[0]],
+             [ybounds[0], ybounds[0], ybounds[1], ybounds[1], ybounds[0]],
+             color='navy', linestyle='-.', linewidth=1.5, label='Boundary',
+             alpha=1)
+
+    ax3.set_xlabel('Si')
+    ax3.set_ylabel('0th Mode Weights')
+
+    if any(value > 0 for value in Si):
+        ax3.set_xlim(np.min(Si), 0)
+
+    ax3.legend()
+    ax3.grid()
+
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{band}')
+    plt.tight_layout()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)

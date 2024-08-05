@@ -1002,43 +1002,88 @@ class PCARelCal(_Preprocess):
     Example configuration file entry::
 
       - name: 'pca_relcal'
-        signal: 'hwpss_remove'
+        signal: 'lpf_sig'
+        pca_run: 'run1'
         calc: True
         save: True
-
+        plot: True
+    
+    # TODO: add xfac and yfac as options in config file entry?
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.run = step_cfgs.get('pca_run', 'run1')
+        self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        rc_aman = core.AxisManager(aman.dets, aman.samps)
+        finalrelcal_aman = core.AxisManager(aman.dets, aman.samps)
+        pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
         relcal = np.zeros(aman.dets.count)
+        pca_weight0 = np.zeros(aman.dets.count)
+        badids = []
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            rc_aman.wrap(f'{band}_mask', m0, [(0, 'dets')])
+            finalrelcal_aman.wrap(f'{band}_idx', np.where(m0)[0])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            med = np.median(pca_signal.weights[:,0])
-            relcal[m0] = med/pca_signal.weights[:,0]
+            result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal)
 
-            rc_aman.wrap(f'{band}_median', med)
-            rc_aman.wrap(f'{band}_pca_mode0', pca_signal.modes[0], [(0, 'samps')])
-        rc_aman.wrap('relcal', relcal, [(0,'dets')])
-        self.save(proc_aman, rc_aman)
+            badids.append(result_aman['badids'])
+            pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
+            relcal[m0] = result_aman['relcal']
+            pca_weight0[m0] = result_aman['pca_weight0']
+            finalrelcal_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
+            finalrelcal_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+            finalrelcal_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+            finalrelcal_aman.wrap(f'{band}_median', result_aman['median'])
+        
+        badids_comb = np.concatenate(badids)
+        finalrelcal_aman.wrap('badids', badids_comb)
+        finalrelcal_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
+        finalrelcal_aman.wrap('relcal', relcal, [(0, 'dets')])
+        finalrelcal_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
 
-    def save(self, proc_aman, rc_aman):
+        self.save(proc_aman, finalrelcal_aman)
+
+    def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.name, rc_aman)
+            proc_aman.wrap(self.run_name, pca_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~proc_aman[self.run_name]['pca_det_mask']
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_pcabounds
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+
+            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = bands[bands != 'NC']
+            for band in bands:
+                band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                plot_pcabounds(aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band)
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
