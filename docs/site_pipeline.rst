@@ -997,7 +997,7 @@ I'm just writing in SAT1)::
             det_tag = dict(base_tags)
             det_tag['detector'] = det
             tag_list.append(det_tag)
-        log_tags = {'observation': obs_id, 'wafer': wafer}
+        log_tags = {'telescope': 'SAT1', 'wafer': wafer}
         monitor.record('white_noise_level', det_white_noise, timestamps, tag_list, 'detector_stats', log_tags=log_tags)
         monitor.write()
 

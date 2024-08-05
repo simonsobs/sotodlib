@@ -136,7 +136,10 @@ def _obs_tags(obs, cfgs):
         "stream_id" : obs.stream_id
     }]
 
-    log_tags = {"observation": obs.obs_id, "stream_id": obs.stream_id}
+    log_tags = {
+        "telescope" : cfgs["monitor"]["telescope"], 
+        "stream_id": obs.stream_id
+    }
 
     return tags, log_tags
 
