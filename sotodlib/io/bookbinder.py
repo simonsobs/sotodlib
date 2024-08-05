@@ -839,10 +839,12 @@ class BookBinder:
                     f"Output directory {outdir} contains files. Delete to retry"
                       " bookbinding"
                 )
+
             elif nfiles == 1:
                 assert os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', \
                     f"only acceptable file in new book path {outdir} is " \
                     " Z_bookbinder_log.txt"
+
         else:
             os.makedirs(outdir)
 

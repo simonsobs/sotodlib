@@ -488,7 +488,7 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         [so3g.proj.Ranges.from_mask(r != 0) for r in a])
 
     if wrap:
-        assert(tod is not None, "Pass in a tod to 'wrap' the output.")
+        assert tod is not None, "Pass in a tod to 'wrap' the output."
         tod.flags.wrap(wrap, source_flags, [(0, 'dets'), (1, 'samps')])
     return source_flags
 

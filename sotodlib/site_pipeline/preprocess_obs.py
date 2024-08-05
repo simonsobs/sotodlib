@@ -177,6 +177,12 @@ def get_parser(parser=None):
         help="If true, takes all planet tags as logical OR and adjusts related configs",
         action='store_true',
     )
+    parser.add_argument(
+        '--verbosity',
+        help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
+        default=2,
+        type=int
+    )
     return parser
 
 def main(
@@ -189,13 +195,14 @@ def main(
     update_delay: Optional[int] = None,
     tags: Optional[List[str]] = None,
     planet_obs: bool = False,
+    verbosity: Optional[int] = None,
  ):
     configs, context = _get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess")
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..
         # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) + update_delay
+        min_ctime = int(time.time()) - update_delay*86400
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"

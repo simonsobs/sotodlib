@@ -29,7 +29,7 @@ if not toast.mpi.use_mpi:
     os.environ["DISABLE_MPI"] = "true"
 
 from ... import mapmaking as mm
-from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
+from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis, FlagManager
 
 
 @trait_docs
@@ -391,7 +391,8 @@ class MLMapmaker(Operator):
                 axis_map=[(0, axdets), (1, axsamps)],
             )
             axobs.wrap("boresight", axbore)
-            axobs.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
+            axobs.wrap('flags', FlagManager.for_tod(axobs))
+            axobs.flags.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
             axobs.wrap("weather", np.full(1, self.weather))
             axobs.wrap("site",    np.full(1, "so"))
 
