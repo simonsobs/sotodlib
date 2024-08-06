@@ -51,6 +51,8 @@ def compute_summary_stats(snippets, cols_for_stats = ['Number of Detectors', 'Y 
 
         adjacent = func.max_and_adjacent_y_pos_ratio(y_t)
 
+        num_peaks = func.compute_num_peaks(data)
+
         info[s, 0] = det_num
         info[s, 1] = hist_ratio
         info[s, 2] = corr
