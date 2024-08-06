@@ -10,7 +10,7 @@ from typing import Optional, Union, Dict, List, cast
 from queue import Queue
 
 from sotodlib import core
-from sotodlib.io.metadata import write_dataset
+from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 import sotodlib.site_pipeline.util as sp_util
 import multiprocessing as mp
@@ -250,97 +250,92 @@ class ObsInfo:
     iva_files: Dict[str, str]
     bsa_files: Dict[str, str]
 
-
-def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfo:
-    ctx = core.Context(cfg.context_path)
-    am = ctx.get_obs(
-        obs_id,
-        samples=(0, 1),
-        ignore_missing=True,
-        no_signal=True,
-        on_missing={"det_cal": "skip"},
-    )
-
-    if "smurf" not in am.det_info:
-        raise ValueError(f"Missing smurf info for {obs_id}")
-
-    logger.debug(f"Getting cal obsids ({obs_id})")
-
-    iv_obsids = get_cal_obsids(ctx, obs_id, "iv")
-
-    # Load in IVs
-    logger.debug(f"Loading Bias step and IV data ({obs_id})")
-    rtm_bit_to_volt = None
-    pA_per_phi0 = None
-
-    # Automatically determine paths based on data root instead of obsfiledb
-    # because obsfiledb queries are slow on nersc.
-
-    iva_files = {}
-    bsa_files = {}
-    cfg.data_root = cast(str, cfg.data_root)
-    for dset, oid in iv_obsids.items():
-        if oid is not None:
-            timecode = oid.split("_")[1][:5]
-            zsmurf_dir = os.path.join(cfg.data_root, "oper", timecode, oid, "Z_smurf")
-            for f in os.listdir(zsmurf_dir):
-                if "iv" in f:
-                    iva_files[dset] = os.path.join(zsmurf_dir, f)
-                    break
-            else:
-                raise ValueError(f"IV data not found for in cal obs {oid}")
-        else:
-            logger.debug("missing IV data for %s", dset)
-
-    # Load in bias steps
-    bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
-    for dset, oid in bias_step_obsids.items():
-        if oid is not None:
-            timecode = oid.split("_")[1][:5]
-            zsmurf_dir = os.path.join(cfg.data_root, "oper", timecode, oid, "Z_smurf")
-            for f in os.listdir(zsmurf_dir):
-                if "bias_step" in f:
-                    bs_file = os.path.join(zsmurf_dir, f)
-                    bsa_files[dset] = bs_file
-                    break
-            else:
-                raise ValueError(f"Bias step data not found for in cal obs {oid}")
-        else:
-            logger.debug("missing bias step data for %s", dset)
-
-    if rtm_bit_to_volt is None:
-        rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
-    if pA_per_phi0 is None:
-        pA_per_phi0 = DEFAULT_pA_per_phi0
-
-    return ObsInfo(
-        obs_id=obs_id,
-        am=am,
-        iv_obsids=iv_obsids,
-        bs_obsids=bias_step_obsids,
-        iva_files=iva_files,
-        bsa_files=bsa_files,
-    )
-
-
 @dataclass
 class ObsInfoResult:
     obs_id: str
     success: bool = False
     traceback: Optional[str] = None
+
     obs_info: Optional[ObsInfo] = None
 
-
-def get_obs_info_result(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
-    """
-    Gets an obs infor result. Returns even if there is an exception.
-    """
+def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     res = ObsInfoResult(obs_id)
+
     try:
-        res.obs_info = get_obs_info(cfg, obs_id)
+        ctx = core.Context(cfg.context_path)
+        am = ctx.get_obs(
+                obs_id, samples=(0, 1), ignore_missing=True, no_signal=True,
+                on_missing={'det_cal': 'skip'}
+        )
+
+        if 'smurf' not in am.det_info:
+            raise ValueError(f"Missing smurf info for {obs_id}")
+
+        logger.debug(f"Getting cal obsids ({obs_id})")
+
+        iv_obsids = get_cal_obsids(ctx, obs_id, 'iv')
+
+        # Load in IVs
+        logger.debug(f"Loading Bias step and IV data ({obs_id})")
+        rtm_bit_to_volt = None
+        pA_per_phi0 = None
+
+        # Automatically determine paths based on data root instead of obsfiledb
+        # because obsfiledb queries are slow on nersc.
+
+        iva_files = {}
+        bsa_files = {}
+        for dset, oid in iv_obsids.items():
+            if oid is not None:
+                timecode = oid.split('_')[1][:5]
+                zsmurf_dir = os.path.join(
+                    cfg.data_root, 'oper', timecode, oid, f'Z_smurf'
+                )
+                for f in os.listdir(zsmurf_dir):
+                    if 'iv' in f:
+                        iva_files[dset] = os.path.join(zsmurf_dir, f)
+                        break
+                else:
+                    raise ValueError(f"IV data not found for in cal obs {oid}")
+            else:
+                logger.debug("missing IV data for %s", dset)
+
+        if len(iva_files) == 0:
+            raise ValueError(f"No IV data found for {obs_id}")
+
+        # Load in bias steps
+        bias_step_obsids = get_cal_obsids(ctx, obs_id, 'bias_steps')
+        for dset, oid in bias_step_obsids.items():
+            if oid is not None:
+                timecode = oid.split('_')[1][:5]
+                zsmurf_dir = os.path.join(
+                    cfg.data_root, 'oper', timecode, oid, f'Z_smurf'
+                )
+                for f in os.listdir(zsmurf_dir):
+                    if 'bias_step' in f:
+                        bs_file = os.path.join(zsmurf_dir, f)
+                        bsa_files[dset] = bs_file
+                        break
+                else:
+                    raise ValueError(f"Bias step data not found for in cal obs {oid}")
+            else:
+                logger.debug("missing bias step data for %s", dset)
+        
+        if rtm_bit_to_volt is None:
+            rtm_bit_to_volt = DEFAULT_RTM_BIT_TO_VOLT
+        if pA_per_phi0 is None:
+            pA_per_phi0 = DEFAULT_pA_per_phi0
+        
+        res.obs_info = ObsInfo(
+            obs_id=obs_id, am=am, iv_obsids=iv_obsids,
+            bs_obsids=bias_step_obsids,
+            iva_files=iva_files, bsa_files=bsa_files,
+        )
         res.success = True
-    except Exception:
+    except:
         res.traceback = traceback.format_exc()
+        if cfg.raise_exceptions:
+            raise
     return res
 
 
@@ -401,6 +396,8 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
         rtm_bit_to_volt = iva["meta"]["rtm_bit_to_volt"]
         pA_per_phi0 = iva["meta"]["pA_per_phi0"]
         cals = [CalInfo(rid) for rid in am.det_info.readout_id]
+        if len(cals) == 0:
+            raise ValueError(f"No detectors found for {obs_id}")
 
         # Add IV info
         for i, cal in enumerate(cals):
@@ -491,20 +488,17 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             if not ridx:  # Channel doesn't exist in bias step analysis
                 continue
 
-            correction = find_correction_results(band, chan, detset)
-            if correction is None:
-                logger.warn(
-                    "Unable to find correction result for %s %s %s (%s)",
-                    band,
-                    chan,
-                    detset,
-                    obs_id,
-                )
-                use_correction = False
-                cal.tes_param_correction_success = False
+            if cfg.apply_cal_correction:
+                correction = find_correction_results(band, chan, detset)
+                if correction is None:
+                    logger.warn("Unable to find correction result for %s %s %s (%s)", band, chan, detset, obs_id)
+                    use_correction = False
+                    cal.tes_param_correction_success = False
+                else:
+                    use_correction = correction.success
+                    cal.tes_param_correction_success = correction.success
             else:
-                use_correction = correction.success
-                cal.tes_param_correction_success = correction.success
+                use_correction = False
 
             ridx = ridx[0]
             cal.tau_eff = bsa["tau_eff"][ridx]
@@ -515,8 +509,8 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 correction = cast(tpc.CorrectionResults, correction)
                 cal.r_tes = correction.corrected_R0
                 cal.r_frac = correction.corrected_R0 / cal.r_n
-                cal.s_i = correction.corrected_Si
-                cal.p_bias = correction.corrected_Pj
+                cal.s_i = correction.corrected_Si * 1e6
+                cal.p_bias = correction.corrected_Pj * 1e-12
                 cal.loopgain = correction.loopgain
             else:
                 cal.r_tes = bsa["R0"][ridx]
@@ -529,7 +523,8 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
         res.success = True
     except Exception as e:
         res.traceback = traceback.format_exc()
-        res.fail_msg = str(e)
+        res.fail_msg = res.traceback
+        # res.fail_msg = str(e)
         if cfg.raise_exceptions:
             raise
     return res
@@ -545,7 +540,11 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List:
     # Find all obs_ids that have not been processed
     with open(cfg.failed_cache_file, "r") as f:
         failed_cache = yaml.safe_load(f)
-    failed_obsids = set(failed_cache.keys())
+
+    if failed_cache is not None:
+        failed_obsids = set(failed_cache.keys())
+    else:
+        failed_obsids = set()
 
     db = core.metadata.ManifestDb(cfg.index_path)
     obs_ids_all = set(ctx.obsdb.query('type=="obs"')["obs_id"])
@@ -554,6 +553,22 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List:
     if cfg.num_obs is not None:
         obs_ids = obs_ids[: cfg.num_obs]
     return obs_ids
+
+
+def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str):
+    if 'KeyboardInterrupt' in msg: # Don't cache keyboard interrupts
+        return
+
+    if cfg.cache_failed_obsids:
+        logger.info(f"Adding {obs_id} to failed_file_cache")
+        with open(cfg.failed_cache_file, 'r') as f:
+            d = yaml.safe_load(f)
+        if d is None:
+            d = {}
+        d[str(obs_id)] = msg
+        with open(cfg.failed_cache_file, 'w') as f:
+            yaml.dump(d, f)
+        return
 
 
 def handle_result(result: CalRessetResult, cfg: DetCalCfg):
@@ -568,20 +583,12 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg):
 
         msg = result.fail_msg
         if msg is None:
-            msg = "unknown error"
+            msg = 'unknown error'
+        add_to_failed_cache(cfg, obs_id, msg)
+        return
 
-        if cfg.cache_failed_obsids:
-            logger.info(f"Adding {obs_id} to failed_file_cache")
-            with open(cfg.failed_cache_file, "r") as f:
-                d = yaml.safe_load(f)
-                d[obs_id] = msg
-            with open(cfg.failed_cache_file, "w") as f:
-                yaml.dump(d, f)
-            return
-
-    rset = core.metadata.ResultSet.from_friend(result.result_set)
     logger.debug(f"Adding obs_id {obs_id} to dataset")
-    write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
+    write_dataset(result.result_set, cfg.h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
     db.add_entry(
         {"obs:obs_id": obs_id, "dataset": obs_id}, filename=cfg.h5_path, replace=True
@@ -645,7 +652,8 @@ def run_update_nersc(cfg: DetCalCfg):
 
     cfg.setup()
     obs_ids = get_obsids_to_run(cfg)
-
+    # obs_ids = ['obs_1713962395_satp1_0000100']
+    # obs_ids = ['obs_1713758716_satp1_1000000']
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
     pb = tqdm(total=len(obs_ids), disable=(not cfg.show_pb))
@@ -666,28 +674,21 @@ def run_update_nersc(cfg: DetCalCfg):
     resset_async_results: Queue = Queue()
     obsinfo_async_results: Queue = Queue()
 
-    def get_obs_info_callback(res: ObsInfoResult):
-        if not res.success:
-            logger.error(f"Failed to get obs_info for {res.obs_id}")
-            logger.error(res.traceback)
+    def get_obs_info_callback(result: ObsInfoResult):
+        if result.success:
+            pool2.apply_async(
+                get_cal_resset, args=(cfg, result.obs_info), callback=callback, error_callback=errback
+            )
+        else:
             pb.update()
-            return
-
-        a = pool2.apply_async(
-            get_cal_resset,
-            args=(cfg, res.obs_info),
-            callback=callback,
-            error_callback=errback,
-        )
-        resset_async_results.put(a)
+            add_to_failed_cache(cfg, result.obs_id, result.traceback)
+            logger.error(f"Failed to get obs_info for {result.obs_id}:\n{result.traceback}")
 
     try:
         for obs_id in obs_ids:
             a = pool1.apply_async(
-                get_obs_info_result,
-                args=(cfg, obs_id),
-                callback=get_obs_info_callback,
-                error_callback=errback,
+                get_obs_info, args=(cfg, obs_id), callback=get_obs_info_callback, 
+                error_callback=errback
             )
             obsinfo_async_results.put(a)
 
@@ -697,9 +698,9 @@ def run_update_nersc(cfg: DetCalCfg):
             resset_async_results.get().wait()
 
     finally:
-        pool1.close()
+        pool1.terminate()
         pool1.join()
-        pool2.close()
+        pool2.terminate()
         pool2.join()
     pb.close()
     logger.info("Finished updates")
