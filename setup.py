@@ -65,7 +65,6 @@ setup_opts["install_requires"] = [
     'psycopg2-binary',
     'pandas', 
     'scikit-learn', 
-    'pickle', 
     'diptest'
 ]
 setup_opts["extras_require"] = {
