@@ -2,3 +2,7 @@ numpy<2
 matplotlib
 toml
 quaternionarray
+pandas
+diptest
+sklearn
+scikit
