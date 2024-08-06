@@ -13,8 +13,7 @@ from sotodlib.tod_ops import filter_stats_functions as func
 
 def compute_summary_stats(snippets, cols_for_stats = ['Number of Detectors', 'Y and X Extent Ratio', 
         'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
-        'TOD', 'Start Ctime', 'Stop Ctime']):
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks', 'Start Ctime', 'Stop Ctime']):
 
     '''
     Compute all of the summary statistics for glitch classification

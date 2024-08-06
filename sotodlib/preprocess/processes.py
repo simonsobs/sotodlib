@@ -1232,7 +1232,7 @@ class GlitchComputeStats(_Preprocess):
         'Y and X Extent Ratio', 'Mean abs(Correlation)','Mean abs(Time Lag)', 
         'Y Hist Max and Adjacent/Number of Detectors',
         'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
-        'TOD', 'Start Index', 'Stop Index', 'Start Ctime', 'Stop Ctime'])
+        'Start Index', 'Stop Index', 'Start Ctime', 'Stop Ctime'])
 
         ##need to figure out a way to save snippet layout too
 
@@ -1265,8 +1265,9 @@ class GlitchClassification(_Preprocess):
 
         trained_forest = pk.load(open('{}/{}.pkl'.format(outdir, trained_forest_name), 'rb'))
 
-        classifying_cols = self.process_cfgs.get("columns_for_classifying", ['Number of Detectors', 'Y and X Extent Ratio','Y Hist Max and Adjacent/Number of Detectors',
-          'Within 0.1 of Y Hist Max/Number of Detectors', 'Mean abs(Correlation)', 'Mean abs(Time Lag)'])
+        classifying_cols = self.process_cfgs.get("columns_for_classifying", ['Number of Detectors', 'Y and X Extent Ratio', 
+        'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks'])
 
         df_stats_t = pd.read_hdf('{}/{}.h5'.format(outdir, df_name))
 
