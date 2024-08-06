@@ -11,7 +11,10 @@ from sotodlib.tod_ops import filter_stats_functions as func
 
 
 
-def compute_summary_stats(snippets, cols_for_stats):
+def compute_summary_stats(snippets, cols_for_stats = ['Number of Detectors', 'Y and X Extent Ratio', 
+        'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
+        'TOD', 'Start Ctime', 'Stop Ctime']):
 
     '''
     Compute all of the summary statistics for glitch classification
@@ -22,7 +25,7 @@ def compute_summary_stats(snippets, cols_for_stats):
     required for glitch classification
     ''' 
 
-    info = np.empty(shape = (len(snippets), 15))
+    info = np.empty(shape = (len(snippets), 9))
 
     for s in range(len(snippets)):
         
@@ -48,34 +51,15 @@ def compute_summary_stats(snippets, cols_for_stats):
 
         adjacent = func.max_and_adjacent_y_pos_ratio(y_t)
 
-        ks = func.KS_test(x_t)
-
         info[s, 0] = det_num
         info[s, 1] = hist_ratio
         info[s, 2] = corr
         info[s, 3] = time_lag
         info[s, 4] = adjacent
         info[s, 5] = near
-        info[s, 10] = ks[0]
-        info[s, 11] = 5
-        info[s, 12] = s + 1
-        info[s, 13] = tstart
-        info[s, 14] = tstop
-        
-        if det_num <= 3:
-            info[s, 6] = np.nan
-            info[s, 7] = np.nan
-            info[s, 8] = np.nan
-            info[s, 9] = np.nan
-
-        else:
-
-            dip_x, pval_x, dip_y, pval_y = func.dip_test(x_t, y_t)
-
-            info[s, 6] = dip_x
-            info[s, 7] = pval_x
-            info[s, 8] = dip_y
-            info[s, 9] = pval_y
+        info[s, 6] = num_peaks
+        info[s, 7] = tstart
+        info[s, 8] = tstop
 
 
     df =  pd.DataFrame(info, columns = cols_for_stats)

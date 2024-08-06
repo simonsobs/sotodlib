@@ -1228,11 +1228,11 @@ class GlitchComputeStats(_Preprocess):
     
     def process(self, aman, proc_aman):
 
-        cols_for_stats = self.process_cfgs.get("cols_for_stats",['Number of Detectors', 'Y and X Extent Ratio', 
-        'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist', 'P Value for Dip Test for X Hist',
-        'Dip Test for Y Hist', 'P Value for Dip Test for Y Hist', 'KS Test for X', 'Obs ID',
-        'Snippet', 'Start timestamp', 'Stop timestamp'])
+        cols_for_stats = self.process_cfgs.get("cols_for_stats",['Number of Detectors', 
+        'Y and X Extent Ratio', 'Mean abs(Correlation)','Mean abs(Time Lag)', 
+        'Y Hist Max and Adjacent/Number of Detectors',
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
+        'TOD', 'Start Index', 'Stop Index', 'Start Ctime', 'Stop Ctime'])
 
         ##need to figure out a way to save snippet layout too
 

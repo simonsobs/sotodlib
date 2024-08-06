@@ -1,48 +1,6 @@
 import numpy as np
 import scipy.stats as ss
-import diptest
 
-def KS_test(x_pos):
-
-    '''
-    Compute the Kolmogorov–Smirnov test of the x position hisotgram
-    compared to a uniform distribution.
-
-    Input: x_pos: x positions across the focal plane
-    Output: KS test statistic, p-value
-    ''' 
-
-    
-    #compute a uniform distribution with the same x range as the x positions
-    dist_uni_guess = np.random.uniform(low = np.min(x_pos), high = np.max(x_pos), size = len(x_pos))
-
-    #calculate CDF values
-    dist_cdf = 1. * np.arange(len(x_pos)) / (len(x_pos) - 1)
-    
-    dist_uni_guess_cdf = 1. * np.arange(len(dist_uni_guess)) / (len(dist_uni_guess) - 1)
-    
-
-    ks = ss.kstest(x_pos, dist_uni_guess_cdf)
-    
-    return ks
-
-
-def dip_test(x_pos, y_pos):
-
-    '''
-    Compute the dip test of the x position and y position 
-    hisotgrams.
-
-    Input: x_pos: x positions and y_pos: y positions across the focal plane
-    Output: x dip test statistic, p-value for the x dip test statistic,
-    y dip test statistic, p-value for the y dip test statistic
-    ''' 
-
-    # both the dip statistic and p-value
-    dip_x, pval_x = diptest.diptest(x_pos)
-    dip_y, pval_y = diptest.diptest(y_pos)
-
-    return dip_x, pval_x, dip_y, pval_y
 
 def num_of_det(x_pos):
 
@@ -197,3 +155,42 @@ def max_and_adjacent_y_pos_ratio(y_pos):
 
     return sum_near/det_num
 
+def compute_num_peaks(data):
+
+    '''
+    Computes the number of peaks in the combined TOD from the different detectors.
+
+    Input: data: detector TOD signals (snippets[s].signal
+    where s is the given snippet number but you need to detrened 
+    TODs, e.g. using sotodlib.tod_ops.detrend_tod(snippets[s], method = 'median'))
+    Output: the number of peaks
+    ''' 
+
+    #make a smoothing kernal
+    kernel_size = 3
+    kernel = np.ones(kernel_size) / kernel_size
+
+    #smooth the data
+    max_vals_t = np.convolve(np.max(data, axis = 0), kernel, mode='same')
+
+    mean_vals_t = np.convolve(np.mean(data, axis = 0), kernel, mode='same')
+
+    std_vals_t = np.std(data)
+
+    vals_for_peaks = np.zeros(len(max_vals_t))
+
+    #check if the max value is >= the mean *3std or else use the mean value
+    for i in range(len(max_vals_t)):
+
+        if max_vals_t[i] >= mean_vals_t[i] + 3*std_vals_t:
+            vals_for_peaks[i] = max_vals_t[i]
+
+        else:
+            vals_for_peaks[i] = mean_vals_t[i]
+
+    #find the peaks in the combined TOD
+    peaks_t = sp.signal.find_peaks(vals_for_peaks, prominence = 1e-12)[0]
+
+    num_peaks_t = len(peaks_t)
+
+    return num_peaks_t
