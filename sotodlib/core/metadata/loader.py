@@ -7,6 +7,9 @@ import os
 import numpy as np
 import warnings
 
+import toast
+import toast.timing
+
 from . import ResultSet
 
 logger = logging.getLogger(__name__)
@@ -372,11 +375,18 @@ class SuperLoader:
         if on_missing is None:
             on_missing = {}
 
+        gt = toast.timing.GlobalTimers.get()
+
         if self.obsdb is not None and 'obs:obs_id' in request:
             if dest is None:
                 dest = core.AxisManager()
             obs_man = core.AxisManager()
+
+            gt.start("superloader obsdb.get")
             obs_info = self.obsdb.get(request['obs:obs_id'], add_prefix='obs:')
+            gt.stop("superloader obsdb.get")
+
+            gt.start("superloader obs info wrap")
             if obs_info is None:
                 logger.warning(
                     f"Observation {request['obs:obs_id']} not found in obsdb; "
@@ -388,6 +398,7 @@ class SuperLoader:
                 for k, v in _filter_items('obs:', obs_info).items():
                     obs_man.wrap(k, v)
             dest.wrap('obs_info', obs_man)
+            gt.stop("superloader obs info wrap")
 
         def reraise(spec, e):
             logger.error(
@@ -442,12 +453,16 @@ class SuperLoader:
 
             return det_info, aug_request
 
+        gt.start("superloader check_tags 1")
         det_info, aug_request = check_tags(det_info, aug_request)
+        gt.stop("superloader check_tags 1")
         n_dets = len(det_info)
 
+        gt.start("superloader process spec_list")
         # Process each item.
         items = []
         for spec in spec_list:
+            gt.start("superloader process spec_list: from_dict")
             spec, _spec = MetadataSpec.from_dict(spec), spec
             if det_info_scan and not spec.det_info:
                 continue
@@ -462,7 +477,9 @@ class SuperLoader:
                 logger.debug(f'User overrides on_missing={_on_missing} for {label}')
 
             assert _on_missing in ['trim', 'skip', 'fail']
+            gt.stop("superloader process spec_list: from_dict")
 
+            gt.start("superloader process spec_list: load_one")
             try:
                 item = self.load_one(spec, aug_request, det_info)
                 error = None
@@ -474,7 +491,9 @@ class SuperLoader:
                     continue
                 else:
                     reraise(_spec, e)
+            gt.stop("superloader process spec_list: load_one")
 
+            gt.start("superloader process spec_list: merge_det_info + check")
             if spec.det_info and error is None:
                 item_keys = _filter_items('dets:', item.keys)
                 try:
@@ -497,7 +516,9 @@ class SuperLoader:
                 # dataset, and that's ok.
                 det_info, aug_request = check_tags(det_info, aug_request)
                 n_dets = len(det_info)
+            gt.stop("superloader process spec_list: merge_det_info + check")
 
+            gt.start("superloader process spec_list: bcast + index")
             if check:
                 items.append((spec, error))
                 continue
@@ -507,15 +528,17 @@ class SuperLoader:
                 continue
 
             # Make everything an axisman.
+            gt.start("superloader process spec_list: bcast + index resultset")
             if isinstance(item, ResultSet):
                 # Note this might raise an IncompleteDetInfoError.
                 item = broadcast_resultset(item, det_info=det_info)
-
             elif not isinstance(item, core.AxisManager):
                 logger.error(
                     f'The decoded item {item} is not an AxisManager or '
                     f'other well-understood type.  Request was: {request}.')
+            gt.stop("superloader process spec_list: bcast + index resultset")
 
+            gt.start("superloader process spec_list: bcast + index multi")
             if 'dets' in item:
                 # You have to check for detector loss here -- compare
                 # item.dets.vals to what's in det_info.
@@ -534,23 +557,33 @@ class SuperLoader:
                     else:  # skip
                         logger.warning(message + 'Discarding.')
                         continue
+            gt.stop("superloader process spec_list: bcast + index multi")
 
+            gt.start("superloader process spec_list: bcast + index unpack")
             # Unpack it.
             try:
                 dest = unpack_item(spec.unpack, item, dest=dest)
             except Exception as e:
                 reraise(_spec, e)
+            gt.stop("superloader process spec_list: bcast + index unpack")
+
+            gt.stop("superloader process spec_list: bcast + index")
 
             if 'dets' in dest:
                 logger.debug(f'load(): dest now has shape {dest.shape}')
                 n_dets = dest.dets.count
+        gt.stop("superloader process spec_list")
 
+        gt.start("superloader check_tags 2")
         check_tags(det_info, aug_request, final=True)
+        gt.stop("superloader check_tags 2")
 
         if check:
             return items
 
+        gt.start("superloader wrap convert_det_info")
         dest.wrap('det_info', convert_det_info(det_info))
+        gt.stop("superloader wrap convert_det_info")
 
         return dest
 
