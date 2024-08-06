@@ -64,7 +64,7 @@ setup_opts["install_requires"] = [
     'numdifftools',
     'psycopg2-binary',
     'pandas', 
-    'sklearn', 
+    'scikit-learn', 
     'pickle', 
     'diptest'
 ]
