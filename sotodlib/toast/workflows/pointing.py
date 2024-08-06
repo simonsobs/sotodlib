@@ -25,10 +25,18 @@ def setup_pointing(operators):
     """
     # Detector quaternion pointing
     operators.append(
-        toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel")
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_azel",
+            boresight=defaults.boresight_azel,
+            quats="quats_azel",
+        )
     )
     operators.append(
-        toast.ops.PointingDetectorSimple(name="det_pointing_radec", quats="quats_radec")
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_radec",
+            boresight=defaults.boresight_radec,
+            quats="quats_radec",
+        )
     )
     # Stokes weights
     operators.append(
@@ -110,9 +118,6 @@ def select_pointing(job, otherargs, runargs, data):
         raise RuntimeError(msg)
 
     # Configure Az/El and RA/DEC boresight and detector pointing and weights
-
-    job_ops.det_pointing_azel.boresight = defaults.boresight_azel
-    job_ops.det_pointing_radec.boresight = defaults.boresight_radec
 
     job_ops.pixels_wcs_azel.detector_pointing = job_ops.det_pointing_azel
     job_ops.pixels_wcs_radec.detector_pointing = job_ops.det_pointing_radec
