@@ -63,6 +63,10 @@ setup_opts["install_requires"] = [
     'pyfftw',
     'numdifftools',
     'psycopg2-binary',
+    'pandas', 
+    'sklearn', 
+    'pickle', 
+    'diptest'
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
