@@ -7,6 +7,7 @@ tod_ops submodule
 This submodule includes functions for processing time-ordered signals,
 including time and Fourier domain filtering, PCA, gap-filling, etc.
 
+.. _fourier-filters:
 
 Fourier space filters
 =====================
@@ -140,6 +141,7 @@ Class and function references should be auto-generated here.
 
 .. autofunction:: sotodlib.tod_ops.gapfill.get_contaminated_ranges
 
+.. _pca-background:
 
 tod_ops.pca
 ===========
@@ -165,10 +167,67 @@ using this submodule.
 tod_ops.jumps
 =============
 
-Functions to find jumps in data. The jumps are found by taking the cumulative
-sum of mean subtracted data (which may be filtered) and looking for peaks in the
-output. Taking the cumulative sum is functionally the same as convolving with
-an unit step, so it is acting as a matched filter.
+Functions to find and fix jumps in data.
+There are currently three jump finders included here each targeting a different use case:
+
+* :func:`sotodlib.tod_ops.twopi_jumps`: For jumps that are a multiple of 2pi, these are a byproduct of the readout.
+* :func:`sotodlib.tod_ops.slow_jumps`: For things that look like jumps when zoomed out, but happen on longer time scales (ie: a short unlock, timing issues, etc.). 
+* :func:`sotodlib.tod_ops.find_jumps`: For all other jumps, note here that we expect these to be "true" jumps and happen in a small number of samples. 
+
+
+When running multiple jump finders in a row it is advisible for performance reasons to cache the noise level used to compute the thresholds
+(ie: the output of :func:`sotodlib.tod_ops.std_est`) to avoid recomputing it. This can then be used to pass in variables like `min_size` and `abs_thresh`. 
+Another way to increase performance is the set the `NUM_FUTURES` system variable to control how many futures are used to parallelize jump finding and fixing
+(currently only used by :func:`sotodlib.tod_ops.find_jumps` and :func:`sotodlib.tod_ops.jumpfix_subtract_heights`).
+Remember that at a certain point the overhead from increased parallelization will be greater than the speedup, so use with caution.
+
+Historically the jump finder included options to do multiple passes with recursion and/or iteration.
+This was because in very jumpy data smaller jumps can be hard enough to find smaller jumps near large jumps.
+This was removed for the practical reason that the detectors that this helps with usually have low enough data quality that they should be cut anyways.
+If you would like to use iterative jump finding you can do so with a for loop or similar but remember to jumpfix and gapfill between each itteration.
 
 .. automodule:: sotodlib.tod_ops.jumps
+   :members:
+
+tod_ops.azss
+=============
+
+Function for binning signal by azimuth and fitting it with legendre polynomials in 
+az-vs-signal space. This has been used in ABS and other experiments to get 
+an Azimuth synchronous signal (AzSS) template largely due to polarized ground signal 
+to remove from the data.
+
+.. autofunction:: sotodlib.tod_ops.azss.get_azss
+
+.. autofunction:: sotodlib.tod_ops.azss.subtract_azss
+
+tod_ops.binning
+===============
+
+Function for binning signal along specified axis (i.e. azimuth, time, hwp angle).
+
+.. autofunction:: sotodlib.tod_ops.binning.bin_signal
+
+tod_ops.sub_polyf
+=================
+
+Function for remove low order polynominal component in each subscan.
+
+.. automodule:: sotodlib.tod_ops.sub_polyf
+   :members:
+
+tod_ops.flags
+=============
+
+Module containing functions for generating flags for cuts and tod masking.
+
+.. automodule:: sotodlib.tod_ops.flags
+   :members:
+
+tod_ops.fft_ops
+===============
+
+Module containing functions for FFTs and related operations.
+
+.. automodule:: sotodlib.tod_ops.fft_ops
    :members:

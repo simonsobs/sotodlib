@@ -418,7 +418,7 @@ def read_book(
         wafer_bands (dict):  Dictionary of bands to load for each wafer.
         frame_intervals (str):  The intervals to use for frame boundaries.
         ignore_sim (bool):  If True, do not load toast simulation information
-            in the M_observation.yaml file.  This will emulate loading real data,
+            in the M_index.yaml file.  This will emulate loading real data,
             but the resulting observation cannot be used for reproducing the
             simulated content.
 
@@ -437,7 +437,7 @@ def read_book(
         with open(book_meta_file, "r") as f:
             book_meta = yaml.load(f, Loader=yaml.Loader)
         # print(f"{book_dir}:  {book_meta}")
-        obs_meta_file = os.path.join(book_dir, f"M_observation.yaml")
+        obs_meta_file = os.path.join(book_dir, f"M_index.yaml")
         # print(f"Loading {obs_meta_file}")
         with open(obs_meta_file, "r") as f:
             obs_meta = yaml.load(f, Loader=yaml.Loader)
@@ -447,7 +447,7 @@ def read_book(
         obs_meta = comm.comm_group.bcast(obs_meta, root=0)
 
     # All of the observation metadata is currently duplicated between the observation
-    # frame and the M_observation.yaml file.  However, if that changes we could grab
+    # frame and the M_index.yaml file.  However, if that changes we could grab
     # the observation frame from any of the files here.
 
     book_session = False
@@ -455,8 +455,10 @@ def read_book(
     if not ignore_sim:
         # Attempt to restore the session and site information that was used during
         # the sim.
-        if "toast" in obs_meta:
-            toast_meta = obs_meta["toast"]
+        toast_meta_file = os.path.join(book_dir, f"M_toast.yaml")
+        if os.path.isfile(toast_meta_file):
+            with open(toast_meta_file, "r") as f:
+                toast_meta = yaml.load(f, Loader=yaml.Loader)
             try:
                 tele_uid = toast_meta["telescope_uid"]
             except KeyError:
@@ -528,7 +530,7 @@ def read_book(
                 log.warning_rank(msg, comm=comm.comm_group)
                 book_session = True
         else:
-            msg = f"Cannot load simulation info from book {book_name}, "
+            msg = f"Cannot load simulation info from book '{toast_meta_file}', "
             msg += f"use ignore_sim=True?"
             log.warning_rank(msg, comm=comm.comm_group)
     else:

@@ -91,7 +91,7 @@ def sim_nominal():
     bnd["NET"] = 435.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 LAT baseline
     bnd["A"] = 0.06
@@ -107,7 +107,7 @@ def sim_nominal():
     bnd["NET"] = 281.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.16
     bnd["C"] = 0.79
     bnd["NET_corr"] = 1.02
@@ -121,7 +121,7 @@ def sim_nominal():
     bnd["NET"] = 361.0
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.16
     bnd["C"] = 0.80
     bnd["NET_corr"] = 1.09
@@ -135,7 +135,7 @@ def sim_nominal():
     bnd["NET"] = 352.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.17
     bnd["C"] = 0.78
     bnd["NET_corr"] = 1.01
@@ -149,7 +149,7 @@ def sim_nominal():
     bnd["NET"] = 724.4
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.29
     bnd["C"] = 0.62
     bnd["NET_corr"] = 1.02
@@ -163,7 +163,7 @@ def sim_nominal():
     bnd["NET"] = 1803.9
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.36
     bnd["C"] = 0.53
     bnd["NET_corr"] = 1.00
@@ -177,7 +177,7 @@ def sim_nominal():
     bnd["NET"] = 314.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     # Noise elevation scaling fits from Carlos Sierra
     # These numbers are for V3 SAT baseline
     bnd["A"] = 0.06
@@ -193,7 +193,7 @@ def sim_nominal():
     bnd["NET"] = 225.8
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.19
     bnd["C"] = 0.76
     bnd["NET_corr"] = 1.01
@@ -207,7 +207,7 @@ def sim_nominal():
     bnd["NET"] = 245.1
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.19
     bnd["C"] = 0.76
     bnd["NET_corr"] = 1.04
@@ -221,7 +221,7 @@ def sim_nominal():
     bnd["NET"] = 250.2
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.23
     bnd["C"] = 0.70
     bnd["NET_corr"] = 1.02
@@ -235,7 +235,7 @@ def sim_nominal():
     bnd["NET"] = 540.3
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.35
     bnd["C"] = 0.54
     bnd["NET_corr"] = 1.00
@@ -249,7 +249,7 @@ def sim_nominal():
     bnd["NET"] = 1397.5
     bnd["fknee"] = 50.0
     bnd["fmin"] = 0.01
-    bnd["alpha"] = 3.5
+    bnd["alpha"] = 1.0
     bnd["A"] = 0.42
     bnd["C"] = 0.45
     bnd["NET_corr"] = 1.00
@@ -357,11 +357,25 @@ def sim_nominal():
     # TOAST hexagon layout positions in Xi/Eta coordinates
     ltube_toasthex_pos = [0, 1, 2, 3, 5, 6, 10]
 
-    # "Optics" locations as given in several SO slide decks
+    # "Optics" locations as given in several SO slide decks.  Note this is flipped in
+    # some figures.  See:
+    # https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates
     ltube_optics_pos = [1, 3, 5, 4, 8, 9, 12]
 
     # Cryo team names for these positions
     ltube_cryonames=["c1", "i5", "i6", "i1", "i3", "i4", "o6"]
+
+    lat_ufm_slot = [
+        0,
+        1,
+        2,
+    ]
+
+    lat_ufm_thetarot = [
+        240.0,
+        0.0,
+        120.0,
+    ]
 
     for tindx in range(7):
         nm = ltube_cryonames[tindx]
@@ -370,12 +384,19 @@ def sim_nominal():
         tb["type"] = ttyp
         tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
+        tb["wafer_slot_angle"] = [
+            lat_ufm_thetarot[tw] for tw in range(3)
+        ] # Degrees
+        # The "slot" here is the relative slot (ws0 - ws2) within the tube.
+        tb["wafer_ufm_slot"] = list()
         for tw in range(3):
             off = 0
             for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
+                        props["tube_index"] = tw
                         tb["wafer_slots"].append(w)
+                        tb["wafer_ufm_slot"].append(lat_ufm_slot[tw])
                         woff[ttyp] += 1
                         break
                     off += 1
@@ -385,7 +406,37 @@ def sim_nominal():
         tb["receiver_name"] = ""
         tube_slots[nm] = tb
 
-    stubes = ["SAT_MF", "SAT_MF", "SAT_UHF","SAT_LF"]
+    # These are taken from:
+    # https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates#UFM-Layout.1
+    hex_to_ufm_slot = [
+        0,
+        2,
+        1,
+        6,
+        5,
+        4,
+        3,
+    ]
+    hex_to_ufm_loc = [
+        "AX",
+        "NE",
+        "NO",
+        "NW",
+        "SW",
+        "SO",
+        "SE",
+    ]
+    hex_to_ufm_thetarot = [
+        240.0,
+        0.0,
+        300.0,
+        180.0,
+        120.0,
+        60.0,
+        60.0,
+    ]
+
+    stubes = ["SAT_MF", "SAT_MF", "SAT_UHF", "SAT_LF"]
     for tindx in range(4):
         nm = "ST{:d}".format(tindx+1)
         ttyp = stubes[tindx]
@@ -393,12 +444,22 @@ def sim_nominal():
         tb["type"] = ttyp
         tb["waferspace"] = 128.4
         tb["wafer_slots"] = list()
+        tb["wafer_slot_angle"] = [
+            hex_to_ufm_thetarot[tw] for tw in range(7)
+        ] # Degrees
+        # The "slot" here is the relative slot (ws0 - ws6) within the tube.
+        tb["wafer_ufm_slot"] = list()
+        # The "loc" here is the compass direction name (e.g. NO, NE, SW, etc.)
+        tb["wafer_ufm_loc"] = list()
         for tw in range(7):
             off = 0
             for w, props in cnf["wafer_slots"].items():
                 if props["type"] == ttyp:
                     if off == woff[ttyp]:
+                        props["tube_index"] = tw
                         tb["wafer_slots"].append(w)
+                        tb["wafer_ufm_slot"].append(hex_to_ufm_slot[tw])
+                        tb["wafer_ufm_loc"].append(hex_to_ufm_loc[tw])
                         woff[ttyp] += 1
                         break
                     off += 1

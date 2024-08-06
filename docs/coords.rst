@@ -274,6 +274,12 @@ Planet Mapmaking support
 .. automodule:: sotodlib.coords.planets
    :members:
 
+Mapmaking for HWP data
+----------------------
+
+.. automodule:: sotodlib.coords.demod
+   :members:
+
 Local coordinate systems
 ------------------------
 
@@ -283,5 +289,5 @@ Local coordinate systems
 Focal Plane from Physical Optics
 --------------------------------
 
-.. automodule:: sotodlib.coords.focal_plane
+.. automodule:: sotodlib.coords.optics
    :members:

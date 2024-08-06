@@ -12,7 +12,7 @@ import scipy.signal
 
 from numpy.testing import assert_array_equal, assert_allclose
 
-from sotodlib import core, tod_ops
+from sotodlib import core, tod_ops, sim_flags
 import so3g
 
 from ._helpers import mpi_multi
@@ -20,9 +20,11 @@ from ._helpers import mpi_multi
 
 SAMPLE_FREQ_HZ = 100.
 
-def get_tod(sig_type='trendy'):
-    tod = core.AxisManager(core.LabelAxis('dets', ['a', 'b', 'c']),
-                           core.IndexAxis('samps', 1000))
+def get_tod(sig_type='trendy', ndets=3, nsamps=1000):
+    tod = core.AxisManager(
+        core.LabelAxis('dets', ['det%i' % i for i in range(ndets)]),
+        core.OffsetAxis('samps', nsamps)
+    )
     tod.wrap_new('signal', ('dets', 'samps'), dtype='float32')
     tod.wrap_new('timestamps', ('samps',))[:] = (
         np.arange(tod.samps.count) / SAMPLE_FREQ_HZ)
@@ -39,6 +41,38 @@ def get_tod(sig_type='trendy'):
     else:
         raise RuntimeError(f'sig_type={sig_type}?')
     return tod
+
+
+def get_glitchy_tod(ts, noise_amp=0, ndets=2, npoly=3, poly_coeffs=None):
+    """Returns axis manager to test fill_glitches"""
+    fake_signal = np.zeros((ndets, len(ts)))
+    input_sig = np.zeros((ndets, len(ts)))
+    if poly_coeffs is None:
+        poly_coeffs = np.random.uniform(0.5, 1.6, npoly)*1e-1
+    poly_sig = np.polyval(poly_coeffs, ts-np.mean(ts))
+    for nd in range(ndets):
+        input_sig[nd] = poly_sig
+        fake_signal[nd] = poly_sig
+        noise = np.random.normal(0, noise_amp, size=len(ts))
+        fake_signal[nd] += noise
+
+    dets = ['det%i' % i for i in range(ndets)]
+
+    tod_fake = core.AxisManager(core.LabelAxis('dets', vals=dets),
+                                core.OffsetAxis('samps', count=len(ts)))
+    tod_fake.wrap('timestamps', ts, axis_map=[(0, 'samps')])
+    tod_fake.wrap('signal', np.atleast_2d(fake_signal),
+                  axis_map=[(0, 'dets'), (1, 'samps')])
+    tod_fake.wrap('inputsignal', np.atleast_2d(input_sig),
+                  axis_map=[(0, 'dets'), (1, 'samps')])
+    flgs = core.AxisManager()
+    tod_fake.wrap('flags', flgs)
+    params = {'n_glitches': 10, 'sig_n_glitch': 10, 'h_glitch': 10,
+              'sig_h_glitch': 2}
+    sim_flags.add_random_glitches(tod_fake, params=params, signal='signal',
+                                  flag='glitches', overwrite=False)
+    return tod_fake
+
 
 class FactorsTest(unittest.TestCase):
     def test_inf(self):
@@ -82,6 +116,14 @@ class PcaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             tod_ops.detrend_tod(tod, signal_name='sig1e')
 
+    def test_detrend_inplace(self):
+        tod = get_tod('trendy')
+        sig_id = id(tod.signal)
+
+        for method in ["linear", "mean", "median"]:
+            tod_ops.detrend_tod(tod, method=method, in_place=True)
+            self.assertEqual(sig_id, id(tod.signal))
+
 class GapFillTest(unittest.TestCase):
     def test_basic(self):
         """Test linear fill on simple linear data."""
@@ -121,6 +163,28 @@ class GapFillTest(unittest.TestCase):
                 assert_allclose(tod.signal[1][gap_mask], sentinel)
                 # ... check "extraction" has model values.
                 assert_allclose(ex[1].data, sig[gap_mask], atol=atol)
+    
+    def test_fillglitches(self):
+        """Tests fill glitches wrapper function"""
+        ts = np.arange(0, 1*60, 1/200)
+        aman = get_glitchy_tod(ts, ndets=100)
+        # test poly fill
+        up, mg = False, False
+        glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
+                                                      wrap=mg)
+        self.assertTrue(np.max(np.abs(glitch_filled-aman.inputsignal)) < 1e-3)
+
+        # test pca fill
+        up, mg = True, False
+        glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
+                                                      wrap=mg)
+        print(np.max(np.abs(glitch_filled-aman.inputsignal)))
+
+        # test wrap new field
+        up, mg = False, True
+        glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
+                                                      wrap=mg)
+        self.assertTrue('gap_filled' in aman._assignments)
 
 class FilterTest(unittest.TestCase):
     def test_basic(self):
@@ -131,12 +195,21 @@ class FilterTest(unittest.TestCase):
         f0 = SAMPLE_FREQ_HZ
         fc = f0 / 4
 
+        def wrap_iir(N, wn, fs=f0):
+            b, a = scipy.signal.butter(N, wn, fs=fs)
+            iir_params = core.AxisManager()
+            iir_params.wrap('a', a)
+            iir_params.wrap('b', b)
+            iir_params.wrap('fscale', 1)
+            return iir_params
+
         # A simple IIR filter
-        b, a = scipy.signal.butter(4, fc, fs=f0)
-        iir_params = core.AxisManager()
-        iir_params.wrap('a', a)
-        iir_params.wrap('b', b)
-        iir_params.wrap('fscale', 1)
+        iir_params = wrap_iir(4, fc)
+
+        # Per-wafer IIR filter params (ok if uniform)
+        iir_params_multi = core.AxisManager()
+        iir_params_multi.wrap('wafer1', wrap_iir(4, fc))
+        iir_params_multi.wrap('wafer2', wrap_iir(4, fc))
 
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
@@ -146,8 +219,11 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.gaussian_filter(fc, f_sigma=f0 / 10),
                 tod_ops.filters.gaussian_filter(0, f_sigma=f0 / 10),
                 tod_ops.filters.iir_filter(iir_params=iir_params),
+                tod_ops.filters.iir_filter(iir_params=iir_params_multi),
                 tod_ops.filters.iir_filter(
                     a=iir_params.a, b=iir_params.b, fscale=iir_params.fscale),
+                tod_ops.filters.iir_filter(
+                    iir_params=dict(iir_params._fields.items())),
                 tod_ops.filters.identity_filter(),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
@@ -158,7 +234,14 @@ class FilterTest(unittest.TestCase):
             if not isinstance(filt, tod_ops.filters.identity_filter):
                 self.assertTrue(np.all(sigma1 < sigma0))
 
+        # Confirm fail if not uniform per-wafer
+        iir_params_multi.wrap('wafer3', wrap_iir(6, fc))
+        filt = tod_ops.filters.iir_filter(iir_params=iir_params_multi)
+        with self.assertRaises(ValueError):
+            y = filt(f, tod)
+
         # Check 1d
+        filt = tod_ops.filters.high_pass_butter4(fc)
         sig1f = tod_ops.fourier_filter(tod, filt, signal_name='sig1d',
                                        detrend='linear')
         self.assertEqual(sig1f.shape, tod['sig1d'].shape)
@@ -178,26 +261,48 @@ class JumpfindTest(unittest.TestCase):
 
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
+        # Find jumps without filtering
+        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_nf = jumps_nf.ranges().flatten()
+        
         # Find jumps with TV filtering
-        jumps_tv = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_tv, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
         jumps_tv = jumps_tv.ranges().flatten()
 
         # Find jumps with gaussian filtering
-        jumps_gauss = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps,
-                                               jumpfinder=tod_ops.jumps.jumpfinder_gaussian, min_size=5)
+        jumps_gauss, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
         jumps_gauss = jumps_gauss.ranges().flatten()
 
         # Remove double counted jumps and round to remove uncertainty
+        jumps_nf = np.unique(np.round(jumps_nf, -2))
         jumps_tv = np.unique(np.round(jumps_tv, -2))
         jumps_gauss = np.unique(np.round(jumps_gauss, -2))
 
-        # Check that both methods agree
+        # Check that all methods agree
         self.assertEqual(len(jumps_tv), len(jumps_gauss))
         self.assertTrue(np.all(np.abs(jumps_tv - jumps_gauss) == 0))
+        self.assertEqual(len(jumps_nf), len(jumps_gauss))
+        self.assertTrue(np.all(np.abs(jumps_nf - jumps_gauss) == 0))
 
         # Check that they agree with the input
-        self.assertEqual(len(jump_locs), len(jumps_tv))
-        self.assertTrue(np.all(np.abs(jumps_tv - jump_locs) == 0))
+        self.assertEqual(len(jump_locs), len(jumps_nf))
+        self.assertTrue(np.all(np.abs(jumps_nf - jump_locs) == 0))
+
+        # Check height
+        jumps_msk = np.zeros_like(sig_jumps, dtype=bool)
+        jumps_msk[jumps_nf] = True
+        heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk)
+        heights = heights[heights.nonzero()].ravel()
+        self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
+
+
+class FFTTest(unittest.TestCase):
+    def test_psd(self):
+        tod = get_tod("white")
+        f, Pxx = tod_ops.fft_ops.calc_psd(tod, nperseg=256)
+        self.assertEqual(len(f), 129) # nperseg/2 + 1
+        f, Pxx = tod_ops.fft_ops.calc_psd(tod, freq_spacing=.1)
+        self.assertEqual(np.round(np.median(np.diff(f)), 1), .1)
 
 if __name__ == '__main__':
     unittest.main()

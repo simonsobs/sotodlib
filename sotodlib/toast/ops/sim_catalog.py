@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2023 Simons Observatory.
+# Copyright (c) 2018-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import h5py
@@ -16,12 +16,14 @@ import toml
 import traitlets
 
 import toast
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast import qarray as qa
 from toast.data import Data
-from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
+from toast.traits import (
+    trait_docs, Int, Unicode, Unit, Bool, Quantity, Float, Instance
+)
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger
 from toast.observation import default_values as defaults
 from toast.coordinates import azel_to_radec
 
@@ -70,8 +72,10 @@ class SimCatalog(Operator):
         # the SED can be specified using an arbitrary number of
         # frequency bins.  The SED is interpolated in log-log space to
         # convolve with the detector bandpass
+        # Use either `flux_density_mJy` or `flux_density_Jy` and adjust
+        # the values accordingly
         freqs_ghz = [ 1.0, 1000.0,]
-        flux_density_jy = [ 10.0, 1.0,]
+        flux_density_mJy = [ 10.0, 1.0,]
         # Omitting polarization fraction results in an
         # unpolarized source
         pol_frac = 0.1
@@ -84,7 +88,7 @@ class SimCatalog(Operator):
         # An arbitrary number of SED vectors can be provided but the
         # location of the frequency bins is fixed.  Effective SED is
         # interpolated between the specified epochs.
-        flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,], [ 10.0, 1.0,],]
+        flux_density_Jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,], [ 10.0, 1.0,],]
         # Omitting the times_mjd entry resuls in a static source
         times_mjd = [ 59000.0, 60000.0, 61000.0,]
         # The polarization properties can also vary
@@ -95,7 +99,7 @@ class SimCatalog(Operator):
         ra_deg = 30
         dec_deg = -20
         freqs_ghz = [ 1.0, 1000.0,]
-        flux_density_jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,],]
+        flux_density_Jy = [ [ 10.0, 1.0,], [ 30.0, 10.0,],]
         # Difference between a variable and transient source is
         # simply that the specified epochs do not cover the entire
         # simulation time span.  The operator will not extrapolate
@@ -132,6 +136,10 @@ class SimCatalog(Operator):
     det_data = Unicode(
         defaults.det_data,
         help="Observation detdata key for simulated signal",
+    )
+
+    det_data_units = Unit(
+        defaults.det_data_units, help="Output units if creating detector data"
     )
 
     detector_pointing = Instance(
@@ -219,7 +227,7 @@ class SimCatalog(Operator):
 
             dets = obs.select_local_detectors(detectors)
             exists = obs.detdata.ensure(
-                self.det_data, detectors=dets, create_units=u.K
+                self.det_data, detectors=dets, create_units=self.det_data_units
             )
             det_units = obs.detdata[self.det_data].units
             scale = toast.utils.unit_conversion(u.K, det_units)
@@ -247,7 +255,7 @@ class SimCatalog(Operator):
             # We have already read the single beam file.
             beam_dic = self.beam_props["ALL"]
         else:
-            with h5py(self.beam_file, 'r') as f_t:
+            with h5py.File(self.beam_file, 'r') as f_t:
                 beam_dic = {}
                 beam_dic["data"] = f_t["beam"][:]
                 beam_dic["size"] = [[f_t["beam"].attrs["size"], f_t["beam"].attrs["res"]], [f_t["beam"].attrs["npix"], 1]]
@@ -314,7 +322,7 @@ class SimCatalog(Operator):
 
             det_theta, det_phi, det_psi = qa.to_iso_angles(det_quat)
             det_vec = hp.dir2vec(det_theta, det_phi).T.copy()
-            det_psi_pol = focalplane[det]["pol_ang"] * u.deg
+            det_psi_pol = focalplane[det]["pol_ang"]
 
             if beam is None or not "ALL" in self.beam_props:
                 beam, beam_radius, beam_solid_angle = self._get_beam_map(det)
@@ -348,7 +356,13 @@ class SimCatalog(Operator):
                     left_weights = 1 - right_weights
                     # useful shorthands
                     freq = np.array(source_dict["freqs_ghz"]) * u.GHz
-                    seds = np.array(source_dict["flux_density_jy"]) * u.Jy
+                    if "flux_density_Jy" in source_dict:
+                        seds = np.array(source_dict["flux_density_Jy"]) * u.Jy
+                    elif "flux_density_mJy" in source_dict:
+                        seds = np.array(source_dict["flux_density_mJy"]) * u.mJy
+                    else:
+                        msg = f"No flux density for {source_name}"
+                        raise RuntimeError(msg)
                     # Mean SED used for bandpass convolution
                     wright = np.mean(right_weights)
                     wleft = 1 - wright
@@ -396,7 +410,13 @@ class SimCatalog(Operator):
                         pol_angle = None
                 else:
                     freq = np.array(source_dict["freqs_ghz"]) * u.GHz
-                    sed_mean = np.array(source_dict["flux_density_jy"]) * u.Jy
+                    if "flux_density_Jy" in source_dict:
+                        sed_mean = np.array(source_dict["flux_density_Jy"]) * u.Jy
+                    elif "flux_density_mJy" in source_dict:
+                        sed_mean = np.array(source_dict["flux_density_mJy"]) * u.mJy
+                    else:
+                        msg = f"No flux density for {source_name}"
+                        raise RuntimeError(msg)
                     if "pol_frac" in source_dict:
                         pol_frac = np.array(source_dict["pol_frac"])
                         pol_angle = np.radians(source_dict["pol_angle_deg"])

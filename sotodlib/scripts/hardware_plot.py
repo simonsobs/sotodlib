@@ -45,6 +45,11 @@ def main():
     )
 
     parser.add_argument(
+        "--show_centers", required=False, default=False, action="store_true",
+        help="Add labels with pixel center coordinates."
+    )
+
+    parser.add_argument(
         "--xieta", required=False, default=False, action="store_true",
         help="Plot in Xi / Eta coordinates."
     )
@@ -93,6 +98,7 @@ def main():
         xieta=args.xieta,
         lat_corotate=args.lat_corotate,
         lat_elevation=args.lat_elevation_deg * u.degree,
+        show_centers=args.show_centers
     )
 
     return

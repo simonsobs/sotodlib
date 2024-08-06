@@ -31,11 +31,13 @@ _DEFAULT_CONFIG = {
 
     # Work-arounds ...
     'sample_range_inclusive_hack': False,
+    'require_ordered_detsets': True,
     'tolerate_sample_range_resetting': False,
     'tolerate_missing_ancil': False,
     'tolerate_missing_ancil_timestamps': False,
     'tolerate_timestamps_value_discrepancy': False,
     'tolerate_stray_files': False,
+    'remove_fixed_tones': False, 
     'tolerate_missing_extra_files': False,
 }
     
@@ -348,6 +350,12 @@ class BookScanner:
         file_rows = []
 
         for stream_id, detset in zip(meta['stream_ids'], meta['detsets']):
+            if self.config['require_ordered_detsets']:
+                assert stream_id in detset
+            elif stream_id not in detset:
+                # if detsets don't need to be in the correct order just find the
+                # right one.
+                detset = [x for x in meta['detsets'] if stream_id in x][0]
             detset_rows.append((detset, det_lists[stream_id]))
             for index in range(meta['file_count']):
                 pattern = self.config['stream_file_pattern']
@@ -368,6 +376,8 @@ class BookScanner:
         if db is not None:
             for name, dets in detset_rows:
                 if len(db.get_dets(name)) == 0:
+                    if self.config['remove_fixed_tones']:
+                        dets = [d for d in dets if not "NONE" in d]
                     db.add_detset(name, dets)
             for row in file_rows:
                 db.add_obsfile(**row)

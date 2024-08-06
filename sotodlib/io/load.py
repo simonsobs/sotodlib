@@ -31,7 +31,6 @@ from collections import OrderedDict
 
 from .. import core
 from .load_toast_h5 import load_toast_h5_obs
-from .load_book import load_obs_book
 
 
 # Interim, Oct. 2021.  Wait a year, remove this caution.
@@ -600,7 +599,6 @@ core.OBSLOADER_REGISTRY.update(
     {
         'pipe-s0001': load_observation,
         'toast3-hdf': load_toast_h5_obs,
-        'obs-book': load_obs_book,
         'default': load_observation,
     }
 )

@@ -6,6 +6,7 @@ import logging
 import numpy as np
 
 from . import metadata
+from .util import tag_substr
 from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class Context(odict):
         self['tags'] = self._get_warn_missing('tags', {})
 
         # Perform recursive substitution on strings defined in tags.
-        self._subst(self)
+        tag_substr(self, self['tags'])
 
         # Load basic databases.
         self.reload(load_list)
@@ -102,27 +103,6 @@ class Context(odict):
             return
         logger.info('Calling hook for %s: %s' % (hook_key, hook_func))
         hook_func(self, *args, **kwargs)
-
-    def _subst(self, dest, max_recursion=20):
-        # Do string substitution of all our tags into dest (in-place
-        # if dest is a dict).
-        assert(max_recursion > 0)  # Too deep this dictionary.
-        if isinstance(dest, str):
-            # Keep subbing until it doesn't change any more...
-            new = dest.format(**self['tags'])
-            while dest != new:
-                dest = new
-                new = dest.format(**self['tags'])
-            return dest
-        if isinstance(dest, list):
-            return [self._subst(x) for x in dest]
-        if isinstance(dest, tuple):
-            return (self._subst(x) for x in dest)
-        if isinstance(dest, dict):
-            for k, v in dest.items():
-                dest[k] = self._subst(v, max_recursion-1)
-            return dest
-        return dest
 
     def _get_warn_missing(self, k, default=None):
         if not k in self:
@@ -177,6 +157,7 @@ class Context(odict):
                 detsets=None,
                 meta=None,
                 ignore_missing=None,
+                on_missing=None,
                 free_tags=None,
                 no_signal=None,
                 loader_type=None,
@@ -211,6 +192,10 @@ class Context(odict):
             obs_colon_tags fields for detector restrictions.
           ignore_missing (bool): If True, don't fail when a metadata
             item can't be loaded, just try to proceed without it.
+          on_missing (dict): If a metadata entry has a label that
+            matches a key in this dict, the corresponding value in
+            this dict will override the on_missing setting from the
+            metadata entry.
           no_signal (bool): If True, the .signal will be set to None.
             This is a way to get the axes and pointing info without
             the (large) TOD blob.  Not all loaders may support this.
@@ -279,7 +264,8 @@ class Context(odict):
         """
         meta = self.get_meta(obs_id=obs_id, dets=dets, samples=samples,
                              filename=filename, detsets=detsets, meta=meta,
-                             free_tags=free_tags, ignore_missing=ignore_missing)
+                             free_tags=free_tags, ignore_missing=ignore_missing,
+                             on_missing=on_missing)
 
         # Use the obs_id, dets, and samples from meta.
         obs_id = meta['obs_info']['obs_id']
@@ -296,7 +282,7 @@ class Context(odict):
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets=dets,
                            samples=samples, no_signal=no_signal)
- 
+
         if aman is None:
             return meta
         if meta is not None:
@@ -335,14 +321,16 @@ class Context(odict):
                  free_tags=None,
                  check=False,
                  ignore_missing=False,
+                 on_missing=None,
                  det_info_scan=False):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
 
         The arguments shared with :func:`get_obs` (``obs_id``,
-        ``dets``, ``samples`, ``filename``, ``detsets`, ``meta``,
-        ``free_tags``) have the same meaning as in that function and
-        are treated in the same way.
+        ``dets``, ``samples``, ``filename``, ``detsets``, ``meta``,
+        ``free_tags``, ``ignore_missing``, ``on_missing``) have the
+        same meaning as in that function and are treated in the same
+        way.
 
         Args:
           check (bool): If True, run in a check mode where an attempt
@@ -444,8 +432,7 @@ class Context(odict):
 
         # Incorporate detset info from obsfiledb.
         detsets_info = self.obsfiledb.get_det_table(obs_id)
-        det_info = metadata.merge_det_info(det_info, detsets_info,
-                                           ['readout_id'])
+        det_info = metadata.merge_det_info(det_info, detsets_info)
 
         # Make the request for SuperLoader
         request = {'obs:obs_id': obs_id}
@@ -472,7 +459,8 @@ class Context(odict):
         metadata_list = self._get_warn_missing('metadata', [])
         meta = self.loader.load(metadata_list, request, det_info=det_info, check=check,
                                 free_tags=free_tags, free_tag_fields=free_tag_fields,
-                                det_info_scan=det_info_scan, ignore_missing=ignore_missing)
+                                det_info_scan=det_info_scan, ignore_missing=ignore_missing,
+                                on_missing=on_missing)
         if check:
             return meta
 
@@ -493,7 +481,8 @@ class Context(odict):
                      filename=None,
                      detsets=None,
                      meta=None,
-                     free_tags=None):
+                     free_tags=None,
+                     on_missing=None):
         """Pass all arguments to :func:`get_meta(det_info_scan=True)`, and
         then return only the det_info, as a ResultSet.
 
@@ -501,7 +490,7 @@ class Context(odict):
         if meta is None:
             meta = self.get_meta(obs_id=obs_id, dets=dets, samples=samples,
                                  filename=filename, detsets=detsets, free_tags=free_tags,
-                                 det_info_scan=True)
+                                 on_missing=on_missing, det_info_scan=True)
         # Convert
         def _unpack(aman):
             items = []

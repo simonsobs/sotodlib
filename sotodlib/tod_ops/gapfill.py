@@ -1,6 +1,9 @@
 import numpy as np
 import so3g
+from . import pca
+import logging
 
+logger = logging.getLogger(__name__)
 
 class Extract:
     """Container for storage of sparse sub-segments of a vector.  This
@@ -380,3 +383,80 @@ def get_contaminated_ranges(good_flags, bad_flags):
                 rs.add_interval(int(i0), int(i1))
     return contam
 
+
+def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
+                  glitch_flags=None, wrap=True):
+    """
+    This function fills pre-computed glitches provided by the caller in
+    time-ordered data using either a polynomial (default) or PCA-based
+    approach. Wraps the other functions in the ``tod_ops.gapfill`` module.
+
+    Args
+    -----
+    aman : AxisManager
+        AxisManager to fill glitches in
+    nbuf : int
+        Number of buffer samples to use in polynomial gap filling.
+    use_pca : bool
+        Whether or not to fill glitches using pca model. Default is False
+    modes : int
+        Number of modes in the pca to use if pca=True. Default is 3.
+    signal : ndarray or None
+        Array of data to fill glitches in. If None then uses ``aman.signal``.
+        Default is None.
+    glitch_flags : RangesMatrix or None
+        RangesMatrix containing flags to use for gap filling. If None then
+        uses ``aman.flags.glitches``.
+    wrap : bool or str
+        If True wraps new field called ``gap_filled``, if False returns the
+        gap filled array, if a string wraps new field with provided name.
+
+    Returns
+    -------
+    signal : ndarray
+        Returns ndarray with gaps filled from input signal.
+    """
+    # Process Args
+    if signal is None:
+        sig = np.copy(aman.signal)
+    else:
+        sig = np.copy(signal)
+    
+    if glitch_flags is None:
+        glitch_flags = aman.flags.glitches
+
+    # Polyfill
+    gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
+                        signal=np.float32(sig))
+    sig = gaps.swap(aman, signal=sig)
+    
+    #PCA Fill
+    if use_pca:
+        if modes > aman.dets.count:
+            logger.warning(f'modes = {modes} > number of detectors = ' +
+                           f'{aman.dets.count}, setting modes = number of ' +
+                           'detectors')
+            modes = aman.dets.count
+        # fill with poly fill before PCA
+        gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
+                            signal=np.float32(sig))
+        sig = gaps.swap(aman, signal=sig)
+        # PCA fill
+        mod = pca.get_pca_model(tod=aman, n_modes=modes,
+                                signal=sig)
+        gfill = get_gap_model(tod=aman, model=mod, flags=glitch_flags)
+        sig = gfill.swap(aman, signal=sig)
+    
+    # Wrap and Return
+    if isinstance(wrap, str):
+        if wrap in aman._assignments:
+            aman.move(wrap, None)
+        aman.wrap(wrap, sig, [(0, 'dets'), (1, 'samps')])
+        return sig
+    elif wrap:
+        if 'gap_filled' in aman._assignments:
+            aman.move('gap_filled', None)
+        aman.wrap('gap_filled', sig, [(0, 'dets'), (1, 'samps')])
+        return sig
+    else:
+        return sig

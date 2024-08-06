@@ -1,5 +1,27 @@
 import numpy as np
 
+def tag_substr(dest, tags, max_recursion=20):
+    """ Do string substitution of all our tags into dest (in-place
+    if dest is a dict). Used for context and data packaging tag replacements
+    """
+    assert(max_recursion > 0)  # Too deep this dictionary.
+    if isinstance(dest, str):
+        # Keep subbing until it doesn't change any more...
+        new = dest.format(**tags)
+        while dest != new:
+            dest = new
+            new = dest.format(**tags)
+        return dest
+    if isinstance(dest, list):
+        return [tag_substr(x,tags) for x in dest]
+    if isinstance(dest, tuple):
+        return (tag_substr(x,tags) for x in dest)
+    if isinstance(dest, dict):
+        for k, v in dest.items():
+            dest[k] = tag_substr(v,tags, max_recursion-1)
+        return dest
+    return dest
+
 def get_coindices(v0, v1, check_unique=False):
     """Given vectors v0 and v1, each of which contains no duplicate
     values, determine the elements that are found in both vectors.

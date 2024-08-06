@@ -55,6 +55,7 @@ class Monitor:
         return cls(
             host = configs["host"],
             port = configs["port"],
+            database = configs["database"],
             username = configs["username"],
             password = configs["password"],
             path = configs["path"],

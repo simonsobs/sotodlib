@@ -17,6 +17,7 @@ toast.observation.set_default_values(
         "hwp_angle": "hwp_angle",
         "azimuth": "azimuth",
         "elevation": "elevation",
+        "roll": "roll",
         "boresight_azel": "boresight_azel",
         "boresight_radec": "boresight_radec",
         "position": "position",

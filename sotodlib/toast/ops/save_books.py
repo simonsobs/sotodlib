@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2022 Simons Observatory.
+# Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -8,10 +8,10 @@ import numpy as np
 import traitlets
 from astropy import units as u
 
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.traits import trait_docs, Int, Unicode, Bool, Quantity, Float, Instance
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger, Timer
+from toast.utils import Environment, Logger
 from toast.observation import default_values as defaults
 
 from ..io import write_book

@@ -77,6 +77,13 @@ class ManifestScheme:
     def __init__(self):
         self.cols = []
 
+    def new_db(self, **kwargs):
+        """Use this scheme to instantiate a ManifestDb, and return it.  Aall
+        kwargs are passed to ManifestDb constructor.
+
+        """
+        return ManifestDb(scheme=self, **kwargs)
+
     # Methods for constructing table.
 
     def add_exact_match(self, name, dtype=DEFAULT_DTYPE):
@@ -489,7 +496,7 @@ class ManifestDb:
             raise ValueError('Matched multiple rows with index data: %s' % rows)
         return rows[0]
 
-    def inspect(self, params={}, strict=True):
+    def inspect(self, params={}, strict=True, prefix=None):
         """Given (partial) Index Data and Endpoint Data, find and return the
         complete matching records.
 
@@ -498,6 +505,7 @@ class ManifestDb:
           strict (bool): if True, a ValueError will be raised if
             params contains any keys that aren't recognized as Index
             or Endpoint data.
+          prefix (str or None): As in .match().
 
         Returns:
           A list of results matching the query.  Each result in the
@@ -522,6 +530,9 @@ class ManifestDb:
                   'from map join files on map.file_id=files.id %s' % where_str, p)
         rows = c.fetchall()
         rows = [self.scheme._format_row(dict(zip(rp, r))) for r in rows]
+        if prefix is not None:
+            for r in rows:
+                r['filename'] = os.path.join(prefix, r['filename'])
         if filename:
             # manual filter...
             rows = [r for r in rows if r['filename'] == filename]
@@ -676,14 +687,16 @@ def get_parser(parser=None):
         endpoint fields.  (This mode is chosen by default.)
         """)
 
-    # "table"
+    # "entries"
     p = cmdsubp.add_parser(
-        'table', usage="""Syntax:
+        'entries', help=
+        "Show all entries in the database.",
+        usage="""Syntax:
 
     %(prog)s
 
         This will print every row of the metadata map table,
-        including the filename.
+        including the filename, and with two header rows.
         """)
 
 
@@ -823,7 +836,7 @@ def main(args=None):
 
         print()
 
-    elif args.mode == 'table':
+    elif args.mode == 'entries':
         # Print the table of entries.
         schema = db.scheme.as_resultset()
         keys = []
@@ -938,3 +951,6 @@ def main(args=None):
             db.conn.commit()
             c.execute('vacuum')
             db.to_file(args.output_db)
+
+    else:
+        print(f'Sorry, {args.mode} not implemented.')

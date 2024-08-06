@@ -13,6 +13,7 @@ TABLE_DEFS = {
     'tags': [
         "`obs_id` varchar(256)",
         "`tag` varchar(256)",
+        "CONSTRAINT one_tag UNIQUE (`obs_id`, `tag`)",
     ],
 }
 
@@ -247,7 +248,8 @@ class ObsDb(object):
             raise ValueError('Too many rows...')  # or integrity error...
         output = results[0]
         if tags:
-            c = self.conn.execute('select tag from tags where obs_id=?', (obs_id,))
+            # "distinct" should not be needed given uniqueness constraint.
+            c = self.conn.execute('select distinct tag from tags where obs_id=?', (obs_id,))
             output['tags'] = [r[0] for r in c]
         return output
 
@@ -308,7 +310,7 @@ class ObsDb(object):
                 else:
                     join_type = 'join'
                     extra_fields.append(f'1 as {t}')
-                joins += (f' {join_type} (select obs_id from tags where tag="{t}") as tt{tagi} on '
+                joins += (f' {join_type} (select distinct obs_id from tags where tag="{t}") as tt{tagi} on '
                           f'obs.obs_id = tt{tagi}.obs_id')
         extra_fields = ''.join([','+f for f in extra_fields])
         q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)

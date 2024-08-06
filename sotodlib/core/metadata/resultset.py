@@ -27,8 +27,15 @@ class ResultSet(object):
       >>> rset[10]
       {'base.array_code': 'LF1', 'base.freq_code': 'f027'}
 
-    (You can also access the raw row data in .rows, which is a simple
-    list of tuples.)
+    Note that the array or dict returned by indexing the ResultSet
+    present copies of the data, not changing those objects will not
+    update the original ResultSet.
+
+    You can also access the raw row data in .rows, which is a simple
+    list of tuples.  If you want to edit the data in a ResultSet,
+    modify those data rows directly, or else use ``.asarray()`` to get
+    a numpy array, modify the result, and create and a new ResultSet
+    from that using the ``.from_friend`` constructor.
 
     You can get a structured numpy array using:
 
@@ -67,11 +74,21 @@ class ResultSet(object):
 
     @classmethod
     def from_friend(cls, source):
+        """Return a new ResultSet populated with data from source.
+
+        If source is a ResultSet, a copy is made.  If source is a
+        numpy structured array, the ResultSet is constructed based on
+        the dtype names and rows of source.
+
+        Otherwise, a TypeError is raised.
+
+        """
         if isinstance(source, np.ndarray):
-            keys = source.dtype.names # structured array?
+            keys = source.dtype.names  # structured array?
             return cls(keys, list(source))
         if isinstance(source, ResultSet):
             return cls(source.keys, source.rows)
+        raise TypeError(f"No implementation to construct {cls} from {source.__class__}.")
 
     def copy(self):
         return self.__class__(self.keys, self.rows)

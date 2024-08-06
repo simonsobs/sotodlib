@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2023 Simons Observatory.
+# Copyright (c) 2019-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -16,6 +16,7 @@ from toast.utils import Logger, name_UID
 from ..core.hardware import Hardware, build_readout_id, parse_readout_id
 from ..sim_hardware import sim_nominal
 from .sim_focalplane import sim_telescope_detectors
+from so3g.proj.coords import SITES
 
 
 FOCALPLANE_RADII = {
@@ -85,9 +86,10 @@ class SOSite(GroundSite):
     def __init__(
         self,
         name="ATACAMA",
-        lat=-22.958064 * u.degree,
-        lon=-67.786222 * u.degree,
-        alt=5200 * u.meter,
+        lat=SITES["so"].lat * u.degree,
+        lon=SITES["so"].lon * u.degree,
+        alt=SITES["so"].elev * u.meter,
+        weather="atacama",
         **kwargs,
     ):
         super().__init__(
@@ -105,6 +107,29 @@ class SOFocalplane(Focalplane):
     This can be constructed in several ways:
         - From a file while applying selection criteria.
         - From an existing (pre-selected) Hardware instance.
+        - From a nominal sim on the fly with selections.
+
+    Note that to support serialization, the simulated hardware dictionary elements
+    have values in standard units.  When constructing our focalplane table we restore
+    those units and build Quantities.
+
+    Args:
+        hw (Hardware):  If specified, construct from a Hardware object in memory.
+        hwfile (str):  If specified, load this hardware model from disk.
+        det_info_file (str):  If simulating a Hardware model, optionally specify
+            a det_info format file to load
+        det_info_version (str):  The version of the det_info file format.
+        telescope (str):  If not None, select only detectors from this telescope.
+        sample_rate (Quantity):  Use this sample rate for all detectors.
+        bands (str):  Comma separated string of bands to use.
+        wafer_slots (str):  Comma separated string of wafers to use.
+        tube_slots (str):  Comma separated string of tubes to use.
+        thinfp (int):  The factor by which to reduce the number of detectors.
+        creation_time (float):  Optional timestamp to use when building readout_id.
+        comm (MPI.Comm):  Optional MPI communicator.
+        apply_net_corr (bool):  Degrade NETs according to the correlation factors.
+            If False, the correlation factors are just recorded in the instrument
+            model.
 
     """
 
@@ -122,6 +147,7 @@ class SOFocalplane(Focalplane):
         thinfp=None,
         creation_time=None,
         comm=None,
+        apply_net_corr=True,
     ):
         log = Logger.get()
         meta = dict()
@@ -222,6 +248,9 @@ class SOFocalplane(Focalplane):
             pol_angs,
             pol_angs_wafer,
             pol_orientations_wafer,
+            gamma,
+            wafer_xs,
+            wafer_ys,
             card_slots,
             channels,
             AMCs,
@@ -231,6 +260,9 @@ class SOFocalplane(Focalplane):
             mux_positions,
             tele_wf_band,
         ) = (
+            [],
+            [],
+            [],
             [],
             [],
             [],
@@ -279,9 +311,12 @@ class SOFocalplane(Focalplane):
             )
             fwhms.append(float(det_data["fwhm"]) * u.arcmin)
             pols.append(det_data["pol"])
-            pol_angs.append(det_data["pol_ang"])
-            pol_angs_wafer.append(det_data["pol_ang_wafer"])
-            pol_orientations_wafer.append(det_data["pol_orientation_wafer"])
+            pol_angs.append(det_data["pol_ang"] * u.degree)
+            pol_angs_wafer.append(det_data["pol_ang_wafer"] * u.degree)
+            pol_orientations_wafer.append(det_data["pol_orientation_wafer"] * u.degree)
+            gamma.append(det_data["pol_ang"] * u.degree)
+            wafer_xs.append(det_data["wafer_x_mm"] * u.mm)
+            wafer_ys.append(det_data["wafer_y_mm"] * u.mm)
             card_slots.append(det_data["card_slot"])
             channels.append(det_data["channel"])
             AMCs.append(det_data["AMC"])
@@ -308,17 +343,19 @@ class SOFocalplane(Focalplane):
             )
             # Get noise parameters.  If detector-specific entries are
             # absent, use band averages
-            nets.append(
-                get_par_float(det_data, "NET", band_data["NET"])
-                * 1.0e-6
-                * u.K
-                * u.s**0.5
+            net_corr = get_par_float(
+                det_data, "NET_corr", band_data["NET_corr"]
             )
-            net_corrs.append(get_par_float(det_data, "NET_corr", band_data["NET_corr"]))
+            net = get_par_float(det_data, "NET", band_data["NET"]) \
+                * 1.0e-6 * u.K * u.s**0.5
+            if apply_net_corr:
+                net *= net_corr
+                net_corr = 1.0
+            nets.append(net)
+            net_corrs.append(net_corr)
             fknees.append(get_par_float(det_data, "fknee", band_data["fknee"]) * u.mHz)
             fmins.append(get_par_float(det_data, "fmin", band_data["fmin"]) * u.mHz)
-            # alphas.append(get_par(det_data, "alpha", band_data["alpha"]))
-            alphas.append(1)  # hardwire a sensible number. 3.5 is not realistic.
+            alphas.append(get_par_float(det_data, "alpha", band_data["alpha"]))
             As.append(get_par_float(det_data, "A", band_data["A"]))
             Cs.append(get_par_float(det_data, "C", band_data["C"]))
             # bandpass
@@ -356,6 +393,9 @@ class SOFocalplane(Focalplane):
                 pol_angs,
                 pol_angs_wafer,
                 pol_orientations_wafer,
+                gamma,
+                wafer_xs,
+                wafer_ys,
                 channels,
                 AMCs,
                 biases,
@@ -388,6 +428,9 @@ class SOFocalplane(Focalplane):
                 "pol_ang",
                 "pol_ang_wafer",
                 "pol_orientation_wafer",
+                "gamma",
+                "wafer_x",
+                "wafer_y",
                 "channel",
                 "AMC",
                 "bias",

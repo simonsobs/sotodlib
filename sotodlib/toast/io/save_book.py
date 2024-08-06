@@ -558,6 +558,17 @@ def write_book(
         frame_intervals=frame_intervals,
     )
 
+    # Collect the total sample ranges of all frames in each
+    # file, for writing into the index later.
+    local_sample_ranges = [
+        int(ancil_frames[0]["sample_range"][0]),
+        int(ancil_frames[-1]["sample_range"][1]),
+    ]
+    if comm.comm_group is None:
+        file_sample_ranges = [local_sample_ranges]
+    else:
+        file_sample_ranges = comm.comm_group.gather(local_sample_ranges, root=0)
+
     # Write ancillary frames
     froot = os.path.join(book_path, "A_ancil")
     write_frames = [obs_frame]
@@ -629,27 +640,44 @@ def write_book(
                         v.save_hdf5(f.handle, ob)
 
     # Write out observation metadata as a yaml file, in addition to the observation
-    # frame.
+    # frame.  NOTE:  we copy what is done in the BookBinder class.
     if comm.group_rank == 0:
         obs_meta = dict()
         obs_meta["obs_id"] = book_name
+        obs_meta["type"] = "obs"
+        obs_meta["book_id"] = book_name
         obs_meta["observatory"] = "Simons Observatory"
         obs_meta["telescope"] = obs_props["telescope_name"]
         obs_meta["stream_ids"] = [str(x) for x in all_wafers.keys()]
+        obs_meta["detsets"] = obs_meta["stream_ids"]
+        obs_meta["start_time"] = timestamp_start
+        obs_meta["stop_time"] = timestamp_end
         obs_meta["timestamp_start"] = format_book_time(
             datetime.fromtimestamp(timestamp_start).astimezone(timezone.utc)
         )
         obs_meta["timestamp_end"] = format_book_time(
             datetime.fromtimestamp(timestamp_end).astimezone(timezone.utc)
         )
-        obs_meta["toast"] = obs_props
-        obs_meta_file = os.path.join(book_path, f"M_observation.yaml")
+        obs_meta["sample_ranges"] = file_sample_ranges
+        obs_meta["n_samples"] = file_sample_ranges[-1][1]
+        obs_meta["tags"] = []
+        obs_meta_file = os.path.join(book_path, f"M_index.yaml")
         try:
             obs_meta_content = yaml.dump(obs_meta, default_flow_style=False)
             with open(obs_meta_file, "w") as f:
                 f.write(obs_meta_content)
         except yaml.YAMLError:
-            log.error("Cannot write M_observation.yaml")
+            log.error("Cannot write M_index.yaml")
+            raise
+
+        # Write out toast properties
+        toast_meta_file = os.path.join(book_path, f"M_toast.yaml")
+        try:
+            toast_meta_content = yaml.dump(obs_props, default_flow_style=False)
+            with open(toast_meta_file, "w") as f:
+                f.write(toast_meta_content)
+        except yaml.YAMLError:
+            log.error("Cannot write M_toast.yaml")
             raise
 
         # Write out book metadata last- so we can use the existence of this file as

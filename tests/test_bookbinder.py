@@ -85,7 +85,9 @@ class BookbinderTest(unittest.TestCase):
         obsid = 'obsid'
         bookid = 'bookid'
         readout_ids = [str(i) for i in range(len(in_data))]
-        ssp = bb.SmurfStreamProcessor(obsid, l2_files, bookid, readout_ids)
+        ssp = bb.SmurfStreamProcessor(
+            obsid, l2_files, bookid, readout_ids, allow_bad_timing=True,
+        )
         ssp.preprocess()
         ssp.bind(self.l3_dir, ts, frame_idxs, file_idxs)
 

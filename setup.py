@@ -24,15 +24,14 @@ setup_opts["entry_points"] = {
         "so_hardware_info = sotodlib.scripts.hardware_info:main",
         "so-metadata = sotodlib.core.metadata.cli:main",
         "so-site-pipeline = sotodlib.site_pipeline.cli:main",
+        "so-data-package = sotodlib.io.imprinter_cli:main",
+        "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
+        "toast_so_map = sotodlib.toast.scripts.so_map:cli",
+        "toast_so_transfer = sotodlib.toast.scripts.so_transfer:cli",
+        "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
+        "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
 }
-
-scripts = [
-    "workflows/toast_so_sim.py",
-    "workflows/toast_so_map.py",
-    "workflows/toast_so_convert.py",
-    "workflows/get_wafer_offset.py",
-]
 
 setup_opts["name"] = "sotodlib"
 setup_opts["provides"] = "sotodlib"
@@ -44,7 +43,6 @@ setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
 setup_opts["requires"] = ["Python (>3.7.0)", ]
-setup_opts["scripts"] = scripts
 setup_opts["package_data"] = {
     "sotodlib": [
         "toast/ops/data/*"
@@ -52,7 +50,7 @@ setup_opts["package_data"] = {
 }
 setup_opts["include_package_data"] = True
 setup_opts["install_requires"] = [
-    'numpy',
+    'numpy<2',
     'scipy',
     'matplotlib',
     'quaternionarray',
@@ -63,11 +61,13 @@ setup_opts["install_requires"] = [
     'pixell',
     'scikit-image',
     'pyfftw',
-    'typer',
+    'numdifftools',
+    'psycopg2-binary',
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
+        "venn"
     ],
     "tests": [
         "socs",

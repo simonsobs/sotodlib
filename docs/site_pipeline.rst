@@ -76,6 +76,54 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb
+------------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.update_obsdb` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb
+   :func: get_parser
+   :prog: update-obsdb
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb
+   :members:
+   :undoc-members:
+
+update-smurf-caldbs
+-----------------------
+This update script is used to add detset and calibration metadata to manifest
+dbs
+
+Module Docs
+`````````````````````````
+.. automodule:: sotodlib.site_pipeline.update_smurf_caldbs
+   :no-members:
+  
+The calibration info described below is used to populate the calibration db.
+For more information on how calibration info is computed in sodetlib, checkout
+the following docs and source code:
+
+- `Bias step docs <https://sodetlib.readthedocs.io/en/latest/operations/bias_steps.html>`_
+- `IV docs <https://sodetlib.readthedocs.io/en/latest/operations/iv.html>`_
+- `sodetlib source code <https://github.com/simonsobs/sodetlib>`_
+
+.. autoclass:: sotodlib.site_pipeline.update_smurf_caldbs.CalInfo
+   :no-members:
+
+Command line arguments
+`````````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.update_smurf_caldbs
+   :func: get_parser
+   :prog: update_smurf_caldbs.py
 
 Detector and Readout ID Mapping
 -------------------------------
@@ -87,13 +135,32 @@ resulting ManifestDbs should work for both level 2 and level 3 SMuRf data.
 
 make_det_info_wafer
 ```````````````````
-This script uses the DetMap software package to build detector IDs for a set of
-UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
-saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
-with a correctly formatted context file and a readout to detector id mapping.
-The detector info mapping created by this script will be stable as long as the
-same UFMs are used in the same optics tube positions, meaning it only needs to
-be re-made if the physical hardware setup changes. 
+
+This script uses basic array construction inputs to assemble a table
+of information about a set of UFMs and save it toan HDF5 file.  The
+resulting datasets may be used to populate ``det_info.wafer``, once
+the ``det_id`` of the readout channels is known.  The detector info
+mapping created by this script is re-usable as long as the UFM
+continues to be associated with the same ``stream_id``.
+
+Here is a basic configuration file::
+
+  output_dir: ./satp3_wafer_info_240305
+  array_info_dir: "/home/pipeline/site-pipeline-configs/shared/detmapping/design/"
+
+  stream_ids:
+    - ufm_mv5
+    - ufm_mv12
+    - ufm_mv17
+    - ufm_mv23
+    - ufm_mv27
+    - ufm_mv33
+    - ufm_mv35
+
+
+The output database ``wafer_info.sqlite`` and HDF5 file
+``wafer_info.h5`` are written to the ``output_dir``, which is created
+if it does not exist.
 
 make_read_det_match
 ```````````````````
@@ -165,6 +232,84 @@ entries mater.
           det_info: true
           multi: true
 
+update_det_match
+------------------
+
+The ``update_det_match`` script will run the ``det_match`` module on any new
+detsets with available calibration metadata. It loads smurf and resonator
+information from the AxisManager metadata, and matches resonators against a
+solution file in the site-pipeline-configs.
+
+To run, this script requires a config file described below. If run without the
+``--all`` flag, it will only run one detset at a time.  If run with the
+``--all`` flag, will continue running until all detsets have been mantched.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_det_match
+   :func: make_parser
+
+Generated results
+```````````````````
+This generates the following data in the specified ``results`` directory:
+
+ - A match file, with the path ``<results_path>/matches/<detset>.h5`` is written
+   for every detset.
+ - The file ``<results_path>/assignment.sqlite`` is a manifestdb, that contains
+   the mapping from readout-id to detector-id. This is compatible with
+   the ``det_info_wafer`` and ``focal_plane`` metadata.
+ - The ``<results_path>/det_match.sqlite`` file, that contains the
+   ``det_match.Resonator`` data from the match for each resonator.
+
+Configuration
+`````````````````
+This script takes in a config yaml file, which corresponds directly to the
+``UpdateDetMatchesConfig`` class (see docs below).
+
+For example, this can run simply with the config file:
+
+.. code-block:: yaml
+
+  results_path: /path/to/results
+  context_path: /path/to/context.yaml
+
+Note that by default, this will run a scan of frequency offsets between the
+solution and the resonator metadata to find the freq-offset with the best
+match. To disable this, you can run a config file like the following:
+
+.. code-block:: yaml
+
+  results_path: /path/to/results
+  context_path: /path/to/context.yaml
+  freq_offset_range_args: None
+
+Below is a more complex config used for SATp1 matching:
+
+.. code-block:: yaml
+
+  results_path: /so/metadata/satp1/manifests/det_match/satp1_det_match_240220m
+  context_path: /so/metadata/satp1/contexts/smurf_detcal.yaml
+  show_pb: False
+  freq_offset_range_args: NULL
+  apply_solution_pointing: False
+  solution_type: resonator_set
+  resonator_set_dir: /so/metadata/satp1/ancillary/detmatch_solutions/satp1_detmatch_solutions_240219r1
+  match_pars:
+    freq_width: 0.2
+
+Below is the full docs of the configuration class.
+
+.. autoclass:: sotodlib.site_pipeline.update_det_match.UpdateDetMatchesConfig
+
+update-hkdb
+----------------
+
+The update_hkdb site-pipeline script is used to scan through housekeeping files,
+and update the index database. Configuration for this script must be passed in
+through a config file, with fields that map to the HkConfig dataclass, described
+below:
+
+.. autoclass:: sotodlib.io.hkdb.HkConfig
+  :no-index:
 
 analyze-bright-ptsrc
 --------------------
@@ -176,6 +321,198 @@ including amplitude and FWHM.
 .. argparse::
    :module: sotodlib.site_pipeline.analyze_bright_ptsrc
    :func: get_parser
+
+finalize-focal-plane
+--------------------
+
+This element produces a finalized focal plane for a given array.
+It consumes the output of pointing fits (ie from ``analyze-bright-ptsrc``)
+with a detector map to combine results across multiple tuning epochs.
+It works by averaging the provided ``analyze-bright-ptsrc`` results using weights,
+determined by how well each fit matches the nominal template, to produce a final focal plane.
+An affine transformation that lines up the template focal plane computed with physical optics
+is then computed to create a "noise-free" focal plane.
+
+This element also computes the receiver and optics tube "common mode" transformation.
+The optics tube common mode is how all of the arrays in one optics tube move together,
+and the receiver common mode is how all of the optics tubes move together.
+In the case of the SATs where there is only one tube, the optics tube common mode
+is always taken to be the identity.
+Given the smaller number of data points, these common modes are simple rigid transforms
+(shift and rotation) rather than a full affine transform.
+
+``finalize_focal_plane`` can optionally be run in a "per obs" mode where no averaging is done,
+in this case the output database is indexed by ``obs_id``.
+
+
+.. automodule:: sotodlib.site_pipeline.finalize_focal_plane
+   :members:
+   :undoc-members:
+
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # There are two options to get the data in
+  # One is to pass in ResultSets like so:
+  resultsets:
+    obs_1: # obs_id associated with this data
+      # There are 3 possible ResultSets you can pass
+      # pointing is mandatory
+      pointing:
+        - "PATH/TO/FITS.h5" # The path to the ResultSet
+        - "focalplane" # The name of the ResultSet in the h5 file
+      # polarization and detmap are optional
+      polarization :
+        - "PATH/TO/FITS.h5"
+        - "polarization"
+      detmap:
+        - "PATH/TO/DETMAP.h5"
+        - "merged"
+    obs_2: ...
+  # When using results sets you also need to pass in additional metadata like
+  stream_id: "ufm_mv29"
+  wafer_slot: "ws0"
+  telescope_flavor: "SAT"
+  tube_slot: "st1"
+  # Note that in the ResultSets case only single wafer fits are supported
+
+  # You can also load the data in with context like so
+  context:
+    path: PATH/TO/CONTEXT
+    # There are two pointing fields in case we have both a tod and map fit for one obs_id
+    # This may change down the line
+    map_pointing: "map_pointing" # The name of the map based pointing metadata field
+    tod_pointing: "tod_pointing" # The name of the TOD based pointing metadata field
+    polarization: "polarization" # The name of the polarization metadata field (optional)
+    # There are two ways to specitfy the observation, obs_id and query
+    # Both can be provided 
+    obs_id: [obs_1, obs_2] # Pass in the obs_id directly
+    query: QUERY # Pass in a query
+    # You can pass in detector restrictions here as well
+    dets: {} # Should be a dict you would pass to the dets areg of ctx.get_meta
+  
+  per_obs: False # Set to true if you want to run in per obs mode
+  weight_factor: 1000 # Weights are computed with sigma=template_spacing/weight_factor.
+                      # This is an advanced feature and should be used with caution.
+
+  # There are a few ways to pass in a template as well
+  template: "PATH/TO/TEMPLATE.h5" # As a h5 file with a ResultSet named the same as the UFM
+  gen_template: False # Or by setting this true to generate the template on the fly
+
+  # You also will need to provide some information for using the optics code
+  pipeline_config_dir : "PATH/TO/PIPELINE/CONFIGS" # If not provided the sysvar $PIPELINE_CONFIG_DIR is used
+  zemax_path: "PATH/TO/ID9_checked_trace_data.npz" # Only needed for the LAT
+  
+  # Plotting info
+  plot: True # Set to output plot
+  plot_dir: "./plots" # Where to save plots
+  
+  # Output info
+  outdir: "."
+  append: "test" # Will have a "_" before it.
+  
+
+Output file format
+``````````````````
+
+The results of ``finalize_focal_plane`` are stored in an HDF5 file containing
+multiple datasets. The datasets are made using the ``ResultSet`` class and can be
+loaded back as such but metadata stored as attributes require ``h5py``.
+
+The datasets and attributes are organized by tube and array as seem below:
+
+.. code-block:: text
+
+   focal_plane.h5
+   - (attr) center # The nominal center of the receive on sky
+   - (attr) center_transformed # The center with the common mode transform applied
+   - (group) transform # The receiver common mode
+   - (group) tube1 # The first tube (ie st1, oti1, etc.)
+     - (attr) center # The nominal center of the tube on sky
+     - (attr) center_transformed # The center with the common mode transform applied
+     - (group) transform # The tube common mode
+     - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
+       - (attr) template_centers # The nominal center for this array
+       - (attr) fit_centers # The fit center for this array
+       - (group) transform # The transform for the ufm, includes parameters with and without the common mode
+       - (dataset) focal_plane # The focal_plane with just fit positions
+         - (attr) measured_gamma # If gamma was actually measured
+       - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
+     - (group) ufm_2
+       ...
+     ...
+
+
+The ``focal_plane`` dataset contains four columns:
+
+- ``dets:det_id``: The detector id
+- ``xi``: The transformed template xi in radians
+- ``eta``: The transformed template eta in radians
+- ``gamma``: The transformed template gamma in radians.
+
+If no polarization angles are provided them ``gamma`` will be populated
+with the nominal values from physical optics.
+There is an attribute called ``measured_gamma`` that will be ``False`` in this case.
+
+The ``focal_plane_full`` dataset contains nine columns: 
+
+- ``dets:det_id``: The detector id
+- ``xi_t``: The transformed template xi in radians
+- ``eta_t``: The transformed template eta in radians
+- ``gamma_t``: The transformed template gamma in radians.
+- ``xi_m``: The measured xi in radians
+- ``eta_m``: The measured eta in radians
+- ``gamma_m``: The measured gamma in radians.
+- ``weights``: The average weights of the measurements for this det.
+- ``n_point``: The number of pointing fits used for the det.
+- ``n_gamma``: The number of gamma fits used for this det.
+
+All the attributes having to do with the centers of things are ``(1,3)`` arrays
+in the form ``((xi), (eta), (gamma))`` in radians.
+
+This transformation for ``xi`` and ``eta`` is an affine transformation defined as
+:math:`m = An + t`, where:
+
+- ``m`` is the measured ``xi-eta`` pointing
+- ``n`` is the nominal ``xi-eta`` pointing
+- ``A`` is the 2x2 affine matrix
+- ``t`` is the final translation
+
+``A`` is then decomposed into a rotation of the ``xi-eta`` plane, a shear parameter,
+and a scale along each axis.
+This decomposition is done assuming the order as ``A = rotation*shear*scale``.
+
+For gamma the transformation is also technically affine, but since it is in just
+one dimension it can be described by a single shift and scale.
+
+All of these results are stored as attributes in the ``transform`` groups.
+These nominally are:
+
+- ``affine``: The full affine matrix
+- ``shift``: The shift in ``(xi, eta, gamma)`` in radians
+- ``scale``: The scale along ``(xi, eta, gamma)`` in radians
+- ``rot``: The rotation of the ``xi-eta`` plane
+- ``shear``: The shear of the ``xi-eta`` plane
+
+The ``transform`` group for the arrays also include these attributes with
+whe common mode removed, the names have ``_nocm`` appended (ie ``rot_nocm``).
+
+Since the common mode transformations are fit as affine transforms ``scale`` will
+always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
+
+
+``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
+in the output directory.
+By default this will be indexed by ``stream_id`` and will point to the ``focal_plane`` dataset.
+If you are running in ``per_obs`` mode then it will also be indexed by ``obs_id`` and will point
+to results associated with data observation.
+Be warned that in this case there will only be entries for observations with pointing fits,
+so design your context accordingly.
 
 
 preprocess-tod
@@ -192,117 +529,19 @@ the preprocessing steps applied to them.
    :module: sotodlib.site_pipeline.preprocess_tod
    :func: get_parser
 
-make-position-match
--------------------
+preprocess-obs
+--------------
+This script is set up to run a preprocessing pipeline using the preprocess
+module. See details in :ref:`See details here<preprocess-module>` for how to
+build an obs preprocessing pipeline.
 
-This element builds a ``readout_id`` to ``detector_id`` mapping by matching
-measured pointing and polarization angles against a template.
-It is capable of taking multiple measurements from the same tuning epoch and
-combining them to produce a single mapping and an average focal plane.
+This module is similar to ``preprocess_tod`` but removes grouping by detset so
+that the entire observation is loaded, without signal.
 
-.. automodule:: sotodlib.site_pipeline.make_position_match
-   :members:
-   :undoc-members:
+.. argparse::
+   :module: sotodlib.site_pipeline.preprocess_obs
+   :func: get_parser
 
-
-Config file format
-``````````````````
-
-Here's an annotated example:
-
-.. code-block:: yaml
-
-  # Data sources
-  # Both of these are technically optional but are strongly reccomended
-  detmap: "detmap_results.csv"
-  bias_map: "bias_map_results.npz"
-  
-  context:
-    path: "context.yaml"
-    # What the metadata is called in the context file
-    pointing: "beammap"
-    polarization: null # Set to null to not use
-    # List of observation ids to run on
-    # You need at least one of these, but can also provide both
-    obs_ids:
-        - "obs_ufm_uv31_1677980982"
-    query: "sqlite query string"
-    # Optional det selection dict to be passed to context loader
-    dets:
-        wafer: "w03"
-  
-  # Configuration options
-  ufm: "Uv31"
-  gen_template: False # Generate template using InstModel
-  radial_thresh: 2.0 # Threshold at which to cut detectors based on their pointing
-  dm_transform: True # Apply an initial transformation based on the detmap
-
-  # Settings to generate priors from detmap
-  # Do not include if you dont want priors
-  priors:
-    val: 1.5
-    method: "gaussian"
-    width: 1
-    basis: "fit_fr_mhz"
-  # Value that likelihoods are normalized to when making priors from them.
-  prior_normalization: .2
-
-  # Settings for the matching processes
-  matching:
-    out_thresh: .4 # Liklihood below which things will be considered outliers
-    reverse: False # Reverse the match direction
-    vis: False # Play an animation of match iterations
-    cpd_args: # Args to pass pycpd
-      max_iterations: 1000
-
-  outdir: "."
-  # Optional string to be appended to output filename.
-  # Will have a "_" before it.
-  append: "test" 
-  manifest_db: "path.sqlite"
-
-Ouput file format
-`````````````````
-
-The results of ``make_position_match`` are stored in an HDF5 file containing
-two datasets. The datasets are made using the ``ResultSet`` class and can be
-loaded back as such.
-
-The first dataset is called ``input_data_paths`` and has two columns:
-``type`` and ``path``. It contains the list of input files used to produce
-the output, with ``type`` being the type of input and ``path`` being the
-actual path.
-
-The current types of paths are:
-
-- config
-- tunefile
-- context
-- bgmap
-- detmap
-- obs_id (not actually a path, but useful to track)
-
-The second dataset is called ``focal_plane`` and has columns:
-
-- ``dets:readout_id``, the readout id.
-- ``matched_det_id``, the detector id as matched by this element.
-- ``band``, the SMuRF band.
-- ``channel``, the SMuRF channel.
-- ``xi``, average xi for each detector. Nominally in radians.
-- ``eta``, average eta for each detector. Nominally in radians.
-- ``polang``, average polarization angle for each detector.
-  Nominally in radians.
-- ``meas_x``, the measured x position of each detector on the array.
-  Nominally in mm.
-- ``meas_y``, the measured y position of each detector on the array.
-  Nominally in mm.
-- ``meas_pol``, the measured polarization angle of each detector on the array.
-  Nominally in deg.
-- ``likelihood``, the likelihood of the match for each detector.
-- ``outliers``, boolean flag that shows which detectors look like outliers.
-
-If the input contained only a single observation the results can be found
-using the ManifestDb specified in the config file, this ManifestDb is indexed by `obs_id`.
 
 make-source-flags
 -----------------
@@ -399,7 +638,7 @@ Here's an annotated example:
     cal_keys: ['abscal', 'relcal']
     pointing_keys: ['boresight_offset']
 
-  # Mapmaking parameters
+  # mapmaking parameters
   mapmaking:
     force_source: Uranus
     res:
@@ -452,6 +691,196 @@ Command line arguments
    :module: sotodlib.site_pipeline.update_hwp_angle
    :func: get_parser
    :prog: update_hwp_angle
+
+
+make-hwp-solutions
+------------------
+
+This element generates HWP angle-related metadata, 
+which contains the calibrated HWP angle and flags.
+The HWP angle is synchronized with the input SMuRF timestamp.
+:ref:`See details here<g3thwp-section>`.
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_hwp_solutions
+    :func: get_parser
+    :prog: make_hwp_solutions
+
+
+make-cosamp-hk
+------------------
+
+This element generates house-keeping data with timestamps co-sampled
+with detector timestamps. 
+
+Command line arguments
+``````````````````````
+.. argparse::
+    :module: sotodlib.site_pipeline.make_cosamp_hk
+    :func: get_parser
+    :prog: make-cosamp-hk
+    
+An example config for wiregrid is shown below.
+With the config file, ``wiregrid.sqlite`` and ``wiregrid_XXXX.h5``, 
+where XXXX is substituted with the first four digits of timestamps, 
+are generated on ``/path/to/manifests/wiregrid``. ``context_file``, 
+``input_dir``, ``output_dir``, ``fields``, ``aliases``, and ``output_prefix``
+are required::
+
+    context_file: '/path/to/context.yaml'
+    query_text: 'type == "obs"'
+    min_ctime: 1700000000
+    max_ctime: null
+    query_tags: ['wiregrid=1']
+    input_dir: '/path/to/level2/hk'
+    output_dir: '/path/to/manifests/wiregrid'
+    fields: 
+            ['satpX.wg-encoder.feeds.wgencoder_full.reference_count',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
+             'satpX.wg-actuator.feeds.wgactuator.limitswitch_LSR2',]
+    aliases: 
+        ['encoder',
+         'LS1',
+         'LS2',
+         'LSR1',
+         'LSR2']
+    output_prefix: 'wiregrid'
+
+If you specifiy some of ``save_mean``, ``save_median``, ``save_rms``, ``save_ptp`` boolean
+in config file, those values are calculated for the first parameter of ``fields`` and 
+stored to columns of sqlite with name of like "{output_prefix}_mean". If you specify
+``min_valid_value``, ``max_valid_value``, ``max_valid_dvalue_dt`` in config file, values
+out of the range are set to ``np.nan`` and ``{output_prefix}_nan_fraction`` is added to
+columns of sqlite. A config below is an example for PWV data with its valid range is 
+0.3 < pwv < 3.0 mm and its valid time derivative is 0.01 mm/s::
+
+    context_file: '/path/to/context.yaml'
+    query_text: null
+    min_ctime: null 
+    max_ctime: null
+    update_delay: 1
+    query_tags: null
+    input_dir: '/path/to/level2/hk'
+    output_dir: '/path/to/manifests/pwv_clas'
+    fields: 
+        ['site.env-radiometer-class.feeds.pwvs.pwv',]
+    aliases: ['pwv_class',]
+    output_prefix: 'pwv_class'
+
+    save_mean: True
+    save_median: True
+    save_rms: True
+    save_ptp: True
+    min_valid_value: 0.3
+    max_valid_value: 3.0
+    max_valid_dvalue_dt: 0.01
+
+    
+make-ml-map
+-----------
+
+This submodule can be used to call the maximum likelihood mapmaker.
+The mapmaker will produce ``bin``, ``div`` and ``sky`` maps. The mapmaker
+has several different flags (see the example config file below) that can
+be passed via the CLI or a ``config.yaml`` file. If an argument is not 
+specified, a value is selected from a set of defaults.
+
+The arguments ``freq``,  ``area`` and ``context`` are required; they should
+either be supplied through the CLI or the ``config.yaml``.
+
+Command line arguments
+``````````````````````
+.. argparse::
+   :module: sotodlib.site_pipeline.make_ml_map
+   :func: get_parser
+
+
+
+Default Mapmaker Values
+```````````````````````
+The following code block contains the hard-coded default values for non-
+essential mapmaker arguments. The can be overidden in the CLI or in the
+``config.yaml``.
+   
+.. code-block:: python 
+
+        defaults = {"query": "1",
+                    "comps": "T",
+                    "ntod": None,
+                    "tods": None,
+                    "nset": None,
+                    "site": 'so_lat',
+                    "nmat": "corr",
+                    "max_dets": None,
+                    "verbose": 0,
+                    "quiet": 0,
+                    "center_at": None,
+                    "window": 0.0,
+                    "inject": None,
+                    "nocal": True,
+                    "nmat_dir": "/nmats",
+                    "nmat_mode": "build",
+                    "downsample": 1,
+                    "maxiter": 500,
+                    "tiled": 1,
+                    "wafer": None,
+                   }
+
+
+
+Config file format
+``````````````````
+
+Example of a config file:
+
+.. code-block:: yaml
+       
+         # Query
+        query: "1"
+
+        # Context file containing TODs
+        context: 'context.yaml'
+
+        # Telescope info
+        freq: 'f150'
+        site: 'so_lat'
+
+        # Mapping area footprint
+        area: 'geometry.fits'
+
+        # Output Directory and file name prefix
+        odir: './output/'
+        prefix: 'my_maps'
+
+        # Detectors info. null by default
+        tods: [::100] # Restrict TOD selections by index
+        ntod: 3 # Special case of `tods` above. Implemented as follows: [:ntod]
+        nset: 10 # Number of detsets kept
+        max-dets: 200 # Maximum dets kept
+        wafer: 'w17' # Restrict which wafers are mapped. Can do multiple wafers
+
+        # Mapmaking meta
+        comps: 'T' # TQU
+        inject: null 
+        nocal: True # No relcal or abscal
+        downsample: 1 # Downsample TOD by this factor
+        tiled: 0 # Tiling boolean (0 or 1)
+        nmat-dir: './nmats/' # Dir to save or load nmat
+        nmat: 'corr' # 'corr' or 'uncorr' 
+        maxiter: 500 # Max number of iterative steps
+        nmat_mode: 'build' # 'cache', 'build', 'load' or 'save'
+        center_at: null 
+        window: 0.0
+        inject: null
+
+        # Scripting tools
+        verbose: True
+        quiet: False
+
 
 QDS Monitor
 ===========

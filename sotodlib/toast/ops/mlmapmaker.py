@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021 Simons Observatory.
+# Copyright (c) 2020-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Operator for interfacing with the Maximum Likelihood Mapmaker.
 
@@ -7,11 +7,8 @@
 import os
 
 import numpy as np
-
 import traitlets
-
 from astropy import units as u
-
 from pixell import enmap, tilemap, fft
 
 import toast
@@ -21,17 +18,24 @@ from toast.utils import Logger, Environment, rate_from_times
 from toast.timing import function_timer, Timer
 from toast.observation import default_values as defaults
 from toast.fft import FFTPlanReal1DStore
+from toast.instrument_coords import xieta_to_quat, quat_to_xieta
 
 import so3g
 
+# The mapmaking tools import pixell.mpi, which will try to import
+# mpi4py if it is available, even if running on a login node.
+# Check to see if MPI is enabled in toast and if not, disable here.
+if not toast.mpi.use_mpi:
+    os.environ["DISABLE_MPI"] = "true"
+
 from ... import mapmaking as mm
-from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis
+from ...core import AxisManager, IndexAxis, OffsetAxis, LabelAxis, FlagManager
 
 
 @trait_docs
 class MLMapmaker(Operator):
     """Operator which accumulates data to the Maximum Likelihood Mapmaker.
-    
+
     """
 
     # Class traits
@@ -78,7 +82,7 @@ class MLMapmaker(Operator):
 
     nmat_type = Unicode(
         "NmatDetvecs",
-        help="Noise matrix type is either `NmatDetvecs` or `NmatUncorr`",
+        help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr` or `Nmat`",
     )
 
     nmat_mode = Unicode(
@@ -91,9 +95,11 @@ class MLMapmaker(Operator):
     )
 
     nmat_dir = Unicode(
-        "{out_dir}/nmats",
+        None,
+        allow_none=True,
         help="Where to read/write/cache noise matrices. See nmat_mode. "
-        "If {out_dir} is in the string, then it will be expanded to the value of the out_dir parameter")
+        "If None, write to {out_dir}/nmats"
+    )
 
     dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
@@ -141,6 +147,11 @@ class MLMapmaker(Operator):
         help="If True, the map will be represented as distributed tiles in memory. "
         "For large maps this is faster and more memory efficient, but for small "
         "maps it has some overhead due to extra communication."
+    )
+
+    deslope = Bool(
+        True,
+        help="If True, each observation will have the mean and slope removed.",
     )
 
     verbose = Int(
@@ -244,7 +255,7 @@ class MLMapmaker(Operator):
     @traitlets.validate("nmat_type")
     def _check_nmat_type(self, proposal):
         check = proposal["value"]
-        allowed = ["NmatUncorr", "NmatDetvecs"]
+        allowed = ["NmatUncorr", "NmatDetvecs", "Nmat"]
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)
@@ -350,20 +361,7 @@ class MLMapmaker(Operator):
             # Convert the focalplane offsets into the expected form
             det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
             det_quat = np.array([fp.detector_data["quat"][det_to_row[x]] for x in dets])
-            det_theta, det_phi, det_pa = toast.qarray.to_iso_angles(det_quat)
-
-            radius = np.sin(det_theta)
-            xi  = radius * np.sin(det_phi)
-            eta = radius * np.cos(det_phi)
-            gamma = np.pi/2 - det_pa
-            # for d in range(len(det_quat)):
-            #     print(f"{d:03d}: {det_quat[d]}")
-            #     print(f"  theta = {det_theta[d]}")
-            #     print(f"  phi   = {det_phi[d]}")
-            #     print(f"  pa    = {det_pa[d]}")
-            #     print(f"  xi    = {xi[d]}")
-            #     print(f"  eta   = {eta[d]}")
-            #     print(f"  gamma = {gamma[d]}")
+            xi, eta, gamma = quat_to_xieta(det_quat)
 
             axfp = AxisManager()
             axfp.wrap("xi", xi, axis_map=[(0, axdets)])
@@ -377,7 +375,7 @@ class MLMapmaker(Operator):
             # Azimuth is measured in the opposite direction from longitude
             az = 2 * np.pi - phi
             el = np.pi / 2 - theta
-            roll = pa  # FIXME: double check this...
+            roll = pa
 
             axbore = AxisManager()
             axbore.wrap("az", az, axis_map=[(0, axsamps)])
@@ -393,7 +391,8 @@ class MLMapmaker(Operator):
                 axis_map=[(0, axdets), (1, axsamps)],
             )
             axobs.wrap("boresight", axbore)
-            axobs.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
+            axobs.wrap('flags', FlagManager.for_tod(axobs))
+            axobs.flags.wrap("glitch_flags", ranges, axis_map=[(0, axdets), (1, axsamps)])
             axobs.wrap("weather", np.full(1, self.weather))
             axobs.wrap("site",    np.full(1, "so"))
 
@@ -410,7 +409,10 @@ class MLMapmaker(Operator):
             # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
             # Maybe load precomputed noise model
-            nmat_dir  = self.nmat_dir.format(out_dir=self.out_dir)
+            if self.nmat_dir is None:
+                nmat_dir  = os.path.join(self.out_dir, "nmats")
+            else:
+                nmat_dir  = self.nmat_dir
             nmat_file = nmat_dir + "/nmat_%s.hdf" % ob.name
             there = os.path.isfile(nmat_file)
             if self.nmat_mode == "load" and not there:
@@ -419,11 +421,25 @@ class MLMapmaker(Operator):
                 )
             if self.nmat_mode == "load" or (self.nmat_mode == "cache" and there):
                 log.info_rank(f"Loading noise model from '{nmat_file}'", comm=gcomm)
-                nmat = mm.read_nmat(nmat_file)
+                try:
+                    nmat = mm.read_nmat(nmat_file)
+                except Exception as e:
+                    if self.nmat_mode == "cache":
+                        log.info_rank(
+                            f"Failed to load noise model from '{nmat_file}'"
+                            f" : '{e}'. Will cache a new one",
+                            comm=gcomm,
+                        )
+                        nmat = None
+                    else:
+                        msg = f"Failed to load noise model from '{nmat_file}' : {e}"
+                        raise RuntimeError(msg)
             else:
                 nmat = None
 
-            self._mapmaker.add_obs(ob.name, axobs, noise_model=nmat)
+            self._mapmaker.add_obs(
+                ob.name, axobs, deslope=self.deslope, noise_model=nmat
+            )
             del axobs
 
             # Maybe save the noise model we built (only if we actually built one rather than
@@ -517,7 +533,8 @@ class MLMapmaker(Operator):
 
         for signal, val in zip(self._mapmaker.signals, step.x):
             if signal.output:
-                signal.write(prefix, "map", val)
+                fname = signal.write(prefix, "map", val)
+                log.info_rank(f"Wrote {fname}", comm=comm)
 
         if comm is not None:
             comm.barrier()
