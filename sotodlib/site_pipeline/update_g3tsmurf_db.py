@@ -109,9 +109,9 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
         raise ValueError(
             f"Found {len(raise_list_timing)} observations with bad timing"
-            f"obs_ids are {raise_list_timing}.\nFound "
+            f" obs_ids are {raise_list_timing}.\nFound "
             f"{len(raise_list_readout_ids)} observations without Tunesets" 
-            f"obs_ids are {raise_list_readout_ids}."
+            f" obs_ids are {raise_list_readout_ids}."
         )
 
 def get_parser(parser=None):
