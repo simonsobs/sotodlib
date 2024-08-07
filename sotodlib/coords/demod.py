@@ -197,4 +197,4 @@ def rotate_demodQU(tod, zero_gamma=True):
     tod.demodU = demodC.imag
     del demodC
     if zero_gamma:
-        tod.focal_plane.gamma = 0
+        tod.focal_plane.gamma *= 0
