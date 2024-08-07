@@ -63,17 +63,6 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     cfgs = load_configs( config )
     SMURF = G3tSmurf.from_configs(cfgs, make_db=make_db)
 
-    monitor = None
-    if use_monitor and "monitor" in cfgs:
-        logger.info("Will send monitor information to Influx")
-        try:
-            monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
-            to_record = cfgs["monitor"].get("record", [])
-        except Exception as e:
-            logger.error(f"Monitor connectioned failed {e}")
-            monitor = None
-            to_record = []
-
     updates_start = dt.datetime.now().timestamp()
 
     session = SMURF.Session()
@@ -102,7 +91,8 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         )
     ).all()
 
-    raise_list = []
+    raise_list_timing = []
+    raise_list_readout_ids = []
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
@@ -111,73 +101,18 @@ def main(config: Optional[str] = None, update_delay: float = 2,
                 force=True,
             )
         if (obs.stop is not None) and (not obs.timing):
-            raise_list.append( obs.obs_id)
+            raise_list_timing.append(obs.obs_id)
 
-        if monitor is not None:
-            if obs.stop is not None:
-                try:
-                    if "timing_on" in to_record:
-                        record_timing(monitor, obs, cfgs)
-                    if "has_tuneset" in to_record:
-                        record_tuning(monitor, obs, cfgs)
-                except Exception as e:
-                    logger.error(
-                        f"Monitor Update failed for {obs.obs_id} with {e}"
-                    )
-    if len(raise_list) > 0:
+        if (obs.stop is not None) and len(obs.tunesets)==0:
+            raise_list_readout_ids.append(obs.obs_id)
+
+    if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
         raise ValueError(
-            f"Found {len(raise_list)} observations with bad timing. obs_ids " f"are {raise_list}"
+            f"Found {len(raise_list_timing)} observations with bad timing"
+            f"obs_ids are {raise_list_timing}.\nFound "
+            f"{len(raise_list_readout_ids)} observations without Tunesets" 
+            f"obs_ids are {raise_list_readout_ids}."
         )
-
-def _obs_tags(obs, cfgs):
-    
-    tags = [{
-        "telescope" : cfgs["monitor"]["telescope"], 
-        "stream_id" : obs.stream_id
-    }]
-
-    log_tags = {
-        "telescope" : cfgs["monitor"]["telescope"], 
-        "stream_id": obs.stream_id
-    }
-
-    return tags, log_tags
-
-def record_tuning(monitor, obs, cfgs):
-    """Send a record of the Tune Status to the Influx QDS database.
-    Will be used to alter if the database readout_ids are not working.
-    """
-    tags, log_tags = _obs_tags(obs, cfgs)
-    if not monitor.check("has_tuneset", obs.obs_id, tags=tags[0]):
-        monitor.record(
-            "has_tuneset", 
-            [ len(obs.tunesets)==1 ], 
-            [obs.timestamp], 
-            tags, 
-            cfgs["monitor"]["measurement"], 
-            log_tags=log_tags
-        )
-        monitor.write()
-
-
-def record_timing(monitor, obs, cfgs):
-    """Send a record of the timing status to the Influx QDS database
-    """
-    tags, log_tags = _obs_tags(obs, cfgs)
-
-    if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
-        timing = obs.timing
-        if timing is None:
-            timing = False
-        monitor.record(
-            "timing_on", 
-            [timing], 
-            [obs.timestamp], 
-            tags, 
-            cfgs["monitor"]["measurement"], 
-            log_tags=log_tags
-        )
-        monitor.write()
 
 def get_parser(parser=None):
     if parser is None:
