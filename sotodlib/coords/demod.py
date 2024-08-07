@@ -180,4 +180,21 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         if wrap:
             tod.wrap('signal', signal_sim, [(0, 'dets'), (1, 'samps')])
         return signal_sim
-    
+
+
+def rotate_demodQU(tod, zero_gamma=True):
+    """
+    Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams.
+
+    Args:
+        tod : an axisManager object
+        zero_gamma (bool, optional): Whether to set zero to gamma. Make this true for polarization
+        mapmaking using make_map.
+
+    """
+    demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp(-2j*tod.focal_plane.gamma)).T
+    tod.demodQ = demodC.real
+    tod.demodU = demodC.imag
+    del demodC
+    if zero_gamma:
+        tod.focal_plane.gamma = 0

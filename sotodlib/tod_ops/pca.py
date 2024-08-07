@@ -215,3 +215,42 @@ def get_trends(tod, remove=False, size=1, signal=None):
     if remove:
         add_model(tod, trends, scale=-1, signal=signal)
     return trends
+
+
+def get_common_mode(
+    tod,
+    signal_name='signal',
+    method='median',
+    wrap_name=None,
+    weights=None,
+):
+    """Returns common mode timestream between detectors.
+
+    Arguments
+    ---------
+        tod: axis manager
+        method: str
+            method of common mode estimation. 'median' or 'average'.
+        signal_name: str
+            the name of the signal to estimate common mode. defaults to 'signal'.
+            axis of signal is assumed to be ('dets', 'samps').
+        wrap_name: str or None.
+            If not None, wrap the common mode into tod with this name.
+        weights: array with dets axis
+            If not None, estimate common mode by taking average with this weights.
+
+    Returns
+    -------
+        common mode timestream
+
+    """
+    signal = tod[signal_name]
+    if method == 'median':
+        common_mode = np.median(signal, axis=0)
+    elif method == 'average':
+        common_mode = np.average(signal, axis=0, weights=weights)
+    else:
+        raise ValueError("method flag must be median or average")
+    if wrap_name is not None:
+        tod.wrap(wrap_name, common_mode, [(0, 'samps')])
+    return common_mode
