@@ -12,14 +12,13 @@ import logging
 from sqlalchemy import not_, or_, and_
 from typing import Optional
 
-from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
 from sotodlib.io.datapkg_utils import load_configs
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False, use_monitor:bool=False):
+         index_via_actions: bool=False):
     """
     Arguments
     ---------
@@ -37,9 +36,6 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         will be necessary for data older than Oct 2022 but creates concurancy 
         issues on systems (like the site) running automatic deletion of level 2 
         data.
-    use_monitor : bool
-        if True, will send monitor information to influx, set to false by
-        default so we can use identical config files for development
     """
     show_pb = True if verbosity > 1 else False
 
@@ -125,8 +121,6 @@ def get_parser(parser=None):
     parser.add_argument("--verbosity", help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
                         default=2, type=int)
     parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
-                        action="store_true")
-    parser.add_argument('--use-monitor', help="Send updates to influx",
                         action="store_true")
     return parser
 
