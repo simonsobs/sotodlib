@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simulated observing / scanning motion of the telescope.
 """
@@ -6,6 +6,7 @@
 import numpy as np
 from astropy import units as u
 import toast
+from toast.observation import default_values as defaults
 import toast.ops
 
 from .. import ops as so_ops
@@ -101,6 +102,21 @@ def setup_simulate_observing(parser, operators):
     )
     operators.append(so_ops.CoRotator(name="corotate_lat"))
     operators.append(toast.ops.PerturbHWP(name="perturb_hwp", enabled=False))
+    # Detector quaternion pointing
+    operators.append(
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_azel_sim",
+            boresight=defaults.boresight_azel,
+            quats="quats_azel_sim",
+        )
+    )
+    operators.append(
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_radec_sim",
+            boresight=defaults.boresight_radec,
+            quats="quats_radec_sim",
+        )
+    )
 
 
 @workflow_timer

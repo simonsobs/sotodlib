@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
@@ -173,3 +173,11 @@ def select_pointing(job, otherargs, runargs, data):
         # same one as the solve.
         if not job_ops.binner_final.enabled:
             job_ops.binner_final = job_ops.binner
+
+    # See if there is separate pointing for simulations
+    if hasattr(job_ops, "det_pointing_azel_sim"):
+        if not job_ops.det_pointing_azel_sim.enabled:
+            job_ops.det_pointing_azel_sim = job_ops.det_pointing_azel
+    if hasattr(job_ops, "det_pointing_radec_sim"):
+        if not job_ops.det_pointing_radec_sim.enabled:
+            job_ops.det_pointing_radec_sim = job_ops.det_pointing_radec
