@@ -474,7 +474,7 @@ def load_preprocess_tod_sim(obs_id, sim_map,
                             context=None, dets=None,
                             meta=None, modulated=True):
     """ Loads the saved information from the preprocessing pipeline and runs the
-    processing section of the pipeline. 
+    processing section of the pipeline on simulated data
 
     Assumes preprocess_tod has already been run on the requested observation. 
     
@@ -483,6 +483,8 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     obs_id: multiple
         passed to `context.get_obs` to load AxisManager, see Notes for 
         `context.get_obs`
+    sim_map: pixell.enmap.ndmap
+        signal map containing (T, Q, U) fields
     configs: string or dictionary
         config file or loaded config directory
     dets: dict
@@ -490,6 +492,10 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     meta: AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
+    modulated: bool
+        If True, apply the HWP angle model and scan the simulation
+        into a modulated signal.
+        If False, scan the simulation into demodulated timestreams.
     """
     configs, context = _get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)

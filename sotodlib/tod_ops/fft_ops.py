@@ -461,6 +461,23 @@ def params_from_noise_model_fit(
     noise_fit_params
 ):
     """
+    Take the result of the noise model fit, stored in the
+    attribute `noise_fit_array` and return the median value
+    of the parameters accross detectors.
+
+    Args
+    ----
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    noise_fit_array : nparray
+        Array of noise model fit parameters sized nparams x ndets.
+    noise_fit_params : list
+        List of parameter names corresponding to the noise model fit.
+    Returns
+    -------
+    params_dict : dict
+        Returns a dictionary of the median values of the noise model fit parameters.
     """
     median_params = np.median(noise_fit_array, axis=0)
-    return {k: median_params[i] for i, k in enumerate(noise_fit_params)}
+    params_dict = {k: median_params[i] for i, k in enumerate(noise_fit_params)}
+    return params_dict
