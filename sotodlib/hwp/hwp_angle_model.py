@@ -55,7 +55,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
     if "lat" in telescope:
         return tod
 
-    hwp = tod['hwp_solution']
+    hwp = tod.get('hwp_solution', None)
     if hwp is None:
         raise ValueError('hwp_solution is missing')
     model = tod.get('hwp_angle_model', None)
