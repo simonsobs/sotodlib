@@ -677,12 +677,12 @@ def fit_noise_model(
         if 'wn' in fixed_parameter.keys():
             covout_i = np.insert(covout_i, 1, 0, axis=0)
             covout_i = np.insert(covout_i, 1, 0, axis=1)
-            covout_i[1][1] = wnest
+            covout_i[1][1] = np.nan
             fitout_i = np.insert(fitout_i, 1, wnest)
         elif 'alpha' in fixed_parameter.keys():
             covout_i = np.insert(covout_i, 2, 0, axis=0)
             covout_i = np.insert(covout_i, 2, 0, axis=1)
-            covout_i[2][2] = alpha
+            covout_i[2][2] = np.nan
             fitout_i = np.insert(fitout_i, 2, alpha)
         covout[i] = covout_i
         fitout[i] = fitout_i
