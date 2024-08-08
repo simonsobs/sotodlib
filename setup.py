@@ -63,7 +63,9 @@ setup_opts["install_requires"] = [
     'pyfftw',
     'numdifftools',
     'psycopg2-binary',
-]
+    'pandas', 
+    'scikit-learn'
+    ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
