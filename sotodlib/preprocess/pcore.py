@@ -410,6 +410,9 @@ class Pipeline(list):
             if True, the aman detector axis is restricted as described in
             each preprocess module. Most pipelines are developed with 
             select=True. Running select=False may produce unstable behavior
+        sim: boolean (Optional)
+            if running on sim (``sim=True``), proccesses with the flag
+            ``skip_on_sim`` will be skipped.
 
         Returns
         -------
