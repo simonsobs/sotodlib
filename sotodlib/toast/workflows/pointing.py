@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
@@ -25,10 +25,18 @@ def setup_pointing(operators):
     """
     # Detector quaternion pointing
     operators.append(
-        toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel")
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_azel",
+            boresight=defaults.boresight_azel,
+            quats="quats_azel",
+        )
     )
     operators.append(
-        toast.ops.PointingDetectorSimple(name="det_pointing_radec", quats="quats_radec")
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_radec",
+            boresight=defaults.boresight_radec,
+            quats="quats_radec",
+        )
     )
     # Stokes weights
     operators.append(
@@ -111,9 +119,6 @@ def select_pointing(job, otherargs, runargs, data):
 
     # Configure Az/El and RA/DEC boresight and detector pointing and weights
 
-    job_ops.det_pointing_azel.boresight = defaults.boresight_azel
-    job_ops.det_pointing_radec.boresight = defaults.boresight_radec
-
     job_ops.pixels_wcs_azel.detector_pointing = job_ops.det_pointing_azel
     job_ops.pixels_wcs_radec.detector_pointing = job_ops.det_pointing_radec
     job_ops.pixels_healpix_radec.detector_pointing = job_ops.det_pointing_radec
@@ -168,3 +173,11 @@ def select_pointing(job, otherargs, runargs, data):
         # same one as the solve.
         if not job_ops.binner_final.enabled:
             job_ops.binner_final = job_ops.binner
+
+    # See if there is separate pointing for simulations
+    if hasattr(job_ops, "det_pointing_azel_sim"):
+        if not job_ops.det_pointing_azel_sim.enabled:
+            job_ops.det_pointing_azel_sim = job_ops.det_pointing_azel
+    if hasattr(job_ops, "det_pointing_radec_sim"):
+        if not job_ops.det_pointing_radec_sim.enabled:
+            job_ops.det_pointing_radec_sim = job_ops.det_pointing_radec

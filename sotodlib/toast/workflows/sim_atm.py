@@ -133,7 +133,7 @@ def simulate_atmosphere_signal(job, otherargs, runargs, data):
     for sim_atm in job_ops.sim_atmosphere_coarse, job_ops.sim_atmosphere:
         if not sim_atm.enabled:
             continue
-        sim_atm.detector_pointing = job_ops.det_pointing_azel
+        sim_atm.detector_pointing = job_ops.det_pointing_azel_sim
         if sim_atm.polarization_fraction != 0:
             sim_atm.detector_weights = job_ops.weights_azel
         log.info_rank(f"  Running {sim_atm.name}...", comm=data.comm.comm_world)

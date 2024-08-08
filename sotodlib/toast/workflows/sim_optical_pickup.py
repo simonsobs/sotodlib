@@ -46,7 +46,7 @@ def simulate_scan_synchronous_signal(job, otherargs, runargs, data):
         job_ops.sim_sss.realization = otherargs.realization
 
     if job_ops.sim_sss.enabled:
-        job_ops.sim_sss.detector_pointing = job_ops.det_pointing_azel
+        job_ops.sim_sss.detector_pointing = job_ops.det_pointing_azel_sim
         job_ops.sim_sss.apply(data)
 
 
