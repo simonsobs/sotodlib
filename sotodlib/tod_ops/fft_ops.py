@@ -511,15 +511,16 @@ def fit_noise_model(
     f=None,
     pxx=None,
     psdargs=None,
-    fwhite=(10, 100),
-    lowf=1,
+    fknee_est=1,
+    wn_est=2E-9,
+    alpha_est=3.4,
     merge_fit=False,
     f_min=None,
     f_max=100,
     merge_name="noise_fit_stats",
     merge_psd=True,
     mask=False,
-    fixed_parameter={},
+    fixed_param=None,
     binning=False,
     unbinned_mode=3,
     base=1.05,
@@ -544,12 +545,15 @@ def fit_noise_model(
         Default is None which calculates f, pxx from signal.
     psdargs : dict
         Dictionary of optional argument for ``scipy.signal.welch``
-    fwhite : tuple
-        Low and high frequency used to estimate white noise for initial
-        guess passed to ``scipy.signal.curve_fit``.
-    lowf : tuple
-        Frequency below which estimate of 1/f noise index and knee are estimated
-        for initial guess passed to ``scipy.signal.curve_fit``.
+    fknee_est : float or nparray
+        Initial estimation value of knee frequency. If it is given in array,
+        initial values are applied for each detector.
+    wn_est : float or nparray
+        Initial estimation value of white noise. If it is given in array,
+        initial values are applied for each detector.
+    alpha_est : float or nparray
+        Initial estimation value of alpha. If it is given in array,
+        initial values are applied for each detector.
     merge_fit : bool
         Merges fit and fit statistics into input axis manager.
     f_min : float
@@ -565,9 +569,9 @@ def fit_noise_model(
         If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
     mask : bool
         If ``mask`` is True then PSD is masked with ``aman.psd_mask``.
-    fixed_parameter : dict
-        This accepts the key in 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
-        white noise level (alpha) is fixed to the given value.
+    fixed_param : str
+        This accepts 'wn' or 'alpha' or None. If 'wn' ('alpha') is given, 
+        white noise level (alpha) is fixed to the wn_est (alpha_est).
     unbinned_mode : int
         First Fourier modes up to this number are left un-binned.
     base : float (> 1)
@@ -615,50 +619,44 @@ def fit_noise_model(
     # binning
     if binning == True:
         f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
-                                           base=base, merge=False)
+                                          base=base, merge=False)
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
     covout = np.zeros((aman.dets.count, 3, 3))
-    fixed_param = {}
+    if isinstance(fknee_est, (int, float)):
+        fknee_est = np.zeros(aman.dets.count)+fknee_est
+    elif len(fknee_est)!=aman.dets.count:
+        print('Size of fknee_est must be equal to aman.dets.count or a single value.')
+        return
+    if isinstance(wn_est, (int, float)):
+        wn_est = np.zeros(aman.dets.count)+wn_est
+    elif len(wn_est)!=aman.dets.count:
+        print('Size of wn_est must be equal to aman.dets.count or a single value.')
+        return
+    if isinstance(alpha_est, (int, float)):
+        alpha_est = np.zeros(aman.dets.count)+alpha_est
+    elif len(alpha_est)!=aman.dets.count:
+        print('Size of alpha_est must be equal to aman.dets.count or a single value.')
+        return
+    if fixed_param == None:
+        initial_params = np.array([fknee_est, wn_est, alpha_est])
+    if fixed_param == "wn":
+        initial_params = np.array([fknee_est, alpha_est])
+        fixed = wn_est
+    if fixed_param == "alpha":
+        initial_params = np.array([fknee_est, wn_est])
+        fixed = alpha_est
+
     for i in range(len(pxx)):
         p = pxx[i]
-        if fixed_parameter == {}:
-            wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])
-            try:
-                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
-                )
-                covout[i] = np.full((3, 3), np.nan)
-                fitout[i] = np.full(3, np.nan)
-                continue
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], wnest, -pfit[0]]
-        elif 'wn' in fixed_parameter.keys():
-            wnest = fixed_parameter["wn"]
-            try:
-                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
-                )
-                covout[i] = np.full((3, 3), np.nan)
-                fitout[i] = np.full(3, np.nan)
-                continue
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], -pfit[0]]
-        elif 'alpha' in fixed_parameter.keys():
-            alpha = fixed_parameter['alpha']
-            wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])
-            p0 = [lowf, wnest]
-        else:
-            print('"fixed_parameter" is invalid.')
-            return
-        res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_parameter), 
+        p0 = initial_params.T[i]
+        _fixed = {}
+        if fixed_param != None:
+            _fixed = {fixed_param: fixed[i]}            
+        res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), 
                p0, method="Nelder-Mead")
         try:
-            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_parameter), full_output=True)
+            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
             hessian_ndt, _ = Hfun(res["x"])
             # Inverse of the hessian is an estimator of the covariance matrix
             # sqrt of the diagonals gives you the standard errors.
@@ -674,16 +672,16 @@ def fit_noise_model(
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         fitout_i = res.x
-        if 'wn' in fixed_parameter.keys():
+        if fixed_param == "wn":
             covout_i = np.insert(covout_i, 1, 0, axis=0)
             covout_i = np.insert(covout_i, 1, 0, axis=1)
             covout_i[1][1] = np.nan
-            fitout_i = np.insert(fitout_i, 1, wnest)
-        elif 'alpha' in fixed_parameter.keys():
+            fitout_i = np.insert(fitout_i, 1, wn_est[i])
+        elif fixed_param == "alpha":
             covout_i = np.insert(covout_i, 2, 0, axis=0)
             covout_i = np.insert(covout_i, 2, 0, axis=1)
             covout_i[2][2] = np.nan
-            fitout_i = np.insert(fitout_i, 2, alpha)
+            fitout_i = np.insert(fitout_i, 2, alpha_est[i])
         covout[i] = covout_i
         fitout[i] = fitout_i
 
