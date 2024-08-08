@@ -481,7 +481,7 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     Arguments
     ----------
     obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
+        passed to ``context.get_obs`` to load AxisManager, see Notes for 
         `context.get_obs`
     sim_map: pixell.enmap.ndmap
         signal map containing (T, Q, U) fields

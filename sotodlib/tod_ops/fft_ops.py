@@ -462,7 +462,7 @@ def params_from_noise_model_fit(
 ):
     """
     Take the result of the noise model fit, stored in the
-    attribute `noise_fit_array` and return the median value
+    attribute ``noise_fit_array`` and return the median value
     of the parameters accross detectors.
 
     Args
