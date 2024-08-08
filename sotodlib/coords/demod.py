@@ -184,7 +184,8 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
 
 def rotate_demodQU(tod, zero_gamma=True):
     """
-    Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams.
+    Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams to
+    place all detectors' Q and U timestreams in a common telescope frame.
 
     Args:
         tod : an axisManager object
