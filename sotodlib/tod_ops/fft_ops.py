@@ -504,6 +504,7 @@ def calc_binned_psd(
         aman.wrap("bin_size", bin_size, [(0,"dets"),(1,"nusamps_bin")])
     return f_bin, pxx_bin, bin_size
 
+
 def fit_noise_model(
     aman,
     signal=None,
@@ -519,210 +520,7 @@ def fit_noise_model(
     merge_psd=True,
     mask=False,
     fixed_parameter=None,
-):
-    """
-    Fits noise model with white and 1/f noise to the PSD of signal.
-    This uses a MLE method that minimizes a log likelihood. This is
-    better for chi^2 distributed data like the PSD.
-
-    Reference: http://keatonb.github.io/archivers/powerspectrumfits
-
-    Args
-    ----
-    aman : AxisManager
-        Axis manager which has samps axis aligned with signal.
-    signal : nparray
-        Signal sized ndets x nsamps to fit noise model to.
-        Default is None which corresponds to aman.signal.
-    f : nparray
-        Frequency of PSD of signal.
-        Default is None which calculates f, pxx from signal.
-    pxx : nparray
-        PSD sized ndets x len(f) which is fit to with model.
-        Default is None which calculates f, pxx from signal.
-    psdargs : dict
-        Dictionary of optional argument for ``scipy.signal.welch``
-    fwhite : tuple
-        Low and high frequency used to estimate white noise for initial
-        guess passed to ``scipy.signal.curve_fit``.
-    lowf : tuple
-        Frequency below which estimate of 1/f noise index and knee are estimated
-        for initial guess passed to ``scipy.signal.curve_fit``.
-    merge_fit : bool
-        Merges fit and fit statistics into input axis manager.
-    f_min : float
-        Minimum frequency to include in the fitting.
-        Default is None which selects f_min as the second index of f.
-    f_max : float
-        Maximum frequency to include in the fitting. This is particularly
-        important for lowpass filtered data such as that post demodulation
-        if the data is not downsampled after lowpass filtering.
-    merge_name : bool
-        If ``merge_fit`` is True then addes into axis manager with merge_name.
-    merge_psd : bool
-        If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
-    mask : bool
-        If ``mask`` is True then PSD is masked with ``aman.psd_mask``.
-    fixed_parameter : str
-        This accepts None or 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
-        white noise level (alpha) is fixed to the initially estimated value.
-    Returns
-    -------
-    noise_fit_stats : AxisManager
-        If merge_fit is False then axis manager with fit and fit statistics
-        is returned otherwise nothing is returned and axis manager is wrapped
-        into input aman.
-    """
-    if signal is None:
-        signal = aman.signal
-
-    if f is None or pxx is None:
-        if psdargs is None:
-            f, pxx = calc_psd(
-                aman, signal=signal, timestamps=aman.timestamps, merge=merge_psd
-            )
-        else:
-            f, pxx = calc_psd(
-                aman,
-                signal=signal,
-                timestamps=aman.timestamps,
-                merge=merge_psd,
-                **psdargs,
-            )
-    if mask:
-        if 'psd_mask' in aman:
-            mask = ~aman.psd_mask.mask()
-            f = f[mask]
-            pxx = pxx[:, mask]
-        else:
-            print('"psd_mask" is not in aman. Masking is skipped.')
-
-    eix = np.argmin(np.abs(f - f_max))
-    if f_min is None:
-        six = 1
-    elif f_min < f[0]:
-        six = 1
-    else:
-        six = np.argmin(np.abs(f - f_min))
-    f = f[six:eix]
-    pxx = pxx[:, six:eix]
-    fitout = np.zeros((aman.dets.count, 3))
-    # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-    covout = np.zeros((aman.dets.count, 3, 3))
-    fixed_param = {}
-    for i in range(aman.dets.count):
-        p = pxx[i]
-        wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
-        if fixed_parameter == None:
-            try:
-                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
-                )
-                covout[i] = np.full((3, 3), np.nan)
-                fitout[i] = np.full(3, np.nan)
-                continue
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], wnest, -pfit[0]]
-        elif fixed_parameter == 'wn':
-            try:
-                pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
-                )
-                covout[i] = np.full((3, 3), np.nan)
-                fitout[i] = np.full(3, np.nan)
-                continue
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], -pfit[0]]
-            fixed_param['wn'] = wnest
-        elif fixed_parameter == 'alpha':
-            try:
-                pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
-                )
-                covout[i] = np.full((3, 3), np.nan)
-                fitout[i] = np.full(3, np.nan)
-                continue
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], wnest]
-            fixed_param['alpha'] = -pfit[0]
-        else:
-            print('"fixed_parameter" is invalid.')
-            return
-        res = minimize(lambda params: neglnlike(params, f, p, **fixed_param), 
-               p0, method="Nelder-Mead")
-        try:
-            #Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
-            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, **fixed_param), full_output=True)
-            hessian_ndt, _ = Hfun(res["x"])
-            # Inverse of the hessian is an estimator of the covariance matrix
-            # sqrt of the diagonals gives you the standard errors.
-            covout_i = np.linalg.inv(hessian_ndt)            
-        except np.linalg.LinAlgError:
-            print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
-            )
-            covout_i = np.full((len(p0), len(p0)), np.nan)
-        except IndexError:
-            print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
-            )
-            covout_i = np.full((len(p0), len(p0)), np.nan)
-        fitout_i = res.x
-        if fixed_parameter == 'alpha':
-            alpha_err = np.sqrt(vfit[0][0])
-            covout_i = np.insert(covout_i, 2, 0, axis=0)
-            covout_i = np.insert(covout_i, 2, 0, axis=1)
-            covout_i[2][2] = alpha_err
-            fitout_i = np.insert(fitout_i, 2, -pfit[0])
-        elif fixed_parameter == 'wn':
-            wnest_err = np.std(p[((f > fwhite[0]) & (f < fwhite[1]))])
-            covout_i = np.insert(covout_i, 1, 0, axis=0)
-            covout_i = np.insert(covout_i, 1, 0, axis=1)
-            covout_i[1][1] = wnest_err
-            fitout_i = np.insert(fitout_i, 1, wnest)
-        covout[i] = covout_i
-        fitout[i] = fitout_i
-
-    noise_model_coeffs = ["fknee", "white_noise", "alpha"]
-    noise_fit_stats = core.AxisManager(
-        aman.dets,
-        core.LabelAxis(
-            name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U8")
-        ),
-    )
-    noise_fit_stats.wrap("fit", fitout, [(0, "dets"), (1, "noise_model_coeffs")])
-    noise_fit_stats.wrap(
-        "cov",
-        covout,
-        [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")],
-    )
-
-    if merge_fit:
-        aman.wrap(merge_name, noise_fit_stats)
-    return noise_fit_stats
-
-
-def fit_binned_noise_model(
-    aman,
-    signal=None,
-    f=None,
-    pxx=None,
-    psdargs=None,
-    fwhite=(10, 100),
-    lowf=1,
-    merge_fit=False,
-    f_min=None,
-    f_max=100,
-    merge_name="noise_fit_stats",
-    merge_psd=True,
-    mask=False,
-    fixed_parameter=None,
+    binning=False,
     unbinned_mode=3,
     base=1.05,
 ):
@@ -774,11 +572,7 @@ def fit_binned_noise_model(
         First Fourier modes up to this number are left un-binned.
     base : float (> 1)
         Base of the logspace bins.
-    limit_N : int
-        If the number of data points in a bin is less than ``limit_N``, that bin is handled with
-        chi2 distribution and its error is <psd>. Otherwise the central limit theorem
-        is applied to the bin and the error of the bin is std(psd)/sqrt(len(psd)).
-
+ 
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -817,9 +611,11 @@ def fit_binned_noise_model(
         six = np.argmin(np.abs(f - f_min))
     f = f[six:eix]
     pxx = pxx[:, six:eix]
+    bin_size = 1
     # binning
-    f, pxx, bin_size = calc_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
-                                       base=base, merge=False)
+    if binning == True:
+        f, pxx, bin_size = calc_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
+                                           base=base, merge=False)
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
     covout = np.zeros((aman.dets.count, 3, 3))
