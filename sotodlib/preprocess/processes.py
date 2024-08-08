@@ -5,6 +5,7 @@ import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 import sotodlib.obs_ops as obs_ops
 from sotodlib.hwp import hwp, hwp_angle_model
+from sotodlib.coords import demod
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
@@ -1171,6 +1172,43 @@ class SubtractT2P(_Preprocess):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
 
+class RotateDemodQU(_Preprocess):
+    """Apply detectors' polarization angle rotation to the
+    demodulated Q and U timestreams to put them in the common
+    telescope frame.
+
+     Example config block::
+
+        - name : "rotate_demodQU"
+          process:
+            zero_gamma: True
+
+    .. autofunction:: sotodlib.coords.demod.rotate_demodQU
+    """
+    name = "rotate_demodQU"
+
+    def process(self, aman, proc_aman):
+        demod.rotate_demodQU(aman, **self.process_cfgs)
+
+class GetCommonMode(_Preprocess):
+    """Get common mode.
+
+     Example config block::
+
+        - name : "get_common_mode"
+          process:
+            signal: 'signal'
+            method: 'median'
+            wrap_name: 'signal_common_mode'
+
+    .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
+    """
+    name = "get_common_mode"
+
+    def process(self, aman, proc_aman):
+        tod_ops.fft_ops.calc_psd(aman, **self.process_cfgs)
+
+
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
 _Preprocess.register(InvVarFlags)
@@ -1199,3 +1237,5 @@ _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
+_Preprocess.register(RotateDemodQU)
+_Preprocess.register(GetCommonMode)
