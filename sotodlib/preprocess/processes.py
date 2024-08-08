@@ -875,7 +875,7 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-    
+        
     def calc_and_save(self, aman, proc_aman):
         center_on = self.calc_cfgs.get('center_on', 'planet')
         # Get source from tags
@@ -968,8 +968,6 @@ class FourierFilter(_Preprocess):
           filter_params:
             cutoff: 1
             width: 0.1
-
-    See :ref:`fourier-filters` documentation for more details.
     """
     name = 'fourier_filter'
     def __init__(self, step_cfgs):
@@ -994,6 +992,11 @@ class FourierFilter(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
+
+class ReduceFlags(_Preprocess):
+    name = 'reduce_flags'
+    def process(self, aman, proc_aman):
+        aman.flags.reduce(**self.process_cfgs)       
 
 class PCARelCal(_Preprocess):
     """
@@ -1033,7 +1036,7 @@ class PCARelCal(_Preprocess):
             rc_aman.wrap(f'{band}_pca_mode0', pca_signal.modes[0], [(0, 'samps')])
         rc_aman.wrap('relcal', relcal, [(0,'dets')])
         self.save(proc_aman, rc_aman)
-
+        
     def save(self, proc_aman, rc_aman):
         if self.save_cfgs is None:
             return
@@ -1199,3 +1202,4 @@ _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
+_Preprocess.register(ReduceFlags)
