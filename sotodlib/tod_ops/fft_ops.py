@@ -373,13 +373,13 @@ def neglnlike(params, x, y, bin_size=1, **fixed_param):
         return 1.0e30
     return output
 
-def calc_psd_mask(aman, psd_mask=None, f=None, pxx=None,
+def get_psd_mask(aman, psd_mask=None, f=None, pxx=None,
                 mask_hwpss=True, hwp_freq=None, max_hwpss_mode=10, hwpss_width=((-0.4, 0.6), (-0.2, 0.2)),
                 mask_peak=False, peak_freq=None, peak_width=(-0.002, +0.002),
                 merge=True, overwrite=True
 ):
     """
-    Function that calculates masks for hwpss or single peak in PSD.
+    Function to get masks for hwpss or single peak in PSD.
 
     Arguments
     ---------
@@ -447,7 +447,7 @@ def calc_psd_mask(aman, psd_mask=None, f=None, pxx=None,
         aman.wrap("psd_mask", psd_mask, [(0,"nusamps")])
     return psd_mask
 
-def calc_binned_psd(
+def get_binned_psd(
     aman,
     f=None,
     pxx=None,
@@ -614,7 +614,7 @@ def fit_noise_model(
     bin_size = 1
     # binning
     if binning == True:
-        f, pxx, bin_size = calc_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
+        f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                            base=base, merge=False)
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
