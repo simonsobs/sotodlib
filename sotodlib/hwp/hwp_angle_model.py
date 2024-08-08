@@ -28,7 +28,7 @@ def default_model(telescope):
         raise ValueError('Not supported yet')
 
     model.wrap('sign_matrix', sign)
-    model.wrap('time_offset', np.deg2rad(-1. * 360 / 1140 * 3 / 2))
+    model.wrap('sign_dependent_offset', np.deg2rad(-1. * 360 / 1140 * 3 / 2))
     return model
 
 
@@ -61,7 +61,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
     model = tod.get('hwp_angle_model', None)
     if model is None:
         logger.warn('hwp_angle_model metadata is missing. '
-                    'Apply default correction. This may be old.')
+                    'Apply default model. This may be old.')
         model = default_model(telescope)
 
     # construct sign
@@ -89,7 +89,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
         raise ValueError('Invalid on_sign_ambiguous')
 
     # apply correction
-    hwp_angle = np.mod(sign * (hwp.hwp_angle + model.time_offset)
+    hwp_angle = np.mod(sign * (hwp.hwp_angle + model.sign_dependent_offset)
                 + model[f'mechanical_offset_{hwp.primary_encoder}'], 2*np.pi)
     if 'hwp_angle' in tod._assignments.keys():
         tod.hwp_angle = hwp_angle
