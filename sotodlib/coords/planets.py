@@ -92,12 +92,15 @@ class SlowSource:
         return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
 
 
-def get_scan_q(tod, planet, refq=None):
+def get_scan_q(tod, planet, xioff = 0, etaoff = 0, refq=None):
     """Identify the point (in time and azimuth space) at which the
     specified planet crosses the boresight elevation for the
     observation in tod.  The rotation taking boresight coordinates to
     celestial coordinates at that moment in time (and pointing) is
     computed, and its conjugate is returned.
+
+    Xioff and etaoff being in radian are used for taking into account
+    off-centered wafer that have position offset in the focal plane.
 
     The returned rotation is useful because it represents a fixed way
     to rotate the celestial such that the target source ends up at
@@ -106,6 +109,7 @@ def get_scan_q(tod, planet, refq=None):
     measuring beam and pointing parameters.
 
     """
+    q_xieta = so3g.proj.quat.rotation_xieta(xioff, etaoff)
     if refq is None:
         refq = so3g.proj.quat.rotation_xieta(0, 0)
     # Get reference elevation...
@@ -119,7 +123,7 @@ def get_scan_q(tod, planet, refq=None):
         csl = so3g.proj.CelestialSightLine.az_el(
             t, az, el, weather='typical', site='so')
         ra0, dec0 = planet.pos(t)
-        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
+        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q * q_xieta
 
     def distance(p):
         dt, daz = p
