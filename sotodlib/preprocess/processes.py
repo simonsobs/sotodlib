@@ -980,28 +980,27 @@ class FourierFilter(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
-        _f = getattr(tod_ops.filters,
-                self.process_cfgs.get('filt_function','high_pass_butter4'))
-        
+        filt_function = self.process_cfgs.get(
+            "filt_function",
+            "high_pass_butter4"
+        )
+        _f = getattr(
+            tod_ops.filters,
+            filt_function
+        )
+
         if self.process_cfgs.get("noise_fit_params"):
             field = self.process_cfgs["noise_fit_array"]
             _noise_fit = attrgetter(field)
-
             noise_fit = _noise_fit(proc_aman)
-            noise_fit_array = getattr(noise_fit, "fit")
-            noise_fit_params = getattr(noise_fit, "noise_model_coeffs").vals
-
-            fit_params = tod_ops.fft_ops.params_from_noise_model_fit(
-                proc_aman,
-                noise_fit_array=noise_fit_array,
-                noise_fit_params=noise_fit_params
-            )
-            filter_params = self.process_cfgs.get("filter_params")
-            for k, v in filter_params.items():
-                if isinstance(v, str):
-                    filter_params.update({k: fit_params[v]})
         else:
-            filter_params = self.process_cfgs.get("filter_params")
+            noise_fit = None
+        
+        filter_params = tod_ops.fft_ops.build_filter_params_dict(
+            filt_function,
+            noise_fit=noise_fit,
+            filter_params=self.process_cfgs.get("filter_params", None)
+        )
 
         filt = _f(**filter_params)
 
