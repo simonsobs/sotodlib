@@ -1,10 +1,44 @@
 import numpy as np
+from sotodlib import core
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def default_model(telescope):
+    """Returns default hwp_angle_model. This will be deleted in future.
+    """
+
+    model = core.AxisManager()
+    if telescope == 'satp1':
+        sign = core.AxisManager()
+        sign.wrap('pid', 1)
+        sign.wrap('offcenter', -1)
+        model.wrap('mechanical_offset_1', np.deg2rad(-1.66 - 90 + 49.1))
+        model.wrap('mechanical_offset_2', np.deg2rad(-1.66 + 90 + 49.1))
+
+    elif telescope == 'satp3':
+        sign = core.AxisManager()
+        sign.wrap('pid', -1)
+        sign.wrap('offcenter', 1)
+        model.wrap('mechanical_offset_1', np.deg2rad(-1.66 + 90 - 2.29))
+        model.wrap('mechanical_offset_2', np.deg2rad(-1.66 - 90 - 2.29))
+
+    else:
+        raise ValueError('Not supported yet')
+
+    model.wrap('sign_matrix', sign)
+    model.wrap('time_offset', np.deg2rad(-1. * 360 / 1140 * 3 / 2))
+    return model
 
 
 def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
     """
-    Returns the tod AxisManager after applying hwp angle model parameters.
-    hwp_angle_model correct the sign and offset of hwp_angle.
+    Applies `hwp_angle_model` to the `hwp_solution` and construct hwp angle
+    calibrated in the telescope frame.
+    This will populate the calibrated hwp angle as `hwp_angle` attribute.
+    `hwp_solution` is the hwp angle measured in the encoder frame.
+    `hwp_angle_model` corrects the sign and offset of `hwp_solution`.
 
     Args:
         tod: AxisManager
@@ -22,7 +56,13 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
         return tod
 
     hwp = tod['hwp_solution']
-    model = tod['hwp_angle_model']
+    if hwp is None:
+        raise ValueError('hwp_solution is missing')
+    model = tod.get('hwp_angle_model', None)
+    if model is None:
+        logger.warn('hwp_angle_model metadata is missing. '
+                    'Apply default correction. This may be old.')
+        model = default_model(telescope)
 
     # construct sign
     methods = model.sign_matrix.keys()
