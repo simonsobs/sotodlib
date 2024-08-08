@@ -519,7 +519,7 @@ def fit_noise_model(
     merge_name="noise_fit_stats",
     merge_psd=True,
     mask=False,
-    fixed_parameter=None,
+    fixed_parameter={},
     binning=False,
     unbinned_mode=3,
     base=1.05,
@@ -565,9 +565,9 @@ def fit_noise_model(
         If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
     mask : bool
         If ``mask`` is True then PSD is masked with ``aman.psd_mask``.
-    fixed_parameter : str
-        This accepts None or 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
-        white noise level (alpha) is fixed to the initially estimated value.
+    fixed_parameter : dict
+        This accepts the key in 'wn' or 'alpha'. If 'wn' ('alpha') is given, 
+        white noise level (alpha) is fixed to the given value.
     unbinned_mode : int
         First Fourier modes up to this number are left un-binned.
     base : float (> 1)
@@ -622,8 +622,8 @@ def fit_noise_model(
     fixed_param = {}
     for i in range(len(pxx)):
         p = pxx[i]
-        wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])*1.5 #conversion factor from median to mean
-        if fixed_parameter == None:
+        if fixed_parameter == {}:
+            wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])
             try:
                 pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
             except np.linalg.LinAlgError:
@@ -635,7 +635,8 @@ def fit_noise_model(
                 continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], wnest, -pfit[0]]
-        elif fixed_parameter == 'wn':
+        elif 'wn' in fixed_parameter.keys():
+            wnest = fixed_parameter["wn"]
             try:
                 pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
             except np.linalg.LinAlgError:
@@ -647,28 +648,17 @@ def fit_noise_model(
                 continue
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], -pfit[0]]
-            fixed_param['wn'] = wnest
-        elif fixed_parameter == 'alpha':
-            try:
-                pfit, vfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1, cov=True)
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot fit 1/f for detector {aman.dets.vals[i]} skipping."
-                )
-                covout[i] = np.full((3, 3), np.nan)
-                fitout[i] = np.full(3, np.nan)
-                continue
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], wnest]
-            fixed_param['alpha'] = -pfit[0]
+        elif 'alpha' in fixed_parameter.keys():
+            alpha = fixed_parameter['alpha']
+            wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])
+            p0 = [lowf, wnest]
         else:
             print('"fixed_parameter" is invalid.')
             return
-        res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_param), 
+        res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_parameter), 
                p0, method="Nelder-Mead")
         try:
-            #Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
-            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_param), full_output=True)
+            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **fixed_parameter), full_output=True)
             hessian_ndt, _ = Hfun(res["x"])
             # Inverse of the hessian is an estimator of the covariance matrix
             # sqrt of the diagonals gives you the standard errors.
@@ -684,18 +674,16 @@ def fit_noise_model(
             )
             covout_i = np.full((len(p0), len(p0)), np.nan)
         fitout_i = res.x
-        if fixed_parameter == 'alpha':
-            alpha_err = np.sqrt(vfit[0][0])
-            covout_i = np.insert(covout_i, 2, 0, axis=0)
-            covout_i = np.insert(covout_i, 2, 0, axis=1)
-            covout_i[2][2] = alpha_err
-            fitout_i = np.insert(fitout_i, 2, -pfit[0])
-        elif fixed_parameter == 'wn':
-            wnest_err = np.std(p[((f > fwhite[0]) & (f < fwhite[1]))])
+        if 'wn' in fixed_parameter.keys():
             covout_i = np.insert(covout_i, 1, 0, axis=0)
             covout_i = np.insert(covout_i, 1, 0, axis=1)
-            covout_i[1][1] = wnest_err
+            covout_i[1][1] = wnest
             fitout_i = np.insert(fitout_i, 1, wnest)
+        elif 'alpha' in fixed_parameter.keys():
+            covout_i = np.insert(covout_i, 2, 0, axis=0)
+            covout_i = np.insert(covout_i, 2, 0, axis=1)
+            covout_i[2][2] = alpha
+            fitout_i = np.insert(fitout_i, 2, alpha)
         covout[i] = covout_i
         fitout[i] = fitout_i
 
