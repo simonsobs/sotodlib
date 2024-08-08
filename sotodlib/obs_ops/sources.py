@@ -35,21 +35,21 @@ def get_sso(aman, sso, nstep=100):
     q_bore = csl.Q
 
     ras, decs = [], []
-    point_sources = {('tauA', 83.6272579, 22.02159891),
-                     ('rcw38', 134.7805107, -47.50911231),
-                     ('iras16183-4958', 245.5154, -50.09168292),
-                     ('iras19078+0901', 287.5575891, 9.107188994),
-                     ('rcw122', 260.0339538, -38.95673421),
-                     ('cenA', 201.3625336, -43.00797508),
-                     ('3c279', 194.0409868, -5.79174024),
-                     ('3c273', 187.2775626, 2.053532671),
-                     ('G025.36-00.14', 279.5264042, -6.793169326),
-                     ('QSO_J2253+1608', 343.4952422, 16.14301323),
-                     ('galactic_center', -93.5833, -29.0078)}
+    point_sources = {'tauA': (83.6272579, 22.02159891),
+                     'rcw38': (134.7805107, -47.50911231),
+                     'iras16183-4958': (245.5154, -50.09168292),
+                     'iras19078+0901': (287.5575891, 9.107188994),
+                     'rcw122': (260.0339538, -38.95673421),
+                     'cenA': (201.3625336, -43.00797508),
+                     '3c279': (194.0409868, -5.79174024),
+                     '3c273': (187.2775626, 2.053532671),
+                     'G025.36-00.14': (279.5264042, -6.793169326),
+                     'QSO_J2253+1608': (343.4952422, 16.14301323),
+                     'galactic_center': (-93.5833, -29.0078)}
     for d1_unix in ctime[::nstep]:
         if sso in point_sources:
             ra = point_sources[sso][0]
-            dec = point_sources[sso][0]
+            dec = point_sources[sso][1]
             planet = planets.SlowSource(d1_unix*1., float(ra) * coords.DEG,
                                         float(dec) * coords.DEG)
         else:
@@ -62,6 +62,8 @@ def get_sso(aman, sso, nstep=100):
         decs.append(dec0)
 
     planet_q = quat.rotation_lonlat(np.array(ras), np.array(decs))
+    if len(q_bore) != len(planet_q):
+        raise ValueError("Q vectors have inconsistent lengths")
     q_total = ~q_bore * planet_q
     xi_p, eta_p, _ = quat.decompose_xieta(np.array(q_total))
 
