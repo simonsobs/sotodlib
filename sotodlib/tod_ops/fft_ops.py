@@ -691,7 +691,7 @@ def fit_noise_model(
     noise_fit_stats = core.AxisManager(
         aman.dets,
         core.LabelAxis(
-            name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U8")
+            name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
         ),
     )
     noise_fit_stats.wrap("fit", fitout, [(0, "dets"), (1, "noise_model_coeffs")])
