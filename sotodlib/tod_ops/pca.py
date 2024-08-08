@@ -1,5 +1,8 @@
 from sotodlib import core
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Note to future developers with a need for speed: there are two
 # obvious places where OpenMP acceleration in a C++ routine would be
@@ -215,3 +218,53 @@ def get_trends(tod, remove=False, size=1, signal=None):
     if remove:
         add_model(tod, trends, scale=-1, signal=signal)
     return trends
+
+
+def get_common_mode(
+    tod,
+    signal='signal',
+    method='median',
+    wrap_name=None,
+    weights=None,
+):
+    """Returns common mode timestream between detectors.
+    This uses method 'median' or 'average' across detectors as opposed to a principle
+    component analysis to get the common mode.
+
+    Arguments
+    ---------
+        tod: axis manager
+        signal: str, optional
+            The name of the signal to estimate common mode or ndarray with shape of
+            (n_dets x n_samps). Defaults to 'signal'.
+        method: str
+            method of common mode estimation. 'median' or 'average'.
+        wrap_name: str or None.
+            If not None, wrap the common mode into tod with this name.
+        weights: array with dets axis
+            If not None, estimate common mode by taking average with this weights.
+
+    Returns
+    -------
+        common mode timestream
+
+    """
+    if isinstance(signal, str):
+        signal = tod[signal]
+    elif isinstance(signal, np.ndarray):
+        if np.shape(signal) != (tod.dets.count, tod.samps.count):
+            raise ValueError("When passing signal as ndarray shape must match (n_dets x n_samps).")
+    else:
+        raise TypeError("signal must be str, or ndarray")
+
+    if method == 'median':
+        if weights is not None:
+            logger.warn('weights will be ignored because median method is chosen')
+        common_mode = np.median(signal, axis=0)
+    elif method == 'average':
+        common_mode = np.average(signal, axis=0, weights=weights)
+    else:
+        raise ValueError("method flag must be median or average")
+    if wrap_name is not None:
+        tod.wrap(wrap_name, common_mode, [(0, 'samps')])
+    return common_mode
