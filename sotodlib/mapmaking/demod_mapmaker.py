@@ -239,7 +239,7 @@ class DemodSignalMap(DemodSignal):
                     
             # Build the RHS for this observation
             obs_rhs = pmap_local.zeros() # this is the final RHS, we will fill it at the end
-            
+
             if not(self.singlestream):
                 obs_rhs_T = pmap_local.to_map(tod=obs, signal=obs.dsT, comps='T', det_weights=2*nmat.ivar)
                 

@@ -42,7 +42,9 @@ import argparse
 from . import (
     analyze_bright_ptsrc,
     check_book,
+    make_atomic_db,
     make_det_info_wafer,
+    make_filterbin_map,
     make_ml_map,
     make_source_flags,
     make_uncal_beam_map,
@@ -60,7 +62,9 @@ from . import (
 ELEMENTS = {
     'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
+    'make-atomic-db': make_atomic_db,
     'make-det-info-wafer': make_det_info_wafer,
+    'make-filterbin-map': make_filterbin_map,
     'make-ml-map': make_ml_map,
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
@@ -68,6 +72,7 @@ ELEMENTS = {
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
+    'update-obsdb': update_obsdb
 }
 
 CLI_NAME = 'so-site-pipeline'

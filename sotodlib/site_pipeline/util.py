@@ -278,7 +278,6 @@ def init_logger(name, announce='', verbosity=2):
           if isinstance(handler, logging.StreamHandler):
               handler.setLevel(level)
               break
-
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
 
