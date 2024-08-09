@@ -111,6 +111,9 @@ def select_pointing(job, otherargs, runargs, data):
 
     # Configure Az/El and RA/DEC boresight and detector pointing and weights
 
+    job_ops.det_pointing_azel.boresight = defaults.boresight_azel
+    job_ops.det_pointing_radec.boresight = defaults.boresight_radec
+
     job_ops.pixels_wcs_azel.detector_pointing = job_ops.det_pointing_azel
     job_ops.pixels_wcs_radec.detector_pointing = job_ops.det_pointing_radec
     job_ops.pixels_healpix_radec.detector_pointing = job_ops.det_pointing_radec
