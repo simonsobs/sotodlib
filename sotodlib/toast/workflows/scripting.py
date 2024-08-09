@@ -36,6 +36,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
 
     if job_ops.sim_ground.enabled:
         data = wrk.simulate_observing(job, otherargs, runargs, comm)
+        wrk.select_pointing(job, otherargs, runargs, data)
         wrk.simple_noise_models(job, otherargs, runargs, data)
     else:
         group_size = wrk.reduction_group_size(job, runargs, comm)
@@ -56,7 +57,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
         # optionally zero out
         if hasattr(otherargs, "zero_loaded_data") and otherargs.zero_loaded_data:
             toast.ops.Reset(detdata=[defaults.det_data])
-    wrk.select_pointing(job, otherargs, runargs, data)
+        wrk.select_pointing(job, otherargs, runargs, data)
 
     job_ops.mem_count.prefix = "After Data Load or Simulate"
     job_ops.mem_count.apply(data)
