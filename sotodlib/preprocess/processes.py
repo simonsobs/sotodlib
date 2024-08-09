@@ -1004,7 +1004,9 @@ class PCARelCal(_Preprocess):
       - name: 'pca_relcal'
         signal: 'lpf_sig'
         pca_run: 'run1'
-        calc: True
+        calc:
+            xfac: 2
+            yfac: 1.5
         save: True
         plot: True
     
@@ -1035,7 +1037,7 @@ class PCARelCal(_Preprocess):
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal)
+            result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal, **self.calc_cfgs)
 
             badids.append(result_aman['badids'])
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
