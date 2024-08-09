@@ -1454,6 +1454,7 @@ class G3tHWP():
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
         offset = 0
+        outlier_count = 0
         for quad_split in np.array_split(quad, 1 + np.floor(len(quad) / 100)):
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
                 for j in range(len(quad_split)):
@@ -1462,12 +1463,9 @@ class G3tHWP():
                 continue
 
             outlier = np.argwhere(
-                np.abs(
-                    quad_split.mean() -
-                    quad_split) > 0.5).flatten()
+                np.abs(quad_split.mean() - quad_split) > 0.5).flatten()
             if len(outlier) > 5:
-                logger.warning(
-                    "flipping quad is corrected by mean value")
+                outlier_count += 1
             for i in outlier:
                 if i == 0:
                     ii, iii = i + 1, i + 2
@@ -1480,5 +1478,8 @@ class G3tHWP():
                 if quad_split[i] + quad_split[ii] + quad_split[iii] == 2:
                     quad[i + offset] = 1
             offset += len(quad_split)
+        if outlier_count > 0:
+            logger.warning("flipping quad was corrected by mean value "
+                           f"in {outlier_count} sections.")
 
         return quad
