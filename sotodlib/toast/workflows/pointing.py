@@ -25,18 +25,10 @@ def setup_pointing(operators):
     """
     # Detector quaternion pointing
     operators.append(
-        toast.ops.PointingDetectorSimple(
-            name="det_pointing_azel",
-            boresight=defaults.boresight_azel,
-            quats="quats_azel",
-        )
+        toast.ops.PointingDetectorSimple(name="det_pointing_azel", quats="quats_azel")
     )
     operators.append(
-        toast.ops.PointingDetectorSimple(
-            name="det_pointing_radec",
-            boresight=defaults.boresight_radec,
-            quats="quats_radec",
-        )
+        toast.ops.PointingDetectorSimple(name="det_pointing_radec", quats="quats_radec")
     )
     # Stokes weights
     operators.append(
