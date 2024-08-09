@@ -513,23 +513,25 @@ class G3tHWP():
             return array - pv
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
-        # template subtraction
-        ft = solved['fast_time'+suffix][solved['ref_indexes'+suffix]
-                                        [0]:solved['ref_indexes'+suffix][-2]+1]
+        ref_indexes = solved['ref_indexes'+suffix]
+        fast_time = solved['fast_time'+suffix]
+        # Trim only the timestamps of integer revolutions
+        ft = fast_time[ref_indexes[0]:ref_indexes[-2]]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
         # make template
-        template_slit = np.diff(ft).reshape(
-            len(solved['ref_indexes'+suffix])-2, self._num_edges)
+        template_slit = ft.reshape(len(ref_indexes)-2, self._num_edges)
         template_slit = np.average(template_slit, axis=0)
-        average_slit = np.average(template_slit)
+        template_slit -= np.average(template_slit)
+        # make subtraction model
+        subtract = np.roll(np.tile(template_slit, len(ref_indexes) + 1), ref_indexes[0])
+        subtract = subtract[:len(fast_time)]
         # subtract template, keep raw timestamp
-        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
-            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'+suffix])])
-        solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
-        solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
-        solved['template'+suffix] = template_slit / \
-            np.average(np.diff(solved['fast_time'+suffix]))
+        solved['fast_time_raw'+suffix] = fast_time
+        solved['fast_time'+suffix] = fast_time - subtract
+        # Normalize template by the width of slit
+        average_dt_slit = np.average(np.diff(fast_time - subtract))
+        solved['template'+suffix] = template_slit / average_dt_slit
 
     def eval_offcentering(self, solved):
         """
@@ -1129,9 +1131,12 @@ class G3tHWP():
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
 
-        # Reject unexpected counter
+        # Reject unexpected counter that exceeds instantaneous
+        # rotation speed of 5 Hz
         idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
+            logger.warning(f'Rejected {len(idx)} counters because instantaneous '
+                            'rotation speed exceeds 5 Hz. Encoder data might be noisy.')
             self._encd_clk = np.delete(self._encd_clk, idx)
             self._encd_cnt = self._encd_cnt[0] + \
                 np.arange(len(self._encd_cnt) - len(idx))
@@ -1160,7 +1165,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(self._time))
 
-        # calculate hwp angle with IRIG timing
+        # calculate hwp angle
         self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
@@ -1233,12 +1238,21 @@ class G3tHWP():
             return -1
 
         # delete unexpected ref slit indexes
-        self._ref_indexes = np.delete(self._ref_indexes, np.where(
-            np.diff(self._ref_indexes) < self._num_edges - 10)[0])
+        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 10)[0]
+        if len(bad_ref_indexes) > 0:
+            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
+            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
+
+        # check quality of ref_indexes
+        number_of_bad_refs = np.sum(np.diff(self._ref_indexes) != self._num_edges - 2)
+        if number_of_bad_refs > 0:
+            logger.warning(f'There are {number_of_bad_refs} bad ref indexes')
+
         self._ref_clk = self._encd_clk[self._ref_indexes]
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         logger.debug('found {} reference points'.format(
             len(self._ref_indexes)))
+
         return 0
 
     def _fill_refs(self):
@@ -1301,18 +1315,17 @@ class G3tHWP():
         return
 
     def _calc_angle_linear(self, mod2pi=True):
-
+        """ Calculate hwp angle of encoder counters for each revolution """
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
-            (2 * np.pi / self._num_edges) % (2 * np.pi)
+            (2 * np.pi / self._num_edges)
         angle_last_revolution = (self._encd_cnt_split[-1] - self._ref_cnt[-1]) * \
-            (2 * np.pi / self._num_edges) % (2 * np.pi) + \
-            len(self._ref_cnt) * 2 * np.pi
-        self._angle = np.concatenate([(self._encd_cnt_split[i] - self._ref_cnt[i]) *
-                                      (2 * np.pi /
-                                       np.diff(self._ref_indexes)[i - 1])
-                                      % (2 * np.pi) + i * 2 * np.pi
-                                      for i in range(1, len(self._encd_cnt_split) - 1)])
+            (2 * np.pi / self._num_edges) + (len(self._ref_cnt) - 1) * 2 * np.pi
+        self._angle = np.concatenate(
+            [(self._encd_cnt_split[i] - self._ref_cnt[i]) *
+             (2 * np.pi /np.diff(self._ref_indexes)[i - 1]) + i * 2 * np.pi
+             for i in range(1, len(self._encd_cnt_split) - 1)]
+        )
         self._angle = np.concatenate(
             [angle_first_revolution, self._angle.flatten(), angle_last_revolution])
 
