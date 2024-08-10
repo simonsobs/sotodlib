@@ -33,15 +33,15 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
     """
     if isinstance(flags, str):
         flags = aman.flags[flags]
-    flag_mask = flags.mask()
+    flags_mask = flags.mask()
     
-    if flag_mask.ndim == 1:
+    if flags_mask.ndim == 1:
         flag_is_1d = True
     else:
         all_columns_same = np.all(np.all(flags_mask == flags_mask[0, :], axis=0))
         if all_columns_same:
             flag_is_1d = True
-            flag_mask = flags_mask[0]
+            flags_mask = flags_mask[0]
         else:
             flag_is_1d = False
 
