@@ -456,7 +456,7 @@ def fit_noise_model(
     return noise_fit_stats
 
 
-def build_filter_params_dict(
+def build_hpf_params_dict(
     filter_name,
     noise_fit=None,
     filter_params=None

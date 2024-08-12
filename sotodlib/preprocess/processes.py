@@ -996,7 +996,7 @@ class FourierFilter(_Preprocess):
         else:
             noise_fit = None
         
-        filter_params = tod_ops.fft_ops.build_filter_params_dict(
+        filter_params = tod_ops.fft_ops.build_hpf_params_dict(
             filt_function,
             noise_fit=noise_fit,
             filter_params=self.process_cfgs.get("filter_params", None)
