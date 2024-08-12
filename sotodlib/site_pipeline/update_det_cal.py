@@ -588,10 +588,12 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg):
         return
 
     logger.debug(f"Adding obs_id {obs_id} to dataset")
-    write_dataset(result.result_set, cfg.h5_path, obs_id, overwrite=True)
+    rset = ResultSet.from_friend(result.result_set)
+    write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
+    relpath = os.path.relpath(cfg.h5_path, start=os.path.dirname(cfg.index_path))
     db.add_entry(
-        {"obs:obs_id": obs_id, "dataset": obs_id}, filename=cfg.h5_path, replace=True
+        {"obs:obs_id": obs_id, "dataset": obs_id}, filename=relpath, replace=True
     )
 
 
@@ -620,13 +622,12 @@ def run_update_site(cfg: DetCalCfg):
 
     with mp.get_context("fork").Pool(cfg.nprocs_result_set) as pool:
         for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
-            try:
-                obs_info = get_obs_info(cfg, oid)
-            except Exception:
+            res = get_obs_info(cfg, oid)
+            if not res.success:
                 logger.info(f"Could not get obs info for obs id: {oid}")
-                continue
+                logger.error(res.traceback)
 
-            result_set = get_cal_resset(cfg, obs_info, pool=pool)
+            result_set = get_cal_resset(cfg, res.obs_info, pool=pool)
             handle_result(result_set, cfg)
 
 
