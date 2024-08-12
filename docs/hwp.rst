@@ -67,11 +67,6 @@ Here's an annotated example of yaml config file:
   # Search range of reference slot
   ref_range: 0.1
 
-  # force to quad value
-  # 0: use measured quad value (default)
-  # 1: positive rotation direction, -1: negative rotation direction
-  force_quad: 0
-
 Data Loading
 ------------
 
@@ -159,7 +154,7 @@ There is a fucntion to output analyzed data with HDF5 metadata format.
 This is mainly used for make-hwp-solutions site pipeline element.
 ::
 
-   hwp_angle_tool.write_solution_h5(aman,h5_filename,h5_address)
+   hwp_angle_tool.make_solution(aman)
 
 .. _g3thwp-ref-section:
 
@@ -185,7 +180,11 @@ Class and function references should be auto-generated here.
     :noindex:
 
 .. autoclass:: G3tHWP
-    :members: write_solution_h5
+    :members: set_data
+    :noindex:
+
+.. autoclass:: G3tHWP
+    :members: make_solution
     :noindex:
 
 

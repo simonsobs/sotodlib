@@ -16,7 +16,8 @@ from . import filters
 from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                       psat_range=(0, 15), merge=True, overwrite=True,
+                       psat_range=(0, 15), rn_range=None, si_nan=False,
+                       merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
@@ -33,6 +34,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
         P_SAT in the IV analysis is the bias power at 90% Rn in pW.
+    rn_range : Tuple
+        Tuple (lower_bound, upper_bound) for r_n det selection.
+    si_nan : bool
+        If true, flag dets where s_i is NaN. Default is false.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -64,13 +69,20 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         merge = False
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
+
+    ranges = [detcal.bg >= 0,
+              detcal.r_tes > 0,
+              detcal.r_frac >= rfrac_range[0],
+              detcal.r_frac <= rfrac_range[1],
+              detcal.p_sat*1e12 >= psat_range[0],
+              detcal.p_sat*1e12 <= psat_range[1]]
+    if rn_range is not None:
+        ranges.append(detcal.r_n >= rn_range[0])
+        ranges.append(detcal.r_n <= rn_range[1])
+    if si_nan:
+        ranges.append(np.isnan(detcal.s_i) == False)
     
-    msk = ~(np.all([detcal.bg >= 0,
-                    detcal.r_tes > 0,
-                    detcal.r_frac >= rfrac_range[0],
-                    detcal.r_frac <= rfrac_range[1],
-                    detcal.p_sat*1e12 >= psat_range[0],
-                    detcal.p_sat*1e12 <= psat_range[1]], axis=0))
+    msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     if 'samps' in aman:
         x = Ranges(aman.samps.count)
@@ -230,11 +242,11 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         for part_slice_ta_masked, part_slice_ta_unmasked in zip(part_slices_ta_masked, part_slices_ta_unmasked):
             daz_part = daz[part_slice_ta_masked]
             daz_part_mean, daz_part_std, daz_part_samps = daz_part.mean(), daz_part.std(), daz_part.shape[0]
-            if np.isclose(daz_part_mean, daz_right_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_right_samps)) and \
-                np.isclose(daz_part_std, daz_right_std, rtol=1, atol=0):
+            if np.isclose(daz_part_mean, daz_right_mean, rtol=0.01, atol=3.*daz_right_std/np.sqrt(daz_right_samps)) and \
+                np.isclose(daz_part_std, daz_right_std, rtol=3., atol=0):
                 _right_flag[part_slice_ta_unmasked] = True
-            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0, atol=3*daz_right_std/np.sqrt(daz_left_samps)) and \
-                np.isclose(daz_part_std, daz_left_std, rtol=1, atol=0):
+            elif np.isclose(daz_part_mean, daz_left_mean, rtol=0.01, atol=3.*daz_right_std/np.sqrt(daz_left_samps)) and \
+                np.isclose(daz_part_std, daz_left_std, rtol=3., atol=0):
                 _left_flag[part_slice_ta_unmasked] = True
             else:
                 _truncate_flag[part_slice_ta_unmasked] = True
@@ -264,7 +276,8 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         # truncate unstable scan before the first turnaround or after the last turnaround
         if truncate:
             valid_slice = slice(*np.where(~_truncate_flag)[0][[0, -1]])
-            aman.restrict('samps', valid_slice)
+            valid_i_start, valid_i_end = np.where(~_truncate_flag)[0][0], np.where(~_truncate_flag)[0][-1]
+            aman.restrict('samps', (aman.samps.offset + valid_i_start, aman.samps.offset+valid_i_end))
             ta_flag = Ranges.from_bitmask(_ta_flag[valid_slice])
         else:
             ta_flag = Ranges.from_bitmask(np.logical_or(_ta_flag, _truncate_flag))
@@ -524,3 +537,116 @@ def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source
             aman.flags.wrap(source_flags_name, source_flags, [(0, 'dets'), (1, 'samps')])
 
     return source_flags
+
+def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
+                  merge=False, overwrite=False, ptp_flag_name='ptp_flag',
+                  outlier_range=(0.5, 2.)):
+    """
+    Returns a ranges matrix that indicates if the peak-to-peak (ptp) of
+    the tod is valid based on the kurtosis of the distribution of ptps. The
+    threshold is set by ``kurtosis_threshold``.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    signal_name : str
+        Signal to estimate flags off of. Default is ``signal``.
+    kurtosis_threshold : float
+        Maximum allowable kurtosis of the distribution of peak-to-peaks.
+        Default is 5.
+    merge : bool
+        Merge RangesMatrix into ``aman.flags``. Default is False.
+    overwrite : bool
+        Whether to write over any existing data in ``aman.flags[ptp_flag_name]`` 
+        if merge is True. Default is False.
+    ptp_flag_name : str
+        Field name used when merge is True. Default is ``ptp_flag``.
+    outlier_range : tuple
+        (lower, upper) bound of the initial cut before estimating the kurtosis.
+
+    Returns
+    -------
+    mskptps : RangesMatrix
+        RangesMatrix of detectors with acceptable peak-to-peaks. 
+        All ones if the detector should be cut.
+
+    """
+    det_mask = np.full(aman.dets.count, True, dtype=bool)
+    ptps_full = np.ptp(aman[signal_name], axis=1)
+    ratio = ptps_full/np.median(ptps_full)
+    outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
+    det_mask[outlier_mask] = False
+    while True:
+        if len(aman.dets.vals[det_mask]) > 0:
+            ptps = np.ptp(aman[signal_name][det_mask], axis=1)
+        else:
+            break
+        kurtosis_ptp = stats.kurtosis(ptps)
+        if np.abs(kurtosis_ptp) < kurtosis_threshold:
+            break
+        else:
+            max_is_bad_factor = np.max(ptps)/np.median(ptps)
+            min_is_bad_factor = np.median(ptps)/np.min(ptps)
+            if max_is_bad_factor > min_is_bad_factor:
+                det_mask[ptps_full >= np.max(ptps)] = False
+            else:
+                det_mask[ptps_full <= np.min(ptps)] = False
+    x = Ranges(aman.samps.count)
+    mskptps = RangesMatrix([Ranges.zeros_like(x) if Y
+                             else Ranges.ones_like(x) for Y in det_mask])
+    if merge:
+        if ptp_flag_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {ptp_flag_name} already exists in aman.flags")
+        if ptp_flag_name in aman.flags:
+            aman.flags[ptp_flag_name] = mskptps
+        else:
+            aman.flags.wrap(ptp_flag_name, mskptps, [(0, 'dets'), (1, 'samps')])
+
+    return mskptps
+
+def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
+                      merge=False, overwrite=False, inv_var_flag_name='inv_var_flag'):
+    """
+    Returns a ranges matrix that indicates if the inverse variance (inv_var) of
+    the tod is greater than ``nsigma`` away from the median.
+    
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod
+    signal_name : str
+        Signal to estimate flags off of. Default is ``signal``.
+    nsigma : float
+        Maximum allowable deviation from the median inverse variance.
+        Default is 5.
+    merge : bool
+        Merge RangesMatrix into ``aman.flags``. Default is False.
+    overwrite : bool
+        Whether to write over any existing data in ``aman.flags[inv_var_flag_name]`` 
+        if merge is True. Default is False.
+    inv_var_flag_name : str
+        Field name used when merge is True. Default is ``inv_var_flag``.
+
+    Returns
+    -------
+    mskptps : RangesMatrix
+        RangesMatrix of detectors with acceptable inverse variance. 
+        All ones if the detector should be cut.
+
+    """
+    ivar = 1.0/np.var(aman[signal_name], axis=-1)
+    sigma = (np.percentile(ivar,84) - np.percentile(ivar, 16))/2
+    det_mask = ivar > np.median(ivar) + nsigma*sigma
+    x = Ranges(aman.samps.count)
+    mskinvar = RangesMatrix([Ranges.ones_like(x) if Y
+                             else Ranges.zeros_like(x) for Y in det_mask])
+    if merge:
+        if inv_var_flag_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {inv_var_flag_name} already exists in aman.flags")
+        if inv_var_flag_name in aman.flags:
+            aman.flags[inv_var_flag_name] = mskinvar
+        else:
+            aman.flags.wrap(inv_var_flag_name, mskinvar, [(0, 'dets'), (1, 'samps')])
+
+    return mskinvar

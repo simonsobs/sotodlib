@@ -4,7 +4,7 @@ from operator import attrgetter
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 import sotodlib.obs_ops as obs_ops
-from sotodlib.hwp import hwp
+from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
@@ -442,6 +442,7 @@ class Calibrate(_Preprocess):
       - name: "calibrate"
         process:
           kind: "single_value"
+          divide: True # If true will divide instead of multiply.
           # phase_to_pA: 9e6/(2*np.pi)
           val: 1432394.4878270582
       - name: "calibrate"
@@ -459,11 +460,21 @@ class Calibrate(_Preprocess):
 
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
-            aman[self.signal] *= self.process_cfgs["val"]
+            if self.process_cfgs.get("divide", False):
+                aman[self.signal] /= self.process_cfgs["val"]
+            else:
+                aman[self.signal] *= self.process_cfgs["val"]
         elif self.process_cfgs["kind"] == "array":
             field = self.process_cfgs["cal_array"]
             _f = attrgetter(field)
-            aman[self.signal] = np.multiply(aman[self.signal].T, _f(aman)).T
+            if self.process_cfgs.get("proc_aman_cal", False):
+                cal_arr = _f(proc_aman)
+            else:
+                cal_arr = _f(aman)
+            if self.process_cfgs.get("divide", False):
+                aman[self.signal] = np.divide(aman[self.signal].T, cal_arr).T
+            else:
+                aman[self.signal] = np.multiply(aman[self.signal].T, cal_arr).T
         else:
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
@@ -606,9 +617,11 @@ class SubtractHWPSS(_Preprocess):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
             template = hwp.harms_func(aman.hwp_angle, modes,
                                   proc_aman[self.hwpss_stats].coeffs)
+            if 'hwpss_model' in aman._fields:
+                aman.move('hwpss_model', None)
+            aman.wrap('hwpss_model', template, [(0, 'dets'), (1, 'samps')])
             hwp.subtract_hwpss(
                 aman,
-                hwpss_template = template,
                 subtract_name = self.process_cfgs["subtract_name"]
                 )
 
@@ -630,7 +643,13 @@ class Demodulate(_Preprocess):
     name = "demodulate"
 
     def process(self, aman, proc_aman):
-        hwp.demod_tod(aman, **self.process_cfgs)
+        hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
 
 
 class EstimateAzSS(_Preprocess):
@@ -638,6 +657,18 @@ class EstimateAzSS(_Preprocess):
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
     fitting will be applied and used as AzSS model.
+
+    Example configuration block::
+
+      - name: "estimate_azss"
+        calc:
+          signal: 'demodQ'
+          azss_stats_name: 'azss_statsQ'
+          range: [-1.57079, 7.85398]
+          bins: 1080
+          merge_stats: False
+          merge_model: False
+        save: True
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
@@ -839,13 +870,32 @@ class SourceFlags(_Preprocess):
             res: 0.005817764173314432 # np.radians(20/60)
             max_pix: 4e6
           save: True
+          select: True # optional
     
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
     
     def calc_and_save(self, aman, proc_aman):
-        source_flags = tod_ops.flags.get_source_flags(aman, merge=False, **self.calc_cfgs)
+        center_on = self.calc_cfgs.get('center_on', 'planet')
+        # Get source from tags
+        if center_on == 'planet':
+            from sotodlib.coords.planets import SOURCE_LIST
+            matches = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(matches) != 0:
+                source = matches[0]
+            else:
+                raise ValueError("No tags match source list")
+        else:
+            source = center_on
+        source_flags = tod_ops.flags.get_source_flags(aman, 
+                                                      merge=self.calc_cfgs.get('merge', False),
+                                                      overwrite=self.calc_cfgs.get('overwrite', True),
+                                                      source_flags_name=self.calc_cfgs.get('source_flags_name', 'source_flags'),
+                                                      mask=self.calc_cfgs.get('mask', None),
+                                                      center_on=source,
+                                                      res=self.calc_cfgs.get('res', None),
+                                                      max_pix=self.calc_cfgs.get('max_pix', None))
 
         source_aman = core.AxisManager(aman.dets, aman.samps)
         source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
@@ -856,8 +906,277 @@ class SourceFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("sources", source_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_any_cuts(proc_aman.sources.source_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+class HWPAngleModel(_Preprocess):
+    """Apply hwp angle model to the TOD.
+
+    Saves results in proc_aman under the "hwp_angle" field. 
+
+     Example config block::
+
+        - name : "hwp_angle_model"
+          process: True
+          calc:
+            on_sign_ambiguous: 'fail'
+          save: True
+          
+    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
+    """
+    name = "hwp_angle_model"
+
+    def process(self, aman, proc_aman):
+        if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
+            aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
+                      [(0, 'samps')])
+        else:
+            return
+
+    def calc_and_save(self, aman, proc_aman):
+        hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+        hwp_angle_aman = core.AxisManager(aman.samps)
+        hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
+        self.save(proc_aman, hwp_angle_aman)
+
+    def save(self, proc_aman, hwp_angle_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("hwp_angle", hwp_angle_aman)
         
 
+class FourierFilter(_Preprocess):
+    """
+    Applies a fourier filter (defined in fft_ops) to the data.
+
+    Example config file entry::
+
+      - name: "fourier_filter"
+        wrap_name: "lpf_sig"
+        signal_name: "signal"
+        process:
+          filt_function: "low_pass_sine2"
+          trim_samps: 2000
+          filter_params:
+            cutoff: 1
+            width: 0.1
+
+    See :ref:`fourier-filters` documentation for more details.
+    """
+    name = 'fourier_filter'
+    def __init__(self, step_cfgs):
+        self.signal_name = step_cfgs.get('signal_name', 'signal')
+        # By default signal is overwritted by the filtered signal
+        self.wrap_name = step_cfgs.get('wrap_name', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        _f = getattr(tod_ops.filters,
+                self.process_cfgs.get('filt_function','high_pass_butter4'))
+        filt = _f(**self.process_cfgs.get('filter_params'))
+        filt_tod= tod_ops.filters.fourier_filter(aman, filt,
+                                                 signal_name=self.signal_name)
+        if self.wrap_name in aman._fields:
+            aman.move(self.wrap_name, None)
+        aman.wrap(self.wrap_name, filt_tod, [(0, 'dets'), (1, 'samps')])
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
+            proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
+                                         proc_aman.samps.offset + proc_aman.samps.count - trim))
+
+class PCARelCal(_Preprocess):
+    """
+    Estimate the relcal factor from the atmosphere using PCA.
+    
+    Example configuration file entry::
+
+      - name: 'pca_relcal'
+        signal: 'hwpss_remove'
+        calc: True
+        save: True
+
+    See :ref:`pca-background` for more details on the method.
+    """
+    name = 'pca_relcal'
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = bands[bands != 'NC']
+        rc_aman = core.AxisManager(aman.dets, aman.samps)
+        relcal = np.zeros(aman.dets.count)
+        for band in bands:
+            m0 = aman.det_info.wafer.bandpass == band
+            rc_aman.wrap(f'{band}_mask', m0, [(0, 'dets')])
+            band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+            pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
+            pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
+                                        signal=band_aman[self.signal])
+            med = np.median(pca_signal.weights[:,0])
+            relcal[m0] = med/pca_signal.weights[:,0]
+
+            rc_aman.wrap(f'{band}_median', med)
+            rc_aman.wrap(f'{band}_pca_mode0', pca_signal.modes[0], [(0, 'samps')])
+        rc_aman.wrap('relcal', relcal, [(0,'dets')])
+        self.save(proc_aman, rc_aman)
+
+    def save(self, proc_aman, rc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.name, rc_aman)
+
+class PTPFlags(_Preprocess):
+    """Find detectors with anomalous peak-to-peak signal.
+
+    Saves results in proc_aman under the "ptp_flags" field. 
+
+     Example config block::
+
+        - name : "ptp_flags"
+          calc:
+            signal_name: "dsT"
+            kurtosis_threshold: 6
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_ptp_flags
+    """
+    name = "ptp_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
+        
+        ptp_aman = core.AxisManager(aman.dets, aman.samps)
+        ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, ptp_aman)
+    
+    def save(self, proc_aman, dark_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("ptp_flags", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.ptp_flags.ptp_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+class InvVarFlags(_Preprocess):
+    """Find detectors with too high inverse variance.
+
+    Saves results in proc_aman under the "inv_var_flags" field. 
+
+     Example config block::
+
+        - name : "inv_var_flags"
+          calc:
+            signal_name: "demodQ"
+            nsigma: 6
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_inv_var_flags
+    """
+    name = "inv_var_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskptps = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
+        
+        ptp_aman = core.AxisManager(aman.dets, aman.samps)
+        ptp_aman.wrap('inv_var_flags', mskptps, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, ptp_aman)
+    
+    def save(self, proc_aman, dark_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("inv_var_flags", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+    
+class EstimateT2P(_Preprocess):
+    """Estimate T to P leakage coefficients.
+
+    Saves results in proc_aman under the "t2p" field. 
+
+     Example config block::
+
+        - name : "estimate_t2p"
+          calc:
+            T_sig_name: 'dsT'
+            Q_sig_name: 'demodQ'
+            U_sig_name: 'demodU'
+            trim_samps: 2000
+            lpf_cfgs:
+              type: 'sine2'
+              cutoff: 0.5
+              trans_width: 0.1
+          save: True
+    
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
+    """
+    name = "estimate_t2p"
+
+    def calc_and_save(self, aman, proc_aman):
+        t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
+        self.save(proc_aman, t2p_aman)
+    
+    def save(self, proc_aman, t2p_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("t2p", t2p_aman)
+
+class SubtractT2P(_Preprocess):
+    """Subtract T to P leakage.
+
+     Example config block::
+
+        - name : "subtract_t2p"
+          process:
+            Q_sig_name: 'demodQ'
+            U_sig_name: 'demodU'
+    
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
+    """
+    name = "subtract_t2p"
+
+    def process(self, aman, proc_aman):
+        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
+                                        **self.process_cfgs)
+
+_Preprocess.register(SubtractT2P)
+_Preprocess.register(EstimateT2P)
+_Preprocess.register(InvVarFlags)
+_Preprocess.register(PTPFlags)
+_Preprocess.register(PCARelCal)
+_Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
 _Preprocess.register(Detrend)
@@ -879,3 +1198,4 @@ _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
+_Preprocess.register(HWPAngleModel)

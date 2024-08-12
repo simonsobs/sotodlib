@@ -1,9 +1,9 @@
+import re
 import datetime
 import logging
-import re
-import time
 
 import numpy as np
+
 from scipy.optimize import fmin
 
 from astropy import units
@@ -17,11 +17,27 @@ from .. import core, tod_ops, coords
 
 logger = logging.getLogger(__name__)
 
-# Files that we might want to download and cache using
-# astropy.utils.data
-RESOURCE_URLS = {
-    'de421.bsp': 'ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp',
-}
+
+# Default source list
+SOURCE_LIST = ['mercury',
+               'venus',
+               'moon',
+               'mars',
+               'jupiter',
+               'saturn',
+               'uranus',
+               'neptune',
+               ('tauA', 83.6272579, 22.02159891),
+               ('rcw38', 134.7805107, -47.50911231),
+               ('iras16183-4958', 245.5154, -50.09168292),
+               ('iras19078+0901', 287.5575891, 9.107188994),
+               ('rcw122', 260.0339538, -38.95673421),
+               ('cenA', 201.3625336, -43.00797508),
+               ('3c279', 194.0409868, -5.79174024),
+               ('3c273', 187.2775626, 2.053532671),
+               ('G025.36-00.14', 279.5264042, -6.793169326),
+               ('QSO_J2253+1608', 343.4952422, 16.14301323),
+               ('galactic_center', -93.5833, -29.0078)]
 
 
 class SlowSource:
@@ -236,14 +252,14 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
-def _get_astrometric(source_name, timestamp, site='_default'):
+def _get_astrometric(source_name, timestamp, site="_default"):
     """
-    Derive skyfield's Astrometric object of a celestial source at a 
+    Derive skyfield's Astrometric object of a celestial source at a
     specific timestamp and observing site, which is used to derive
     radec/azel in get_source_pos/get_source_azel.
-    
+
     Note that it will download a 16M ephemeris file on first use.
-    
+
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
         or fixed source specification.
@@ -254,14 +270,13 @@ def _get_astrometric(source_name, timestamp, site='_default'):
     Returns:
       astrometric: skyfield's astrometric object
     """
-    # Get the ephemeris -- this will trigger a 16M download on first use.
-    de_url = RESOURCE_URLS['de421.bsp']
-    de_filename = au_data.download_file(de_url, cache=True)
+    # Get the ephemeris
+    de_filename = core.get_local_file("de421.bsp")
 
     planets = jpllib.SpiceKernel(de_filename)
     for k in [
-            source_name,
-            source_name + ' barycenter',
+        source_name,
+        source_name + " barycenter",
     ]:
         try:
             target = planets[k]
@@ -270,8 +285,9 @@ def _get_astrometric(source_name, timestamp, site='_default'):
             pass
     else:
         options = list(planets.names().values())
-        raise ValueError(f'Failed to find a match for "{source_name}" in '
-                         f'ephemeris: {options}')
+        raise ValueError(
+            f'Failed to find a match for "{source_name}" in ephemeris: {options}'
+        )
 
     if isinstance(site, str):
         site = so3g.proj.SITES[site]
@@ -280,12 +296,12 @@ def _get_astrometric(source_name, timestamp, site='_default'):
 
     timescale = skyfield_api.load.timescale()
     sf_timestamp = timescale.from_datetime(
-        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc))
+        datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
+    )
     astrometric = observatory.at(sf_timestamp).observe(target)
-    planets.close()
     return astrometric
-    
-    
+
+
 def get_source_pos(source_name, timestamp, site='_default'):
     """Get the equatorial coordinates of a planet (or fixed-position
     source, see note) at some time.  Returns the apparent position,
@@ -392,16 +408,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
     w = enmap.enmap(w, wcs=wcs)
 
     if source_list is None:
-        source_list = [
-            'mercury',
-            'venus',
-            'mars',
-            'jupiter',
-            'saturn',
-            'uranus',
-            'neptune',
-            ('tau_a', 83.6331, 22.0145),
-        ]
+        source_list = SOURCE_LIST
 
     positions = []
     for source_name in source_list:
@@ -481,7 +488,7 @@ def compute_source_flags(tod=None, P=None, mask=None, wrap=None,
         [so3g.proj.Ranges.from_mask(r != 0) for r in a])
 
     if wrap:
-        assert(tod is not None, "Pass in a tod to 'wrap' the output.")
+        assert tod is not None, "Pass in a tod to 'wrap' the output."
         tod.flags.wrap(wrap, source_flags, [(0, 'dets'), (1, 'samps')])
     return source_flags
 

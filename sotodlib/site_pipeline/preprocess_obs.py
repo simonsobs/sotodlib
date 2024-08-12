@@ -4,7 +4,7 @@ import time
 import numpy as np
 import argparse
 import traceback
-from typing import Optional
+from typing import Optional, List
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -106,7 +106,9 @@ def preprocess_obs(
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
-        db.add_entry(db_data, dest_file)
+        h5_path = os.path.relpath(dest_file,
+                start=os.path.dirname(configs['archive']['index']))
+        db.add_entry(db_data, h5_path)
 
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
@@ -175,6 +177,12 @@ def get_parser(parser=None):
         help="If true, takes all planet tags as logical OR and adjusts related configs",
         action='store_true',
     )
+    parser.add_argument(
+        '--verbosity',
+        help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
+        default=2,
+        type=int
+    )
     return parser
 
 def main(
@@ -185,15 +193,16 @@ def main(
     min_ctime: Optional[int] = None,
     max_ctime: Optional[int] = None,
     update_delay: Optional[int] = None,
-    tags: Optional[str] = None,
+    tags: Optional[List[str]] = None,
     planet_obs: bool = False,
+    verbosity: Optional[int] = None,
  ):
     configs, context = _get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess")
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..
         # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) + update_delay
+        min_ctime = int(time.time()) - update_delay*86400
 
     if obs_id is not None:
         tot_query = f"obs_id=='{obs_id}'"
@@ -209,10 +218,11 @@ def main(
         if tot_query=="":
             tot_query="1"
     
-    for i, tag in enumerate(tags):
-        tags[i] = tags[i].lower()
-        if '=' not in tags[i]:
-            tags[i] += '=1'
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tags[i].lower()
+            if '=' not in tags[i]:
+                tags[i] += '=1'
 
     if planet_obs:
         obs_list = []
