@@ -989,7 +989,7 @@ class FourierFilter(_Preprocess):
             filt_function
         )
 
-        if self.process_cfgs.get("noise_fit_params"):
+        if self.process_cfgs.get("noise_fit_array"):
             field = self.process_cfgs["noise_fit_array"]
             _noise_fit = attrgetter(field)
             noise_fit = _noise_fit(proc_aman)
