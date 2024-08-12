@@ -469,8 +469,8 @@ def build_filter_params_dict(
     ----
     filter_name : str
         Name of the filter to build the parameter dict for.
-    noise_fit: nparray
-        Array of noise model fit parameters sized nparams x ndets.
+    noise_fit: AxisManager
+        AxisManager containing the result of the noise model fit sized nparams x ndets.
     filter_params: dict
         Filter parameters dictionary to complement parameters
         derived from the noise fit (or to be used if noise fit is None).
