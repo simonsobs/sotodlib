@@ -770,6 +770,26 @@ class SSOFootprint(_Preprocess):
     """Find nearby sources within a given distance and get SSO footprint and plot
     each source on the focal plane.
 
+     Example config block::
+
+        - name: "sso_footprint"
+          calc:
+              # source_list: ['jupiter'] # remove to find nearby sources
+              distance: 20
+              nstep: 100
+              telescope: 'SAT'
+              wafer_hit_threshold: 10
+          save: True
+          plot:
+              wafer_offsets: {'ws0': [-2.5, -0.5],
+                              'ws1': [-2.5, -13],
+                              'ws2': [-13, -7],
+                              'ws3': [-13, 5],
+                              'ws4': [-2.5, 11.5],
+                              'ws5': [8.5, 5],
+                              'ws6': [8.5, -7]}
+              focal_plane: '/so/home/msilvafe/shared_files/sat_hw_positions.npz'
+
     .. autofunction:: sotodlib.obs_ops.sources.get_sso
     """
     name = 'sso_footprint'
@@ -785,6 +805,14 @@ class SSOFootprint(_Preprocess):
         sso_aman = core.AxisManager()
         nstep = self.calc_cfgs.get("nstep", 100)
         onsamp = (aman.samps.count+nstep-1)//nstep
+        telescope = self.calc_cfgs.get("telescope", 'SAT')
+        if telescope == 'SAT':
+            wafer_slots = [f'ws{i}' for i in range(7)]
+        elif telescope == 'LAT':
+            wafer_slots = [f'ws{i}' for i in range(3)]
+        else:
+            raise NameError('Only "SAT" or "LAT" is supported.')
+        streamed_wafer_slots  = ['ws{}'.format(index) for index, bit in enumerate(aman.obs_info.obs_id.split('_')[-1]) if bit == '1']
         for sso in ssos:
             planet = sso
             xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
@@ -794,6 +822,19 @@ class SSOFootprint(_Preprocess):
             # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
             planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
             planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
+            for ws in wafer_slots:
+                if ws in streamed_wafer_slots:
+                    ws_dets = np.where(aman.det_info.wafer_slot == ws)[0]
+                    ws_xi = aman.focal_plane.xi[ws_dets]
+                    ws_eta = aman.focal_plane.eta[ws_dets]
+                    wafer_hit = np.sum([np.any(np.sqrt((xi_p-xi)**2 + (eta_p-eta)**2) < np.deg2rad(0.5)) for xi, eta in zip(ws_xi, ws_eta)]) > self.calc_cfgs.get("wafer_hit_threshold", 10)
+                    if wafer_hit:
+                        planet_aman.wrap(ws, True)
+                    else:
+                        planet_aman.wrap(ws, False)
+                else:
+                    planet_aman.wrap(ws, False)
+
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
         

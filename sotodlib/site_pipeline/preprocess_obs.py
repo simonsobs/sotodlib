@@ -70,6 +70,25 @@ def preprocess_obs(
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
+
+    source_list = configs.get('source_list', None)
+    source_names = []
+    for _s in source_list:
+        if isinstance(_s, str):
+            source_names.append(_s)
+        elif len(_s) == 3:
+            source_names.append(_s[0])
+        else:
+            raise ValueError('Invalid style of source')
+
+    # Other configurations
+    telescope = configs.get('telescope', 'SAT')
+    if telescope == 'SAT':
+        wafer_slots = [f'ws{i}' for i in range(7)]
+    elif telescope == 'LAT':
+        wafer_slots = [f'ws{i}' for i in range(3)]
+    else:
+        raise NameError('Only "SAT" or "LAT" is supported.')
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -81,6 +100,10 @@ def preprocess_obs(
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
+        for source_name in source_names:
+            scheme.add_data_field(source_name)
+            for ws in wafer_slots:
+                scheme.add_data_field(f'{source_name}_{ws}')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
             scheme=scheme
@@ -103,6 +126,28 @@ def preprocess_obs(
     # Update the index.
     db_data = {'obs:obs_id': obs_id,
                 'dataset': dest_dataset}
+    
+    sso_footprint_process = False
+    for process in configs['process_pipe']:
+        if 'name' in process and 'sso_footprint' == process['name']:
+            sso_footprint_process = True
+    if sso_footprint_process:
+        nearby_source_names = []
+        for _source in proc_aman.sso_footprint._assignments.keys():
+            nearby_source_names.append(_source)
+        for ws in wafer_slots:
+            for source_name in source_names:
+                if source_name in nearby_source_names:
+                    db_data[f'{source_name}_{ws}'] = int(proc_aman.sso_footprint[source_name][ws])
+                else:
+                    db_data[f'{source_name}_{ws}'] = 0
+        for source_name in source_names:
+            hit_any = False
+            for ws in wafer_slots:
+                if db_data[f'{source_name}_{ws}'] == 1:
+                    hit_any = True
+            db_data[f'{source_name}'] = 1 if hit_any else 0
+    
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
