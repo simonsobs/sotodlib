@@ -968,6 +968,16 @@ class FourierFilter(_Preprocess):
           filter_params:
             cutoff: 1
             width: 0.1
+    
+    or with params from a noise fit::
+
+      - name: "fourier_filter"
+        wrap_name: "lpf_sig"
+        signal_name: "signal"
+        process:
+          filt_function: "low_pass_sine2"
+          trim_samps: 2000
+          noise_fit_array: "noiseQ_fit"
 
     See :ref:`fourier-filters` documentation for more details.
     """
