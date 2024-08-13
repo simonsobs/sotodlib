@@ -253,7 +253,7 @@ def LAT_pix2sky(x, y, sec2xi, sec2eta, array2secx, array2secy, rot=0, opt2cryo=3
 
         array2secy: Function that maps positions on tube's focal plane to y position on secondary.
 
-        rot: Rotation about the line of site = xi - 60 - corotator.
+        rot: Rotation about the line of site = elev - 60 - corotator.
 
         opt2cryo: The rotation to get from cryostat coordinates to zemax coordinates (TBD, prob 30 deg).
 
@@ -273,7 +273,7 @@ def LAT_pix2sky(x, y, sec2xi, sec2eta, array2secx, array2secy, rot=0, opt2cryo=3
     ys = array2secy(xz, yz)
     # get into LAT zemax coord
     # There is a 90 degree offset between how zemax coords and SO coords are defined
-    rot -= 90
+    rot += 90
     xrot = xs * np.cos(d2r * rot) - ys * np.sin(d2r * rot)
     yrot = ys * np.cos(d2r * rot) + xs * np.sin(d2r * rot)
     # note these are around the telescope boresight
@@ -330,7 +330,7 @@ def LAT_optics(zemax_path):
     x = LAT["x"][gi].ravel()
     y = LAT["y"][gi].ravel()
     xi = LAT["elev"][gi].ravel()
-    eta = LAT["eta"][gi].ravel()
+    eta = LAT["xel"][gi].ravel()
 
     s2e = bisplrep(x, y, xi, kx=3, ky=3)
     sec2xi = partial(_interp_func, spline=s2e)
