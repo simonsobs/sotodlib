@@ -43,6 +43,8 @@ defaults = {"query": "1",
             "mindur": None,
             "calc_hpf_params": False,
             "l2_data_path": "/global/cfs/cdirs/sobs/untracked/data/site/hk",
+            "current_limit": 100,
+            "one_over_f_freq_limit":0.2,
            }
 
 def get_parser(parser=None):
@@ -96,8 +98,9 @@ def get_parser(parser=None):
                         help='Set to calculate the parameters used in the high-pass-filter from the data')
     parser.add_argument("--l2_data_path",
                         help='Path to level-2 data')
+    parser.add_argument("--current_limit", type=float, help="lower limit for current in pA/rtHz")
+    parser.add_argument("--one_over_f_freq_limit", type=float, help="upper limit for fitted freq in 1/f in Hz")
     return parser
-
 
 def _get_config(config_file):
     return yaml.safe_load(open(config_file,'r'))
@@ -182,6 +185,20 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
+def calc_wrap_psd(aman, signal_name, merge=False, merge_wn=False, merge_suffix=None, nperseg=1000*200):
+    freqs, Pxx = fft_ops.calc_psd(aman, signal=aman[signal_name], nperseg=nperseg, merge=False, timestamps=aman.timestamps)
+    if merge:
+        assert merge_suffix is not None
+        if 'nusamps' not in list(aman._axes.keys()):
+            nusamps = OffsetAxis('nusamps', len(freqs))
+            aman.wrap_new('freqs', (nusamps, ))
+            aman.freqs = freqs
+        aman.wrap(f'Pxx_{merge_suffix}', Pxx, [(0, 'dets'), (1, 'nusamps')])
+    if merge_wn:
+        wn = fft_ops.calc_wn(aman, pxx=Pxx, freqs=freqs)
+        _ = aman.wrap(f'wn_{merge_suffix}', wn, [(0, 'dets')])
+    return  freqs, Pxx
+
 def wrap_info(obs, site):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
@@ -212,11 +229,18 @@ def get_detector_cuts_flags(obs, rfrac_range=(0.05,0.9), psat_range=(0,20)):
     return True
 
 def select_data(obs):
+    # Check that the hwp is spinning
+
     # Restrict non optical detectors, which have nans in their focal plane
     # coordinates and will crash the mapmaking operation.
     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
 
     status = get_detector_cuts_flags(obs)
+    if not(status):
+        return False
+
+    # Do readout filter
+    status = readout_filter(obs)
     if not(status):
         return False
 
@@ -249,7 +273,7 @@ def get_jumps(obs):
                                     signal=obs.signal,
                                     glitch_flags=obs.flags.jumps_2pi)
     obs.signal = gfilled
-    jdets = has_any_cuts(jflags)
+    #jdets = has_any_cuts(jflags)
     return True
 
 def get_glitches(obs):
@@ -259,21 +283,35 @@ def get_glitches(obs):
                                     hp_fc=1, n_sig=10, overwrite=True)
     gstats = obs.flags.glitches.get_stats()
     obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10])
+
+def wnl_cuts(obs, current_limit = None):
+    # limits are in pA
+    # First we transform raw units to pA
+    obs.signal *= 9e6/(2*np.pi)
+    # calculate white noise levels
+    calc_wrap_psd(obs, signal_name='signal', merge=False, merge_wn=True, merge_suffix='signal')
+    obs.restrict('dets', obs.dets.vals[(current_limit < obs.wn_signal)])
+    # Convert back to raw units
+    obs.signal /= 9e6/(2*np.pi)
     
-def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3', remove_hwpss=True):
+def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3', remove_hwpss=True, current_limit=None):
 
     # Wrap extra info
     wrap_info(obs, site)
 
     if obs.signal is not None:
         # Data cuts
+        detrend_tod(obs, method='median', signal_name='signal')
         status = select_data(obs)
         if not(status): return False
-    
-        # Detrend, subtract hwpss
-        detrend_tod(obs, method='median', signal_name='signal')
+
         if remove_hwpss:
             subtract_hwpss(obs)
+
+        # After hwpss, we cut by white noise levels
+        wnl_cuts(obs, current_limit=current_limit)
+        # check if we cut all detectors
+        if obs.dets.count == 0: return False
         
         # Trending cuts
         get_trending_cuts(obs)
@@ -288,15 +326,16 @@ def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3', remove_hwpss=True
         # Detrend
         if remove_hwpss:
             detrend_tod(obs, method='median', signal_name='signal')
-    
+
         # check if all detectors are cut before going into p2p cuts
-        if obs.dets.count == 0:
-            return False
+        if obs.dets.count == 0: return False
 
         # P2P cuts
         ptp_flags = flags.get_ptp_flags(obs, signal_name='signal')
         bad_dets = has_all_cut(ptp_flags)
         obs.restrict('dets', obs.dets.vals[~bad_dets])
+        # check if I cut all detectors
+        if obs.dets.count == 0: return False
     return True
 
 def cal_pW(obs):
@@ -447,13 +486,13 @@ def get_psd(obs):
     obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
     return
 
-def high_pass_correct(obs, get_params_from_data):
+def high_pass_correct(obs, get_params_from_data, one_over_f_freq_limit = None):
     if get_params_from_data:
         # wrap psd
         get_psd(obs)
 
         noise_obs = fft_ops.fit_noise_model(obs, pxx=obs.Pxx_demodQ, f=obs.freqs,
-                                    merge_fit=True,fwhite=[0.1, 1], f_max=1.5,
+                                    merge_fit=True, fwhite=[0.5, 2], f_max=2,
                                     lowf=0.1, merge_name='noise_fit_statsQ')
         # we wrap the fitted params because we will use them for the dsT 1/f
         obs.wrap('fk', obs.noise_fit_statsQ.fit[:,0] , [(0, 'dets')])
@@ -464,24 +503,27 @@ def high_pass_correct(obs, get_params_from_data):
     else:
         fknee = 0.1
         alpha = 2
+    # If fitted fknee is too high then almost all signal will be killed and
+    # we will have a flat map
+    if fknee > one_over_f_freq_limit:
+        return False
 
     # High-pass filter
     hpf = filters.counter_1_over_f(fknee, alpha)
     hpf_Q = filters.fourier_filter(obs, hpf, signal_name='demodQ')
     hpf_U = filters.fourier_filter(obs, hpf, signal_name='demodU')
-
     obs.demodQ = hpf_Q
     obs.demodU = hpf_U
-
-    return obs
+    return True
     
-def filter_data(obs, calc_hpf_params):
+def filter_data(obs, calc_hpf_params, one_over_f_freq_limit=None):
     """ All the post-demodulation operations """
     ### Polarization
     # Correct for IP leakage at TOD level
     IP_correct(obs)
     # Custom high-pass filter
-    high_pass_correct(obs, calc_hpf_params)
+    status = high_pass_correct(obs, calc_hpf_params, one_over_f_freq_limit=one_over_f_freq_limit)
+    if not(status): return False
 
     ### Temperature
     # PCA
@@ -498,30 +540,32 @@ def filter_data(obs, calc_hpf_params):
     obs.flags.reduce(flags=['turnarounds', 'jumps_2pi', 'glitches'],
                      method='union', wrap=True, new_flag='glitch_flags',
                      remove_reduced=True)
+    return True
     
 def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
                       det_left_right=False, det_in_out=False,
                       det_upper_lower=False,
-                      remove_hwpss=True, calc_hpf_params=False):
-    status = preprocess_data(obs, dtype_tod, site, remove_hwpss)
+                      remove_hwpss=True, calc_hpf_params=False, 
+                      current_limit=None, one_over_f_freq_limit=None ):
+    status = preprocess_data(obs, dtype_tod, site, remove_hwpss, current_limit=current_limit)
     if not(status):
         return False
     if obs.dets.count<=1:
         return obs # this will happen when ptp_cuts cuts all detectors
 
     status = calibrate_data(obs)
-    if not(status):
-        return False
+    if not(status): return False
     
-    status = readout_filter(obs)
-    if not(status):
-        return False # The readout_filter failed for not having parameters
+    #status = readout_filter(obs)
+    #if not(status):
+    #    return False # The readout_filter failed for not having parameters
 
     deconvolve_detector_tconst(obs)
     
     demodulate_hwp(obs)
     
-    filter_data(obs, calc_hpf_params)
+    status = filter_data(obs, calc_hpf_params, one_over_f_freq_limit=one_over_f_freq_limit)
+    if not(status): return False
 
     splits.det_splits_relative(obs, det_left_right=det_left_right,
                                det_upper_lower=det_upper_lower,
@@ -613,7 +657,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
                     preprocess_config=None, split_labels=None,
                     singlestream=False, det_in_out=False, det_left_right=False,
                     det_upper_lower=False, site='so_sat3', recenter=None,
-                    calc_hpf_params=False):
+                    calc_hpf_params=False, current_limit=None,
+                    one_over_f_freq_limit=None):
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
@@ -673,13 +718,14 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
         obs = calibrate_obs_otf(obs, dtype_tod=dtype_tod, det_in_out=det_in_out,
                                 det_left_right=det_left_right,
                                 det_upper_lower=det_upper_lower,
-                                site=site, calc_hpf_params=calc_hpf_params)
+                                site=site, calc_hpf_params=calc_hpf_params, 
+                                current_limit=current_limit, 
+                                one_over_f_freq_limit=one_over_f_freq_limit)
         if obs is False:
             L.info('tod %s:%s:%s failed in the preprocessing'%(obs_id,detset,band)
             )
             continue
         if obs.dets.count <= 1: continue
-
         # And add it to the mapmaker
         if split_labels==None:
             # this is the case of no splits
@@ -1022,7 +1068,9 @@ def main(config_file=None, defaults=defaults, **args):
                                           det_left_right=args['det_left_right'],
                                           det_upper_lower=args['det_upper_lower'],
                                           site=args['site'],
-                                          calc_hpf_params=args["calc_hpf_params"])
+                                          calc_hpf_params=args["calc_hpf_params"],
+                                          current_limit=args["current_limit"],
+                                          one_over_f_freq_limit=args["one_over_f_freq_limit"])
                 # 6. write them
                 write_depth1_map(prefix, mapdata, split_labels=split_labels, )
                 write_depth1_info(prefix, info, split_labels=split_labels )
