@@ -4,6 +4,8 @@ import argparse
 import datetime as dt
 from typing import Optional
 from sotodlib.io.imprinter import Imprinter
+import sotodlib.io.imprinter_utils as utils
+
 
 def main(config: str):
     """Make books based on imprinter db
@@ -40,6 +42,7 @@ def main(config: str):
             continue
         print(f"Binding book {book.bid}")
         try:
+            utils.set_book_rebind(imprinter, book)
             imprinter.bind_book(book)
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
