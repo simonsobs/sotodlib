@@ -45,7 +45,7 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
         else:
             flag_is_1d = False
 
-    apodizer = ~flags.mask()
+    apodizer = ~flags_mask
     apodizer = apodizer.astype(float)
     cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
 
