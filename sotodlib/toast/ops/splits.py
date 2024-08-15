@@ -123,8 +123,8 @@ class Split(object):
         log = Logger.get()
         if isinstance(name, list):
             # The "real" name should be in kwargs
-            split_name = kwargs["name"]
-            del kwargs["name"]
+            split_name = kwargs["split_name"]
+            del kwargs["split_name"]
             kwargs["dets"] = name
             return SplitByList(split_name, **kwargs)
         elif name == "all":
@@ -469,7 +469,7 @@ class Splits(Operator):
                             det_list.append(line.strip())
                 if data.comm.comm_world is not None:
                     det_list = data.comm.comm_world.bcast(det_list, root=0)
-                split_kw["name"] = name
+                split_kw["split_name"] = name
                 self._split_obj[name] = Split.create(det_list, **split_kw)
             else:
                 # Just a normal split type
