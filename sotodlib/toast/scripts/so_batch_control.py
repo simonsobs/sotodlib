@@ -16,6 +16,7 @@ import datetime
 import os
 import re
 import sys
+import time
 
 import numpy as np
 
@@ -52,11 +53,26 @@ def load_obs_file(path):
     return olist
 
 
+def get_state_file(out_root, obs, name="state"):
+    """Construct the path to the state file.
+
+    Args:
+        out_root (str):  The top-level output directory
+        obs (str):  The observation ID
+
+    Returns:
+        (str):  The state file path.
+
+    """
+    obs_dir = os.path.join(out_root, obs)
+    state_file = os.path.join(obs_dir, name)
+    return state_file
+
+
 def get_obs_state(out_root, obs):
     """Find the current processing state of an observation.
     """
-    obs_dir = os.path.join(out_root, obs)
-    state_file = os.path.join(obs_dir, "state")
+    state_file = get_state_file(out_root, obs)
     if os.path.isfile(state_file):
         with open(state_file, "r") as f:
             state = f.readline()
@@ -70,7 +86,7 @@ def clear_obs_state(out_root, obs):
     obs_dir = os.path.join(out_root, obs)
     if not os.path.isdir(obs_dir):
         return
-    state_file = os.path.join(obs_dir, "state")
+    state_file = get_state_file(out_root, obs)
     if os.path.isfile(state_file):
         os.remove(state_file)
 
@@ -81,25 +97,38 @@ def set_obs_state(out_root, obs, state):
     obs_dir = os.path.join(out_root, obs)
     if not os.path.exists(obs_dir):
         os.makedirs(obs_dir)
-    state_file = os.path.join(obs_dir, f"state")
-    temp_state = os.path.join(obs_dir, f"state_temp")
+    state_file = get_state_file(out_root, obs)
+    temp_state = get_state_file(out_root, obs, name="state_temp")
+    # Although the temp file only exists for a fraction of a second,
+    # check if it was somehow left behind by a previous process.
+    if os.path.isfile(temp_state):
+        msg = "Temporary state file {temp_state} exists."
+        msg += "  This means that a previous batch_control job was "
+        msg += "killed while setting the state.  You should cleanup "
+        msg += "manually."
+        raise RuntimeError(msg)
     with open(temp_state, "w") as f:
         f.write(f"{state}\n")
     os.rename(temp_state, state_file)
 
 
-def find_obs(all_obs, n_job_obs, out_root, ignore_running=False):
+def find_obs(all_obs, n_job_obs, out_root, ignore_running=False, timeout_hours=24):
     """Get the list of obs to run for a given job.
 
     Args:
         all_obs (list):  The list of all observation IDs to consider.
         n_job_obs (int):  The number of observations to select.
         out_root (str):  The output root directory.
+        ignore_running (bool):  If True, consider "running" jobs to be eligible
+            for re-running.
+        timeout_hours (float):  Number of hours after which a "running" job is
+            considered dead, regardless of ignore_running option.
 
     Returns:
         None
 
     """
+    timeout_sec = timeout_hours * 3600
     selected = list()
     for obs in all_obs:
         state = get_obs_state(out_root, obs)
@@ -107,7 +136,14 @@ def find_obs(all_obs, n_job_obs, out_root, ignore_running=False):
             if state == "done":
                 continue
             if state == "running" and not ignore_running:
-                continue
+                # Check how long this job has been "running"
+                cur_time = time.time()
+                state_file = get_state_file(out_root, obs)
+                state_time = os.path.getmtime(state_file)
+                elapsed = cur_time - state_time
+                if elapsed < timeout_sec:
+                    # The job has not timed out yet
+                    continue
         # We are going to consider this obs
         selected.append(obs)
         if len(selected) >= n_job_obs:
