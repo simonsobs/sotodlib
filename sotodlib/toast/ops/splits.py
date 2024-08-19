@@ -317,6 +317,12 @@ class SplitByList(Split):
         else:
             self._dets = set(dets)
         self._interval = interval
+        # Add all possible demodulated names of the detector
+        demod_dets = set()
+        for det in self._dets:
+            for prefix in ["demod0", "demo2r", "demod2i", "demod4r", "demod4i"]:
+                demod_dets.add(f"{prefix}_{det}")
+        self._dets.update(demod_dets)
 
     def _create_split(self, obs):
         # Flag detectors
