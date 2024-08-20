@@ -297,36 +297,48 @@ def plot_trending_flags(aman, trend_aman, filename='./trending_flags.png'):
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
 
-def plot_jumps_stats(aman, jump_aman, N_bins=30, filename="./jumps_stats.png",):
+def plot_flag_stats(aman, flag_aman, flag_type="glitches", N_bins=30, filename="./glitch_stats.png"):
     """
-    Function for plotting the glitch flags/cut statistics using the built in stats functions
+    Function for plotting the glitches or jumps flags/cut statistics using the built in stats functions
     in the RangesMatrices class.
     Args:
     -----
     aman : AxisManager
         Input axis manager.
-    jump_aman : AxisManager
-        Output jump_aman of tod_ops.jumps.jumps_aman.
+    flag_aman : AxisManager
+        Output jump_aman of tod_ops.jumps.jumps_aman or
+        glitch_aman of tod_ops.flags.get_glitch_flags with full_output=True.
+    flag_type : str
+        Flag type to plot. Options: ["glitches, "jumps"]. Default is "glitches"
     N_bins (int): Number of bins in the histogram.
     filename : str
         Full filename with direct path to plot output directory.
     """
+    if flag_type == "glitches":
+        flags = flag_aman.glitch_flags
+        plot_name = "Glitch Stats"
+    elif flag_type == "jumps":
+        flags = flag_aman.jump_flag
+        plot_name = "Jumps Stats"
+    else:
+        raise ValueError("Flag type not recognized. Must be 'glitches' or 'jumps'")
+    
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
     ax = axes.flatten()
-    frac_samp_jumps = (
-        100 * np.asarray(jump_aman.jump_flag.get_stats()["samples"]) / aman.samps.count
+    frac_samp_glitches = (
+        100 * np.asarray(flags.get_stats()["samples"]) / aman.samps.count
     )
-    jumplog = np.log10(frac_samp_jumps[frac_samp_jumps > 0])
-    binmin = int(np.floor(np.min(jumplog)))
-    binmax = int(np.ceil(np.max(jumplog)))
+    glitchlog = np.log10(frac_samp_glitches[frac_samp_glitches > 0])
+    binmin = int(np.floor(np.min(glitchlog)))
+    binmax = int(np.ceil(np.max(glitchlog)))
     _ = ax[0].hist(
-        frac_samp_jumps, bins=np.logspace(binmin, binmax, N_bins), label="_nolegend_"
+        frac_samp_glitches, bins=np.logspace(binmin, binmax, N_bins), label="_nolegend_"
     )
-    medsamps = np.median(frac_samp_jumps)
+    medsamps = np.median(frac_samp_glitches)
     ax[0].axvline(medsamps, color="C1", ls=":", lw=2, label=f"Median: {medsamps:.2e}%")
-    meansamps = np.mean(frac_samp_jumps)
+    meansamps = np.mean(frac_samp_glitches)
     ax[0].axvline(meansamps, color="C2", ls=":", lw=2, label=f"Mean: {meansamps:.2e}%")
-    modesamps = stats.mode(frac_samp_jumps, keepdims=True)
+    modesamps = stats.mode(frac_samp_glitches, keepdims=True)
     ax[0].axvline(
         modesamps[0][0],
         color="C3",
@@ -334,7 +346,7 @@ def plot_jumps_stats(aman, jump_aman, N_bins=30, filename="./jumps_stats.png",):
         lw=2,
         label=f"Mode: {modesamps[0][0]:.2e}%, Counts: {modesamps[1][0]}",
     )
-    stdsamps = np.std(frac_samp_jumps)
+    stdsamps = np.std(frac_samp_glitches)
     ax[0].axvspan(
         meansamps - stdsamps,
         meansamps + stdsamps,
@@ -354,18 +366,18 @@ def plot_jumps_stats(aman, jump_aman, N_bins=30, filename="./jumps_stats.png",):
         + f"{aman.samps.count}"
     )
 
-    interval_jumps = np.asarray(jump_aman.jump_flag.get_stats()["intervals"])
-    binlinmax = np.quantile(interval_jumps, 0.98)
-    _ = ax[1].hist(np.clip(interval_jumps, 0, binlinmax), bins=np.linspace(0, binlinmax, N_bins))
-    medints = np.median(interval_jumps)
+    interval_glitches = np.asarray(flags.get_stats()["intervals"])
+    binlinmax = np.quantile(interval_glitches, 0.98)
+    _ = ax[1].hist(np.clip(interval_glitches, 0, binlinmax), bins=np.linspace(0, binlinmax, N_bins))
+    medints = np.median(interval_glitches)
     ax[1].axvline(
         medints, color="C1", ls=":", lw=2, label=f"Median: {medints:.2e} intervals"
     )
-    meanints = np.mean(interval_jumps)
+    meanints = np.mean(interval_glitches)
     ax[1].axvline(
         meanints, color="C2", ls=":", lw=2, label=f"Mean: {meanints:.2e} intervals"
     )
-    modeints = stats.mode(interval_jumps, keepdims=True)
+    modeints = stats.mode(interval_glitches, keepdims=True)
     ax[1].axvline(
         modeints[0][0],
         color="C3",
@@ -373,7 +385,7 @@ def plot_jumps_stats(aman, jump_aman, N_bins=30, filename="./jumps_stats.png",):
         lw=2,
         label=f"Mode: {modeints[0][0]:.2e} intervals, Counts: {modeints[1][0]}",
     )
-    stdints = np.std(interval_jumps)
+    stdints = np.std(interval_glitches)
     ax[1].axvspan(
         meanints - stdints,
         meanints + stdints,
@@ -388,10 +400,10 @@ def plot_jumps_stats(aman, jump_aman, N_bins=30, filename="./jumps_stats.png",):
     ax[1].set_ylabel("Counts", fontsize=16)
     ax[1].set_title(
         "Ranges Flag Manager Stats\n$N_{\mathrm{dets}}$ with $\geq$ 1 interval = "
-        + f"{len(interval_jumps[interval_jumps > 0])}/{aman.dets.count}\n(98th quantile bin max)"
+        + f"{len(interval_glitches[interval_glitches > 0])}/{aman.dets.count}\n(98th quantile bin max)"
     )
-    det = aman.dets.vals[0]
-    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\nJump Stats")
+    
+    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{plot_name}")
     plt.subplots_adjust(top=0.70, bottom=0.15)
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
