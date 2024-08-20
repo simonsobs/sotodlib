@@ -252,11 +252,14 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
     Example config block::
 
       - name: "jumps"
-        signal: "hwpss_remove"
         calc:
           function: "twopi_jumps"
         save:
           jumps_name: "jumps_2pi"
+        plot: True
+        select:
+            max_n_jumps: 5
+        
 
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
@@ -306,6 +309,18 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_jumps_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            name = self.save_cfgs.get('jumps_name', 'jumps')
+            plot_jumps_stats(aman, proc_aman[name], filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
