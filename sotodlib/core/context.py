@@ -5,11 +5,14 @@ import importlib
 import logging
 import numpy as np
 
+from typing import Union, Dict, Tuple, List
+
 from . import metadata
 from .util import tag_substr
 from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
+
 
 class Context(odict):
     # Sets of special handlers may be registered in this class variable, then
@@ -149,19 +152,22 @@ class Context(odict):
             self.loader \
                 = metadata.SuperLoader(self, obsdb=self.obsdb)
 
-    def get_obs(self,
-                obs_id=None,
-                dets=None,
-                samples=None,
-                filename=None,
-                detsets=None,
-                meta=None,
-                ignore_missing=None,
-                on_missing=None,
-                free_tags=None,
-                no_signal=None,
-                loader_type=None,
-    ):
+    def get_obs(
+        self,
+        obs_id: Union[str, Dict[str, str], AxisManager] = None,
+        dets: Union[
+            List[str], Dict[str, Union[List[str], str]], metadata.ResultSet
+        ] = None,
+        samples: Tuple[int] = None,
+        filename: str = None,
+        detsets: List[str] = None,
+        meta: AxisManager = None,
+        ignore_missing: bool = None,
+        on_missing: Dict[str, str] = None,
+        free_tags: List[str] = None,
+        no_signal: bool = None,
+        loader_type: str = None,
+    ) -> AxisManager:
         """Load TOD and supporting metadata for some observation.
 
         Most arguments to this function are also accepted by (and in
@@ -311,18 +317,21 @@ class Context(odict):
             aman.merge(meta)
         return aman
 
-    def get_meta(self,
-                 obs_id=None,
-                 dets=None,
-                 samples=None,
-                 filename=None,
-                 detsets=None,
-                 meta=None,
-                 free_tags=None,
-                 check=False,
-                 ignore_missing=False,
-                 on_missing=None,
-                 det_info_scan=False):
+    def get_meta(
+        self,
+        obs_id: Union[str, Dict[str, str], AxisManager] = None,
+        dets: Union[List[str], Dict[str, Union[List[str], str]], ResultSet] = None,
+        samples: Tuple[int] = None,
+        filename: str = None,
+        detsets: List[str] = None,
+        meta: AxisManager = None,
+        free_tags: List[str] = None,
+        check: bool = False,
+        ignore_missing: bool = False,
+        on_missing: Dict[str, str] = None,
+        det_info_scan: bool = False,
+    ) -> AxisManager:
+
         """Load supporting metadata for an observation and return it in an
         AxisManager.
 
