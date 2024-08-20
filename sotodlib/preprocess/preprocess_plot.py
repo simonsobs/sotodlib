@@ -7,7 +7,7 @@ from venn import venn
 
 from sotodlib import hwp
 import sotodlib.core as core
-from sotodlib.core.flagman import has_all_cut
+from sotodlib.core.flagman import has_all_cut, has_any_cuts
 
 def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
                         psat_range=(0, 15), filename="./bias_cuts_venn.png"):
@@ -241,6 +241,56 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
         ax.text(wafer_offsets[k][0], wafer_offsets[k][1], k, fontsize=16)
 
     plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{sso}')
+    plt.tight_layout()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
+
+def plot_trending_flags(aman, trend_aman, filename='./trending_flags.png'):
+    """
+    Function for plotting trending flags.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    trend_aman : AxisManager
+        Output trend_aman of tod_ops.flags.get_trending_flags with full_output=True.
+    filename : str
+        Full filename with direct path to plot output directory.
+    """
+    fig, axs = plt.subplots(1, 2, figsize=(5*2, 5*1))
+
+    tdets = has_any_cuts(trend_aman.trend_flags)
+    
+    keep = np.abs(trend_aman.trends[~tdets, :]).T
+    for i in range(keep.shape[1]):
+        if i == 0:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], keep[:, i], color = 'C0', 
+                        alpha=0.75, marker='o', markersize=0.75, linestyle='None', label='Keep')
+        else:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], keep[:, i], color = 'C0', 
+                        alpha=0.75, marker='o', markersize=0.75, linestyle='None')
+    flagged = np.abs(trend_aman.trends[tdets, :]).T
+    for i in range(flagged.shape[1]):
+        if i == 0:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], flagged[:, i], color = 'C1', 
+                        marker='o', markersize=1.5, linestyle='None', label='Flagged')
+        else:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], flagged[:, i], color = 'C1', 
+                        marker='o', markersize=1.5, linestyle='None')
+    axs[0].set_yscale('log')
+    axs[0].set_xlabel('Timestamp')
+    axs[0].set_ylabel('Trend Slope')
+    axs[0].set_title('Trending Slopes of Dets')
+    axs[0].legend()
+
+    axs[1].plot(aman.timestamps[::100], aman.signal[tdets][:,::100].T, color = 'C0', alpha = 0.5)
+    axs[1].set_xlabel('Timestamp')
+    axs[1].set_ylabel('Signal [Readout Radians]')
+    axs[1].set_title(f'Trending Channels ({len(np.where(tdets == True)[0])} dets)')
+
+    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\nTrending Flags (Total cut: {len(np.where(tdets == True)[0])}/{len(aman.dets.vals)})")
     plt.tight_layout()
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)

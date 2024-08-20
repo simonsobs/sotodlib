@@ -100,6 +100,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             max_trend: 2.5
             n_pieces: 10
           save: True
+          plot: True
           select:
             kind: "any"
     
@@ -140,6 +141,17 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
                                 "understood. Expect 'any' or 'all'")
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_trending_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
 
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
