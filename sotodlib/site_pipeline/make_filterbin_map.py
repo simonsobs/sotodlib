@@ -185,20 +185,6 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
-def calc_wrap_psd(aman, signal_name, merge=False, merge_wn=False, merge_suffix=None, nperseg=1000*200):
-    freqs, Pxx = fft_ops.calc_psd(aman, signal=aman[signal_name], nperseg=nperseg, merge=False, timestamps=aman.timestamps)
-    if merge:
-        assert merge_suffix is not None
-        if 'nusamps' not in list(aman._axes.keys()):
-            nusamps = OffsetAxis('nusamps', len(freqs))
-            aman.wrap_new('freqs', (nusamps, ))
-            aman.freqs = freqs
-        aman.wrap(f'Pxx_{merge_suffix}', Pxx, [(0, 'dets'), (1, 'nusamps')])
-    if merge_wn:
-        wn = fft_ops.calc_wn(aman, pxx=Pxx, freqs=freqs)
-        _ = aman.wrap(f'wn_{merge_suffix}', wn, [(0, 'dets')])
-    return  freqs, Pxx
-
 def wrap_info(obs, site):
     obs.wrap("weather", np.full(1, "toco"))
     obs.wrap("site",    np.full(1, site))
@@ -295,7 +281,6 @@ def wnl_cuts(obs, current_limit = None):
     obs.signal /= 9e6/(2*np.pi)
     
 def preprocess_data(obs, dtype_tod=np.float32, site='so_sat3', remove_hwpss=True, current_limit=None):
-
     # Wrap extra info
     wrap_info(obs, site)
 
@@ -391,8 +376,36 @@ def demodulate_hwp(obs):
     apodize.apodize_cosine(obs)
     hwp.demod_tod(obs)
     obs.restrict('samps',(30*200, -30*200))
+    return obs
 
-    return obs    
+def rotate_demodQU(aman, offset = 0):
+    demodC = ((aman.demodQ + 1j*aman.demodU).T * np.exp(-2j*aman.focal_plane.gamma + 1j*np.deg2rad(offset))).T
+    aman.demodQ = demodC.real
+    aman.demodU = demodC.imag
+    del demodC
+
+def de_rotate_demodQU(aman, offset = 0):
+    demodC = ((aman.demodQ + 1j*aman.demodU).T * np.exp(2j*aman.focal_plane.gamma - 1j*np.deg2rad(offset))).T
+    aman.demodQ = demodC.real
+    aman.demodU = demodC.imag
+    del demodC
+
+def _correct(obs):
+    # Apply cuts and demod but no filters
+    rotate_demodQU(obs)
+    medQ = np.median(obs.demodQ, axis=0)
+    medU = np.median(obs.demodU, axis=0)
+    vects = np.atleast_2d(medQ)
+    I = np.linalg.inv(np.tensordot(vects, vects, (1, 1)))
+    coeffs = np.matmul(obs.demodQ, vects.T)
+    coeffs = np.dot(I, coeffs.T).T
+    obs.demodQ -= coeffs * medQ
+    vects = np.atleast_2d(medU)
+    I = np.linalg.inv(np.tensordot(vects, vects, (1, 1)))
+    coeffs = np.matmul(obs.demodU, vects.T)
+    coeffs = np.dot(I, coeffs.T).T
+    obs.demodU -= coeffs * medU
+    de_rotate_demodQU(obs)
 
 def IP_correct(obs):
     filt = filters.low_pass_sine2(0.5, width=0.1)
@@ -471,20 +484,33 @@ def high_pass_correct_dsT(obs, get_params_from_data):
     obs.dsT = filters.fourier_filter(obs, filt, signal_name='dsT', detrend=None)
     return
 
-def get_psd(obs):
-    #freq, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ, nperseg=nperseg, merge=True)
-    #_, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU, nperseg=nperseg, merge=True)
-    # TODO: To use above, need to implement (to avoid bugs):
-    # nperseg = 2**x, use power as it's faster in fft operations
-    # set maxsample = greater than 2**x, so that it's the same as welch 
-    dt = obs.timestamps - obs.timestamps[0]
-    freq, Pxx_demodQ = welch(obs.demodQ, fs=1/np.mean(np.diff(dt)), nperseg=10*60*1/np.mean(np.diff(dt)))
-    _, Pxx_demodU = welch(obs.demodQ, fs=1/np.mean(np.diff(dt)), nperseg=10*60*1/np.mean(np.diff(dt)))
-    obs.merge( AxisManager(OffsetAxis("nusamps", len(freq))))
-    obs.wrap("freqs", freq, [(0,"nusamps")])
+def get_psd(obs, fftcfg = None):
+    if fftcfg is None:
+        fftcfg = {'max_samples': 524288,
+                  'merge': False,
+                  'nperseg': 65536}
+    freqs, Pxx_demodQ = fft_ops.calc_psd(obs, signal=obs.demodQ,
+                                         **fftcfg)
+    _, Pxx_demodU = fft_ops.calc_psd(obs, signal=obs.demodU,
+                                     **fftcfg)
+    obs.merge( AxisManager(OffsetAxis("nusamps", len(freqs))))
+    obs.wrap("freqs", freqs, [(0,"nusamps")])
     obs.wrap('Pxx_demodQ', Pxx_demodQ, [(0, 'dets'), (1, 'nusamps')])
     obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
-    return
+
+def calc_wrap_psd(aman, signal_name, merge=False, merge_wn=False, merge_suffix=None, nperseg=600*200):
+    freqs, Pxx = fft_ops.calc_psd(aman, signal=aman[signal_name], nperseg=nperseg, merge=False, timestamps=aman.timestamps)
+    if merge:
+        assert merge_suffix is not None
+        if 'nusamps' not in list(aman._axes.keys()):
+            nusamps = OffsetAxis('nusamps', len(freqs))
+            aman.wrap_new('freqs', (nusamps, ))
+            aman.freqs = freqs
+        aman.wrap(f'Pxx_{merge_suffix}', Pxx, [(0, 'dets'), (1, 'nusamps')])
+    if merge_wn:
+        wn = fft_ops.calc_wn(aman, pxx=Pxx, freqs=freqs)
+        _ = aman.wrap(f'wn_{merge_suffix}', wn, [(0, 'dets')])
+    return  freqs, Pxx
 
 def high_pass_correct(obs, get_params_from_data, one_over_f_freq_limit = None):
     if get_params_from_data:
@@ -497,7 +523,6 @@ def high_pass_correct(obs, get_params_from_data, one_over_f_freq_limit = None):
         # we wrap the fitted params because we will use them for the dsT 1/f
         obs.wrap('fk', obs.noise_fit_statsQ.fit[:,0] , [(0, 'dets')])
         obs.wrap('alpha', obs.noise_fit_statsQ.fit[:,0] , [(0, 'dets')])
-
         fknee = np.median(obs.noise_fit_statsQ.fit[:,0])
         alpha = np.median(obs.noise_fit_statsQ.fit[:,2])
     else:
@@ -520,7 +545,8 @@ def filter_data(obs, calc_hpf_params, one_over_f_freq_limit=None):
     """ All the post-demodulation operations """
     ### Polarization
     # Correct for IP leakage at TOD level
-    IP_correct(obs)
+    #IP_correct(obs)
+    _correct(obs)
     # Custom high-pass filter
     status = high_pass_correct(obs, calc_hpf_params, one_over_f_freq_limit=one_over_f_freq_limit)
     if not(status): return False
@@ -548,6 +574,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
                       remove_hwpss=True, calc_hpf_params=False, 
                       current_limit=None, one_over_f_freq_limit=None ):
     status = preprocess_data(obs, dtype_tod, site, remove_hwpss, current_limit=current_limit)
+    print('End of preprocess_data')
     if not(status):
         return False
     if obs.dets.count<=1:
@@ -562,7 +589,7 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
 
     deconvolve_detector_tconst(obs)
     
-    demodulate_hwp(obs)
+    obs = demodulate_hwp(obs)
     
     status = filter_data(obs, calc_hpf_params, one_over_f_freq_limit=one_over_f_freq_limit)
     if not(status): return False
@@ -1086,6 +1113,7 @@ def main(config_file=None, defaults=defaults, **args):
             if comm_intra.rank == 0:
                 oname = "%s_%s.%s" % (prefix, "full_hits", 'fits')
                 enmap.write_map(oname, mapdata.hits)
+    L.info("Rank %i finished correctly"%comm.rank)
     if comm.rank == 0:
         print("Done")
     return True
