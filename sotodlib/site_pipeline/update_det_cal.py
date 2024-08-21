@@ -392,6 +392,11 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             for dset, bsa_file in obs_info.bsa_files.items()
         }
 
+        for iva in ivas.values(): # Run R_L correction if analysis version is old...
+            if iva.get('analysis_version', 0) == 0:
+                # This will eddit IVA dicts in place
+                tpc.recompute_iv_pars(iva, cfg.param_correction_config)
+
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva["meta"]["rtm_bit_to_volt"]
         pA_per_phi0 = iva["meta"]["pA_per_phi0"]
