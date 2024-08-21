@@ -44,7 +44,6 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
     """
     if method not in ["polyfit", "legendre"] :
         raise ValueError("Only polyfit and legendre are acceptable.")
-        
     if exclude_turnarounds:
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
             logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
@@ -104,7 +103,6 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
 
     elif method == "legendre":
         degree_corr = degree + 1
-
         time = np.copy(aman["timestamps"])
 
         for start, end in subscan_indices:
@@ -114,7 +112,6 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
             
             # Get each subscan to be filtered
             tod_mat = copy.deepcopy(signal[:, start:end])
-
 
             # Scale time range into [-1,1]
             x = np.linspace(-1, 1, tod_mat.shape[1])
@@ -156,15 +153,13 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
                             tod_mat[idet,msk_indx] = interped
                     else :
                         pass
-            
-            
+
             means = np.mean(tod_mat, axis=1)[:, np.newaxis]
             tod_mat -= means
             
             # Make model to be subtracted
             coeffs = np.dot(arr_legendre, tod_mat.T)
             model = np.dot((coeffs/norm_vector[:, np.newaxis]).T,arr_legendre)*dx
-
             model += means
             signal[:,start:end] -= model
 
