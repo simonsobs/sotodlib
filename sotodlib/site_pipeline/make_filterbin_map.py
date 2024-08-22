@@ -574,7 +574,6 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
                       remove_hwpss=True, calc_hpf_params=False, 
                       current_limit=None, one_over_f_freq_limit=None ):
     status = preprocess_data(obs, dtype_tod, site, remove_hwpss, current_limit=current_limit)
-    print('End of preprocess_data')
     if not(status):
         return False
     if obs.dets.count<=1:
@@ -738,6 +737,9 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
         # Correct HWP and PID polarization angles
         try:
             obs = hwp_angle_model.apply_hwp_angle_model(obs)
+            # there might be nan hwp angles, this is a temporary fix
+            mask = np.isfinite(obs.hwp_angle)
+            obs.restrict('samps',(int(np.argwhere(mask)[0]), int(np.argwhere(mask)[-1])))
         except ValueError:
             continue # this is to skip the "hwp rotation direction is ambiguous" error
 
