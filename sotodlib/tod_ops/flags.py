@@ -577,6 +577,8 @@ def get_ptp_flags(aman, signal_name='signal', kurtosis_threshold=5,
     ratio = ptps_full/np.median(ptps_full)
     outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
     det_mask[outlier_mask] = False
+    if np.any(np.logical_not(np.isfinite(aman[signal_name][det_mask]))):
+        raise ValueError(f"There is a nan in {signal_name} in aman {aman.obs_info['obs_id']} !!!")
     while True:
         if len(aman.dets.vals[det_mask]) > 0:
             ptps = np.ptp(aman[signal_name][det_mask], axis=1)
