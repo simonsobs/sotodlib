@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def get_apodize_window_for_ends(aman, apodize_samps=1600):
     """
     Generate an apodization window using a cosine taper at the beginning and end.
@@ -16,7 +17,8 @@ def get_apodize_window_for_ends(aman, apodize_samps=1600):
     w[-apodize_samps:] = cosedge
     w[:apodize_samps] = np.flip(cosedge)
     return w
-    
+
+
 def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
     """
     Generate an apodization window based on flag values. Apply cosine tapering every 
@@ -34,7 +36,7 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
     if isinstance(flags, str):
         flags = aman.flags[flags]
     flags_mask = flags.mask()
-    
+
     if flags_mask.ndim == 1:
         flag_is_1d = True
     else:
@@ -53,53 +55,41 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
         idxes_left = np.where(np.diff(apodizer) == -1)[0]
         idxes_right = np.where(np.diff(apodizer) == 1)[0]
 
-        for _i, (_left, _right) in enumerate(zip(idxes_left, idxes_right)):            
+        for _left in idxes_left:
             _apo_idxes_left = (_left-apodize_samps+1, _left+1)
-            _apo_idxes_right = (_right-1, _right+apodize_samps-1)
-
-            if _i == 0:
-                if _apo_idxes_left[0] < 0:
-                    apodizer[:_apo_idxes_left[1]] = 0
-                else:
-                    apodizer[_apo_idxes_left[0]:_apo_idxes_left[1]] = cosedge
-                apodizer[_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
-
-            elif _i == len(idxes_left) - 1:
-                apodizer[_apo_idxes_left[0]:_apo_idxes_left[1]] = cosedge
-                if _apo_idxes_right[1] > aman.samps.count:                    
-                    apodizer[_apo_idxes_right[0]:] = 0
-                else:
-                    apodizer[_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
+            if _apo_idxes_left[0] < 0:
+                apodizer[:_apo_idxes_left[1]] = 0
             else:
-                apodizer[_apo_idxes_left[0]:_apo_idxes_left[1]] = cosedge
-                apodizer[_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
+                apodizer[_apo_idxes_left[0]:_apo_idxes_left[1]] *= cosedge
+
+        for _right in idxes_right:
+            _apo_idxes_right = (_right-1, _right+apodize_samps-1)
+            if _apo_idxes_right[1] > aman.samps.count - 1:
+                apodizer[_apo_idxes_right[0]:] = 0
+            else:
+                apodizer[_apo_idxes_right[0]:_apo_idxes_right[1]] *= np.flip(cosedge)
     else:
-        for di, det in enumerate(aman.dets.vals):
+        for di in range(aman.dets.count):
             idxes_left = np.where(np.diff(apodizer[di]) == -1)[0]
             idxes_right = np.where(np.diff(apodizer[di]) == 1)[0]
 
-            for _i, (_left, _right) in enumerate(zip(idxes_left, idxes_right)):            
+            for _left in idxes_left:
                 _apo_idxes_left = (_left-apodize_samps+1, _left+1)
-                _apo_idxes_right = (_right-1, _right+apodize_samps-1)
-
-                if _i == 0:
-                    if _apo_idxes_left[0] < 0:
-                        apodizer[di][:_apo_idxes_left[1]] = 0
-                    else:
-                        apodizer[di][_apo_idxes_left[0]:_apo_idxes_left[1]] = cosedge
-                    apodizer[di][_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
-
-                elif _i == len(idxes_left) - 1:
-                    apodizer[di][_apo_idxes_left[0]:_apo_idxes_left[1]] = cosedge
-                    if _apo_idxes_right[1] > aman.samps.count:                    
-                        apodizer[di][_apo_idxes_right[0]:] = 0
-                    else:
-                        apodizer[di][_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
+                if _apo_idxes_left[0] < 0:
+                    apodizer[di][:_apo_idxes_left[1]] = 0
                 else:
-                    apodizer[di][_apo_idxes_left[0]:_apo_idxes_left[1]] = cosedge
-                    apodizer[di][_apo_idxes_right[0]:_apo_idxes_right[1]] = np.flip(cosedge)
+                    apodizer[di][_apo_idxes_left[0]:_apo_idxes_left[1]] *= cosedge
+
+            for _right in idxes_right:
+                _apo_idxes_right = (_right-1, _right+apodize_samps-1)
+                if _apo_idxes_right[1] > aman.samps.count - 1:
+                    apodizer[di][_apo_idxes_right[0]:] = 0
+                else:
+                    apodizer[di][_apo_idxes_right[0]:_apo_idxes_right[1]] *= np.flip(cosedge)
+
     return apodizer
-    
+
+
 def apodize_cosine(aman, signal_name='signal', apodize_samps=1600, in_place=True,
                    apo_axis='apodized', window=None):
     """
@@ -116,7 +106,7 @@ def apodize_cosine(aman, signal_name='signal', apodize_samps=1600, in_place=True
     """
     if window is None:
         w = get_apodize_window_for_ends(aman, apodize_samps)
-        
+
     if in_place:
         aman[signal_name] *= w
     else:
