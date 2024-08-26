@@ -299,7 +299,12 @@ def counter_1_over_f(freqs, tod, fk, n):
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
     """
-    return 1/(1+(fk/freqs)**n)
+    if isinstance(fk, (int, np.int32, np.int64, float, np.float32, np.float64)):
+        return 1/(1+(fk/freqs)**n)
+    elif len(fk) == tod.dets.count and len(n) == tod.dets.count:
+        return 1 / (1 + (fk[:, None]/freqs[None,:])**n[:, None])
+    else:
+        raise ValueError("The fk and n must be a float value or array-like with length of number of detectors")
 
 @fft_filter
 def identity_filter(freqs, tod, invert=False):
