@@ -29,6 +29,7 @@ def default_model(telescope):
 
     model.wrap('sign_matrix', sign)
     model.wrap('sign_dependent_offset', np.deg2rad(-1. * 360 / 1140 * 3 / 2))
+    model.wrap('model_version', 'v2')
     return model
 
 
@@ -64,6 +65,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
                     'Apply default model. This may be old.')
         model = default_model(telescope)
 
+    assert model.model_version == 'v2'
     # construct sign
     methods = model.sign_matrix.keys()
     if on_sign_ambiguous in methods:
