@@ -9,7 +9,13 @@ from numpy.typing import NDArray
 from pixell.utils import block_expand, block_reduce, moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import matched_jumps, matched_jumps64, clean_flag, find_quantized_jumps, find_quantized_jumps64
+from so3g import (
+    matched_jumps,
+    matched_jumps64,
+    clean_flag,
+    find_quantized_jumps,
+    find_quantized_jumps64,
+)
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -441,6 +447,10 @@ def twopi_jumps(
         find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
     else:
         raise TypeError("signal must be float32 or float64")
+
+    # Shift things by half the window
+    heights = np.roll(heights, -1 * int(win_size / 2), -1)
+    heights[:, (-1 * int(win_size / 2)) :] = 0
 
     jumps = heights != 0
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
