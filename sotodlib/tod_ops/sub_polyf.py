@@ -49,15 +49,25 @@ def subscan_polyfilter(aman, degree, signal_name="signal", exclude_turnarounds=F
         if ("left_scan" not in aman.flags) or ("turnarounds" not in aman.flags):
             logger.warning('aman does not have left/right scan or turnarounds flag. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
             _ = flags.get_turnaround_flags(aman,truncate=True)
-        valid_scan = np.logical_and(np.logical_or(aman.flags["left_scan"].mask(), aman.flags["right_scan"].mask()),
-                                    ~aman.flags["turnarounds"].mask())
+        ls_mask = aman.flags["left_scan"].mask()
+        rs_mask = aman.flags["right_scan"].mask()
+        ta_mask = aman.flags["turnarounds"].mask()
+        
+        valid_scan = np.logical_and(np.logical_or(ls_mask if ls_mask.ndim==1 else ls_mask[0], 
+                                                  rs_mask if rs_mask.ndim==1 else rs_mask[0], ),
+                                    ~ta_mask if ta_mask.ndim==1 else ta_mask[0])
         subscan_indices = _get_subscan_range_index(valid_scan)
     else:
         if ("left_scan" not in aman.flags):
             logger.warning('aman does not have left/right scan. `sotodlib.flags.get_turnaround_flags` will be ran with default parameters')
             _ = flags.get_turnaround_flags(aman,truncate=True)
-        subscan_indices_l = _get_subscan_range_index(aman.flags["left_scan"].mask())
-        subscan_indices_r = _get_subscan_range_index(aman.flags["right_scan"].mask())
+            
+        ls_mask = aman.flags["left_scan"].mask()
+        rs_mask = aman.flags["right_scan"].mask()
+        ta_mask = aman.flags["turnarounds"].mask()
+        
+        subscan_indices_l = _get_subscan_range_index(ls_mask if ls_mask.ndim==1 else ls_mask[0])
+        subscan_indices_r = _get_subscan_range_index(rs_mask if rs_mask.ndim==1 else rs_mask[0])
         subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
         subscan_indices= subscan_indices[np.argsort(subscan_indices[:, 0])]
         
