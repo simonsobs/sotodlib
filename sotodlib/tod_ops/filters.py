@@ -299,7 +299,7 @@ def counter_1_over_f(freqs, tod, fk, n):
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
     """
-    if isinstance(fk, (int, np.int32, np.int64, float, np.float32, np.float64)):
+    if np.isscalar(fk) and np.isscalar(n):
         return 1/(1+(fk/freqs)**n)
     elif len(fk) == tod.dets.count and len(n) == tod.dets.count:
         return 1 / (1 + (fk[:, None]/freqs[None,:])**n[:, None])
