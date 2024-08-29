@@ -45,7 +45,11 @@ def main(config):
     for oid in all_obs_id:
         logger.info(f"Recording metrics for obs_id {oid} ({i}/{n})...")
         # load metadata once
-        meta = context.get_meta(oid, ignore_missing=True)
+        try:
+            # this can fail if crucial metadata is unavailable
+            meta = context.get_meta(oid, ignore_missing=True)
+        except Exception as e:
+            logger.error(f"Failed to load metadata for {oid}.\n{type(e)}: {e}")
         # check that obsdb info is available
         if len(meta.obs_info.keys()) < 2:
             logger.warning("This observation is missing obs_info. Skipping.")
