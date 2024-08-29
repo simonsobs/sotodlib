@@ -108,6 +108,7 @@ def setup_simulate_observing(parser, operators):
             name="det_pointing_azel_sim",
             boresight=defaults.boresight_azel,
             quats="quats_azel_sim",
+            enabled=False,
         )
     )
     operators.append(
@@ -115,6 +116,7 @@ def setup_simulate_observing(parser, operators):
             name="det_pointing_radec_sim",
             boresight=defaults.boresight_radec,
             quats="quats_radec_sim",
+            enabled=False,
         )
     )
 
