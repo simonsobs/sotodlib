@@ -1154,6 +1154,9 @@ class G3tHWP():
                 self._encd_cnt = self._encd_cnt[0] + \
                     np.arange(len(self._encd_cnt) - len(idx))
                 self._ref_indexes[i+1:] -= num_of_extra
+                # TODO need to delete from filled_indexes too
+                # TODO record bad_indexes for correction later
+                # TODO need to shift filled_indexes and bad_indexes in fill_refs
 
         # reference filling
         if fast:
@@ -1248,6 +1251,8 @@ class G3tHWP():
             return -1
 
         # delete unexpected ref slit indexes
+        # this type of unexpected ref slit is produced from packet drop filling and 
+        # noise in encoder data
         bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 10)[0]
         if len(bad_ref_indexes) > 0:
             logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
