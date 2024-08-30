@@ -188,12 +188,12 @@ def jumpfix_subtract_heights(
                  If inplace is True this is just a reference to x.
     """
 
-    def _fix(i, jump_ranges, heights, x_fixed):
+    def _fix(jump_ranges, heights, x_fixed):
         for j, jump_range in enumerate(jump_ranges):
             for start, end in jump_range.ranges():
-                _heights = heights[i + j, start:end]
+                _heights = heights[j, start:end]
                 height = _heights[np.argmax(np.abs(_heights))]
-                x_fixed[i + j, int((start + end) / 2) :] -= height
+                x_fixed[j, int((start + end) / 2) :] -= height
 
     x_fixed = x
     if not inplace:
@@ -216,10 +216,7 @@ def jumpfix_subtract_heights(
     slices = [slice(i * slice_size, (i + 1) * slice_size) for i in range(nfuture)]
     slices[-1] = slice(slices[-1].start, len(x_fixed))
     with concurrent.futures.ThreadPoolExecutor() as e:
-        _ = [
-            e.submit(_fix, i, jumps.ranges[s], heights[s], x_fixed[s])
-            for i, s in enumerate(slices)
-        ]
+        _ = [e.submit(_fix, jumps.ranges[s], heights[s], x_fixed[s]) for s in slices]
 
     return x_fixed.reshape(orig_shape)
 
