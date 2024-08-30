@@ -405,7 +405,7 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, filled_indexes}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, ref_indexes, filled_indexes}
 
 
         Notes
@@ -457,6 +457,7 @@ class G3tHWP():
             out['angle'+suffix] = angle
             out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
+            out['bad_ref_indexes'+suffix] = self._bad_ref_indexes
             out['filled_indexes'+suffix] = self._filled_indexes
 
         return out
@@ -513,17 +514,20 @@ class G3tHWP():
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
         ref_indexes = solved['ref_indexes'+suffix]
+        bad_ref_indexes = solved['bad_ref_indexes'+suffix]
         fast_time = solved['fast_time'+suffix]
         # Trim only the timestamps of integer revolutions
         ft = fast_time[ref_indexes[0]:ref_indexes[-2]]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
-        # make template
+        # make template from good revolutions
         template_slit = ft.reshape(len(ref_indexes)-2, self._num_edges)
+        good_revolutions = np.logical_not([i in bad_ref_indexes for i, ri in enumerate(ref_indexes[:-2])])
+        template_slit = template_slit[good_revolutions]
         template_slit = np.average(template_slit, axis=0)
         template_slit -= np.average(template_slit)
         # make subtraction model
-        subtract = np.roll(np.tile(template_slit, len(ref_indexes) + 1), ref_indexes[0])
+        subtract = np.roll(np.tile(template_slit, int(np.ceil(len(fast_time)/self._num_edges))), ref_indexes[0])
         subtract = subtract[:len(fast_time)]
         # subtract template, keep raw timestamp
         solved['fast_time_raw'+suffix] = fast_time
@@ -1123,34 +1127,33 @@ class G3tHWP():
         self._encoder_packet_sort()
         self._fill_dropped_packets()
 
-        # assign IRIG synched timestamp
-        self._time = scipy.interpolate.interp1d(
-            self._rising_edge,
-            self._irig_time,
-            kind='linear',
-            fill_value='extrapolate')(self._encd_clk)
-
-        # Reject unexpected counter that exceeds instantaneous
-        # rotation speed of 5 Hz
-        idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
-        if len(idx) > 0:
-            logger.warning(f'Rejected {len(idx)} counters because instantaneous '
-                            'rotation speed exceeds 5 Hz. Encoder data might be noisy.')
-            self._encd_clk = np.delete(self._encd_clk, idx)
-            self._encd_cnt = self._encd_cnt[0] + \
-                np.arange(len(self._encd_cnt) - len(idx))
-            self._time = np.delete(self._time, idx)
-
         # reference finding and fill its angle
         _status_find_ref = self._find_refs()
         if _status_find_ref == -1:
             return [], []
+
+        # remove counter with high instantaneous speed
+        self._bad_ref_indexes = np.where(np.diff(self._ref_indexes) != self._num_edges - 2 )[0]
+        diff = np.ediff1d(self._encd_clk)
+        for i in self._bad_ref_indexes:
+            logger.warning('Remove counter with high instantaneous speed')
+            num_of_extra = self._ref_indexes[i+1] - self._ref_indexes[i] - self._num_edges + 2
+            if num_of_extra > 0:
+                _diff = diff[self._ref_indexes[i]:self._ref_indexes[i+1]]
+                idx = np.argsort(_diff)[:num_of_extra]
+                idx += self._ref_indexes[i]
+                self._encd_clk = np.delete(self._encd_clk, idx)
+                self._encd_cnt = self._encd_cnt[0] + \
+                    np.arange(len(self._encd_cnt) - len(idx))
+                self._ref_indexes[i+1:] -= num_of_extra
+
+        # reference filling
         if fast:
             self._fill_refs_fast()
         else:
             self._fill_refs()
 
-        # re-assign IRIG synched timestamp
+        # assign IRIG synched timestamp
         self._time = scipy.interpolate.interp1d(
             self._rising_edge,
             self._irig_time,
