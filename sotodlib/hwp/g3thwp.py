@@ -571,11 +571,11 @@ class G3tHWP():
         logger.info('Remove offcentering effect from hwp angle and overwrite')
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes_1"][0] > self._num_edges/2-1:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][0]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         else:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][1]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
         if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
@@ -591,8 +591,11 @@ class G3tHWP():
         # Calculate the offcentering (mm).
         period = (solved["fast_time_1"][offcenter_idx1+1] -
                   solved["fast_time_1"][offcenter_idx1])*self._num_edges
-        offset_angle = offset_time/period*2*np.pi
-        offcentering = np.tan(offset_angle)*self._encoder_disk_radius
+        # When data is extremely noisy, period gets zero and offcentering becomes nan
+        period[period==0] = np.median(period)
+        offset_angle = 2 * np.pi * offset_time / period
+        offcentering = np.tan(offset_angle) * self._encoder_disk_radius
+
         solved['offcenter_idx1'] = offcenter_idx1
         solved['offcenter_idx2'] = offcenter_idx2
         solved['offcentering'] = offcentering
@@ -795,11 +798,15 @@ class G3tHWP():
         f.close()
         return data
 
-    def _bool_interpolation(self, timestamp1, data, timestamp2):
+    def _interpolation(self, timestamp1, data, timestamp2):
         interp = scipy.interpolate.interp1d(
-            timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
-        result = (interp > 0.999)
-        return result
+            timestamp1, data, kind='linear', bounds_error=False, fill_value='extrapolate')(timestamp2)
+        return interp
+
+    def _bool_interpolation(self, timestamp1, data, timestamp2):
+        interp = self._interpolation(timestamp1, data, timestamp2)
+        interp = (interp > 0.999)
+        return interp
 
     def set_data(self, tod, h5_filename=None):
         """
@@ -1009,8 +1016,8 @@ class G3tHWP():
                 solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
             aman['locked'+suffix] = self._bool_interpolation(
                 solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
-            aman['hwp_rate'+suffix] = scipy.interpolate.interp1d(
-                solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
+            aman['hwp_rate'+suffix] = self._interpolation(
+                solved['slow_time'+suffix], solved['hwp_rate'+suffix], tod.timestamps)
             aman['logger'+suffix] = self._write_solution_h5_logger
 
             quad = self._bool_interpolation(
@@ -1020,18 +1027,18 @@ class G3tHWP():
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_indexes'+suffix]] = 1
-            filled_flag = scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
+            filled_flag = self._interpolation(
+                solved['fast_time'+suffix], filled_flag, tod.timestamps)
             aman['filled_flag'+suffix] = filled_flag.astype(bool)
-            aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+            aman['hwp_angle_ver1'+suffix] = np.mod(self._interpolation(
+                solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
 
             # version 2
             # calculate template subtracted angle
             try:
                 self.eval_angle(solved, poly_order=3, suffix=suffix)
-                aman['hwp_angle_ver2'+suffix] = np.mod(scipy.interpolate.interp1d(
-                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                aman['hwp_angle_ver2'+suffix] = np.mod(self._interpolation(
+                    solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
                 aman['template'+suffix] = solved['template'+suffix]
             except Exception as e:
@@ -1046,10 +1053,10 @@ class G3tHWP():
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
                 for suffix in self._suffixes:
-                    aman['hwp_angle_ver3'+suffix] = np.mod(scipy.interpolate.interp1d(
-                        solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                    aman['hwp_angle_ver3'+suffix] = np.mod(self._interpolation(
+                        solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                     aman['version'+suffix] = 3
-                aman['offcenter'] = np.array([np.average(solved['offcentering']), np.std(solved['offcentering'])])
+                aman['offcenter'] = np.array([np.nanmean(solved['offcentering']), np.nanstd(solved['offcentering'])])
                 aman.offcenter_direction = np.sign(aman['offcenter'][0])
             except Exception as e:
                 logger.error(
@@ -1135,8 +1142,9 @@ class G3tHWP():
         # remove counter with high instantaneous speed
         self._bad_ref_indexes = np.where(np.diff(self._ref_indexes) != self._num_edges - 2 )[0]
         diff = np.ediff1d(self._encd_clk)
-        for i in self._bad_ref_indexes:
+        if len(self._bad_ref_indexes) > 0:
             logger.warning('Remove counter with high instantaneous speed')
+        for i in self._bad_ref_indexes:
             num_of_extra = self._ref_indexes[i+1] - self._ref_indexes[i] - self._num_edges + 2
             if num_of_extra > 0:
                 _diff = diff[self._ref_indexes[i]:self._ref_indexes[i+1]]
