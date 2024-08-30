@@ -5,6 +5,7 @@ import os
 import numpy as np
 import scipy.interpolate
 import h5py
+from copy import copy
 import so3g
 from spt3g import core
 import logging
@@ -425,8 +426,17 @@ class G3tHWP():
             * hwp_rate: float
                 * the "approximate" HWP spin rate, with sign, in revs / second.
                 * Use placeholder value of 0 for cases when not "stable".
+            * ref_indexes: int
+                * Indexes of of reference slots.
+            * bad_indexes_each_ref: dictionary
+                * Information about bad data points in each revolution starting from reference slot
+                * key: Index of reference slots which have bad data points.
+                * value: A list of indexes indicating the positions of bad data points
+                         within each revolution, starting from the reference index.
             * filled_indexes: boolean array
-                * indexes where we filled due to packet drop etc.
+                * Indexes indicating the points that are filled due to packet drop.
+            * bad_revolution_indexes: boolean array
+                * Indexes indicating the points of bad revolutions that are contaminated with noise.
         """
 
         if not any(data):
@@ -457,7 +467,7 @@ class G3tHWP():
             out['angle'+suffix] = angle
             out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
-            out['bad_ref_indexes'+suffix] = self._bad_ref_indexes
+            out['bad_indexes_each_ref'+suffix] = self._bad_indexes_each_ref
             out['filled_indexes'+suffix] = self._filled_indexes
 
         return out
@@ -514,7 +524,7 @@ class G3tHWP():
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
         ref_indexes = solved['ref_indexes'+suffix]
-        bad_ref_indexes = solved['bad_ref_indexes'+suffix]
+        bad_indexes_each_ref = solved['bad_indexes_each_ref'+suffix]
         fast_time = solved['fast_time'+suffix]
         # Trim only the timestamps of integer revolutions
         ft = fast_time[ref_indexes[0]:ref_indexes[-2]]
@@ -522,7 +532,8 @@ class G3tHWP():
         ft = detrend(ft, deg=3)
         # make template from good revolutions
         template_slit = ft.reshape(len(ref_indexes)-2, self._num_edges)
-        good_revolutions = np.logical_not([i in bad_ref_indexes for i, ri in enumerate(ref_indexes[:-2])])
+        good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes[:-2])])
+        assert np.sum(good_revolutions) > 0
         template_slit = template_slit[good_revolutions]
         template_slit = np.average(template_slit, axis=0)
         template_slit -= np.average(template_slit)
@@ -530,7 +541,7 @@ class G3tHWP():
         subtract = np.roll(np.tile(template_slit, int(np.ceil(len(fast_time)/self._num_edges))), ref_indexes[0])
         subtract = subtract[:len(fast_time)]
         # subtract template, keep raw timestamp
-        solved['fast_time_raw'+suffix] = fast_time
+        solved['fast_time_raw'+suffix] = copy(fast_time)
         solved['fast_time'+suffix] = fast_time - subtract
         # Normalize template by the width of slit
         average_dt_slit = np.average(np.diff(fast_time - subtract))
@@ -1140,23 +1151,27 @@ class G3tHWP():
             return [], []
 
         # remove counter with high instantaneous speed
-        self._bad_ref_indexes = np.where(np.diff(self._ref_indexes) != self._num_edges - 2 )[0]
+        idx_of_bad_ref_indexes = np.where(np.diff(self._ref_indexes) != self._num_edges - 2 )[0]
+        # keep bad data points as a dictionary
+        self._bad_indexes_each_ref = {}
+
         diff = np.ediff1d(self._encd_clk)
-        if len(self._bad_ref_indexes) > 0:
-            logger.warning('Remove counter with high instantaneous speed')
-        for i in self._bad_ref_indexes:
-            num_of_extra = self._ref_indexes[i+1] - self._ref_indexes[i] - self._num_edges + 2
-            if num_of_extra > 0:
-                _diff = diff[self._ref_indexes[i]:self._ref_indexes[i+1]]
-                idx = np.argsort(_diff)[:num_of_extra]
-                idx += self._ref_indexes[i]
-                self._encd_clk = np.delete(self._encd_clk, idx)
-                self._encd_cnt = self._encd_cnt[0] + \
-                    np.arange(len(self._encd_cnt) - len(idx))
-                self._ref_indexes[i+1:] -= num_of_extra
-                # TODO need to delete from filled_indexes too
-                # TODO record bad_indexes for correction later
-                # TODO need to shift filled_indexes and bad_indexes in fill_refs
+        if len(idx_of_bad_ref_indexes) > 0:
+            logger.warning('Remove counters with high instantaneous speed. '
+                           'Encoder data may be noisy.')
+            removed_counters = 0
+            for i in idx_of_bad_ref_indexes:
+                num_of_extra = self._ref_indexes[i+1] - self._ref_indexes[i] - self._num_edges + 2
+                if num_of_extra > 0:
+                    _diff = diff[self._ref_indexes[i]:self._ref_indexes[i+1]]
+                    idx = np.argsort(_diff)[:num_of_extra]
+                    self._bad_indexes_each_ref[i] = idx
+                    self._encd_clk = np.delete(self._encd_clk, idx + self._ref_indexes[i])
+                    self._encd_cnt = self._encd_cnt[0] + \
+                        np.arange(len(self._encd_cnt) - len(idx))
+                    self._ref_indexes[i+1:] -= num_of_extra
+                    removed_counters += num_of_extra
+            logger.warning(f'Removed {removed_counters} counters in total.')
 
         # reference filling
         if fast:
