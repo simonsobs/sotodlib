@@ -171,6 +171,12 @@ class Imprinter:
           librarian_conn: string (optional)
           build_hk: True 
           build_det: True
+          hk_fields:
+            az: acu.acu_udp_stream.Corrected_Azimuth
+            el: acu.acu_udp_stream.Corrected_Elevation
+            boresight: acu.acu_udp_stream.Corrected_Boresight
+            az_mode:  acu.acu_status.Azimuth_mode
+            hwp_freq: hwp-bbb-e1.HWPEncoder.approx_hwp_freq
 
           tel_tubes:
             tel_tube1:
@@ -630,7 +636,9 @@ class Imprinter:
         book, 
         ignore_tags=False,
         ancil_drop_duplicates=False,
-        allow_bad_timing=False
+        allow_bad_timing=False,
+        require_hwp=True,
+        require_acu=True,
     ):
         """get the appropriate bookbinder for the book based on its type"""
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
@@ -645,13 +653,19 @@ class Imprinter:
             filedb = self.get_files_for_book(book)
             obsdb = self.get_g3tsmurf_obs_for_book(book)
             readout_ids = self.get_readout_ids_for_book(book)
+            hk_fields = self.config.get('hk_fields')
+
+            if hk_fields is None:
+                raise ValueError("`hk_fields` entry required for bookbinding.")
 
             # bind book using bookbinder library
             bookbinder = BookBinder(
-                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path,
+                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path, hk_fields,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
+                require_hwp=require_hwp,
+                require_acu=require_acu,
             )
             return bookbinder
 
@@ -752,6 +766,8 @@ class Imprinter:
         ignore_tags=False,
         ancil_drop_duplicates=False,
         allow_bad_timing=False,
+        require_hwp=True,
+        require_acu=True,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -796,6 +812,11 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
+        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
+        ## or if we ever plan to run the SATs without HWPs
+        if 'lat' in self.daq_node:
+            require_hwp = False
+
         try:
             # find appropriate binder for the book type
             binder = self._get_binder_for_book(
@@ -803,6 +824,8 @@ class Imprinter:
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
+                require_acu=require_acu,
+                require_hwp=require_hwp,
             )
             binder.bind(pbar=pbar)
 

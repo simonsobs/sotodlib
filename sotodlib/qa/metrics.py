@@ -151,7 +151,7 @@ class PreprocessQA(QAMetric):
 
     def _get_available_obs(self):
         # find preprocess manifest file
-        man_file = [p["db"] for p in self.context["metadata"] if p.get("label", "") == "preprocess"]
+        man_file = [p["db"] for p in self.context["metadata"] if re.match(".*preprocess", p.get("db", ""))]
         if len(man_file) == 0:
             raise Exception(f"No preprocess metadata block in context {self.context.filename}.")
 

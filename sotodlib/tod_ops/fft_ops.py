@@ -434,9 +434,6 @@ def fit_noise_model(
             # sqrt of the diagonals gives you the standard errors.
             covout[i] = np.linalg.inv(hessian_ndt)
         except np.linalg.LinAlgError:
-            print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping."
-            )
             covout[i] = np.full((3, 3), np.nan)
         fitout[i] = res.x
 
@@ -457,3 +454,76 @@ def fit_noise_model(
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
     return noise_fit_stats
+
+
+def build_hpf_params_dict(
+    filter_name,
+    noise_fit=None,
+    filter_params=None
+):
+    """
+    Build the filter parameter dictionary from a provided
+    dictionary or from noise fit results.
+
+    Args
+    ----
+    filter_name : str
+        Name of the filter to build the parameter dict for.
+    noise_fit: AxisManager
+        AxisManager containing the result of the noise model fit sized nparams x ndets.
+    filter_params: dict
+        Filter parameters dictionary to complement parameters
+        derived from the noise fit (or to be used if noise fit is None).
+    Returns
+    -------
+    filter_params : dict
+        Returns a dictionary of the median values of the noise model fit parameters
+        if noise_fit is not None, otherwise return the provided filter_params.
+    """
+    if noise_fit is not None:
+
+        pars_mapping = {
+            "high_pass_butter4": {
+                "fc": "fknee",
+            },
+            "counter_1_over_f": {
+                "fk": "fknee", 
+                "n": "alpha"
+            },
+            "high_pass_sine2": {
+                "cutoff": "fknee",
+                "width": None
+            }
+        }
+
+        if filter_name not in pars_mapping.keys():
+            raise NotImplementedError(
+                f"{filter_name} params from noise fit is not implemented"
+            )
+        
+        noise_fit_array = noise_fit.fit
+        noise_fit_params = noise_fit.noise_model_coeffs.vals
+        
+        median_params = np.median(noise_fit_array, axis=0)
+        median_dict = {
+            k: median_params[i]
+            for i, k in enumerate(noise_fit_params)
+        }
+
+        params_dict = {}
+        for k, v in pars_mapping[filter_name].items():
+            if v is None:
+                if (filter_params is None) or (k not in filter_params):
+                    raise ValueError(
+                        f"Required parameters {k} not found in config "
+                         "and cannot be derived from noise fit."
+                    )
+                else:
+                    params_dict.update({k: filter_params[k]})
+            else:
+                params_dict[k] = median_dict[v]
+
+        filter_params = params_dict
+    
+    return filter_params
+        
