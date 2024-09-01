@@ -472,9 +472,9 @@ class G3tHWP():
 
         return out
 
-    def eval_angle(self, solved, poly_order=3, suffix='_1'):
+    def template_subtraction(self, solved, poly_order=3, suffix='_1'):
         """
-        Evaluate the non-uniformity of hwp angle timestamp and subtract
+        Evaluate the non-uniformity of hwp angle timestamp (template) and subtract it
         The raw hwp angle timestamp is kept.
 
         Args
@@ -526,19 +526,22 @@ class G3tHWP():
         ref_indexes = solved['ref_indexes'+suffix]
         bad_indexes_each_ref = solved['bad_indexes_each_ref'+suffix]
         fast_time = solved['fast_time'+suffix]
+
         # Trim only the timestamps of integer revolutions
-        ft = fast_time[ref_indexes[0]:ref_indexes[-2]]
+        ft = fast_time[ref_indexes[0]:ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=3)
         # make template from good revolutions
-        template_slit = ft.reshape(len(ref_indexes)-2, self._num_edges)
-        good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes[:-2])])
+        good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes)])
+        # abort template subtraction is there is no good revolutions
         assert np.sum(good_revolutions) > 0
-        template_slit = template_slit[good_revolutions]
-        template_slit = np.average(template_slit, axis=0)
-        template_slit -= np.average(template_slit)
-        # make subtraction model
-        subtract = np.roll(np.tile(template_slit, int(np.ceil(len(fast_time)/self._num_edges))), ref_indexes[0])
+        # make template from difference of time
+        template_slit = np.diff(ft).reshape(len(solved['ref_indexes'+suffix])-2, self._num_edges)
+        template_slit = template_slit[good_revolutions[:-2]]
+        template_slit = np.average(template_slit, axis=0) # take average of all revolutions
+        template_slit = np.cumsum(template_slit)
+        template_slit -= np.average(template_slit) # remove global time ofset
+        subtract = np.roll(np.tile(template_slit, int(np.ceil(len(fast_time)/self._num_edges))), ref_indexes[0]+1)
         subtract = subtract[:len(fast_time)]
         # subtract template, keep raw timestamp
         solved['fast_time_raw'+suffix] = copy(fast_time)
@@ -557,7 +560,7 @@ class G3tHWP():
         Args
         -----
         solved: dict
-            dict solved from eval_angle
+            dict solved from template_subtraction
             {fast_time_1, angle_2, fast_time_2, angle_2, ...}
 
         Returns
@@ -621,7 +624,7 @@ class G3tHWP():
         Args
         -----
         solved: dict
-            dict solved from eval_angle
+            dict solved from template_subtraction
             {fast_time_1, angle_1, fast_time_2, angle_2, ...}
         offcentering: dict
             dict solved from eval_offcentering
@@ -657,6 +660,8 @@ class G3tHWP():
         offcenter_idx2 = solved['offcenter_idx2']
         offset_time = solved['offset_time']
 
+        solved['fast_time_raw_1'] = solved['fast_time_raw_1'][offcenter_idx1]
+        solved['fast_time_raw_2'] = solved['fast_time_raw_2'][offcenter_idx2]
         solved['fast_time_1'] = solved['fast_time_1'][offcenter_idx1] - offset_time
         solved['fast_time_2'] = solved['fast_time_2'][offcenter_idx2] + offset_time
         solved['angle_1'] = solved['angle_1'][offcenter_idx1]
@@ -1047,7 +1052,7 @@ class G3tHWP():
             # version 2
             # calculate template subtracted angle
             try:
-                self.eval_angle(solved, poly_order=3, suffix=suffix)
+                self.template_subtraction(solved, poly_order=3, suffix=suffix)
                 aman['hwp_angle_ver2'+suffix] = np.mod(self._interpolation(
                     solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
