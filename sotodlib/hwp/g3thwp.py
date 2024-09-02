@@ -406,7 +406,8 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, ref_indexes, filled_flag}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, ref_indexes, bad_indexes_each_ref,
+             filled_flag, bad_revolution_flag}
 
 
         Notes
@@ -435,8 +436,8 @@ class G3tHWP():
                          within each revolution, starting from the reference index.
             * filled_flag: bool
                 * Flag indicating the points that are filled due to packet drop.
-            * bad_revolution_indexes: boolean array
-                * Indexes indicating the points of bad revolutions that are contaminated with noise.
+            * bad_revolution_flag: boolean array
+                * Flag indicating the points of bad revolutions that are contaminated with noise.
         """
 
         if not any(data):
@@ -468,10 +469,15 @@ class G3tHWP():
             out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
             out['bad_indexes_each_ref'+suffix] = self._bad_indexes_each_ref
+            # generate flags
             filled_flag = np.zeros_like(fast_time, dtype=bool)
             for r in self._filled_ranges: filled_flag[r[0]:r[1]] = 1
             out['filled_flag'+suffix] = filled_flag
-
+            bad_revolution_flag = np.zeros_like(fast_time, dtype=bool)
+            for i in self._bad_indexes_each_ref.keys():
+                ri = self._ref_indexes[i]
+                bad_revolution_flag[ri:ri+self._num_edges] = 1
+            out['bad_revolution_flag'+suffix] = bad_revolution_flag
         return out
 
     def template_subtraction(self, solved, poly_order=None, suffix='_1'):
@@ -492,7 +498,7 @@ class G3tHWP():
         Returns
         --------
         output: dict
-            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, template}
+            {fast_time, fast_time_raw, template, template_err, ...}
 
 
         Notes
@@ -500,6 +506,8 @@ class G3tHWP():
             * template: float array (ratio)
                 * Averaged non-uniformity of the hwp angle
                 * normalized by the step of the angle encoder
+            * template_err: float array
+                * Error bar of template
 
         non-uniformity of hwp angle comes from following reasons,
             - non-uniformity of encoder slits
@@ -797,7 +805,9 @@ class G3tHWP():
             aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
             aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap_new('bad_revolution_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap('version'+suffix, 1)
             aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -825,10 +835,15 @@ class G3tHWP():
             timestamp1, data, kind='linear', bounds_error=False, fill_value='extrapolate')(timestamp2)
         return interp
 
-    def _bool_interpolation(self, timestamp1, data, timestamp2):
+    def _bool_interpolation(self, timestamp1, data, timestamp2, round_option):
         interp = self._interpolation(timestamp1, data, timestamp2)
-        interp = (interp > 0.999)
-        return interp
+        if round_option == 'floor':
+            interp = np.floor(interp)
+        elif round_option == 'ceil':
+            interp = np.ceil(interp)
+        else:
+            raise ValueError(f'round option {round_option} is not supported.')
+        return interp.astype(bool)
 
     def set_data(self, tod, h5_filename=None):
         """
@@ -960,13 +975,19 @@ class G3tHWP():
                 'Angle calculation failed', 'Angle calculation succeeded'
 
             - filled_flag_1/2: bool (samps,)
-                Array to indicate the index of hwp angle filled due to packet drop, etc.
+                Array to indicate the data points that are filled due to packet drop.
+
+            - bad_revolution_flag_1/2: bool (samps,)
+                Array to indicate the data points of bad revolutions that are contaminated with noise.
 
             - quad_1/2: int (quad,)
                 0 or 1 or -1. 0 means no data
 
             - template_1/2: float (1140,)
                 Template of the non uniformity of hwp encoder plate
+
+            - template_err_1/2: float (1140,)
+                Error bar of template
 
             - offcenter: float (2,)
                 - (average offcenter, std of offcenter) unit is (mm)
@@ -1035,21 +1056,24 @@ class G3tHWP():
             self._write_solution_h5_logger = 'Angle calculation succeeded'
             aman['version'+suffix] = 1
             aman['stable'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
+                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 'floor')
             aman['locked'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
+                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 'floor')
             aman['hwp_rate'+suffix] = self._interpolation(
                 solved['slow_time'+suffix], solved['hwp_rate'+suffix], tod.timestamps)
             aman['logger'+suffix] = self._write_solution_h5_logger
 
             quad = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['quad'+suffix], tod.timestamps)
+                solved['fast_time'+suffix], solved['quad'+suffix], tod.timestamps, 'floor')
             aman['quad'+suffix] = np.array([1 if q else -1 for q in quad])
             aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
             filled_flag = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['filled_flag'+suffix], tod.timestamps)
+                solved['fast_time'+suffix], solved['filled_flag'+suffix], tod.timestamps, 'ceil')
             aman['filled_flag'+suffix] = filled_flag
+            bad_revolution_flag = self._bool_interpolation(
+                solved['fast_time'+suffix], solved['bad_revolution_flag'+suffix], tod.timestamps, 'ceil')
+            aman['bad_revolution_flag'+suffix] = bad_revolution_flag
             aman['hwp_angle_ver1'+suffix] = np.mod(self._interpolation(
                 solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
 
@@ -1061,6 +1085,7 @@ class G3tHWP():
                     solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
                 aman['template'+suffix] = solved['template'+suffix]
+                aman['template_err'+suffix] = solved['template_err'+suffix]
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the template subtraction.")
