@@ -406,7 +406,7 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, ref_indexes, filled_indexes}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, ref_indexes, filled_flag}
 
 
         Notes
@@ -433,8 +433,8 @@ class G3tHWP():
                 * key: Index of reference slots which have bad data points.
                 * value: A list of indexes indicating the positions of bad data points
                          within each revolution, starting from the reference index.
-            * filled_indexes: boolean array
-                * Indexes indicating the points that are filled due to packet drop.
+            * filled_flag: bool
+                * Flag indicating the points that are filled due to packet drop.
             * bad_revolution_indexes: boolean array
                 * Indexes indicating the points of bad revolutions that are contaminated with noise.
         """
@@ -468,7 +468,9 @@ class G3tHWP():
             out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
             out['bad_indexes_each_ref'+suffix] = self._bad_indexes_each_ref
-            out['filled_indexes'+suffix] = self._filled_indexes
+            filled_flag = np.zeros_like(fast_time, dtype=bool)
+            for r in self._filled_ranges: filled_flag[r[0]:r[1]] = 1
+            out['filled_flag'+suffix] = filled_flag
 
         return out
 
@@ -1045,11 +1047,9 @@ class G3tHWP():
             aman['quad'+suffix] = np.array([1 if q else -1 for q in quad])
             aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
-            filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
-            filled_flag[solved['filled_indexes'+suffix]] = 1
-            filled_flag = self._interpolation(
-                solved['fast_time'+suffix], filled_flag, tod.timestamps)
-            aman['filled_flag'+suffix] = filled_flag.astype(bool)
+            filled_flag = self._bool_interpolation(
+                solved['fast_time'+suffix], solved['filled_flag'+suffix], tod.timestamps)
+            aman['filled_flag'+suffix] = filled_flag
             aman['hwp_angle_ver1'+suffix] = np.mod(self._interpolation(
                 solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
 
@@ -1136,7 +1136,7 @@ class G3tHWP():
 
         # metadata of packet drop
         self._num_dropped_pkts = 0
-        self._filled_indexes = []
+        self._filled_ranges = []
 
         # check duplication in data
         self._duplication_check()
@@ -1180,6 +1180,17 @@ class G3tHWP():
                         np.arange(len(self._encd_cnt) - num_of_extra)
                     self._ref_indexes[i+1:] -= num_of_extra
                     removed_counters += num_of_extra
+
+                    # Shift filled indexes
+                    for fi in self._filled_ranges:
+                        offset_start, offset_end = 0, 0
+                        for j in idx + self._ref_indexes[i]:
+                            if j < fi[0]:
+                                offset_start -= 1
+                            if j < fi[1]:
+                                offset_end -= 1
+                        fi[0] += offset_start
+                        fi[1] += offset_end
             logger.warning(f'Removed {removed_counters} counters in total.')
 
         # reference filling
@@ -1348,8 +1359,20 @@ class G3tHWP():
 
         self._encd_cnt = self._encd_cnt[0] + np.arange(
             len(self._encd_cnt) + len(self._ref_indexes) * self._ref_edges)
-        self._ref_indexes += np.arange(len(self._ref_indexes)
-                                       ) * self._ref_edges
+        # Shift filled indexes
+        for fi in self._filled_ranges:
+            offset_start, offset_end = 0, 0
+            for ri in self._ref_indexes:
+                if fi[0] <= ri:
+                    break
+                if fi[0] > ri:
+                    offset_start += 2
+                if fi[1] > ri:
+                    offset_end += 2
+            fi[0] += offset_start
+            fi[1] += offset_end
+        # Shift ref indexes
+        self._ref_indexes += np.arange(len(self._ref_indexes)) * self._ref_edges
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         return
 
@@ -1444,16 +1467,13 @@ class G3tHWP():
             _diff = int(np.diff(self._encd_cnt)[ii])
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
-            self._filled_indexes += list(range(ii + 1,
-                                         ii + 1 + self._pkt_size))
+            self._filled_ranges.append([ii + 1, ii + 1 + self._pkt_size])
             if ii - self._num_edges + self._ref_edges + 1 >= 0:
                 gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1: ii+_diff - self._num_edges + self._ref_edges] \
-                    - self._encd_clk[ii-self._num_edges +
-                                     self._ref_edges] + self._encd_clk[ii]
+                    - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
             else:
                 gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii - 1 + self._num_edges] \
-                    - self._encd_clk[ii - _diff +
-                                     self._num_edges - 1] + self._encd_clk[ii]
+                    - self._encd_clk[ii - _diff + self._num_edges - 1] + self._encd_clk[ii]
             gap_cnt = np.arange(self._encd_cnt[ii]+1, self._encd_cnt[ii+1])
             self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
             self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
