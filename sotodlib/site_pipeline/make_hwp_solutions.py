@@ -36,20 +36,17 @@ def get_parser(parser=None):
         help="increase output verbosity. \
         0: Error, 1: Warning, 2: Info(default), 3: Debug")
     parser.add_argument(
-        '--overwrite',
+        '--overwrite', action='store_true',
         help="If true, overwrites existing entries in the database",
-        action='store_true',
     )
     parser.add_argument(
-        '--load-h5',
+        '--load-h5', action='store_true',
         help="If true, try to load raw encoder data from h5 file",
-        action='store_true',
     )
     parser.add_argument(
-        '--query',
+        '--query', type=str,
         help="Query to pass to the observation list. Use \\'string\\' to "
              "pass in strings within the query.",
-        type=str
     )
     parser.add_argument(
         '--min-ctime',
@@ -60,8 +57,8 @@ def get_parser(parser=None):
         help="Maximum timestamp for the beginning of an observation list",
     )
     parser.add_argument(
-        '--obs-id',
-        help="obs-id of particular observation if we want to run on just one",
+        '--obs-id', type=str, nargs='+',
+        help="List of obs-id of particular observation that you want to run",
     )
     return parser
 
@@ -157,7 +154,7 @@ def main(
 
     # load observation data
     if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
+        tot_query = ' or '.join([f"(obs_id=='{o}')" for o in obs_id])
     else:
         tot_query = "and "
         if min_ctime is not None:
