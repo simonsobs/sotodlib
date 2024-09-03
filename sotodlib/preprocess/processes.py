@@ -1010,7 +1010,6 @@ class PCARelCal(_Preprocess):
         save: True
         plot: True
     
-    # TODO: add xfac and yfac as options in config file entry?
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
@@ -1024,14 +1023,14 @@ class PCARelCal(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        finalrelcal_aman = core.AxisManager(aman.dets, aman.samps)
+        rc_aman = core.AxisManager(aman.dets, aman.samps)
         pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
         relcal = np.zeros(aman.dets.count)
         pca_weight0 = np.zeros(aman.dets.count)
         badids = []
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            finalrelcal_aman.wrap(f'{band}_idx', np.where(m0)[0])
+            rc_aman.wrap(f'{band}_idx', np.where(m0)[0])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
 
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
@@ -1043,18 +1042,18 @@ class PCARelCal(_Preprocess):
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
             pca_weight0[m0] = result_aman['pca_weight0']
-            finalrelcal_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
-            finalrelcal_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
-            finalrelcal_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
-            finalrelcal_aman.wrap(f'{band}_median', result_aman['median'])
+            rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
+            rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+            rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+            rc_aman.wrap(f'{band}_median', result_aman['median'])
         
         badids_comb = np.concatenate(badids)
-        finalrelcal_aman.wrap('badids', badids_comb)
-        finalrelcal_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
-        finalrelcal_aman.wrap('relcal', relcal, [(0, 'dets')])
-        finalrelcal_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
+        rc_aman.wrap('badids', badids_comb)
+        rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
+        rc_aman.wrap('relcal', relcal, [(0, 'dets')])
+        rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
 
-        self.save(proc_aman, finalrelcal_aman)
+        self.save(proc_aman, rc_aman)
 
     def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:

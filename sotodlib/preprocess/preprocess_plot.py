@@ -253,14 +253,16 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
 
     Parameters
     ----------
-    amans : AxisManager
+    aman : AxisManager
         input AxisManager
     pca_aman : AxisManager
         Relcal output AxisManager
-    ghz : str
-        Bandpass (for plotting purposes)
     filename : str
         Full filename with direct path to plot output directory.
+    signal : str
+        Signal name in aman. ``aman.signal`` is used if not provided.
+    band : str
+        Bandpass name. Assumes no bandpass separation if not provided.
     
     """
     if signal is None:
@@ -281,8 +283,6 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     good_indices = np.where(~pca_dets)[0]
     bad_indices = np.where(pca_dets)[0]
 
-    timestamps = aman.timestamps  # should assume lpf signal though
-
     fig = plt.figure(figsize=(10, 6))
 
     # Define axes
@@ -290,15 +290,14 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax2 = plt.subplot2grid((2, 2), (1, 1), colspan=1, rowspan=1)
     ax3 = plt.subplot2grid((2, 2), (0, 0), colspan=2, rowspan=1)
     
-    #print('len of times', len(timestamps), 'len modes', len(modes))
     # ax1: good signals
-    ax1.plot(timestamps, modes, color='black', linewidth=3,
+    ax1.plot(aman.timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
 
     for ind in good_indices:
         weight = pca_aman.pca_weight0[ind] #, 0]
         signals = signal[ind]
-        ax1.plot(timestamps, signals / weight,
+        ax1.plot(aman.timestamps, signals / weight,
                  zorder=1, color='#D8BFD8', alpha=0.3)
 
     ax1.set_title(f'Good Detector Batch: ({len(good_indices)} dets)')
@@ -306,12 +305,12 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax1.grid()
 
     # ax2: bad signals
-    ax2.plot(timestamps, modes, color='black', linewidth=3,
+    ax2.plot(aman.timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
     for ind in bad_indices:
         weight = pca_aman.pca_weight0[ind]
         signals = signal[ind]
-        ax2.plot(timestamps, signals / weight,
+        ax2.plot(aman.timestamps, signals / weight,
                  zorder=1, color='#FFA07A', alpha=0.3)
     ax2.set_title(f'Bad Detector Batch: ({len(bad_indices)} dets)')
     ax2.legend(loc='upper left')
@@ -319,11 +318,10 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
 
     # ax3: box
     weight = np.abs(pca_aman.pca_weight0)
-    Si = aman.det_cal.s_i
-    ax3.plot(Si[good_indices], weight[good_indices], '.', color='#D8BFD8', markersize=10,
+    ax3.plot(aman.det_cal.s_i[good_indices], weight[good_indices], '.', color='#D8BFD8', markersize=10,
              label=f'Good dets ({len(good_indices)} dets)', alpha=0.3)
 
-    ax3.plot(Si[bad_indices], weight[bad_indices], '.', color='#FFA07A', markersize=10,
+    ax3.plot(aman.det_cal.s_i[bad_indices], weight[bad_indices], '.', color='#FFA07A', markersize=10,
              label=f'Bad dets ({len(bad_indices)} dets)', alpha=0.3)
 
     ax3.plot([xbounds[0], xbounds[1], xbounds[1], xbounds[0], xbounds[0]],
@@ -334,8 +332,8 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax3.set_xlabel('Si')
     ax3.set_ylabel('0th Mode Weights')
 
-    if any(value > 0 for value in Si):
-        ax3.set_xlim(np.min(Si), 0)
+    if any(value > 0 for value in aman.det_cal.s_i):
+        ax3.set_xlim(np.min(aman.det_cal.s_i), 0)
 
     ax3.legend()
     ax3.grid()
