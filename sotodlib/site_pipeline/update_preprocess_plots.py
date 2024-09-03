@@ -110,7 +110,7 @@ def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
         try:
             meta = context.get_meta(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
             aman = context.get_obs(meta)
-            pipe.run(aman, aman.preprocess)
+            pipe.run(aman, aman.preprocess, update_plot=True)
         except Exception as e:
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
