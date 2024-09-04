@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g
 from sotodlib import tod_ops, coords, mapmaking
-from sotodlib.core import Context, AxisManager, IndexAxis
+from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi
@@ -27,6 +27,7 @@ defaults = {"query": "1",
             "maxiter": 100,
             "tiled": 1,
             "wafer": None,
+            "freq": None,
             "tasks_per_group":1,
             "cont":False,
            }
@@ -60,6 +61,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--maxiter",    type=int, help="Maximum number of iterative steps")
     parser.add_argument("-T", "--tiled"  ,    type=int)
     parser.add_argument("-W", "--wafer"  ,   type=str, nargs='+', help="Detector wafer subset to map with")
+    parser.add_argument(      "--freq" ,  type=str, nargs='+', help="Frequency band to map with")
     parser.add_argument("-g", "--tasks-per-group", type=int, help="number of tasks per group. By default it is 1, but can be higher if you want more than one MPI job working on a depth-1 map, e.g. if you don't have enough memory for so many MPI jobs")
     return parser
 
@@ -103,9 +105,8 @@ def find_scan_profile(context, my_tods, my_infos, comm=mpi.COMM_WORLD, npoint=10
         xi0  = np.mean(utils.minmax(fp.xi))
         eta0 = np.mean(utils.minmax(fp.eta))
         # Build a boresight corresponding to a single az sweep at constant time
-        # CARLOS: change throw with span for now
-        azs  = info.az_nom + np.linspace(-info.az_span/2, info.az_span/2, npoint)
-        els  = np.full(npoint, info.el_nom)
+        azs  = info.az_center + np.linspace(-info.az_throw/2, info.az_throw/2, npoint)
+        els  = np.full(npoint, info.el_center)
         profile[:] = tele2equ(np.array([azs, els])*utils.degree, info.timestamp, detoffs=[xi0, eta0]).T[1::-1] # dec,ra
     comm.Bcast(profile, root=first)
     return profile
@@ -162,10 +163,14 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
         obs.wrap("site",    np.full(1, site))
     # Prepare our data. FFT-truncate for faster fft ops
     obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
-    if "glitch_flags" not in obs:
-        #obs.wrap_new('glitch_flags', shape=('dets', 'samps'), cls=so3g.proj.RangesMatrix.zeros)
-        obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape), [(0, 'dets'), (1, 'samps')])
     
+    # add dummy glitch flags
+    if 'flags' not in obs._fields:
+        obs.wrap('flags', FlagManager.for_tod(obs))
+    if "glitch_flags" not in obs.flags:
+        obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape),
+                        [(0,'dets'),(1,'samps')])
+
     try:
         obs.signal
         has_signal = True
@@ -335,7 +340,7 @@ def main(config_file=None, defaults=defaults, **args):
     elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
     
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'])
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'])
     
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
