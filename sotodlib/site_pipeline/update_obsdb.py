@@ -228,6 +228,7 @@ def main(config: str,
                 wafer_slots = index["wafer_slots"]
                 if len(wafer_slots) < len(stream_ids):
                     logger.error("Missing info on some stream_ids")
+                    continue
                 bookcartobsdb.add_obs_columns(["wafer_slots_list str", "stream_ids_list str"])
                 wafer_slots_list = ""
                 stream_ids_list = ",".join(stream_ids)
