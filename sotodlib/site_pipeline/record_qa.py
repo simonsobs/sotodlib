@@ -50,6 +50,7 @@ def main(config):
             meta = context.get_meta(oid, ignore_missing=True)
         except Exception as e:
             logger.error(f"Failed to load metadata for {oid}.\n{type(e)}: {e}")
+            continue
         # check that obsdb info is available
         if len(meta.obs_info.keys()) < 2:
             logger.warning("This observation is missing obs_info. Skipping.")
