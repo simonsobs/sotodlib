@@ -11,6 +11,8 @@ from sotodlib.site_pipeline import preprocess_tod
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy.signal import welch
+from scipy.stats import kurtosis, skew
+from lmfit import Model
 from . import util
 
 defaults = {"query": "1",
@@ -203,7 +205,8 @@ def wrap_info(obs, site):
     ## TODO add --preprocess to args
     return
 
-def get_detector_cuts_flags(obs, rfrac_range=(0.05,0.9), psat_range=(0,20)):
+#def get_detector_cuts_flags(obs, rfrac_range=(0.05,0.9), psat_range=(0,20)):
+def get_detector_cuts_flags(obs, rfrac_range=(0.2,0.8), psat_range=(0,20)):
     try:
         flags.get_turnaround_flags(obs) 
     except Exception as e:
@@ -376,6 +379,9 @@ def demodulate_hwp(obs):
     apodize.apodize_cosine(obs)
     hwp.demod_tod(obs)
     obs.restrict('samps',(30*200, -30*200))
+    detrend_tod(obs, signal_name='dsT', method='linear')
+    detrend_tod(obs, signal_name='demodQ', method='linear')
+    detrend_tod(obs, signal_name='demodU', method='linear')
     return obs
 
 def rotate_demodQU(aman, offset = 0):
@@ -406,6 +412,70 @@ def _correct(obs):
     coeffs = np.dot(I, coeffs.T).T
     obs.demodU -= coeffs * medU
     de_rotate_demodQU(obs)
+
+def leakage_model(dT, AQ, AU, lamQ, lamU):
+    return AQ + lamQ*dT + 1.j*(AU + lamU*dT)
+
+def get_corr(aman, mask=None, ds_factor=100):
+    if mask is None:
+        mask = np.ones_like(aman.dsT, dtype='bool')
+
+    A_Q_array = []
+    A_U_array = []
+    A_P_array = []
+    lambda_Q_array = []
+    lambda_U_array = []
+    lambda_P_array = []
+
+    for di, det in enumerate(aman.dets.vals[:]):
+        x = aman.dsT[di][mask[di]][::ds_factor]
+        yQ = aman.demodQ[di][mask[di]][::ds_factor]
+        yU = aman.demodU[di][mask[di]][::ds_factor]
+
+        model = Model(leakage_model, independent_vars=['dT'])
+        params = model.make_params(AQ=np.median(yQ), AU=np.median(yU),
+                                   lamQ=0., lamU=0.)
+        result = model.fit(yQ+1j*yU, params, dT=x)
+        A_Q = result.params['AQ'].value
+        A_U = result.params['AU'].value
+        A_P = np.sqrt(A_Q**2 + A_U**2)
+        lambda_Q = result.params['lamQ'].value
+        lambda_U = result.params['lamU'].value
+        lambda_P = np.sqrt(lambda_Q**2 + lambda_U**2)
+
+        A_Q_array.append(A_Q)
+        A_U_array.append(A_U)
+        A_P_array.append(A_P)
+        lambda_Q_array.append(lambda_Q)
+        lambda_U_array.append(lambda_U)
+        lambda_P_array.append(lambda_P)
+
+    A_Q_array = np.array(A_Q_array)
+    A_U_array = np.array(A_U_array)
+    A_P_array = np.array(A_P_array)
+
+    lambda_Q_array = np.array(lambda_Q_array)
+    lambda_U_array = np.array(lambda_U_array)
+    lambda_P_array = np.array(lambda_P_array)
+    return A_Q_array, A_U_array, A_P_array, lambda_Q_array, lambda_U_array, lambda_P_array
+
+def subtract_leakage(aman, mask=None, ds_factor=100, nperseg=600*200):
+    AQ, AU, AP, lamQ, lamU, lamP = get_corr(aman, mask=mask, ds_factor=ds_factor)
+
+    aman.wrap('AQ', AQ, [(0, 'dets')])
+    aman.wrap('AU', AU, [(0, 'dets')])
+
+    aman.wrap('lamQ', lamQ, [(0, 'dets')])
+    aman.wrap('lamU', lamU, [(0, 'dets')])
+
+    aman.demodQ -= (aman.dsT * aman.lamQ[:, np.newaxis] + aman.AQ[:, np.newaxis])
+    aman.demodU -= (aman.dsT * aman.lamU[:, np.newaxis] + aman.AU[:, np.newaxis])
+
+    freq, Pxx_demodQ_new = fft_ops.calc_psd(aman, signal=aman.demodQ, nperseg=nperseg, merge=False)
+    freq, Pxx_demodU_new = fft_ops.calc_psd(aman, signal=aman.demodU, nperseg=nperseg, merge=False)
+    aman.Pxx_demodQ = Pxx_demodQ_new
+    aman.Pxx_demodU = Pxx_demodU_new
+    return
 
 def IP_correct(obs):
     filt = filters.low_pass_sine2(0.5, width=0.1)
@@ -498,7 +568,7 @@ def get_psd(obs, fftcfg = None):
     obs.wrap('Pxx_demodQ', Pxx_demodQ, [(0, 'dets'), (1, 'nusamps')])
     obs.wrap('Pxx_demodU', Pxx_demodU, [(0, 'dets'), (1, 'nusamps')])
 
-def calc_wrap_psd(aman, signal_name, merge=False, merge_wn=False, merge_suffix=None, nperseg=600*200):
+def calc_wrap_psd(aman, signal_name, merge=False, merge_wn=False, merge_suffix=None, nperseg=1000*200):
     freqs, Pxx = fft_ops.calc_psd(aman, signal=aman[signal_name], nperseg=nperseg, merge=False, timestamps=aman.timestamps)
     if merge:
         assert merge_suffix is not None
@@ -514,10 +584,11 @@ def calc_wrap_psd(aman, signal_name, merge=False, merge_wn=False, merge_suffix=N
 
 def high_pass_correct(obs, get_params_from_data, one_over_f_freq_limit = None):
     if get_params_from_data:
+        #obs.move('Pxx_demodQ', None) ; obs.move('Pxx_demodU', None)
         # wrap psd
-        get_psd(obs)
-
-        noise_obs = fft_ops.fit_noise_model(obs, pxx=obs.Pxx_demodQ, f=obs.freqs,
+        #get_psd(obs)
+        calc_wrap_psd(obs, signal_name='demodQ', merge=True, merge_suffix='demodQQ')
+        noise_obs = fft_ops.fit_noise_model(obs, pxx=obs.Pxx_demodQQ, f=obs.freqs,
                                     merge_fit=True, fwhite=[0.5, 2], f_max=2,
                                     lowf=0.1, merge_name='noise_fit_statsQ')
         # we wrap the fitted params because we will use them for the dsT 1/f
@@ -532,7 +603,6 @@ def high_pass_correct(obs, get_params_from_data, one_over_f_freq_limit = None):
     # we will have a flat map
     if fknee > one_over_f_freq_limit:
         return False
-
     # High-pass filter
     hpf = filters.counter_1_over_f(fknee, alpha)
     hpf_Q = filters.fourier_filter(obs, hpf, signal_name='demodQ')
@@ -546,6 +616,7 @@ def filter_data(obs, calc_hpf_params, one_over_f_freq_limit=None):
     ### Polarization
     # Correct for IP leakage at TOD level
     #IP_correct(obs)
+    subtract_leakage(obs)
     _correct(obs)
     # Custom high-pass filter
     status = high_pass_correct(obs, calc_hpf_params, one_over_f_freq_limit=one_over_f_freq_limit)
@@ -553,9 +624,9 @@ def filter_data(obs, calc_hpf_params, one_over_f_freq_limit=None):
 
     ### Temperature
     # PCA
-    pca_dsT(obs)
+    #pca_dsT(obs)
     # Counter 1/f
-    high_pass_correct_dsT(obs, calc_hpf_params)
+    #high_pass_correct_dsT(obs, calc_hpf_params)
     
     # Cut detectors with wigh variance
     cut_outlier_detectors(obs)
@@ -579,14 +650,14 @@ def calibrate_obs_otf(obs, dtype_tod=np.float32, site='so_sat3',
     if obs.dets.count<=1:
         return obs # this will happen when ptp_cuts cuts all detectors
 
+    deconvolve_detector_tconst(obs)
+
     status = calibrate_data(obs)
     if not(status): return False
     
     #status = readout_filter(obs)
     #if not(status):
     #    return False # The readout_filter failed for not having parameters
-
-    deconvolve_detector_tconst(obs)
     
     obs = demodulate_hwp(obs)
     
@@ -724,6 +795,7 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU",
                                                 "wafer.bandpass":band}, )
             end_time = time.time()
             elapsed_time = end_time - start_time
+            obs.focal_plane.gamma = np.arctan(np.tan(obs.focal_plane.gamma))
             #print("Elapsed time make_depth1_map get_obs:", elapsed_time,
             #      "seconds")
         else:
