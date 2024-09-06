@@ -294,11 +294,7 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax1.plot(aman.timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
 
-    for ind in good_indices:
-        weight = pca_aman.pca_weight0[ind] #, 0]
-        signals = signal[ind]
-        ax1.plot(aman.timestamps, signals / weight,
-                 zorder=1, color='#D8BFD8', alpha=0.3)
+    ax1.plot(aman.timestamps[::20], np.divide(aman.signal[good_indices][:,::20].T, pca_aman.pca_weight0[good_indices]), zorder=1, color='#D8BFD8', alpha=0.3)
 
     ax1.set_title(f'Good Detector Batch: ({len(good_indices)} dets)')
     ax1.legend(loc='upper left')
@@ -307,11 +303,9 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     # ax2: bad signals
     ax2.plot(aman.timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
-    for ind in bad_indices:
-        weight = pca_aman.pca_weight0[ind]
-        signals = signal[ind]
-        ax2.plot(aman.timestamps, signals / weight,
-                 zorder=1, color='#FFA07A', alpha=0.3)
+
+    ax2.plot(aman.timestamps[::20], np.divide(aman.signal[bad_indices][:,::20].T, pca_aman.pca_weight0[bad_indices]), zorder=1, color='#FFA07A', alpha=0.3)
+        
     ax2.set_title(f'Bad Detector Batch: ({len(bad_indices)} dets)')
     ax2.legend(loc='upper left')
     ax2.grid()
@@ -324,16 +318,12 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax3.plot(aman.det_cal.s_i[bad_indices], weight[bad_indices], '.', color='#FFA07A', markersize=10,
              label=f'Bad dets ({len(bad_indices)} dets)', alpha=0.3)
 
-    ax3.plot([xbounds[0], xbounds[1], xbounds[1], xbounds[0], xbounds[0]],
-             [ybounds[0], ybounds[0], ybounds[1], ybounds[1], ybounds[0]],
-             color='navy', linestyle='-.', linewidth=1.5, label='Boundary',
-             alpha=1)
+    vertices = [(xbounds[0], ybounds[0]), (xbounds[1], ybounds[0]), (xbounds[1], ybounds[1]), (xbounds[0], ybounds[1])]
+    box = matplotlib.patches.Polygon(vertices, closed=True, edgecolor='navy', linestyle='-.', fill=False, alpha=1, label='Boundary')
+    ax3.add_patch(box)
 
     ax3.set_xlabel('Si')
     ax3.set_ylabel('0th Mode Weights')
-
-    if any(value > 0 for value in aman.det_cal.s_i):
-        ax3.set_xlim(np.min(aman.det_cal.s_i), 0)
 
     ax3.legend()
     ax3.grid()
