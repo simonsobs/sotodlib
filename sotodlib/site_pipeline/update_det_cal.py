@@ -1,3 +1,12 @@
+"""
+This module is used to compute detector calibration parameters from sodetlib
+data products.
+
+The naive computation is described in the `sodetlib documentation. <https://sodetlib.readthedocs.io/en/latest/operations/bias_steps.html#in-transition>`_
+
+Details about the RP and loopgain correction `can be found on our confluence. <https://simonsobs.atlassian.net/wiki/spaces/~5570586d07625a6be74c8780e4b96f6156f5e6/blog/2024/02/02/286228683/Nonlinear+TES+model+using+RP+curve>`_
+"""
+
 import traceback
 import os
 import yaml
@@ -44,38 +53,49 @@ class DetCalCfg:
     Class for configuring the behavior of the det-cal update script.
 
     Args
-    -------
+    -------------
     root_dir: str
         Path to the root of the results directory.
     context_path: str
         Path to the context file to use.
+    data_root: Optional[str]
+        Root path of L3 data. If this is not specified, will automatically
+        determine it based on the context.
     raise_exceptions: bool
         If Exceptions should be raised in the get_cal_resset function.
+        Defaults to False.
     apply_cal_correction: bool
         If True, apply the RP calibration correction, and use corrected results
-        for Rtes, Si, Pj, and loopgain when successful.
+        for Rtes, Si, Pj, and loopgain when successful. Defaults to True.
     index_path: str
-        Path to the index file to use for the det_cal database.
+        Path to the index file to use for the det_cal database. Defaults to
+        "det_cal.sqlite".
     h5_path: str
-        Path to the HDF5 file to use for the det_cal database.
+        Path to the HDF5 file to use for the det_cal database. Default to
+        "det_cal.h5".
+    cache_failed_obsids: bool
+        If True, will cache failed obs-ids to avoid re-running them. Defaults to
+        True.
     failed_file_cache: str
-        Path to the yaml file that will store failed obsids.
+        Path to the yaml file that will store failed obsids. Defaults to
+        "failed_obsids.yaml".
     show_pb: bool
-        If True, show progress bar in the run_update function.
-    num_processes: int
-        Number of parallel processes that should be used to process observations.
-    num_obs: int
-        Max number of observations to process per run_update call.
+        If True, show progress bar in the run_update function. Defaults to True.
+    param_correction_config: dict
+        Configuration for the TES param correction. If None, default values are used.
+    run_method: str
+        Must be "site" or "nersc". If "site", this function will not parallelize SQLite access, and will only parallelize the TES parameter correction. If "nersc", this will parallelize both SQLite access and the TES param correction, using ``nprocs_obs_info`` and ``nprocs_result_set`` processes respectively.
+    nprocs_obs_info: int
+        Number of processes to use to acquire observation info from the file system.
+        Defaults to 1.
+    nprocs_result_set: int
+        Number of parallel processes that should to compute the TES parameters,
+        and to run the TES parameter correction.
+    num_obs: Optional[int]
+        Max number of observations to process per run_update call. If not set,
+        will run on all available observations.
     log_level: str
         Logging level for the logger.
-    param_correction_config: dict
-        Configuration for the TES param correction. If None, default values are used,
-        with ``default_nprocs`` set to ``num_processes``.
-    cache_failed_obsids: bool
-        If True, will cache failed obs-ids and avoid running them in the future.
-    data_root: str
-        Path to the root of the data directory. If None, it will be determined
-        from the context object.
     """
 
     def __init__(
@@ -209,6 +229,20 @@ class CalInfo:
         "saturation power" of the TES [J] calculated from IV curve data.
         This is defined  as the electrical bias power at which the TES
         resistance is 90% of the normal resistance.
+    naive_r_tes: float
+        Detector resistance [ohms]. This is based on the naive bias step
+        estimation without any additional corrections.
+    naive_r_frac: float
+        Fractional resistance of TES, given by r_tes / r_n. This is based on the
+        naive bias step estimation without any additional corrections.
+    naive_p_bias: float
+        Bias power on the TES [J] computed using bias steps at the bias point.
+        This is based on the naive bias step estimation without any additional
+        corrections.
+    naive_s_i: float
+        Current responsivity of the TES [1/V] computed using bias steps at the
+        bias point. This is based on the naive bias step estimation without
+        using any additional corrections.
     """
 
     readout_id: str = ""
