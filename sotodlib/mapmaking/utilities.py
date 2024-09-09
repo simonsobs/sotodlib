@@ -136,7 +136,6 @@ def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
     return idiv
 
 
-
 def measure_cov(d, nmax=10000):
     d = d[:,::max(1,d.shape[1]//nmax)]
     n,m = d.shape
@@ -512,7 +511,7 @@ def downsample_obs(obs, down):
     # The cuts
     # TODO: The TOD will include a Flagmanager with all the flags. Update this part
     # accordingly.
-    cut_keys = ["glitch_flag"]
+    cut_keys = ["glitch_flags"]
 
     if "source_flags" in obs:
         cut_keys.append("source_flags")

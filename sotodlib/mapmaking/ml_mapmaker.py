@@ -202,7 +202,7 @@ class SignalMap(Signal):
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, glitch_flags="flags.glitch_flags"):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -372,7 +372,7 @@ class SignalCut(Signal):
         self.rhs   = []
         self.div   = []
 
-    def add_obs(self, id, obs, nmat, Nd):
+    def add_obs(self, id, obs, nmat, Nd, glitch_flags="flags.glitch_flags"):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data."""
@@ -441,7 +441,7 @@ class SignalCut(Signal):
             so3g.translate_cuts(odata.pcut.cuts, sdata.pcut.cuts, sdata.pcut.model, sdata.pcut.params, junk[odata.i1:odata.i2], res[sdata.i1:sdata.i2])
         return res
 
-    def transeval(self, id, obs, other, junk, tod):
+    def transeval(self, id, obs, other, junk, tod, glitch_flags="flags.glitch_flags"):
         """Translate data junk from SignalCut other to the current SignalCut,
         and then evaluate it for the given observation, returning a tod.
         This is used when building a signal-free tod for the noise model
