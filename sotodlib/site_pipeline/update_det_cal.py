@@ -77,6 +77,7 @@ class DetCalCfg:
         Path to the root of the data directory. If None, it will be determined
         from the context object.
     """
+
     def __init__(
         self,
         root_dir: str,
@@ -95,7 +96,7 @@ class DetCalCfg:
         nprocs_obs_info: int = 1,
         nprocs_result_set: int = 10,
         num_obs: Optional[int] = None,
-        log_level: str = "DEBUG"
+        log_level: str = "DEBUG",
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
@@ -133,10 +134,10 @@ class DetCalCfg:
 
         kw = {"show_pb": False, "default_nprocs": self.nprocs_result_set}
         if param_correction_config is None:
-            self.param_correction_config = tpc.AnalysisCfg(**kw) # type: ignore
+            self.param_correction_config = tpc.AnalysisCfg(**kw)  # type: ignore
         elif isinstance(param_correction_config, dict):
             kw.update(param_correction_config)
-            self.param_correction_config = tpc.AnalysisCfg(**kw)  #type: ignore
+            self.param_correction_config = tpc.AnalysisCfg(**kw)  # type: ignore
         else:
             self.param_correction_config = param_correction_config
 
@@ -161,7 +162,6 @@ class DetCalCfg:
             scheme.add_data_field("dataset")
             db = core.metadata.ManifestDb(scheme=scheme)
             db.to_file(self.index_path)
-
 
 
 @dataclass
@@ -268,12 +268,14 @@ class ObsInfo:
     iva_files: Dict[str, str]
     bsa_files: Dict[str, str]
 
+
 @dataclass
 class ObsInfoResult:
     obs_id: str
     success: bool = False
-    traceback: str = ''
+    traceback: str = ""
     obs_info: Optional[ObsInfo] = None
+
 
 def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     res = ObsInfoResult(obs_id)
@@ -281,16 +283,19 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     try:
         ctx = core.Context(cfg.context_path)
         am = ctx.get_obs(
-                obs_id, samples=(0, 1), ignore_missing=True, no_signal=True,
-                on_missing={'det_cal': 'skip'}
+            obs_id,
+            samples=(0, 1),
+            ignore_missing=True,
+            no_signal=True,
+            on_missing={"det_cal": "skip"},
         )
 
-        if 'smurf' not in am.det_info:
+        if "smurf" not in am.det_info:
             raise ValueError(f"Missing smurf info for {obs_id}")
 
         logger.debug(f"Getting cal obsids ({obs_id})")
 
-        iv_obsids = get_cal_obsids(ctx, obs_id, 'iv')
+        iv_obsids = get_cal_obsids(ctx, obs_id, "iv")
 
         # Load in IVs
         logger.debug(f"Loading Bias step and IV data ({obs_id})")
@@ -304,12 +309,12 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         bsa_files = {}
         for dset, oid in iv_obsids.items():
             if oid is not None:
-                timecode = oid.split('_')[1][:5]
+                timecode = oid.split("_")[1][:5]
                 zsmurf_dir = os.path.join(
-                    cfg.data_root, 'oper', timecode, oid, f'Z_smurf'
+                    cfg.data_root, "oper", timecode, oid, f"Z_smurf"
                 )
                 for f in os.listdir(zsmurf_dir):
-                    if 'iv' in f:
+                    if "iv" in f:
                         iva_files[dset] = os.path.join(zsmurf_dir, f)
                         break
                 else:
@@ -321,15 +326,15 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             raise ValueError(f"No IV data found for {obs_id}")
 
         # Load in bias steps
-        bias_step_obsids = get_cal_obsids(ctx, obs_id, 'bias_steps')
+        bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
         for dset, oid in bias_step_obsids.items():
             if oid is not None:
-                timecode = oid.split('_')[1][:5]
+                timecode = oid.split("_")[1][:5]
                 zsmurf_dir = os.path.join(
-                    cfg.data_root, 'oper', timecode, oid, f'Z_smurf'
+                    cfg.data_root, "oper", timecode, oid, f"Z_smurf"
                 )
                 for f in os.listdir(zsmurf_dir):
-                    if 'bias_step' in f:
+                    if "bias_step" in f:
                         bs_file = os.path.join(zsmurf_dir, f)
                         bsa_files[dset] = bs_file
                         break
@@ -344,9 +349,12 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             pA_per_phi0 = DEFAULT_pA_per_phi0
 
         res.obs_info = ObsInfo(
-            obs_id=obs_id, am=am, iv_obsids=iv_obsids,
+            obs_id=obs_id,
+            am=am,
+            iv_obsids=iv_obsids,
             bs_obsids=bias_step_obsids,
-            iva_files=iva_files, bsa_files=bsa_files,
+            iva_files=iva_files,
+            bsa_files=bsa_files,
         )
         res.success = True
     except:
@@ -361,6 +369,7 @@ class CalRessetResult:
     """
     Results object for the get_cal_resset function.
     """
+
     obs_info: ObsInfo
     success: bool = False
     traceback: Optional[str] = None
@@ -409,8 +418,9 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
         }
 
         if cfg.apply_cal_correction:
-            for iva in ivas.values(): # Run R_L correction if analysis version is old...
-                if getattr(iva, 'analysis_version', 0) == 0:
+            for iva in ivas.values():
+                # Run R_L correction if analysis version is old...
+                if getattr(iva, "analysis_version", 0) == 0:
                     # This will edit IVA dicts in place
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
@@ -514,7 +524,13 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             if cfg.apply_cal_correction:
                 correction = find_correction_results(band, chan, detset)
                 if correction is None:
-                    logger.warn("Unable to find correction result for %s %s %s (%s)", band, chan, detset, obs_id)
+                    logger.warn(
+                        "Unable to find correction result for %s %s %s (%s)",
+                        band,
+                        chan,
+                        detset,
+                        obs_id,
+                    )
                     use_correction = False
                     cal.tes_param_correction_success = False
                 else:
@@ -582,17 +598,17 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
 
 
 def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str) -> None:
-    if 'KeyboardInterrupt' in msg: # Don't cache keyboard interrupts
+    if "KeyboardInterrupt" in msg:  # Don't cache keyboard interrupts
         return
 
     if cfg.cache_failed_obsids:
         logger.info(f"Adding {obs_id} to failed_file_cache")
-        with open(cfg.failed_cache_file, 'r') as f:
+        with open(cfg.failed_cache_file, "r") as f:
             d = yaml.safe_load(f)
         if d is None:
             d = {}
         d[str(obs_id)] = msg
-        with open(cfg.failed_cache_file, 'w') as f:
+        with open(cfg.failed_cache_file, "w") as f:
             yaml.dump(d, f)
         return
 
@@ -609,7 +625,7 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
 
         msg = result.fail_msg
         if msg is None:
-            msg = 'unknown error'
+            msg = "unknown error"
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
@@ -705,18 +721,25 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     def get_obs_info_callback(result: ObsInfoResult):
         if result.success:
             pool2.apply_async(
-                get_cal_resset, args=(cfg, result.obs_info), callback=callback, error_callback=errback
+                get_cal_resset,
+                args=(cfg, result.obs_info),
+                callback=callback,
+                error_callback=errback,
             )
         else:
             pb.update()
             add_to_failed_cache(cfg, result.obs_id, result.traceback)
-            logger.error(f"Failed to get obs_info for {result.obs_id}:\n{result.traceback}")
+            logger.error(
+                f"Failed to get obs_info for {result.obs_id}:\n{result.traceback}"
+            )
 
     try:
         for obs_id in obs_ids:
             a = pool1.apply_async(
-                get_obs_info, args=(cfg, obs_id), callback=get_obs_info_callback, 
-                error_callback=errback
+                get_obs_info,
+                args=(cfg, obs_id),
+                callback=get_obs_info_callback,
+                error_callback=errback,
             )
             obsinfo_async_results.put(a)
 
