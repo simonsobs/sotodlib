@@ -226,6 +226,11 @@ class CalInfo:
     r_n: float = np.nan
     p_sat: float = np.nan
 
+    naive_r_tes: float = np.nan
+    naive_r_frac: float = np.nan
+    naive_p_bias: float = np.nan
+    naive_s_i: float = np.nan
+
     @classmethod
     def dtype(cls) -> List[Tuple[str, Any]]:
         """Returns ResultSet dtype for an item based on this class"""
@@ -556,6 +561,12 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 cal.r_frac = bsa.Rfrac[ridx]
                 cal.p_bias = bsa.Pj[ridx]
                 cal.s_i = bsa.Si[ridx]
+
+            # Save naive parameters even if we're using corrected version
+            cal.naive_r_tes = bsa.R0[ridx]
+            cal.naive_r_frac = bsa.Rfrac[ridx]
+            cal.naive_s_i = bsa.Si[ridx]
+            cal.naive_p_bias = bsa.Pj[ridx]
 
             if cal.s_i == 0:
                 cal.phase_to_pW = np.nan
