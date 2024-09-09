@@ -557,6 +557,17 @@ class ResSet:
             r.xi = xis[idx]
             r.eta = etas[idx]
 
+
+def get_det_type_mask(arr: np.ndarray, det_types: List[str]) -> np.ndarray:
+    """
+    Returns a boolean mask of all dets that have specific detector types.
+    """
+    return np.logical_or.reduce([
+        arr['det_type'] == dt
+        for dt in det_types
+    ])
+
+
 @dataclass
 class MatchParams:
     """
@@ -576,8 +587,9 @@ class MatchParams:
             penalty to apply to leaving a resonator with a good qi unassigned
         good_res_qi_thresh (float):
             qi threshold that is considered "good"
-        force_pointing (bool):
-            If True, only resonators with pointing information will be matched.
+        enforce_pointing_reqs (bool):
+            If True, will enforce pointing requirements that depend on resonator
+            type.
         assigned_bg_unmatched_pen (float):
             Penalty to apply to leaving a resonator with an assigned bg
             unmatched
@@ -597,7 +609,7 @@ class MatchParams:
     dist_width: float =0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
-    force_pointing: bool = False
+    enforce_pointing_reqs: bool = True
 
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
@@ -677,7 +689,7 @@ class Match:
         self.matching, self.merged = self._match()
         self.stats = self.get_stats()
 
-    def _get_biadjacency_matrix(self):
+    def _get_biadjacency_matrix(self) -> np.ndarray:
         src_arr = self.src.as_array()
         dst_arr = self.dst.as_array()
 
@@ -687,11 +699,24 @@ class Match:
         m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
 
-        if self.match_pars.force_pointing:
-            m = np.isnan(src_arr['xi']) | np.isnan(src_arr['eta'])
-            mat[m, :] = np.inf
-            m = np.isnan(dst_arr['xi']) | np.isnan(dst_arr['eta'])
-            mat[:, m] = np.inf
+        if self.match_pars.enforce_pointing_reqs:
+            src_has_pointing = np.isnan(src_arr['xi']) | np.isnan(src_arr['eta'])
+            dst_has_pointing = np.isnan(dst_arr['xi']) | np.isnan(dst_arr['eta'])
+
+            src_no_match = get_det_type_mask(src_arr, ['NC'])
+            dst_no_match = get_det_type_mask(dst_arr, ['NC'])
+            mat[src_no_match, :] = np.inf
+            mat[:, dst_no_match] = np.inf
+
+            src_pointing_forbidden = get_det_type_mask(src_arr, ['UNRT', 'SQID', 'BARE'])
+            dst_pointing_forbidden = get_det_type_mask(dst_arr, ['UNRT', 'SQID', 'BARE'])
+            mat[src_pointing_forbidden, dst_has_pointing] = np.inf
+            mat[src_has_pointing, dst_pointing_forbidden] = np.inf
+
+            src_pointing_required = get_det_type_mask(src_arr, ['OPTC'])
+            dst_pointing_required = get_det_type_mask(dst_arr, ['OPTC'])
+            mat[src_pointing_required, ~dst_has_pointing] = np.inf
+            mat[~src_has_pointing, dst_pointing_required] = np.inf
 
         # Frequency offset
         df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
