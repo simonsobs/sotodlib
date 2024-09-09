@@ -5,9 +5,9 @@ from dataclasses import dataclass, astuple, fields
 import numpy as np
 from tqdm.auto import tqdm
 import logging
-import sys
-from typing import Optional, Union, Dict, List, cast, Any, Tuple
+from typing import Optional, Union, Dict, List, Any, Tuple
 from queue import Queue
+import argparse
 
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
@@ -768,14 +768,12 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     logger.info("Finished updates")
 
 
-def main(cfg: Union[DetCalCfg, str]) -> None:
+def main(config_file: str) -> None:
     """
     Run update function. This will chose the correct method to run based on
     ``cfg.run_method``.
     """
-    if isinstance(cfg, str):
-        cfg = DetCalCfg.from_yaml(cfg)
-        cfg = cast(DetCalCfg, cfg)
+    cfg = DetCalCfg.from_yaml(config_file)
 
     if cfg.run_method == "site":
         run_update_site(cfg)
@@ -785,7 +783,20 @@ def main(cfg: Union[DetCalCfg, str]) -> None:
         raise ValueError(f"Unknown run_method: {cfg.run_method}")
 
 
+def get_parser(
+    parser: Optional[argparse.ArgumentParser] = None,
+) -> argparse.ArgumentParser:
+    if parser is None:
+        p = argparse.ArgumentParser()
+    else:
+        p = parser
+    p.add_argument(
+        "config_file", type=str, help="yaml file with configuration for update script."
+    )
+    return p
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        raise ValueError("Must provide a config file")
-    main(sys.argv[1])
+    parser = get_parser()
+    args = parser.parse_args()
+    main(config_file=args.config_file)
