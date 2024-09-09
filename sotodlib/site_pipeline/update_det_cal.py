@@ -6,7 +6,7 @@ import numpy as np
 from tqdm.auto import tqdm
 import logging
 import sys
-from typing import Optional, Union, Dict, List, cast, Any
+from typing import Optional, Union, Dict, List, cast, Any, Tuple
 from queue import Queue
 
 from sotodlib import core
@@ -28,7 +28,7 @@ if not logger.hasHandlers():
     sp_util.init_logger("det_cal")
 
 
-def get_data_root(ctx: core.Context):
+def get_data_root(ctx: core.Context) -> str:
     "Get root data directory based on context file"
     c = ctx.obsfiledb.conn.execute("select name from files limit 1")
     res = [r[0] for r in c][0]
@@ -227,12 +227,12 @@ class CalInfo:
     p_sat: float = np.nan
 
     @classmethod
-    def dtype(cls):
+    def dtype(cls) -> List[Tuple[str, Any]]:
         """Returns ResultSet dtype for an item based on this class"""
         dtype = []
         for field in fields(cls):
             if field.name == "readout_id":
-                dt = ("dets:readout_id", "<U40")
+                dt: Tuple[str, Any] = ("dets:readout_id", "<U40")
             else:
                 dt = (field.name, field.type)
             dtype.append(dt)
@@ -556,7 +556,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
     return res
 
 
-def get_obsids_to_run(cfg: DetCalCfg) -> List:
+def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
     """
     Returns list of obs-ids to process, based on the configuration object.
     This will included non-processed obs-ids that are not found in the fail cache,
@@ -581,7 +581,7 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List:
     return obs_ids
 
 
-def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str):
+def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str) -> None:
     if 'KeyboardInterrupt' in msg: # Don't cache keyboard interrupts
         return
 
@@ -597,7 +597,7 @@ def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str):
         return
 
 
-def handle_result(result: CalRessetResult, cfg: DetCalCfg):
+def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
     """
     Handles a CalRessetResult. If successful, this will add to the manifestdb,
     if not this will add to the failed cache if cfg.cache_failed_obsids is True.
@@ -623,7 +623,7 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg):
     )
 
 
-def run_update_site(cfg: DetCalCfg):
+def run_update_site(cfg: DetCalCfg) -> None:
     """
     Main run script for computing det-cal results at the site. This will
     loop over obs-ids and serially gather the ObsInfo from the filesystem and
@@ -659,7 +659,7 @@ def run_update_site(cfg: DetCalCfg):
             handle_result(result_set, cfg)
 
 
-def run_update_nersc(cfg: DetCalCfg):
+def run_update_nersc(cfg: DetCalCfg) -> None:
     """
     Main run script for computing det-cal results. This does the same thing as
     ``run_update_site`` however instantiates two separate pools for gathering
@@ -734,7 +734,7 @@ def run_update_nersc(cfg: DetCalCfg):
     logger.info("Finished updates")
 
 
-def run(cfg: Union[DetCalCfg, str]):
+def main(cfg: Union[DetCalCfg, str]) -> None:
     """
     Run update function. This will chose the correct method to run based on
     ``cfg.run_method``.
@@ -754,4 +754,4 @@ def run(cfg: Union[DetCalCfg, str]):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise ValueError("Must provide a config file")
-    run(sys.argv[1])
+    main(sys.argv[1])
