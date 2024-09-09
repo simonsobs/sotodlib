@@ -378,7 +378,7 @@ class SignalCut(Signal):
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data."""
         Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-        pcut    = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
+        pcut    = PmatCut(get_flags_from_path(obs, glitch_flags), model=self.cut_type)
         # Build our RHS
         obs_rhs = np.zeros(pcut.njunk, self.dtype)
         pcut.backward(Nd, obs_rhs)
