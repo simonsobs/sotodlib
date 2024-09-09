@@ -320,7 +320,7 @@ class Context(odict):
     def get_meta(
         self,
         obs_id: Union[str, Dict[str, str], AxisManager] = None,
-        dets: Union[List[str], Dict[str, Union[List[str], str]], ResultSet] = None,
+        dets: Union[List[str], Dict[str, Union[List[str], str]], metadata.ResultSet] = None,
         samples: Tuple[int] = None,
         filename: str = None,
         detsets: List[str] = None,
