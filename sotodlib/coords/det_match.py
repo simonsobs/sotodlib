@@ -700,8 +700,8 @@ class Match:
         mat[m] = np.inf
 
         if self.match_pars.enforce_pointing_reqs:
-            src_has_pointing = np.isnan(src_arr['xi']) | np.isnan(src_arr['eta'])
-            dst_has_pointing = np.isnan(dst_arr['xi']) | np.isnan(dst_arr['eta'])
+            src_has_pointing = np.isfinite(src_arr['xi']) & np.isfinite(src_arr['eta'])
+            dst_has_pointing = np.isfinite(dst_arr['xi']) & np.isfinite(dst_arr['eta'])
 
             src_no_match = get_det_type_mask(src_arr, ['NC'])
             dst_no_match = get_det_type_mask(dst_arr, ['NC'])
@@ -710,13 +710,17 @@ class Match:
 
             src_pointing_forbidden = get_det_type_mask(src_arr, ['UNRT', 'SQID', 'BARE'])
             dst_pointing_forbidden = get_det_type_mask(dst_arr, ['UNRT', 'SQID', 'BARE'])
-            mat[src_pointing_forbidden, dst_has_pointing] = np.inf
-            mat[src_has_pointing, dst_pointing_forbidden] = np.inf
+            m = src_pointing_forbidden[:, None] & dst_has_pointing[None, :]
+            mat[m] = np.inf
+            m = src_has_pointing[:, None] & dst_pointing_forbidden[None, :]
+            mat[m] = np.inf
 
             src_pointing_required = get_det_type_mask(src_arr, ['OPTC'])
             dst_pointing_required = get_det_type_mask(dst_arr, ['OPTC'])
-            mat[src_pointing_required, ~dst_has_pointing] = np.inf
-            mat[~src_has_pointing, dst_pointing_required] = np.inf
+            m = src_pointing_required[:, None] & (~dst_has_pointing[None, :])
+            mat[m] = np.inf
+            m = (~src_has_pointing[:, None]) & dst_pointing_required[None, :]
+            mat[m] = np.inf
 
         # Frequency offset
         df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
