@@ -1007,6 +1007,7 @@ class PCARelCal(_Preprocess):
         calc:
             xfac: 2
             yfac: 1.5
+            calc_good_medianw: True
         save: True
         plot: True
     
@@ -1027,18 +1028,16 @@ class PCARelCal(_Preprocess):
         pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
         relcal = np.zeros(aman.dets.count)
         pca_weight0 = np.zeros(aman.dets.count)
-        badids = []
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            rc_aman.wrap(f'{band}_idx', np.where(m0)[0])
+            rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
 
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            result_aman = tod_ops.pca.calc_pcabounds(band_aman, pca_signal, **self.calc_cfgs)
+            result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
 
-            badids.append(result_aman['badids'])
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
             pca_weight0[m0] = result_aman['pca_weight0']
@@ -1047,11 +1046,10 @@ class PCARelCal(_Preprocess):
             rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
             rc_aman.wrap(f'{band}_median', result_aman['median'])
         
-        badids_comb = np.concatenate(badids)
-        rc_aman.wrap('badids', badids_comb)
         rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
         rc_aman.wrap('relcal', relcal, [(0, 'dets')])
         rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
+        print(rc_aman)
 
         self.save(proc_aman, rc_aman)
 
@@ -1083,8 +1081,9 @@ class PCARelCal(_Preprocess):
             bands = np.unique(aman.det_info.wafer.bandpass)
             bands = bands[bands != 'NC']
             for band in bands:
+                pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                plot_pcabounds(aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band)
+                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band)
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.

@@ -217,7 +217,7 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
-def calc_pcabounds(tod, pca_aman, xfac=2, yfac=1.5):
+def pca_cuts_and_cal(tod, pca_aman, xfac=2, yfac=1.5, calc_good_medianw=False):
     """Finds the bounds of the pca box using IQR 
     statistics
 
@@ -233,11 +233,14 @@ def calc_pcabounds(tod, pca_aman, xfac=2, yfac=1.5):
     yfac : int
         multiplicative factor for the height of the box.
         Default is 1.5. 
+    calc_good_medianw : bool
+        If true, the resulting median weight is calculated 
+        excluding bad dets. Default is false.
 
     Returns
     -------
-    aman
-        aman that's wrapped with the x and y bounds and the good and bad dets
+    pca_relcal : AxisManager
+        AxisManager pca and relcal information.
         
     """
     x = tod.det_cal.s_i
@@ -254,22 +257,15 @@ def calc_pcabounds(tod, pca_aman, xfac=2, yfac=1.5):
     medianx = np.median(xfilt)
 
     # IQR of normalized weights
-    q20 = np.percentile(ynorm, 20)
-    q80 = np.percentile(ynorm, 80)
-    iqry_norm = q80 - q20
+    iqry_norm = np.percentile(ynorm, 80) - np.percentile(ynorm, 20)
 
     # IQR of Si's
-    q20x = np.percentile(xfilt, 20)
-    q80x = np.percentile(xfilt, 80)
-    iqrx = q80x - q20x
+    iqrx = np.percentile(xfilt, 80) - np.percentile(xfilt, 20)
 
-    # Find box height using norm'd weights
-    ylb_norm = median_ynorm - yfac * iqry_norm
-    yub_norm = median_ynorm + yfac * iqry_norm
-
+    # Find box heights using norm'd weights
     # Convert y bounds back to the scale of the raw weights
-    ylb = ylb_norm * np.median(yfilt)
-    yub = yub_norm * np.median(yfilt)
+    ylb = (median_ynorm - yfac * iqry_norm) * np.median(yfilt)
+    yub = (median_ynorm + yfac * iqry_norm) * np.median(yfilt)
 
     # Calculate box width
     xlb = medianx - xfac * iqrx
@@ -278,34 +274,29 @@ def calc_pcabounds(tod, pca_aman, xfac=2, yfac=1.5):
         mad = np.median(np.abs(xfilt - medianx))
         xub = medianx + xfac * mad
 
-    xbounds = [xlb, xub]
-    ybounds = [ylb, yub]
+    xbounds = (xlb, xub)
+    ybounds = (ylb, yub)
 
     # Get indices of the values in the box (indices are wrt `x` array)
-    box_xfilt_inds = np.where((xfilt >= xlb) & (
-        xfilt <= xub) & (yfilt >= ylb) & (yfilt <= yub))[0]
-    box = filt[box_xfilt_inds] 
-    notbox = np.setdiff1d(np.arange(len(x)), box)
+    ranges = [x >= xlb,
+              x <= xub,
+              y >= ylb,
+              y <= yub]
+    m = ~(np.all(ranges, axis=0))
 
-    goodids = tod.det_info.det_id[box]
-    badids = tod.det_info.det_id[notbox]
-    
-    medianw = np.median(pca_aman.weights[:,0])
+    if calc_good_medianw:
+        medianw = np.median(pca_aman.weights[:,0][~m])
+    else:
+        medianw = np.median(pca_aman.weights[:,0])
     relcal_val = medianw/pca_aman.weights[:,0]
 
-    mask = np.isin(tod.det_info.det_id, badids)
-    relcal = core.AxisManager(tod.dets, tod.samps)
-    relcal.wrap('pca_det_mask', mask, [(0, 'dets')])
-    relcal.wrap('xbounds', np.array(xbounds))
-    relcal.wrap('ybounds', np.array(ybounds))
-    relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
-    relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
-    relcal.wrap('relcal', relcal_val, [(0, 'dets')])
-    relcal.wrap('median', medianw)
-    relcal.wrap('badids', badids)
-    relcal.wrap('goodids', goodids)
+    pca_relcal = core.AxisManager(tod.dets, tod.samps)
+    pca_relcal.wrap('pca_det_mask', m, [(0, 'dets')])
+    pca_relcal.wrap('xbounds', np.array(xbounds))
+    pca_relcal.wrap('ybounds', np.array(ybounds))
+    pca_relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
+    pca_relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
+    pca_relcal.wrap('relcal', relcal_val, [(0, 'dets')])
+    pca_relcal.wrap('median', medianw)
 
-    # make an Si mask to also wrap which will tell us which Si's correspond to bad dets etc
-
-    return relcal
-
+    return pca_relcal
