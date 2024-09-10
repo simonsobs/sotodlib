@@ -1049,7 +1049,6 @@ class PCARelCal(_Preprocess):
         rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
         rc_aman.wrap('relcal', relcal, [(0, 'dets')])
         rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
-        print(rc_aman)
 
         self.save(proc_aman, rc_aman)
 
