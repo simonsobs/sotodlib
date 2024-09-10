@@ -182,20 +182,22 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         return signal_sim
 
 
-def rotate_demodQU(tod, zero_gamma=True):
+def rotate_demodQU(tod, update_focal_plane=True):
     """
     Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams to
-    place all detectors' Q and U timestreams in a common telescope frame.
+    place all detectors' Q and U timestreams in a common telescope frame. This updates tod.demodQ
+    and tod.demodU, in place.
 
     Args:
         tod : an axisManager object
-        zero_gamma (bool, optional): Whether to set zero to gamma. Make this true for polarization
-        mapmaking using make_map.
+        update_focal_plane (bool, optional): Whether to set focal_plane.gamma angles to zero,
+        consistent with new coordinate reference. Make this true for polarization mapmaking
+        using make_map.
 
     """
     demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp(-2j*tod.focal_plane.gamma)).T
     tod.demodQ = demodC.real
     tod.demodU = demodC.imag
     del demodC
-    if zero_gamma:
+    if update_focal_plane:
         tod.focal_plane.gamma *= 0
