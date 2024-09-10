@@ -5,34 +5,41 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def default_model(telescope):
-    """Returns default hwp_angle_model. This will be deleted in future.
+def default_model(telescope: str) -> core.AxisManager:
     """
+    Returns default hwp_angle_model. This will be deleted in future.
+    """
+    hwp_params = {
+        "satp1": {
+            "pid": 1,
+            "offcenter": -1,
+            "mechanical_offset_1": np.deg2rad(-1.66 - 90 + 49.1),
+            "mechanical_offset_2": np.deg2rad(-1.66 + 90 + 49.1),
+        },
+        "satp2": {
+            "pid": 1,
+            "offcenter": -1,
+            "mechanical_offset_1": np.deg2rad(-1.66 - 90 + 7.7),
+            "mechanical_offset_2": np.deg2rad(-1.66 + 90 + 7.7),
+        },
+        "satp3": {
+            "pid": -1,
+            "offcenter": 1,
+            "mechanical_offset_1": np.deg2rad(-1.66 + 90 - 2.29),
+            "mechanical_offset_2": np.deg2rad(-1.66 - 90 - 2.29),
+        },
+    }
+
+    telescope_params = hwp_params.get(telescope, None)
+    if telescope_params is None:
+        raise ValueError(f"Telescope {telescope} is not supported yet.")
 
     model = core.AxisManager()
-    if telescope == 'satp1':
-        sign = core.AxisManager()
-        sign.wrap('pid', 1)
-        sign.wrap('offcenter', -1)
-        model.wrap('mechanical_offset_1', np.deg2rad(-1.66 - 90 + 49.1))
-        model.wrap('mechanical_offset_2', np.deg2rad(-1.66 + 90 + 49.1))
-
-    elif telescope == 'satp2':
-        sign = core.AxisManager()
-        sign.wrap('pid', 1)
-        sign.wrap('offcenter', -1)
-        model.wrap('mechanical_offset_1', np.deg2rad(-1.66 - 90 + 7.7))
-        model.wrap('mechanical_offset_2', np.deg2rad(-1.66 + 90 + 7.7))
-
-    elif telescope == 'satp3':
-        sign = core.AxisManager()
-        sign.wrap('pid', -1)
-        sign.wrap('offcenter', 1)
-        model.wrap('mechanical_offset_1', np.deg2rad(-1.66 + 90 - 2.29))
-        model.wrap('mechanical_offset_2', np.deg2rad(-1.66 - 90 - 2.29))
-
-    else:
-        raise ValueError('Not supported yet')
+    sign = core.AxisManager()
+    sign.wrap("pid", telescope_params["pid"])
+    sign.wrap("offcenter", telescope_params["offcenter"])
+    model.wrap("mechanical_offset_1", telescope_params["mechanical_offset_1"])
+    model.wrap("mechanical_offset_2", telescope_params["mechanical_offset_2"])
 
     model.wrap('sign_matrix', sign)
     model.wrap('sign_dependent_offset', np.deg2rad(-1. * 360 / 1140 * 3 / 2))
