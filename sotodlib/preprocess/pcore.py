@@ -34,7 +34,7 @@ class _Preprocess(object):
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
-
+        self.skip_on_sim = step_cfgs.get("skip_on_sim", False)
     def process(self, aman, proc_aman):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
@@ -386,7 +386,7 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, select=True):
+    def run(self, aman, proc_aman=None, select=True, sim=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -414,6 +414,9 @@ class Pipeline(list):
             if True, the aman detector axis is restricted as described in
             each preprocess module. Most pipelines are developed with 
             select=True. Running select=False may produce unstable behavior
+        sim: boolean (Optional)
+            if running on sim (``sim=True``), proccesses with the flag
+            ``skip_on_sim`` will be skipped.
 
         Returns
         -------
@@ -437,6 +440,8 @@ class Pipeline(list):
         
         success = 'end'
         for step, process in enumerate(self):
+            if sim and process.skip_on_sim:
+                continue
             self.logger.debug(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:
