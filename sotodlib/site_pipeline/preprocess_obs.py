@@ -100,12 +100,7 @@ def preprocess_obs(
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
-        scheme.add_data_field('source')
         scheme.add_data_field('coverage')
-        # for source_name in source_names:
-        #     scheme.add_data_field(source_name)
-        #     for ws in wafer_slots:
-        #         scheme.add_data_field(f'{source_name}_{ws}')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
             scheme=scheme
@@ -133,6 +128,21 @@ def preprocess_obs(
     for process in configs['process_pipe']:
         if 'name' in process and 'sso_footprint' == process['name']:
             sso_footprint_process = True
+
+    if sso_footprint_process:
+        logger.info(f"Saving per source to database {db_data}")
+        nearby_source_names = []
+        for _source in proc_aman.sso_footprint._assignments.keys():
+            nearby_source_names.append(_source)
+        coverage = []
+        for source_name in source_names:
+            if source_name in nearby_source_names:
+                for ws in wafer_slots:
+                    if proc_aman.sso_footprint[source_name][ws]:
+                        coverage.append(f"{source_name}:{ws}")
+        db_data['coverage'] = ','.join(coverage)
+    else:
+        db_data['coverage'] = None
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
@@ -140,39 +150,6 @@ def preprocess_obs(
                 start=os.path.dirname(configs['archive']['index']))
         db.add_entry(db_data, h5_path)
 
-    if sso_footprint_process:
-        logger.info(f"Saving per source to database {db_data}")
-        nearby_source_names = []
-        for _source in proc_aman.sso_footprint._assignments.keys():
-            nearby_source_names.append(_source)
-        # for ws in wafer_slots:
-        #     for source_name in source_names:
-        #         if source_name in nearby_source_names:
-        #             db_data[f'{source_name}_{ws}'] = int(proc_aman.sso_footprint[source_name][ws])
-        #         else:
-        #             db_data[f'{source_name}_{ws}'] = 0
-        # for source_name in source_names:
-        #     hit_any = False
-        #     for ws in wafer_slots:
-        #         if db_data[f'{source_name}_{ws}'] == 1:
-        #             hit_any = True
-        #     db_data[f'{source_name}'] = 1 if hit_any else
-        for source_name in source_names:
-            coverage = []
-            if source_name in nearby_source_names:
-                db_data = {'obs:obs_id': obs_id,
-                           'dataset': dest_dataset + f'_{source_name}'}
-                
-                for ws in wafer_slots:
-                    if proc_aman.sso_footprint[source_name][ws]:
-                        coverage.append(ws)
-                db_data['source'] = source_name
-                db_data['coverage'] = coverage
-
-                if len(db.inspect(db_data)) == 0:
-                    h5_path = os.path.relpath(dest_file,
-                            start=os.path.dirname(configs['archive']['index']))
-                    db.add_entry(db_data, h5_path)
 
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
