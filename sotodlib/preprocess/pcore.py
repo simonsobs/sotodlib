@@ -292,7 +292,11 @@ def _expand(new, full, wrap_valid=True):
                 assert tuple(new._assignments[k]) == ('dets', 'samps')
                 out[k] = _reform_csr_array(v, oidx, nidx, out[k].shape)
             else:
-                out[k][oidx] = v[nidx]
+                try:
+                    out[k][oidx] = v[nidx]
+                except TypeError:
+                    # Skip expansion for scalar array with no axes.
+                    out[k] = v
     if wrap_valid:
         x = Ranges( full.samps.count )
         m = x.mask()
