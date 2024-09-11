@@ -247,7 +247,7 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     plt.savefig(filename)
 
 
-def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None):
+def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None, plot_ds_factor=20):
     """Subplot of pca bounds as well as the good and bad detector
     timestreams with 0th mode weight overplotted
 
@@ -259,16 +259,22 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
         Relcal output AxisManager
     filename : str
         Full filename with direct path to plot output directory.
-    signal : str
-        Signal name in aman. ``aman.signal`` is used if not provided.
+    signal : str or ndarray
+        Signal name or signal array in aman. ``aman.signal`` is used if not provided.
     band : str
         Bandpass name. Assumes no bandpass separation if not provided.
+    plot_ds_factor : int
+        Factor to downsample signal plots. Default is 20.
     
     """
     if signal is None:
-        signal = aman.signal
-    else:
+        signal = aman['signal']
+    elif isinstance(signal, str):
         signal = aman[signal]
+    elif isinstance(signal, np.ndarray):
+        pass
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
 
     if band is None:
         xbounds = pca_aman.xbounds
@@ -294,7 +300,7 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax1.plot(aman.timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
 
-    ax1.plot(aman.timestamps[::20], np.divide(aman.signal[good_indices][:,::20].T, pca_aman.pca_weight0[good_indices]), zorder=1, color='#D8BFD8', alpha=0.3)
+    ax1.plot(aman.timestamps[::plot_ds_factor], np.divide(aman.signal[good_indices][:,::plot_ds_factor].T, pca_aman.pca_weight0[good_indices]), zorder=1, color='#D8BFD8', alpha=0.3)
 
     ax1.set_title(f'Good Detector Batch: ({len(good_indices)} dets)')
     ax1.legend(loc='upper left')
@@ -304,7 +310,7 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None)
     ax2.plot(aman.timestamps, modes, color='black', linewidth=3,
              label='0th mode', zorder=2, alpha=0.4)
 
-    ax2.plot(aman.timestamps[::20], np.divide(aman.signal[bad_indices][:,::20].T, pca_aman.pca_weight0[bad_indices]), zorder=1, color='#FFA07A', alpha=0.3)
+    ax2.plot(aman.timestamps[::plot_ds_factor], np.divide(aman.signal[bad_indices][:,::plot_ds_factor].T, pca_aman.pca_weight0[bad_indices]), zorder=1, color='#FFA07A', alpha=0.3)
         
     ax2.set_title(f'Bad Detector Batch: ({len(bad_indices)} dets)')
     ax2.legend(loc='upper left')

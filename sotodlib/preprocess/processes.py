@@ -1009,7 +1009,8 @@ class PCARelCal(_Preprocess):
             yfac: 1.5
             calc_good_medianw: True
         save: True
-        plot: True
+        plot:
+            plot_ds_factor: 20
     
     See :ref:`pca-background` for more details on the method.
     """
@@ -1082,7 +1083,7 @@ class PCARelCal(_Preprocess):
             for band in bands:
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band)
+                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
