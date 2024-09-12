@@ -339,31 +339,32 @@ def noise_model(f, params, **fixed_param):
     Noise model for power spectrum with white noise, and 1/f noise.
     If any fixed param is handed, that parameter is fixed in the fit.
     'alpha' or 'wn' can be fixed.
+    params = [wn, fknee, alpha]
     """
-    if 'alpha' in fixed_param.keys():
-        if len(params)==2:
-            alpha = fixed_param['alpha']
-            fknee, wn = params[0], params[1]
-        else:
-            raise ValueError('The number of fit parameters are invalid.')
-            return
-    elif 'wn' in fixed_param.keys():
+    if 'wn' in fixed_param.keys():
         if len(params)==2:
             wn = fixed_param['wn']
             fknee, alpha = params[0], params[1]
         else:
             raise ValueError('The number of fit parameters are invalid.')
             return
+    elif 'alpha' in fixed_param.keys():
+        if len(params)==2:
+            alpha = fixed_param['alpha']
+            wn, fknee = params[0], params[1]
+        else:
+            raise ValueError('The number of fit parameters are invalid.')
+            return
     elif len(fixed_param)==0:
         if len(params)==3:
-            fknee, wn, alpha = params[0], params[1], params[2]
+            wn, fknee, alpha = params[0], params[1], params[2]
         else:
             raise ValueError('The number of fit parameters are invalid.')
             return
     else:
         raise ValueError('"alpha" or "wn" can be a fixed parameter.')
         return
-    return wn * (1 + (fknee / f) ** alpha)
+    return wn**2 * (1 + (fknee / f) ** alpha)
 
 
 def neglnlike(params, x, y, bin_size=1, **fixed_param):
@@ -512,7 +513,7 @@ def fit_noise_model(
     pxx=None,
     psdargs=None,
     fknee_est=1,
-    wn_est=2E-9,
+    wn_est=4E-5,
     alpha_est=3.4,
     merge_fit=False,
     f_min=None,
@@ -623,28 +624,28 @@ def fit_noise_model(
     fitout = np.zeros((aman.dets.count, 3))
     # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
     covout = np.zeros((aman.dets.count, 3, 3))
-    if isinstance(fknee_est, (int, float)):
-        fknee_est = np.zeros(aman.dets.count)+fknee_est
-    elif len(fknee_est)!=aman.dets.count:
-        print('Size of fknee_est must be equal to aman.dets.count or a single value.')
-        return
     if isinstance(wn_est, (int, float)):
-        wn_est = np.zeros(aman.dets.count)+wn_est
+        wn_est = np.full(aman.dets.count, wn_est)
     elif len(wn_est)!=aman.dets.count:
         print('Size of wn_est must be equal to aman.dets.count or a single value.')
         return
+    if isinstance(fknee_est, (int, float)):
+        fknee_est = np.full(aman.dets.count, fknee_est)
+    elif len(fknee_est)!=aman.dets.count:
+        print('Size of fknee_est must be equal to aman.dets.count or a single value.')
+        return
     if isinstance(alpha_est, (int, float)):
-        alpha_est = np.zeros(aman.dets.count)+alpha_est
+        alpha_est = np.full(aman.dets.count, alpha_est)
     elif len(alpha_est)!=aman.dets.count:
         print('Size of alpha_est must be equal to aman.dets.count or a single value.')
         return
     if fixed_param == None:
-        initial_params = np.array([fknee_est, wn_est, alpha_est])
+        initial_params = np.array([wn_est, fknee_est, alpha_est])
     if fixed_param == "wn":
         initial_params = np.array([fknee_est, alpha_est])
         fixed = wn_est
     if fixed_param == "alpha":
-        initial_params = np.array([fknee_est, wn_est])
+        initial_params = np.array([wn_est, fknee_est])
         fixed = alpha_est
 
     for i in range(len(pxx)):
@@ -673,10 +674,10 @@ def fit_noise_model(
             covout_i = np.full((len(p0), len(p0)), np.nan)
         fitout_i = res.x
         if fixed_param == "wn":
-            covout_i = np.insert(covout_i, 1, 0, axis=0)
-            covout_i = np.insert(covout_i, 1, 0, axis=1)
-            covout_i[1][1] = np.nan
-            fitout_i = np.insert(fitout_i, 1, wn_est[i])
+            covout_i = np.insert(covout_i, 0, 0, axis=0)
+            covout_i = np.insert(covout_i, 0, 0, axis=1)
+            covout_i[0][0] = np.nan
+            fitout_i = np.insert(fitout_i, 0, wn_est[i])
         elif fixed_param == "alpha":
             covout_i = np.insert(covout_i, 2, 0, axis=0)
             covout_i = np.insert(covout_i, 2, 0, axis=1)
@@ -685,7 +686,7 @@ def fit_noise_model(
         covout[i] = covout_i
         fitout[i] = fitout_i
 
-    noise_model_coeffs = ["fknee", "white_noise", "alpha"]
+    noise_model_coeffs = ["white_noise", "fknee", "alpha"]
     noise_fit_stats = core.AxisManager(
         aman.dets,
         core.LabelAxis(
