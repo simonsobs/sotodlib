@@ -60,6 +60,7 @@ class SimHWPSS(Operator):
 
     atmo_data = Unicode(
         None,
+        allow_none=True,
         help="Observation detdata key for simulated atmosphere "
         "(modulates part of the HWPSS)",
     )
@@ -192,7 +193,7 @@ class SimHWPSS(Operator):
             chi = obs.shared[self.hwp_angle].data
             for det in dets:
                 signal = obs.detdata[self.det_data][det]
-                if self.atmo.data is None:
+                if self.atmo_data is None:
                     atmo = None
                 else:
                     atmo = obs.detdata[self.atmo_data][det]
@@ -289,7 +290,8 @@ class SimHWPSS(Operator):
 
                 # Observe HWPSS with the detector
 
-                iquv = (transmission + reflection).T
+                iquv = transmission + reflection
+                iquv = (iquv - np.mean(iquv.T, 1)).T
                 iquss = (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
@@ -297,23 +299,23 @@ class SimHWPSS(Operator):
                 ) * scale
 
                 if atmo is not None:
-                    # Atmospheric HWPSS is modulated by the relative atmospheric fluctuation
+                    # Atmospheric HWPSS is modulated by the relative
+                    # atmospheric fluctuation
                     modulation = atmo / np.median(atmo)
-                    iquv = (transmission_atmo + reflection_atmo).T
+                    iquv = transmission_atmo + reflection_atmo
+                    iquv = (iquv - np.mean(iquv.T, 1)).T
                     iquss += (
                         iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                         qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                         uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                     ) * scale * modulation
 
-                iquv = emission.T
+                iquv = (emission - np.mean(emission.T, 1)).T
                 iquss += (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                     uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 )
-
-                iquss -= np.median(iquss)
 
                 if self.hwpss_random_drift:
                     # Apply detector couplings to HWPSS random drift common mode

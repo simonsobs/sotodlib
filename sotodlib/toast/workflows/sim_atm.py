@@ -131,9 +131,9 @@ def simulate_atmosphere_signal(job, otherargs, runargs, data):
     if (
             hasattr(job_ops, "sim_hwpss")
             and job_ops.sim_hwpss.enabled
-            and job_ops.sim_hwpss.atmo_signal is not None
+            and job_ops.sim_hwpss.atmo_data is not None
         ):
-        temp_signal = job_ops.sim_hwpss.atmo_signal
+        temp_signal = job_ops.sim_hwpss.atmo_data
     else:
         temp_signal = None
 
