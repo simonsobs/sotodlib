@@ -195,7 +195,7 @@ def main(
         g3thwp = G3tHWP(HWPconfig)
 
         if load_h5:
-            aman_encoder = g3thwp.set_data(tod, h5_filename = h5_encoder)
+            aman_encoder = g3thwp.set_data(tod, h5_filename = os.path.join(output_dir, h5_encoder))
         else:
             aman_encoder = g3thwp.set_data(tod)
         logger.info("Saving hwp_encoder")

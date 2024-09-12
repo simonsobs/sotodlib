@@ -541,7 +541,8 @@ class G3tHWP():
         ft = fast_time[ref_indexes[0]:ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         if poly_order is None:
-            poly_order = int(len(ref_indexes)/50)
+            poly_order = int(len(ref_indexes)/100)
+            poly_order = np.min([100, poly_order])
         ft = detrend(ft, deg=poly_order)
         # make template from good revolutions
         good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes)])
@@ -1163,6 +1164,9 @@ class G3tHWP():
         self._num_dropped_pkts = 0
         self._filled_ranges = []
 
+        # keep bad data points as a dictionary
+        self._bad_indexes_each_ref = {}
+
         # check duplication in data
         self._duplication_check()
 
@@ -1186,8 +1190,6 @@ class G3tHWP():
 
         # remove counter with high instantaneous speed
         idx_of_bad_ref_indexes = np.where(np.diff(self._ref_indexes) != self._num_edges - 2 )[0]
-        # keep bad data points as a dictionary
-        self._bad_indexes_each_ref = {}
 
         diff = np.ediff1d(self._encd_clk)
         if len(idx_of_bad_ref_indexes) > 0:
@@ -1311,7 +1313,7 @@ class G3tHWP():
             return -1
 
         # delete unexpected ref slit indexes
-        # this type of unexpected ref slit is produced from packet drop filling and 
+        # this type of unexpected ref slit is produced from packet drop filling and
         # noise in encoder data
         bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 10)[0]
         if len(bad_ref_indexes) > 0:
