@@ -1,10 +1,10 @@
 from argparse import ArgumentParser
-import numpy as np, sys, time, warnings, os, so3g
+import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-from sotodlib.tod_ops import filters
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi
+from sotodlib.tod_ops import filters, detrend_tod
+from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory
 import yaml
 
 defaults = {"query": "1",
@@ -67,6 +67,45 @@ def get_parser(parser=None):
 
 def _get_config(config_file):
     return yaml.safe_load(open(config_file,'r'))
+
+class ColoredFormatter(logging.Formatter):
+    def __init__(self, msg, colors={'DEBUG':colors.reset,'INFO':colors.lgreen,'WARNING':colors.lbrown,'ERROR':colors.lred, 'CRITICAL':colors.lpurple}):
+        logging.Formatter.__init__(self, msg)
+        self.colors = colors
+    def format(self, record):
+        try:
+            col = self.colors[record.levelname]
+        except KeyError:
+            col = colors.reset
+        return col + logging.Formatter.format(self, record) + colors.reset
+
+class LogInfoFilter(logging.Filter):
+    def __init__(self, rank=0):
+        self.rank = rank
+        try:
+            # Try to get actual time since task start if possible
+            import os, psutil
+            p = psutil.Process(os.getpid())
+            self.t0 = p.create_time()
+        except ImportError:
+            # Otherwise measure from creation of this filter
+            self.t0 = time.time()
+    def filter(self, record):
+        record.rank  = self.rank
+        record.wtime = time.time()-self.t0
+        record.wmins = record.wtime/60.
+        record.whours= record.wmins/60.
+        record.mem   = memory.current()/1024.**3
+        record.resmem= memory.resident()/1024.**3
+        record.memmax= memory.max()/1024.**3
+        return record
+
+def handle_empty(prefix, tag, comm, e):
+    # This happens if we ended up with no valid tods for some reason
+    if comm.rank == 0:
+        L.info("%s Skipped: %s" % (tag, str(e)))
+        utils.mkdir(os.path.dirname(prefix))
+        with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
 
 def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
     # Broadcast and flatten input arrays
@@ -163,13 +202,12 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
         obs.wrap("site",    np.full(1, site))
     # Prepare our data. FFT-truncate for faster fft ops
     obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
-    
+
     # add dummy glitch flags
     if 'flags' not in obs._fields:
         obs.wrap('flags', FlagManager.for_tod(obs))
     if "glitch_flags" not in obs.flags:
-        obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape),
-                        [(0,'dets'),(1,'samps')])
+        obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape),[(0,'dets'),(1,'samps')])
 
     try:
         obs.signal
@@ -179,6 +217,7 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
     
     #if obs.signal is not None:
     if has_signal:
+        detrend_tod(obs, method='linear')
         utils.deslope(obs.signal, w=5, inplace=True)
         obs.signal = obs.signal.astype(dtype_tod)
     
@@ -214,7 +253,7 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
         obs.focal_plane.gamma += obs.boresight_offset.gamma
     return obs
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
@@ -234,9 +273,17 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
         obs = calibrate_obs(obs, site=site)
         #bools, nod_indices, obs = find_el_nods(obs)
-        if obs.dets.count == 0: continue
+
+        if downsample != 1:
+            obs = mapmaking.downsample_obs(obs, downsample)
+        if obs.dets.count == 0:
+            print('Skipping ', (obs_id, detset, band))
+            continue
         # And add it to the mapmaker
-        mapmaker.add_obs(name, obs)
+        try:
+            mapmaker.add_obs(name, obs)
+        except KeyError:
+            print('rank = %i' % comm.rank, (obs_id, detset, band) )
         # Also build the RHS for the per-pixel timestamp. First
         # make a white noise weighted timestamp per sample timestream
         Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
@@ -302,8 +349,8 @@ def main(config_file=None, defaults=defaults, **args):
     for req in required_fields:
         if req not in cfg.keys():
             raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
-
     args = cfg
+
     warnings.simplefilter('ignore')
     # Set up our communicators
     comm       = mpi.COMM_WORLD
@@ -327,7 +374,15 @@ def main(config_file=None, defaults=defaults, **args):
     meta_only  = False
     nmat_dir = os.path.join(args['odir'],args['nmat_dir'])
     utils.mkdir(args['odir'])
-    L = mapmaking.init(level=mapmaking.DEBUG, rank=comm_inter.rank)
+
+    # Set up logging.
+    L   = logging.getLogger(__name__)
+    L.setLevel(logging.INFO)
+    ch  = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(ColoredFormatter( "%(rank)3d " + "%3d %3d" % (comm_inter.rank, comm.rank) + " %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s"))
+    ch.addFilter(LogInfoFilter(comm_intra.rank))
+    L.addHandler(ch)
 
     recenter = None
     if args['center_at']:
@@ -339,7 +394,7 @@ def main(config_file=None, defaults=defaults, **args):
     if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
     elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
-    
+
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'])
     
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
@@ -395,11 +450,12 @@ def main(config_file=None, defaults=defaults, **args):
             # 5. make the maps
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
                     subshape, subwcs, noise_model, L, comps=comps, t0=t, comm=comm_good, tag=tag,
-                    niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0, verbose=verbose>0 )
+                    niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0, verbose=verbose>0, downsample=args['downsample'] )
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod)
         except DataMissing as e:
             handle_empty(prefix, tag, comm_good, e)
+    return True
 
 if __name__ == '__main__':
     util.main_launcher(main, get_parser)
