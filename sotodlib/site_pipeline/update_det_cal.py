@@ -120,9 +120,9 @@ class DetCalCfg:
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
-        self.ctx = core.Context(self.context_path)
+        ctx = core.Context(self.context_path)
         if data_root is None:
-            self.data_root = get_data_root(self.ctx)
+            self.data_root = get_data_root(ctx)
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
         self.cache_failed_obsids = cache_failed_obsids
@@ -752,6 +752,7 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
         handle_result(result, cfg)
 
     def errback(e):
+        logger.info(e)
         raise e
 
     # We split into multiple pools because:
@@ -765,12 +766,13 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
 
     def get_obs_info_callback(result: ObsInfoResult):
         if result.success:
-            pool2.apply_async(
+            r = pool2.apply_async(
                 get_cal_resset,
                 args=(cfg, result.obs_info),
                 callback=callback,
                 error_callback=errback,
             )
+            resset_async_results.put(r)
         else:
             pb.update()
             add_to_failed_cache(cfg, result.obs_id, result.traceback)
