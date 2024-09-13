@@ -92,12 +92,16 @@ class SlowSource:
         return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
 
 
-def get_scan_q(tod, planet, refq=None):
+def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     """Identify the point (in time and azimuth space) at which the
     specified planet crosses the boresight elevation for the
     observation in tod.  The rotation taking boresight coordinates to
     celestial coordinates at that moment in time (and pointing) is
     computed, and its conjugate is returned.
+
+    Boresight_offset is for taking into account off-centered wafer 
+    that have position offset in the focal plane, which is either None
+    or a (xi, eta) tuple in radian.
 
     The returned rotation is useful because it represents a fixed way
     to rotate the celestial such that the target source ends up at
@@ -106,6 +110,9 @@ def get_scan_q(tod, planet, refq=None):
     measuring beam and pointing parameters.
 
     """
+    if boresight_offset is None:
+        boresight_offset = (0, 0)
+    q_xieta = so3g.proj.quat.rotation_xieta(boresight_offset[0], boresight_offset[1])
     if refq is None:
         refq = so3g.proj.quat.rotation_xieta(0, 0)
     # Get reference elevation...
@@ -119,7 +126,7 @@ def get_scan_q(tod, planet, refq=None):
         csl = so3g.proj.CelestialSightLine.az_el(
             t, az, el, weather='typical', site='so')
         ra0, dec0 = planet.pos(t)
-        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
+        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q * q_xieta
 
     def distance(p):
         dt, daz = p
@@ -147,7 +154,7 @@ def get_scan_q(tod, planet, refq=None):
             'planet': planet}
 
 
-def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
+def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=None, **kw):
     """Get a standard Projection Matrix targeting a planet (or some
     interesting fixed position), in source-scan coordinates.
 
@@ -158,7 +165,7 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
 
     if res is None:
         res = 0.01 * coords.DEG
-    X = get_scan_q(tod, planet)
+    X = get_scan_q(tod, planet, boresight_offset=boresight_offset, refq=refq)
     rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
     wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
 

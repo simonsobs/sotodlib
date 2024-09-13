@@ -245,3 +245,97 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
+
+
+def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None, plot_ds_factor=20):
+    """Subplot of pca bounds as well as the good and bad detector
+    timestreams with 0th mode weight overplotted
+
+    Parameters
+    ----------
+    aman : AxisManager
+        input AxisManager
+    pca_aman : AxisManager
+        Relcal output AxisManager
+    filename : str
+        Full filename with direct path to plot output directory.
+    signal : str or ndarray
+        Signal name or signal array in aman. ``aman.signal`` is used if not provided.
+    band : str
+        Bandpass name. Assumes no bandpass separation if not provided.
+    plot_ds_factor : int
+        Factor to downsample signal plots. Default is 20.
+    
+    """
+    if signal is None:
+        signal = aman['signal']
+    elif isinstance(signal, str):
+        signal = aman[signal]
+    elif isinstance(signal, np.ndarray):
+        pass
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
+
+    if band is None:
+        xbounds = pca_aman.xbounds
+        ybounds = pca_aman.ybounds
+        modes = pca_aman.pca_mode0
+    else:
+        xbounds = pca_aman[f'{band}_xbounds']
+        ybounds = pca_aman[f'{band}_ybounds']
+        modes = pca_aman[f'{band}_pca_mode0']
+
+    pca_dets = pca_aman.pca_det_mask
+    good_indices = np.where(~pca_dets)[0]
+    bad_indices = np.where(pca_dets)[0]
+
+    fig = plt.figure(figsize=(10, 6))
+
+    # Define axes
+    ax1 = plt.subplot2grid((2, 2), (1, 0), colspan=1, rowspan=1)
+    ax2 = plt.subplot2grid((2, 2), (1, 1), colspan=1, rowspan=1)
+    ax3 = plt.subplot2grid((2, 2), (0, 0), colspan=2, rowspan=1)
+    
+    # ax1: good signals
+    ax1.plot(aman.timestamps, modes, color='black', linewidth=3,
+             label='0th mode', zorder=2, alpha=0.4)
+
+    ax1.plot(aman.timestamps[::plot_ds_factor], np.divide(aman.signal[good_indices][:,::plot_ds_factor].T, pca_aman.pca_weight0[good_indices]), zorder=1, color='#D8BFD8', alpha=0.3)
+
+    ax1.set_title(f'Good Detector Batch: ({len(good_indices)} dets)')
+    ax1.legend(loc='upper left')
+    ax1.grid()
+
+    # ax2: bad signals
+    ax2.plot(aman.timestamps, modes, color='black', linewidth=3,
+             label='0th mode', zorder=2, alpha=0.4)
+
+    ax2.plot(aman.timestamps[::plot_ds_factor], np.divide(aman.signal[bad_indices][:,::plot_ds_factor].T, pca_aman.pca_weight0[bad_indices]), zorder=1, color='#FFA07A', alpha=0.3)
+        
+    ax2.set_title(f'Bad Detector Batch: ({len(bad_indices)} dets)')
+    ax2.legend(loc='upper left')
+    ax2.grid()
+
+    # ax3: box
+    weight = np.abs(pca_aman.pca_weight0)
+    ax3.plot(aman.det_cal.s_i[good_indices], weight[good_indices], '.', color='#D8BFD8', markersize=10,
+             label=f'Good dets ({len(good_indices)} dets)', alpha=0.3)
+
+    ax3.plot(aman.det_cal.s_i[bad_indices], weight[bad_indices], '.', color='#FFA07A', markersize=10,
+             label=f'Bad dets ({len(bad_indices)} dets)', alpha=0.3)
+
+    vertices = [(xbounds[0], ybounds[0]), (xbounds[1], ybounds[0]), (xbounds[1], ybounds[1]), (xbounds[0], ybounds[1])]
+    box = matplotlib.patches.Polygon(vertices, closed=True, edgecolor='navy', linestyle='-.', fill=False, alpha=1, label='Boundary')
+    ax3.add_patch(box)
+
+    ax3.set_xlabel('Si')
+    ax3.set_ylabel('0th Mode Weights')
+
+    ax3.legend()
+    ax3.grid()
+
+    plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{band}')
+    plt.tight_layout()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
