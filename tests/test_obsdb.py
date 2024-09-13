@@ -7,7 +7,7 @@ from sotodlib.core import metadata
 import os
 import time
 
-from ._helpers import mpi_multi
+# from ._helpers import mpi_multi
 
 def get_example():
     # Create a new Db and add two columns.
@@ -46,7 +46,24 @@ def make_extdb_pwv(dir_name, file_name):
         extdb_pwv.add_entry(entry_dict)
     return os.path.join(dir_name, file_name)
 
-@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
+def make_extdb_coverage(dir_name, file_name):
+    # create a extenal manifestdb for source coverage, and return temporal filepath to the database
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('coverage')
+    extdb_coverage = metadata.ManifestDb(map_file=os.path.join(dir_name, file_name),
+                                         scheme=scheme)
+    for i in range(10):
+        if i in [3, 8]:
+            coverage = 'jupiter:ws0,jupiter:ws1,saturn:ws0'
+        else:
+            coverage = 'jupiter:ws1,jupiter:ws2,saturn:ws0'
+        entry_dict = {'obs:obs_id': f'myobs{i}', 
+                      'coverage': coverage}
+        extdb_coverage.add_entry(entry_dict)
+    return os.path.join(dir_name, file_name)
+
+# @unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestObsDb(unittest.TestCase):
 
     def setUp(self):
@@ -70,6 +87,8 @@ class TestObsDb(unittest.TestCase):
         db = get_example()
         r0 = db.query('drift == "rising"')
         r1 = db.query('drift == "setting"')
+        print(r0, len(r0))
+        print(r1, len(r1))
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
         
@@ -96,9 +115,51 @@ class TestObsDb(unittest.TestCase):
                                          'query_list': ['pwv>=2.0'],
                                          'params_list': ['pwv']}]
                    )
+        print(r0, len(r0))
+        print(r1, len(r1))
+        print(r2, len(r2))
+        print(r3, len(r3))
         self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
                          len(db))
         self.assertTrue('pwv' in r0.keys)
+
+    def test_query_extension_coverage(self):
+        db = get_example()
+        extdb_path = make_extdb_coverage(dir_name=self.test_dir, file_name='coverage.sqlite')
+        r0 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws0 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r1 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws0 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r2 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws2 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r3 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws2 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r4 = db.query(
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws1 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        print(r0, len(r0))
+        print(r1, len(r1))
+        print(r2, len(r2))
+        print(r3, len(r3))
+        print(r4, len(r4))
+        self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
+                         len(db))
+        self.assertEqual(len(r4), len(db))
+        self.assertTrue('coverage' in r0.keys)
         
 
     def test_tags(self):

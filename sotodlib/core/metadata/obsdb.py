@@ -105,7 +105,12 @@ def _generate_query_components_from_subdb(filepath,
     if query_list is not None and isinstance(query_list, list):
         query = []
         for _query_component in query_list:
-            query.append(f'{alias}.{table_name}.{_query_component}')
+            if ' in ' in _query_component:
+                _query_component = _query_component.split(' in ')
+                _query_component = _query_component[1]+' LIKE '+'"%'+_query_component[0]+'%"'
+                query.append(f'{alias}.{table_name}.{_query_component}')
+            else:
+                query.append(f'{alias}.{table_name}.{_query_component}')
         query = ''.join([' and '+_q for _q in query])
     elif query_list is None:
         query = ''
