@@ -290,8 +290,8 @@ class SimHWPSS(Operator):
 
                 # Observe HWPSS with the detector
 
-                iquv = transmission + reflection
-                iquv = (iquv - np.mean(iquv.T, 1)).T
+                iquv = (transmission + reflection)
+                iquv = iquv.T.copy()
                 iquss = (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
@@ -302,15 +302,18 @@ class SimHWPSS(Operator):
                     # Atmospheric HWPSS is modulated by the relative
                     # atmospheric fluctuation
                     modulation = atmo / np.median(atmo)
-                    iquv = transmission_atmo + reflection_atmo
-                    iquv = (iquv - np.mean(iquv.T, 1)).T
+                    iquv = (transmission_atmo + reflection_atmo)
+                    iquv = iquv.T.copy()
+                    # Replace the generic T offset with the simulated atmosphere
+                    # offset
+                    iquv[0] += np.median(atmo) / det_scale - np.mean(iquv[0])
                     iquss += (
                         iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                         qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                         uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                     ) * scale * modulation
 
-                iquv = (emission - np.mean(emission.T, 1)).T
+                iquv = (emission).T.copy()
                 iquss += (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
@@ -338,6 +341,10 @@ class SimHWPSS(Operator):
 
                 # Co-add with the cached signal
 
+                if atmo is not None:
+                    # Avoid double-counting the atmosphere.
+                    # HWPSS has a copy of it
+                    signal -= atmo
                 signal += det_scale * iquss * (1 + drift * coupling)
 
         return
