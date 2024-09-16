@@ -248,11 +248,16 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
     return match
 
-def run_match(runner: Runner, detset: str):
+def run_match(runner: Runner, detset: str) -> bool:
     """
     Creates match files for specified detset, along with any other unmatched
     detsets in the loaded observation. If match fails for a known reason, this
     will add it to the failed_detset_cache so that it is not re-attempted.
+
+    Returns
+    -------
+    success: bool
+        True if match was successful
     """
     # Find obs-id with cal info
     obs_all = set(runner.ctx.obsdb.query("type=='obs'")['obs_id'])
@@ -269,7 +274,7 @@ def run_match(runner: Runner, detset: str):
             runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL", runner.cfg
         )
         logger.error(f"Cannot find obsid for detset {detset}")
-        return None
+        return False
 
     obs_id = obs_ids[0]
 
@@ -312,7 +317,7 @@ def run_match(runner: Runner, detset: str):
         match.save(fpath)
         logger.info(f"Saved match to file: {fpath}")
 
-    return aman
+    return True
 
 
 def scan_for_freq_offset(rs0, rs1, freq_offsets, match_pars=None, show_pb=True):
@@ -433,11 +438,11 @@ def main(config_file: str, all: bool=False):
             run_match(runner, detset)
             update_manifests_all(runner)
     else:
-        if len(remaining_detsets) == 0:
-            logger.info("No detsets to run.")
-        else:
-            run_match(runner, remaining_detsets[0])
+        for detset in remaining_detsets:
+            success = run_match(runner, detset)
             update_manifests_all(runner)
+            if success:
+                break
 
 if __name__ == '__main__':
     parser = make_parser()
