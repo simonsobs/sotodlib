@@ -3,7 +3,7 @@ import numpy as np
 import os
 import yaml
 from copy import deepcopy
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
@@ -166,17 +166,13 @@ class Runner:
         self.match_dir = os.path.join(cfg.results_path, 'matches')
         if not os.path.exists(self.match_dir):
             os.mkdir(self.match_dir)
-        
-    def run_next_match(self):
+
+    def get_remaining_detsets(self) -> List[str]:
         detsets_all = set(self.detset_db.get_entries(['dataset'])['dataset'])
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
-        if len(remaining_detsets) == 0:
-            return False
-        logger.info(f"Number of detsets remaining: {len(remaining_detsets)}")
-        run_match(self, remaining_detsets[0])
-        return True
+        return remaining_detsets
 
 def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
     cfg = runner.cfg
@@ -429,13 +425,19 @@ def main(config_file: str, all: bool=False):
 
     runner = Runner(cfg)
 
+    remaining_detsets = runner.get_remaining_detsets()
+    logger.info(f"{len(remaining_detsets)} detsets to match")
     if all:
         update_manifests_all(runner)
-        while runner.run_next_match():
+        for detset in remaining_detsets:
+            run_match(runner, detset)
             update_manifests_all(runner)
     else:
-        runner.run_next_match()
-        update_manifests_all(runner)
+        if len(remaining_detsets) == 0:
+            logger.info("No detsets to run.")
+        else:
+            run_match(runner, remaining_detsets[0])
+            update_manifests_all(runner)
 
 if __name__ == '__main__':
     parser = make_parser()
