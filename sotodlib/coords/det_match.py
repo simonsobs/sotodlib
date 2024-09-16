@@ -609,7 +609,7 @@ class MatchParams:
     dist_width: float =0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
-    enforce_pointing_reqs: bool = True
+    enforce_pointing_reqs: bool = False
 
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
