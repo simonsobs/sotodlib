@@ -200,7 +200,7 @@ class CalInfo:
     r_frac: float
         Fractional resistance of TES, given by r_tes / r_n.
     p_bias: float
-        Bias power on the TES [J] computed using bias steps at the bias point.
+        Bias power on the TES [W] computed using bias steps at the bias point.
     s_i: float
         Current responsivity of the TES [1/V] computed using bias steps at the
         bias point.
@@ -226,7 +226,7 @@ class CalInfo:
     r_n: float
         Normal resistance of the TES [Ohms] calculated from IV curve data.
     p_sat: float
-        "saturation power" of the TES [J] calculated from IV curve data.
+        "saturation power" of the TES [W] calculated from IV curve data.
         This is defined  as the electrical bias power at which the TES
         resistance is 90% of the normal resistance.
     naive_r_tes: float
@@ -236,7 +236,7 @@ class CalInfo:
         Fractional resistance of TES, given by r_tes / r_n. This is based on the
         naive bias step estimation without any additional corrections.
     naive_p_bias: float
-        Bias power on the TES [J] computed using bias steps at the bias point.
+        Bias power on the TES [W] computed using bias steps at the bias point.
         This is based on the naive bias step estimation without any additional
         corrections.
     naive_s_i: float
@@ -288,6 +288,8 @@ class ObsInfo:
     ------------
     obs_id: str
         Obs id.
+    am: AxisManager
+        AxisManager containing metadata for the given observation.
     iv_obsids: dict
         Dict mapping detset to iv obs-id.
     bs_obsids: dict
