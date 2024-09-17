@@ -70,6 +70,25 @@ def preprocess_obs(
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
+
+    source_list = configs.get('source_list', None)
+    source_names = []
+    for _s in source_list:
+        if isinstance(_s, str):
+            source_names.append(_s)
+        elif len(_s) == 3:
+            source_names.append(_s[0])
+        else:
+            raise ValueError('Invalid style of source')
+
+    # Other configurations
+    telescope = configs.get('telescope', 'SAT')
+    if telescope == 'SAT':
+        wafer_slots = [f'ws{i}' for i in range(7)]
+    elif telescope == 'LAT':
+        wafer_slots = [f'ws{i}' for i in range(3)]
+    else:
+        raise NameError('Only "SAT" or "LAT" is supported.')
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -81,6 +100,7 @@ def preprocess_obs(
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
+        scheme.add_data_field('coverage')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
             scheme=scheme
@@ -104,11 +124,32 @@ def preprocess_obs(
     db_data = {'obs:obs_id': obs_id,
                 'dataset': dest_dataset}
     
+    sso_footprint_process = False
+    for process in configs['process_pipe']:
+        if 'name' in process and 'sso_footprint' == process['name']:
+            sso_footprint_process = True
+
+    if sso_footprint_process:
+        logger.info(f"Saving per source to database {db_data}")
+        nearby_source_names = []
+        for _source in proc_aman.sso_footprint._assignments.keys():
+            nearby_source_names.append(_source)
+        coverage = []
+        for source_name in source_names:
+            if source_name in nearby_source_names:
+                for ws in wafer_slots:
+                    if proc_aman.sso_footprint[source_name][ws]:
+                        coverage.append(f"{source_name}:{ws}")
+        db_data['coverage'] = ','.join(coverage)
+    else:
+        db_data['coverage'] = None
+    
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
         h5_path = os.path.relpath(dest_file,
                 start=os.path.dirname(configs['archive']['index']))
         db.add_entry(db_data, h5_path)
+
 
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
