@@ -1,4 +1,5 @@
 import argparse as ap
+import datetime as dt
 import logging
 import os
 from copy import deepcopy
@@ -132,23 +133,38 @@ def _load_template(template_path, ufm, pointing_cfg):
     )
 
 
+def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[]):
+    query_all = query
+    query_obs = [] 
+    if query is None:
+        query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
+    all_obs = ctx.obsdb.query(query_all)['obs_id']
+    dbs = [metadata.ManifestDb(md['db']) for md in ctx['metadata'] if md.get("name", "") in metalist or md.get("label", "") in metalist]
+    with_meta = np.unique(np.hstack([np.array([entry['obs:obs_id'] for entry in db.inspect()]) for db in dbs]))
+    all_obs = np.intersect1d(all_obs, with_meta)
+
+    if query is not None:
+        query_obs = ctx.obsdb.query(query)['obs_id']
+    obs_ids += query_obs
+
+    if len(obs_ids) == 0 and query is None:
+        return all_obs
+    return np.intersect1d(obs_ids, all_obs)
+
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
     dm_name = config["context"].get("detmap", "detmap")
     roll_range = config.get("roll_range", [-1 * np.inf, np.inf])
-    query = []
-    if "query" in config["context"]:
-        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
-    obs_ids = np.append(config["context"].get("obs_ids", []), query)
-    obs_ids = np.unique(obs_ids)
+    obs_ids = _get_obs_ids(ctx, [tod_pointing_name, map_pointing_name, pol_name], config["start_time"], config["stop_time"], config["context"].get("query", None), config["context"].get("obs_ids", []))
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
-    _config = config.copy()
-    if "query" in _config["context"]:
-        del _config["context"]["query"]
     amans = []
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
@@ -387,6 +403,11 @@ def main():
     # Log file
     logfile = logging.FileHandler(logpath)
     logger.addHandler(logfile)
+
+    # Time range
+    config["start_time"] = config.get("start_time", 0)
+    config["stop_time"] = config.get("stop_time", 2**32)
+    logger.info("Running on time range %s to %s", dt.datetime.fromtimestamp(config["start_time"]), dt.datetime.fromtimestamp(config["stop_time"]))
 
     # Load data
     if "context" in config:

@@ -357,6 +357,10 @@ Here's an annotated example:
 
 .. code-block:: yaml
 
+  # This is the time range that this focal plane is valid for
+  # These are ctime
+  start_time: 0 # default is 0
+  stop_time: 1726605779 # default is 2**32
   # There are two options to get the data in
   # One is to pass in ResultSets like so:
   resultsets:
@@ -394,7 +398,8 @@ Here's an annotated example:
     obs_id: [obs_1, obs_2] # Pass in the obs_id directly
     query: QUERY # Pass in a query
     # You can pass in detector restrictions here as well
-    dets: {} # Should be a dict you would pass to the dets areg of ctx.get_meta
+    dets: {} # Should be a dict you would pass to the dets arg of ctx.get_meta
+    # If neither option is passed all obs from start_time to stop_timewith valid metadata are used
   
   per_obs: False # Set to true if you want to run in per obs mode
   weight_factor: 1000 # Weights are computed with sigma=template_spacing/weight_factor.
