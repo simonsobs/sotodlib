@@ -1,4 +1,5 @@
 import argparse as ap
+import logging
 import os
 from copy import deepcopy
 from typing import List, Optional
@@ -11,9 +12,17 @@ import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
 from sotodlib.coords import optics as op
-from sotodlib.coords.fp_containers import (FocalPlane, OpticsTube, Receiver,
-                                           Template, Transform, plot_by_gamma,
-                                           plot_ot, plot_receiver, plot_ufm)
+from sotodlib.coords.fp_containers import (
+    FocalPlane,
+    OpticsTube,
+    Receiver,
+    Template,
+    Transform,
+    plot_by_gamma,
+    plot_ot,
+    plot_receiver,
+    plot_ufm,
+)
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
@@ -356,14 +365,6 @@ def main():
     per_obs = config.get("per_obs", args.per_obs)
     include_cm = config.get("include_cm", args.include_cm)
 
-    # Load data
-    if "context" in config:
-        amans, obs_ids, stream_ids = _load_ctx(config)
-    elif "resultsets" in config:
-        amans, obs_ids, stream_ids = _load_rset(config)
-    else:
-        raise ValueError("No valid inputs provided")
-
     # Build output path
     append = config.get("append", "")
     dbroot = f"db{bool(append)*'_'}{append}"
@@ -373,12 +374,27 @@ def main():
     )
     outdir = os.path.join(config["outdir"], subdir)
     dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
+    logpath = os.path.join(outdir, f"focal_plane{bool(append)*'_'}{append}.log")
     os.makedirs(outdir, exist_ok=True)
     plot_dir_base = config.get("plot_dir", None)
     if plot_dir_base is not None:
-        plot_dir_base = os.path.join(plot_dir_base, subdir + bool(append)*'_' + append)
+        plot_dir_base = os.path.join(
+            plot_dir_base, subdir + bool(append) * "_" + append
+        )
         plot_dir_base = os.path.abspath(plot_dir_base)
         os.makedirs(plot_dir_base, exist_ok=True)
+
+    # Log file
+    logfile = logging.FileHandler(logpath)
+    logger.addHandler(logfile)
+
+    # Load data
+    if "context" in config:
+        amans, obs_ids, stream_ids = _load_ctx(config)
+    elif "resultsets" in config:
+        amans, obs_ids, stream_ids = _load_rset(config)
+    else:
+        raise ValueError("No valid inputs provided")
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
