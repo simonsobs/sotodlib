@@ -31,12 +31,15 @@ from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 
-def _create_db(filename, per_obs, obs_id):
-    base = {}
+def _create_db(filename, per_obs, obs_id, start_time, stop_time):
     if per_obs:
         base = {"obs:obs_id": obs_id}
+        group = obs_id
+    else:
+        base = {"obs:timestamp": (start_time, stop_time)}
+        group = str(start_time)
     if os.path.isfile(filename):
-        return metadata.ManifestDb(filename), base
+        return metadata.ManifestDb(filename), base, group
     if not os.path.isdir(os.path.dirname(filename)):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
@@ -44,10 +47,12 @@ def _create_db(filename, per_obs, obs_id):
     scheme.add_exact_match("dets:stream_id")
     if per_obs:
         scheme.add_exact_match("obs:obs_id")
+    else:
+        scheme.add_range_match("obs:timestamp")
     scheme.add_data_field("dataset")
 
     metadata.ManifestDb(scheme=scheme).to_file(filename)
-    return metadata.ManifestDb(filename), base
+    return metadata.ManifestDb(filename), base, group
 
 
 def _avg_focalplane(full_fp, tot_weight):
@@ -135,23 +140,32 @@ def _load_template(template_path, ufm, pointing_cfg):
 
 def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[]):
     query_all = query
-    query_obs = [] 
+    query_obs = []
     if query is None:
         query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
     if ctx.obsdb is None:
         raise ValueError("No obsdb!")
-    all_obs = ctx.obsdb.query(query_all)['obs_id']
-    dbs = [metadata.ManifestDb(md['db']) for md in ctx['metadata'] if md.get("name", "") in metalist or md.get("label", "") in metalist]
-    with_meta = np.unique(np.hstack([np.array([entry['obs:obs_id'] for entry in db.inspect()]) for db in dbs]))
+    all_obs = ctx.obsdb.query(query_all)["obs_id"]
+    dbs = [
+        metadata.ManifestDb(md["db"])
+        for md in ctx["metadata"]
+        if md.get("name", "") in metalist or md.get("label", "") in metalist
+    ]
+    with_meta = np.unique(
+        np.hstack(
+            [np.array([entry["obs:obs_id"] for entry in db.inspect()]) for db in dbs]
+        )
+    )
     all_obs = np.intersect1d(all_obs, with_meta)
 
     if query is not None:
-        query_obs = ctx.obsdb.query(query)['obs_id']
+        query_obs = ctx.obsdb.query(query)["obs_id"]
     obs_ids += query_obs
 
     if len(obs_ids) == 0 and query is None:
         return all_obs
     return np.intersect1d(obs_ids, all_obs)
+
 
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
@@ -162,7 +176,14 @@ def _load_ctx(config):
     pol_name = config["context"].get("polarization", "polarization")
     dm_name = config["context"].get("detmap", "detmap")
     roll_range = config.get("roll_range", [-1 * np.inf, np.inf])
-    obs_ids = _get_obs_ids(ctx, [tod_pointing_name, map_pointing_name, pol_name], config["start_time"], config["stop_time"], config["context"].get("query", None), config["context"].get("obs_ids", []))
+    obs_ids = _get_obs_ids(
+        ctx,
+        [tod_pointing_name, map_pointing_name, pol_name],
+        config["start_time"],
+        config["stop_time"],
+        config["context"].get("query", None),
+        config["context"].get("obs_ids", []),
+    )
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
     amans = []
@@ -384,13 +405,15 @@ def main():
     # Build output path
     append = config.get("append", "")
     dbroot = f"db{bool(append)*'_'}{append}"
+    froot = f"focal_plane{bool(append)*'_'}{append}"
     subdir = config.get("subdir", "")
     subdir = subdir + (subdir == "") * (
         per_obs * "per_obs" + (not per_obs) * "combined"
     )
     outdir = os.path.join(config["outdir"], subdir)
+    outpath = os.path.abspath(os.path.join(outdir, f"{froot}.h5"))
     dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
-    logpath = os.path.join(outdir, f"focal_plane{bool(append)*'_'}{append}.log")
+    logpath = os.path.join(outdir, f"{froot}.log")
     os.makedirs(outdir, exist_ok=True)
     plot_dir_base = config.get("plot_dir", None)
     if plot_dir_base is not None:
@@ -407,7 +430,11 @@ def main():
     # Time range
     config["start_time"] = config.get("start_time", 0)
     config["stop_time"] = config.get("stop_time", 2**32)
-    logger.info("Running on time range %s to %s", dt.datetime.fromtimestamp(config["start_time"]), dt.datetime.fromtimestamp(config["stop_time"]))
+    logger.info(
+        "Running on time range %s to %s",
+        dt.datetime.fromtimestamp(config["start_time"]),
+        dt.datetime.fromtimestamp(config["stop_time"]),
+    )
 
     # Load data
     if "context" in config:
@@ -439,9 +466,6 @@ def main():
         if per_obs:
             plot_dir = os.path.join(plot_dir_base, obs_ids[0])
             os.makedirs(plot_dir, exist_ok=True)
-        froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
-        outpath = os.path.join(outdir, f"{froot}.h5")
-        outpath = os.path.abspath(outpath)
         logger.info("Working on batch containing: %s", str(obs_ids))
         ots = {}
         for stream_id in stream_ids:
@@ -494,8 +518,6 @@ def main():
                     template,
                     is_optical,
                     pointing_cfg,
-                    winfo_path,
-                    stream_id,
                 )
             elif have_template:
                 logger.info("\tLoading template from %s", template_path)
@@ -758,9 +780,16 @@ def main():
         # Make final outputs and save
         logger.info("Saving data to %s", outpath)
         logger.info("Writing to database at %s", dbpath)
-        db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
+        db, base, group = _create_db(
+            dbpath,
+            per_obs=per_obs,
+            obs_id=obs_ids[0],
+            start_time=config["start_time"],
+            stop_time=config["stop_time"],
+        )
         with h5py.File(outpath, "w") as f:
-            receiver.save(f, (db, base))
+            f.create_group(group)
+            receiver.save(f, (db, base), group)
 
 
 if __name__ == "__main__":

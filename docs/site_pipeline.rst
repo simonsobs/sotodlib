@@ -434,23 +434,26 @@ The datasets and attributes are organized by tube and array as seem below:
 .. code-block:: text
 
    focal_plane.h5
-   - (attr) center # The nominal center of the receive on sky
-   - (attr) center_transformed # The center with the common mode transform applied
-   - (group) transform # The receiver common mode
-   - (group) tube1 # The first tube (ie st1, oti1, etc.)
-     - (attr) center # The nominal center of the tube on sky
+   - (group) result # For combined results this is the start of the validity period
+                    # For per-obs this is the obs_id
+     - (attr) center # The nominal center of the receive on sky
      - (attr) center_transformed # The center with the common mode transform applied
-     - (group) transform # The tube common mode
-     - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
-       - (attr) template_centers # The nominal center for this array
-       - (attr) fit_centers # The fit center for this array
-       - (group) transform # The transform for the ufm, includes parameters with and without the common mode
-       - (dataset) focal_plane # The focal_plane with just fit positions
-         - (attr) measured_gamma # If gamma was actually measured
-       - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
-     - (group) ufm_2
+     - (group) transform # The receiver common mode
+     - (group) tube1 # The first tube (ie st1, oti1, etc.)
+       - (attr) center # The nominal center of the tube on sky
+       - (attr) center_transformed # The center with the common mode transform applied
+       - (group) transform # The tube common mode
+       - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
+         - (attr) template_centers # The nominal center for this array
+         - (attr) fit_centers # The fit center for this array
+         - (group) transform # The transform for the ufm, includes parameters with and without the common mode
+         - (dataset) focal_plane # The focal_plane with just fit positions
+           - (attr) measured_gamma # If gamma was actually measured
+         - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
+       - (group) ufm_2
+         ...
        ...
-     ...
+    ...
 
 
 The ``focal_plane`` dataset contains four columns:
@@ -513,12 +516,23 @@ always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 
 ``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
 in the output directory.
-By default this will be indexed by ``stream_id`` and will point to the ``focal_plane`` dataset.
-If you are running in ``per_obs`` mode then it will also be indexed by ``obs_id`` and will point
+By default this will be indexed by ``stream_id`` and ``obs:timestamp`` and will point to the ``focal_plane`` dataset.
+If you are running in ``per_obs`` mode then it wirbe indexed by ``obs_id`` and will point
 to results associated with data observation.
 Be warned that in this case there will only be entries for observations with pointing fits,
 so design your context accordingly.
 
+Focal planes can be loaded directly from the ``hdf5`` files if you require information other than 
+the ``focal_plane`` dataset. This can be done like so:
+
+.. code-block:: python
+
+   from sotodlib.coords import fp_containers as fpc
+   rxs = fpc.Receiver(PATH)
+
+
+This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
+The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
 
 preprocess-tod
 --------------
