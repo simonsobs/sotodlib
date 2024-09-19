@@ -615,7 +615,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
         res.traceback = traceback.format_exc()
         res.fail_msg = res.traceback
         if cfg.raise_exceptions:
-            raise
+            raise e
     return res
 
 
