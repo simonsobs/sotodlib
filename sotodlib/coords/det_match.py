@@ -915,8 +915,12 @@ class Match:
             if 'meta/dst_name' in f:
                 dst.name = f['meta/dst_name'][()].decode()
             match_pars = {}
+            match_par_fields = [f.name for f in fields(MatchParams)]
             for k in f['meta/match_pars'].keys():
-                match_pars[k] = f['meta/match_pars'][k][()]
+                if k not in match_par_fields:
+                    print(f"Ignoring unknonwn kwarg for match-param: {k}")
+                else:
+                    match_pars[k] = f['meta/match_pars'][k][()]
             match_pars = MatchParams(**match_pars)
         match = cls(src, dst, match_pars=match_pars)
         return match
