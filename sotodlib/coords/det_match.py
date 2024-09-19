@@ -558,16 +558,6 @@ class ResSet:
             r.eta = etas[idx]
 
 
-def get_det_type_mask(arr: np.ndarray, det_types: List[str]) -> np.ndarray:
-    """
-    Returns a boolean mask of all dets that have specific detector types.
-    """
-    return np.logical_or.reduce([
-        arr['det_type'] == dt
-        for dt in det_types
-    ])
-
-
 @dataclass
 class MatchParams:
     """
@@ -588,8 +578,11 @@ class MatchParams:
         good_res_qi_thresh (float):
             qi threshold that is considered "good"
         enforce_pointing_reqs (bool):
-            If True, will enforce pointing requirements that depend on resonator
-            type.
+            If this is enabled, it will enforce the following requirements when
+            matching:
+              - Resonators with OPTC det_type must have pointing data.
+              - Resonators with UNRT, SQID, or BARE det_types must _not_ have pointing data.
+              - Resonators with DARK or SLOT det_types may or may not have pointing data.
         assigned_bg_unmatched_pen (float):
             Penalty to apply to leaving a resonator with an assigned bg
             unmatched
@@ -700,23 +693,27 @@ class Match:
         mat[m] = np.inf
 
         if self.match_pars.enforce_pointing_reqs:
+            # Det types of DARK and SLOT are allowed to may or may not have
+            # pointing data. For these types of detectors, the cost is left
+            # untouched.
+
             src_has_pointing = np.isfinite(src_arr['xi']) & np.isfinite(src_arr['eta'])
             dst_has_pointing = np.isfinite(dst_arr['xi']) & np.isfinite(dst_arr['eta'])
 
-            src_no_match = get_det_type_mask(src_arr, ['NC'])
-            dst_no_match = get_det_type_mask(dst_arr, ['NC'])
+            src_no_match = np.isin(src_arr['det_type'], ['NC'])
+            dst_no_match = np.isin(dst_arr['det_type'], ['NC'])
             mat[src_no_match, :] = np.inf
             mat[:, dst_no_match] = np.inf
 
-            src_pointing_forbidden = get_det_type_mask(src_arr, ['UNRT', 'SQID', 'BARE'])
-            dst_pointing_forbidden = get_det_type_mask(dst_arr, ['UNRT', 'SQID', 'BARE'])
+            src_pointing_forbidden = np.isin(src_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+            dst_pointing_forbidden = np.isin(dst_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
             m = src_pointing_forbidden[:, None] & dst_has_pointing[None, :]
             mat[m] = np.inf
             m = src_has_pointing[:, None] & dst_pointing_forbidden[None, :]
             mat[m] = np.inf
 
-            src_pointing_required = get_det_type_mask(src_arr, ['OPTC'])
-            dst_pointing_required = get_det_type_mask(dst_arr, ['OPTC'])
+            src_pointing_required = np.isin(src_arr['det_type'], ['OPTC'])
+            dst_pointing_required = np.isin(dst_arr['det_type'], ['OPTC'])
             m = src_pointing_required[:, None] & (~dst_has_pointing[None, :])
             mat[m] = np.inf
             m = (~src_has_pointing[:, None]) & dst_pointing_required[None, :]
