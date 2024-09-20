@@ -580,9 +580,10 @@ class MatchParams:
         enforce_pointing_reqs (bool):
             If this is enabled, it will enforce the following requirements when
             matching:
-              - Resonators with OPTC det_type must have pointing data.
-              - Resonators with UNRT, SQID, or BARE det_types must _not_ have pointing data.
-              - Resonators with DARK or SLOT det_types may or may not have pointing data.
+
+             - Resonators with OPTC det_type must have pointing data.
+             - Resonators with UNRT, SQID, or BARE det_types must _not_ have pointing data.
+             - Resonators with DARK or SLOT det_types may or may not have pointing data.
         assigned_bg_unmatched_pen (float):
             Penalty to apply to leaving a resonator with an assigned bg
             unmatched
