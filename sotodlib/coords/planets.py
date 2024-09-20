@@ -178,6 +178,31 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
     return P, X
 
 
+def get_horizon_P(tod, az, el, **kw):
+    """Get a standard Projection Matrix targeting arbitrary source (for example
+    drone) in horizon coordinates.
+
+    Args:
+      tod: AxisManager of the observation
+      az: azimuth of the target source (rad)
+      el: elevation of the target source (rad)
+
+    Return:
+      a Projection Matrix
+
+    """
+    sight = so3g.proj.CelestialSightLine.for_horizon(
+        tod.timestamps,
+        tod.boresight.az,
+        tod.boresight.el,
+        tod.boresight.roll
+    )
+    pq = so3g.proj.quat.rotation_lonlat(-az, el)
+    sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
+    P = coords.P.for_tod(tod, sight, **kw)
+    return P
+
+
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
                        wrap=None):
