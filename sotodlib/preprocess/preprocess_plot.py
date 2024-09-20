@@ -251,7 +251,9 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None,
     """Subplot of pca bounds as well as the good and bad detector
     timestreams with 0th mode weight overplotted
 
-
+    Parameters
+    ----------
+    aman : AxisManager
         input AxisManager
     pca_aman : AxisManager
         Relcal output AxisManager
