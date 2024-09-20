@@ -392,10 +392,10 @@ def plot_trending_flags(aman, trend_aman, filename='./trending_flags.png'):
 
 def plot_signal_diff(aman, flag_aman, flag_type="glitches", flag_threshold=10, plot_ds_factor=50, filename="./glitch_signal_diff.png"):
     """
-    Function for plotting the glitches or jumps flags/cut statistics using the built in stats functions
-    in the RangesMatrices class.
-    Args:
-    -----
+    Function for plotting the difference in signal before and after cuts from either glitches or jumps.
+    
+    Parameters
+    ----------
     aman : AxisManager
         Input axis manager.
     flag_aman : AxisManager
