@@ -110,6 +110,17 @@ def preprocess_obs(
                 start=os.path.dirname(configs['archive']['index']))
         db.add_entry(db_data, h5_path)
 
+    if configs.get("lmsi_config", None) is not None:
+        from pathlib import Path
+        import lmsi.core as lmsi
+
+        new_plots = os.path.join(configs["plot_dir"],
+                                 f'{str(aman.timestamps[0])[:5]}',
+                                 aman.obs_info.obs_id)
+        lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
+                  Path(configs["lmsi_config"]),
+                  Path(os.path.join(new_plots, 'index.html')))
+
 def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
     """ Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline. 
