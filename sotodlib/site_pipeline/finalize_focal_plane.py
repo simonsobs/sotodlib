@@ -596,25 +596,6 @@ def main():
                 logger.error("\tToo few points! Skipping...")
                 continue
 
-            # Compute transformation between the two nominal and measured pointing
-            focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
-            if focal_plane.have_gamma:
-                gamma_scale, gamma_shift = gamma_fit(
-                    focal_plane.template.fp[:, 2], focal_plane.avg_fp[:, 2]
-                )
-                focal_plane.transformed[:, 2] = (
-                    focal_plane.template.fp[:, 2] * gamma_scale + gamma_shift
-                )
-                focal_plane.center_transformed[:, 2] = (
-                    gamma_scale * focal_plane.template.center[:, 2] + gamma_shift
-                )
-            else:
-                logger.warning(
-                    "\tNo polarization data availible, gammas will be filled with the nominal values."
-                )
-                gamma_scale = 1.0
-                gamma_shift = 0.0
-
             try:
                 affine, shift = mt.get_affine_two_stage(
                     focal_plane.template.fp[:, :2],
@@ -632,8 +613,37 @@ def main():
                 focal_plane.template.center[:, :2], affine, shift
             )
 
+            # Compute transformation between the two nominal and measured pointing
+            focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
+            if focal_plane.have_gamma:
+                gamma_scale, gamma_shift = gamma_fit(
+                    focal_plane.template.fp[:, 2], focal_plane.avg_fp[:, 2]
+                )
+            else:
+                logger.warning(
+                    "\tNo polarization data availible, gammas will be based on the nominal values."
+                )
+                logger.warning(
+                    "\tSetting gamma shift to the xi-eta rotation and scale to 1.0"
+                )
+                transform = Transform.from_split(np.array((*shift, 0.0)), affine, 1.0)
+                gamma_scale = 1.0
+                gamma_shift = transform.rot
+            focal_plane.transformed[:, 2] = (
+                focal_plane.template.fp[:, 2] * gamma_scale + gamma_shift
+            )
+            focal_plane.center_transformed[:, 2] = (
+                focal_plane.template.center[:, 2] * gamma_scale + gamma_shift
+            )
+
             rms = np.sqrt(
-                np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2)
+                np.nanmean(
+                    (
+                        focal_plane.avg_fp[:, : (2 + focal_plane.have_gamma)]
+                        - focal_plane.transformed[:, : (2 + focal_plane.have_gamma)]
+                    )
+                    ** 2
+                )
             )
             logger.info("\tRMS after transformation is %f", rms)
 
