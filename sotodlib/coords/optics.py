@@ -7,8 +7,7 @@ LAT code adapted from code provided by Simon Dicker.
 import logging
 from functools import lru_cache, partial
 import numpy as np
-from numpy.core.numeric import isscalar
-from scipy.interpolate import interp1d, bisplrep, bisplev
+from scipy.interpolate import make_interp_spline, bisplrep, bisplev
 from scipy.spatial.transform import Rotation as R
 from sotodlib import core
 from sotodlib.io.metadata import read_dataset
@@ -41,20 +40,12 @@ LAT_TUBES = {
     "o6": 11,
 }
 
+# fmt: off
 # SAT Optics
 # TODO: Maybe we want these to be provided in a config file?
-SAT_X = (0.0, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
-SAT_LON = (
-    0.0,
-    0.0523597,
-    0.10471958,
-    0.15707946,
-    0.20943951,
-    0.26179764,
-    0.27925093,
-    0.30543087,
-)
-
+SAT_R_FP = (0.0, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
+SAT_R_SKY = (0.0, 0.0523597, 0.10471958, 0.15707946, 0.20943951, 0.26179764, 0.27925093, 0.30543087)
+# fmt: on
 
 def _interp_func(x, y, spline):
     xr = np.atleast_1d(x).ravel()
@@ -463,21 +454,21 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
 
 
 @lru_cache(maxsize=None)
-def sat_to_sky(x, theta):
+def sat_to_sky(r_fp, r_sky):
     """
-    Interpolate x and theta values to create mapping from SAT focal plane to sky.
+    Interpolate focal plane and on sky radius values to create mapping from SAT focal plane to sky.
     This function is a wrapper whose main purpose is the cache this mapping.
 
     Arguments:
-        x: X values in mm, should be all positive.
+        r_fp: Focal plane radius values in mm, should be all positive.
 
-        theta: Theta values in radians, should be all positive.
+        theta: On sky radius values in radians, should be all positive.
                Theta is defined by ISO coordinates.
 
     Return:
         sat_to_sky: Interp object with the mapping from the focal plane to sky.
     """
-    return interp1d(x, theta, fill_value="extrapolate")
+    return make_interp_spline(r_fp, r_sky)
 
 
 def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
@@ -497,7 +488,7 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
 
         roll: Rotation about the line of site = -1*boresight.
 
-        mapping_data: Tuple of (x, theta) that can be interpolated to map the focal plane to the sky.
+        mapping_data: Tuple of (r_fp, r_sky) that can be interpolated to map the focal plane to the sky.
                       Leave as None to use the default mapping.
 
     Returns:
@@ -519,32 +510,36 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
         pol = aman.focal_plane.pol_fp
 
     if mapping_data is None:
-        fp_to_sky = sat_to_sky(SAT_X, SAT_LON)
+        fp_to_sky = sat_to_sky(SAT_R_FP, SAT_R_SKY)
     else:
         mapping_data = (tuple(val) for val in mapping_data)
         fp_to_sky = sat_to_sky(*mapping_data)
 
-    # NOTE: lonlat coords are naturally centered at (1, 0, 0) and
-    #       xieta at (0, 0, 1). The euler angle below does this recentering
-    #       as well as flipping the sign of eta.
-    #       There is also a sign flip of xi that is supresses the factor of
-    #       -1 that would normally be applied when calculating lon since
-    #       it has the opposite sign as x.
-    #       The sign flips perform the flip about the origin from optics.
-    minus_lon = np.sign(x) * fp_to_sky(np.abs(x))
-    lat = np.sign(y) * fp_to_sky(np.abs(y))
-    _xi, _eta, _ = quat.decompose_xieta(
-        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(minus_lon, lat)
-    )
+    # Get things in polor coords 
+    r_fp = (x**2 + y**2)**.5
+    phi_fp = np.arctan2(y, x)
+
+    # Now to the sky
+    theta_iso = -fp_to_sky(r_fp)
+    phi_iso = np.pi/2 - phi_fp
+
+    # Flip about the origin for optics (180 deg rotation)
+    phi_iso += np.pi
+
+    # Now go to xieta
+    _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(theta_iso, phi_iso))
+
+    # Apply roll
     xi = _xi * np.cos(np.deg2rad(roll)) - _eta * np.sin(np.deg2rad(roll))
     eta = _eta * np.cos(np.deg2rad(roll)) + _xi * np.sin(np.deg2rad(roll))
 
+    # Lets do gamma as a set of endpoints
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
-    pol_minus_lon = np.sign(pol_x) * fp_to_sky(np.abs(pol_x))
-    pol_lat = np.sign(pol_y) * fp_to_sky(np.abs(pol_y))
-    _xi, _eta, _ = quat.decompose_xieta(
-        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(pol_minus_lon, pol_lat)
-    )
+    pol_r = (pol_x**2 + pol_y**2)**.5
+    pol_phi = np.arctan2(pol_y, pol_x)
+    pol_theta_iso = -fp_to_sky(pol_r)
+    pol_phi_iso = np.pi/2 - pol_phi + np.pi
+    _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(pol_theta_iso, pol_phi_iso))
     pol_xi = _xi * np.cos(np.deg2rad(roll)) - _eta * np.sin(np.deg2rad(roll))
     pol_eta = _eta * np.cos(np.deg2rad(roll)) + _xi * np.sin(np.deg2rad(roll))
     gamma = get_gamma(pol_xi, pol_eta)
