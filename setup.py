@@ -68,7 +68,8 @@ setup_opts["install_requires"] = [
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
-        "venn"
+        "venn",
+        "sodetlib @ git+https://github.com/simonsobs/sodetlib",
     ],
     "tests": [
         "socs",
