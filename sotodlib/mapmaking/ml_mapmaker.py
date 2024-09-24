@@ -1,7 +1,8 @@
 import numpy as np
 import h5py
 import so3g
-from pixell import bunch, enmap, tilemap, putils
+from pixell import bunch, enmap, tilemap
+from pixell import utils as putils
 
 from .. import coords
 from .pointing_matrix import PmatCut
@@ -42,7 +43,7 @@ class MLMapmaker:
         # the noise model, if available
         if signal_estimate is not None: tod -= signal_estimate
         if deslope:
-            utils.deslope(tod, w=5, inplace=True)
+            putils.deslope(tod, w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
@@ -61,7 +62,7 @@ class MLMapmaker:
             # The signal estimate might not be desloped, so
             # adding it back can reintroduce a slope. Fix that here.
             if deslope:
-                utils.deslope(tod, w=5, inplace=True)
+                putils.deslope(tod, w=5, inplace=True)
         # And apply it to the tod
         tod    = nmat.apply(tod)
         # Add the observation to each of our signals
@@ -125,7 +126,7 @@ class MLMapmaker:
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         if x0 is not None: x0 = self.dof.zip(*x0)
-        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
+        solver = putils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
         while solver.i < maxiter and solver.err > maxerr:
             solver.step()
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x))
@@ -268,9 +269,9 @@ class SignalMap(Signal):
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
             if self.comm is not None:
-                self.rhs  = utils.allreduce(self.rhs, self.comm)
-                self.div  = utils.allreduce(self.div, self.comm)
-                self.hits = utils.allreduce(self.hits, self.comm)
+                self.rhs  = putils.allreduce(self.rhs, self.comm)
+                self.div  = putils.allreduce(self.div, self.comm)
+                self.hits = putils.allreduce(self.hits, self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
@@ -307,7 +308,7 @@ class SignalMap(Signal):
             return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else:
             if self.comm is None: return map
-            else: return utils.allreduce(map, self.comm)
+            else: return putils.allreduce(map, self.comm)
 
     def write(self, prefix, tag, m):
         if not self.output: return
