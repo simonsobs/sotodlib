@@ -1,6 +1,7 @@
 import numpy as np
 import h5py
 import so3g
+from typing import Optional
 from pixell import bunch, enmap, tilemap
 from pixell import utils as putils
 
@@ -13,7 +14,7 @@ from .noise_model import NmatUncorr
 
 
 class MLMapmaker:
-    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
+    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, glitch_flags:str = "flags.glitch_flags"):
         """Initialize a Maximum Likelihood Mapmaker.
         Arguments:
         * signals: List of Signal-objects representing the models that will be solved
@@ -33,6 +34,7 @@ class MLMapmaker:
         self.data         = []
         self.dof          = MultiZipper()
         self.ready        = False
+        self.glitch_flags_path = glitch_flags
 
     def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None):
         # Prepare our tod
@@ -67,7 +69,7 @@ class MLMapmaker:
         tod    = nmat.apply(tod)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod)
+            signal.add_obs(id, obs, nmat, tod, glitch_flags=self.glitch_flags_path)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime),
             dets=obs.dets.vals, nmat=nmat))
@@ -169,7 +171,7 @@ class Signal:
         self.dof    = None
         self.ready  = False
         self.glitch_flags = glitch_flags
-    def add_obs(self, id, obs, nmat, Nd): pass
+    def add_obs(self, id, obs, nmat, Nd, glitch_flags:Optional[str]): pass
     def prepare(self): self.ready = True
     def forward (self, id, tod, x): pass
     def backward(self, id, tod, x): pass
@@ -210,7 +212,7 @@ class SignalMap(Signal):
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, glitch_flags: Optional[str] = None):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -218,7 +220,8 @@ class SignalMap(Signal):
         """
         Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
-        pcut   = PmatCut(get_flags_from_path(obs, self.glitch_flags)) # could pass this in, but fast to construct
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        pcut   = PmatCut(get_flags_from_path(obs, gflags)) # could pass this in, but fast to construct
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
@@ -381,12 +384,14 @@ class SignalCut(Signal):
         self.rhs   = []
         self.div   = []
 
-    def add_obs(self, id, obs, nmat, Nd):
+    def add_obs(self, id, obs, nmat, Nd, glitch_flags: Optional[str] = None):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data."""
         Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-        pcut    = PmatCut(get_flags_from_path(obs, self.glitch_flags), model=self.cut_type)
+
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        pcut    = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
         # Build our RHS
         obs_rhs = np.zeros(pcut.njunk, self.dtype)
         pcut.backward(Nd, obs_rhs)
@@ -450,7 +455,7 @@ class SignalCut(Signal):
             so3g.translate_cuts(odata.pcut.cuts, sdata.pcut.cuts, sdata.pcut.model, sdata.pcut.params, junk[odata.i1:odata.i2], res[sdata.i1:sdata.i2])
         return res
 
-    def transeval(self, id, obs, other, junk, tod):
+    def transeval(self, id, obs, other, junk, tod, glitch_flags: Optional[str] = None):
         """Translate data junk from SignalCut other to the current SignalCut,
         and then evaluate it for the given observation, returning a tod.
         This is used when building a signal-free tod for the noise model
@@ -458,7 +463,8 @@ class SignalCut(Signal):
         self._checkcompat(other)
         # We have to make a pointing matrix from scratch because add_obs
         # won't have been called yet at this point
-        spcut = PmatCut(get_flags_from_path(obs, self.glitch_flags), model=self.cut_type)
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        spcut = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
         # We do have one for other though, since that will be the output
         # from the previous round of multiplass mapmaking.
         odata = other.data[id]

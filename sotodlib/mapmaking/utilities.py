@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Any, Union, Optional
 
 import numpy as np
 import so3g
@@ -441,8 +441,48 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1):
-    ncut  = rangemat_sum(obs.flags.glitch_flags)
+def flags_in_path(
+    aman: core.AxisManager, rpath: str, sep: str = "."
+) -> bool:
+    """
+    This function allows to pull data from an AxisManager based on a path.
+    Parameters:
+        - aman: An Axis Manager object
+        - path: a string with a recursive path to extract data. The path is separated via a sep.
+                For example 'flags.glitch_flags'
+        - sep: separator. Defaults to `.`
+    """
+
+    rpath = rpath.split(sep=sep)
+    flags = aman.copy()
+    while rpath and flags is not None:
+        path = rpath.pop()
+        flags = flags[path]
+
+    return flags is not None
+
+
+def get_flags_from_path(
+    aman: core.AxisManager, rpath: str, sep: str = "."
+) -> Union[so3g.proj.RangesMatrix, Any]:
+    """
+    This function allows to pull data from an AxisManager based on a path.
+    Parameters:
+        - aman: An Axis Manager object
+        - path: a string with a recursive path to extract data. The path is separated via a sep.
+                For example 'flags.glitch_flags'
+        - sep: separator. Defaults to `.`
+    """
+
+    flags = aman.copy()
+    for path in rpath.split(sep=sep):
+        flags = flags[path]
+
+    return flags
+
+
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
+    ncut  = rangemat_sum(get_flags_from_path(obs, glitch_flags))
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -501,7 +541,7 @@ def downsample_obs(obs, down):
             if isinstance(val, core.AxisManager):
                 res.wrap(key, val)
             else:
-                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+                axdesc = [(k, v) for k, v in enumerate(axes) if v is not None]
                 res.wrap(key, val, axdesc)
     # The normal sample stuff
     res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
@@ -513,33 +553,23 @@ def downsample_obs(obs, down):
 
     # The cuts
     # obs.flags will contain all types of flags. We should query it for glitch_flags and source_flags
-    cut_keys = ["glitch_flags"]
+    cut_keys = []
+    if flags_in_path(obs, "glitch_flags"):
+        cut_keys.append("glitch_flags")
+    elif flags_in_path(obs, "flags.glitch_flags"):
+        cut_keys.append("flags.glitch_flags")
 
-    if "source_flags" in obs.flags:
+    if flags_in_path(obs, "source_flags"):
         cut_keys.append("source_flags")
+    elif flags_in_path(obs, "flags.source_flags"):
+        cut_keys.append("flags.source_flags")
 
     # We need to add a res.flags FlagManager to res
     res = res.wrap('flags', core.FlagManager.for_tod(res))
 
     for key in cut_keys:
-        res.flags.wrap(key, downsample_cut(getattr(obs.flags, key), down), [(0,"dets"),(1,"samps")])
+        res.flags.wrap(key, downsample_cut(get_flags_from_path(obs, key), down), [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
-
-def get_flags_from_path(aman: core.AxisManager, rpath: str, sep: str=".") ->  Union[so3g.proj.RangesMatrix, Any]:
-    """
-    This function allows to pull data from an AxisManager based on a path.
-    Parameters:
-        - aman: An Axis Manager object
-        - path: a string with a recursive path to extract data. The path is separated via a sep.
-                For example 'flags.glitch_flags'
-        - sep: separator. Defaults to `.`
-    """
-
-    tmp = aman.copy()
-    for path in rpath.split(sep=sep):
-        tmp = tmp[path]
-
-    return tmp
