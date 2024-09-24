@@ -119,8 +119,10 @@ def get_gamma(pol_xi, pol_eta):
     xi = pol_xi.reshape((-1, 2))
     eta = pol_eta.reshape((-1, 2))
 
-    d_xi = np.diff(xi, axis=1).ravel()
-    d_eta = np.diff(eta, axis=1).ravel()
+    q0 = quat.rotation_xieta(xi[:,0], eta[:,0])
+    q1 = quat.rotation_xieta(xi[:,1], eta[:,1])
+    dq = ~q0 * q1
+    d_xi, d_eta, _ = quat.decompose_xieta(dq)
 
     gamma = np.arctan2(d_xi, d_eta) % (2 * np.pi)
     return gamma
