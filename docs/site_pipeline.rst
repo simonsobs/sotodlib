@@ -528,7 +528,7 @@ the ``focal_plane`` dataset. This can be done like so:
 .. code-block:: python
 
    from sotodlib.coords import fp_containers as fpc
-   rxs = fpc.Receiver(PATH)
+   rxs = fpc.Receiver.load_file(PATH)
 
 
 This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
