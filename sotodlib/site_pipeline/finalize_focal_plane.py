@@ -465,7 +465,9 @@ def main():
         plot_dir = plot_dir_base
         if per_obs:
             plot_dir = os.path.join(plot_dir_base, obs_ids[0])
-            os.makedirs(plot_dir, exist_ok=True)
+        else:
+            plot_dir = os.path.join(plot_dir_base, str(config["start_time"]))
+        os.makedirs(plot_dir, exist_ok=True)
         logger.info("Working on batch containing: %s", str(obs_ids))
         ots = {}
         for stream_id in stream_ids:
