@@ -385,6 +385,11 @@ def preprocess_tod(obs_id,
         db = _get_preprocess_db(configs, group_by)
     
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
+
+    if configs.get("lmsi_config", None) is not None:
+        make_lmsi = True
+    else:
+        make_lmsi = False
     
     n_fail = 0
     for group in groups:
@@ -394,6 +399,11 @@ def preprocess_tod(obs_id,
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
+
+            if make_lmsi:
+                new_plots = os.path.join(configs["plot_dir"],
+                                         f'{str(aman.timestamps[0])[:5]}',
+                                         aman.obs_info.obs_id)
         except Exception as e:
             #error = f'{obs_id} {group}'
             errmsg = f'{type(e)}: {e}'
@@ -432,6 +442,15 @@ def preprocess_tod(obs_id,
                 h5_path = os.path.relpath(dest_file,
                         start=os.path.dirname(configs['archive']['index']))
                 db.add_entry(db_data, h5_path)
+
+    if make_lmsi:
+        from pathlib import Path
+        import lmsi.core as lmsi
+
+        lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
+                  Path(configs["lmsi_config"]),
+                  Path(os.path.join(new_plots, 'index.html')))
+    
     if run_parallel:
         if n_fail == len(groups):
             # If no groups make it to the end of the processing return error.
