@@ -174,6 +174,18 @@ def autofix_failed_books(imprint:Imprinter, test_mode=False):
             print(f"Book {book.bid} does not have readout ids, not binding")
             if not test_mode:
                 utils.set_book_wont_bind(imprint, book)
+        elif 'NoScanFrames' in book.message:
+            print(f"Book {book.bid} does not have scan frames, not binding")
+            if not test_mode:
+                utils.set_book_wont_bind(imprint, book)
+        elif 'NoHWPData' in book.message:
+            print(
+                f"Book {book.bid} does not HWP data reading out, binding "
+                "anyway"
+            )
+            if not test_mode:
+                utils.set_book_rebind(imprint, book)
+                imprint.bind_book(book, require_hwp=False,)
         else:
             print(f"I cannot catagorize book {book.bid}")
 
