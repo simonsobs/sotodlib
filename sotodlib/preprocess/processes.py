@@ -100,6 +100,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             max_trend: 2.5
             n_pieces: 10
           save: True
+          plot: True
           select:
             kind: "any"
     
@@ -141,6 +142,17 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_trending_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
+
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
@@ -161,6 +173,8 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
           hp_fc: 1
           n_sig: 10
         save: True
+        plot:
+            plot_ds_factor: 50
         select:
           max_n_glitch: 10
           sig_glitch: 10
@@ -197,6 +211,19 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_signal_diff(aman, proc_aman.glitches, flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
+                             plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
+            plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
 
 class FixJumps(_Preprocess):
@@ -240,11 +267,15 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
     Example config block::
 
       - name: "jumps"
-        signal: "hwpss_remove"
         calc:
           function: "twopi_jumps"
         save:
           jumps_name: "jumps_2pi"
+        plot:
+            plot_ds_factor: 50
+        select:
+            max_n_jumps: 5
+        
 
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
@@ -294,6 +325,20 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            name = self.save_cfgs.get('jumps_name', 'jumps')
+            plot_signal_diff(aman, proc_aman[name], flag_type='jumps', flag_threshold=self.select_cfgs.get("max_n_jumps", 5), 
+                             plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
+            plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
