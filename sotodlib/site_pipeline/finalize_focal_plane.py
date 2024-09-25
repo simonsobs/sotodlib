@@ -799,7 +799,7 @@ def main():
             start_time=config["start_time"],
             stop_time=config["stop_time"],
         )
-        with h5py.File(outpath, "w") as f:
+        with h5py.File(outpath, "a") as f:
             f.create_group(group)
             receiver.save(f, (db, base), group)
 
