@@ -216,13 +216,14 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if self.plot_cfgs is None:
             return
         if self.plot_cfgs:
-            from .preprocess_plot import plot_signal_diff
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
             filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
             plot_signal_diff(aman, proc_aman.glitches, flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
+            plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
 
 class FixJumps(_Preprocess):
@@ -329,7 +330,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         if self.plot_cfgs is None:
             return
         if self.plot_cfgs:
-            from .preprocess_plot import plot_signal_diff
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
             filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             det = aman.dets.vals[0]
@@ -337,6 +338,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
             name = self.save_cfgs.get('jumps_name', 'jumps')
             plot_signal_diff(aman, proc_aman[name], flag_type='jumps', flag_threshold=self.select_cfgs.get("max_n_jumps", 5), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
+            plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
