@@ -14,7 +14,7 @@ from dataclasses import dataclass, astuple, fields
 import numpy as np
 from tqdm.auto import tqdm
 import logging
-from typing import Optional, Union, Dict, List, Any, Tuple
+from typing import Optional, Union, Dict, List, Any, Tuple, Literal
 from queue import Queue
 import argparse
 
@@ -96,6 +96,8 @@ class DetCalCfg:
         will run on all available observations.
     log_level: str
         Logging level for the logger.
+    multiprocess_start_method: str
+        Method to use to start child processes. Can be "spawn" or "fork".
     """
 
     def __init__(
@@ -117,6 +119,7 @@ class DetCalCfg:
         nprocs_result_set: int = 10,
         num_obs: Optional[int] = None,
         log_level: str = "DEBUG",
+        multiprocess_start_method: Literal["spawn", "fork"] = "spawn"
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
@@ -136,6 +139,7 @@ class DetCalCfg:
         self.nprocs_result_set = nprocs_result_set
         self.num_obs = num_obs
         self.log_level = log_level
+        self.multiprocess_start_method = multiprocess_start_method
 
         self.root_dir = os.path.expandvars(self.root_dir)
         if not os.path.exists(self.root_dir):
@@ -676,7 +680,7 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
-    logger.debug(f"Adding obs_id {obs_id} to dataset")
+    logger.info(f"Adding obs_id {obs_id} to dataset")
     rset = ResultSet.from_friend(result.result_set)
     write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
@@ -708,7 +712,8 @@ def run_update_site(cfg: DetCalCfg) -> None:
 
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
-    with mp.get_context("fork").Pool(cfg.nprocs_result_set) as pool:
+    mp.set_start_method(cfg.multiprocess_start_method)
+    with mp.Pool(cfg.nprocs_result_set) as pool:
         for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
             res = get_obs_info(cfg, oid)
             if not res.success:
@@ -760,8 +765,9 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     # We split into multiple pools because:
     # - we don't want to overload sqlite files with too much concurrent access
     # - we want to be able to continue getting the next obs_info data while ressets are being computed
-    pool1 = mp.get_context("fork").Pool(cfg.nprocs_obs_info)
-    pool2 = mp.get_context("fork").Pool(cfg.nprocs_result_set)
+    mp.set_start_method(cfg.multiprocess_start_method)
+    pool1 = mp.Pool(cfg.nprocs_obs_info)
+    pool2 = mp.Pool(cfg.nprocs_result_set)
 
     resset_async_results: Queue = Queue()
     obsinfo_async_results: Queue = Queue()
