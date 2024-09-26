@@ -123,8 +123,8 @@ class Split(object):
         log = Logger.get()
         if isinstance(name, list):
             # The "real" name should be in kwargs
-            split_name = kwargs["name"]
-            del kwargs["name"]
+            split_name = kwargs["split_name"]
+            del kwargs["split_name"]
             kwargs["dets"] = name
             return SplitByList(split_name, **kwargs)
         elif name == "all":
@@ -317,6 +317,12 @@ class SplitByList(Split):
         else:
             self._dets = set(dets)
         self._interval = interval
+        # Add all possible demodulated names of the detector
+        demod_dets = set()
+        for det in self._dets:
+            for prefix in ["demod0", "demo2r", "demod2i", "demod4r", "demod4i"]:
+                demod_dets.add(f"{prefix}_{det}")
+        self._dets.update(demod_dets)
 
     def _create_split(self, obs):
         # Flag detectors
@@ -469,7 +475,7 @@ class Splits(Operator):
                             det_list.append(line.strip())
                 if data.comm.comm_world is not None:
                     det_list = data.comm.comm_world.bcast(det_list, root=0)
-                split_kw["name"] = name
+                split_kw["split_name"] = name
                 self._split_obj[name] = Split.create(det_list, **split_kw)
             else:
                 # Just a normal split type

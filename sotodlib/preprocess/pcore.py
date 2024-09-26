@@ -34,7 +34,7 @@ class _Preprocess(object):
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
-
+        self.skip_on_sim = step_cfgs.get("skip_on_sim", False)
     def process(self, aman, proc_aman):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
@@ -264,6 +264,10 @@ def _expand(new, full, wrap_valid=True):
         if isinstance(v, core.AxisManager):
             out.wrap( k, _expand( v, full) )
         else:
+            if np.isscalar(v):
+                # Skip expansion for wrapped scalars.
+                out.wrap(k, v)
+                continue
             out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
             oidx=[]; nidx=[]
             for a in new._assignments[k]:
@@ -288,7 +292,11 @@ def _expand(new, full, wrap_valid=True):
                 assert tuple(new._assignments[k]) == ('dets', 'samps')
                 out[k] = _reform_csr_array(v, oidx, nidx, out[k].shape)
             else:
-                out[k][oidx] = v[nidx]
+                try:
+                    out[k][oidx] = v[nidx]
+                except TypeError:
+                    # Skip expansion for scalar array with no axes.
+                    out[k] = v
     if wrap_valid:
         x = Ranges( full.samps.count )
         m = x.mask()
@@ -378,7 +386,7 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, select=True):
+    def run(self, aman, proc_aman=None, select=True, sim=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -406,6 +414,9 @@ class Pipeline(list):
             if True, the aman detector axis is restricted as described in
             each preprocess module. Most pipelines are developed with 
             select=True. Running select=False may produce unstable behavior
+        sim: boolean (Optional)
+            if running on sim (``sim=True``), proccesses with the flag
+            ``skip_on_sim`` will be skipped.
 
         Returns
         -------
@@ -429,6 +440,8 @@ class Pipeline(list):
         
         success = 'end'
         for step, process in enumerate(self):
+            if sim and process.skip_on_sim:
+                continue
             self.logger.debug(f"Running {process.name}")
             process.process(aman, proc_aman)
             if run_calc:

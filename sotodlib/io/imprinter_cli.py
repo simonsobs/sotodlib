@@ -69,15 +69,21 @@ def fix_single_book(imprint:Imprinter, book:Books):
         utils.set_book_rebind(imprint, book, update_level2=(resp==2) )
     elif resp == 3:
         utils.set_book_rebind(imprint, book)
-        resp = input("Ignore Tags? (y/n)")
-        ignore_tags = resp.lower() == 'y'
-        resp = input("Drop Ancillary Duplicates? (y/n)")
-        ancil_drop_duplicates = resp.lower() == 'y'
-        resp = input("Allow Low Precision Timing? (y/n)")
-        allow_bad_timing = resp.lower() == 'y'
+        print("Set each flag [] represents defaults")
+        ignore_tags = set_tag_and_validate( "Ignore Tags? (y/[n])" )
+        ancil_drop_duplicates = set_tag_and_validate(
+            "Drop Ancillary Duplicates? (y/[n])"
+        )
+        allow_bad_timing = set_tag_and_validate(
+            "Allow Low Precision Timing? (y/[n])"
+        )
+        require_acu = set_tag_and_validate("Require ACU data? ([y]/n)")
+        require_hwp = set_tag_and_validate("Require HWP data? ([y]/n)")
         imprint.bind_book(
             book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates,
             allow_bad_timing=allow_bad_timing,
+            require_acu=require_acu,
+            require_hwp=require_hwp,
         )
     elif resp == 4:
         utils.set_book_wont_bind(imprint, book)
@@ -86,6 +92,12 @@ def fix_single_book(imprint:Imprinter, book:Books):
     else:
         raise ValueError("how did I get here?")
 
+def set_tag_and_validate(msg):
+    resp = input(msg)
+    while (resp.lower() != 'n' and resp.lower() != 'y'):
+        print(f"Response {resp} is invalid")
+        resp = input(msg)
+    return resp.lower() == 'y'
 
 def check_failed_books(imprint:Imprinter):
     fail_list = imprint.get_failed_books()
@@ -162,6 +174,18 @@ def autofix_failed_books(imprint:Imprinter, test_mode=False):
             print(f"Book {book.bid} does not have readout ids, not binding")
             if not test_mode:
                 utils.set_book_wont_bind(imprint, book)
+        elif 'NoScanFrames' in book.message:
+            print(f"Book {book.bid} does not have scan frames, not binding")
+            if not test_mode:
+                utils.set_book_wont_bind(imprint, book)
+        elif 'NoHWPData' in book.message:
+            print(
+                f"Book {book.bid} does not HWP data reading out, binding "
+                "anyway"
+            )
+            if not test_mode:
+                utils.set_book_rebind(imprint, book)
+                imprint.bind_book(book, require_hwp=False,)
         else:
             print(f"I cannot catagorize book {book.bid}")
 

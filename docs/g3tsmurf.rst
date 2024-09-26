@@ -304,9 +304,6 @@ an obs_id and a G3tSmurf instance and return paths or file lists.
 Usage with Context
 ------------------
 
-.. py:module:: sotodlib.io.load_smurf
-    :noindex:
-
 The G3tSmurf database can be used with the larger `sotodlib` Context system.
 In this setup, the main G3tSmurf database is both the ObsFileDb and the ObsDb.
 
