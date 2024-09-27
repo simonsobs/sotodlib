@@ -234,14 +234,14 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
         if (flags is not None) and apodize_flags:
-            flag_mask = flags.mask()
-            if flag_mask.ndim == 1:
+            flags_mask = flags.mask()
+            if flags_mask.ndim == 1:
                 flag_is_1d = True
             else:
                 all_columns_same = np.all(np.all(flags_mask == flags_mask[0, :], axis=0))
                 if all_columns_same:
                     flag_is_1d = True
-                    flag_mask = flags_mask[0]
+                    flags_mask = flags_mask[0]
                 else:
                     flag_is_1d = False
             if flag_is_1d:

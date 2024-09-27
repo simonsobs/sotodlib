@@ -100,6 +100,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             max_trend: 2.5
             n_pieces: 10
           save: True
+          plot: True
           select:
             kind: "any"
     
@@ -141,6 +142,17 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_trending_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
+
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
@@ -161,6 +173,8 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
           hp_fc: 1
           n_sig: 10
         save: True
+        plot:
+            plot_ds_factor: 50
         select:
           max_n_glitch: 10
           sig_glitch: 10
@@ -197,6 +211,19 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_signal_diff(aman, proc_aman.glitches, flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
+                             plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
+            plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
 
 class FixJumps(_Preprocess):
@@ -240,11 +267,15 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
     Example config block::
 
       - name: "jumps"
-        signal: "hwpss_remove"
         calc:
           function: "twopi_jumps"
         save:
           jumps_name: "jumps_2pi"
+        plot:
+            plot_ds_factor: 50
+        select:
+            max_n_jumps: 5
+        
 
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
@@ -294,6 +325,20 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            name = self.save_cfgs.get('jumps_name', 'jumps')
+            plot_signal_diff(aman, proc_aman[name], flag_type='jumps', flag_threshold=self.select_cfgs.get("max_n_jumps", 5), 
+                             plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
+            plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
@@ -968,6 +1013,16 @@ class FourierFilter(_Preprocess):
           filter_params:
             cutoff: 1
             width: 0.1
+    
+    or with params from a noise fit::
+
+      - name: "fourier_filter"
+        wrap_name: "lpf_sig"
+        signal_name: "signal"
+        process:
+          filt_function: "low_pass_sine2"
+          trim_samps: 2000
+          noise_fit_array: "noiseQ_fit"
 
     See :ref:`fourier-filters` documentation for more details.
     """
@@ -980,9 +1035,30 @@ class FourierFilter(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
-        _f = getattr(tod_ops.filters,
-                self.process_cfgs.get('filt_function','high_pass_butter4'))
-        filt = _f(**self.process_cfgs.get('filter_params'))
+        filt_function = self.process_cfgs.get(
+            "filt_function",
+            "high_pass_butter4"
+        )
+        _f = getattr(
+            tod_ops.filters,
+            filt_function
+        )
+
+        if self.process_cfgs.get("noise_fit_array"):
+            field = self.process_cfgs["noise_fit_array"]
+            _noise_fit = attrgetter(field)
+            noise_fit = _noise_fit(proc_aman)
+        else:
+            noise_fit = None
+        
+        filter_params = tod_ops.fft_ops.build_hpf_params_dict(
+            filt_function,
+            noise_fit=noise_fit,
+            filter_params=self.process_cfgs.get("filter_params", None)
+        )
+
+        filt = _f(**filter_params)
+
         filt_tod= tod_ops.filters.fourier_filter(aman, filt,
                                                  signal_name=self.signal_name)
         if self.wrap_name in aman._fields:
@@ -1002,15 +1078,23 @@ class PCARelCal(_Preprocess):
     Example configuration file entry::
 
       - name: 'pca_relcal'
-        signal: 'hwpss_remove'
-        calc: True
+        signal: 'lpf_sig'
+        pca_run: 'run1'
+        calc:
+            xfac: 2
+            yfac: 1.5
+            calc_good_medianw: True
         save: True
-
+        plot:
+            plot_ds_factor: 20
+    
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.run = step_cfgs.get('pca_run', 'run1')
+        self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
 
@@ -1018,27 +1102,64 @@ class PCARelCal(_Preprocess):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
         rc_aman = core.AxisManager(aman.dets, aman.samps)
+        pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
         relcal = np.zeros(aman.dets.count)
+        pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            rc_aman.wrap(f'{band}_mask', m0, [(0, 'dets')])
+            rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            med = np.median(pca_signal.weights[:,0])
-            relcal[m0] = med/pca_signal.weights[:,0]
+            result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
 
-            rc_aman.wrap(f'{band}_median', med)
-            rc_aman.wrap(f'{band}_pca_mode0', pca_signal.modes[0], [(0, 'samps')])
-        rc_aman.wrap('relcal', relcal, [(0,'dets')])
+            pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
+            relcal[m0] = result_aman['relcal']
+            pca_weight0[m0] = result_aman['pca_weight0']
+            rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
+            rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+            rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+            rc_aman.wrap(f'{band}_median', result_aman['median'])
+        
+        rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
+        rc_aman.wrap('relcal', relcal, [(0, 'dets')])
+        rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
+
         self.save(proc_aman, rc_aman)
 
-    def save(self, proc_aman, rc_aman):
+    def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.name, rc_aman)
+            proc_aman.wrap(self.run_name, pca_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~proc_aman[self.run_name]['pca_det_mask']
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_pcabounds
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+
+            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = bands[bands != 'NC']
+            for band in bands:
+                pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.

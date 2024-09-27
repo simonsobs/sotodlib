@@ -510,15 +510,17 @@ def downsample_obs(obs, down):
     res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
 
     # The cuts
-    # TODO: The TOD will include a Flagmanager with all the flags. Update this part
-    # accordingly.
-    cut_keys = ["glitch_flag"]
+    # obs.flags will contain all types of flags. We should query it for glitch_flags and source_flags
+    cut_keys = ["glitch_flags"]
 
-    if "source_flags" in obs:
+    if "source_flags" in obs.flags:
         cut_keys.append("source_flags")
 
+    # We need to add a res.flags FlagManager to res
+    res = res.wrap('flags', core.FlagManager.for_tod(res))
+
     for key in cut_keys:
-        res.wrap(key, downsample_cut(getattr(obs, key), down), [(0,"dets"),(1,"samps")])
+        res.flags.wrap(key, downsample_cut(getattr(obs.flags, key), down), [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway

@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simulated detector response to sky signal.
 """
@@ -94,10 +94,22 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
         log.error(msg)
         raise RuntimeError(msg)
 
+    if job_ops.det_pointing_radec_sim is not job_ops.det_pointing_radec:
+        if job_ops.scan_map.enabled and not job_ops.scan_map_pixels.enabled:
+            msg = "Simulation pointing is different from data reduction pointing. " \
+                " You must enable scan_map_pixels"
+            log.error(msg)
+            raise RuntimeError(msg)
+        if job_ops.scan_wcs_map.enabled and not job_ops.scan_wcs_map_pixels.enabled:
+            msg = "Simulation pointing is different from data reduction pointing. " \
+                " You must enable scan_wcs_map_pixels"
+            log.error(msg)
+            raise RuntimeError(msg)
+
     if job_ops.scan_map.enabled:
         if job_ops.scan_map_pixels.enabled:
             # We are using a custom pointing matrix
-            job_ops.scan_map_pixels.detector_pointing = job_ops.det_pointing_radec
+            job_ops.scan_map_pixels.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.scan_map.pixel_dist = "scan_map_pixel_dist"
             job_ops.scan_map.pixel_pointing = job_ops.scan_map_pixels
         else:
@@ -105,7 +117,7 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
             job_ops.scan_map.pixel_dist = job_ops.binner_final.pixel_dist
             job_ops.scan_map.pixel_pointing = job.pixels_final
         if job_ops.scan_map_weights.enabled:
-            job_ops.scan_map_weights.detector_pointing = job_ops.det_pointing_radec
+            job_ops.scan_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.scan_map.stokes_weights = job_ops.scan_map_weights
         else:
             job_ops.scan_map.stokes_weights = job_ops.weights_radec
@@ -115,7 +127,7 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
     if job_ops.scan_wcs_map.enabled:
         if job_ops.scan_wcs_map_pixels.enabled:
             # We are using a custom pointing matrix
-            job_ops.scan_wcs_map_pixels.detector_pointing = job_ops.det_pointing_radec
+            job_ops.scan_wcs_map_pixels.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.scan_wcs_map.pixel_dist = "scan_wcs_map_pixel_dist"
             job_ops.scan_wcs_map.pixel_pointing = job_ops.scan_wcs_map_pixels
         else:
@@ -123,7 +135,7 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
             job_ops.scan_wcs_map.pixel_dist = job_ops.binner_final.pixel_dist
             job_ops.scan_wcs_map.pixel_pointing = job.pixels_final
         if job_ops.scan_wcs_map_weights.enabled:
-            job_ops.scan_wcs_map_weights.detector_pointing = job_ops.det_pointing_radec
+            job_ops.scan_wcs_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.scan_wcs_map.stokes_weights = job_ops.scan_wcs_map_weights
         else:
             job_ops.scan_wcs_map.stokes_weights = job_ops.weights_radec
@@ -182,11 +194,11 @@ def simulate_conviqt_signal(job, otherargs, runargs, data):
     if job_ops.sim_ground.hwp_angle is None:
         if job_ops.conviqt.enabled:
             job_ops.conviqt.comm = data.comm.comm_world
-            job_ops.conviqt.detector_pointing = job_ops.det_pointing_radec
+            job_ops.conviqt.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.conviqt.apply(data)
     else:
         if job_ops.conviqt_teb.enabled:
             job_ops.conviqt_teb.comm = data.comm.comm_world
-            job_ops.conviqt_teb.detector_pointing = job_ops.det_pointing_radec
+            job_ops.conviqt_teb.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.conviqt_teb.hwp_angle = job_ops.sim_ground.hwp_angle
             job_ops.conviqt_teb.apply(data)

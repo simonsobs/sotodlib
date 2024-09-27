@@ -10,7 +10,8 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import h5py
 import copy
-
+from sotodlib.coords import demod as demod_mm
+from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
@@ -384,6 +385,11 @@ def preprocess_tod(obs_id,
         db = _get_preprocess_db(configs, group_by)
     
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
+
+    if configs.get("lmsi_config", None) is not None:
+        make_lmsi = True
+    else:
+        make_lmsi = False
     
     n_fail = 0
     for group in groups:
@@ -393,6 +399,11 @@ def preprocess_tod(obs_id,
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
+
+            if make_lmsi:
+                new_plots = os.path.join(configs["plot_dir"],
+                                         f'{str(aman.timestamps[0])[:5]}',
+                                         aman.obs_info.obs_id)
         except Exception as e:
             #error = f'{obs_id} {group}'
             errmsg = f'{type(e)}: {e}'
@@ -431,6 +442,16 @@ def preprocess_tod(obs_id,
                 h5_path = os.path.relpath(dest_file,
                         start=os.path.dirname(configs['archive']['index']))
                 db.add_entry(db_data, h5_path)
+
+    if make_lmsi:
+        from pathlib import Path
+        import lmsi.core as lmsi
+
+        if os.path.exists(new_plots):
+            lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
+                      Path(configs["lmsi_config"]),
+                      Path(os.path.join(new_plots, 'index.html')))
+    
     if run_parallel:
         if n_fail == len(groups):
             # If no groups make it to the end of the processing return error.
@@ -467,6 +488,53 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     logger.info(f"Cutting on the last process: {pipe[-1].name}")
     pipe[-1].select(meta)
     return meta
+
+def load_preprocess_tod_sim(obs_id, sim_map,
+                            configs="preprocess_configs.yaml",
+                            context=None, dets=None,
+                            meta=None, modulated=True):
+    """ Loads the saved information from the preprocessing pipeline and runs the
+    processing section of the pipeline on simulated data
+
+    Assumes preprocess_tod has already been run on the requested observation. 
+    
+    Arguments
+    ----------
+    obs_id: multiple
+        passed to ``context.get_obs`` to load AxisManager, see Notes for 
+        `context.get_obs`
+    sim_map: pixell.enmap.ndmap
+        signal map containing (T, Q, U) fields
+    configs: string or dictionary
+        config file or loaded config directory
+    dets: dict
+        dets to restrict on from info in det_info. See context.get_meta.
+    meta: AxisManager
+        Contains supporting metadata to use for loading.
+        Can be pre-restricted in any way. See context.get_meta.
+    modulated: bool
+        If True, apply the HWP angle model and scan the simulation
+        into a modulated signal.
+        If False, scan the simulation into demodulated timestreams.
+    """
+    configs, context = _get_preprocess_context(configs, context)
+    meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
+
+    if meta.dets.count == 0:
+        logger.info(f"No detectors left after cuts in obs {obs_id}")
+        return None
+    else:
+        pipe = Pipeline(configs["process_pipe"], logger=logger)
+        aman = context.get_obs(meta, no_signal=True)
+        if modulated:
+            # Apply the HWP angle model here
+            # WARNING : should be turned off in the config file
+            # to filter simulations
+            aman = hwp_angle_model.apply_hwp_angle_model(aman)
+            aman.move("signal", None)
+        demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated)
+        pipe.run(aman, aman.preprocess, sim=True)
+        return aman
 
 def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
                         context=None, dets=None, meta=None):

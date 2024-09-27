@@ -220,6 +220,91 @@ def get_trends(tod, remove=False, size=1, signal=None):
     return trends
 
 
+def pca_cuts_and_cal(tod, pca_aman, xfac=2, yfac=1.5, calc_good_medianw=False):
+    """Finds the bounds of the pca box using IQR 
+    statistics
+
+    Parameters
+    ----------
+    tod : AxisManager
+        observation axismanagers
+    pca_aman : AxisManager
+        output pca axismanager from get_pca_model
+    xfac : int
+        multiplicative factor for the width of the pca box.
+        Default is 2.
+    yfac : int
+        multiplicative factor for the height of the box.
+        Default is 1.5. 
+    calc_good_medianw : bool
+        If true, the resulting median weight is calculated 
+        excluding bad dets. Default is false.
+
+    Returns
+    -------
+    pca_relcal : AxisManager
+        AxisManager pca and relcal information.
+        
+    """
+    x = tod.det_cal.s_i
+    y = np.abs(pca_aman.weights[:, 0])
+
+    # remove positive Si values
+    filt = np.where(x < 0)[0]
+    xfilt = x[filt]
+    yfilt = y[filt]
+
+    # normalize weights
+    ynorm = yfilt / np.median(yfilt)
+    median_ynorm = np.median(ynorm)
+    medianx = np.median(xfilt)
+
+    # IQR of normalized weights
+    iqry_norm = np.percentile(ynorm, 80) - np.percentile(ynorm, 20)
+
+    # IQR of Si's
+    iqrx = np.percentile(xfilt, 80) - np.percentile(xfilt, 20)
+
+    # Find box heights using norm'd weights
+    # Convert y bounds back to the scale of the raw weights
+    ylb = (median_ynorm - yfac * iqry_norm) * np.median(yfilt)
+    yub = (median_ynorm + yfac * iqry_norm) * np.median(yfilt)
+
+    # Calculate box width
+    xlb = medianx - xfac * iqrx
+    xub = medianx + xfac * iqrx
+    if xub > 0:
+        mad = np.median(np.abs(xfilt - medianx))
+        xub = medianx + xfac * mad
+
+    xbounds = (xlb, xub)
+    ybounds = (ylb, yub)
+
+    # Get indices of the values in the box (indices are wrt `x` array)
+    ranges = [x >= xlb,
+              x <= xub,
+              y >= ylb,
+              y <= yub]
+    m = ~(np.all(ranges, axis=0))
+
+    if calc_good_medianw:
+        medianw = np.median(pca_aman.weights[:,0][~m])
+    else:
+        medianw = np.median(pca_aman.weights[:,0])
+    relcal_val = medianw/pca_aman.weights[:,0]
+
+    pca_relcal = core.AxisManager(tod.dets, tod.samps)
+    pca_relcal.wrap('pca_det_mask', m, [(0, 'dets')])
+    pca_relcal.wrap('xbounds', np.array(xbounds))
+    pca_relcal.wrap('ybounds', np.array(ybounds))
+    pca_relcal.wrap('pca_mode0', pca_aman.modes[0], [(0, 'samps')])
+    pca_relcal.wrap('pca_weight0', pca_aman.weights[:, 0], [(0, 'dets')])
+    pca_relcal.wrap('relcal', relcal_val, [(0, 'dets')])
+    pca_relcal.wrap('median', medianw)
+
+    return pca_relcal
+
+
 def get_common_mode(
     tod,
     signal='signal',

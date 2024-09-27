@@ -260,7 +260,7 @@ def set_timecode_final(imprint, time_code):
                 timecode=time_code,
                 agent=server["timestream-suprsync"],
             )
-        g3session.add(tcf)
+            g3session.add(tcf)
 
         tcm = g3session.query(TimeCodes).filter(
             TimeCodes.timecode==time_code,
@@ -274,5 +274,5 @@ def set_timecode_final(imprint, time_code):
                 timecode=time_code,
                 agent=server["smurf-suprsync"],
             )
-        g3session.add(tcm)    
+            g3session.add(tcm)    
     g3session.commit()
