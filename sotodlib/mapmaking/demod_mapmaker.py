@@ -5,12 +5,13 @@ DemodSignalMap creates a signal you want to solve for, over which
 you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
-__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap']
+__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_atomic_map']
 import numpy as np
 from pixell import enmap, utils, tilemap, bunch
 import so3g.proj
 
 from .. import coords
+from .. import site_pipeline
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
 from .noise_model import NmatWhite
 
@@ -43,7 +44,7 @@ class DemodMapmaker:
             rather than from obs.dsT, obs.demodQ, obs.demodU
         
         Example usage :: 
-            signal_map = mapmaking.DemodSignalMap(shape, wcs, comm)
+            signal_map = mapmaking.DemodSignalMap(shape, wcs)
             signals    = [signal_map]
             mapmaker   = mapmaking.DemodMapmaker(signals, 
                          noise_model=noise_model)
@@ -140,7 +141,7 @@ class DemodSignal:
     def write   (self, prefix, tag, x): pass
 
 class DemodSignalMap(DemodSignal):
-    def __init__(self, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
+    def __init__(self, shape, wcs, comps="TQU", name="sky", ofmt="{name}", output=True,
             ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
         """
         Signal describing a non-distributed sky map. Signal describing a sky map in the coordinate 
@@ -153,8 +154,6 @@ class DemodSignalMap(DemodSignal):
             Shape of the output map geometry
         wcs : wcs
             WCS of the output map geometry
-        comm : MPI.comm
-            MPI communicator
         comps : str, optional
             Components to map
         name : str, optional
@@ -186,7 +185,6 @@ class DemodSignalMap(DemodSignal):
         
         """
         DemodSignal.__init__(self, name, ofmt, output, ext)
-        self.comm  = comm
         self.comps = comps
         self.sys   = sys
         self.recenter = recenter
@@ -289,34 +287,90 @@ class DemodSignalMap(DemodSignal):
         if self.ready: return
         if self.tiled:
             self.geo_work = self.rhs.geometry
-            self.rhs  = tilemap.redistribute(self.rhs, self.comm)
-            self.div  = tilemap.redistribute(self.div, self.comm)
-            self.hits = tilemap.redistribute(self.hits,self.comm)
-        else:
-            if self.comm is not None:
-                self.rhs  = utils.allreduce(self.rhs, self.comm)
-                self.div  = utils.allreduce(self.div, self.comm)
-                self.hits = utils.allreduce(self.hits,self.comm)
         self.ready = True
 
     @property
     def ncomp(self): return len(self.comps)
-
-    def to_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
-        else: return map.copy()
-
-    def from_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
-        else: return utils.allreduce(map, self.comm)
 
     def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.tiled:
-            tilemap.write_map(oname, m, self.comm)
+            tilemap.write_map(oname, m)
         else:
-            if self.comm is None or self.comm.rank == 0:
-                enmap.write_map(oname, m)
+            enmap.write_map(oname, m)
         return oname
+
+def make_atomic_map(context, obslist, shape, wcs, noise_model, comps="TQU",
+                    t0=0, dtype_tod=np.float32, dtype_map=np.float64, L=None,
+                    tag="", verbose=0, preprocess_config=None, 
+                    split_labels=None, det_in_out=False,
+                    det_left_right=False, det_upper_lower=False,
+                    site='so_sat3', recenter=None, outs=None, singlestream=False):
+    pre = "" if tag is None else tag + " "
+    L.info(pre + "Initializing equation system")
+    
+    # Set up our mapmaking equation
+    if split_labels==None:
+        # this is the case where we did not request any splits at all
+        signal_map = DemodSignalMap(shape, wcs, comps=comps,
+                                              dtype=dtype_map, tiled=False,
+                                              ofmt="", singlestream=singlestream,
+                                              recenter=recenter )
+    else:
+        # this is the case where we asked for at least 2 splits (1 split set).
+        # We count how many split we'll make, we need to define the Nsplits
+        # maps inside the DemodSignalMap
+        Nsplits = len(split_labels)
+        signal_map = DemodSignalMap(shape, wcs, comps=comps,
+                                              dtype=dtype_map, tiled=False,
+                                              ofmt="", Nsplits=Nsplits,
+                                              singlestream=singlestream,
+                                              recenter=recenter)
+    signals    = [signal_map]
+    mapmaker   = DemodMapmaker(signals, noise_model=noise_model,
+                                         dtype=dtype_tod,
+                                         verbose=verbose>0,
+                                         singlestream=singlestream)
+    L.info(pre + "Building RHS")
+    # And feed it with our observations
+    for oi in range(len(obslist)):
+        obs_id, detset, band = obslist[oi][:3]
+        name = "%s:%s:%s" % (obs_id, detset, band)
+        error, output, obs = site_pipeline.preprocess_tod.preproc_or_load_group(obs_id, configs=preprocess_config,
+                            dets={'wafer_slot':detset, 'wafer.bandpass':band}, 
+                            logger=L, context=context, overwrite=False)
+
+        obs.wrap("weather", np.full(1, "toco"))
+        obs.wrap("site",    np.full(1, site))
+        obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds 
+                       + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
+        
+        if error not in [None,'load_success']:
+            L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
+            continue
+        outs.append(error)
+        outs.append(output)
+        # And add it to the mapmaker
+        if split_labels==None:
+            # this is the case of no splits
+            mapmaker.add_obs(name, obs)
+        else:
+            # this is the case of having splits. We need to pass the split_labels
+            # at least. If we have detector splits fixed in time, then we pass the
+            # masks in det_split_masks. Otherwise, det_split_masks will be None.
+            mapmaker.add_obs(name, obs, split_labels=split_labels)
+        L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
+
+    for signal in signals:
+        signal.prepare()
+    L.info(pre + "Writing F+B outputs")
+    wmap = []
+    weights = []
+    for n_split in range(signal_map.Nsplits):
+        wmap.append( signal_map.rhs[n_split] )
+        div = np.diagonal(signal_map.div[n_split], axis1=0, axis2=1)
+        div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
+        weights.append(div)
+    return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0 )
