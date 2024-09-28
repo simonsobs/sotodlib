@@ -165,7 +165,7 @@ class DemodSignalMap(DemodSignal):
         ext : str, optional
             The extension used for the files.
         dtype : numpy.dtype
-            The data type to use for the time-ordered data.
+            The data type to use for the maps.
         sys : str or None, optional
             The coordinate system to map. Defaults to equatorial
         recenter : str or None
@@ -302,15 +302,67 @@ class DemodSignalMap(DemodSignal):
             enmap.write_map(oname, m)
         return oname
 
-def make_atomic_map(context, obslist, shape, wcs, noise_model, comps="TQU",
-                    t0=0, dtype_tod=np.float32, dtype_map=np.float64, L=None,
-                    tag="", verbose=0, preprocess_config=None, 
-                    split_labels=None, det_in_out=False,
-                    det_left_right=False, det_upper_lower=False,
+def make_atomic_map(context, obslist, shape, wcs, noise_model, L,
+                    preprocess_config, comps="TQU", t0=0,
+                    dtype_tod=np.float32, dtype_map=np.float32,
+                    tag="", verbose=0, split_labels=None,
                     site='so_sat3', recenter=None, outs=None, singlestream=False):
+    """
+        Initialize a FilterBin Mapmaker for demodulated data
+
+        Arguments
+        ---------
+        context : sotodlib.core.Context
+            Context object used to load obs from.
+        obslist : dict
+            The obslist which is the output of the
+            mapmaking.obs_grouping.build_obslists, contains the information of the
+            single or multiple obs to map.
+        shape : tuple
+            Shape of the geometry to use for mapping.
+        wcs : dict
+            WCS kernel of the geometry to use for mapping.
+        noise_model : sotodlib.mapmaking.Nmat
+            Noise model to pass to DemodMapmaker.
+        L : logger
+            Logger for printing on the screen.
+        preprocess_config : dict
+            Dictionary with the config yaml file for the preprocess database.
+        comps : str, optional
+            Which components to map, only TQU supported for now.
+        t0 : int, optional
+            Ctime to use as the label in the map files.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time-ordered data. Only tested
+            with float32.
+        dtype_map : numpy.dtype, optional
+            The data type to use for the maps.
+        tag : str, optional
+            Prefix tag for the logger.
+        verbose : bool, optional
+        split_labels : list or None, optional
+            A list of strings with the splits requested. If None then no splits
+            were asked for, i.e. we will produce one map.
+        site : str, optional
+            Plataform name for the pointing matrix.
+        recenter : str or None
+            String to make object-centered maps, such as Moon/Sun/Planet centered maps.
+            Look at sotodlib.mapmaking.parse_recentering for details.
+        outs : list, optional
+            List to accumulate the outputs from preproc_or_load_group. This is
+            necessary if you end up preprocessing an obs here and want to save
+            to the database so you won't have to re-process again.
+        singlestream : Bool
+            If True, do not perform demodulated filter+bin mapmaking but
+            rather regular filter+bin mapmaking, i.e. map from obs.signal
+            rather than from obs.dsT, obs.demodQ, obs.demodU.
+
+        Example usage ::
+        """
+
     pre = "" if tag is None else tag + " "
     L.info(pre + "Initializing equation system")
-    
+
     # Set up our mapmaking equation
     if split_labels==None:
         # this is the case where we did not request any splits at all
@@ -373,4 +425,4 @@ def make_atomic_map(context, obslist, shape, wcs, noise_model, comps="TQU",
         div = np.diagonal(signal_map.div[n_split], axis1=0, axis2=1)
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
-    return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0 )
+    return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0)
