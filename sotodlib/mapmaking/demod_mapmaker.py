@@ -302,13 +302,13 @@ class DemodSignalMap(DemodSignal):
             enmap.write_map(oname, m)
         return oname
 
-def make_atomic_map(context, obslist, shape, wcs, noise_model, L,
+def make_demod_map(context, obslist, shape, wcs, noise_model, L,
                     preprocess_config, comps="TQU", t0=0,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None,
                     site='so_sat3', recenter=None, outs=None, singlestream=False):
     """
-        Initialize a FilterBin Mapmaker for demodulated data
+        Make a demodulated map from the list of observations in obslist.
 
         Arguments
         ---------
@@ -357,8 +357,7 @@ def make_atomic_map(context, obslist, shape, wcs, noise_model, L,
             rather regular filter+bin mapmaking, i.e. map from obs.signal
             rather than from obs.dsT, obs.demodQ, obs.demodU.
 
-        Example usage ::
-        """
+    """
 
     pre = "" if tag is None else tag + " "
     L.info(pre + "Initializing equation system")
@@ -387,23 +386,22 @@ def make_atomic_map(context, obslist, shape, wcs, noise_model, L,
                                          singlestream=singlestream)
     L.info(pre + "Building RHS")
     # And feed it with our observations
+    nobs_kept  = 0
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
         error, output, obs = site_pipeline.preprocess_tod.preproc_or_load_group(obs_id, configs=preprocess_config,
                             dets={'wafer_slot':detset, 'wafer.bandpass':band}, 
                             logger=L, context=context, overwrite=False)
-
+        outs.append(error)
+        outs.append(output)
+        if error not in [None,'load_success']:
+            L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
+            continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
         obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds 
                        + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
-        
-        if error not in [None,'load_success']:
-            L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
-            continue
-        outs.append(error)
-        outs.append(output)
         # And add it to the mapmaker
         if split_labels==None:
             # this is the case of no splits
@@ -414,6 +412,10 @@ def make_atomic_map(context, obslist, shape, wcs, noise_model, L,
             # masks in det_split_masks. Otherwise, det_split_masks will be None.
             mapmaker.add_obs(name, obs, split_labels=split_labels)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
+        nobs_kept += 1
+    # if we skip all the obs
+    if nobs_kept == 0:
+        return None
 
     for signal in signals:
         signal.prepare()
