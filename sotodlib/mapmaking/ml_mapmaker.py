@@ -14,7 +14,8 @@ from .noise_model import NmatUncorr
 
 
 class MLMapmaker:
-    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, glitch_flags:str = "flags.glitch_flags"):
+    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False,
+                 glitch_flags:str = "flags.glitch_flags"):
         """Initialize a Maximum Likelihood Mapmaker.
         Arguments:
         * signals: List of Signal-objects representing the models that will be solved
@@ -155,7 +156,7 @@ class MLMapmaker:
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
-    def __init__(self, name, ofmt, output, ext, glitch_flags: str = "flags.glitch_flags"):
+    def __init__(self, name, ofmt, output, ext, **kwargs):
         """Initialize a Signal. It probably doesn't make sense to construct a generic signal
         directly, though. Use one of the subclasses.
         Arguments:
@@ -163,6 +164,7 @@ class Signal:
         * ofmt: The format used when constructing output file prefix
         * output: Whether this signal should be part of the output or not.
         * ext: The extension used for the files.
+        * **kwargs: additional keyword based parameters, accessible as class parameters
         """
         self.name   = name
         self.ofmt   = ofmt
@@ -170,8 +172,9 @@ class Signal:
         self.ext    = ext
         self.dof    = None
         self.ready  = False
-        self.glitch_flags = glitch_flags
-    def add_obs(self, id, obs, nmat, Nd, glitch_flags:Optional[str]): pass
+        self.__dict__.update(kwargs)
+
+    def add_obs(self, id, obs, nmat, Nd, **kwargs): pass
     def prepare(self): self.ready = True
     def forward (self, id, tod, x): pass
     def backward(self, id, tod, x): pass
@@ -191,7 +194,7 @@ class SignalMap(Signal):
         to equatorial coordinates. If tiled==True, then this will be a distributed map with
         the given tile_shape, otherwise it will be a plain enmap. interpol controls the
         pointing matrix interpolation mode. See so3g's Projectionist docstring for details."""
-        Signal.__init__(self, name, ofmt, output, ext, glitch_flags)
+        Signal.__init__(self, name, ofmt, output, ext, glitch_flags=glitch_flags)
         self.comm  = comm
         self.comps = comps
         self.sys   = sys
@@ -202,6 +205,7 @@ class SignalMap(Signal):
         self.data  = {}
         ncomp      = len(comps)
         shape      = tuple(shape[-2:])
+
         if tiled:
             geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
             self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
@@ -373,7 +377,7 @@ class SignalMap(Signal):
 
 class SignalCut(Signal):
     def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
-            output=False, cut_type=None, glitch_flags:str ="flags.glitch_flags"):
+            output=False, cut_type=None, glitch_flags: str = "flags.glitch_flags"):
         """Signal for handling the ML solution for the values of the cut samples."""
         Signal.__init__(self, name, ofmt, output, ext="hdf", glitch_flags=glitch_flags)
         self.comm  = comm
@@ -389,7 +393,6 @@ class SignalCut(Signal):
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data."""
         Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-
         gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
         pcut    = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
         # Build our RHS

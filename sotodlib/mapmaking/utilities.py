@@ -441,25 +441,30 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def flags_in_path(
-    aman: core.AxisManager, rpath: str, sep: str = "."
-) -> bool:
+
+def parameter_in_path(obj: Any, rpath: str, sep: str = ".") -> bool:
     """
-    This function allows to pull data from an AxisManager based on a path.
+    This function checks if a parameter path exists in an object.
+
     Parameters:
-        - aman: An Axis Manager object
-        - path: a string with a recursive path to extract data. The path is separated via a sep.
+        - obj: A python object
+        - path: a string with a recursive path to verify if it exist. 
+                The path is separated via a sep.
                 For example 'flags.glitch_flags'
         - sep: separator. Defaults to `.`
     """
+    checker = obj.__dict__
+    if isinstance(obj, core.AxisManager):
+        checker = obj._fields
 
     rpath = rpath.split(sep=sep)
-    flags = aman.copy()
-    while rpath and flags is not None:
-        path = rpath.pop()
-        flags = flags[path]
 
-    return flags is not None
+    if rpath[0] in checker and len(rpath)>1:
+        return parameter_in_path(checker[rpath[0]], ".".join(rpath[1:]), sep=sep)
+    elif rpath[0] in checker:
+        return True
+    else:
+        return False
 
 
 def get_flags_from_path(
@@ -467,6 +472,7 @@ def get_flags_from_path(
 ) -> Union[so3g.proj.RangesMatrix, Any]:
     """
     This function allows to pull data from an AxisManager based on a path.
+
     Parameters:
         - aman: An Axis Manager object
         - path: a string with a recursive path to extract data. The path is separated via a sep.
@@ -474,11 +480,10 @@ def get_flags_from_path(
         - sep: separator. Defaults to `.`
     """
 
-    flags = aman.copy()
     for path in rpath.split(sep=sep):
-        flags = flags[path]
+        aman = aman[path]
 
-    return flags
+    return aman
 
 
 def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
@@ -549,26 +554,29 @@ def downsample_obs(obs, down):
     for key in ["az", "el", "roll"]:
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
-    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp),
+             [(0,"dets"),(1,"samps")])
 
-    # The cuts
-    # obs.flags will contain all types of flags. We should query it for glitch_flags and source_flags
+    # # The cuts
+    # # obs.flags will contain all types of flags. We should query it for glitch_flags
+    # # and source_flags
     cut_keys = []
-    if flags_in_path(obs, "glitch_flags"):
+    if parameter_in_path(obs, "glitch_flags"):
         cut_keys.append("glitch_flags")
-    elif flags_in_path(obs, "flags.glitch_flags"):
+    elif parameter_in_path(obs, "flags.glitch_flags"):
         cut_keys.append("flags.glitch_flags")
 
-    if flags_in_path(obs, "source_flags"):
+    if parameter_in_path(obs, "source_flags"):
         cut_keys.append("source_flags")
-    elif flags_in_path(obs, "flags.source_flags"):
+    elif parameter_in_path(obs, "flags.source_flags"):
         cut_keys.append("flags.source_flags")
 
     # We need to add a res.flags FlagManager to res
     res = res.wrap('flags', core.FlagManager.for_tod(res))
 
     for key in cut_keys:
-        res.flags.wrap(key, downsample_cut(get_flags_from_path(obs, key), down), [(0,"dets"),(1,"samps")])
+        res.flags.wrap(key, downsample_cut(get_flags_from_path(obs, key), down),
+                       [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
