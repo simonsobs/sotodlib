@@ -282,20 +282,6 @@ def _expand(new, full, wrap_valid=True):
                     nidx.append(slice(None))
             oidx = tuple(oidx)
             nidx = tuple(nidx)
-            print('k,v',k,v)
-            try:
-                print(len(v))
-                print('new_dets',new.dets.count)
-                print('new_samps',new.samps.count)
-            except:
-                print('none')
-            print('full_dets',full.dets.count)
-            print('full_samps',full.samps.count)
-            print('out', out)
-            print('oidx', oidx)
-            print('nidx', nidx)
-            
-            
             if isinstance(out[k], RangesMatrix):
                 assert new._assignments[k][-1] == 'samps'
                 out[k] = _ranges_matrix_match( out[k], v, oidx, nidx)

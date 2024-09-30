@@ -271,8 +271,8 @@ def subtract_leakage(aman, t2p_aman, T_signal=None, mask=None, ds_factor=100, np
     aman.demodQ -= (T_signal * t2p_aman.lamQ[:, np.newaxis] + t2p_aman.AQ[:, np.newaxis])
     aman.demodU -= (T_signal * t2p_aman.lamU[:, np.newaxis] + t2p_aman.AU[:, np.newaxis])
     
-    '''freq, Pxx_demodQ_new = calc_psd(aman, signal=aman.demodQ, nperseg=nperseg, merge=False)
+    freq, Pxx_demodQ_new = calc_psd(aman, signal=aman.demodQ, nperseg=nperseg, merge=False)
     freq, Pxx_demodU_new = calc_psd(aman, signal=aman.demodU, nperseg=nperseg, merge=False)
     aman.Pxx_demodQ = Pxx_demodQ_new
     aman.Pxx_demodU = Pxx_demodU_new
-    '''
+    
