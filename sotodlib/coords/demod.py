@@ -190,9 +190,9 @@ def rotate_demodQU(tod, update_focal_plane=True):
 
     Args:
         tod : an axisManager object
-        update_focal_plane (bool, optional): Whether to set focal_plane.gamma angles to zero,
-        consistent with new coordinate reference. Make this true for polarization mapmaking
-        using make_map.
+            update_focal_plane (bool, optional): Whether to set focal_plane.gamma angles to zero,
+            consistent with new coordinate reference. Make this true for polarization mapmaking
+            using make_map.
 
     """
     demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp(-2j*tod.focal_plane.gamma)).T
