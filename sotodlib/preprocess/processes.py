@@ -14,6 +14,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
+from ..utils.profile import cprofile
 
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
@@ -21,7 +22,8 @@ class FFTTrim(_Preprocess):
 
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
-    name = "fft_trim"    
+    name = "fft_trim"
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
@@ -37,6 +39,7 @@ class Detrend(_Preprocess):
 
         super().__init__(step_cfgs)
     
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
@@ -51,6 +54,7 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     name = "det_bias_flags"
     _influx_field = "det_bias_flags_frac"
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
                                                     **self.calc_cfgs)
@@ -98,7 +102,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            n_pieces: 10
+            t_piece: 100
           save: True
           select:
             kind: "any"
@@ -112,7 +116,8 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-    
+
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
@@ -170,6 +175,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     name = "glitches"
     _influx_field = "glitch_flags_frac"
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
@@ -219,6 +225,7 @@ class FixJumps(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         field = self.process_cfgs['jumps_aman']
         aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
@@ -257,6 +264,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         function = self.calc_cfgs.get("function", "find_jumps")
         cfgs = self.calc_cfgs.get('jump_configs', {})
@@ -321,7 +329,7 @@ class PSDCalc(_Preprocess):
 
         super().__init__(step_cfgs)
         
-
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
                                               **self.process_cfgs)
@@ -333,6 +341,7 @@ class PSDCalc(_Preprocess):
         fft_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
         aman.wrap(self.wrap, fft_aman)
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         self.save(proc_aman, aman[self.wrap])
 
@@ -371,6 +380,7 @@ class Noise(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         if self.psd not in aman:
             raise ValueError("PSD is not saved in AxisManager")
@@ -457,7 +467,8 @@ class Calibrate(_Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-
+    
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
@@ -498,6 +509,7 @@ class EstimateHWPSS(_Preprocess):
     _influx_field = "hwpss_coeffs"
     _influx_percentiles = [0, 50, 75, 90, 95, 100]
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
@@ -520,7 +532,7 @@ class EstimateHWPSS(_Preprocess):
             plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
             plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
 
-    @classmethod
+    #@classmethod
     def gen_metric(cls, meta, proc_aman):
         """ Generate a QA metric for the coefficients of the HWPSS fit.
         Coefficient percentiles and mean are recorded for every mode and detset.
@@ -612,6 +624,7 @@ class SubtractHWPSS(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         if not(proc_aman[self.hwpss_stats] is None):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
@@ -632,6 +645,7 @@ class Apodize(_Preprocess):
     """
     name = "apodize"
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
 
@@ -642,6 +656,7 @@ class Demodulate(_Preprocess):
     """
     name = "demodulate"
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
         if self.process_cfgs.get("trim_samps"):
@@ -673,7 +688,8 @@ class EstimateAzSS(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"
-
+    
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, calc_aman)
@@ -709,6 +725,7 @@ class GlitchFill(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         tod_ops.gapfill.fill_glitches(
             aman, signal=aman[self.signal],
@@ -725,6 +742,7 @@ class FlagTurnarounds(_Preprocess):
     """
     name = 'flag_turnarounds'
     
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
@@ -751,7 +769,8 @@ class FlagTurnarounds(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
-
+    
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         
@@ -763,6 +782,7 @@ class SubPolyf(_Preprocess):
     """
     name = 'sub_polyf'
     
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
@@ -774,6 +794,7 @@ class SSOFootprint(_Preprocess):
     """
     name = 'sso_footprint'
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs.get("source_list", None):
             ssos = self.calc_cfgs["source_list"]
@@ -831,6 +852,7 @@ class DarkDets(_Preprocess):
     """
     name = "dark_dets"
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         mskdarks = tod_ops.flags.get_dark_dets(aman, merge=False)
         
@@ -875,7 +897,8 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-    
+
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         center_on = self.calc_cfgs.get('center_on', 'planet')
         # Get source from tags
@@ -933,6 +956,7 @@ class HWPAngleModel(_Preprocess):
     """
     name = "hwp_angle_model"
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
             aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
@@ -940,6 +964,7 @@ class HWPAngleModel(_Preprocess):
         else:
             return
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
         hwp_angle_aman = core.AxisManager(aman.samps)
@@ -989,6 +1014,7 @@ class FourierFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
         filt_function = self.process_cfgs.get(
             "filt_function",
@@ -1045,6 +1071,7 @@ class PCARelCal(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
@@ -1089,6 +1116,7 @@ class PTPFlags(_Preprocess):
     """
     name = "ptp_flags"
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
         
@@ -1129,6 +1157,7 @@ class InvVarFlags(_Preprocess):
     """
     name = "inv_var_flags"
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
         
@@ -1170,12 +1199,13 @@ class EstimateT2P(_Preprocess):
               trans_width: 0.1
           save: True
     
-    .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.get_corr
     """
     name = "estimate_t2p"
 
+    #@cprofile(name)
     def calc_and_save(self, aman, proc_aman):
-        t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
+        t2p_aman = tod_ops.t2pleakage.get_corr(aman, **self.calc_cfgs)
         self.save(proc_aman, t2p_aman)
     
     def save(self, proc_aman, t2p_aman):
@@ -1194,12 +1224,13 @@ class SubtractT2P(_Preprocess):
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
     
-    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_leakage
     """
     name = "subtract_t2p"
 
+    #@cprofile(name)
     def process(self, aman, proc_aman):
-        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
+        tod_ops.t2pleakage.subtract_leakage(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
 
 _Preprocess.register(SubtractT2P)

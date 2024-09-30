@@ -16,7 +16,7 @@ from . import filters
 from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                       psat_range=(0, 15), rn_range=None, si_nan=False,
+                       psat_range=None, rn_range=None, si_nan=False,
                        merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
@@ -73,15 +73,17 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     ranges = [detcal.bg >= 0,
               detcal.r_tes > 0,
               detcal.r_frac >= rfrac_range[0],
-              detcal.r_frac <= rfrac_range[1],
-              detcal.p_sat*1e12 >= psat_range[0],
-              detcal.p_sat*1e12 <= psat_range[1]]
+              detcal.r_frac <= rfrac_range[1]
+             ]    
+    if psat_range is not None:
+        ranges.append(detcal.p_sat*1e12 >= psat_range[0])
+        ranges.append(detcal.p_sat*1e12 <= psat_range[1])
     if rn_range is not None:
         ranges.append(detcal.r_n >= rn_range[0])
         ranges.append(detcal.r_n <= rn_range[1])
     if si_nan:
         ranges.append(np.isnan(detcal.s_i) == False)
-    
+
     msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
     if 'samps' in aman:
@@ -108,16 +110,22 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         ranges = [detcal.bg >= 0,
                   detcal.r_tes > 0,
                   detcal.r_frac >= rfrac_range[0],
-                  detcal.r_frac <= rfrac_range[1],
-                  detcal.p_sat*1e12 >= psat_range[0],
-                  detcal.p_sat*1e12 <= psat_range[1]]
+                  detcal.r_frac <= rfrac_range[1]
+                 ]
+        if psat_range is not None:
+            ranges.append(detcal.p_sat*1e12 >= psat_range[0])
+            ranges.append(detcal.p_sat*1e12 <= psat_range[1])
+
         for range in ranges:
             msk = ~(np.all([range], axis=0))
             msks.append(RangesMatrix([Ranges.ones_like(x) if Y
                                       else Ranges.zeros_like(x) for Y in msk]))
 
-        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt', 'p_sat_gt', 'p_sat_lt']
-
+        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
+        
+        if psat_range is not None:
+            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
+            
         for i, msk in enumerate(msks):
             if 'samps' in aman:
                 msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets'), (1, 'samps')])
@@ -401,7 +409,7 @@ def get_glitch_flags(aman,
 
 def get_trending_flags(aman,
                        max_trend=1.2,
-                       n_pieces=1,
+                       t_piece=500,
                        max_samples=500,
                        signal=None,
                        timestamps=None,
@@ -420,8 +428,8 @@ def get_trending_flags(aman,
         The tod
     max_trend : float
         Slope at which detectors are unlocked. The default is for use with phase units.
-    n_pieces : int
-        Number of pieces to cut the timestream in to to look for trends.
+    t_piece : float
+        Duration in seconds of each pieces to cut the timestream in to to look for trends
     max_samples : int
         Maximum samples to compute the slope with.
     signal : array
@@ -460,6 +468,13 @@ def get_trending_flags(aman,
     slopes = np.zeros((len(signal), 0))
     cut = np.zeros((len(signal), 0), dtype=bool)
     samp_edges = [0]
+    
+    # Get sampling rate
+    fs = 1 / np.nanmedian(np.diff(timestamps))
+    n_samples_per_piece = int(t_piece * fs)
+    # How many pieces can timestamps be divided into
+    n_pieces = len(timestamps) // n_samples_per_piece
+    
     for t, s in zip(
         np.array_split(timestamps, n_pieces), np.array_split(signal, n_pieces, 1)
     ):
