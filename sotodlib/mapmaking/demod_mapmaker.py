@@ -393,8 +393,8 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L,
         error, output, obs = site_pipeline.preprocess_tod.preproc_or_load_group(obs_id, configs=preprocess_config,
                             dets={'wafer_slot':detset, 'wafer.bandpass':band}, 
                             logger=L, context=context, overwrite=False)
-        outs.append(error)
-        outs.append(output)
+        if outs is not None:
+            outs.append((error,output))
         if error not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
             continue
