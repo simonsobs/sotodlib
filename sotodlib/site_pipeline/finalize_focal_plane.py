@@ -138,14 +138,14 @@ def _load_template(template_path, ufm, pointing_cfg):
     )
 
 
-def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[]):
+def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], tags=[]):
     query_all = query
     query_obs = []
     if query is None:
         query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
     if ctx.obsdb is None:
         raise ValueError("No obsdb!")
-    all_obs = ctx.obsdb.query(query_all)["obs_id"]
+    all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
     dbs = [
         metadata.ManifestDb(md["db"])
         for md in ctx["metadata"]
@@ -183,6 +183,7 @@ def _load_ctx(config):
         config["stop_time"],
         config["context"].get("query", None),
         config["context"].get("obs_ids", []),
+        config["context"].get("tags", ["timing_issues=0"]),
     )
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
@@ -800,6 +801,8 @@ def main():
             stop_time=config["stop_time"],
         )
         with h5py.File(outpath, "a") as f:
+            if group in f:
+                del f[group]
             f.create_group(group)
             receiver.save(f, (db, base), group)
 
