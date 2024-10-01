@@ -443,15 +443,22 @@ def rangemat_sum(rangemat):
 
 
 def parameter_in_path(obj: Any, rpath: str, sep: str = ".") -> bool:
-    """
-    This function checks if a parameter path exists in an object.
+    """This function checks if a parameter path exists in an object.
 
-    Parameters:
-        - obj: A python object
-        - path: a string with a recursive path to verify if it exist. 
-                The path is separated via a sep.
-                For example 'flags.glitch_flags'
-        - sep: separator. Defaults to `.`
+    Parameters
+    ----------
+    obj : Any
+        A python object. It needs to have a `__dict__` or a `_fields` parameter.
+    rpath : str
+        a string with a recursive path to verify if it exist. The path is separated
+        via a sep. For example 'flags.glitch_flags'.
+    sep : str, optional
+        A string separator, by default "."
+
+    Returns
+    -------
+    bool
+        Whether the rpath exists despite its value.
     """
     checker = obj.__dict__
     if isinstance(obj, core.AxisManager):
@@ -460,7 +467,7 @@ def parameter_in_path(obj: Any, rpath: str, sep: str = ".") -> bool:
     rpath = rpath.split(sep=sep)
 
     if rpath[0] in checker and len(rpath)>1:
-        return parameter_in_path(checker[rpath[0]], ".".join(rpath[1:]), sep=sep)
+        return parameter_in_path(checker[rpath[0]], sep.join(rpath[1:]), sep=sep)
     elif rpath[0] in checker:
         return True
     else:
@@ -470,14 +477,22 @@ def parameter_in_path(obj: Any, rpath: str, sep: str = ".") -> bool:
 def get_flags_from_path(
     aman: core.AxisManager, rpath: str, sep: str = "."
 ) -> Union[so3g.proj.RangesMatrix, Any]:
-    """
-    This function allows to pull data from an AxisManager based on a path.
+    """This function allows to pull data from an AxisManager based on a path.
 
-    Parameters:
-        - aman: An Axis Manager object
-        - path: a string with a recursive path to extract data. The path is separated via a sep.
+    Parameters
+    ----------
+    aman : core.AxisManager
+        An Axis Manager object
+    rpath : str
+        a string with a recursive path to extract data. The path is separated via a sep.
                 For example 'flags.glitch_flags'
-        - sep: separator. Defaults to `.`
+    sep : str, optional
+        a string separator, by default "."
+
+    Returns
+    -------
+    Union[so3g.proj.RangesMatrix, Any]
+        The flags that are in the rpath
     """
 
     for path in rpath.split(sep=sep):
