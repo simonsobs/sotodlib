@@ -16,7 +16,30 @@ from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
+import cProfile 
+import mtprof
+import pstats
+import io
+
 logger = sp_util.init_logger("preprocess")
+
+def profile_function(func, profile_path, *args, **kwargs):
+    
+    local_vars = None
+
+    def wrapper_func():
+        nonlocal local_vars  # Ensure `result` from the outer scope is modified
+        # Store the function result in a local variable accessible through locals()
+        local_vars = func(*args, **kwargs)
+
+    # Ensure profile_path is a valid file path
+    try:
+        cProfile.runctx('wrapper_func()', globals(), locals(), filename=profile_path)
+        logger.info(f"Profile saved to {profile_path}")
+    except Exception as e:
+        logger.error(f"Error during profiling: {e}")
+
+    return local_vars
 
 def dummy_preproc(obs_id, group_list, logger, 
                   configs, overwrite, run_parallel):
@@ -692,13 +715,43 @@ def main(
         dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
 
     logger.info(f'Starting dest_file set to {dest_file}')
+    
+    """Run write_block obs-ids in parallel at once and write all to the sqlite db."""
+    profile_files = []
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    with ProcessPoolExecutor(nproc) as exe:
+    '''with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                      group_list=r[1], verbosity=verbosity,
                      configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
+    '''
+    
+    output_dir = os.path.dirname(configs['archive']['index'])
+    logger.info(f'using profiling directory {output_dir}')
+
+    profile_files = []
+    
+    with ProcessPoolExecutor(nproc) as exe:
+        futures = []
+        for r in run_list:
+            # Generate a profile file in the specified directory
+            profile_path = os.path.join(output_dir, f'{r[0]["obs_id"]}.prof')
+            profile_files.append(profile_path)
+
+            future = exe.submit(
+                profile_function,
+                preprocess_tod,
+                profile_path,
+                obs_id=r[0]['obs_id'],
+                group_list=r[1],
+                verbosity=verbosity,
+                configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
+                overwrite=overwrite,
+                run_parallel=True
+            )
+            futures.append(future)
+        
         for future in as_completed(futures):
             logger.info('New future as_completed result')
             try:
@@ -744,6 +797,14 @@ def main(
                 f = open(errlog, 'a')
                 f.write(f'\n{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}\n')
                 f.close()
+    # Combine the profile results into a single profile
+    combined_profile_path = os.path.join(output_dir, 'combined_profile.prof')
+    combined_stats = pstats.Stats(profile_files[0])
+    for profile_file in profile_files[1:]:
+        combined_stats.add(profile_file)
+
+    # Save the combined stats to a file
+    combined_stats.dump_stats(combined_profile_path)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)
