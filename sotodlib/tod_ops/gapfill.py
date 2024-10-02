@@ -385,7 +385,7 @@ def get_contaminated_ranges(good_flags, bad_flags):
 
 
 def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
-                  glitch_flags=None, wrap=True):
+                  glitch_flags=None, in_place=True, wrap_name=None):
     """
     This function fills pre-computed glitches provided by the caller in
     time-ordered data using either a polynomial (default) or PCA-based
@@ -418,9 +418,15 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
     """
     # Process Args
     if signal is None:
-        sig = np.copy(aman.signal)
+        if in_place:
+            sig = aman.signal
+        else:
+            sig = np.copy(aman.signal)
     else:
-        sig = np.copy(signal)
+        if in_place:
+            sig = signal
+        else:
+            sig = np.copy(signal)
     
     if glitch_flags is None:
         glitch_flags = aman.flags.glitches
@@ -438,9 +444,9 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
                            'detectors')
             modes = aman.dets.count
         # fill with poly fill before PCA
-        gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
-                            signal=np.float32(sig))
-        sig = gaps.swap(aman, signal=sig)
+        #gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
+        #                    signal=np.float32(sig))
+        #sig = gaps.swap(aman, signal=sig)
         # PCA fill
         mod = pca.get_pca_model(tod=aman, n_modes=modes,
                                 signal=sig)
@@ -448,15 +454,9 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
         sig = gfill.swap(aman, signal=sig)
     
     # Wrap and Return
-    if isinstance(wrap, str):
-        if wrap in aman._assignments:
-            aman.move(wrap, None)
-        aman.wrap(wrap, sig, [(0, 'dets'), (1, 'samps')])
-        return sig
-    elif wrap:
-        if 'gap_filled' in aman._assignments:
-            aman.move('gap_filled', None)
-        aman.wrap('gap_filled', sig, [(0, 'dets'), (1, 'samps')])
-        return sig
-    else:
-        return sig
+    if wrap_name is not None:
+        if wrap_name in aman._assignments:
+            aman.move(wrap_name, None)
+        aman.wrap(wrap_name, sig, [(0, 'dets'), (1, 'samps')])
+        
+    return sig
