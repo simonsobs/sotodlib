@@ -443,10 +443,6 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
                            f'{aman.dets.count}, setting modes = number of ' +
                            'detectors')
             modes = aman.dets.count
-        # fill with poly fill before PCA
-        #gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,
-        #                    signal=np.float32(sig))
-        #sig = gaps.swap(aman, signal=sig)
         # PCA fill
         mod = pca.get_pca_model(tod=aman, n_modes=modes,
                                 signal=sig)
