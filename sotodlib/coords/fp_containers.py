@@ -4,6 +4,7 @@ from dataclasses import InitVar, dataclass, field
 from functools import cached_property
 from typing import Dict, List, Optional
 
+import h5py
 import matplotlib.pyplot as plt
 import megham.transform as mt
 import megham.utils as mu
@@ -12,7 +13,7 @@ from numpy.typing import NDArray
 from scipy.stats import binned_statistic
 from sotodlib.coords import optics as op
 from sotodlib.core import metadata
-from sotodlib.io.metadata import ResultSet, read_dataset, write_dataset
+from sotodlib.io.metadata import read_dataset, write_dataset
 
 logger = logging.getLogger("finalize_focal_plane")
 plt.style.use("tableau-colorblind10")
@@ -398,16 +399,20 @@ class OpticsTube:
 
         return OpticsTube(name, center)
 
-    def save(self, f, db_info):
-        f.create_group(self.name)
+    def save(self, f, db_info, group="/"):
+        g = f[group]
+        g.create_group(self.name)
         _add_attrs(
-            f[self.name],
+            g[self.name],
             {"center": self.center, "center_transformed": self.center_transformed},
         )
-        self.transform.save(f, f"{self.name}/transform")
-        self.transform_fullcm.save(f, f"{self.name}/transform", "_fullcm")
+        tr_path = os.path.join(group, self.name, "transform")
+        self.transform.save(f, tr_path)
+        self.transform_fullcm.save(f, tr_path, "_fullcm")
         for focal_plane in self.focal_planes:
-            focal_plane.save(f, db_info, f"{self.name}/{focal_plane.stream_id}")
+            focal_plane.save(
+                f, db_info, os.path.join(group, self.name, focal_plane.stream_id)
+            )
 
     @classmethod
     def load(cls, group):
@@ -437,27 +442,39 @@ class Receiver:
             self.center, self.transform.affine, self.transform.shift
         )
 
-    def save(self, f, db_info):
+    def save(self, f, db_info, group="/"):
         _add_attrs(
-            f["/"],
+            f[group],
             {
                 "center": self.center,
                 "center_transformed": self.center_transformed,
                 "include_cm": self.include_cm,
             },
         )
-        self.transform.save(f, f"transform")
+        self.transform.save(f, os.path.join(group, "transform"))
         for ot in self.optics_tubes:
-            ot.save(f, db_info)
+            ot.save(f, db_info, group)
 
     @classmethod
-    def load(cls, f):
-        center = f["/"].attrs["center"]
-        include_cm = f["/"].attrs["include_cm"]
-        transform = Transform.load(f["transform"])
-        ots = [OpticsTube.load(f[grp]) for grp in f.keys() if "transform" not in grp]
+    def load(cls, f, group="/"):
+        center = f[group].attrs["center"]
+        include_cm = f[group].attrs["include_cm"]
+        transform = Transform.load(f[group]["transform"])
+        ots = [
+            OpticsTube.load(f[group][grp])
+            for grp in f[group].keys()
+            if "transform" not in grp
+        ]
 
         return Receiver(ots, center, include_cm, transform)
+
+    @classmethod
+    def load_file(cls, path):
+        with h5py.File(path, "r") as f:
+            # Check if its an old file:
+            if "transform" in f.keys():
+                return {"": cls.load(f)}
+            return {grp: cls.load(f, grp) for grp in f.keys()}
 
     @property
     def focal_planes(self):
