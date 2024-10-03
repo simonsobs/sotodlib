@@ -626,6 +626,7 @@ class SmurfStreamProcessor:
 
         # Mask to use to separate out non-resonator signal from resonator signal
         tracked_chans = np.array(['NONE' not in r for r in self.readout_ids], dtype=bool)
+        readout_id_arr = np.array(self.readout_ids)
 
         # Handle file writers
         writer = None
@@ -743,8 +744,8 @@ class SmurfStreamProcessor:
             oframe['flag_smurfgaps'] = core.G3VectorBool(~filled)
 
             ts = core.G3VectorTime(ts * core.G3Units.s)
-            oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids[tracked_chans], ts, data[tracked_chans, :])
-            oframe['untracked'] = so3g.G3SuperTimestream(self.readout_ids[~tracked_chans], ts, data[~tracked_chans, :])
+            oframe['signal'] = so3g.G3SuperTimestream(readout_id_arr[tracked_chans], ts, data[tracked_chans, :])
+            oframe['untracked'] = so3g.G3SuperTimestream(readout_id_arr[~tracked_chans], ts, data[~tracked_chans, :])
             oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
             oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
             oframe['stream_id'] = self.stream_id
