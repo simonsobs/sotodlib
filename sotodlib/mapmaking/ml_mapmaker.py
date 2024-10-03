@@ -362,7 +362,7 @@ class SignalMap(Signal):
         # Currently we don't support any actual translation, but could handle
         # resolution changes in the future (probably not useful though)
         self._checkcompat(other)
-        ctime = obs.timestamp
+        ctime = obs.timestamps
         # Build the local geometry and pointing matrix for this observation
         if self.recenter:
             rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
