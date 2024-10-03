@@ -134,7 +134,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             proc_aman = meta.preprocess
         if self.select_cfgs["kind"] == "any":
             keep = ~has_any_cuts(proc_aman.trends.trend_flags)
-        elif self.select_cfgs == "all":
+        elif self.select_cfgs["kind"] == "all":
             keep = ~has_all_cut(proc_aman.trends.trend_flags)
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
