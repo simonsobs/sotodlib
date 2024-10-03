@@ -1,18 +1,22 @@
 import logging
 import os
 from dataclasses import InitVar, dataclass, field
+from functools import cached_property
 from typing import Dict, List, Optional
 
+import h5py
+import matplotlib.pyplot as plt
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
 from numpy.typing import NDArray
-from scipy.spatial import transform
+from scipy.stats import binned_statistic
 from sotodlib.coords import optics as op
 from sotodlib.core import metadata
-from sotodlib.io.metadata import write_dataset, read_dataset
+from sotodlib.io.metadata import read_dataset, write_dataset
 
 logger = logging.getLogger("finalize_focal_plane")
+plt.style.use("tableau-colorblind10")
 
 
 def _add_attrs(dset, attrs):
@@ -81,6 +85,9 @@ class Template:
     pointing_cfg: InitVar[Dict]
     center: NDArray[np.floating] = field(init=False)  # (1, ndim)
     spacing: NDArray[np.floating] = field(init=False)  # (ndim,)
+    bandpass: NDArray[np.str_] = field(init=False)
+    pol: NDArray[np.str_] = field(init=False)
+    rhombus: NDArray[np.str_] = field(init=False)
 
     def __post_init__(self, pointing_cfg):
         self.center = np.array(
@@ -92,10 +99,41 @@ class Template:
         gamma_spacing = np.percentile(np.diff(np.sort(self.fp[2])), 99.9)
         self.spacing = np.array([xieta_spacing, xieta_spacing, gamma_spacing])
 
+        self.bandpass = np.zeros_like(self.det_ids)
+        self.pol = np.zeros_like(self.det_ids)
+        self.rhombus = np.zeros_like(self.det_ids)
+
+    def add_wafer_info(self, aman, template_msk):
+        self.__dict__.pop("id_strs", None)
+        self.__dict__.pop("valid_ids", None)
+        if not np.all(
+            np.isin(["bandpass", "pol", "rhombus"], list(aman.det_info.wafer.keys()))
+        ):
+            logger.warning(
+                "det_info.wafer seems to be missint metadata? Safe to ignore in rset mode."
+            )
+            return
+        mapping = np.argsort(np.argsort(self.det_ids[template_msk]))
+        srt = np.argsort(aman.det_info.det_id)
+        self.bandpass[template_msk] = aman.det_info.wafer.bandpass[srt][mapping]
+        self.pol[template_msk] = aman.det_info.wafer.pol[srt][mapping]
+        self.rhombus[template_msk] = aman.det_info.wafer.rhombus[srt][mapping]
+
+    @cached_property
+    def id_strs(self):
+        return np.array([bp + "_" + pol for bp, pol in zip(self.bandpass, self.pol)])
+
+    @cached_property
+    def valid_ids(self):
+        ids = np.unique(self.id_strs)
+        valid = ~(np.char.startswith(ids, "_") * np.char.endswith(ids, "_"))
+        return ids[valid]
+
 
 @dataclass
 class FocalPlane:
     stream_id: str
+    wafer_slot: str
     det_ids: NDArray[np.str_]  # (ndet,)
     avg_fp: NDArray[np.floating]  # (ndim, ndet)
     weights: NDArray[np.floating]  # (ndet,)
@@ -121,8 +159,22 @@ class FocalPlane:
         ):
             raise ValueError("Focalplane center does not match template")
 
+    @property
+    def diff(self):
+        return self.avg_fp - self.transformed
+
+    @property
+    def isfinite(self):
+        return np.isfinite(self.diff[:, 0])
+
+    @property
+    def dist(self):
+        if self.have_gamma:
+            return np.linalg.norm(self.diff, axis=1)
+        return np.linalg.norm(self.diff[:, :2], axis=1)
+
     @classmethod
-    def empty(cls, template, stream_id, n_aman):
+    def empty(cls, template, stream_id, wafer_slot, n_aman):
         if template is None:
             raise TypeError("template must be an instance of Template, not None")
         full_fp = np.full(template.fp.shape + (n_aman,), np.nan)
@@ -137,6 +189,7 @@ class FocalPlane:
 
         fp = FocalPlane(
             stream_id,
+            wafer_slot,
             template.det_ids,
             avg_fp,
             weight,
@@ -199,7 +252,10 @@ class FocalPlane:
             f"{group}/focal_plane",
             overwrite=True,
         )
-        _add_attrs(f[f"{group}/focal_plane"], {"measured_gamma": self.have_gamma})
+        _add_attrs(
+            f[f"{group}/focal_plane"],
+            {"wafer_slot": str(self.wafer_slot), "measured_gamma": self.have_gamma},
+        )
         entry = {"dets:stream_id": self.stream_id, "dataset": f"{group}/focal_plane"}
         entry.update(db_info[1])
         db_info[0].add_entry(entry, filename=os.path.basename(f.filename), replace=True)
@@ -251,11 +307,19 @@ class FocalPlane:
         fp_full = read_dataset(group.file, f"{group.name}/focal_plane_full")
         det_ids = fp_full["dets:det_id"]
         avg_fp = np.column_stack(
-            (np.array(fp_full["xi_m"]), np.array(fp_full["eta_m"]), np.array(fp_full["gamma_m"]))
+            (
+                np.array(fp_full["xi_m"]),
+                np.array(fp_full["eta_m"]),
+                np.array(fp_full["gamma_m"]),
+            )
         )
         weights = fp_full["weights"]
         transformed = np.column_stack(
-            (np.array(fp_full["xi_t"]), np.array(fp_full["eta_t"]), np.array(fp_full["gamma_t"]))
+            (
+                np.array(fp_full["xi_t"]),
+                np.array(fp_full["eta_t"]),
+                np.array(fp_full["gamma_t"]),
+            )
         )
         center = group.attrs["template_centers"]
         center_transformed = group.attrs["fit_centers"]
@@ -265,9 +329,15 @@ class FocalPlane:
         template = None
         transform = Transform.load(group["transform"])
         transform_nocm = Transform.load(group["transform"], "_nocm")
+        if "wafer_slot" in group["focal_plane"].attrs:
+            wafer_slot = group["focal_plane"].attrs["wafer_slot"]
+        else:
+            logger.warning("No wafer slot found in this focal plane, may be old.")
+            wafer_slot = "ws?"
 
         return FocalPlane(
             stream_id,
+            wafer_slot,
             np.array(det_ids),
             avg_fp,
             np.array(weights),
@@ -329,16 +399,20 @@ class OpticsTube:
 
         return OpticsTube(name, center)
 
-    def save(self, f, db_info):
-        f.create_group(self.name)
+    def save(self, f, db_info, group="/"):
+        g = f[group]
+        g.create_group(self.name)
         _add_attrs(
-            f[self.name],
+            g[self.name],
             {"center": self.center, "center_transformed": self.center_transformed},
         )
-        self.transform.save(f, f"{self.name}/transform")
-        self.transform_fullcm.save(f, f"{self.name}/transform", "_fullcm")
+        tr_path = os.path.join(group, self.name, "transform")
+        self.transform.save(f, tr_path)
+        self.transform_fullcm.save(f, tr_path, "_fullcm")
         for focal_plane in self.focal_planes:
-            focal_plane.save(f, db_info, f"{self.name}/{focal_plane.stream_id}")
+            focal_plane.save(
+                f, db_info, os.path.join(group, self.name, focal_plane.stream_id)
+            )
 
     @classmethod
     def load(cls, group):
@@ -368,24 +442,251 @@ class Receiver:
             self.center, self.transform.affine, self.transform.shift
         )
 
-    def save(self, f, db_info):
+    def save(self, f, db_info, group="/"):
         _add_attrs(
-            f["/"],
+            f[group],
             {
                 "center": self.center,
                 "center_transformed": self.center_transformed,
                 "include_cm": self.include_cm,
             },
         )
-        self.transform.save(f, f"transform")
+        self.transform.save(f, os.path.join(group, "transform"))
         for ot in self.optics_tubes:
-            ot.save(f, db_info)
+            ot.save(f, db_info, group)
 
     @classmethod
-    def load(cls, f):
-        center = f["/"].attrs["center"]
-        include_cm = f["/"].attrs["include_cm"]
-        transform = Transform.load(f["transform"])
-        ots = [OpticsTube.load(f[grp]) for grp in f.keys() if "transform" not in grp]
+    def load(cls, f, group="/"):
+        center = f[group].attrs["center"]
+        include_cm = f[group].attrs["include_cm"]
+        transform = Transform.load(f[group]["transform"])
+        ots = [
+            OpticsTube.load(f[group][grp])
+            for grp in f[group].keys()
+            if "transform" not in grp
+        ]
 
         return Receiver(ots, center, include_cm, transform)
+
+    @classmethod
+    def load_file(cls, path):
+        with h5py.File(path, "r") as f:
+            # Check if its an old file:
+            if "transform" in f.keys():
+                return {"": cls.load(f)}
+            return {grp: cls.load(f, grp) for grp in f.keys()}
+
+    @property
+    def focal_planes(self):
+        fps = []
+        for ot in self.optics_tubes:
+            fps += ot.focal_planes
+        return fps
+
+    @property
+    def lims(self):
+        xmax = np.max([np.nanmax(fp.transformed[:, 0]) for fp in self.focal_planes])
+        xmin = np.min([np.nanmin(fp.transformed[:, 0]) for fp in self.focal_planes])
+        ymax = np.max([np.nanmax(fp.transformed[:, 1]) for fp in self.focal_planes])
+        ymin = np.min([np.nanmin(fp.transformed[:, 1]) for fp in self.focal_planes])
+        return (xmin, xmax), (ymin, ymax)
+
+
+# Plotting Functions
+def plot_ufm(focal_plane, plot_dir):
+    nominal = focal_plane.template.fp
+    measured = focal_plane.avg_fp
+    transformed = focal_plane.transformed
+    fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
+    # Plot pointing
+    ax1.scatter(
+        nominal[:, 0],
+        nominal[:, 1],
+        alpha=0.4,
+        color="blue",
+        label="nominal",
+        marker="P",
+    )
+    ax1.scatter(
+        transformed[:, 0],
+        transformed[:, 1],
+        alpha=0.4,
+        color="black",
+        label="transformed",
+        marker="X",
+    )
+    ax1.scatter(measured[:, 0], measured[:, 1], alpha=0.4, color="orange", label="fit")
+    ax1.set_xlabel("Xi (rad)")
+    ax1.set_ylabel("Eta (rad)")
+    ax1.set_aspect("equal")
+    ax1.legend()
+
+    # Histogram of differences
+    dist = focal_plane.dist[focal_plane.isfinite] * 180 * 60 * 60 / np.pi
+    dist_thresh = np.percentile(dist, 97)
+    bins = max(int(len(dist) / 20), 10)
+    ax2.hist(dist[dist < dist_thresh], bins=bins)
+    ax2.set_xlabel("Residual (arcseconds)")
+
+    fig.suptitle(f"{focal_plane.stream_id}")
+    fig.set_size_inches(2 * fig.get_size_inches())
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(
+            os.path.join(plot_dir, f"{focal_plane.stream_id}.png"), bbox_inches="tight"
+        )
+        plt.clf()
+
+
+def plot_ot(ot, plot_dir):
+    fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
+    dists = [fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi for fp in ot.focal_planes]
+    xis = [fp.transformed[fp.isfinite, 0] for fp in ot.focal_planes]
+    etas = [fp.transformed[fp.isfinite, 1] for fp in ot.focal_planes]
+
+    # Plot the radial dist
+    r = np.sqrt(np.hstack(xis) ** 2 + np.hstack(etas) ** 2)
+    dist = np.hstack(dists)
+    dist_avg, edges, _ = binned_statistic(r, dist, "median", bins=50)
+    r_bins = (edges[:-1] + edges[1:]) / 2
+    max_dist = np.max(dist)
+
+    ax1.scatter(r, dist, alpha=0.1)
+    ax1.plot(r_bins, dist_avg, color="black")
+    ax1.set_ylim((None, np.percentile(dist, 95)))
+    ax1.set_xlabel("Radius (rad)")
+    ax2.set_ylabel("Residual (arcseconds)")
+
+    # Plot a heatmap
+    cf = None
+    for dist, xi, eta in zip(dists, xis, etas):
+        cf = ax2.tricontourf(
+            xi, eta, dist, levels=20, vmin=-1 * max_dist, vmax=max_dist, cmap="coolwarm"
+        )
+    if cf is not None:
+        fig.colorbar(cf, ax=ax2, label="arcseconds")
+    ax2.set_aspect("equal")
+    ax2.set_xlabel("Xi (rad)")
+    ax2.set_ylabel("Eta (rad)")
+    fig.suptitle(f"{ot.name}")
+
+    fig.set_size_inches(2 * fig.get_size_inches())
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"{ot.name}.png"), bbox_inches="tight")
+        plt.clf()
+
+
+def plot_by_gamma(focal_plane, plot_dir):
+    fig, axs = plt.subplots(1, 3, sharey=True, constrained_layout=True)
+    dist_thresh = np.percentile(focal_plane.dist[focal_plane.isfinite], 97)
+    msk = (focal_plane.dist < dist_thresh) + focal_plane.isfinite
+    rhombi = np.unique(focal_plane.template.rhombus)
+    gammas = (focal_plane.template.fp[msk, 2] * 180 / np.pi) % 180.0
+    bins = np.linspace(0, 180, 13)
+    for i, name in enumerate(("xi", "eta", "gamma")):
+        d = focal_plane.diff[msk, i] * 180 * 60 * 60 / np.pi
+        axs[i].set_title(name)
+        if np.sum(np.isfinite(d)) == 0:
+            continue
+        medians, *_ = binned_statistic(gammas, d, statistic="median", bins=bins)
+        for rhombus in rhombi:
+            rmsk = focal_plane.template.rhombus[msk] == rhombus
+            if not (np.any(rmsk)):
+                continue
+            axs[i].scatter(gammas[rmsk], d[rmsk], alpha=0.2, label=f"Rhombus {rhombus}")
+        axs[i].scatter(np.arange(7.5, 180, 15), medians, color="black")
+        leg = axs[i].legend()
+        for lh in leg.legend_handles:
+            lh.set_alpha(1)
+    axs[0].set_ylabel("Diff (arcseconds)")
+    axs[1].set_xlabel("Nominal Gamma (deg)")
+    fig.suptitle(f"{focal_plane.stream_id} By Gamma")
+    fig.set_size_inches(2 * fig.get_size_inches())
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(
+            os.path.join(plot_dir, f"{focal_plane.stream_id}_by_gamma.png"),
+            bbox_inches="tight",
+        )
+        plt.clf()
+
+
+def plot_receiver(receiver, plot_dir):
+    max_diff = 0
+    valid_ids = []
+    for fp in receiver.focal_planes:
+        diff = np.nanpercentile(np.abs(fp.diff), 97)
+        if diff > max_diff:
+            max_diff = diff
+        valid_ids += list(fp.template.valid_ids)
+    valid_ids = np.unique(valid_ids)
+    max_diff *= 180 * 60 * 60 / np.pi
+    xlims, ylims = receiver.lims
+
+    fig, axs_all = plt.subplots(
+        4, 3, sharex="col", sharey="row", constrained_layout=True
+    )
+    axs = axs_all.flat
+    axs[0].set_title("Xi")
+    axs[1].set_title("Eta")
+    axs[2].set_title("Gamma")
+    cf = None
+    for i in range(4):
+        for j in range(3):
+            axs[3 * i + j].set_aspect("equal")
+            axs[3 * i + j].set_xlim(xlims)
+            axs[3 * i + j].set_ylim(ylims)
+        for fp in receiver.focal_planes:
+            msk = (fp.template.id_strs == valid_ids[i]) * fp.isfinite
+            if np.sum(msk) == 0:
+                continue
+            diff = fp.diff * 180 * 60 * 60 / np.pi
+            cf = axs[3 * i + 0].tricontourf(
+                fp.transformed[msk, 0],
+                fp.transformed[msk, 1],
+                diff[msk, 0],
+                levels=20,
+                vmin=-1 * max_diff,
+                vmax=max_diff,
+                cmap="coolwarm",
+            )
+            cf = axs[3 * i + 1].tricontourf(
+                fp.transformed[msk, 0],
+                fp.transformed[msk, 1],
+                diff[msk, 1],
+                levels=20,
+                vmin=-1 * max_diff,
+                vmax=max_diff,
+                cmap="coolwarm",
+            )
+            if fp.have_gamma:
+                cf = axs[3 * i + 2].tricontourf(
+                    fp.transformed[msk, 0],
+                    fp.transformed[msk, 1],
+                    diff[msk, 2],
+                    levels=20,
+                    vmin=-1 * max_diff,
+                    vmax=max_diff,
+                    cmap="coolwarm",
+                )
+        axs[3 * i + 0].set_ylabel(f"{valid_ids[i]}\nEta (rad)")
+    if cf is not None:
+        fig.colorbar(cf, ax=axs_all.ravel().tolist(), label="arcsecs")
+    axs[-3].set_xlabel("Xi (rad)")
+    axs[-2].set_xlabel("Xi (rad)")
+    axs[-1].set_xlabel("Xi (rad)")
+    fig.suptitle("Full Receiver Residuals")
+    fig.set_size_inches(2 * fig.get_size_inches())
+    if plot_dir is None:
+        plt.show()
+    else:
+        os.makedirs(plot_dir, exist_ok=True)
+        plt.savefig(os.path.join(plot_dir, f"receiver.png"), bbox_inches="tight")
+        plt.clf()

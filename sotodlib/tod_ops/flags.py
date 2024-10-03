@@ -465,6 +465,10 @@ def get_trending_flags(aman,
         timestamps = aman.timestamps
     assert len(timestamps) == signal.shape[1]
 
+    # This helps with floating point precision
+    # Not modifying inplace since we don't want to touch aman.timestamps
+    timestamps = timestamps - timestamps[0]
+
     slopes = np.zeros((len(signal), 0))
     cut = np.zeros((len(signal), 0), dtype=bool)
     samp_edges = [0]
