@@ -5,11 +5,14 @@ import importlib
 import logging
 import numpy as np
 
+from typing import Union, Dict, Tuple, List
+
 from . import metadata
 from .util import tag_substr
 from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
+
 
 class Context(odict):
     # Sets of special handlers may be registered in this class variable, then
@@ -322,7 +325,8 @@ class Context(odict):
                  check=False,
                  ignore_missing=False,
                  on_missing=None,
-                 det_info_scan=False):
+                 det_info_scan=False
+    ):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
 
