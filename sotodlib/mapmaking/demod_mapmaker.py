@@ -430,6 +430,12 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
             rather regular filter+bin mapmaking, i.e. map from obs.signal
             rather than from obs.dsT, obs.demodQ, obs.demodU.
 
+        Returns
+        -------
+        errors : list
+            List of errors from preprocess database. To be used in cleanup_mandb.
+        outputs : list
+            List of outputs from preprocess database. To be used in cleanup_mandb.
     """
 
     pre = "" if tag is None else tag + " "
