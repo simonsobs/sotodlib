@@ -98,7 +98,7 @@ def _generate_query_components_from_subdb(filepath,
     elif params_list is None:
         extra_fields = ''
     else:
-        raise InputError('Invalid input for params_list')
+        raise ValueError('Invalid input for params_list')
     
     join  = f' join {alias}.{table_name} on obs.obs_id =  {alias}.{table_name}."{obs_id_name}"'
     
@@ -115,7 +115,7 @@ def _generate_query_components_from_subdb(filepath,
     elif query_list is None:
         query = ''
     else:
-        raise InputError('Invalid input for query_list')
+        raise ValueError('Invalid input for query_list')
     
     return extra_fields, join, query
 
@@ -419,7 +419,7 @@ class ObsDb(object):
             If you do not know the parameters in the sub-database, you can view the params 
             as long as it is a ManifestDb like below::
 
-                from sotolib.core import metadata
+                from sotodlib.core import metadata
                 subdb = metadata.ManifestDb('/path/to/pwv_class.sqlite')
                 print(subdb.scheme._get_map_table_def())
         
@@ -427,7 +427,9 @@ class ObsDb(object):
         cursor = self.conn.cursor()
         
         try:
-            extra_fields_main, joins_main, query_text_main = _generate_query_components_from_tags(query_text=query_text, tags=tags)
+            extra_fields_main, joins_main, query_text_main = \
+                _generate_query_components_from_tags(query_text=query_text,
+                                                     tags=tags)
             sort_text = ''
             if sort is not None and len(sort):
                 sort_text = ' ORDER BY ' + ','.join(sort)
@@ -442,19 +444,19 @@ class ObsDb(object):
                 for i, subdb_info in enumerate(subdbs_info_list):
                     assert isinstance(subdb_info, dict)
                     if 'filepath' not in subdb_info.keys():
-                        raise InputError(f'subdb_info does not have "filepath" in keys')
+                        raise KeyError(f'subdb_info does not have "filepath" in keys')
                     filepath = subdb_info['filepath']
                     alias = f'subdb{i}'
                     aliases.append(alias)
                     attach = f"ATTACH DATABASE '{filepath}' AS '{alias}'"
                     cursor = cursor.execute(attach)            
-                    _extra_fields_sub, _join_sub, _query_sub = _generate_query_components_from_subdb(filepath=filepath, 
-                                                                                                    alias=alias,
-                                                                                                    query_list=subdb_info.get('query_list', None),
-                                                                                                    params_list=subdb_info.get('params_list', None),
-                                                                                                    table_name=subdb_info.get('table_name', None),
-                                                                                                    obs_id_name=subdb_info.get('obs_id_name', None),
-                                                                                                    )
+                    _extra_fields_sub, _join_sub, _query_sub = \
+                        _generate_query_components_from_subdb(filepath=filepath, 
+                                                              alias=alias,
+                                                              query_list=subdb_info.get('query_list', None),
+                                                              params_list=subdb_info.get('params_list', None),
+                                                              table_name=subdb_info.get('table_name', None),
+                                                              obs_id_name=subdb_info.get('obs_id_name', None),)
                     extra_fields_sub.append(_extra_fields_sub)
                     joins_sub.append(_join_sub)
                     query_text_sub.append(_query_sub)

@@ -7,7 +7,7 @@ from sotodlib.core import metadata
 import os
 import time
 
-# from ._helpers import mpi_multi
+from ._helpers import mpi_multi
 
 def get_example():
     # Create a new Db and add two columns.
@@ -87,8 +87,6 @@ class TestObsDb(unittest.TestCase):
         db = get_example()
         r0 = db.query('drift == "rising"')
         r1 = db.query('drift == "setting"')
-        print(r0, len(r0))
-        print(r1, len(r1))
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
         
@@ -115,10 +113,6 @@ class TestObsDb(unittest.TestCase):
                                          'query_list': ['pwv>=2.0'],
                                          'params_list': ['pwv']}]
                    )
-        print(r0, len(r0))
-        print(r1, len(r1))
-        print(r2, len(r2))
-        print(r3, len(r3))
         self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
                          len(db))
         self.assertTrue('pwv' in r0.keys)
@@ -151,11 +145,6 @@ class TestObsDb(unittest.TestCase):
                                          'query_list': ['jupiter:ws1 in coverage'],
                                          'params_list': ['coverage']}]
                    )
-        print(r0, len(r0))
-        print(r1, len(r1))
-        print(r2, len(r2))
-        print(r3, len(r3))
-        print(r4, len(r4))
         self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
                          len(db))
         self.assertEqual(len(r4), len(db))
