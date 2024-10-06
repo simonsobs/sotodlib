@@ -580,7 +580,7 @@ class Imprinter:
             )
             if q.count() > 0:
                 self.logger.info(
-                    f"Not ready to bind {book_id} due to unbound or "
+                    f"Not ready to register {book_id} due to unbound or "
                     "failed obs/oper books."
                 )
                 continue
@@ -1138,23 +1138,21 @@ class Imprinter:
             session = self.get_session()
         session.rollback()
 
-    def _find_incomplete(self, min_ctime, max_ctime, stream_filt=None):
+    def _find_incomplete(self, min_ctime, max_ctime, streams=None):
         """return G3tSmurf session query for incomplete observations
         """
-        if stream_filt is None:
-            streams = []
-            streams.extend(
-                *[t.get("slots") for (_,t) in self.tubes.items()]
-            )
-            stream_filt = or_(
-                *[G3tObservations.stream_id == s for s in streams]
-            )
+        
+        if streams is None:
+            streams = [x for xs in [
+                t.get('slots') for (_,t) in self.tubes.items()
+            ] for x in xs]
+
 
         session = self.get_g3tsmurf_session()
         q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp <= max_ctime,
-            stream_filt,
+            G3tObservations.stream_id.in_(streams),
             or_(
                 G3tObservations.stop == None,
                 G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
@@ -1226,9 +1224,6 @@ class Imprinter:
             streams = stream_ids
         self.logger.debug(f"Looking for observations from stream_ids {streams}")
 
-        # restrict to given stream ids (wafers)
-        stream_filt = or_(*[G3tObservations.stream_id == s for s in streams])
-
         # check data transfer finalization
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
@@ -1238,7 +1233,7 @@ class Imprinter:
         self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
-        q_incomplete = self._find_incomplete(min_ctime, max_ctime, stream_filt)
+        q_incomplete = self._find_incomplete(min_ctime, max_ctime, streams)
 
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
@@ -1275,7 +1270,7 @@ class Imprinter:
         obs_q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp < max_ctime,
-            stream_filt,
+            G3tObservations.stream_id.in_(streams),
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
             G3tObservations.obs_id.not_in(already_registered),
