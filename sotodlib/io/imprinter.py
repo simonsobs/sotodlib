@@ -498,9 +498,8 @@ class Imprinter:
 
         smurf books are registered whenever all the relevant metadata timecode
         entries have been found. stray books are registered when metadata and
-        file timecode entries exist ASSUMING all obs/oper books in that time
+        file timecode entries exist AND all obs/oper books in that time
         range have been bound successfully.
-
         """
 
         if not self.build_det:
@@ -1138,15 +1137,17 @@ class Imprinter:
             session = self.get_session()
         session.rollback()
 
+    @property
+    def all_slots(self):
+        return [x for xs in [
+            t.get('slots') for (_,t) in self.tubes.items()
+        ] for x in xs]
+
     def _find_incomplete(self, min_ctime, max_ctime, streams=None):
         """return G3tSmurf session query for incomplete observations
         """
-        
         if streams is None:
-            streams = [x for xs in [
-                t.get('slots') for (_,t) in self.tubes.items()
-            ] for x in xs]
-
+            streams = self.all_slots
 
         session = self.get_g3tsmurf_session()
         q = session.query(G3tObservations).filter(
@@ -1306,7 +1307,7 @@ class Imprinter:
                         # observations from other streams
                         q = obs_q.filter(
                             G3tObservations.stream_id != str_obs.stream_id,
-                            stream_filt,
+                            G3tObservations.stream_id.in_(streams),
                             or_(
                                 and_(
                                     G3tObservations.start <= str_obs.start,
