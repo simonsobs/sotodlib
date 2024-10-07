@@ -13,7 +13,7 @@ from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
 from .job import workflow_timer
-from .proc_noise_est import select_current_noise_model
+from .proc_noise_est import select_mapmaking_noise_model
 
 
 def setup_splits(operators):
@@ -155,7 +155,7 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
         )
         # Noise model.  If noise estimation is not enabled, and no existing noise model
         # is found, then create a fake noise model with uniform weighting.
-        noise_model = select_current_noise_model(job, otherargs, runargs, data)
+        noise_model = select_mapmaking_noise_model(job, otherargs, runargs, data)
         if noise_model is None:
             for ob in data.obs:
                 (estrate, _, _, _, _) = toast.utils.rate_from_times(
@@ -225,6 +225,11 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
             log.warning_rank(
                 "--intervalmaps overrides --obsmaps", data.comm.comm_world
             )
+        if do_obsmaps or do_intervalmaps:
+            log.debug_rank(
+                f"{data.comm.group}: Running observation or interval maps",
+                comm=data.comm.comm_world,
+            )
 
         mapmaker_name = map_op.name
         for det in all_dets:
@@ -237,10 +242,6 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                 map_op.name = f"{mapmaker_name}_{det}"
                 detectors = [det]
             if do_obsmaps or do_intervalmaps:
-                log.debug_rank(
-                    f"{data.comm.group}: Running observation or interval maps",
-                    comm=data.comm.comm_world,
-                )
                 # Map each observation separately
                 timer_obs = toast.timing.Timer()
                 timer_obs.start()
@@ -255,9 +256,14 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                         f"/ {len(data.obs)}.",
                         comm=new_comm.comm_world,
                     )
+                    # Set the observation name used in output file names.
+                    # This is the base observation name without any "demod_"
+                    # string.
+                    obs_str = obs.name.replace("demod_", "")
                     # Data object that only covers one observation
                     obs_data = data.select(obs_uid=obs.uid)
-                    map_op.output_dir = os.path.join(orig_outdir, obs.name)
+                    # Set the output directory to the session name
+                    map_op.output_dir = os.path.join(orig_outdir, obs.session.name)
                     # Replace comm_world with the group communicator
                     obs_data._comm = new_comm
                     if isinstance(map_op, so_ops.Splits):
@@ -280,20 +286,20 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                                 times, timespans=[(view.start, view.stop)]
                             )
                             binner.pixel_pointing.view = single_view
-                            map_op.name = f"{orig_name}_{obs.name}-{iview}"
+                            map_op.name = f"{orig_name}_{obs_str}-{iview}"
                             map_op.reset_pix_dist = True
                             try:
                                 map_op.apply(obs_data, detectors=detectors)
                                 log.info_rank(
                                     f"{group} : Mapped det={det} "
-                                    f"{obs.name}-{iview} / {len(views)} in",
+                                    f"{obs_str}-{iview} / {len(views)} in",
                                     comm=new_comm.comm_world,
                                     timer=timer_obs,
                                 )
                             except Exception as e:
                                 log.info_rank(
                                     f"{group} : Failed to map "
-                                    f"{obs.name}-{iview} / {len(views)} (e) in",
+                                    f"{obs_str}-{iview} / {len(views)} (e) in",
                                     comm=new_comm.comm_world,
                                     timer=timer_obs,
                                 )
@@ -301,7 +307,7 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     else:
                         # Map the observation as a whole
                         # Rename the operator with the observation suffix
-                        map_op.name = f"{orig_name}_{obs.name}"
+                        map_op.name = f"{orig_name}_{obs_str}"
                         if isinstance(map_op, so_ops.Splits):
                             # Reset the pixel distribution of the underlying
                             # mapmaker
@@ -311,10 +317,12 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                             map_op.reset_pix_dist = True
 
                     # Map this observation
+                    if obs_data.comm.world_rank == 0:
+                        print(f"DBG obsmaps:  output_dir = {map_op.output_dir}, name = {map_op.name}", flush=True)
                     map_op.apply(obs_data, detectors=detectors)
 
                     log.info_rank(
-                        f"{group} : Mapped det={det} obs={obs.name} in",
+                        f"{group} : Mapped det={det} obs={obs_str} in",
                         comm=new_comm.comm_world,
                         timer=timer_obs,
                     )
@@ -332,6 +340,8 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     f"det={det}",
                     comm=data.comm.comm_world,
                 )
+                if obs_data.comm.world_rank == 0:
+                    print(f"DBG no obsmaps:  output_dir = {map_op.output_dir}, name = {map_op.name}", flush=True)
                 map_op.apply(data, detectors=detectors)
 
 

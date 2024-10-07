@@ -282,6 +282,11 @@ class LoadContext(Operator):
 
         comm = data.comm
 
+        if self.combine_wafers:
+            msg = "Combining multiple wafers in a single observation is"
+            msg += " currently broken"
+            raise NotImplementedError(msg)
+
         if self.context is None:
             if self.context_file is None:
                 msg = "Either the context or context_file must be specified"
@@ -416,6 +421,11 @@ class LoadContext(Operator):
 
             # One process in the group loads the metadata, builds the focalplane
             # model, and broadcasts to the rest of the group.
+            #
+            # FIXME: in the case of multiple wafers per observation, each wafer
+            # reader needs to do this step, in order to pull in unique metadata
+            # that is per-wafer and merge.
+            #
             obs_meta, det_props, n_samp = self._load_metadata(
                 obs_name,
                 obs_props[obindx]["session_name"],
@@ -439,6 +449,7 @@ class LoadContext(Operator):
                 telescope,
                 n_samp,
                 fp_flags,
+                obs_meta,
             )
 
             # Read and communicate data
@@ -498,6 +509,9 @@ class LoadContext(Operator):
         det_props = None
         obs_meta = None
         n_samp = None
+
+        # FIXME: This only works if there is one wafer per observation (and
+        # hence one reader).
         if rank == 0:
             # Load metadata
             ctx = open_context(context=self.context, context_file=self.context_file)
@@ -675,7 +689,7 @@ class LoadContext(Operator):
 
     @function_timer
     def _create_observation(
-        self, obs_name, session_name, comm, telescope, n_samp, fp_flags
+        self, obs_name, session_name, comm, telescope, n_samp, fp_flags, meta
     ):
         """Create the observation.
 
@@ -689,6 +703,7 @@ class LoadContext(Operator):
             telescope (Telescope):  The Telescope for this observation.
             n_samp (int):  The number of samples in the observation.
             fp_flags (dict):  The per-detector flags to apply.
+            meta (dict):  The observation metadata to populate.
 
         Returns:
             (tuple):  The (Observation, have_pointing), where the second
@@ -809,6 +824,9 @@ class LoadContext(Operator):
             )
             ob.detdata.create(self.det_flags, dtype=np.uint8)
 
+        if meta is not None:
+            ob.update(meta)
+
         log.debug_rank(
             f"LoadContext {obs_name} allocate Observation in",
             comm=comm.comm_group,
@@ -897,7 +915,12 @@ class LoadContext(Operator):
         # populate in the observation.  Since all wafers have the same
         # ancil data (and the same field names, just with different
         # detectors), we can just do this on one process and broadcast
-        # the result
+        # the result.
+        #
+        # FIXME:  In the case of multiple wafers (and readers) per
+        # observation, every reader must parse every wafer and merge
+        # all the metadata information.
+        #
         temp_shared = None
         if ob.comm.group_rank == 0:
             first_wafer = list(axwafers.keys())[0]
