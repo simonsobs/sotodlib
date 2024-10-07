@@ -317,8 +317,6 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                             map_op.reset_pix_dist = True
 
                     # Map this observation
-                    if obs_data.comm.world_rank == 0:
-                        print(f"DBG obsmaps:  output_dir = {map_op.output_dir}, name = {map_op.name}", flush=True)
                     map_op.apply(obs_data, detectors=detectors)
 
                     log.info_rank(
@@ -340,8 +338,6 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     f"det={det}",
                     comm=data.comm.comm_world,
                 )
-                if obs_data.comm.world_rank == 0:
-                    print(f"DBG no obsmaps:  output_dir = {map_op.output_dir}, name = {map_op.name}", flush=True)
                 map_op.apply(data, detectors=detectors)
 
 

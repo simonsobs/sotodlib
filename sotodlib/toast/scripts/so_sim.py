@@ -227,7 +227,6 @@ def main():
     wrk.setup_simulate_readout_effects(operators)
     wrk.setup_save_data_hdf5(operators)
 
-    wrk.setup_deconvolve_detector_timeconstant(operators)
     wrk.setup_raw_statistics(operators)
 
     wrk.setup_filter_common_mode(operators)
