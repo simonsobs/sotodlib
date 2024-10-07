@@ -11,7 +11,7 @@ from toast.observation import default_values as defaults
 
 from .. import ops as so_ops
 from .job import workflow_timer
-from .proc_noise_est import select_current_noise_model
+from .proc_noise_est import select_raw_noise_model
 
 
 def setup_demodulate(operators):
@@ -78,11 +78,12 @@ def demodulate(job, otherargs, runargs, data):
         return data
 
     # The pre-demodulation noise model to use
-    noise_model = select_current_noise_model(job, otherargs, runargs, data)
+    noise_model = select_raw_noise_model(job, otherargs, runargs, data)
 
     # The Demodulation operator is special because it returns a
     # new TOAST data object
     job_ops.demodulate.stokes_weights = job_ops.weights_radec
+    job_ops.demodulate.hwp_angle = job_ops.weights_radec.hwp_angle
     job_ops.demodulate.noise_model = noise_model
     new_data = job_ops.demodulate.apply(data)
     log.info_rank(

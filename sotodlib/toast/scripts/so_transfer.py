@@ -52,6 +52,8 @@ pixell.fft.engine = "fftw"
 
 def reduce_input(job, otherargs, runargs, data):
     """Apply cuts and compute noise model on original data."""
+    job_ops = job.operators
+
     wrk.create_az_intervals(job, otherargs, runargs, data)
     wrk.apply_readout_filter(job, otherargs, runargs, data)
     wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
@@ -60,7 +62,13 @@ def reduce_input(job, otherargs, runargs, data):
     # Preprocess data to get flags / cuts
     wrk.preprocess(job, otherargs, runargs, data)
 
-    data = wrk.demodulate(job, otherargs, runargs, data)
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
+    wrk.noise_estimation(job, otherargs, runargs, data)
+
+    if job_ops.demodulate.enabled:
+        save_weights = job_ops.weights_radec
+        data = wrk.demodulate(job, otherargs, runargs, data)
+        job_ops.weights_radec = save_weights
 
     wrk.filter_ground(job, otherargs, runargs, data)
     wrk.filter_common_mode(job, otherargs, runargs, data)
@@ -107,6 +115,7 @@ def reduce_realization(job, otherargs, runargs, data):
     """Apply data reduction to a single realization."""
     log = toast.utils.Logger.get()
     job_ops = job.operators
+    save_weights = job_ops.weights_radec
 
     cleanup = False
     if otherargs.simulate_demodulated:
@@ -140,6 +149,8 @@ def reduce_realization(job, otherargs, runargs, data):
         processed_data.close()
     del processed_data
 
+    job_ops.weights_radec = save_weights
+
 
 def signal_realizations(job, otherargs, runargs, data):
     """Run minimal reduction on signal realizations for transfer functions."""
@@ -164,6 +175,13 @@ def signal_realizations(job, otherargs, runargs, data):
             comm=data.comm.comm_world,
         )
         map_binner.full_pointing = True
+
+    if job_ops.demodulate.enabled and job_ops.demodulate.purge:
+        log.warning_rank(
+            "Demodulation configured to purge original data.  Overriding.",
+            comm=data.comm.comm_world,
+        )
+        job_ops.demodulate.purge = False
 
     # Get the file for each realization
     realizations = dict()
@@ -243,7 +261,7 @@ def main():
     env = toast.utils.Environment.get()
     log = toast.utils.Logger.get()
     gt = toast.timing.GlobalTimers.get()
-    gt.start("toast_so_sat (total)")
+    gt.start("toast_so_transfer (total)")
     timer = toast.timing.Timer()
     timer.start()
 

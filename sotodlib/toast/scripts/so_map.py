@@ -67,6 +67,9 @@ def reduce_data(job, otherargs, runargs, data):
     # Now apply preprocessing to good detectors
     wrk.raw_statistics(job, otherargs, runargs, data)
 
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
+    wrk.noise_estimation(job, otherargs, runargs, data)
+
     data = wrk.demodulate(job, otherargs, runargs, data)
 
     wrk.filter_ground(job, otherargs, runargs, data)
