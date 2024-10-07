@@ -137,8 +137,8 @@ def diff_noise_estimation(job, otherargs, runargs, data):
         job_ops.diff_noise_estim.apply(data)
 
 
-def select_current_noise_model(job, otherargs, runargs, data):
-    """Select the current active noise model.
+def select_mapmaking_noise_model(job, otherargs, runargs, data):
+    """Select the noise model for mapmaking.
 
     Args:
         job (namespace):  The configured operators and templates for this job.
@@ -167,6 +167,63 @@ def select_current_noise_model(job, otherargs, runargs, data):
         log.info_rank("  Using demodulated noise model", comm=data.comm.comm_world)
         noise_model = job_ops.demod_noise_estim_fit.out_model
     elif hasattr(job_ops, "diff_noise_estim") and job_ops.diff_noise_estim.enabled:
+        # We have a signal-diff noise estimate
+        log.info_rank("  Using signal diff noise model", comm=data.comm.comm_world)
+        noise_model = job_ops.diff_noise_estim.noise_model
+    elif (
+        hasattr(job_ops, "noise_estim")
+        and job_ops.noise_estim.enabled
+        and job_ops.noise_estim_fit.enabled
+    ):
+        # We have a noise estimate
+        log.info_rank("  Using estimated noise model", comm=data.comm.comm_world)
+        noise_model = job_ops.noise_estim_fit.out_model
+    else:
+        have_noise = True
+        for ob in data.obs:
+            if "noise_model" not in ob:
+                have_noise = False
+        if have_noise:
+            log.info_rank(
+                "  Using noise model from data files", comm=data.comm.comm_world
+            )
+            noise_model = "noise_model"
+        if not have_noise:
+            # No noise estimates and no external noise models in the data.
+            # Do we have the simulated elevation-weighted nominal model?
+            have_noise = True
+            for ob in data.obs:
+                if "elevation_model" not in ob:
+                    have_noise = False
+            if have_noise:
+                log.info_rank(
+                    "  Using nominal synthetic noise model", comm=data.comm.comm_world
+                )
+                noise_model = "elevation_model"
+    return noise_model
+
+
+def select_raw_noise_model(job, otherargs, runargs, data):
+    """Select the noise model prior to demodulation.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        (str):  The name of the noise model, or None if a model has
+            not yet been created.
+
+    """
+    log = toast.utils.Logger.get()
+
+    # Configured operators for this job
+    job_ops = job.operators
+
+    noise_model = None
+    if hasattr(job_ops, "diff_noise_estim") and job_ops.diff_noise_estim.enabled:
         # We have a signal-diff noise estimate
         log.info_rank("  Using signal diff noise model", comm=data.comm.comm_world)
         noise_model = job_ops.diff_noise_estim.noise_model
