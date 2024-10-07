@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.stats as stats
 import os
 import matplotlib
 matplotlib.use("Agg")
@@ -7,7 +8,7 @@ from venn import venn
 
 from sotodlib import hwp
 import sotodlib.core as core
-from sotodlib.core.flagman import has_all_cut
+from sotodlib.core.flagman import has_all_cut, has_any_cuts, count_cuts, sparse_to_ranges_matrix
 
 def plot_det_bias_flags(aman, det_bias_flags, rfrac_range=(0.1, 0.7),
                         psat_range=(0, 15), filename="./bias_cuts_venn.png"):
@@ -246,7 +247,6 @@ def plot_sso_footprint(aman, planet_aman, sso, wafer_offsets=None, focal_plane=N
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
 
-
 def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None, plot_ds_factor=20):
     """Subplot of pca bounds as well as the good and bad detector
     timestreams with 0th mode weight overplotted
@@ -336,6 +336,222 @@ def plot_pcabounds(aman, pca_aman, filename='./pca.png', signal=None, band=None,
 
     plt.suptitle(f'{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{band}')
     plt.tight_layout()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
+
+def plot_trending_flags(aman, trend_aman, filename='./trending_flags.png'):
+    """
+    Function for plotting trending flags.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    trend_aman : AxisManager
+        Output trend_aman of tod_ops.flags.get_trending_flags with full_output=True.
+    filename : str
+        Full filename with direct path to plot output directory.
+    """
+    fig, axs = plt.subplots(1, 2, figsize=(5*2, 5*1))
+
+    tdets = has_any_cuts(trend_aman.trend_flags)
+    
+    keep = np.abs(trend_aman.trends[~tdets, :]).T
+    for i in range(keep.shape[1]):
+        if i == 0:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], keep[:, i], color = 'C0', 
+                        alpha=0.75, marker='o', markersize=0.75, linestyle='None', label='Keep')
+        else:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], keep[:, i], color = 'C0', 
+                        alpha=0.75, marker='o', markersize=0.75, linestyle='None')
+    flagged = np.abs(trend_aman.trends[tdets, :]).T
+    for i in range(flagged.shape[1]):
+        if i == 0:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], flagged[:, i], color = 'C1', 
+                        marker='o', markersize=1.5, linestyle='None', label='Flagged')
+        else:
+            axs[0].plot(aman.timestamps[trend_aman.samp_start], flagged[:, i], color = 'C1', 
+                        marker='o', markersize=1.5, linestyle='None')
+    axs[0].set_yscale('log')
+    axs[0].set_xlabel('Timestamp')
+    axs[0].set_ylabel('Trend Slope')
+    axs[0].set_title('Trending Slopes of Dets')
+    axs[0].legend()
+
+    axs[1].plot(aman.timestamps[::100], aman.signal[tdets][:,::100].T, color = 'C0', alpha = 0.5)
+    axs[1].set_xlabel('Timestamp')
+    axs[1].set_ylabel('Signal [Readout Radians]')
+    axs[1].set_title(f'Trending Channels ({len(np.where(tdets == True)[0])} dets)')
+
+    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\nTrending Flags (Total cut: {len(np.where(tdets == True)[0])}/{len(aman.dets.vals)})")
+    plt.tight_layout()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
+
+def plot_signal_diff(aman, flag_aman, flag_type="glitches", flag_threshold=10, plot_ds_factor=50, filename="./glitch_signal_diff.png"):
+    """
+    Function for plotting the difference in signal before and after cuts from either glitches or jumps.
+    
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    flag_aman : AxisManager
+        Output jump_aman of tod_ops.jumps.jumps_aman or
+        glitch_aman of tod_ops.flags.get_glitch_flags with full_output=True.
+    flag_type : str
+        Flag type to plot. Options: ["glitches, "jumps"]. Default is "glitches"
+    flag_threshold : int
+        Threshold to cut dets. Equivalent to "max_n_glitch" and "max_n_jumps".
+    plot_ds_factor : int
+        Factor to downsample signal plots. Default is 50.
+    filename : str
+        Full filename with direct path to plot output directory.
+    """
+    if flag_type == "glitches":
+        flags = flag_aman.glitch_flags
+        plot_name = f"Glitch Flags Signal Diff (Every {plot_ds_factor} dets)"
+    elif flag_type == "jumps":
+        flags = flag_aman.jump_flag
+        plot_name = f"Jump Flags Signal Diff (Every {plot_ds_factor} dets)"
+    else:
+        raise ValueError("Flag type not recognized. Must be 'glitches' or 'jumps'")
+    
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    ax = axes.flatten()
+    
+    ax[0].plot(aman.timestamps[::plot_ds_factor], aman.signal[:,::plot_ds_factor].T, color='tab:blue', alpha=0.3)
+    ax[0].set_xlabel("Timestamp")
+    ax[0].set_ylabel("Signal [Readout Radians]")
+    ax[0].set_title("Before")
+    
+    if flag_type == "glitches":
+        flags = sparse_to_ranges_matrix(flag_aman.glitch_detection > flag_threshold)
+    n_cut = count_cuts(flags)
+    keep = n_cut <= flag_threshold
+    flags_removed = aman.restrict("dets", aman.dets.vals[keep], in_place=False)
+
+    ax[1].plot(flags_removed.timestamps[::plot_ds_factor], flags_removed.signal[:,::plot_ds_factor].T, color='tab:blue', alpha=0.3)
+    ax[1].set_xlabel("Timestamp")
+    ax[1].set_ylabel("Signal [Readout Radians]")
+    ax[1].set_title("After")
+    
+    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{plot_name} (Total cut: {len(np.where(~keep)[0])}/{len(aman.dets.vals)})")
+    plt.subplots_adjust(top=0.70, bottom=0.15)
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
+
+def plot_flag_stats(aman, flag_aman, flag_type="glitches", N_bins=30, filename="./glitch_stats.png"):
+    """
+    Function for plotting the glitches or jumps flags/cut statistics using the built in stats functions
+    in the RangesMatrices class.
+    Args:
+    -----
+    aman : AxisManager
+        Input axis manager.
+    flag_aman : AxisManager
+        Output jump_aman of tod_ops.jumps.jumps_aman or
+        glitch_aman of tod_ops.flags.get_glitch_flags with full_output=True.
+    flag_type : str
+        Flag type to plot. Options: ["glitches, "jumps"]. Default is "glitches"
+    N_bins (int): Number of bins in the histogram.
+    filename : str
+        Full filename with direct path to plot output directory.
+    """
+    if flag_type == "glitches":
+        flags = flag_aman.glitch_flags
+        plot_name = "Glitch Stats"
+    elif flag_type == "jumps":
+        flags = flag_aman.jump_flag
+        plot_name = "Jumps Stats"
+    else:
+        raise ValueError("Flag type not recognized. Must be 'glitches' or 'jumps'")
+    
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    ax = axes.flatten()
+    frac_samp_glitches = (
+        100 * np.asarray(flags.get_stats()["samples"]) / aman.samps.count
+    )
+    glitchlog = np.log10(frac_samp_glitches[frac_samp_glitches > 0])
+    binmin = int(np.floor(np.min(glitchlog)))
+    binmax = int(np.ceil(np.max(glitchlog)))
+    _ = ax[0].hist(
+        frac_samp_glitches, bins=np.logspace(binmin, binmax, N_bins), label="_nolegend_"
+    )
+    medsamps = np.median(frac_samp_glitches)
+    ax[0].axvline(medsamps, color="C1", ls=":", lw=2, label=f"Median: {medsamps:.2e}%")
+    meansamps = np.mean(frac_samp_glitches)
+    ax[0].axvline(meansamps, color="C2", ls=":", lw=2, label=f"Mean: {meansamps:.2e}%")
+    modesamps = stats.mode(frac_samp_glitches, keepdims=True)
+    ax[0].axvline(
+        modesamps[0][0],
+        color="C3",
+        ls=":",
+        lw=2,
+        label=f"Mode: {modesamps[0][0]:.2e}%, Counts: {modesamps[1][0]}",
+    )
+    stdsamps = np.std(frac_samp_glitches)
+    ax[0].axvspan(
+        meansamps - stdsamps,
+        meansamps + stdsamps,
+        color="wheat",
+        alpha=0.2,
+        label=f"$\sigma$: {stdsamps:.2e}%",
+    )
+    ax[0].legend()
+    ax[0].set_xlim(10**binmin, 10**binmax)
+    ax[0].set_xscale("log")
+    ax[0].set_xlabel("Fraction of Samples Flagged\nper Detector [%]", fontsize=16)
+    ax[0].set_ylabel("Counts", fontsize=16)
+    ax[0].set_title(
+        "Samples Flagged Stats\n$N_{\mathrm{dets}}$ = "
+        + f"{aman.dets.count}"
+        + " and $N_{\mathrm{samps}}$ = "
+        + f"{aman.samps.count}"
+    )
+
+    interval_glitches = np.asarray(flags.get_stats()["intervals"])
+    binlinmax = np.quantile(interval_glitches, 0.98)
+    _ = ax[1].hist(np.clip(interval_glitches, 0, binlinmax), bins=np.linspace(0, binlinmax, N_bins))
+    medints = np.median(interval_glitches)
+    ax[1].axvline(
+        medints, color="C1", ls=":", lw=2, label=f"Median: {medints:.2e} intervals"
+    )
+    meanints = np.mean(interval_glitches)
+    ax[1].axvline(
+        meanints, color="C2", ls=":", lw=2, label=f"Mean: {meanints:.2e} intervals"
+    )
+    modeints = stats.mode(interval_glitches, keepdims=True)
+    ax[1].axvline(
+        modeints[0][0],
+        color="C3",
+        ls=":",
+        lw=2,
+        label=f"Mode: {modeints[0][0]:.2e} intervals, Counts: {modeints[1][0]}",
+    )
+    stdints = np.std(interval_glitches)
+    ax[1].axvspan(
+        meanints - stdints,
+        meanints + stdints,
+        color="wheat",
+        alpha=0.2,
+        label=f"$\sigma$: {stdints:.2e} intervals",
+    )
+
+    ax[1].legend()
+    ax[1].set_xlim(-1, binlinmax)
+    ax[1].set_xlabel("Number of Flag Intervals\nper Detector", fontsize=16)
+    ax[1].set_ylabel("Counts", fontsize=16)
+    ax[1].set_title(
+        "Ranges Flag Manager Stats\n$N_{\mathrm{dets}}$ with $\geq$ 1 interval = "
+        + f"{len(interval_glitches[interval_glitches > 0])}/{aman.dets.count}\n(98th quantile bin max)"
+    )
+    
+    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min\n{plot_name}")
+    plt.subplots_adjust(top=0.70, bottom=0.15)
     head_tail = os.path.split(filename)
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)

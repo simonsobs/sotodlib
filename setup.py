@@ -70,6 +70,7 @@ setup_opts["extras_require"] = {
         "influxdb",
         "venn",
         "sodetlib @ git+https://github.com/simonsobs/sodetlib",
+        "let-me-scroll-it",
     ],
     "tests": [
         "socs",
