@@ -5,14 +5,19 @@ DemodSignalMap creates a signal you want to solve for, over which
 you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
-__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap']
+__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap', 'DemodSignalMapHealpix']
 import numpy as np
 from pixell import enmap, utils, tilemap, bunch
 import so3g.proj
 
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
+from .utilities import import_optional, get_flags, process_detweight_str
 from .noise_model import NmatWhite
+from types import SimpleNamespace
+
+hp = import_optional('healpy')
+h5py = import_optional('h5py')
 
 class DemodMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, comps='TQU', singlestream=False):
@@ -62,7 +67,7 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None, det_weights='ivar', qp_kwargs={}):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -106,7 +111,7 @@ class DemodMapmaker:
                 raise RuntimeError(msg)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels)
+            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels, det_weights=det_weights, qp_kwargs=qp_kwargs)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -195,6 +200,7 @@ class DemodSignalMap(DemodSignal):
         self.data  = {}
         self.Nsplits = Nsplits
         self.singlestream = singlestream
+        self.wrapper = lambda x : x
         ncomp      = len(comps)
         shape      = tuple(shape[-2:])
         if tiled:
@@ -207,7 +213,7 @@ class DemodSignalMap(DemodSignal):
             self.div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, det_weights='ivar', qp_kwargs={}):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -222,58 +228,21 @@ class DemodSignalMap(DemodSignal):
                     rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
                 else: rot = None
                 if split_labels is None:
+                    flagnames = ['glitch_flags']
                     # this is the case with no splits
-                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=obs.flags.glitch_flags, hwp=True)
                 else:
-                    # this is the case where we are processing a split. We need to figure out what type of split it is (detector, samples), build the RangesMatrix mask and create the pmap.
-                    if split_labels[n_split] in ['det_left','det_right','det_in','det_out','det_upper','det_lower']:
-                        # then we are in a detector fixed in time split.
-                        cuts = obs.flags.glitch_flags + obs.det_flags[split_labels[n_split]]
-                    elif split_labels[n_split] == 'scan_left':
-                        cuts = obs.flags.glitch_flags + obs.flags.left_scan
-                    elif split_labels[n_split] == 'scan_right':
-                        cuts = obs.flags.glitch_flags + obs.flags.right_scan
-                    pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
+                    flagnames = ['glitch_flags', split_labels[n_split]]
+                cuts = get_flags(obs, flagnames)
+                threads='domdir'
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, pix_scheme="rectpix", qp_kwargs=qp_kwargs)
             else:
                 pmap_local = pmap
-                    
-            # Build the RHS for this observation
-            obs_rhs = pmap_local.zeros() # this is the final RHS, we will fill it at the end
-            
+
+            det_weightsT, det_weightsQU = process_detweight_str(det_weights, nmat)
             if not(self.singlestream):
-                obs_rhs_T = pmap_local.to_map(tod=obs, signal=obs.dsT, comps='T', det_weights=2*nmat.ivar)
-                
-                obs_rhs_demodQ = pmap_local.to_map(tod=obs, signal=obs.demodQ, comps='QU', det_weights=nmat.ivar)
-                obs_rhs_demodU = pmap_local.to_map(tod=obs, signal=obs.demodU, comps='QU', det_weights=nmat.ivar)
-                obs_rhs_demodQU = pmap_local.zeros(super_shape=(2), comps='QU',)
-                
-                obs_rhs_demodQU[0][:] = obs_rhs_demodQ[0] - obs_rhs_demodU[1]
-                obs_rhs_demodQU[1][:] = obs_rhs_demodQ[1] + obs_rhs_demodU[0]
-                del obs_rhs_demodQ, obs_rhs_demodU
-                
-                # we write into the obs_rhs. 
-                obs_rhs[0] = obs_rhs_T[0]
-                obs_rhs[1] = obs_rhs_demodQU[0]
-                obs_rhs[2] = obs_rhs_demodQU[1]
-                del obs_rhs_demodQU, obs_rhs_T
-                                
-                obs_div    = pmap_local.zeros(super_shape=(self.ncomp, self.ncomp))
-                # Build the per-pixel inverse covmat for this observation
-                wT = pmap_local.to_weights(obs, signal=obs.dsT, comps='T', det_weights=2*nmat.ivar,)
-                wQU = pmap_local.to_weights(obs, signal=obs.demodQ, comps='T', det_weights=nmat.ivar,)
-                obs_div[0,0] = wT
-                obs_div[1,1] = wQU
-                obs_div[2,2] = wQU
-                # Build hitcount
-                Nd[0,:] = 1
-                obs_hits = pmap_local.to_map(signal=Nd[0],)
+                obs_rhs, obs_div, obs_hits = project_all_demod(pmap_local, obs.dsT, obs.demodQ, obs.demodU, det_weightsT, det_weightsQU, self.ncomp, self.wrapper)
             else:
-                pmap_local.to_map(dest=obs_rhs, signal=Nd, comps='TQU')
-                obs_div    = pmap_local.zeros(super_shape=(self.ncomp,self.ncomp))
-                pmap_local.to_weights(dest=obs_div, signal=Nd, comps='TQU')
-                Nd[:] = 1
-                obs_hits = pmap_local.to_map(signal=Nd,)
-                
+                obs_rhs, obs_div, obs_hits = project_all_single(pmap_local, Nd, det_weightsT, self.ncomp, self.wrapper)
             # Update our full rhs and div. This works for both plain and distributed maps
             self.rhs[n_split] = self.rhs[n_split].insert(obs_rhs, op=np.ndarray.__iadd__)
             self.div[n_split] = self.div[n_split].insert(obs_div, op=np.ndarray.__iadd__)
@@ -320,3 +289,138 @@ class DemodSignalMap(DemodSignal):
             if self.comm is None or self.comm.rank == 0:
                 enmap.write_map(oname, m)
         return oname
+
+class DemodSignalMapHealpix(DemodSignal):
+    def __init__(self, nside, nside_tile=None, comm=None, comps="TQU", name="sky", ofmt="{name}", output=True,
+            ext="fits.gz", dtype=np.float32, Nsplits=1, singlestream=False):
+        DemodSignal.__init__(self, name, ofmt, output, ext)
+        self.comm  = comm
+        self.comps = comps
+        self.dtype = dtype
+        self.tiled = (nside_tile is not None)
+        self.data  = {}
+        self.Nsplits = Nsplits
+        self.singlestream = singlestream
+        ncomp      = len(comps)
+        ordering = 'NEST' # Only NEST allowed for tiled maps
+        self.hp_geom = SimpleNamespace(nside=nside, nside_tile=nside_tile, ordering=ordering)
+        npix = 12 * nside**2
+        self.rhs = np.zeros((Nsplits, ncomp, npix), dtype=dtype)
+        self.div = np.zeros((Nsplits, ncomp, ncomp, npix), dtype=dtype)
+        self.hits = np.zeros((Nsplits, npix), dtype=dtype)
+        if self.tiled:
+            self.wrapper = coords.healpix_utils.untile_healpix
+        else:
+            self.wrapper = lambda x:x
+
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, det_weights='ivar', qp_kwargs={}):
+        for n_split in range(self.Nsplits):
+            if pmap is None:
+                # Build the local geometry and pointing matrix for this observation
+                # we handle cuts here through obs.flags
+                if split_labels is None:
+                    # this is the case with no splits
+                    flagnames = ['glitch_flags'] # None
+                else:
+                    flagnames = ['glitch_flags', split_labels[n_split]]
+                cuts = get_flags(obs, flagnames)
+                threads = ["tiles", "simple"][self.hp_geom.nside_tile is None] # 'simple' is likely to perform very poorly but no other method implemented for untiled healpix
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.hp_geom, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, pix_scheme="healpix", qp_kwargs=qp_kwargs)
+            else:
+                pmap_local = pmap
+
+            det_weightsT, det_weightsQU = process_detweight_str(det_weights, nmat)
+            # Build the RHS for this observation
+            if not(self.singlestream):
+                obs_rhs, obs_div, obs_hits = project_all_demod(pmap_local, obs.dsT, obs.demodQ, obs.demodU, det_weightsT, det_weightsQU, self.ncomp, self.wrapper)
+            else:
+                obs_rhs, obs_div, obs_hits = project_all_single(pmap_local, Nd, det_weightsT, self.ncomp, self.wrapper) # Should there be det_weights here?
+
+            # Update our full rhs and div. This works for both plain and distributed maps
+            self.rhs[n_split] = obs_rhs
+            self.div[n_split] = obs_div
+            self.hits[n_split] = obs_hits[0]
+            # Save the per-obs things we need. Just the pointing matrix in our case.
+            # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
+            self.data[(id,n_split)] = bunch.Bunch(pmap=pmap_local)
+            self.ready = True
+        del Nd ## You can prob get rid of Nd entirely; keeping for compatibility
+
+    def prepare(self):
+        ## For now need this method for compatibility
+        ## In the future may support handling of partial maps through a scheme similar to pixell tilemap
+        return
+
+    @property
+    def ncomp(self): return len(self.comps)
+
+    def write(self, prefix, tag, m, write_partial=False):
+        if not self.output: return
+        assert (self.comm is None or self.comm.rank == 0)
+        oname = self.ofmt.format(name=self.name)
+        oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
+        if write_partial and self.ext not in ['fits', 'fits.gz']:
+            raise NotImplementedError("write_partial only supported for fits")
+
+        if self.ext in ["fits", "fits.gz"]:
+            if hp is None:
+                raise ValueError("Cannot save healpix map as fits; healpy could not be imported. Install healpy or save as .npy or .h5")
+            if m.ndim > 2:
+                m = np.reshape(m, (np.product(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
+            hp.write_map(oname, m.view(self.dtype), nest=(self.hp_geom.ordering=='NEST'), partial=write_partial, overwrite=True) ## TODO Replace hard-coded nest
+        elif self.ext == "npy":
+            np.save(oname, m.view(self.dtype))
+        elif self.ext in ['h5', 'hdf5']:
+            if h5py is None:
+                raise ValueError("Cannot save healpix map as hdf5; h5py could not be imported. Install h5py or save as .npy or .fits")
+            with h5py.File(oname, 'w') as f:
+                dset = f.create_dataset("data", m.shape, dtype=self.dtype, data=m)
+        else:
+            raise ValueError(f"Unknown extension {self.ext}")
+
+def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weightsQU, wrapper=lambda x:x):
+    zeros = lambda *args, **kwargs : wrapper(pmap.zeros(*args, **kwargs))
+    to_map = lambda *args, **kwargs : wrapper(pmap.to_map(*args, **kwargs))
+
+    rhs = zeros()
+    rhs_T = to_map(signal=signalT, comps='T', det_weights=det_weightsT)
+    rhs_demodQ = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
+    rhs_demodU = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
+    rhs_demodQU = zeros(super_shape=(2), comps='QU',)
+
+    rhs_demodQU[0][:] = rhs_demodQ[0] - rhs_demodU[1]
+    rhs_demodQU[1][:] = rhs_demodQ[1] + rhs_demodU[0]
+    del rhs_demodQ, rhs_demodU
+
+    # we write into the rhs.
+    rhs[0] = rhs_T[0]
+    rhs[1] = rhs_demodQU[0]
+    rhs[2] = rhs_demodQU[1]
+    return rhs
+
+def project_div_demod(pmap, det_weightsT, det_weightsQU, ncomp, wrapper=lambda x:x):
+    zeros = lambda *args, **kwargs : wrapper(pmap.zeros(*args, **kwargs))
+    to_weights = lambda *args, **kwargs : wrapper(pmap.to_weights(*args, **kwargs))
+
+    div = zeros(super_shape=(ncomp, ncomp))
+    # Build the per-pixel inverse covmat for this observation
+    wT = to_weights(comps='T', det_weights=det_weightsT)
+    wQU = to_weights(comps='T', det_weights=det_weightsQU)
+    div[0,0] = wT
+    div[1,1] = wQU
+    div[2,2] = wQU
+    return div
+
+def project_all_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weightsQU, ncomp, wrapper=lambda x:x):
+    rhs =  project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weightsQU, wrapper)
+    div = project_div_demod(pmap, det_weightsT, det_weightsQU, ncomp, wrapper)
+    hits = wrapper(pmap.to_map(signal=np.ones_like(signalT))) ## Note hits is *not* weighted by det_weights
+    return rhs, div, hits
+
+def project_all_single(pmap, Nd, det_weights, ncomp, wrapper=lambda x:x):
+    rhs = wrapper(pmap.to_map(signal=Nd, comps='TQU', det_weights=det_weights))
+    div = pmap.zeros(super_shape=(ncomp, ncomp))
+    pmap.to_weights(dest=div, comps='TQU', det_weights=det_weights)
+    div = wrapper(div)
+    hits = wrapper(pmap.to_map(np.ones_like(Nd)))
+    return rhs, div, hits

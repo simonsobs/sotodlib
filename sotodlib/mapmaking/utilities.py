@@ -1,6 +1,7 @@
 import numpy as np
 from pixell import enmap, utils, fft, tilemap, resample
 import so3g
+import importlib
 
 from .. import core
 from .. import tod_ops
@@ -525,3 +526,51 @@ def downsample_obs(obs, down):
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
+
+def process_detweight_str(det_weights, nmat=None):
+    """Parse strings for some default detector weight options"""
+    if type(det_weights) is str:
+        if det_weights == 'ivar':
+            if nmat is None:
+                raise ValueError("need noise matrix to use ivar detweights")
+            return 2*nmat.ivar, nmat.ivar
+        elif det_weights == 'unity':
+            return None, None # Might be more robust to use explicit ones but downstream default is 1 so this should work
+        else:
+            raise ValueError(f"det_weight string {det_weights} not recognized; should be 'ivar' or 'unity'")
+    elif type(det_weights) in [tuple, list]:
+        if len(det_weights) not in [1, 2]:
+            raise ValueError(f"Expected len 1 or 2 tuple/list of det_weights. Got len {len(det_weights)}.")
+        return det_weights
+    else:
+        return det_weights, det_weights # Assume it's array-like det_weights (or None) and return two copies, (T, QU)
+
+def get_flags(obs, flagnames):
+    """Parse detector-set splits"""
+    cuts_out = None
+    if flagnames is None:
+        return so3g.proj.RangesMatrix.zeros(obs.shape)
+    det_splits = ['det_left','det_right','det_in','det_out','det_upper','det_lower']
+    for flagname in flagnames:
+        if flagname in det_splits:
+            cuts = obs.det_flags[flagname]
+        elif flagname == 'scan_left':
+            cuts = obs.flags.left_scan
+        elif flagname == 'scan_right':
+            cuts = obs.flags.right_scan
+        else:
+            cuts = getattr(obs.flags, flagname) # obs.flags.flagname
+
+        ## Add to the output matrix
+        if cuts_out is None:
+            cuts_out = cuts
+        else:
+            cuts_out += cuts
+    return cuts_out
+
+def import_optional(module_name):
+    try:
+        module = importlib.import_module(module_name)
+        return module
+    except:
+        return None
