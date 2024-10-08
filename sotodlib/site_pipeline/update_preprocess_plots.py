@@ -14,50 +14,6 @@ from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
 
-def _get_preprocess_context(configs, context=None):
-    if type(configs) == str:
-        configs = yaml.safe_load(open(configs, "r"))
-    
-    if context is None:
-        context = core.Context(configs["context_file"])
-        
-    if type(context) == str:
-        context = core.Context(context)
-    
-    # if context doesn't have the preprocess archive it in add it
-    # allows us to use same context before and after calculations
-    found=False
-    if context.get("metadata") is None:
-        context["metadata"] = []
-
-    for key in context.get("metadata"):
-        if key.get("unpack") == "preprocess":
-            found=True
-            break
-    if not found:
-        context["metadata"].append( 
-            {
-                "db" : configs["archive"]["index"],
-                "unpack" : "preprocess"
-            }
-        )
-    return configs, context
-
-def _get_groups(obs_id, configs, context):
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    for i, gb in enumerate(group_by):
-        if gb.startswith('dets:'):
-            group_by[i] = gb.split(':',1)[1]
-
-        if (gb == 'detset') and (len(group_by) == 1):
-            groups = context.obsfiledb.get_detsets(obs_id)
-            return group_by, [[g] for g in groups]
-        
-    det_info = context.get_det_info(obs_id)
-    rs = det_info.subset(keys=group_by).distinct()
-    groups = [[b for a,b in r.items()] for r in rs]
-    return group_by, groups
-
 def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
     """ Loads the saved information from the preprocessing pipeline and runs the
     plotting section of the pipeline. 
@@ -74,7 +30,7 @@ def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -181,7 +137,17 @@ def main(
         planet_obs: bool = False,
         verbosity: Optional[int] = None,
  ):
-    configs, context = _get_preprocess_context(configs)
+    """The intended use case of this script is: if preprocessing has been previously
+    run on a set of observations but plotting was not enabled during that run. Now,
+    we re-run preprocessing on those observations to produce the plots, without having
+    to fully re-run all the calc steps. Provide the preprocess config file that was
+    initially used, this time enabling plotting in the pipeline where necessary. The
+    config should point to the existing database with the preprocess data. A query
+    should be provided similar to preprocess_tod to define the obs you want to run
+    plotting on.
+
+    """
+    configs, context = sp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     if (min_ctime is None) and (update_delay is not None):
@@ -220,18 +186,15 @@ def main(
     run_list = []
 
     if not os.path.exists(configs['archive']['index']):
-        #don't run if database doesn't exist
-        logger.warning(f"No database found at {configs['archive']['index']}.")
+        # don't run if database doesn't exist
+        raise Exception(f"No database found at {configs['archive']['index']}.")
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = _get_groups(obs["obs_id"], configs, context)
+            group_by, groups = sp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 logger.warning(f"Obs_id {obs['obs_id']} not found in database.")
-            # elif len(x) != len(groups):
-            #     [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-            #     run_list.append( (obs, groups) )
             else:
                 run_list.append( (obs, None) )
 

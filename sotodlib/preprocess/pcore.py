@@ -434,7 +434,7 @@ class Pipeline(list):
             proc_aman = core.AxisManager( aman.dets, aman.samps)
             full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
-            run_plot = False
+            update_plot = False
         else:
             if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
                 self.logger.warning("proc_aman has different detectors than aman. Cutting aman to match")
@@ -443,10 +443,6 @@ class Pipeline(list):
                 proc_aman.restrict('dets', det_list)
             full = proc_aman.copy()
             run_calc = False
-            if update_plot:
-                run_plot = True
-            else:
-                run_plot = False
         
         success = 'end'
         for step, process in enumerate(self):
@@ -458,7 +454,7 @@ class Pipeline(list):
                 process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full, self.wrap_valid)
-            if run_plot:
+            if update_plot:
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
             if select:
                 process.select(aman, proc_aman)
