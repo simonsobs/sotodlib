@@ -5,6 +5,7 @@ from pixell import enmap, tilemap
 
 from .helpers import _get_csl, _valid_arg, _not_both
 from . import helpers
+from . import healpix_utils as hp_utils
 
 import logging
 logger = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None, interpol=None):
+                 cuts=None, threads=None, det_weights=None, interpol=None, pix_scheme=None):
         self.sight = sight
         self.fp = fp
         self.geom = wrap_geom(geom)
@@ -133,13 +134,19 @@ class P:
         self.active_tiles = None
         self.det_weights = det_weights
         self.interpol = interpol
+        self.pix_scheme = check_pix_scheme(pix_scheme, self.geom)
+
+        if self.pix_scheme == "healpix" and (self.geom.nside_tile is not None):
+            if isinstance(self.geom.nside_tile, int):
+                self.geom.nside_tile = min(self.geom.nside, self.geom.nside_tile)
+            self.geom.ntile = True # Not used for healpix but needed for tiled()
 
     @classmethod
     def for_tod(cls, tod, sight=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol=None, hwp=False):
+                site='so', interpol=None, hwp=False, pix_scheme=None, qp_kwargs={}):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -154,6 +161,9 @@ class P:
         - tod.get('boresight_equ')
         - tod.get('boresight')
 
+        qp_kwargs are passed through to qpoint to compute sight
+        if sight and boresight_equ args are None.
+
         If the map geometry geom is not specified, but the wcs_kernel
         is provided, then get_footprint will be called to determine
         the geom.
@@ -163,6 +173,9 @@ class P:
         tod.focal_plane.  If hwp=True, then the rotation angles
         (gamma) are reflected (gamma' = -gamma) before storing in
         self.fp.
+
+        pix_scheme dictates if we are in 'healpix' or 'rectpix'. If None
+        we will attempt to infer it from the geom argument.
 
         """
         if sight is None:
@@ -178,7 +191,7 @@ class P:
                 assert(boresight is not None)
                 sight = so3g.proj.CelestialSightLine.az_el(
                     timestamps, boresight.az, boresight.el, roll=boresight.roll,
-                    site=site, weather=weather)
+                    site=site, weather=weather, **qp_kwargs)
         else:
             sight = _get_csl(sight)
 
@@ -203,7 +216,7 @@ class P:
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
                    cuts=cuts, threads=threads, det_weights=det_weights,
-                   interpol=interpol)
+                   interpol=interpol, pix_scheme=pix_scheme)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -228,13 +241,17 @@ class P:
         """
         if super_shape is None:
             super_shape = (self._comp_count(comps), )
-        if self.tiled:
-            # Need to fully resolve tiling to get occupied tiles.
+        if self.pix_scheme == 'healpix':
             proj, _ = self._get_proj_threads()
-            return tilemap.from_tiles(proj.zeros(super_shape), self.geom)
-        else:
-            proj = self._get_proj()
-            return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
+            return proj.zeros(super_shape)
+        elif self.pix_scheme == 'rectpix':
+            if self.tiled:
+                # Need to fully resolve tiling to get occupied tiles.
+                proj, _ = self._get_proj_threads()
+                return tilemap.from_tiles(proj.zeros(super_shape), self.geom)
+            else:
+                proj = self._get_proj()
+                return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
 
     def to_map(self, tod=None, dest=None, comps=None, signal=None,
                det_weights=None, cuts=None, eigentol=None):
@@ -323,9 +340,16 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
+        if self.pix_scheme == "healpix":
+            tile_list = self._get_hp_tile_list(weights_map)
+            if None in weights_map: weights_map = hp_utils.untile_healpix_compressed(weights_map, -1)
+
         # Works for both normal and tiled maps
         if dest is None: dest = np.zeros_like(weights_map)
         dest[:] = helpers._invert_weights_map(weights_map, eigentol=eigentol, UPLO='U')
+
+        if self.pix_scheme == "healpix" and self.tiled:
+            dest = hp_utils.tile_healpix_compressed(dest, tile_list, -1)
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -356,9 +380,18 @@ class P:
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
 
+        if self.pix_scheme == "healpix":
+            tile_list = self._get_hp_tile_list(signal_map)
+            if None in signal_map: signal_map = hp_utils.untile_healpix_compressed(signal_map, -1)
+            if None in inverse_weights_map: inverse_weights_map = hp_utils.untile_healpix_compressed(inverse_weights_map, -1)
+
         if dest is None: dest = np.zeros_like(signal_map)
         dest[:] = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map)
+
+        if self.pix_scheme == "healpix" and self.tiled:
+            dest = hp_utils.tile_healpix_compressed(dest, tile_list, -1)
         return dest
+
 
     def from_map(self, signal_map, dest=None, comps=None, wrap=None,
                  cuts=None, tod=None):
@@ -429,17 +462,20 @@ class P:
         return len(comps)
 
     def _get_proj(self):
-        if self.geom is None:
-            raise ValueError("Can't project without a geometry!")
         # Backwards compatibility for old so3g
         interpol_kw = _get_interpol_args(self.interpol)
-        if self.tiled:
-            return so3g.proj.Projectionist.for_tiled(
-                self.geom.shape, self.geom.wcs, self.geom.tile_shape,
-                active_tiles=self.active_tiles, **interpol_kw)
-        else:
-            return so3g.proj.Projectionist.for_geom(self.geom.shape,
-                self.geom.wcs, **interpol_kw)
+        if self.geom is None:
+            raise ValueError("Can't project without a geometry!")
+        if self.pix_scheme == "healpix":
+            return so3g.proj.ProjectionistHealpix.for_healpix(self.geom.nside, ordering=self.geom.ordering, nside_tile=self.geom.nside_tile, active_tiles=self.active_tiles, **interpol_kw)
+        elif self.pix_scheme == "rectpix":
+            if self.tiled:
+                return so3g.proj.Projectionist.for_tiled(
+                    self.geom.shape, self.geom.wcs, self.geom.tile_shape,
+                    active_tiles=self.active_tiles, **interpol_kw)
+            else:
+                return so3g.proj.Projectionist.for_geom(self.geom.shape,
+                    self.geom.wcs, **interpol_kw)
 
     def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and sample-thread assignment for the
@@ -461,6 +497,12 @@ class P:
         if cuts is None:
             cuts = self.cuts
 
+        if self.threads is None:
+            if self.pix_scheme == "rectpix":
+                self.threads = 'domdir'
+            elif self.pix_scheme == "healpix":
+                self.threads = 'tiles' if (self.geom.nside_tile is not None) else 'simple'
+
         if self.tiled and self.active_tiles is None:
             logger.info('_get_proj_threads: get_active_tiles')
             if isinstance(self.threads, str) and self.threads == 'tiles':
@@ -470,12 +512,13 @@ class P:
             else:
                 tile_info = proj.get_active_tiles(self._get_asm())
             self.active_tiles = tile_info['active_tiles']
-            proj = self._get_proj()
+            if self.pix_scheme == "healpix":
+                self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
+            proj = self._get_proj() # Add active_tiles to proj
 
         if self.threads is False:
             return proj, ~cuts
-        if self.threads is None:
-            self.threads = 'domdir'
+
         if isinstance(self.threads, str):
             if self.threads in ['simple', 'domdir']:
                 logger.info(f'_get_proj_threads: assigning using "{self.threads}"')
@@ -483,7 +526,7 @@ class P:
                     self._get_asm(), method=self.threads))
             elif self.threads == 'tiles':
                 # Computed above unless logic failed us...
-                self.threads = _thile_threads
+                self.threads = _tile_threads
             else:
                 raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:
@@ -501,8 +544,20 @@ class P:
         return so3g.proj.Assembly.attach(self.sight, so3g_fp)
 
     def _prepare_map(self, map):
-        if self.tiled: return map.tiles
+        if self.tiled and self.pix_scheme == "rectpix": return map.tiles
         else:          return map
+
+    def _get_hp_tile_list(self, tiled_arr=None):
+        """Get len(nTile) boolean array of whether tiles are active"""
+        if (tiled_arr is not None) and (None in tiled_arr):
+            tile_list = hp_utils.get_active_tiles(tiled_arr)
+        elif self.tiled:
+            tile_list = np.zeros(12*self.geom.nside_tile**2, dtype='bool')
+            tile_list[self.active_tiles] = True
+        else:
+            tile_list = None
+        return tile_list
+
 
 class P_PrecompDebug:
     def __init__(self, geom, pixels, phases):
@@ -564,3 +619,19 @@ def _get_interpol_args(interpol):
         return {'interpol': interpol}
     assert interpol in [None, "nn", "nearest"], "Old so3g does not support interpolated mapmaking"
     return {}
+
+def check_pix_scheme(pix_scheme, geom=None):
+    """Check that pix_scheme is a valid string and get default values
+    If pix_scheme is None, try to determine if it should be rectpix or healpix from geom
+    Then check that it is valid 'healpix' or 'rectpix'
+    """
+    if pix_scheme is None:
+        if isinstance(geom, enmap.Geometry):
+            pix_scheme = 'rectpix'
+        elif geom is None:
+            raise ValueError("Cannot determine pix_scheme with geom=None")
+        else:
+            pix_scheme = 'healpix'
+    if pix_scheme not in ['rectpix', 'healpix']:
+        raise ValueError(f"pix_scheme {pix_scheme} not supported; should be 'rectpix' or 'healpix'")
+    return pix_scheme
