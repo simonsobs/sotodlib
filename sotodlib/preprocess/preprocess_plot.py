@@ -476,6 +476,8 @@ def plot_flag_stats(aman, flag_aman, flag_type="glitches", N_bins=30, filename="
         100 * np.asarray(flags.get_stats()["samples"]) / aman.samps.count
     )
     glitchlog = np.log10(frac_samp_glitches[frac_samp_glitches > 0])
+    if glitchlog.size == 0:
+        raise ValueError("No flags found (empty array).")
     binmin = int(np.floor(np.min(glitchlog)))
     binmax = int(np.ceil(np.max(glitchlog)))
     _ = ax[0].hist(
