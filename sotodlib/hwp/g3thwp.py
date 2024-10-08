@@ -480,7 +480,7 @@ class G3tHWP():
             out['bad_revolution_flag'+suffix] = bad_revolution_flag
         return out
 
-    def template_subtraction(self, solved, poly_order=None, suffix='_1'):
+    def template_subtraction(self, solved, poly_order=3, suffix='_1'):
         """
         Evaluate the non-uniformity of hwp angle timestamp (template) and subtract it
         The raw hwp angle timestamp is kept.
@@ -526,6 +526,9 @@ class G3tHWP():
                 'Non-uniformity is already subtracted. Calculation is skipped.')
             return
 
+        def moving_average(array, n):
+            return np.convolve(array, np.ones(n), 'same')/n
+
         def detrend(array, deg):
             x = np.linspace(-1, 1, len(array))
             p,_ ,_ ,_ ,_ = np.polyfit(x, array, deg=deg, full=True)  # supress rank warning
@@ -537,12 +540,13 @@ class G3tHWP():
         bad_indexes_each_ref = solved['bad_indexes_each_ref'+suffix]
         fast_time = solved['fast_time'+suffix]
 
+        solved['fast_time_raw'+suffix] = copy(fast_time)[self._num_edges:-self._num_edges]
+        solved['fast_time'+suffix] = moving_average(fast_time, self._num_edges)[self._num_edges:-self._num_edges]
+        solved['angle'+suffix] = solved['angle'+suffix][self._num_edges:-self._num_edges] - np.pi*2/self._num_edges/2.
+
         # Trim only the timestamps of integer revolutions
         ft = fast_time[ref_indexes[0]:ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
-        if poly_order is None:
-            poly_order = int(len(ref_indexes)/100)
-            poly_order = np.min([100, poly_order])
         ft = detrend(ft, deg=poly_order)
         # make template from good revolutions
         good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes)])
@@ -558,8 +562,8 @@ class G3tHWP():
         subtract = np.roll(np.tile(template_slit, int(np.ceil(len(fast_time)/self._num_edges))), ref_indexes[0]+1)
         subtract = subtract[:len(fast_time)]
         # subtract template, keep raw timestamp
-        solved['fast_time_raw'+suffix] = copy(fast_time)
-        solved['fast_time'+suffix] = fast_time - subtract
+        #solved['fast_time_raw'+suffix] = copy(fast_time)
+        #solved['fast_time'+suffix] = fast_time - subtract
         # Normalize template by the width of slit
         average_dt_slit = np.average(np.diff(fast_time - subtract))
         solved['template'+suffix] = template_slit / average_dt_slit
