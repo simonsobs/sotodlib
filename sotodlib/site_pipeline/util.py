@@ -5,6 +5,8 @@ import logging
 import time
 import sys
 import argparse
+import yaml
+import numpy as np
 
 from astropy import units as u
 
@@ -304,3 +306,55 @@ def main_launcher(main_func, parser_func, args=None):
     if args is None:
         args = sys.argv[1:]
     return main_func(**vars(parser_func().parse_args(args=args)))
+
+def get_preprocess_context(configs, context=None):
+    """Load the provided config file and context file. To be used in
+    `preprocess_*.py` site pipeline scripts.
+
+    """
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+    
+    if context is None:
+        context = core.Context(configs["context_file"])
+        
+    if type(context) == str:
+        context = core.Context(context)
+    
+    # if context doesn't have the preprocess archive it in add it
+    # allows us to use same context before and after calculations
+    found=False
+    if context.get("metadata") is None:
+        context["metadata"] = []
+
+    for key in context.get("metadata"):
+        if key.get("name") == "preprocess":
+            found=True
+            break
+    if not found:
+        context["metadata"].append( 
+            {
+                "db" : configs["archive"]["index"],
+                "name" : "preprocess"
+            }
+        )
+    return configs, context
+
+def get_groups(obs_id, configs, context):
+    """Get subobs group method and groups. To be used in
+    `preprocess_*.py` site pipeline scripts.
+
+    """
+    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+    for i, gb in enumerate(group_by):
+        if gb.startswith('dets:'):
+            group_by[i] = gb.split(':',1)[1]
+
+        if (gb == 'detset') and (len(group_by) == 1):
+            groups = context.obsfiledb.get_detsets(obs_id)
+            return group_by, [[g] for g in groups]
+        
+    det_info = context.get_det_info(obs_id)
+    rs = det_info.subset(keys=group_by).distinct()
+    groups = [[b for a,b in r.items()] for r in rs]
+    return group_by, groups
