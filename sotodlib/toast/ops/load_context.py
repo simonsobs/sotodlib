@@ -337,52 +337,84 @@ class LoadContext(Operator):
         obs_props = None
         preproc_conf = None
         if comm.world_rank == 0:
-            obs_props = list()
-            obs_list = self.observations
+            obs_list = list(sorted(self.observations))
             if self.preprocess_config is not None:
                 with open(self.preprocess_config, "r") as f:
                     preproc_conf = yaml.safe_load(f)
+
+            # Query the obsdb directly so that we only have one DB query,
+            # rather than doing one query per observation.
+            sort_by = ["obs_id"]
+            if len(obs_list) > 0:
+                query_str = "obs.obs_id IN ("
+                for oid in obs_list:
+                    query_str += f"'{oid}',"
+                query_str = query_str.rstrip(",")
+                query_str += ")"
+            else:
+                query_str = "1"
+
+            # Open the databases and query
             ctx = open_context(context=self.context, context_file=self.context_file)
+            query_result = ctx.obsdb.query(query_text=query_str, sort=sort_by)
+
+            # Build up the list of observing session properties, and optionally
+            # only keep observations that match a regex.
+            cols = query_result.keys
+            pat = None
             if self.observation_regex is not None:
-                # Match against the full list of observation IDs
-                obs_list = []
                 pat = re.compile(self.observation_regex)
-                all_obs = ctx.obsdb.query()
-                for result in all_obs:
-                    if pat.match(result["obs_id"]) is not None:
-                        obs_list.append(result["obs_id"])
+            session_props = list()
+            for row in query_result.rows:
+                rprops = {x: y for x, y in zip(cols, row)}
+                obs_id = str(rprops["obs_id"])
+                if pat is not None and pat.match(obs_id) is None:
+                    continue
+                sprops = dict()
+                sprops["session_name"] = obs_id
+                sprops["session_start"] = float(rprops["start_time"])
+                sprops["session_stop"] = float(rprops["stop_time"])
+                sprops["n_samples"] = int(rprops["n_samples"])
+                sprops["tele_name"] = str(rprops["telescope"])
+                sprops["n_wafers"] = int(rprops["wafer_count"])
+                session_props.append(sprops)
 
-            for iobs, obs_id in enumerate(obs_list):
-                meta = ctx.get_meta(obs_id=obs_id, dets=dets_select)
-                if self.combine_wafers:
-                    # Place all wafers into a single session
-                    oprops = dict()
-                    oprops["name"] = obs_id
-                    oprops["session_name"] = obs_id
-                    oprops["wafer"] = "all"
-                    oprops["duration"] = meta["obs_info"]["duration"]
-                    oprops["n_det"] = len(meta["dets"].vals)
-                    obs_props.append(oprops)
-                else:
-                    # Get list of wafers from meta...
-                    duration = meta["obs_info"]["duration"]
-                    selected_wafers = list(
-                        sorted(set(meta["det_info"][self.ax_detinfo_wafer_key]))
-                    )
-                    for wf in selected_wafers:
-                        oprops = dict()
-                        oprops["name"] = f"{obs_id}_{wf}"
-                        oprops["session_name"] = obs_id
-                        oprops["wafer"] = wf
-                        oprops["duration"] = duration
+            # For each observation, query the obsfiledb to get the set of tune files
+            # and hence the list of wafers that are available for this observation.
+            wafer_pat = re.compile(r"(ufm_.*)_.*_tune")
+            for sprops in session_props:
+                tune_names = ctx.obsfiledb.get_detsets(sprops["session_name"])
+                sprops["wafers"] = list()
+                for tune in tune_names:
+                    mat = wafer_pat.match(tune)
+                    if mat is None:
+                        msg = f"Observation {oprops['session_name']} has "
+                        msg += f"unexpected detset format '{tune}'"
+                        raise RuntimeError(msg)
+                    sprops["wafers"].append(mat.group(1))
 
-                        # Get number of dets in this wafer
-                        oprops["n_det"] = np.count_nonzero(
-                            meta["det_info"][self.ax_detinfo_wafer_key] == wf
-                        )
-                        obs_props.append(oprops)
+            # Close the databases
             if self.context_file is not None:
                 del ctx
+
+            # Now construct the list of observation properties, either with all wafers
+            # in a single observation or one observation per wafer.
+            obs_props = list()
+            for sprops in session_props:
+                if self.combine_wafers:
+                    # Place all wafers into a single observation
+                    oprops = dict(sprops)
+                    oprops["name"] = oprops["session_name"]
+                    oprops["wafer"] = "all"
+                    obs_props.append(oprops)
+                else:
+                    # One observation per wafer
+                    for wf in sprops["wafers"]:
+                        oprops = dict(sprops)
+                        oprops["n_wafers"] = 1
+                        oprops["name"] = f"{oprops['session_name']}_{wf}"
+                        oprops["wafer"] = wf
+                        obs_props.append(oprops)
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
@@ -400,7 +432,7 @@ class LoadContext(Operator):
         # Distribute observations among groups- we use the detector-seconds
         # for load balancing.
 
-        obs_sizes = [int(x["n_det"] * x["duration"]) for x in obs_props]
+        obs_sizes = [int(x["n_wafers"] * x["n_samples"]) for x in obs_props]
         groupdist = distribute_discrete(obs_sizes, comm.ngroups)
         group_firstobs = groupdist[comm.group].offset
         group_numobs = groupdist[comm.group].n_elem
