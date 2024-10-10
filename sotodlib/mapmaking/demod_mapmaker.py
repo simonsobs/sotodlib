@@ -10,6 +10,7 @@ import numpy as np, os
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
 import so3g.proj
 
+from .. import core
 from .. import coords
 from .. import site_pipeline
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
@@ -155,7 +156,7 @@ class DemodSignalMap(DemodSignal):
         wcs : wcs
             WCS of the output map geometry
         comm : MPI.comm
-             MPI communicator
+            MPI communicator
         comps : str, optional
             Components to map
         name : str, optional
@@ -385,8 +386,8 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
 
         Arguments
         ---------
-        context : sotodlib.core.Context
-            Context object used to load obs from.
+        context : str
+            File path to context used to load obs from.
         obslist : dict
             The obslist which is the output of the
             mapmaking.obs_grouping.build_obslists, contains the information of the
@@ -437,7 +438,7 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
         outputs : list
             List of outputs from preprocess database. To be used in cleanup_mandb.
     """
-
+    context = core.Context(context)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     mapmaker = setup_demod_map(shape, wcs, noise_model, comm=comm,
