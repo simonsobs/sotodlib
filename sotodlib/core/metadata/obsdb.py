@@ -1,19 +1,20 @@
-import sqlite3
 import os
+import psycopg
+from typing import Optional, Union
 
 from .resultset import ResultSet
 from . import common
 
 
 TABLE_DEFS = {
-    'obs': [
-        "`obs_id` varchar(256) primary key",
-        "`timestamp` float",
+    "obs": [
+        "obs_id varchar(256) primary key",
+        "timestamp real",
     ],
-    'tags': [
-        "`obs_id` varchar(256)",
-        "`tag` varchar(256)",
-        "CONSTRAINT one_tag UNIQUE (`obs_id`, `tag`)",
+    "tags": [
+        "obs_id varchar(256)",
+        "tag varchar(256)",
+        "CONSTRAINT one_tag UNIQUE (obs_id, tag)",
     ],
 }
 
@@ -37,55 +38,63 @@ class ObsDb(object):
     """
 
     TABLE_TEMPLATE = [
-        "`obs_id` varchar(256)",
+        "obs_id varchar(256)",
     ]
 
-    def __init__(self, map_file=None, init_db=True):
+    def __init__(self, map_file: psycopg.Connection = None, init_db: bool = True):
         """Instantiate an ObsDb.
 
         Args:
-          map_file (str or sqlite3.Connection): If this is a string,
-            it will be treated as the filename for the sqlite3
-            database, and opened as an sqlite3.Connection.  If this is
-            an sqlite3.Connection, it is cached and used.  If this
+          map_file (psycopg.Connection): This is
+            an psycopg.Connection, it is cached and used.  If this
             argument is None (the default), then the
-            sqlite3.Connection is opened on ':memory:'.
+            psycopg.Connection is opened in 'localhost:5432'.
           init_db (bool): If True, then any ObsDb tables that do not
             already exist in the database will be created.
 
         Notes:
           If map_file is provided, the database will be connected to
-          the indicated sqlite file on disk, and any changes made to
+          the indicated postgres server, and any changes made to
           this object be written back to the file.
 
         """
-        if isinstance(map_file, sqlite3.Connection):
+        if isinstance(map_file, psycopg.Connection):
             self.conn = map_file
         else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
+            raise RuntimeError("map_file is not a postgres")
 
-        self.conn.row_factory = sqlite3.Row  # access columns by name
+        # self.conn.row_factory = psycopg.Row  # access columns by name
+        # Values are by default returned in tuples
         if init_db:
-            c = self.conn.cursor()
-            c.execute("SELECT name FROM sqlite_master "
-                      "WHERE type='table' and name not like 'sqlite_%';")
-            tables = [r[0] for r in c]
+            # c is the cursor
+            obsdb_cursor = self.conn.cursor()
+            obsdb_cursor.execute(
+                "select table_name"
+                + " from information_schema.tables"
+                + " where table_type='BASE TABLE'"
+                + " and table_schema='public';"
+            )
+            tables = [r[0] for r in obsdb_cursor]
             changes = False
             for k, v in TABLE_DEFS.items():
                 if k not in tables:
-                    q = ('create table if not exists `%s` (' % k +
-                         ','.join(v) + ')')
-                    c.execute(q)
+                    create_query = (
+                        f"create table if not exists {k} (" + ",".join(v) + ")"
+                    )
+                    obsdb_cursor.execute(create_query)
                     changes = True
             if changes:
                 self.conn.commit()
 
     def __len__(self):
-        return self.conn.execute('select count(obs_id) from obs').fetchone()[0]
+        return self.conn.execute("select count(obs_id) from obs").fetchone()[0]
 
-    def add_obs_columns(self, column_defs, ignore_duplicates=True, commit=True):
+    def add_obs_columns(
+        self,
+        column_defs: Union[list[tuple[str, str]]],
+        ignore_duplicates: Optional[bool] = True,
+        commit: Optional[bool] = True,
+    ) -> "ObsDb":
         """Add columns to the obs table.
 
         Args:
@@ -117,7 +126,10 @@ class ObsDb(object):
             'timestamp float, drift str'
 
         """
-        current_cols = self.conn.execute('pragma table_info("obs")').fetchall()
+        current_cols = self.conn.execute(
+            "select column_name, data_type, character_maximum_length from "
+            + "information_schema.columns where table_name = 'obs';"
+        ).fetchall()
         current_cols = [r[1] for r in current_cols]
         if isinstance(column_defs, str):
             column_defs = column_defs.split(',')
@@ -126,7 +138,7 @@ class ObsDb(object):
                 column_def = column_def.split()
             name, typestr = column_def
             if typestr is float:
-                typestr = 'float'
+                typestr = "real"
             elif typestr is int:
                 typestr = 'int'
             elif typestr is str:
@@ -139,14 +151,20 @@ class ObsDb(object):
             if check_name in current_cols:
                 if ignore_duplicates:
                     continue
-                raise ValueError("Column %s already exists in table obs" % check_name)
-            self.conn.execute('ALTER TABLE obs ADD COLUMN %s %s' % (name, typestr))
+                raise ValueError(f"Column {check_name} already exists in table obs")
+            self.conn.execute(f"alter table obs add column {name}, {typestr}")
             current_cols.append(check_name)
         if commit:
             self.conn.commit()
         return self
 
-    def update_obs(self, obs_id, data={}, tags=[], commit=True):
+    def update_obs(
+        self,
+        obs_id: str,
+        data: dict = {},
+        tags: Optional[list[str]] = [],
+        commit: Optional[bool] = True,
+    ):
         """Update an entry in the obs table.
 
         Arguments:
@@ -160,22 +178,29 @@ class ObsDb(object):
             self.
 
         """
-        c = self.conn.cursor()
-        c.execute('INSERT OR IGNORE INTO obs (obs_id) VALUES (?)',
-                  (obs_id,))
+        obsdb_cursor = self.conn.cursor()
+        obsdb_cursor.execute(
+            f"insert into obs (obs_id) values ({obs_id}) on conflict (obs_id) do nothing",
+        )
+
         if len(data.keys()):
-            settors = [f'{k}=?' for k in data.keys()]
-            c.execute('update obs set ' + ','.join(settors) + ' '
-                      'where obs_id=?',
-                      tuple(data.values()) + (obs_id, ))
+            settors = [f"{key} = %s" for key in data.keys()]
+            obsdb_cursor.execute(
+                "update obs set " + ", ".join(settors) + " where obs_id = %s",
+                tuple(data.values()) + (obs_id,),
+            )
+
         for t in tags:
             if t[0] == '!':
                 # Kill this tag.
-                c.execute('DELETE FROM tags WHERE obs_id=? AND tag=?',
-                          (obs_id, t[1:]))
+                obsdb_cursor.execute(
+                    "delete from tags where obs_id = %s and tag = %s", (obs_id, t[1:])
+                )
             else:
-                c.execute('INSERT OR REPLACE INTO tags (obs_id, tag) '
-                          'VALUES (?,?)', (obs_id, t))
+                obsdb_cursor.execute(
+                    f"insert into tags (obs_id, tag) values ({obs_id}, {t}) "
+                    "on conflict (obs_id, tag) do update set obs_id = excluded.obs_id, tag = excluded.tag",
+                )
         if commit:
             self.conn.commit()
         return self
@@ -195,8 +220,10 @@ class ObsDb(object):
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
         new_db = ObsDb(map_file=map_file, init_db=False)
-        script = ' '.join(self.conn.iterdump())
-        new_db.conn.executescript(script)
+        script = common.dump_database(self.conn)
+        for line in script:
+            new_db.conn.execute(line.strip())
+        new_db.conn.commit()
         return new_db
 
     def to_file(self, filename, overwrite=True, fmt=None):
@@ -206,18 +233,24 @@ class ObsDb(object):
           filename (str): the path to the output file.
           overwrite (bool): whether an existing file should be
             overwritten.
-          fmt (str): 'sqlite', 'dump', or 'gz'.  Defaults to 'sqlite'
+          fmt (str): 'dump', or 'gz'.  Defaults to 'dump'
             unless the filename ends with '.gz', in which it is 'gz'.
 
         """
-        return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
+        return common.postgres_to_file(
+            self.conn, filename, overwrite=overwrite, fmt=fmt
+        )
 
     @classmethod
-    def from_file(cls, filename, fmt=None, force_new_db=True):
+    def from_file(
+        cls, filename: str, conn: psycopg.Connection, fmt=None, force_new_db=True
+    ) -> "ObsDb":
         """This method calls
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
+        conn = common.postgres_from_file(
+            filename, conn, fmt=fmt, force_new_db=force_new_db
+        )
         return cls(conn, init_db=False)
 
     def get(self, obs_id=None, tags=None, add_prefix=''):
@@ -253,7 +286,7 @@ class ObsDb(object):
             output['tags'] = [r[0] for r in c]
         return output
 
-    def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix=''):
+    def query(self, query_text="", tags=None, sort=["obs_id"], add_prefix=""):
         """Queries the ObsDb using user-provided text.  Returns a ResultSet.
 
         Args:
@@ -291,7 +324,7 @@ class ObsDb(object):
         """
         sort_text = ''
         if sort is not None and len(sort):
-            sort_text = ' ORDER BY ' + ','.join(sort)
+            sort_text = " order by " + ",".join(sort)
         joins = ''
         extra_fields = []
         if tags is not None and len(tags):
@@ -302,18 +335,23 @@ class ObsDb(object):
                     val = None
                 if val is None:
                     join_type = 'left join'
-                    extra_fields.append(f'ifnull(tt{tagi}.obs_id,"") != "" as {t}')
+                    extra_fields.append(f'coalesce(tt{tagi}.obs_id,"") != "" as {t}')
                 elif val == '0':
                     join_type = 'left join'
-                    extra_fields.append(f'ifnull(tt{tagi}.obs_id,"") != "" as {t}')
+                    extra_fields.append(f'coalesce(tt{tagi}.obs_id,"") != "" as {t}')
                     query_text += f' and {t}==0'
                 else:
                     join_type = 'join'
                     extra_fields.append(f'1 as {t}')
-                joins += (f' {join_type} (select distinct obs_id from tags where tag="{t}") as tt{tagi} on '
-                          f'obs.obs_id = tt{tagi}.obs_id')
+                joins += (
+                    f" {join_type} (select distinct obs_id from tags where tag='{t}') as tt{tagi} on "
+                    f"obs.obs_id = tt{tagi}.obs_id"
+                )
         extra_fields = ''.join([','+f for f in extra_fields])
-        q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)
+        where_statement = ""
+        if len(query_text):
+            where_statement = f" where {query_text}"
+        q = f"select obs.* {extra_fields} from obs {joins} {where_statement} {sort_text}"
         c = self.conn.execute(q)
         results = ResultSet.from_cursor(c)
         if add_prefix is not None:
