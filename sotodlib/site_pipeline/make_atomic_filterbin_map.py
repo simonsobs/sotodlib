@@ -326,8 +326,47 @@ def main(config_file=None, defaults=defaults, **args):
     if not split_labels:
         split_labels = None
 
-    obslists_arr = [item for key, item in obslists.items()]
+    # We open the data base for checking if we have maps already,
+    # if we do we will not run them again.
+    if os.path.isfile('./'+args['atomic_db']) and not args['only_hits']:
+        conn = sqlite3.connect('./'+args['atomic_db']) # open the connector, in reading mode only
+        cursor = conn.cursor()
+        keys_to_remove = []
+        # Now we have obslists and splits ready, we look through the database
+        # to remove the maps we already have from it
+        for key, value in  obslists.items():
+            if split_labels == None:
+                # we want to run only full maps
+                query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="full"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1] )
+                res = cursor.execute(query_)
+                matches = res.fetchall()
+                if len(matches)>0:
+                    # this means the map (key,value) is already in the data base,
+                    # so we have to remove it to not run it again
+                    # it seems that removing the maps from the obskeys is enough.
+                    keys_to_remove.append(key)
+            else:
+                # we are asking for splits
+                missing_split = False
+                for split_label in split_labels:
+                    query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="%s"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1], split_label )
+                    res = cursor.execute(query_)
+                    matches = res.fetchall()
+                    if len(matches)==0:
+                        # this means one of the requested splits is missing
+                        # in the data base
+                        missing_split = True
+                        break
+                if missing_split == False:
+                    # this means we have all the splits we requested for the
+                    # particular obs_id/telescope/freq/wafer
+                    keys_to_remove.append(key)
+        for key in keys_to_remove:
+            obskeys.remove(key)
+            del obslists[key]
+        conn.close() # I close since I only wanted to read
 
+    obslists_arr = [item for key, item in obslists.items()]
     my_oblists=[]; my_tods = []; my_ra_ref=[]; pwvs=[]
     L.info('Starting with read_tods')
     with ProcessPoolExecutor(args['nproc']) as exe:
@@ -473,46 +512,3 @@ def main(config_file=None, defaults=defaults, **args):
 
 if __name__ == '__main__':
     util.main_launcher(main, get_parser)
-
-"""
-if False:
-        # We open the data base for checking if we have maps already,
-        # if we do we will not run them again.
-        if os.path.isfile('./'+args['atomic_db']) and not args['only_hits']:
-            conn = sqlite3.connect('./'+args['atomic_db']) # open the connector, in reading mode only
-            cursor = conn.cursor()
-            keys_to_remove = []
-            # Now we have obslists and splits ready, we look through the database
-            # to remove the maps we already have from it
-            for key, value in  obslists.items():
-                if split_labels == None:
-                    # we want to run only full maps
-                    query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="full"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1] )
-                    res = cursor.execute(query_)
-                    matches = res.fetchall()
-                    if len(matches)>0:
-                        # this means the map (key,value) is already in the data base,
-                        # so we have to remove it to not run it again
-                        # it seems that removing the maps from the obskeys is enough.
-                        keys_to_remove.append(key)
-                else:
-                    # we are asking for splits
-                    missing_split = False
-                    for split_label in split_labels:
-                        query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="%s"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1], split_label )
-                        res = cursor.execute(query_)
-                        matches = res.fetchall()
-                        if len(matches)==0:
-                            # this means one of the requested splits is missing
-                            # in the data base
-                            missing_split = True
-                            break
-                    if missing_split == False:
-                        # this means we have all the splits we requested for the
-                        # particular obs_id/telescope/freq/wafer
-                        keys_to_remove.append(key)
-            for key in keys_to_remove:
-                obskeys.remove(key)
-                del obslists[key]
-            conn.close() # I close since I only wanted to read
-"""
