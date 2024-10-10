@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import InitVar, dataclass, field
-from functools import cached_property
+from functools import cached_property, partial
 from typing import Dict, List, Optional
 
 import h5py
@@ -432,7 +432,9 @@ class OpticsTube:
 @dataclass
 class Receiver:
     optics_tubes: List[OpticsTube] = field(default_factory=list)
-    center: NDArray[np.floating] = field(default=np.zeros((1, 3)))
+    center: NDArray[np.floating] = field(
+        default_factory=partial(np.zeros, shape=(1, 3))
+    )
     include_cm: bool = field(default=False)
     transform: Transform = field(default_factory=Transform.identity)
     center_transformed: NDArray[np.floating] = field(init=False)
