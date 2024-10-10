@@ -191,8 +191,9 @@ def update_file_index(hkcfg: HkConfig, session=None):
     files = []
     log.info(f"Adding {len(new_files)} new files to index...")
     for path in new_files:
+        relpath = os.path.relpath(path, hkcfg.hk_root)
         files.append(HkFile(
-            path=path,
+            path=relpath,
             size=os.path.getsize(path),
             mod_time=os.path.getmtime(path),
             index_status='unindexed'
@@ -419,6 +420,13 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
             if frame.file.path not in file_spec:
                 file_spec[frame.file.path] = []
             file_spec[frame.file.path].append(frame.byte_offset)
+
+    # Convert all paths to absolute paths based on cfg.hk_root
+    def create_abs_path(path):
+        if os.path.isabs(path):
+            return path
+        return os.path.join(load_spec.cfg.hk_root, path)
+    file_spec = {create_abs_path(k): v for k, v in file_spec.items()}
 
     result = {}  # {field: [timestamps, data]}
     field_misses = set()
