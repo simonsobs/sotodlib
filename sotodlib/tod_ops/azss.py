@@ -307,7 +307,7 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
         signal_name = signal
         signal = aman[signal_name]
     elif isinstance(signal, np.ndarray):
-        if np.shape(np.ndarray) != (aman.dets.count, aman.samps.count):
+        if np.shape(signal) != (aman.dets.count, aman.samps.count):
             raise ValueError("When passing signal as ndarray shape must match (n_dets x n_samps).")
         signal_name = None
     else:
