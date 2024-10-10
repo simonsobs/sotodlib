@@ -429,6 +429,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
         for field in load_spec.fields:
             if field.matches(f):
                 result[key] = [[], []]
+                return result[key]
         return None
     ds_factor = load_spec.downsample_factor
 
