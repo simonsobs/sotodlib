@@ -67,11 +67,13 @@ wafer_to_array = {
 
 
 
-def pos_to_ind(pos, mapping, tol=1.0, verbose=False):
+def pos_to_ind(pos, bp, pol, mapping, tol=1.0, verbose=False):
     """
         Match position to a detector index on the UFM
 
         pos: x, y coordinates (tuple) of first detector (mm) relative to UFM center
+        bp: detector bandpass (int)
+        pol: detector polarization (string), 'A' or 'B'
         mapping: pandas object from DetMap CSV of UFM characteristics
         tol (float):  Maximum allowed distance between provided and
             matched detector positions.
@@ -80,6 +82,9 @@ def pos_to_ind(pos, mapping, tol=1.0, verbose=False):
     # Compute Pythagorean distances to all detectors in the mapping
     x, y = pos
     dist = np.sqrt(np.square(mapping["det_x"] - x) + np.square(mapping["det_y"] - y))
+
+    # Send all out of bandpass and polarization distances to infinity
+    dist[np.logical_or(mapping['bandpass'] != str(bp), mapping['pol'] != pol)] = np.inf
 
     # Match detector to position
     ind = dist.argmin()
@@ -102,7 +107,7 @@ def pos_to_ind(pos, mapping, tol=1.0, verbose=False):
 def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0):
     """
         Calculate magnitude of crosstalk for all detector pairs given
-        their physical positions, bandpasses, and mapping
+        their physical positions and mapping
 
         focalplane (SOFocalplane):  Focalplane object
         dets (iterable):  detector names to consider
@@ -143,98 +148,80 @@ def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0):
             msg += f"Perhaps wafer_to_array is out of date?"
         mappings[wafer] = pd.read_csv(datafile)
 
-    # loop over unique combinations of bandpass, pol and wafer computing
     # chi for every detector pair
-    bandpass_set = set(bandpasses)
-    pol_set = set(pols)
     chis = {}
-    for bandpass in bandpass_set:
-        # DetMap does not observe the same bandpass specifications as sotodlib
-        if bandpass == 230:
-            map_bandpass = 225
-        elif bandpass == 290:
-            map_bandpass = 285
-        else:
-            map_bandpass = bandpass
-        for pol in pol_set:
-            for wafer in wafer_set:
-                # Collect detector and positions that match bandpass, pol and wafer
-                mapping = mappings[wafer]
-                m = mapping[np.logical_and(
-                    mapping["bandpass"] == str(map_bandpass),
-                    mapping["pol"] == pol,
-                )]
-                if len(m) == 0:
-                    msg = f"No match for bandpass = {bandpass}, pol = {pol}.\n"
-                    msg += f"Available bandpasses = {sorted(set(mapping['bandpass']))}\n"
-                    msg += f"Available pols = {sorted(set(mapping['pol']))}\n"
+    for wafer in wafer_set:
+        # Collect detector and positions that match wafer
+        m = mappings[wafer]
+        if len(m) == 0:
+            msg = f"No match in DetMap."
+            raise RuntimeError(msg)
+        detector_subset = []
+        position_subset = []
+        freq_subset = []
+        is_north_subset = []
+        mux_band_subset = []
+        bond_pad_subset = []
+        for d, w, b, p, pos in zip(dets, wafers, bandpasses, pols, positions):
+            if w == wafer:
+                detector_subset.append(d)
+                position_subset.append(pos)
+                ind = pos_to_ind(pos, b, p, m, tol=tol)
+                if ind is not None:
+                    # Get resonator frequency
+                    freq_subset.append(m.iloc[ind]["freq_mhz"])
+                    # Get other helpful variables
+                    is_north_subset.append(m.iloc[ind]["is_north"])
+                    mux_band_subset.append(m.iloc[ind]["mux_band"])
+                    bond_pad_subset.append(m.iloc[ind]["bond_pad"])
+                else:
+                    # This position is not in the mapping.  For now, we
+                    # keep the detector and disable crosstalk for it
+                    freq_subset.append(0)
+                    is_north_subset.append(None)
+                    mux_band_subset.append(None)
+                    bond_pad_subset.append(None)
+        # Compute chi for all detector pairs in this subset
+        ndet = len(detector_subset)
+        for idet1, det1 in enumerate(detector_subset):
+            x1, y1 = position_subset[idet1]
+            freq1 = freq_subset[idet1]
+            if freq1 == 0:
+                # Detector was not found in the mapping and
+                # there is no resonator frequency
+                continue
+            is_north1 = is_north_subset[idet1]
+            mux_band1 = mux_band_subset[idet1]
+            bond_pad1 = bond_pad_subset[idet1]
+            for idet2 in range(idet1 + 1, ndet):
+                freq2 = freq_subset[idet2]
+                if freq2 == 0:
+                    # Detector was not found in the mapping and
+                    # there is no resonator frequency
+                    continue
+                det2 = detector_subset[idet2]
+                is_north2 = is_north_subset[idet2]
+                mux_band2 = mux_band_subset[idet2]
+                bond_pad2 = bond_pad_subset[idet2]
+                # Short-circuit chi-calculation if the detectors
+                # cannot cross-talk
+                if is_north1 != is_north2:
+                    continue
+                if mux_band1 != mux_band2:
+                    continue
+                if np.abs(bond_pad1 - bond_pad2) != 4:
+                    continue
+                x2, y2 = position_subset[idet2]
+                # Translate frequencies to chi
+                df = freq1 - freq2
+                avg_f = (freq1 + freq2) / 2
+                chi = alpha * np.power(avg_f, 4) * np.power(df, -2) * 1e12
+                if chi > 1:
+                    msg = f"Anomalously high chi at"
+                    msg += f" {det1}@({x1}, {y1}), {det2}@({x2}, {y2})"
+                    msg += f" : {chi}"
                     raise RuntimeError(msg)
-                detector_subset = []
-                position_subset = []
-                freq_subset = []
-                is_north_subset = []
-                mux_band_subset = []
-                bond_pad_subset = []
-                for d, w, b, p, pos in zip(dets, wafers, bandpasses, pols, positions):
-                    if w == wafer and b == bandpass and p == pol:
-                        detector_subset.append(d)
-                        position_subset.append(pos)
-                        ind = pos_to_ind(pos, m, tol=tol)
-                        if ind is not None:
-                            # Get resonator frequency
-                            freq_subset.append(m.iloc[ind]["freq_mhz"])
-                            # Get other helpful variables
-                            is_north_subset.append(m.iloc[ind]["is_north"])
-                            mux_band_subset.append(m.iloc[ind]["mux_band"])
-                            bond_pad_subset.append(m.iloc[ind]["bond_pad"])
-                        else:
-                            # This position is not in the mapping.  For now, we
-                            # keep the detector and disable crosstalk for it
-                            freq_subset.append(0)
-                            is_north_subset.append(None)
-                            mux_band_subset.append(None)
-                            bond_pad_subset.append(None)
-                # Compute chi for all detector pairs in this subset
-                ndet = len(detector_subset)
-                for idet1, det1 in enumerate(detector_subset):
-                    x1, y1 = position_subset[idet1]
-                    freq1 = freq_subset[idet1]
-                    if freq1 == 0:
-                        # Detector was not found in the mapping and
-                        # there is no resonator frequency
-                        continue
-                    is_north1 = is_north_subset[idet1]
-                    mux_band1 = mux_band_subset[idet1]
-                    bond_pad1 = bond_pad_subset[idet1]
-                    for idet2 in range(idet1 + 1, ndet):
-                        freq2 = freq_subset[idet2]
-                        if freq2 == 0:
-                            # Detector was not found in the mapping and
-                            # there is no resonator frequency
-                            continue
-                        det2 = detector_subset[idet2]
-                        is_north2 = is_north_subset[idet2]
-                        mux_band2 = mux_band_subset[idet2]
-                        bond_pad2 = bond_pad_subset[idet2]
-                        # Short-circuit chi-calculation if the detectors
-                        # cannot cross-talk
-                        if is_north1 != is_north2:
-                            continue
-                        if mux_band1 != mux_band2:
-                            continue
-                        if np.abs(bond_pad1 - bond_pad2) != 4:
-                            continue
-                        x2, y2 = position_subset[idet2]
-                        # Translate frequencies to chi
-                        df = freq1 - freq2
-                        avg_f = (freq1 + freq2) / 2
-                        chi = alpha * np.power(avg_f, 4) * np.power(df, -2) * 1e12
-                        if chi > 1:
-                            msg = f"Anomalously high chi at"
-                            msg += f" {det1}@({x1}, {y1}), {det2}@({x2}, {y2})"
-                            msg += f" : {chi}"
-                            raise RuntimeError(msg)
-                        chis[(det1, det2)] = chi
-                        chis[(det2, det1)] = chi
+                chis[(det1, det2)] = chi
+                chis[(det2, det1)] = chi
 
     return chis

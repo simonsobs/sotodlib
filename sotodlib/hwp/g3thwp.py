@@ -621,7 +621,7 @@ class G3tHWP():
         period = (solved["fast_time_1"][offcenter_idx1+1] -
                   solved["fast_time_1"][offcenter_idx1])*self._num_edges
         # When data is extremely noisy, period gets zero and offcentering becomes nan
-        period[period==0] = np.median(period)
+        period[period == 0] = np.median(period)
         offset_angle = 2 * np.pi * offset_time / period
         offcentering = np.tan(offset_angle) * self._encoder_disk_radius
 
@@ -831,13 +831,16 @@ class G3tHWP():
         f.close()
         return data
 
-    def _interpolation(self, timestamp1, data, timestamp2):
-        interp = scipy.interpolate.interp1d(
-            timestamp1, data, kind='linear', bounds_error=False, fill_value='extrapolate')(timestamp2)
-        return interp
+    def _angle_interpolation(self, timestamp1, angle, timestamp2):
+        """Linearly interpolate the angle to the timestamp of the detector readout.
+        numpy.interp uses constant extrapolation, and extend the first and last values
+        of the angle in the interpolation interval"""
+        return np.interp(timestamp2, timestamp1, angle)
 
     def _bool_interpolation(self, timestamp1, data, timestamp2, round_option):
-        interp = self._interpolation(timestamp1, data, timestamp2)
+        """Linearly interpolate the boolean array. fill values by False outside of the
+        data range"""
+        interp = np.interp(timestamp2, timestamp1, data, left=0, right=0)
         if round_option == 'floor':
             interp = np.floor(interp)
         elif round_option == 'ceil':
@@ -1060,29 +1063,27 @@ class G3tHWP():
                 solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 'floor')
             aman['locked'+suffix] = self._bool_interpolation(
                 solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 'floor')
-            aman['hwp_rate'+suffix] = self._interpolation(
-                solved['slow_time'+suffix], solved['hwp_rate'+suffix], tod.timestamps)
+            aman['hwp_rate'+suffix] = np.interp(
+                tod.timestamps, solved['slow_time'+suffix], solved['hwp_rate'+suffix], left=0, right=0)
             aman['logger'+suffix] = self._write_solution_h5_logger
 
-            quad = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['quad'+suffix], tod.timestamps, 'floor')
+            quad = scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], solved['quad'+suffix], kind='linear', fill_value='extrapolate')(tod.timestamps)
             aman['quad'+suffix] = np.array([1 if q else -1 for q in quad])
             aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
-            filled_flag = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['filled_flag'+suffix], tod.timestamps, 'ceil')
-            aman['filled_flag'+suffix] = filled_flag
-            bad_revolution_flag = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['bad_revolution_flag'+suffix], tod.timestamps, 'ceil')
-            aman['bad_revolution_flag'+suffix] = bad_revolution_flag
-            aman['hwp_angle_ver1'+suffix] = np.mod(self._interpolation(
+            filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
+            filled_flag[solved['filled_indexes'+suffix]] = 1
+            aman['filled_flag'+suffix] = self._bool_interpolation(
+                solved['fast_time'+suffix], filled_flag, tod.timestamps, 'ceil')
+            aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
                 solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
 
             # version 2
             # calculate template subtracted angle
             try:
                 self.template_subtraction(solved, suffix=suffix)
-                aman['hwp_angle_ver2'+suffix] = np.mod(self._interpolation(
+                aman['hwp_angle_ver2'+suffix] = np.mod(self._angle_interpolation(
                     solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
                 aman['template'+suffix] = solved['template'+suffix]
@@ -1099,10 +1100,10 @@ class G3tHWP():
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
                 for suffix in self._suffixes:
-                    aman['hwp_angle_ver3'+suffix] = np.mod(self._interpolation(
+                    aman['hwp_angle_ver3'+suffix] = np.mod(self._angle_interpolation(
                         solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                     aman['version'+suffix] = 3
-                aman['offcenter'] = np.array([np.nanmean(solved['offcentering']), np.nanstd(solved['offcentering'])])
+                aman['offcenter'] = np.array([np.average(solved['offcentering']), np.std(solved['offcentering'])])
                 aman.offcenter_direction = np.sign(aman['offcenter'][0])
             except Exception as e:
                 logger.error(

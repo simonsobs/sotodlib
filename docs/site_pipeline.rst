@@ -125,6 +125,32 @@ Command line arguments
    :func: get_parser
    :prog: update_smurf_caldbs.py
 
+update-det-cal
+-----------------------
+.. automodule:: sotodlib.site_pipeline.update_det_cal
+   :no-members:
+
+CalInfo object
+```````````````````
+
+.. autoclass:: sotodlib.site_pipeline.update_det_cal.CalInfo
+   :no-members:
+
+Configuration
+``````````````
+
+Configuration of the update_det_cal script is done by supplying a yaml file.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_det_cal
+   :func: get_parser
+   :prog: update_smurf_caldbs.py
+
+The possible configuration parameters are defined by the DetCalCfg class:
+
+.. autoclass:: sotodlib.site_pipeline.update_det_cal.DetCalCfg
+  :members:
+
 Detector and Readout ID Mapping
 -------------------------------
 
@@ -357,6 +383,10 @@ Here's an annotated example:
 
 .. code-block:: yaml
 
+  # This is the time range that this focal plane is valid for
+  # These are ctime
+  start_time: 0 # default is 0
+  stop_time: 1726605779 # default is 2**32
   # There are two options to get the data in
   # One is to pass in ResultSets like so:
   resultsets:
@@ -394,7 +424,8 @@ Here's an annotated example:
     obs_id: [obs_1, obs_2] # Pass in the obs_id directly
     query: QUERY # Pass in a query
     # You can pass in detector restrictions here as well
-    dets: {} # Should be a dict you would pass to the dets areg of ctx.get_meta
+    dets: {} # Should be a dict you would pass to the dets arg of ctx.get_meta
+    # If neither option is passed all obs from start_time to stop_timewith valid metadata are used
   
   per_obs: False # Set to true if you want to run in per obs mode
   weight_factor: 1000 # Weights are computed with sigma=template_spacing/weight_factor.
@@ -429,23 +460,26 @@ The datasets and attributes are organized by tube and array as seem below:
 .. code-block:: text
 
    focal_plane.h5
-   - (attr) center # The nominal center of the receive on sky
-   - (attr) center_transformed # The center with the common mode transform applied
-   - (group) transform # The receiver common mode
-   - (group) tube1 # The first tube (ie st1, oti1, etc.)
-     - (attr) center # The nominal center of the tube on sky
+   - (group) result # For combined results this is the start of the validity period
+                    # For per-obs this is the obs_id
+     - (attr) center # The nominal center of the receive on sky
      - (attr) center_transformed # The center with the common mode transform applied
-     - (group) transform # The tube common mode
-     - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
-       - (attr) template_centers # The nominal center for this array
-       - (attr) fit_centers # The fit center for this array
-       - (group) transform # The transform for the ufm, includes parameters with and without the common mode
-       - (dataset) focal_plane # The focal_plane with just fit positions
-         - (attr) measured_gamma # If gamma was actually measured
-       - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
-     - (group) ufm_2
+     - (group) transform # The receiver common mode
+     - (group) tube1 # The first tube (ie st1, oti1, etc.)
+       - (attr) center # The nominal center of the tube on sky
+       - (attr) center_transformed # The center with the common mode transform applied
+       - (group) transform # The tube common mode
+       - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
+         - (attr) template_centers # The nominal center for this array
+         - (attr) fit_centers # The fit center for this array
+         - (group) transform # The transform for the ufm, includes parameters with and without the common mode
+         - (dataset) focal_plane # The focal_plane with just fit positions
+           - (attr) measured_gamma # If gamma was actually measured
+         - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
+       - (group) ufm_2
+         ...
        ...
-     ...
+    ...
 
 
 The ``focal_plane`` dataset contains four columns:
@@ -508,12 +542,23 @@ always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 
 ``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
 in the output directory.
-By default this will be indexed by ``stream_id`` and will point to the ``focal_plane`` dataset.
-If you are running in ``per_obs`` mode then it will also be indexed by ``obs_id`` and will point
+By default this will be indexed by ``stream_id`` and ``obs:timestamp`` and will point to the ``focal_plane`` dataset.
+If you are running in ``per_obs`` mode then it wirbe indexed by ``obs_id`` and will point
 to results associated with data observation.
 Be warned that in this case there will only be entries for observations with pointing fits,
 so design your context accordingly.
 
+Focal planes can be loaded directly from the ``hdf5`` files if you require information other than 
+the ``focal_plane`` dataset. This can be done like so:
+
+.. code-block:: python
+
+   from sotodlib.coords import fp_containers as fpc
+   rxs = fpc.Receiver.load_file(PATH)
+
+
+This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
+The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
 
 preprocess-tod
 --------------

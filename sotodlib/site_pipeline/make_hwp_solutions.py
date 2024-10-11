@@ -64,7 +64,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--obs-id', type=str, nargs='+',
-        help="List of obs-id of particular observation that you want to run",
+        help="List of obs-ids of particular observations that you want to run",
     )
     return parser
 
