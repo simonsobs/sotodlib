@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import time
 import numpy as np
 import scipy.interpolate
 import h5py
@@ -1129,9 +1128,12 @@ class G3tHWP():
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
 
-        # Reject unexpected counter
+        # Reject unexpected counter that exceeds instantaneous
+        # rotation speed of 5 Hz
         idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
+            logger.warning(f'Rejected {len(idx)} counters because instantaneous '
+                            'rotation speed exceeds 5 Hz. Encoder data might be noisy.')
             self._encd_clk = np.delete(self._encd_clk, idx)
             self._encd_cnt = self._encd_cnt[0] + \
                 np.arange(len(self._encd_cnt) - len(idx))
@@ -1160,7 +1162,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(self._time))
 
-        # calculate hwp angle with IRIG timing
+        # calculate hwp angle
         self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
@@ -1233,12 +1235,21 @@ class G3tHWP():
             return -1
 
         # delete unexpected ref slit indexes
-        self._ref_indexes = np.delete(self._ref_indexes, np.where(
-            np.diff(self._ref_indexes) < self._num_edges - 10)[0])
+        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 10)[0]
+        if len(bad_ref_indexes) > 0:
+            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
+            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
+
+        # check quality of ref_indexes
+        number_of_bad_refs = np.sum(np.diff(self._ref_indexes) != self._num_edges - 2)
+        if number_of_bad_refs > 0:
+            logger.warning(f'There are {number_of_bad_refs} bad ref indexes')
+
         self._ref_clk = self._encd_clk[self._ref_indexes]
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         logger.debug('found {} reference points'.format(
             len(self._ref_indexes)))
+
         return 0
 
     def _fill_refs(self):
@@ -1301,7 +1312,7 @@ class G3tHWP():
         return
 
     def _calc_angle_linear(self, mod2pi=True):
-
+        """ Calculate hwp angle of encoder counters for each revolution """
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
