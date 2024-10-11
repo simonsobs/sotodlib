@@ -178,14 +178,18 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
     return P, X
 
 
-def get_horizon_P(tod, az, el, **kw):
+def get_horizon_P(tod, az, el, phase_defl=None, phase_hwp=None, **kw):
     """Get a standard Projection Matrix targeting arbitrary source (for example
     drone) in horizon coordinates.
+    Optional wobble correction. Eventually that will go into the pointing model
+    but in the mean time we can have it here
 
     Args:
       tod: AxisManager of the observation
       az: azimuth of the target source (rad)
       el: elevation of the target source (rad)
+      phase_defl: correct for sinusoidal wobble (rad, optional)
+      phase_hwp: correct for sinusoidal wobble (rad, optional)
 
     Return:
       a Projection Matrix
@@ -197,6 +201,11 @@ def get_horizon_P(tod, az, el, **kw):
         tod.boresight.el,
         tod.boresight.roll
     )
+    if phase_defl is not None and phase_hwp is not None:
+        dxi = phase_defl * np.cos(tod.hwp_angle - phase_hwp)
+        deta = -phase_defl * np.sin(tod.hwp_angle - phase_hwp)
+        deflq = so3g.proj.quat.rotation_xieta(xi = dxi, eta = deta)
+        sight.Q = sight.Q * ~deflq
     pq = so3g.proj.quat.rotation_lonlat(-az, el)
     sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
     P = coords.P.for_tod(tod, sight, **kw)
