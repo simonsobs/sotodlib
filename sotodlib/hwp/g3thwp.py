@@ -565,11 +565,11 @@ class G3tHWP():
         logger.info('Remove offcentering effect from hwp angle and overwrite')
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes_1"][0] > self._num_edges/2-1:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][0]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         else:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][1]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
         if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
@@ -585,8 +585,11 @@ class G3tHWP():
         # Calculate the offcentering (mm).
         period = (solved["fast_time_1"][offcenter_idx1+1] -
                   solved["fast_time_1"][offcenter_idx1])*self._num_edges
-        offset_angle = offset_time/period*2*np.pi
-        offcentering = np.tan(offset_angle)*self._encoder_disk_radius
+        # When data is extremely noisy, period gets zero and offcentering becomes nan
+        period[period==0] = np.median(period)
+        offset_angle = 2 * np.pi * offset_time / period
+        offcentering = np.tan(offset_angle) * self._encoder_disk_radius
+
         solved['offcenter_idx1'] = offcenter_idx1
         solved['offcenter_idx2'] = offcenter_idx2
         solved['offcentering'] = offcentering
