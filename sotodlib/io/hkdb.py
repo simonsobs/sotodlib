@@ -74,12 +74,13 @@ class HkConfig:
     def from_yaml(cls, path):
         with open(path, 'r') as f:
             data = yaml.safe_load(f)
-            if isinstance(data.get('db_url'), dict):
+            _db_url = data.get('db_url')
+            if isinstance(_db_url, dict):
                 url_dict = data['db_url']
                 for k, v in url_dict.items():
                     url_dict[k] = os.path.expandvars(v)
                 data['db_url'] = db.URL.create(**url_dict)
-            elif isinstance(str):
+            elif isinstance(_db_url, str):
                 data['db_url'] = os.path.expandvars(data['db_url'])
             return cls(**data)
 
@@ -202,7 +203,11 @@ def update_file_index(hkcfg: HkConfig, session=None):
     session.add_all(files)
     session.commit()
 
-def get_frames_from_file(file: HkFile, return_on_fail=True) -> List[HkFrame]:
+def get_frames_from_file(
+    hkcfg: HkConfig,
+    file: HkFile,
+    return_on_fail=True
+) -> List[HkFrame]:
     """
     Returns HkFile and HkFrame objects corresponding to a given hk file.
 
@@ -221,7 +226,11 @@ def get_frames_from_file(file: HkFile, return_on_fail=True) -> List[HkFrame]:
         List of all HkFrames in the file
     """
     frames = []
-    reader = so3g.G3IndexedReader(file.path)
+    if os.path.isabs(file.path):
+        path = str(file.path)
+    else:
+        path = os.path.join(hkcfg.hk_root, str(file.path))
+    reader = so3g.G3IndexedReader(path)
 
     while True:
         byte_offset = reader.Tell()
@@ -266,7 +275,7 @@ def update_frame_index(hkcfg: HkConfig, session=None):
     files = session.query(HkFile).filter(HkFile.index_status == 'unindexed').all()
     log.info(f"Indexing {len(files)} files")
     for file in tqdm(files, disable=(not hkcfg.show_index_pb), ascii=True):
-        frames = get_frames_from_file(file)
+        frames = get_frames_from_file(hkcfg, file)
         file_start, file_end = 1<<32, 0
         for f in frames:
             file_start = min(file_start, f.start_time)
