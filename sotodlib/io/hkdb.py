@@ -421,14 +421,23 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
             file_spec[frame.file.path].append(frame.byte_offset)
 
     result = {}  # {field: [timestamps, data]}
+    field_misses = set()
     def get_result_field(agent, feed, field_name):
         f = Field(agent, feed, field_name)
         key = str(f)
+
         if key in result:
             return result[key]
+
+        if key in field_misses:
+            return None
+
         for field in load_spec.fields:
             if field.matches(f):
                 result[key] = [[], []]
+                return result[key]
+        # Cache field on miss
+        field_misses.add(key)
         return None
     ds_factor = load_spec.downsample_factor
 
