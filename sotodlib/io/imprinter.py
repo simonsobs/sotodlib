@@ -584,17 +584,21 @@ class Imprinter:
                     "failed obs/oper books."
                 )
                 continue
-            stray_book = Books(
-                bid=book_id,
-                type="stray",
-                status=UNBOUND,
-                tel_tube=self.daq_node,
-                start=book_start,
-                stop=book_stop,
+
+            flist = self.get_files_for_stray_book(
+                min_ctime= tc * 1e5,
+                max_ctime= (tc + 1) * 1e5
             )
-            stray_book.path = self.get_book_path(stray_book)
-            flist = self.get_files_for_book(stray_book)
             if len(flist) > 0:
+                stray_book = Books(
+                    bid=book_id,
+                    type="stray",
+                    status=UNBOUND,
+                    tel_tube=self.daq_node,
+                    start=book_start,
+                    stop=book_stop,
+                )
+                stray_book.path = self.get_book_path(stray_book)            
                 self.logger.info(f"registering {book_id}")
                 session.add(stray_book)
                 session.commit()
@@ -1430,35 +1434,7 @@ class Imprinter:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
         elif book.type in ["stray"]:
-            session = self.get_session()
-            
-            ## build list of files already in bound books
-            book_list = session.query(Books).filter(
-                Books.start >= book.start,
-                Books.start < book.stop,
-                or_(Books.type == 'obs', Books.type == 'oper'),
-                Books.status != WONT_BIND,
-            ).all()
-            files_in_books = []
-            for b in book_list:
-                flist = self.get_files_for_book(b)
-                for k in flist:
-                    files_in_books.extend(flist[k])
-            
-            g3session = self.get_g3tsmurf_session()
-            tcode = int(book.bid.split("_")[1])
-
-            files_in_tc = g3session.query(Files).filter(
-                Files.name.like(f"%/{tcode}/%"),
-            ).all()
-            files_in_tc = [f.name for f in files_in_tc]
-            
-            files_into_stray = []
-            for f in files_in_tc:
-                if f in files_in_books:
-                    continue
-                files_into_stray.append(f)
-            return files_into_stray
+            return self.get_files_for_stray_book(book)
         
         elif book.type == "hk":
             HK = self.get_g3thk(book.tel_tube)
@@ -1490,6 +1466,62 @@ class Imprinter:
             raise NotImplementedError(
                 f"book type {book.type} not understood for" " file search"
             )
+
+    def get_files_for_stray_book(
+        self, book=None, min_ctime=None, max_ctime=None
+    ):
+        """generate list of files that are not in detector books and should
+        going into stray books. if book is None then we expect both min and max
+        ctime to be provided
+
+        Arguments
+        ----------
+        book: optional, book instance
+        min_ctime: optional, minimum ctime value to search
+        max_ctime: optional, maximum ctime value to search
+
+        Returns
+        --------
+        list of files that should go into a stray book
+        """
+        if book is None:
+            assert min_ctime is not None and max_ctime is not None
+            start = dt.datetime.utcfromtimestamp(min_ctime)
+            stop = dt.datetime.utcfromtimestamp(max_ctime)
+
+            tcode = int(min_ctime//1e5)
+            if max_ctime > (tcode+1)*1e5:
+                self.logger.error(
+                    f"Max ctime {max_ctime} is higher than would be expected "
+                    f"for a single stray book with min ctime {min_ctime}. only"
+                    " checking the first timecode directory"
+                )
+        else:
+            assert book.type == 'stray'
+            start = book.start
+            stop = book.stop
+            tcode = int(book.bid.split("_")[1])
+        
+        session = self.get_session()
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        path = os.path.join(SMURF.archive_path, str(tcode))
+        registered_obs = [ 
+            x[0] for x in session.query(Observations.obs_id).join(Books).filter(
+            Books.start >= start, 
+            Books.start < stop,
+            Books.status != WONT_BIND,
+        ).all()]
+        db_files = g3session.query(Files).filter(
+            Files.name.like(f"{path}%")
+        ).all()
+
+        stray_files = []
+        for f in db_files:
+            if f.obs_id is None or f.obs_id not in registered_obs:
+                stray_files.append(f.name)
+
+        return stray_files
+            
 
     def get_readout_ids_for_book(self, book):
         """
@@ -1696,7 +1728,7 @@ class Imprinter:
         dry_run: bool
             if true, just prints plans to self.logger.info
         """
-        if book.status != BOUND:
+        if book.status != UPLOADED:
             raise ValueError(f"Book must be bound to delete level 2 files")
 
         self.logger.info(f"Removing level 2 files for {book.bid}")
@@ -1751,19 +1783,35 @@ class Imprinter:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
 
+    def find_missing_lvl2_obs_from_books(
+        self, min_ctime, max_ctime
+    ):
+        """create a list of level 2 observation IDs that are not registered in 
+        the imprinter database
+        
+        Arguments
+        ----------
+        min_ctime: minimum ctime value to search
+        max_ctime: maximum ctime value to search
 
-    def all_bound_until(self):
-        """report a datetime object to indicate that all books are bound
-        by this datetime.
+        Returns
+        --------
+        list of level 2 observation ids not in books
         """
         session = self.get_session()
-        # sort by start time and find the start time by which
-        # all books are bound
-        books = session.query(Books).order_by(Books.start).all()
-        for book in books:
-            if book.status < BOUND:
-                return book.start
-        return book.start  # last book
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        registered_obs = [
+            x[0] for x in session.query(Observations.obs_id).join(Books).filter(
+            Books.start >= dt.datetime.utcfromtimestamp(min_ctime), 
+            Books.start < dt.datetime.utcfromtimestamp(max_ctime),
+        ).all()]
+        missing_obs = g3session.query(G3tObservations).filter(
+            G3tObservations.timestamp >= min_ctime,
+            G3tObservations.timestamp <= max_ctime,
+            G3tObservations.stream_id.in_(self.all_slots),
+            G3tObservations.obs_id.not_in(registered_obs)
+        ).all()
+        return missing_obs
 
 #####################
 # Utility functions #

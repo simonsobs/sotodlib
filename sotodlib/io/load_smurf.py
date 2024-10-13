@@ -606,7 +606,7 @@ class G3tSmurf:
             my_logger = logger
 
         db_frames = db_file.frames
-        my_logger.info(f"Deleting frame entries for {db_file.name}")
+        my_logger.debug(f"Deleting frame entries for {db_file.name}")
         if not dry_run:
             [session.delete(frame) for frame in db_frames]
 
@@ -1730,6 +1730,52 @@ class G3tSmurf:
         if new_session:
             session.close()
 
+    def find_missing_files(self, timecode, session=None):
+        """create a list of files in the timecode folder that are not in the
+        g3tsmurf database
+        
+        Arguments
+        ----------
+        timecode (int): a level 2 timestreams timecode
+
+        Returns
+        --------
+        missing (list): list of file paths that are not in the g3tsmurf database
+        """
+        if session is None:
+            session = self.Session()
+        path = os.path.join(self.archive_path, str(timecode))
+
+        q = session.query(Files).filter(Files.name.like(f"{path}%"))
+        db_list = [f.name for f in q.all()]
+        sys_list = walk_files(path)
+        missing = []
+        for f in sys_list:
+            if f not in db_list:
+                missing.append(f)
+
+        return missing
+
+    def find_missing_files_from_obs(self, timecode, session=None):
+        """create a list of files in the g3tsmurf database that do not have an
+        assigned level 2 observation ID
+        
+        Arguments
+        ----------
+        timecode (int): a level 2 timestreams timecode
+
+        Returns
+        --------
+        missing (list): list of file paths that do not have level 2 observation IDs
+        """
+        if session is None:
+            session = self.Session()
+        path = os.path.join(self.archive_path, str(timecode))
+        q = session.query(Files).filter(Files.name.like(f"{path}%"))
+        db_list = q.all()
+        return [f.name for f in db_list if f.obs_id is None]
+        
+
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look
         and act like core.metadata.obsfiledb.lookup_file.
@@ -1914,6 +1960,37 @@ class G3tSmurf:
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
+def just_suprsync(path):
+    """check if timecode folder only has suprsync folder in it
+    """
+    flist = os.listdir( path )
+    if len(flist) == 1 and flist[0] == "suprsync":
+        return True
+    return False
+
+def walk_files(path, include_suprsync=False):
+    """get a list of the files in a timecode folder, optional flag to ignore
+    suprsync files
+    
+    Arguments
+    ----------
+    path: path to a level 2 timecode folder, either smurf or timestreams
+    include_suprsync: optional, bool
+        if true, includes the suprsync files in the returned list
+
+    Returns
+    --------
+    files (list): list of the absolute paths to all files in a timecode folder
+    """
+    if not os.path.exists(path):
+        return []
+    flist = []
+    for root, _, files in os.walk(path):
+        if not include_suprsync and 'suprsync' in root:
+            continue
+        for f in files:
+            flist.append( os.path.join(path, root, f))
+    return flist
 
 def dump_DetDb(archive, detdb_file):
     """
