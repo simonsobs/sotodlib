@@ -49,6 +49,8 @@ DONE = 4
 # tel tube, stream_id, slot mapping
 VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 
+# file patterns excluded from smurf books
+SMURF_EXCLUDE_PATTERNS = ["*.dat", "*_mask.txt", "*_freq.txt"]
 
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
@@ -237,10 +239,12 @@ class Imprinter:
         self.config = load_configs(im_config)
 
         self.db_path = self.config.get("db_path")
-        self.daq_node = self.config.get("daq_node")
+        self.daq_node = self.config.get("daq_node")        
         self.output_root = self.config.get("output_root")
         self.g3tsmurf_config = self.config.get("g3tsmurf")
-        
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
+        self.lvl2_data_root = g3tsmurf_cfg["data_prefix"]
+
         self.build_hk = self.config.get("build_hk")
         self.build_det = self.config.get("build_det")
 
@@ -444,9 +448,6 @@ class Imprinter:
         session = session or self.get_session()
         if not self.build_hk:
             return
-        
-        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
-        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if min_ctime is None:
             min_ctime = 16000e5
@@ -454,7 +455,7 @@ class Imprinter:
             max_ctime = 5e10
 
         # all ctime dir except the last ctime dir will be considered complete
-        ctime_dirs = sorted(glob(op.join(lvl2_data_root, "hk", "*")))
+        ctime_dirs = sorted(glob(op.join(self.lvl2_data_root, "hk", "*")))
         for ctime_dir in ctime_dirs[:-1]:
             ctime = op.basename(ctime_dir)
             if int(ctime) < int(min_ctime//1e5):
@@ -606,8 +607,6 @@ class Imprinter:
         return os.path.join(self.output_root, book_path)
 
     def get_book_path(self, book):
-        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
-        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
             session_id = book.bid.split("_")[1]
@@ -616,7 +615,7 @@ class Imprinter:
             return os.path.join(odir, book.bid)
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
-            root = op.join(lvl2_data_root, book.type)
+            root = op.join(self.lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             odir = op.join(book.tel_tube, book.type)
@@ -640,8 +639,6 @@ class Imprinter:
         require_acu=True,
     ):
         """get the appropriate bookbinder for the book based on its type"""
-        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
-        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
             book_path = self.get_book_abs_path(book)
@@ -659,7 +656,7 @@ class Imprinter:
 
             # bind book using bookbinder library
             bookbinder = BookBinder(
-                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path, hk_fields,
+                book, obsdb, filedb, self.lvl2_data_root, readout_ids, book_path, hk_fields,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
@@ -670,7 +667,7 @@ class Imprinter:
 
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
-            root = op.join(lvl2_data_root, book.type)
+            root = op.join(self.lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             book_path_src = op.join(root, first5)
@@ -701,7 +698,7 @@ class Imprinter:
                         self.indir,
                         self.outdir,
                         ignore=shutil.ignore_patterns(
-                            "*.dat", "*_mask.txt", "*_freq.txt"
+                           *SMURF_EXCLUDE_PATTERNS
                         ),
                     )
 
@@ -711,7 +708,7 @@ class Imprinter:
             flist = self.get_files_for_book(book)
 
             # get source directory for stray book
-            root = op.join(lvl2_data_root, "timestreams")
+            root = op.join(self.lvl2_data_root, "timestreams")
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             book_path_src = op.join(root, first5)
@@ -1474,6 +1471,20 @@ class Imprinter:
                 .all()
             )
             return [f.path for f in flist]
+        elif book.type == "smurf":
+            tcode = int(book.bid.split("_")[1])
+            basepath = os.path.join(
+                self.lvl2_data_root, 'smurf', str(tcode)
+            )
+            ignore = shutil.ignore_patterns(*SMURF_EXCLUDE_PATTERNS)
+            flist = []
+            for root, _, files in os.walk(basepath):
+                to_ignore = ignore('', files)
+                flist.extend([
+                    os.path.join(basepath, root, f) 
+                    for f in files if f not in to_ignore
+                ])
+            return flist
 
         else:
             raise NotImplementedError(
