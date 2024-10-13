@@ -1607,6 +1607,19 @@ class Imprinter:
         )
         return {o.obs_id: o for o in obs}
 
+    def _librarian_connect(self):
+        """
+        start connection to librarian
+        """
+        from hera_librarian import LibrarianClient
+        from hera_librarian.settings import client_settings
+        conn = client_settings.connections.get(
+            self.config.get("librarian_conn")
+        )
+        if conn is None:
+            raise ValueError(f"'librarian_conn' not in imprinter config")
+        self.librarian = LibrarianClient.from_info(conn)
+
     def upload_book_to_librarian(self, book, session=None, raise_on_error=True):
         """Upload bound book to the librarian
 
@@ -1622,14 +1635,7 @@ class Imprinter:
         if session is None:
             session = self.get_session()
         if self.librarian is None:
-            from hera_librarian import LibrarianClient
-            from hera_librarian.settings import client_settings
-            conn = client_settings.connections.get(
-                self.config.get("librarian_conn")
-            )
-            if conn is None:
-                raise ValueError(f"'librarian_conn' not in imprinter config")
-            self.librarian = LibrarianClient.from_info(conn)
+            self._librarian_connect()
         
         assert book.status == BOUND, "cannot upload unbound books"
 
@@ -1651,7 +1657,25 @@ class Imprinter:
                 return False, e
         return True, None
             
-
+    def check_book_offsite(self, book, raise_on_error=True):
+        """have the librarian validate the books is stored offsite
+        """
+        if self.librarian is None:
+            self._librarian_connect()
+        try:
+            resp = self.librarian.validate_file(book.path)
+            offsite = sum(
+                [(x.librarian != 'site-librarian') and 
+                 (x.computed_same_checksum) for x in
+                resp]
+            ) >= 1
+        except:
+            if raise_on_error:
+                raise e
+            else: 
+                offsite = False
+        return offsite
+        
     def delete_level2_files(self, book, dry_run=True):
         """Delete level 2 data from already bound books
 
