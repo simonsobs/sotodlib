@@ -124,7 +124,7 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None, interpol=None, pix_scheme=None):
+                 cuts=None, threads=None, det_weights=None, interpol=None):
         self.sight = sight
         self.fp = fp
         self.geom = wrap_geom(geom)
@@ -134,7 +134,7 @@ class P:
         self.active_tiles = None
         self.det_weights = det_weights
         self.interpol = interpol
-        self.pix_scheme = check_pix_scheme(pix_scheme, self.geom)
+        self.pix_scheme = _infer_pix_scheme(self.geom)
 
         if self.pix_scheme == "healpix" and (self.geom.nside_tile is not None):
             if isinstance(self.geom.nside_tile, int):
@@ -146,7 +146,7 @@ class P:
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol=None, hwp=False, pix_scheme=None, qp_kwargs={}):
+                site='so', interpol=None, hwp=False, qp_kwargs={}):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -173,9 +173,6 @@ class P:
         tod.focal_plane.  If hwp=True, then the rotation angles
         (gamma) are reflected (gamma' = -gamma) before storing in
         self.fp.
-
-        pix_scheme dictates if we are in 'healpix' or 'rectpix'. If None
-        we will attempt to infer it from the geom argument.
 
         """
         if sight is None:
@@ -216,7 +213,7 @@ class P:
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
                    cuts=cuts, threads=threads, det_weights=det_weights,
-                   interpol=interpol, pix_scheme=pix_scheme)
+                   interpol=interpol)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -342,14 +339,15 @@ class P:
 
         if self.pix_scheme == "healpix":
             tile_list = self._get_hp_tile_list(weights_map)
-            if None in weights_map: weights_map = hp_utils.untile_healpix_compressed(weights_map, -1)
+            if tile_list is not None:
+                weights_map = hp_utils.tiled_to_compressed(weights_map, -1)
 
         # Works for both normal and tiled maps
         if dest is None: dest = np.zeros_like(weights_map)
         dest[:] = helpers._invert_weights_map(weights_map, eigentol=eigentol, UPLO='U')
 
-        if self.pix_scheme == "healpix" and self.tiled:
-            dest = hp_utils.tile_healpix_compressed(dest, tile_list, -1)
+        if self.pix_scheme == "healpix" and tile_list is not None:
+            dest = hp_utils.compressed_to_tiled(dest, tile_list, -1)
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -382,14 +380,15 @@ class P:
 
         if self.pix_scheme == "healpix":
             tile_list = self._get_hp_tile_list(signal_map)
-            if None in signal_map: signal_map = hp_utils.untile_healpix_compressed(signal_map, -1)
-            if None in inverse_weights_map: inverse_weights_map = hp_utils.untile_healpix_compressed(inverse_weights_map, -1)
+            if tile_list is not None:
+                signal_map = hp_utils.tiled_to_compressed(signal_map, -1)
+                inverse_weights_map = hp_utils.tiled_to_compressed(inverse_weights_map, -1)
 
         if dest is None: dest = np.zeros_like(signal_map)
         dest[:] = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map)
 
-        if self.pix_scheme == "healpix" and self.tiled:
-            dest = hp_utils.tile_healpix_compressed(dest, tile_list, -1)
+        if self.pix_scheme == "healpix" and tile_list is not None:
+            dest = hp_utils.compressed_to_tiled(dest, tile_list, -1)
         return dest
 
 
@@ -467,7 +466,9 @@ class P:
         if self.geom is None:
             raise ValueError("Can't project without a geometry!")
         if self.pix_scheme == "healpix":
-            return so3g.proj.ProjectionistHealpix.for_healpix(self.geom.nside, ordering=self.geom.ordering, nside_tile=self.geom.nside_tile, active_tiles=self.active_tiles, **interpol_kw)
+            return so3g.proj.ProjectionistHealpix.for_healpix(
+                self.geom.nside, self.geom.nside_tile, self.active_tiles,
+                self.geom.ordering, **interpol_kw)
         elif self.pix_scheme == "rectpix":
             if self.tiled:
                 return so3g.proj.Projectionist.for_tiled(
@@ -514,6 +515,7 @@ class P:
             self.active_tiles = tile_info['active_tiles']
             if self.pix_scheme == "healpix":
                 self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
+                self.geom.ntile = 12*proj.nside_tile**2
             proj = self._get_proj() # Add active_tiles to proj
 
         if self.threads is False:
@@ -544,18 +546,21 @@ class P:
         return so3g.proj.Assembly.attach(self.sight, so3g_fp)
 
     def _prepare_map(self, map):
-        if self.tiled and self.pix_scheme == "rectpix": return map.tiles
-        else:          return map
+        if self.tiled and self.pix_scheme == "rectpix":
+            return map.tiles
+        else:
+            return map
 
     def _get_hp_tile_list(self, tiled_arr=None):
-        """Get len(nTile) boolean array of whether tiles are active"""
-        if (tiled_arr is not None) and (None in tiled_arr):
-            tile_list = hp_utils.get_active_tiles(tiled_arr)
+        """Get len(nTile) boolean array of whether tiles are active. None if un-tiled.
+        If tiled_arr is not None, get tiling from there. Else get from self.geom"""
+        if isinstance(tiled_arr, list): # Assume we are tiled iff tiled_arr is a list instead of ndarr
+            tile_list = hp_utils.get_active_tile_list(tiled_arr)
         elif self.tiled:
             tile_list = np.zeros(12*self.geom.nside_tile**2, dtype='bool')
-            tile_list[self.active_tiles] = True
+            tile_list[self.active_tiles] = True # The tiling must be initiated already
         else:
-            tile_list = None
+            tile_list = None # Un-tiled
         return tile_list
 
 
@@ -620,18 +625,24 @@ def _get_interpol_args(interpol):
     assert interpol in [None, "nn", "nearest"], "Old so3g does not support interpolated mapmaking"
     return {}
 
-def check_pix_scheme(pix_scheme, geom=None):
-    """Check that pix_scheme is a valid string and get default values
-    If pix_scheme is None, try to determine if it should be rectpix or healpix from geom
-    Then check that it is valid 'healpix' or 'rectpix'
-    """
-    if pix_scheme is None:
-        if isinstance(geom, enmap.Geometry):
-            pix_scheme = 'rectpix'
-        elif geom is None:
-            raise ValueError("Cannot determine pix_scheme with geom=None")
-        else:
-            pix_scheme = 'healpix'
-    if pix_scheme not in ['rectpix', 'healpix']:
-        raise ValueError(f"pix_scheme {pix_scheme} not supported; should be 'rectpix' or 'healpix'")
+def _infer_pix_scheme(geom):
+    fail_err = ValueError(f"Cannot determine pix_scheme from geom {geom}")
+
+    # Healpix: geom contains 'nside' attribute
+    if hasattr(geom, "nside"):
+        pix_scheme = "healpix"
+
+    # Rectpix: geom is None, an enmap.Geometry or a tuple/list that can be converted to one
+    elif isinstance(geom, enmap.Geometry):
+        pix_scheme = "rectpix"
+    elif isinstance(geom, tuple) or isinstance(geom, list):
+        try:
+            enmap.Geometry(*geom)
+            pix_scheme = "rectpix"
+        except:
+            raise fail_err
+    elif geom is None:
+        pix_scheme = "rectpix"
+    else:
+        raise fail_err
     return pix_scheme

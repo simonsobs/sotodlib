@@ -14,7 +14,6 @@ from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
 from .utilities import import_optional, get_flags, process_detweight_str
 from .noise_model import NmatWhite
-from types import SimpleNamespace
 
 hp = import_optional('healpy')
 h5py = import_optional('h5py')
@@ -85,6 +84,12 @@ class DemodMapmaker:
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
             i.e. we will produce one map 
+        det_weights: str or len-1 or 2 tuple (or list)
+            Allowed string values are 'unity' for unit detector weights and 'ivar' for
+            inverse-variance weights from self.noise_model.
+            If a tuple, should be tuple of explicit arrays of detector weights for T and QU.
+        qp_kwargs: dict, optional,
+            Keyword arguments for pointing, passed through to qpoint.
 
         """
         ctime  = obs.timestamps
@@ -234,7 +239,7 @@ class DemodSignalMap(DemodSignal):
                     flagnames = ['glitch_flags', split_labels[n_split]]
                 cuts = get_flags(obs, flagnames)
                 threads='domdir'
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, pix_scheme="rectpix", qp_kwargs=qp_kwargs)
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, qp_kwargs=qp_kwargs)
             else:
                 pmap_local = pmap
 
@@ -303,13 +308,13 @@ class DemodSignalMapHealpix(DemodSignal):
         self.singlestream = singlestream
         ncomp      = len(comps)
         ordering = 'NEST' # Only NEST allowed for tiled maps
-        self.hp_geom = SimpleNamespace(nside=nside, nside_tile=nside_tile, ordering=ordering)
+        self.hp_geom = coords.healpix_utils.get_geometry(nside, nside_tile, ordering)
         npix = 12 * nside**2
         self.rhs = np.zeros((Nsplits, ncomp, npix), dtype=dtype)
         self.div = np.zeros((Nsplits, ncomp, ncomp, npix), dtype=dtype)
         self.hits = np.zeros((Nsplits, npix), dtype=dtype)
         if self.tiled:
-            self.wrapper = coords.healpix_utils.untile_healpix
+            self.wrapper = coords.healpix_utils.tiled_to_full
         else:
             self.wrapper = lambda x:x
 
@@ -325,7 +330,7 @@ class DemodSignalMapHealpix(DemodSignal):
                     flagnames = ['glitch_flags', split_labels[n_split]]
                 cuts = get_flags(obs, flagnames)
                 threads = ["tiles", "simple"][self.hp_geom.nside_tile is None] # 'simple' is likely to perform very poorly but no other method implemented for untiled healpix
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.hp_geom, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, pix_scheme="healpix", qp_kwargs=qp_kwargs)
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.hp_geom, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, qp_kwargs=qp_kwargs)
             else:
                 pmap_local = pmap
 
@@ -334,7 +339,7 @@ class DemodSignalMapHealpix(DemodSignal):
             if not(self.singlestream):
                 obs_rhs, obs_div, obs_hits = project_all_demod(pmap_local, obs.dsT, obs.demodQ, obs.demodU, det_weightsT, det_weightsQU, self.ncomp, self.wrapper)
             else:
-                obs_rhs, obs_div, obs_hits = project_all_single(pmap_local, Nd, det_weightsT, self.ncomp, self.wrapper) # Should there be det_weights here?
+                obs_rhs, obs_div, obs_hits = project_all_single(pmap_local, Nd, det_weightsT, self.ncomp, self.wrapper)
 
             # Update our full rhs and div. This works for both plain and distributed maps
             self.rhs[n_split] = obs_rhs
