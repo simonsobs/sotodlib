@@ -74,8 +74,10 @@ class P:
       is passed as True then the gamma (polarization) angles will be
       reflected (gamma' = -gamma). [dets]
     - geom: The target map geometry. This is a pixell.enmap.Geometry
-      object, with attributes .shape and .wcs; or possibly (if tiled)
-      a pixell.tilemap.TileGeometry.
+      object, with attributes .shape and .wcs;
+      a pixell.tilemap.TileGeometry (if tiled);
+      or a Healpix geometry with attributes nside, nside_tile, and
+      ordering.
     - comps: String indicating the spin-components to include in maps.
       E.g., 'T', 'QU', 'TQU'.
     - rot: quat giving an additional fixed rotation to apply to get
