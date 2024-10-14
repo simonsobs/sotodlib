@@ -376,10 +376,10 @@ def write_demod_info(oname, info, split_labels=None):
         for n_split in range(Nsplits):
             bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
 
-def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
+def make_demod_map(context, obslist, shape, wcs, noise_model, info,
                     preprocess_config, prefix, comm=mpi.COMM_WORLD, comps="TQU", t0=0,
                     dtype_tod=np.float32, dtype_map=np.float32,
-                    tag="", verbose=0, split_labels=None,
+                    tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False):
     """
         Make a demodulated map from the list of observations in obslist.
@@ -398,8 +398,6 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
             WCS kernel of the geometry to use for mapping.
         noise_model : sotodlib.mapmaking.Nmat
             Noise model to pass to DemodMapmaker.
-        L : logger
-            Logger for printing on the screen.
         info : list
             Information for the database, will be written as a .hdf file.
         preprocess_config : dict
@@ -421,6 +419,8 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
         split_labels : list or None, optional
             A list of strings with the splits requested. If None then no splits
             were asked for, i.e. we will produce one map.
+        L : logger, optional
+            Logger for printing on the screen.
         site : str, optional
             Plataform name for the pointing matrix.
         recenter : str or None
@@ -439,6 +439,8 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, L, info,
             List of outputs from preprocess database. To be used in cleanup_mandb.
     """
     context = core.Context(context)
+    if L is None:
+        L = site_pipeline.util.init_logger("Demod filterbin mapmaking")
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     mapmaker = setup_demod_map(shape, wcs, noise_model, comm=comm,

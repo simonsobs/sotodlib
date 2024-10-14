@@ -396,6 +396,7 @@ def main(config_file=None, defaults=defaults, **args):
     my_tods = list(itertools.chain.from_iterable(my_tods))
     my_ra_ref = list(itertools.chain.from_iterable(my_ra_ref))
     pwvs = list(itertools.chain.from_iterable(pwvs))
+    L.info('Starting with read_tods')
 
     # we will do the profile and footprint here, and then allgather the
     # subshapes and subwcs.This way we don't have to communicate the
@@ -482,7 +483,7 @@ def main(config_file=None, defaults=defaults, **args):
     # Done with creating run_list
     with ProcessPoolExecutor(args['nproc']) as exe:
         futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0], r[1], r[2],
-                                noise_model, L, r[3], preprocess_config, r[4],
+                                noise_model, r[3], preprocess_config, r[4],
                                 comm = comm, t0=r[5], tag=tag, recenter=recenter,
                                 dtype_map=args['dtype_map'],
                                 dtype_tod=args['dtype_tod'],
