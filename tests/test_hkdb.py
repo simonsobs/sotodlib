@@ -1,13 +1,9 @@
 import unittest
 import tempfile
 
-from sotodlib.core import metadata
-from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array
 from sotodlib.io import hkdb
 
 import os
-import h5py
-import sqlite3
 import so3g
 import numpy as np
 import time
@@ -65,7 +61,6 @@ def write_hk(filepath):
     return t0, t1, len(times)
 
 
-
 class HkDbTest(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -80,9 +75,9 @@ class HkDbTest(unittest.TestCase):
         os.makedirs(os.path.dirname(hk_file), exist_ok=True)
         hkcfg = hkdb.HkConfig(
             hk_root=hk_root,
-            db_file = hkdb_path,
+            db_file=hkdb_path,
             echo_db=True,
-            aliases = {
+            aliases={
                 'test': 'test_agent.test_feed.test_field'
             }
         )
@@ -91,7 +86,7 @@ class HkDbTest(unittest.TestCase):
         load_spec = hkdb.LoadSpec(
             cfg=hkcfg,
             fields=['test'],
-            start=t0, end=t1,
+            start=t0-1, end=t1+1,
         )
         res = hkdb.load_hk(load_spec)
 
