@@ -634,8 +634,8 @@ def _infer_pix_scheme(geom):
     if hasattr(geom, "nside"):
         pix_scheme = "healpix"
 
-    # Rectpix: geom is None, an enmap.Geometry or a tuple/list that can be converted to one
-    elif isinstance(geom, enmap.Geometry):
+    # Rectpix: geom is None, an enmap Geometry or TileGeometry or a tuple/list that can be converted to one
+    elif isinstance(geom, enmap.Geometry) or isinstance(geom, tilemap.TileGeometry):
         pix_scheme = "rectpix"
     elif isinstance(geom, tuple) or isinstance(geom, list):
         try:
