@@ -480,7 +480,7 @@ class G3tHWP():
             out['bad_revolution_flag'+suffix] = bad_revolution_flag
         return out
 
-    def template_subtraction(self, solved, poly_order=None, suffix='_1'):
+    def eval_angle(self, solved, poly_order=3, suffix='_1'):
         """
         Evaluate the non-uniformity of hwp angle timestamp (template) and subtract it
         The raw hwp angle timestamp is kept.
@@ -540,9 +540,6 @@ class G3tHWP():
         # Trim only the timestamps of integer revolutions
         ft = fast_time[ref_indexes[0]:ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
-        if poly_order is None:
-            poly_order = int(len(ref_indexes)/100)
-            poly_order = np.min([100, poly_order])
         ft = detrend(ft, deg=poly_order)
         # make template from good revolutions
         good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes)])
@@ -563,7 +560,41 @@ class G3tHWP():
         # Normalize template by the width of slit
         average_dt_slit = np.average(np.diff(fast_time - subtract))
         solved['template'+suffix] = template_slit / average_dt_slit
-        solved['template_err'+suffix] = np.sqrt(2) * template_err / average_dt_slit
+        solved['template_err'+suffix] = template_err / average_dt_slit
+
+    def template_subtraction(self, solved, suffix='_1'):
+        """ Template subtraction taking into account the drift of hwp rotation speed
+        """
+        ref_indexes = solved['ref_indexes'+suffix]
+        fast_time = solved['fast_time'+suffix]
+        bad_indexes_each_ref = solved['bad_indexes_each_ref'+suffix]
+        good_revolutions = np.logical_not([i in bad_indexes_each_ref.keys() for i, ri in enumerate(ref_indexes[:-1])])
+        assert np.sum(good_revolutions) > 0
+
+        counter = np.arange(len(fast_time))  # this might need fix
+        spl = scipy.interpolate.CubicSpline(counter[ref_indexes], fast_time[ref_indexes])
+        dt_smoothed = spl(counter)
+        dt_derivative = spl.derivative()(counter)
+
+        template = (fast_time - dt_smoothed)[ref_indexes[0]:ref_indexes[-1]].reshape(len(ref_indexes)-1, self._num_edges)
+        template = template[good_revolutions]
+        template_err = np.std(template, axis=0)
+        template = np.average(template, axis=0)
+        template -= np.average(template)
+
+        template_model = np.roll(np.tile(template, len(ref_indexes) + 2), ref_indexes[0])[:len(fast_time)]
+        template_model = template_model * dt_derivative / np.average(dt_derivative)
+
+        solved['fast_time_raw'+suffix] = copy(fast_time)
+        solved['fast_time'+suffix] = fast_time - template_model
+
+        solved['dt_smoothed'+suffix] = dt_smoothed
+        solved['dt_derivative'+suffix] = dt_derivative
+        # Normalize template by the width of slit
+        average_dt_slit = np.average(np.diff(fast_time - template_model))
+        solved['template'+suffix] = template / average_dt_slit
+        solved['template_err'+suffix] = template_err / average_dt_slit
+        return
 
     def eval_offcentering(self, solved):
         """
@@ -1073,7 +1104,7 @@ class G3tHWP():
             aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
-            filled_flag[solved['filled_indexes'+suffix]] = 1
+            filled_flag[solved['filled_flag'+suffix]] = 1
             aman['filled_flag'+suffix] = self._bool_interpolation(
                 solved['fast_time'+suffix], filled_flag, tod.timestamps, 'ceil')
             aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
