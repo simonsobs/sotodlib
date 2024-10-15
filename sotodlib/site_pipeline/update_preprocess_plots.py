@@ -73,6 +73,34 @@ def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
             logger.info(f"ERROR: {obs_id} {group}\n{errmsg}\n{tb}")
             continue
 
+def plot_preprocess_tod_from_db(obs_id, group_by, group, configs, context, verbosity=2):
+    """ Loads the saved information from the preprocessing pipeline and runs the
+    plotting section of the pipeline. 
+
+    Assumes preprocess_tod has already been run on the requested observation. 
+    
+    Arguments
+    ----------
+    obs_id: multiple
+        passed to `context.get_obs` to load AxisManager, see Notes for 
+        `context.get_obs`
+    configs: string or dictionary
+        config file or loaded config directory
+    """
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    
+    pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
+    
+    logger.info(f"Beginning run for {obs_id}:{group}")
+    try:
+        meta = context.get_meta(obs_id, dets={group_by: group})
+        aman = context.get_obs(meta)
+        pipe.run(aman, aman.preprocess, update_plot=True)
+    except Exception as e:
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+        logger.info(f"ERROR: {obs_id} {group}\n{errmsg}\n{tb}")
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -83,6 +111,11 @@ def get_parser(parser=None):
         help="Query to pass to the observation list. Use \\'string\\' to "
              "pass in strings within the query.",  
         type=str
+    )
+    parser.add_argument(
+        '--use-db', 
+        help="If true, get obs list from existing database provided in config",  
+        action='store_true',
     )
     parser.add_argument(
         '--obs-id',
@@ -128,6 +161,7 @@ def get_parser(parser=None):
 def main(
         configs: str,
         query: Optional[str] = None, 
+        use_db: bool = False, 
         obs_id: Optional[str] = None, 
         overwrite: bool = False,
         min_ctime: Optional[int] = None,
@@ -155,44 +189,55 @@ def main(
         # Otherwise it will use update_delay to set min_ctime.
         min_ctime = int(time.time()) - update_delay*86400
 
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
-
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tag.lower()
-            if '=' not in tag:
-                tags[i] += '=1'
-
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
-    if len(obs_list)==0:
-        logger.warning(f"No observations returned from query: {query}")
-    run_list = []
-
     if not os.path.exists(configs['archive']['index']):
         # don't run if database doesn't exist
         raise Exception(f"No database found at {configs['archive']['index']}.")
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
+
+    run_list = []
+
+    if use_db:
+        obs_list = db.inspect()
+        for obs in obs_list:
+            obsid = obs['obs:obs_id']
+            for k, v in obs.items():
+                if k.startswith('dets:'):
+                    group_by = k.split(':',1)[1]
+                    group = v
+            run_list.append( ({'obs_id': obsid, 'group_by': group_by}, group) )
+    else:
+        if obs_id is not None:
+            tot_query = f"obs_id=='{obs_id}'"
+        else:
+            tot_query = "and "
+            if min_ctime is not None:
+                tot_query += f"timestamp>={min_ctime} and "
+            if max_ctime is not None:
+                tot_query += f"timestamp<={max_ctime} and "
+            if query is not None:
+                tot_query += query + " and "
+            tot_query = tot_query[4:-4]
+            if tot_query=="":
+                tot_query="1"
+
+        if not(tags is None):
+            for i, tag in enumerate(tags):
+                tags[i] = tag.lower()
+                if '=' not in tag:
+                    tags[i] += '=1'
+
+        if planet_obs:
+            obs_list = []
+            for tag in tags:
+                obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+        else:
+            obs_list = context.obsdb.query(tot_query, tags=tags)
+        if len(obs_list)==0:
+            logger.warning(f"No observations returned from query: {query}")
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = sp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 logger.warning(f"Obs_id {obs['obs_id']} not found in database.")
             else:
@@ -208,7 +253,10 @@ def main(
             logger.warning(f"Plots found at {plot_path}. Set overwrite=True to overwrite them.")
             continue
         try:
-            plot_preprocess_tod(obsid, configs, context, group_list=groups, verbosity=verbosity)
+            if use_db:
+                plot_preprocess_tod_from_db(obsid, obs['group_by'], groups, configs, context, verbosity=verbosity)
+            else:
+                plot_preprocess_tod(obsid, configs, context, group_list=groups, verbosity=verbosity)
         except Exception as e:
             logger.info(f"{type(e)}: {e}")
             logger.info(''.join(traceback.format_tb(e.__traceback__)))
