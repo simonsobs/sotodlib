@@ -176,9 +176,10 @@ def main(
     we re-run preprocessing on those observations to produce the plots, without having
     to fully re-run all the calc steps. Provide the preprocess config file that was
     initially used, this time enabling plotting in the pipeline where necessary. The
-    config should point to the existing database with the preprocess data. A query
-    should be provided similar to preprocess_tod to define the obs you want to run
-    plotting on.
+    config should point to the existing database with the preprocess data. Set use_db=True
+    to get the obs list and groups from the existing database (Note: this will also set
+    overwrite=True). Otherwise, you can provide a query similiar to the query used for
+    preprocess_tod to define the obs you want to run plotting on.
 
     """
     configs, context = sp_util.get_preprocess_context(configs)
@@ -198,6 +199,7 @@ def main(
     run_list = []
 
     if use_db:
+        overwrite = True
         obs_list = db.inspect()
         for obs in obs_list:
             obsid = obs['obs:obs_id']
