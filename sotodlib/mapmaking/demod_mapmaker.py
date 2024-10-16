@@ -374,7 +374,7 @@ class DemodSignalMap(DemodSignal):
                     m = np.reshape(m, (np.prod(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
                 hp.write_map(oname, m.view(self.dtype), nest=(self.hp_geom.ordering=='NEST'), overwrite=True)
             elif self.ext == "npy":
-                np.save(oname, m.view(self.dtype))
+                np.save(oname, {'nside': self.hp_geom.nside, 'ordering':self.hp_geom.ordering, 'data':m.view(self.dtype)}, allow_pickle=True)
             elif self.ext in ['h5', 'hdf5']:
                 if h5py is None:
                     raise ValueError("Cannot save healpix map as hdf5; h5py could not be imported. Install h5py or save as npy or fits")
