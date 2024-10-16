@@ -238,7 +238,9 @@ class DemodSignalMap(DemodSignal):
             obs.demodQ, obs.demodU
         
         """
-        return cls(shape, wcs, comm, comps, name, ofmt, output, ext, dtype, sys, recenter, tile_shape, tiled, Nsplits, singlestream)
+        return cls(shape=shape, wcs=wcs, comm=comm, comps=comps, name=name, ofmt=ofmt, output=output,
+                   ext=ext, dtype=dtype, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
+                   Nsplits=Nsplits, singlestream=singlestream, nside=None, nside_tile=None)
 
     @classmethod
     def for_healpix(cls, nside, nside_tile=None, comps="TQU", name="sky", ofmt="{name}", output=True,
@@ -274,8 +276,9 @@ class DemodSignalMap(DemodSignal):
             filter+bin mapmaking, i.e. map from obs.signal rather than from obs.dsT,
             obs.demodQ, obs.demodU
         """
-        return cls(None, None, None, comps, name, ofmt, output, ext, dtype, None, None, None, False, Nsplits, singlestream, nside, nside_tile)
-
+        return cls(shape=None, wcs=None, comm=None, comps=comps, name=name, ofmt=ofmt, output=output,
+                   ext=ext, dtype=dtype, sys=None, recenter=None, tile_shape=None, tiled=False,
+                   Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
     def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, det_weights='ivar', qp_kwargs={}):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
@@ -357,7 +360,7 @@ class DemodSignalMap(DemodSignal):
         if self.tiled: return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else: return utils.allreduce(map, self.comm)
 
-    def write(self, prefix, tag, m, write_partial_fits=False):
+    def write(self, prefix, tag, m):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
@@ -372,8 +375,8 @@ class DemodSignalMap(DemodSignal):
                 if hp is None:
                     raise ImportError("Cannot save healpix map as fits; healpy could not be imported. Install healpy or save as npy or h5")
                 if m.ndim > 2:
-                    m = np.reshape(m, (np.product(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
-                hp.write_map(oname, m.view(self.dtype), nest=(self.hp_geom.ordering=='NEST'), partial=write_partial_fits, overwrite=True)
+                    m = np.reshape(m, (np.prod(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
+                hp.write_map(oname, m.view(self.dtype), nest=(self.hp_geom.ordering=='NEST'), overwrite=True)
             elif self.ext == "npy":
                 np.save(oname, m.view(self.dtype))
             elif self.ext in ['h5', 'hdf5']:
@@ -381,6 +384,8 @@ class DemodSignalMap(DemodSignal):
                     raise ValueError("Cannot save healpix map as hdf5; h5py could not be imported. Install h5py or save as npy or fits")
                 with h5py.File(oname, 'w') as f:
                     dset = f.create_dataset("data", m.shape, dtype=self.dtype, data=m)
+                    dset.attrs['ordering'] = self.hp_geom.ordering
+                    dset.attrs['nside'] = self.hp_geom.nside
             else:
                 raise ValueError(f"Unknown extension {self.ext}")
 
@@ -479,5 +484,5 @@ def project_all_single(pmap, Nd, det_weights, comps, wrapper=lambda x:x):
     div = pmap.zeros(super_shape=(ncomp, ncomp))
     pmap.to_weights(dest=div, comps=comps, det_weights=det_weights)
     div = wrapper(div)
-    hits = wrapper(pmap.to_map(np.ones_like(Nd)))
+    hits = wrapper(pmap.to_map(signal=np.ones_like(Nd)))
     return rhs, div, hits
