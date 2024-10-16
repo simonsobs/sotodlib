@@ -66,7 +66,7 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None, qp_kwargs={}):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -84,8 +84,6 @@ class DemodMapmaker:
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
             i.e. we will produce one map 
-        qp_kwargs: dict, optional,
-            Keyword arguments for pointing, passed through to qpoint.
 
         """
         ctime  = obs.timestamps
@@ -112,7 +110,7 @@ class DemodMapmaker:
                 raise RuntimeError(msg)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels, qp_kwargs=qp_kwargs)
+            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -276,7 +274,7 @@ class DemodSignalMap(DemodSignal):
                    ext=ext, dtype=dtype, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, qp_kwargs={}):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -302,7 +300,7 @@ class DemodSignalMap(DemodSignal):
                 else:
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True, qp_kwargs=qp_kwargs)
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
             else:
                 pmap_local = pmap
 
