@@ -1,18 +1,25 @@
 """
 Helper functions for Healpix operations
 
-Functions are provided to transform between "full", "compressed", and "tiled" Healpix maps.
-This follows a scheme in which the full map is broken up into individual tiles defined by a lower resolution map.
-The setup ("geometry") is defined by the base nside, nside_tile of the tiling, and the ordering.
-Tiled maps must use "NEST" ordering in this scheme. If no tiling is used, "RING" is allowed.
+Functions are provided to transform between "full", "compressed", and "tiled"
+Healpix maps. This follows a scheme in which the full map is broken up into
+individual tiles defined by a lower resolution map. The setup ("geometry") is
+defined by the base nside, nside_tile of the tiling, and the ordering. Tiled
+maps have nTile = 12 * nside_tile**2, and must use "NEST" ordering in this
+scheme. If no tiling is used, "RING" is allowed.
 
-Individual tiles are also marked as "active" or "inactive" depending on whether they include any non-zero pixels.
-This information is contained in an active_tile_list: a len(nTile) boolean array of which tiles are active.
+Individual tiles are also marked as "active" or "inactive" depending on
+whether they include any non-zero pixels. This information is contained in an
+active_tile_list: a len(nTile) boolean array of which tiles are active.
 
-Full map: A normal healpix map (in NEST ordering). Numpy arrays with shape (...,npix); can have any number of leading dimensions.
-Tiled map: A len(nTile) list of tiles. None for inactive tiles and a numpy array of shape (..., npix/nside) for active tiles.
-Compressed map: Numpy array of shape (nActiveTile, ..., npix/nside). Requires additional active tile information to recover a full map.
-The position of the tile axis in a compressed map can be controlled with the tile_axis_pos argument.
+- Full map: A normal healpix map (in NEST ordering). Numpy arrays with shape
+  (...,npix); can have any number of leading dimensions.
+- Tiled map: A len(nTile) list of tiles. None for inactive tiles and a numpy
+  array of shape (..., npix/nside) for active tiles.
+- Compressed map: Numpy array of shape (nActiveTile, ..., npix/nside).
+  Requires additional active tile information to recover a full map. The
+  position of the tile axis in a compressed map can be controlled with the
+  tile_axis_pos argument.
 """
 
 import numpy as np
@@ -47,9 +54,9 @@ def full_to_compressed(full, active_tile_list, tile_axis_pos=0):
     """Get a compressed map from a full NEST map.
 
     Args:
-      compressed: compressed map
+      full: Full map in NEST.
       active_tile_list: len(nTile) boolean array of active tiles
-      tile_axis_pos: Index for the tile axis in the input compressed array
+      tile_axis_pos: Index for the tile axis in the compressed array
     """
     npix = full.shape[-1]
     npix_per_tile = int(npix / len(active_tile_list))
@@ -68,7 +75,7 @@ def full_to_tiled(full, active_tile_list):
     return tiled
 
 def compressed_to_full(compressed, active_tile_list, tile_axis_pos=0):
-    """Get a full NEST map from a compressed map.
+    """Get a full NEST map from a compressed map. Empty tiles are filled with zeros.
     See full_to_compressed for args.
     """
     compressed = np.moveaxis(compressed, tile_axis_pos, 0)
@@ -101,7 +108,7 @@ def tiled_to_compressed(tiled, tile_axis_pos=0):
     return np.moveaxis(arr, 0, tile_axis_pos)
 
 def tiled_to_full(tiled):
-    """Get a full NEST map from a tiled map."""
+    """Get a full NEST map from a tiled map. Empty tiles are filled with zeros."""
     compressed = tiled_to_compressed(tiled)
     active_tile_list = get_active_tile_list(tiled)
     return compressed_to_full(compressed, active_tile_list)

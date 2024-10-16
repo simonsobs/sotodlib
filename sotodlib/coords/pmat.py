@@ -74,10 +74,9 @@ class P:
       is passed as True then the gamma (polarization) angles will be
       reflected (gamma' = -gamma). [dets]
     - geom: The target map geometry. This is a pixell.enmap.Geometry
-      object, with attributes .shape and .wcs;
-      a pixell.tilemap.TileGeometry (if tiled);
-      or a Healpix geometry with attributes nside, nside_tile, and
-      ordering.
+      object, with attributes .shape and .wcs (for non-tiled rectpix); 
+      a pixell.tilemap.TileGeometry (if tiled); or a Healpix geometry as
+      defined in coords.healpix_utils.
     - comps: String indicating the spin-components to include in maps.
       E.g., 'T', 'QU', 'TQU'.
     - rot: quat giving an additional fixed rotation to apply to get
@@ -554,7 +553,7 @@ class P:
             return map
 
     def _get_hp_tile_list(self, tiled_arr=None):
-        """Get len(nTile) boolean array of whether tiles are active. None if un-tiled.
+        """For healpix maps, get len(nTile) bool array of whether tiles are active. None if un-tiled.
         If tiled_arr is not None, get tiling from there. Else get from self.geom"""
         if isinstance(tiled_arr, list): # Assume we are tiled iff tiled_arr is a list instead of ndarr
             tile_list = hp_utils.get_active_tile_list(tiled_arr)
