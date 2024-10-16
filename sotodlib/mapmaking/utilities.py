@@ -527,24 +527,6 @@ def downsample_obs(obs, down):
     # doesn't matter anyway
     return res
 
-def process_detweight_str(det_weights, nmat=None):
-    """Parse strings for some default detector weight options"""
-    if type(det_weights) is str:
-        if det_weights == 'ivar':
-            if nmat is None:
-                raise ValueError("need noise matrix to use ivar detweights")
-            return 2*nmat.ivar, nmat.ivar
-        elif det_weights == 'unity':
-            return None, None # Might be more robust to use explicit ones but downstream default is 1 so this should work
-        else:
-            raise ValueError(f"det_weight string {det_weights} not recognized; should be 'ivar' or 'unity'")
-    elif type(det_weights) in [tuple, list]:
-        if len(det_weights) not in [1, 2]:
-            raise ValueError(f"Expected len 1 or 2 tuple/list of det_weights. Got len {len(det_weights)}.")
-        return det_weights
-    else:
-        return det_weights, det_weights # Assume it's array-like det_weights (or None) and return two copies, (T, QU)
-
 def get_flags(obs, flagnames):
     """Parse detector-set splits"""
     cuts_out = None

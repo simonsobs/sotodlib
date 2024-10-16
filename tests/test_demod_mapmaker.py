@@ -19,9 +19,8 @@ class DemodMapmakerTest(unittest.TestCase):
 
         nside = 128
         for nside_tile in [16, None, 'auto']:
-            for det_weights in ['unity', 'ivar']:
-                imap = make_map(obs, nside=nside, nside_tile=nside_tile, det_weights=det_weights)
-                check_map(imap, Q_stream, U_stream, TOL=1e-9)
+            imap = make_map(obs, nside=nside, nside_tile=nside_tile)
+            check_map(imap, Q_stream, U_stream, TOL=1e-9)
 
     def test_make_map_rectpix(self):
         Q_stream = 1.0
@@ -30,12 +29,11 @@ class DemodMapmakerTest(unittest.TestCase):
 
         shape, wcs = enmap.fullsky_geometry(res=0.5*coords.DEG)
 
-        for det_weights in ['unity', 'ivar']:
-            imap = make_map(obs, shape=shape, wcs=wcs, det_weights=det_weights)
-            check_map(imap, Q_stream, U_stream, TOL=1e-9)
+        imap = make_map(obs, shape=shape, wcs=wcs)
+        check_map(imap, Q_stream, U_stream, TOL=1e-9)
 
 
-def make_map(obs, nside=None, nside_tile=None, shape=None, wcs=None, det_weights='unity', comps='TQU'):
+def make_map(obs, nside=None, nside_tile=None, shape=None, wcs=None, comps='TQU'):
     if nside is not None:
         signal_map = DemodSignalMap.for_healpix(nside, nside_tile, comps=comps)
     else:
@@ -43,7 +41,7 @@ def make_map(obs, nside=None, nside_tile=None, shape=None, wcs=None, det_weights
 
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=NmatWhite(), comps=comps)
-    mapmaker.add_obs('obs0', obs, det_weights=det_weights)
+    mapmaker.add_obs('obs0', obs)
     imap = unweight_map(signal_map.rhs[0], signal_map.div[0])
     return imap
 

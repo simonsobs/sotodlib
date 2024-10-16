@@ -12,7 +12,7 @@ import so3g.proj
 
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional, get_flags, process_detweight_str
+from .utilities import import_optional, get_flags
 from .noise_model import NmatWhite
 
 hp = import_optional('healpy')
@@ -66,7 +66,7 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None, det_weights='ivar', qp_kwargs={}):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None, qp_kwargs={}):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -84,10 +84,6 @@ class DemodMapmaker:
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
             i.e. we will produce one map 
-        det_weights: str or len-1 or 2 tuple (or list)
-            Allowed string values are 'unity' for unit detector weights and 'ivar' for
-            inverse-variance weights from self.noise_model.
-            If a tuple, should be tuple of explicit arrays of detector weights for T and QU.
         qp_kwargs: dict, optional,
             Keyword arguments for pointing, passed through to qpoint.
 
@@ -116,7 +112,7 @@ class DemodMapmaker:
                 raise RuntimeError(msg)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels, det_weights=det_weights, qp_kwargs=qp_kwargs)
+            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels, qp_kwargs=qp_kwargs)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -280,7 +276,7 @@ class DemodSignalMap(DemodSignal):
                    ext=ext, dtype=dtype, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, det_weights='ivar', qp_kwargs={}):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, qp_kwargs={}):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -310,11 +306,11 @@ class DemodSignalMap(DemodSignal):
             else:
                 pmap_local = pmap
 
-            det_weightsT, det_weightsQU = process_detweight_str(det_weights, nmat)
             if not(self.singlestream):
-                obs_rhs, obs_div, obs_hits = project_all_demod(pmap_local, obs.dsT, obs.demodQ, obs.demodU, det_weightsT, det_weightsQU, self.ncomp, self.wrapper)
+                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT, signalQ=obs.demodQ, signalU=obs.demodU,
+                                                               det_weightsT=2*nmat.ivar, det_weightsQU=nmat.ivar, ncomp=self.ncomp, wrapper=self.wrapper)
             else:
-                obs_rhs, obs_div, obs_hits = project_all_single(pmap_local, Nd, det_weightsT, 'TQU', self.wrapper)
+                obs_rhs, obs_div, obs_hits = project_all_single(pmap=pmap_local, Nd=Nd, det_weights=nmat.ivar, comps='TQU', wrapper=self.wrapper)
             # Update our full rhs and div. This works for both plain and distributed maps
             if self.pix_scheme == "rectpix":
                 self.rhs[n_split] = self.rhs[n_split].insert(obs_rhs, op=np.ndarray.__iadd__)
