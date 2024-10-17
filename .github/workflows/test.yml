@@ -24,12 +24,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python: "3.8"
-            pyshort: "38"
           - python: "3.9"
             pyshort: "39"
           - python: "3.10"
             pyshort: "310"
+          - python: "3.11"
+            pyshort: "311"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
