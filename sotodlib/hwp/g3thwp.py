@@ -836,7 +836,8 @@ class G3tHWP():
             aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
             aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
-            aman.wrap_new('template_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_t'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_t_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('bad_revolution_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap('version'+suffix, 1)
@@ -1117,7 +1118,8 @@ class G3tHWP():
                     solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
                 aman['template'+suffix] = solved['template'+suffix]
-                aman['template_err'+suffix] = solved['template_err'+suffix]
+                aman['template_t'+suffix] = solved['template_t'+suffix]
+                aman['template_t_err'+suffix] = solved['template_t_err'+suffix]
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the template subtraction.")
@@ -1356,6 +1358,7 @@ class G3tHWP():
             scaled_avg_clk = avg_encd_clk * period[bad_ref] / np.average(period)
             threshold = period[bad_ref]/ self._num_edges * 0.15
             rm = self._find_glitch(sub_clk, scaled_avg_clk, threshold)
+            print(rm + self._ref_indexes[bad_ref])
             remove = np.append(remove, rm + self._ref_indexes[bad_ref])
 
         # remove glitch
@@ -1395,9 +1398,13 @@ class G3tHWP():
             # with smallest time difference is considered as glitch
             if not glitch_is_found:
                 i = np.argmin(np.diff(sub_clk[~mask]))
-                mask[i + j + 1] = True
-                bad_indexes.append(i + j + 1)
+                i += np.sum(bad_indexes < i)  # NEED debug
+                mask[i+1] = True  # NEED debug
+                bad_indexes.append(i)
             logger.debug('{}, {}'.format(bad_indexes, glitch_is_found))
+            print('{}, {}'.format(bad_indexes, glitch_is_found))
+
+        assert len(bad_indexes) == len(np.unique(bad_indexes))
 
         return np.array(bad_indexes)
 
