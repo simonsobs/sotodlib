@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import time
 import numpy as np
 import scipy.interpolate
 import h5py
@@ -566,11 +565,11 @@ class G3tHWP():
         logger.info('Remove offcentering effect from hwp angle and overwrite')
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes_1"][0] > self._num_edges/2-1:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][0]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         else:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][1]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
         if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
@@ -586,8 +585,11 @@ class G3tHWP():
         # Calculate the offcentering (mm).
         period = (solved["fast_time_1"][offcenter_idx1+1] -
                   solved["fast_time_1"][offcenter_idx1])*self._num_edges
-        offset_angle = offset_time/period*2*np.pi
-        offcentering = np.tan(offset_angle)*self._encoder_disk_radius
+        # When data is extremely noisy, period gets zero and offcentering becomes nan
+        period[period == 0] = np.median(period)
+        offset_angle = 2 * np.pi * offset_time / period
+        offcentering = np.tan(offset_angle) * self._encoder_disk_radius
+
         solved['offcenter_idx1'] = offcenter_idx1
         solved['offcenter_idx2'] = offcenter_idx2
         solved['offcentering'] = offcentering
@@ -790,11 +792,26 @@ class G3tHWP():
         f.close()
         return data
 
-    def _bool_interpolation(self, timestamp1, data, timestamp2):
-        interp = scipy.interpolate.interp1d(
-            timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
-        result = (interp > 0.999)
-        return result
+    def _angle_interpolation(self, timestamp1, angle, timestamp2):
+        """Linearly interpolate the angle to the timestamp of the detector readout.
+        Fill outside the data range constant by the first and last values of the angle."""
+        return np.interp(timestamp2, timestamp1, angle, left=angle[0], right=angle[-1])
+
+    def _bool_interpolation(self, timestamp1, data, timestamp2, fill, round_option):
+        """Linearly interpolate the boolean array. fill values by False outside of the
+        data range
+        Args
+            fill: Outside of data range is filled by this value, 0 or 1
+            round_option: round option, 'floor' or 'ceil'
+        """
+        interp = np.interp(timestamp2, timestamp1, data, left=fill, right=fill)
+        if round_option == 'floor':
+            interp = np.floor(interp)
+        elif round_option == 'ceil':
+            interp = np.ceil(interp)
+        else:
+            raise ValueError(f'round option {round_option} is not supported.')
+        return interp.astype(bool)
 
     def set_data(self, tod, h5_filename=None):
         """
@@ -1001,32 +1018,31 @@ class G3tHWP():
             self._write_solution_h5_logger = 'Angle calculation succeeded'
             aman['version'+suffix] = 1
             aman['stable'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
+                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 0, 'floor')
             aman['locked'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
-            aman['hwp_rate'+suffix] = scipy.interpolate.interp1d(
-                solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
+                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 0, 'floor')
+            aman['hwp_rate'+suffix] = np.interp(
+                tod.timestamps, solved['slow_time'+suffix], solved['hwp_rate'+suffix], left=0, right=0)
             aman['logger'+suffix] = self._write_solution_h5_logger
 
-            quad = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['quad'+suffix], tod.timestamps)
+            quad = scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], solved['quad'+suffix], kind='linear', fill_value='extrapolate')(tod.timestamps)
             aman['quad'+suffix] = np.array([1 if q else -1 for q in quad])
             aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_indexes'+suffix]] = 1
-            filled_flag = scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
-            aman['filled_flag'+suffix] = filled_flag.astype(bool)
-            aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+            aman['filled_flag'+suffix] = self._bool_interpolation(
+                solved['fast_time'+suffix], filled_flag, tod.timestamps, 1, 'ceil')
+            aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
+                solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
 
             # version 2
             # calculate template subtracted angle
             try:
                 self.eval_angle(solved, poly_order=3, suffix=suffix)
-                aman['hwp_angle_ver2'+suffix] = np.mod(scipy.interpolate.interp1d(
-                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                aman['hwp_angle_ver2'+suffix] = np.mod(self._angle_interpolation(
+                    solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
                 aman['template'+suffix] = solved['template'+suffix]
             except Exception as e:
@@ -1041,8 +1057,8 @@ class G3tHWP():
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
                 for suffix in self._suffixes:
-                    aman['hwp_angle_ver3'+suffix] = np.mod(scipy.interpolate.interp1d(
-                        solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                    aman['hwp_angle_ver3'+suffix] = np.mod(self._angle_interpolation(
+                        solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                     aman['version'+suffix] = 3
                 aman['offcenter'] = np.array([np.average(solved['offcentering']), np.std(solved['offcentering'])])
                 aman.offcenter_direction = np.sign(aman['offcenter'][0])
@@ -1129,9 +1145,12 @@ class G3tHWP():
             kind='linear',
             fill_value='extrapolate')(self._encd_clk)
 
-        # Reject unexpected counter
+        # Reject unexpected counter that exceeds instantaneous
+        # rotation speed of 5 Hz
         idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
         if len(idx) > 0:
+            logger.warning(f'Rejected {len(idx)} counters because instantaneous '
+                            'rotation speed exceeds 5 Hz. Encoder data might be noisy.')
             self._encd_clk = np.delete(self._encd_clk, idx)
             self._encd_cnt = self._encd_cnt[0] + \
                 np.arange(len(self._encd_cnt) - len(idx))
@@ -1160,7 +1179,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(self._time))
 
-        # calculate hwp angle with IRIG timing
+        # calculate hwp angle
         self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
@@ -1233,12 +1252,21 @@ class G3tHWP():
             return -1
 
         # delete unexpected ref slit indexes
-        self._ref_indexes = np.delete(self._ref_indexes, np.where(
-            np.diff(self._ref_indexes) < self._num_edges - 10)[0])
+        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 10)[0]
+        if len(bad_ref_indexes) > 0:
+            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
+            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
+
+        # check quality of ref_indexes
+        number_of_bad_refs = np.sum(np.diff(self._ref_indexes) != self._num_edges - 2)
+        if number_of_bad_refs > 0:
+            logger.warning(f'There are {number_of_bad_refs} bad ref indexes')
+
         self._ref_clk = self._encd_clk[self._ref_indexes]
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         logger.debug('found {} reference points'.format(
             len(self._ref_indexes)))
+
         return 0
 
     def _fill_refs(self):
@@ -1301,7 +1329,7 @@ class G3tHWP():
         return
 
     def _calc_angle_linear(self, mod2pi=True):
-
+        """ Calculate hwp angle of encoder counters for each revolution """
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges) % (2 * np.pi)
@@ -1429,6 +1457,7 @@ class G3tHWP():
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
         offset = 0
+        outlier_count = 0
         for quad_split in np.array_split(quad, 1 + np.floor(len(quad) / 100)):
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
                 for j in range(len(quad_split)):
@@ -1437,12 +1466,9 @@ class G3tHWP():
                 continue
 
             outlier = np.argwhere(
-                np.abs(
-                    quad_split.mean() -
-                    quad_split) > 0.5).flatten()
+                np.abs(quad_split.mean() - quad_split) > 0.5).flatten()
             if len(outlier) > 5:
-                logger.warning(
-                    "flipping quad is corrected by mean value")
+                outlier_count += 1
             for i in outlier:
                 if i == 0:
                     ii, iii = i + 1, i + 2
@@ -1455,5 +1481,8 @@ class G3tHWP():
                 if quad_split[i] + quad_split[ii] + quad_split[iii] == 2:
                     quad[i + offset] = 1
             offset += len(quad_split)
+        if outlier_count > 0:
+            logger.warning("flipping quad was corrected by mean value "
+                           f"in {outlier_count} sections.")
 
         return quad
