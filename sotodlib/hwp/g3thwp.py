@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import os
-import time
 import numpy as np
 import scipy.interpolate
 import h5py
+from copy import copy
 import so3g
 from spt3g import core
 import logging
@@ -406,7 +406,8 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate, template, filled_indexes}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, ref_indexes, bad_indexes_each_ref,
+             filled_flag, bad_revolution_flag}
 
 
         Notes
@@ -426,8 +427,17 @@ class G3tHWP():
             * hwp_rate: float
                 * the "approximate" HWP spin rate, with sign, in revs / second.
                 * Use placeholder value of 0 for cases when not "stable".
-            * filled_indexes: boolean array
-                * indexes where we filled due to packet drop etc.
+            * ref_indexes: int
+                * Indexes of of reference slots.
+            * bad_indexes_each_ref: dictionary
+                * Information about bad data points in each revolution starting from reference slot
+                * key: Index of reference slots which have bad data points.
+                * value: A list of indexes indicating the positions of bad data points
+                         within each revolution, starting from the reference index.
+            * filled_flag: bool
+                * Flag indicating the points that are filled due to packet drop.
+            * bad_revolution_flag: boolean array
+                * Flag indicating the points of bad revolutions that are contaminated with noise.
         """
 
         if not any(data):
@@ -458,13 +468,23 @@ class G3tHWP():
             out['angle'+suffix] = angle
             out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
-            out['filled_indexes'+suffix] = self._filled_indexes
-
+            out['bad_ref'+suffix] = self._bad_ref
+            # generate flags
+            filled_flag = np.zeros_like(fast_time, dtype=bool)
+            for r in self._filled_ranges: filled_flag[r[0]:r[1]] = 1
+            out['filled_flag'+suffix] = filled_flag
+            out['num_dropped_packets'+suffix] = self._num_dropped_pkts
+            bad_revolution_flag = np.zeros_like(fast_time, dtype=bool)
+            for i in self._bad_ref:
+                ri = self._ref_indexes[i]
+                bad_revolution_flag[ri:ri+self._num_edges] = 1
+            out['bad_revolution_flag'+suffix] = bad_revolution_flag
+            out['num_glitches'+suffix] = self._num_glitches
         return out
 
     def eval_angle(self, solved, poly_order=3, suffix='_1'):
         """
-        Evaluate the non-uniformity of hwp angle timestamp and subtract
+        Evaluate the non-uniformity of hwp angle timestamp (template) and subtract it
         The raw hwp angle timestamp is kept.
 
         Args
@@ -480,7 +500,7 @@ class G3tHWP():
         Returns
         --------
         output: dict
-            {fast_time, fast_time_raw, angle, slow_time, stable, locked, hwp_rate, template}
+            {fast_time, fast_time_raw, template, template_err, ...}
 
 
         Notes
@@ -488,6 +508,8 @@ class G3tHWP():
             * template: float array (ratio)
                 * Averaged non-uniformity of the hwp angle
                 * normalized by the step of the angle encoder
+            * template_err: float array
+                * Error bar of template
 
         non-uniformity of hwp angle comes from following reasons,
             - non-uniformity of encoder slits
@@ -506,30 +528,75 @@ class G3tHWP():
                 'Non-uniformity is already subtracted. Calculation is skipped.')
             return
 
-        def detrend(array, deg=poly_order):
+        def detrend(array, deg):
             x = np.linspace(-1, 1, len(array))
-            p = np.polyfit(x, array, deg=deg)
+            p,_ ,_ ,_ ,_ = np.polyfit(x, array, deg=deg, full=True)  # supress rank warning
             pv = np.polyval(p, x)
             return array - pv
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
-        # template subtraction
-        ft = solved['fast_time'+suffix][solved['ref_indexes'+suffix]
-                                        [0]:solved['ref_indexes'+suffix][-2]+1]
+        ref_indexes = solved['ref_indexes'+suffix]
+        bad_ref = solved['bad_ref'+suffix]
+        fast_time = solved['fast_time'+suffix]
+
+        # Trim only the timestamps of integer revolutions
+        ft = fast_time[ref_indexes[0]:ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
-        ft = detrend(ft, deg=3)
-        # make template
-        template_slit = np.diff(ft).reshape(
-            len(solved['ref_indexes'+suffix])-2, self._num_edges)
-        template_slit = np.average(template_slit, axis=0)
-        average_slit = np.average(template_slit)
+        ft = detrend(ft, deg=poly_order)
+        # make template from good revolutions
+        good_revolutions = np.logical_not([i in bad_ref for i, ri in enumerate(ref_indexes)])
+        # abort template subtraction is there is no good revolutions
+        assert np.sum(good_revolutions) > 0
+        # make template from difference of time
+        template_slit = np.diff(ft).reshape(len(solved['ref_indexes'+suffix])-2, self._num_edges)
+        template_slit = template_slit[good_revolutions[:-2]]
+        template_err = np.std(template_slit, axis=0)
+        template_slit = np.average(template_slit, axis=0) # take average of all revolutions
+        template_slit = np.cumsum(template_slit)
+        template_slit -= np.average(template_slit) # remove global time ofset
+        subtract = np.roll(np.tile(template_slit, int(np.ceil(len(fast_time)/self._num_edges))), ref_indexes[0]+1)
+        subtract = subtract[:len(fast_time)]
         # subtract template, keep raw timestamp
-        subtract = np.cumsum(np.roll(np.tile(template_slit-average_slit, len(
-            self._ref_indexes) + 1), self._ref_indexes[0] + 1)[:len(solved['fast_time'+suffix])])
-        solved['fast_time_raw'+suffix] = solved['fast_time'+suffix]
-        solved['fast_time'+suffix] = solved['fast_time'+suffix] - subtract
-        solved['template'+suffix] = template_slit / \
-            np.average(np.diff(solved['fast_time'+suffix]))
+        solved['fast_time_raw'+suffix] = copy(fast_time)
+        solved['fast_time'+suffix] = fast_time - subtract
+        # Normalize template by the width of slit
+        average_dt_slit = np.average(np.diff(fast_time - subtract))
+        solved['template'+suffix] = template_slit / average_dt_slit
+        solved['template_err'+suffix] = template_err / average_dt_slit
+
+
+    def template_subtraction(self, solved, suffix='_1'):
+        """ Template subtraction taking into account the drift of hwp rotation speed
+        """
+        ref_indexes = solved['ref_indexes'+suffix]
+        bad_ref = solved['bad_ref'+suffix]
+        fast_time = solved['fast_time'+suffix]
+
+        counter = np.arange(len(fast_time))
+        spl = scipy.interpolate.CubicSpline(counter[ref_indexes], fast_time[ref_indexes])
+        dt_smoothed = spl(counter)
+        dt_derivative = spl.derivative()(counter)
+
+        template_list = np.split(fast_time - dt_smoothed, ref_indexes)[1:-1]
+        template = np.array([li for i, li in enumerate(template_list) if i not in bad_ref])
+        template_err = np.std(template, axis=0)
+        template = np.average(template, axis=0)
+        template -= np.average(template)  #  no global shift
+
+        template_model = np.roll(template, ref_indexes[0])
+        template_model = np.tile(template_model, int(np.ceil(len(fast_time)/self._num_edges)))[:len(fast_time)]
+        template_model = template_model * dt_derivative / np.average(dt_derivative)
+
+        solved['fast_time_raw'+suffix] = copy(fast_time)
+        solved['fast_time'+suffix] = fast_time - template_model
+
+        # Normalize template by the width of slit
+        average_dt_slit = np.average(np.diff(fast_time - template_model))
+        solved['template'+suffix] = np.diff(template, append=template[0]) / average_dt_slit
+        solved['template_t'+suffix] = template / average_dt_slit
+        solved['template_t_err'+suffix] = template_err / average_dt_slit
+        return
+
 
     def eval_offcentering(self, solved):
         """
@@ -541,7 +608,7 @@ class G3tHWP():
         Args
         -----
         solved: dict
-            dict solved from eval_angle
+            dict solved from template_subtraction
             {fast_time_1, angle_2, fast_time_2, angle_2, ...}
 
         Returns
@@ -566,11 +633,11 @@ class G3tHWP():
         logger.info('Remove offcentering effect from hwp angle and overwrite')
         # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
         if solved["ref_indexes_1"][0] > self._num_edges/2-1:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][0]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][0]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         else:
-            offcenter_idx1_start, offcenter_idx2_start = int(
-                solved["ref_indexes_1"][1]-self._num_edges/2), int(solved["ref_indexes_2"][0])
+            offcenter_idx1_start = int(solved["ref_indexes_1"][1]-self._num_edges/2)
+            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
         # Calculate offcentering to the end of the shorter encoder data.
         if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
@@ -586,8 +653,11 @@ class G3tHWP():
         # Calculate the offcentering (mm).
         period = (solved["fast_time_1"][offcenter_idx1+1] -
                   solved["fast_time_1"][offcenter_idx1])*self._num_edges
-        offset_angle = offset_time/period*2*np.pi
-        offcentering = np.tan(offset_angle)*self._encoder_disk_radius
+        # When data is extremely noisy, period gets zero and offcentering becomes nan
+        period[period == 0] = np.median(period)
+        offset_angle = 2 * np.pi * offset_time / period
+        offcentering = np.tan(offset_angle) * self._encoder_disk_radius
+
         solved['offcenter_idx1'] = offcenter_idx1
         solved['offcenter_idx2'] = offcenter_idx2
         solved['offcentering'] = offcentering
@@ -602,7 +672,7 @@ class G3tHWP():
         Args
         -----
         solved: dict
-            dict solved from eval_angle
+            dict solved from template_subtraction
             {fast_time_1, angle_1, fast_time_2, angle_2, ...}
         offcentering: dict
             dict solved from eval_offcentering
@@ -638,6 +708,8 @@ class G3tHWP():
         offcenter_idx2 = solved['offcenter_idx2']
         offset_time = solved['offset_time']
 
+        solved['fast_time_raw_1'] = solved['fast_time_raw_1'][offcenter_idx1]
+        solved['fast_time_raw_2'] = solved['fast_time_raw_2'][offcenter_idx2]
         solved['fast_time_1'] = solved['fast_time_1'][offcenter_idx1] - offset_time
         solved['fast_time_2'] = solved['fast_time_2'][offcenter_idx2] + offset_time
         solved['angle_1'] = solved['angle_1'][offcenter_idx1]
@@ -767,7 +839,12 @@ class G3tHWP():
             aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
             aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_t'+suffix, shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_t_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap_new('bad_revolution_flag'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap('num_dropped_packets'+suffix, 0)
+            aman.wrap('num_glitches'+suffix, 0)
             aman.wrap('version'+suffix, 1)
             aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -790,11 +867,23 @@ class G3tHWP():
         f.close()
         return data
 
-    def _bool_interpolation(self, timestamp1, data, timestamp2):
-        interp = scipy.interpolate.interp1d(
-            timestamp1, data, kind='linear', bounds_error=False)(timestamp2)
-        result = (interp > 0.999)
-        return result
+    def _angle_interpolation(self, timestamp1, angle, timestamp2):
+        """Linearly interpolate the angle to the timestamp of the detector readout.
+        numpy.interp uses constant extrapolation, and extend the first and last values
+        of the angle in the interpolation interval"""
+        return np.interp(timestamp2, timestamp1, angle)
+
+    def _bool_interpolation(self, timestamp1, data, timestamp2, round_option):
+        """Linearly interpolate the boolean array. fill values by False outside of the
+        data range"""
+        interp = np.interp(timestamp2, timestamp1, data, left=0, right=0)
+        if round_option == 'floor':
+            interp = np.floor(interp)
+        elif round_option == 'ceil':
+            interp = np.ceil(interp)
+        else:
+            raise ValueError(f'round option {round_option} is not supported.')
+        return interp.astype(bool)
 
     def set_data(self, tod, h5_filename=None):
         """
@@ -926,13 +1015,19 @@ class G3tHWP():
                 'Angle calculation failed', 'Angle calculation succeeded'
 
             - filled_flag_1/2: bool (samps,)
-                Array to indicate the index of hwp angle filled due to packet drop, etc.
+                Array to indicate the data points that are filled due to packet drop.
+
+            - bad_revolution_flag_1/2: bool (samps,)
+                Array to indicate the data points of bad revolutions that are contaminated with noise.
 
             - quad_1/2: int (quad,)
                 0 or 1 or -1. 0 means no data
 
             - template_1/2: float (1140,)
                 Template of the non uniformity of hwp encoder plate
+
+            - template_err_1/2: float (1140,)
+                Error bar of template
 
             - offcenter: float (2,)
                 - (average offcenter, std of offcenter) unit is (mm)
@@ -949,7 +1044,6 @@ class G3tHWP():
 
             - offcenter_direction: int
                 Estimation by the offcentering measured by the time offset between two encoders.
-                To be implemented.
 
             - template_direction: int
                 Estimation by the template of encoder plate.
@@ -957,7 +1051,7 @@ class G3tHWP():
 
             - scan_direction: int
                 Estimation by scan synchronous modulation of rotation speed.
-
+                To be implemented.
 
         """
 
@@ -1001,34 +1095,37 @@ class G3tHWP():
             self._write_solution_h5_logger = 'Angle calculation succeeded'
             aman['version'+suffix] = 1
             aman['stable'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps)
+                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 'floor')
             aman['locked'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps)
-            aman['hwp_rate'+suffix] = scipy.interpolate.interp1d(
-                solved['slow_time'+suffix], solved['hwp_rate'+suffix], kind='linear', bounds_error=False)(tod.timestamps)
+                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 'floor')
+            aman['hwp_rate'+suffix] = np.interp(
+                tod.timestamps, solved['slow_time'+suffix], solved['hwp_rate'+suffix], left=0, right=0)
             aman['logger'+suffix] = self._write_solution_h5_logger
 
-            quad = self._bool_interpolation(
-                solved['fast_time'+suffix], solved['quad'+suffix], tod.timestamps)
+            quad = scipy.interpolate.interp1d(
+                solved['fast_time'+suffix], solved['quad'+suffix], kind='linear', fill_value='extrapolate')(tod.timestamps)
             aman['quad'+suffix] = np.array([1 if q else -1 for q in quad])
             aman['quad_direction'+suffix] = np.nanmedian(aman['quad'+suffix])
 
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
-            filled_flag[solved['filled_indexes'+suffix]] = 1
-            filled_flag = scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], filled_flag, kind='linear', bounds_error=False)(tod.timestamps)
-            aman['filled_flag'+suffix] = filled_flag.astype(bool)
-            aman['hwp_angle_ver1'+suffix] = np.mod(scipy.interpolate.interp1d(
-                solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+            filled_flag[solved['filled_flag'+suffix]] = 1
+            aman['filled_flag'+suffix] = self._bool_interpolation(
+                solved['fast_time'+suffix], filled_flag, tod.timestamps, 'ceil')
+            aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
+                solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
+            aman['num_dropped_packets'+suffix] = solved['num_dropped_packets'+suffix]
+            aman['num_glitches'+suffix] = solved['num_glitches'+suffix]
 
             # version 2
             # calculate template subtracted angle
             try:
-                self.eval_angle(solved, poly_order=3, suffix=suffix)
-                aman['hwp_angle_ver2'+suffix] = np.mod(scipy.interpolate.interp1d(
-                    solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                self.template_subtraction(solved, suffix=suffix)
+                aman['hwp_angle_ver2'+suffix] = np.mod(self._angle_interpolation(
+                    solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                 aman['version'+suffix] = 2
                 aman['template'+suffix] = solved['template'+suffix]
+                aman['template_t'+suffix] = solved['template_t'+suffix]
+                aman['template_t_err'+suffix] = solved['template_t_err'+suffix]
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while the template subtraction.")
@@ -1041,8 +1138,8 @@ class G3tHWP():
                 self.eval_offcentering(solved)
                 self.correct_offcentering(solved)
                 for suffix in self._suffixes:
-                    aman['hwp_angle_ver3'+suffix] = np.mod(scipy.interpolate.interp1d(
-                        solved['fast_time'+suffix], solved['angle'+suffix], kind='linear', bounds_error=False)(tod.timestamps), 2*np.pi)
+                    aman['hwp_angle_ver3'+suffix] = np.mod(self._angle_interpolation(
+                        solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
                     aman['version'+suffix] = 3
                 aman['offcenter'] = np.array([np.average(solved['offcentering']), np.std(solved['offcentering'])])
                 aman.offcenter_direction = np.sign(aman['offcenter'][0])
@@ -1104,7 +1201,11 @@ class G3tHWP():
 
         # metadata of packet drop
         self._num_dropped_pkts = 0
-        self._filled_indexes = []
+        self._filled_ranges = []
+
+        # keep bad data points as a dictionary
+        self._num_glitches = 0
+        self._bad_ref = []
 
         # check duplication in data
         self._duplication_check()
@@ -1122,31 +1223,24 @@ class G3tHWP():
         self._encoder_packet_sort()
         self._fill_dropped_packets()
 
-        # assign IRIG synched timestamp
-        self._time = scipy.interpolate.interp1d(
-            self._rising_edge,
-            self._irig_time,
-            kind='linear',
-            fill_value='extrapolate')(self._encd_clk)
-
-        # Reject unexpected counter
-        idx = np.where((1 / np.diff(self._time) / self._num_edges) > 5.0)[0]
-        if len(idx) > 0:
-            self._encd_clk = np.delete(self._encd_clk, idx)
-            self._encd_cnt = self._encd_cnt[0] + \
-                np.arange(len(self._encd_cnt) - len(idx))
-            self._time = np.delete(self._time, idx)
-
-        # reference finding and fill its angle
+        # reference finding
         _status_find_ref = self._find_refs()
-        if _status_find_ref == -1:
+        if not _status_find_ref:
             return [], []
+
+        # fix reference
+        self._fix_ref()
+
+        # glitch removal
+        self._remove_glitch()
+
+        # reference filling
         if fast:
             self._fill_refs_fast()
         else:
             self._fill_refs()
 
-        # re-assign IRIG synched timestamp
+        # assign IRIG synched timestamp
         self._time = scipy.interpolate.interp1d(
             self._rising_edge,
             self._irig_time,
@@ -1160,7 +1254,7 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(self._time))
 
-        # calculate hwp angle with IRIG timing
+        # calculate hwp angle
         self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
@@ -1230,16 +1324,110 @@ class G3tHWP():
             else:
                 logger.warning(
                     'cannot find reference points, please adjust parameters!')
-            return -1
+            return False
 
-        # delete unexpected ref slit indexes
-        self._ref_indexes = np.delete(self._ref_indexes, np.where(
-            np.diff(self._ref_indexes) < self._num_edges - 10)[0])
+        # check quality of ref_indexes
+        number_of_bad_refs = np.sum(np.diff(self._ref_indexes) != self._num_edges - 2)
+        if number_of_bad_refs > 0:
+            logger.warning(f'There are {number_of_bad_refs} bad ref indexes')
+
         self._ref_clk = self._encd_clk[self._ref_indexes]
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         logger.debug('found {} reference points'.format(
             len(self._ref_indexes)))
-        return 0
+
+        return True
+
+
+    def _fix_ref(self):
+        """Delete unexpected ref slit indexes
+        this type of unexpected ref slit is produced from packet drop filling and
+        noise in encoder data
+        """
+        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 2)[0]
+        if len(bad_ref_indexes) > 0:
+            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
+            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
+
+
+    def _remove_glitch(self):
+        """If the number of data points in onre revolution is larger than expected.
+        We consider that gliches exit.
+        """
+        good_refs = np.where(np.diff(self._ref_indexes) == self._num_edges - 2)[0]
+        bad_refs = np.where(np.diff(self._ref_indexes) > self._num_edges - 2)[0]
+        if len(good_refs) < 1:
+            return False
+        if len(bad_refs) == 0:
+            return True
+        self._bad_ref = bad_refs
+        # get typical timestamp within one revolution
+        sub_encd_clk = np.split(self._encd_clk, self._ref_indexes)[1:-1]
+        period = [sub[-1]-sub[0] for sub in sub_encd_clk]
+        sub_encd_clk = np.array([sub_encd_clk[i] for i in good_refs])
+        avg_encd_clk = np.average(sub_encd_clk, axis=0)
+
+        remove = np.array([], dtype=int)
+        for bad_ref in bad_refs:
+            sl = slice(self._ref_indexes[bad_ref], self._ref_indexes[bad_ref + 1], 1)
+            sub_clk = self._encd_clk[sl]
+            scaled_avg_clk = avg_encd_clk * period[bad_ref] / np.average(period)
+            threshold = period[bad_ref]/ self._num_edges * 0.15
+            rm = self._find_glitch(sub_clk, scaled_avg_clk, threshold)
+            remove = np.append(remove, rm + self._ref_indexes[bad_ref])
+
+        # remove glitch
+        self._num_glitches = len(remove)
+        logger.warning(f'{self._num_glitches} glitches are removed')
+        self._encd_clk = np.delete(self._encd_clk, remove)
+        self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_cnt) - len(remove))
+        n_extra = np.diff(self._ref_indexes)[bad_refs] - self._num_edges + 2
+        for i, n in zip(bad_refs, n_extra):
+            self._ref_indexes[i + 1:] -= n
+        return True
+
+
+    def _find_glitch(self, sub_clk, scaled_avg_clk, threshold):
+        """Find glitch in one revolution and return bad index
+        """
+        n_extra = len(sub_clk) - self._num_edges + 2
+        bad_indexes = []
+        start = 0
+        mask = np.zeros_like(sub_clk, dtype=bool)
+        template = np.diff(scaled_avg_clk)
+
+        # Incrementally search for the glitch
+        for j in range(n_extra):
+            # Find glitches by comparing the timestamp with typical one
+            # Left and right time differences that are both further than
+            # threshold are considered glitches.
+            for i in range(start, self._num_edges - 4):
+                l = np.diff(sub_clk[~mask])[1:][i] - template[1:][i]
+                r = np.diff(sub_clk[~mask])[:-1][i] - template[:-1][i]
+                mismatch = np.min([np.abs(l), np.abs(r)])
+                if mismatch > threshold:
+                    mask[i + j + 1] = True
+                    start = i
+                    bad_indexes.append(i + j + 1)
+                    break
+            else:
+                bad_indexes.append(np.delete(np.arange(len(sub_clk)), bad_indexes)[-1])
+            # if nothing goes beyond the threshold, the data point
+            # with smallest time difference is considered as glitch
+            #else:
+            #    i = np.argmin(np.diff(sub_clk[~mask]))
+            #    for k in sorted(bad_indexes):
+            #        if k <= i + 1:
+            #            i += 1
+            #    mask[i+1] = True  # NEED debug
+            #    bad_indexes.append(i+1)
+            #    start = 0
+        logger.debug('{}, {}'.format(n_extra, bad_indexes))
+
+        assert len(bad_indexes) == len(np.unique(bad_indexes))
+
+        return np.array(bad_indexes)
+
 
     def _fill_refs(self):
         """ Fill in the reference edges """
@@ -1295,24 +1483,35 @@ class G3tHWP():
 
         self._encd_cnt = self._encd_cnt[0] + np.arange(
             len(self._encd_cnt) + len(self._ref_indexes) * self._ref_edges)
-        self._ref_indexes += np.arange(len(self._ref_indexes)
-                                       ) * self._ref_edges
+        # Shift filled indexes
+        for fi in self._filled_ranges:
+            offset_start, offset_end = 0, 0
+            for ri in self._ref_indexes:
+                if fi[0] <= ri:
+                    break
+                if fi[0] > ri:
+                    offset_start += 2
+                if fi[1] > ri:
+                    offset_end += 2
+            fi[0] += offset_start
+            fi[1] += offset_end
+        # Shift ref indexes
+        self._ref_indexes += np.arange(len(self._ref_indexes)) * self._ref_edges
         self._ref_cnt = self._encd_cnt[self._ref_indexes]
         return
 
     def _calc_angle_linear(self, mod2pi=True):
-
+        """ Calculate hwp angle of encoder counters for each revolution """
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
-            (2 * np.pi / self._num_edges) % (2 * np.pi)
+            (2 * np.pi / self._num_edges)
         angle_last_revolution = (self._encd_cnt_split[-1] - self._ref_cnt[-1]) * \
-            (2 * np.pi / self._num_edges) % (2 * np.pi) + \
-            len(self._ref_cnt) * 2 * np.pi
-        self._angle = np.concatenate([(self._encd_cnt_split[i] - self._ref_cnt[i]) *
-                                      (2 * np.pi /
-                                       np.diff(self._ref_indexes)[i - 1])
-                                      % (2 * np.pi) + i * 2 * np.pi
-                                      for i in range(1, len(self._encd_cnt_split) - 1)])
+            (2 * np.pi / self._num_edges) + (len(self._ref_cnt) - 1) * 2 * np.pi
+        self._angle = np.concatenate(
+            [(self._encd_cnt_split[i] - self._ref_cnt[i]) *
+             (2 * np.pi /np.diff(self._ref_indexes)[i - 1]) + i * 2 * np.pi
+             for i in range(1, len(self._encd_cnt_split) - 1)]
+        )
         self._angle = np.concatenate(
             [angle_first_revolution, self._angle.flatten(), angle_last_revolution])
 
@@ -1392,16 +1591,13 @@ class G3tHWP():
             _diff = int(np.diff(self._encd_cnt)[ii])
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
-            self._filled_indexes += list(range(ii + 1,
-                                         ii + 1 + self._pkt_size))
+            self._filled_ranges.append([ii + 1, ii + 1 + self._pkt_size])
             if ii - self._num_edges + self._ref_edges + 1 >= 0:
                 gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1: ii+_diff - self._num_edges + self._ref_edges] \
-                    - self._encd_clk[ii-self._num_edges +
-                                     self._ref_edges] + self._encd_clk[ii]
+                    - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
             else:
                 gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii - 1 + self._num_edges] \
-                    - self._encd_clk[ii - _diff +
-                                     self._num_edges - 1] + self._encd_clk[ii]
+                    - self._encd_clk[ii - _diff + self._num_edges - 1] + self._encd_clk[ii]
             gap_cnt = np.arange(self._encd_cnt[ii]+1, self._encd_cnt[ii+1])
             self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
             self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
@@ -1429,6 +1625,7 @@ class G3tHWP():
         quad[(quad >= 0.5)] = 1
         quad[(quad < 0.5)] = 0
         offset = 0
+        outlier_count = 0
         for quad_split in np.array_split(quad, 1 + np.floor(len(quad) / 100)):
             if quad_split.mean() > 0.1 and quad_split.mean() < 0.9:
                 for j in range(len(quad_split)):
@@ -1437,12 +1634,9 @@ class G3tHWP():
                 continue
 
             outlier = np.argwhere(
-                np.abs(
-                    quad_split.mean() -
-                    quad_split) > 0.5).flatten()
+                np.abs(quad_split.mean() - quad_split) > 0.5).flatten()
             if len(outlier) > 5:
-                logger.warning(
-                    "flipping quad is corrected by mean value")
+                outlier_count += 1
             for i in outlier:
                 if i == 0:
                     ii, iii = i + 1, i + 2
@@ -1455,5 +1649,8 @@ class G3tHWP():
                 if quad_split[i] + quad_split[ii] + quad_split[iii] == 2:
                     quad[i + offset] = 1
             offset += len(quad_split)
+        if outlier_count > 0:
+            logger.warning("flipping quad was corrected by mean value "
+                           f"in {outlier_count} sections.")
 
         return quad
