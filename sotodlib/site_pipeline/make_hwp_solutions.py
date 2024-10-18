@@ -18,6 +18,7 @@ from sotodlib.site_pipeline import util
 
 logger = util.init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
 
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -29,27 +30,29 @@ def get_parser(parser=None):
         'HWPconfig',
         help="Path to HWP configuration yaml file.")
     parser.add_argument(
-        '-o', '--output-dir', action='store', default=None, type=str,
-        help='output data directory, overwrite config output_dir')
+        '-o', '--solution-output-dir', action='store', default=None, type=str,
+        help='output directory of solution metadata, \
+        overwrite config solution_output_dir')
+    parser.add_argument(
+        '--encoder-output-dir', action='store', default=None, type=str,
+        help='output directory of encoder metadata, \
+        overwrite config encoder_output_dir')
     parser.add_argument(
         '--verbose', default=2, type=int,
         help="increase output verbosity. \
         0: Error, 1: Warning, 2: Info(default), 3: Debug")
     parser.add_argument(
-        '--overwrite',
+        '--overwrite', action='store_true',
         help="If true, overwrites existing entries in the database",
-        action='store_true',
     )
     parser.add_argument(
-        '--load-h5',
+        '--load-h5', action='store_true',
         help="If true, try to load raw encoder data from h5 file",
-        action='store_true',
     )
     parser.add_argument(
-        '--query',
+        '--query', type=str,
         help="Query to pass to the observation list. Use \\'string\\' to "
              "pass in strings within the query.",
-        type=str
     )
     parser.add_argument(
         '--min-ctime',
@@ -60,10 +63,11 @@ def get_parser(parser=None):
         help="Maximum timestamp for the beginning of an observation list",
     )
     parser.add_argument(
-        '--obs-id',
-        help="obs-id of particular observation if we want to run on just one",
+        '--obs-id', type=str, nargs='+',
+        help="List of obs-ids of particular observations that you want to run",
     )
     return parser
+
 
 def make_db(db_filename):
     """
@@ -80,7 +84,7 @@ def make_db(db_filename):
         db = core.metadata.ManifestDb(db_filename)
     else:
         logger.info(f"Creating {db_filename} for the "
-                     "archive index.")
+                    "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
@@ -89,6 +93,7 @@ def make_db(db_filename):
             scheme=scheme
         )
     return db
+
 
 def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
     """
@@ -115,10 +120,12 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
 
     logger.error("Cannot save aman, give up.")
 
+
 def main(
     context: str,
     HWPconfig: str,
-    output_dir: Optional[str] = None,
+    solution_output_dir: Optional[str] = None,
+    encoder_output_dir: Optional[str] = None,
     verbose: Optional[int] = 2,
     overwrite: Optional[bool] = False,
     query: Optional[str] = None,
@@ -133,12 +140,17 @@ def main(
     logger.info("Starting make_hwp_solutions")
 
     # Specify output directory
-    if output_dir is None:
-        output_dir = configs["output_dir"]
+    if solution_output_dir is None:
+        solution_output_dir = configs["solution_output_dir"]
+    if encoder_output_dir is None:
+        encoder_output_dir = configs["encoder_output_dir"]
 
-    if not os.path.exists(output_dir):
-        logger.info(f"Making output directory {output_dir}")
-        os.mkdir(output_dir)
+    if not os.path.exists(solution_output_dir):
+        logger.info(f"Making output directory {solution_output_dir}")
+        os.mkdir(solution_output_dir)
+    if not os.path.exists(encoder_output_dir):
+        logger.info(f"Making output directory {encoder_output_dir}")
+        os.mkdir(encoder_output_dir)
 
     # Set verbose
     if verbose == 0:
@@ -152,12 +164,12 @@ def main(
 
     ctx = core.Context(context)
 
-    db_encoder = make_db(os.path.join(output_dir, 'hwp_encoder.sqlite'))
-    db_solution = make_db(os.path.join(output_dir, 'hwp_angle.sqlite'))
+    db_encoder = make_db(os.path.join(encoder_output_dir, 'hwp_encoder.sqlite'))
+    db_solution = make_db(os.path.join(solution_output_dir, 'hwp_angle.sqlite'))
 
     # load observation data
     if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
+        tot_query = ' or '.join([f"(obs_id=='{o}')" for o in obs_id])
     else:
         tot_query = "and "
         if min_ctime is not None:
@@ -198,20 +210,21 @@ def main(
         g3thwp = G3tHWP(HWPconfig)
 
         if load_h5:
-            aman_encoder = g3thwp.set_data(tod, h5_filename = h5_encoder)
+            aman_encoder = g3thwp.set_data(tod, h5_filename=os.path.join(encoder_output_dir, h5_encoder))
         else:
             aman_encoder = g3thwp.set_data(tod)
         logger.info("Saving hwp_encoder")
-        save(aman_encoder, db_encoder, h5_encoder, output_dir, obs_id, overwrite, 'gzip')
+        save(aman_encoder, db_encoder, h5_encoder, encoder_output_dir, obs_id, overwrite, 'gzip')
         del aman_encoder
 
         aman_solution = g3thwp.make_solution(tod)
         logger.info("Saving hwp_angle")
-        save(aman_solution, db_solution, h5_solution, output_dir, obs_id, overwrite, 'gzip')
+        save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite, 'gzip')
         del aman_solution
         del g3thwp
 
     return
+
 
 if __name__ == '__main__':
     parser = get_parser(parser=None)
