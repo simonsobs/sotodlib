@@ -473,11 +473,13 @@ class G3tHWP():
             filled_flag = np.zeros_like(fast_time, dtype=bool)
             for r in self._filled_ranges: filled_flag[r[0]:r[1]] = 1
             out['filled_flag'+suffix] = filled_flag
+            out['num_dropped_packets'+suffix] = self._num_dropped_pkts
             bad_revolution_flag = np.zeros_like(fast_time, dtype=bool)
             for i in self._bad_ref:
                 ri = self._ref_indexes[i]
                 bad_revolution_flag[ri:ri+self._num_edges] = 1
             out['bad_revolution_flag'+suffix] = bad_revolution_flag
+            out['num_glitches'+suffix] = self._num_glitches
         return out
 
     def eval_angle(self, solved, poly_order=3, suffix='_1'):
@@ -581,7 +583,8 @@ class G3tHWP():
         template = np.average(template, axis=0)
         template -= np.average(template)  #  no global shift
 
-        template_model = np.roll(np.tile(template, len(ref_indexes) + 3), ref_indexes[0])[:len(fast_time)]
+        template_model = np.roll(template, ref_indexes[0])
+        template_model = np.tile(template_model, int(np.ceil(len(fast_time)/self._num_edges)))[:len(fast_time)]
         template_model = template_model * dt_derivative / np.average(dt_derivative)
 
         solved['fast_time_raw'+suffix] = copy(fast_time)
@@ -840,6 +843,8 @@ class G3tHWP():
             aman.wrap_new('template_t_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('bad_revolution_flag'+suffix, shape=('samps', ), dtype=bool)
+            aman.wrap('num_dropped_packets'+suffix, 0)
+            aman.wrap('num_glitches'+suffix, 0)
             aman.wrap('version'+suffix, 1)
             aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -1039,7 +1044,6 @@ class G3tHWP():
 
             - offcenter_direction: int
                 Estimation by the offcentering measured by the time offset between two encoders.
-                To be implemented.
 
             - template_direction: int
                 Estimation by the template of encoder plate.
@@ -1047,7 +1051,7 @@ class G3tHWP():
 
             - scan_direction: int
                 Estimation by scan synchronous modulation of rotation speed.
-
+                To be implemented.
 
         """
 
@@ -1109,6 +1113,8 @@ class G3tHWP():
                 solved['fast_time'+suffix], filled_flag, tod.timestamps, 'ceil')
             aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
                 solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
+            aman['num_dropped_packets'+suffix] = solved['num_dropped_packets'+suffix]
+            aman['num_glitches'+suffix] = solved['num_glitches'+suffix]
 
             # version 2
             # calculate template subtracted angle
@@ -1198,6 +1204,7 @@ class G3tHWP():
         self._filled_ranges = []
 
         # keep bad data points as a dictionary
+        self._num_glitches = 0
         self._bad_ref = []
 
         # check duplication in data
@@ -1220,6 +1227,9 @@ class G3tHWP():
         _status_find_ref = self._find_refs()
         if not _status_find_ref:
             return [], []
+
+        # fix reference
+        self._fix_ref()
 
         # glitch removal
         self._remove_glitch()
@@ -1316,14 +1326,6 @@ class G3tHWP():
                     'cannot find reference points, please adjust parameters!')
             return False
 
-        # delete unexpected ref slit indexes
-        # this type of unexpected ref slit is produced from packet drop filling and
-        # noise in encoder data
-        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 10)[0]
-        if len(bad_ref_indexes) > 0:
-            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
-            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
-
         # check quality of ref_indexes
         number_of_bad_refs = np.sum(np.diff(self._ref_indexes) != self._num_edges - 2)
         if number_of_bad_refs > 0:
@@ -1337,7 +1339,21 @@ class G3tHWP():
         return True
 
 
+    def _fix_ref(self):
+        """Delete unexpected ref slit indexes
+        this type of unexpected ref slit is produced from packet drop filling and
+        noise in encoder data
+        """
+        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 2)[0]
+        if len(bad_ref_indexes) > 0:
+            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
+            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
+
+
     def _remove_glitch(self):
+        """If the number of data points in onre revolution is larger than expected.
+        We consider that gliches exit.
+        """
         good_refs = np.where(np.diff(self._ref_indexes) == self._num_edges - 2)[0]
         bad_refs = np.where(np.diff(self._ref_indexes) > self._num_edges - 2)[0]
         if len(good_refs) < 1:
@@ -1353,16 +1369,16 @@ class G3tHWP():
 
         remove = np.array([], dtype=int)
         for bad_ref in bad_refs:
-            sl = slice(self._ref_indexes[bad_ref], self._ref_indexes[bad_ref + 1], 1)
+            sl = slice(self._ref_indexes[bad_ref], self._ref_indexes[bad_ref + 1] + 1, 1)
             sub_clk = self._encd_clk[sl]
             scaled_avg_clk = avg_encd_clk * period[bad_ref] / np.average(period)
             threshold = period[bad_ref]/ self._num_edges * 0.15
             rm = self._find_glitch(sub_clk, scaled_avg_clk, threshold)
-            print(rm + self._ref_indexes[bad_ref])
             remove = np.append(remove, rm + self._ref_indexes[bad_ref])
 
         # remove glitch
-        logger.warning(f'{len(remove)} glitches are removed')
+        self._num_glitches = len(remove)
+        logger.warning(f'{self._num_glitches} glitches are removed')
         self._encd_clk = np.delete(self._encd_clk, remove)
         self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_cnt) - len(remove))
         n_extra = np.diff(self._ref_indexes)[bad_refs] - self._num_edges + 2
@@ -1372,37 +1388,42 @@ class G3tHWP():
 
 
     def _find_glitch(self, sub_clk, scaled_avg_clk, threshold):
-        """ returns bad index within one revolution """
+        """Find glitch in one revolution and return bad index
+        """
         n_extra = len(sub_clk) - self._num_edges + 2
         bad_indexes = []
         start = 0
         mask = np.zeros_like(sub_clk, dtype=bool)
+        template = np.diff(scaled_avg_clk, append=scaled_avg_clk[0])
 
         # Incrementally search for the glitch
         for j in range(n_extra):
-            glitch_is_found = False
             # Find glitches by comparing the timestamp with typical one
             # Left and right time differences that are both further than
             # threshold are considered glitches.
-            for i in range(start, self._num_edges - 4):
-                l = np.diff(sub_clk[~mask])[1:][i] - np.diff(scaled_avg_clk)[1:][i]
-                r = np.diff(sub_clk[~mask])[:-1][i] - np.diff(scaled_avg_clk)[:-1][i]
+            for i in range(start, self._num_edges - 3):
+                l = np.diff(sub_clk[~mask])[1:][i] - template[1:][i]
+                r = np.diff(sub_clk[~mask])[:-1][i] - template[:-1][i]
                 mismatch = np.min([np.abs(l), np.abs(r)])
                 if mismatch > threshold:
-                    mask[i + j + 1] = True
-                    start = i
-                    bad_indexes.append(i + j + 1)
-                    glitch_is_found = True
+                    for k in sorted(bad_indexes):
+                        if k <= i + 1:
+                            i += 1
+                    mask[i + 1] = True
+                    start = i - 1
+                    bad_indexes.append(i + 1)
                     break
             # if nothing goes beyond the threshold, the data point
             # with smallest time difference is considered as glitch
-            if not glitch_is_found:
+            else:
                 i = np.argmin(np.diff(sub_clk[~mask]))
-                i += np.sum(bad_indexes < i)  # NEED debug
+                for k in sorted(bad_indexes):
+                    if k <= i + 1:
+                        i += 1
                 mask[i+1] = True  # NEED debug
-                bad_indexes.append(i)
-            logger.debug('{}, {}'.format(bad_indexes, glitch_is_found))
-            print('{}, {}'.format(bad_indexes, glitch_is_found))
+                bad_indexes.append(i+1)
+                start = 0
+        logger.debug('{}, {}'.format(n_extra, bad_indexes))
 
         assert len(bad_indexes) == len(np.unique(bad_indexes))
 
