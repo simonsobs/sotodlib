@@ -1369,7 +1369,7 @@ class G3tHWP():
 
         remove = np.array([], dtype=int)
         for bad_ref in bad_refs:
-            sl = slice(self._ref_indexes[bad_ref], self._ref_indexes[bad_ref + 1] + 1, 1)
+            sl = slice(self._ref_indexes[bad_ref], self._ref_indexes[bad_ref + 1], 1)
             sub_clk = self._encd_clk[sl]
             scaled_avg_clk = avg_encd_clk * period[bad_ref] / np.average(period)
             threshold = period[bad_ref]/ self._num_edges * 0.15
@@ -1394,35 +1394,34 @@ class G3tHWP():
         bad_indexes = []
         start = 0
         mask = np.zeros_like(sub_clk, dtype=bool)
-        template = np.diff(scaled_avg_clk, append=scaled_avg_clk[0])
+        template = np.diff(scaled_avg_clk)
 
         # Incrementally search for the glitch
         for j in range(n_extra):
             # Find glitches by comparing the timestamp with typical one
             # Left and right time differences that are both further than
             # threshold are considered glitches.
-            for i in range(start, self._num_edges - 3):
+            for i in range(start, self._num_edges - 4):
                 l = np.diff(sub_clk[~mask])[1:][i] - template[1:][i]
                 r = np.diff(sub_clk[~mask])[:-1][i] - template[:-1][i]
                 mismatch = np.min([np.abs(l), np.abs(r)])
                 if mismatch > threshold:
-                    for k in sorted(bad_indexes):
-                        if k <= i + 1:
-                            i += 1
-                    mask[i + 1] = True
-                    start = i - 1
-                    bad_indexes.append(i + 1)
+                    mask[i + j + 1] = True
+                    start = i
+                    bad_indexes.append(i + j + 1)
                     break
+            else:
+                bad_indexes.append(np.delete(np.arange(len(sub_clk)), bad_indexes)[-1])
             # if nothing goes beyond the threshold, the data point
             # with smallest time difference is considered as glitch
-            else:
-                i = np.argmin(np.diff(sub_clk[~mask]))
-                for k in sorted(bad_indexes):
-                    if k <= i + 1:
-                        i += 1
-                mask[i+1] = True  # NEED debug
-                bad_indexes.append(i+1)
-                start = 0
+            #else:
+            #    i = np.argmin(np.diff(sub_clk[~mask]))
+            #    for k in sorted(bad_indexes):
+            #        if k <= i + 1:
+            #            i += 1
+            #    mask[i+1] = True  # NEED debug
+            #    bad_indexes.append(i+1)
+            #    start = 0
         logger.debug('{}, {}'.format(n_extra, bad_indexes))
 
         assert len(bad_indexes) == len(np.unique(bad_indexes))
@@ -1581,7 +1580,7 @@ class G3tHWP():
         """ Estimate the number of dropped packets """
         cnt_diff = np.diff(self._encd_cnt)
         dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size])
-        self._num_dropped_pkts = dropped_samples // (self._pkt_size - 1)
+        self._num_dropped_pkts = int(dropped_samples // (self._pkt_size - 1))
         if self._num_dropped_pkts > 0:
             logger.warning('{} dropped packets are found, performing fill process'.format(
                 self._num_dropped_pkts))
