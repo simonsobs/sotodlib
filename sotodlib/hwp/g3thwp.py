@@ -471,7 +471,8 @@ class G3tHWP():
             out['bad_ref'+suffix] = self._bad_ref
             # generate flags
             filled_flag = np.zeros_like(fast_time, dtype=bool)
-            for r in self._filled_ranges: filled_flag[r[0]:r[1]] = 1
+            for r in self._filled_ranges:
+                filled_flag[r[0]:r[1]] = 1
             out['filled_flag'+suffix] = filled_flag
             out['num_dropped_packets'+suffix] = self._num_dropped_pkts
             bad_revolution_flag = np.zeros_like(fast_time, dtype=bool)
@@ -869,14 +870,17 @@ class G3tHWP():
 
     def _angle_interpolation(self, timestamp1, angle, timestamp2):
         """Linearly interpolate the angle to the timestamp of the detector readout.
-        numpy.interp uses constant extrapolation, and extend the first and last values
-        of the angle in the interpolation interval"""
-        return np.interp(timestamp2, timestamp1, angle)
+        Fill outside the data range constant by the first and last values of the angle."""
+        return np.interp(timestamp2, timestamp1, angle, left=angle[0], right=angle[-1])
 
-    def _bool_interpolation(self, timestamp1, data, timestamp2, round_option):
+    def _bool_interpolation(self, timestamp1, data, timestamp2, fill, round_option):
         """Linearly interpolate the boolean array. fill values by False outside of the
-        data range"""
-        interp = np.interp(timestamp2, timestamp1, data, left=0, right=0)
+        data range
+        Args
+            fill: Outside of data range is filled by this value, 0 or 1
+            round_option: round option, 'floor' or 'ceil'
+        """
+        interp = np.interp(timestamp2, timestamp1, data, left=fill, right=fill)
         if round_option == 'floor':
             interp = np.floor(interp)
         elif round_option == 'ceil':
@@ -1095,9 +1099,9 @@ class G3tHWP():
             self._write_solution_h5_logger = 'Angle calculation succeeded'
             aman['version'+suffix] = 1
             aman['stable'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 'floor')
+                solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 0, 'floor')
             aman['locked'+suffix] = self._bool_interpolation(
-                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 'floor')
+                solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 0, 'floor')
             aman['hwp_rate'+suffix] = np.interp(
                 tod.timestamps, solved['slow_time'+suffix], solved['hwp_rate'+suffix], left=0, right=0)
             aman['logger'+suffix] = self._write_solution_h5_logger
@@ -1110,7 +1114,7 @@ class G3tHWP():
             filled_flag = np.zeros_like(solved['fast_time'+suffix], dtype=bool)
             filled_flag[solved['filled_flag'+suffix]] = 1
             aman['filled_flag'+suffix] = self._bool_interpolation(
-                solved['fast_time'+suffix], filled_flag, tod.timestamps, 'ceil')
+                solved['fast_time'+suffix], filled_flag, tod.timestamps, 1, 'ceil')
             aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
                 solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
             aman['num_dropped_packets'+suffix] = solved['num_dropped_packets'+suffix]

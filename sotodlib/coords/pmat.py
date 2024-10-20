@@ -3,7 +3,7 @@ import numpy as np
 import scipy
 from pixell import enmap, tilemap
 
-from .helpers import _get_csl, _valid_arg, _not_both
+from .helpers import _get_csl, _valid_arg, _not_both, _confirm_wcs
 from . import helpers
 
 import logging
@@ -323,9 +323,14 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
-        # Works for both normal and tiled maps
-        if dest is None: dest = np.zeros_like(weights_map)
-        dest[:] = helpers._invert_weights_map(weights_map, eigentol=eigentol, UPLO='U')
+        if dest is None:
+            dest = self._enmapify(np.zeros_like(weights_map),
+                                  wcs=_confirm_wcs(weights_map))
+
+        logger.info('to_inverse_weights: calling _invert_weights_map')
+        dest[:] = helpers._invert_weights_map(
+            weights_map, eigentol=eigentol, UPLO='U')
+
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -356,7 +361,13 @@ class P:
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
 
-        if dest is None: dest = np.zeros_like(signal_map)
+        if dest is None:
+            wcs_to_use = _confirm_wcs(inverse_weights_map, signal_map)
+            dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype),
+                                  wcs=wcs_to_use)
+        else:
+            _confirm_wcs(inverse_weights_map, signal_map, dest)
+
         dest[:] = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map)
         return dest
 
@@ -503,6 +514,19 @@ class P:
     def _prepare_map(self, map):
         if self.tiled: return map.tiles
         else:          return map
+
+    def _enmapify(self, data, wcs=None):
+        """Promote a numpy.ndarray to an enmap.ndmap by attaching a wcs.  In
+        sensible cases (e.g. data is an ndarray or ndmap) this will
+        not cause a copy of the underlying data array.
+
+        If a wcs is not passed in, then wcs=self.geom[1] is used.
+
+        """
+        if wcs is None:
+            wcs = self.geom[1]
+        return enmap.ndmap(data, wcs=wcs)
+
 
 class P_PrecompDebug:
     def __init__(self, geom, pixels, phases):

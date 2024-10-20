@@ -76,7 +76,7 @@ def get_pca_model(tod=None, pca=None, n_modes=None, signal=None,
     return output
 
 
-def get_pca(tod=None, cov=None, signal=None, wrap=None):
+def get_pca(tod=None, cov=None, signal=None, wrap=None, mask=None):
     """Compute a PCA decomposition of the kind useful for signal analysis.
     A symmetric non-negative matrix cov of shape(n_dets, n_dets) can
     be decomposed into matrix R (same shape) and vector E (length
@@ -96,6 +96,10 @@ def get_pca(tod=None, cov=None, signal=None, wrap=None):
             tod.signal.
         wrap: string; if set then the returned result is also stored
             in tod under this name.
+        mask: If specifed, a boolean array to select which dets are to
+            be considered in the PCA decomp. This is achieved by
+            modifying the cov to make the non-considered dets
+            independent and low significance.
 
     Returns:
         AxisManager with axes 'dets' and 'eigen' (of the same length),
@@ -108,18 +112,26 @@ def get_pca(tod=None, cov=None, signal=None, wrap=None):
         if signal is None:
             signal = tod.signal
         cov = np.cov(signal)
+
+    if mask is not None:
+        var_min = min(np.diag(cov)[mask])
+        for i in (~mask).nonzero()[0]:
+            cov[i,:] = 0
+            cov[:,i] = 0
+            cov[i,i] = var_min * 1e-2
+
     dets = tod.dets
 
     mode_axis = core.IndexAxis('eigen', dets.count)
     output = core.AxisManager(dets, mode_axis)
     output.wrap('cov', cov, [(0, dets.name), (1, dets.name)])
 
-    # Note eig will sometimes return complex eigenvalues.
-    E, R = np.linalg.eig(cov)  # eigh nans sometimes...
+    E, R = np.linalg.eigh(cov)
     E[np.isnan(E)] = 0.
     E, R = E.real, R.real
 
     idx = np.argsort(-E)
+
     output.wrap('E', E[idx], [(0, mode_axis.name)])
     output.wrap('R', R[:, idx], [(0, dets.name), (1, mode_axis.name)])
     if not(wrap is None):

@@ -203,6 +203,10 @@ class SuperLoader:
                 _line.update(subreq)
                 index_lines.append(_line)
 
+        if len(index_lines) == 0:
+            raise LoaderError(
+                f'There were no metadata records found for this observation ({request}).')
+
         # Pre-screen the index_lines for dets:* assignments; plan to
         # skip lines that aren't relevant according to det_info.
         to_skip = []

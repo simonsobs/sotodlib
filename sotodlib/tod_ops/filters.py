@@ -314,6 +314,17 @@ def identity_filter(freqs, tod, invert=False):
     return np.ones(len(freqs))
 
 @fft_filter
+def gain(freqs, tod, gain=1.):
+    """Filter that simply applies a simple gain (which could be complex)
+    to the entire spectrum.
+
+    This can be used (with gain=1) as an identity filter for testing
+    the filter preprocessing.
+
+    """
+    return gain * np.ones(len(freqs))
+
+@fft_filter
 def low_pass_butter4(freqs, tod, fc):
     """4th-order low-pass filter with f3db at fc (Hz).
 
