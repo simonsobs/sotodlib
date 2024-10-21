@@ -314,6 +314,9 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
 
         for bg, vb_bsa in enumerate(bsa['Vbias']):
             bl_label = f"{bsa['meta']['stream_id']}_b{bg:0>2}"
+            # Usually we can count on bias voltages of bias lines >= 12 to be
+            # Nan, however we have seen cases where they're not, so we also
+            # restrict by count.
             if np.isnan(vb_bsa) or bg >= TES_BIAS_COUNT:
                 bias_line_is_valid[bl_label] = False
                 continue
