@@ -59,8 +59,8 @@ class LeakageSubtractionTest(unittest.TestCase):
         hwp.demod_tod(tod)
         oman = t2pleakage.get_t2p_coeffs(tod)
         
-        self.assertTrue(np.all(np.isclose(oman.coeffsQ, t2q, atol=oman.errorsQ*5, rtol=0)))
-        self.assertTrue(np.all(np.isclose(oman.coeffsU, t2u, atol=oman.errorsU*5, rtol=0)))
+        self.assertTrue(np.all(np.isclose(oman.lamQ, t2q, atol=oman.lamQ_error*5, rtol=0)))
+        self.assertTrue(np.all(np.isclose(oman.lamU, t2u, atol=oman.lamU_error*5, rtol=0)))
         
 if __name__ == '__main__':
     unittest.main()

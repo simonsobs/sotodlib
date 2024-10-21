@@ -464,7 +464,7 @@ def get_trending_flags(aman,
     if timestamps is None:
         timestamps = aman.timestamps
     assert len(timestamps) == signal.shape[1]
-
+    
     # This helps with floating point precision
     # Not modifying inplace since we don't want to touch aman.timestamps
     timestamps = timestamps - timestamps[0]
@@ -474,7 +474,7 @@ def get_trending_flags(aman,
     samp_edges = [0]
     
     # Get sampling rate
-    fs = 1 / np.nanmedian(np.diff(timestamps))
+    fs = 1. / np.nanmedian(np.diff(timestamps))
     n_samples_per_piece = int(t_piece * fs)
     # How many pieces can timestamps be divided into
     n_pieces = len(timestamps) // n_samples_per_piece
