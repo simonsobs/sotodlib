@@ -665,7 +665,7 @@ Output file format
 The inputs and outputs ``solve_pointing_model`` are stored as an AxisManager, before saving to an .h5 file.
 Only the pointing model parameters + version are saved to the ManifestdB ``db.sqlite``.
 
-.. code_block:: text
+.. code-block:: text
 
     - ancil (aman)
       - az_enc (num_obs * 7)
