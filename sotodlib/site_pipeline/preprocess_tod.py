@@ -28,7 +28,7 @@ def dummy_preproc(obs_id, group_list, logger,
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -55,50 +55,6 @@ def dummy_preproc(obs_id, group_list, logger,
             outputs.append(db_data)
     if run_parallel:
         return error, dest_file, outputs
-
-def _get_preprocess_context(configs, context=None):
-    if type(configs) == str:
-        configs = yaml.safe_load(open(configs, "r"))
-    
-    if context is None:
-        context = core.Context(configs["context_file"])
-        
-    if type(context) == str:
-        context = core.Context(context)
-    
-    # if context doesn't have the preprocess archive it in add it
-    # allows us to use same context before and after calculations
-    found=False
-    if context.get("metadata") is None:
-        context["metadata"] = []
-
-    for key in context.get("metadata"):
-        if key.get("unpack") == "preprocess":
-            found=True
-            break
-    if not found:
-        context["metadata"].append( 
-            {
-                "db" : configs["archive"]["index"],
-                "unpack" : "preprocess"
-            }
-        )
-    return configs, context
-
-def _get_groups(obs_id, configs, context):
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    for i, gb in enumerate(group_by):
-        if gb.startswith('dets:'):
-            group_by[i] = gb.split(':',1)[1]
-
-        if (gb == 'detset') and (len(group_by) == 1):
-            groups = context.obsfiledb.get_detsets(obs_id)
-            return group_by, [[g] for g in groups]
-        
-    det_info = context.get_det_info(obs_id)
-    rs = det_info.subset(keys=group_by).distinct()
-    groups = [[b for a,b in r.items()] for r in rs]
-    return group_by, groups
 
 def _get_preprocess_db(configs, group_by):
     if os.path.exists(configs['archive']['index']):
@@ -183,7 +139,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
     for g in all_groups:
@@ -348,7 +304,7 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
   
     context = core.Context(configs["context_file"])
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -481,7 +437,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
     """
-    configs, context = _get_preprocess_context(configs, context)
+    configs, context = sp_util.get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
     
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
@@ -517,7 +473,7 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         into a modulated signal.
         If False, scan the simulation into demodulated timestreams.
     """
-    configs, context = _get_preprocess_context(configs, context)
+    configs, context = sp_util.get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
 
     if meta.dets.count == 0:
@@ -556,7 +512,7 @@ def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
     """
-    configs, context = _get_preprocess_context(configs, context)
+    configs, context = sp_util.get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
 
     if meta.dets.count == 0:
@@ -639,44 +595,16 @@ def main(
         verbosity: Optional[int] = None,
         nproc: Optional[int] = 4
  ):
-    configs, context = _get_preprocess_context(configs)
+    configs, context = sp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
     multiprocessing.set_start_method('spawn')
 
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
-
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
-
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tag.lower()
-            if '=' not in tag:
-                tags[i] += '=1'
-
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
+    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
+                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
+                                   planet_obs=planet_obs)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
@@ -689,7 +617,7 @@ def main(
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = _get_groups(obs["obs_id"], configs, context)
+            group_by, groups = sp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
