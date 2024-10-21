@@ -58,6 +58,13 @@ class SimHWPSS(Operator):
         help="Observation detdata key for simulated signal",
     )
 
+    atmo_data = Unicode(
+        None,
+        allow_none=True,
+        help="Observation detdata key for simulated atmosphere "
+        "(modulates part of the HWPSS)",
+    )
+
     stokes_weights = Instance(
         klass=Operator,
         allow_none=True,
@@ -186,6 +193,10 @@ class SimHWPSS(Operator):
             chi = obs.shared[self.hwp_angle].data
             for det in dets:
                 signal = obs.detdata[self.det_data][det]
+                if self.atmo_data is None:
+                    atmo = None
+                else:
+                    atmo = obs.detdata[self.atmo_data][det]
                 band = focalplane[det]["band"]
                 freq = {
                     "SAT_f030" : "027",
@@ -238,18 +249,39 @@ class SimHWPSS(Operator):
                 theta_high = self.thetas[itheta_high]
                 r = (theta_deg - theta_low) / (theta_high - theta_low)
 
-                transmission = (
-                    (1 - r) * self.all_stokes[freq]["transmission"][itheta_low]
-                    + r * self.all_stokes[freq]["transmission"][itheta_high]
+                # HWPSS not from atmosphere
+
+                transmission_wo_atmo = (
+                    (1 - r) * self.all_stokes[freq]["transmission_wo_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["transmission_wo_atmo"][itheta_high]
                 )
-                reflection = (
-                    (1 - r) * self.all_stokes[freq]["reflection"][itheta_low]
-                    + r * self.all_stokes[freq]["reflection"][itheta_high]
+                reflection_wo_atmo = (
+                    (1 - r) * self.all_stokes[freq]["reflection_wo_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["reflection_wo_atmo"][itheta_high]
                 )
+                # Thermal emission from the HWP is not driven by the atmosphere
                 emission = (
-                    (1 - r) * self.all_stokes[freq]["emission"][itheta_low]
-                    + r * self.all_stokes[freq]["emission"][itheta_high]
+                    (1 - r) * self.all_stokes[freq]["emission_wo_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["emission_wo_atmo"][itheta_high]
                 )
+
+                # HWPSS from atmosphere
+
+                transmission_atmo = (
+                    (1 - r) * self.all_stokes[freq]["transmission_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["transmission_atmo"][itheta_high]
+                )
+                reflection_atmo = (
+                    (1 - r) * self.all_stokes[freq]["reflection_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["reflection_atmo"][itheta_high]
+                )
+
+                if atmo is None:
+                    transmission = transmission_wo_atmo + transmission_atmo
+                    reflection = reflection_wo_atmo + reflection_atmo
+                else:
+                    transmission = transmission_wo_atmo
+                    reflection = reflection_wo_atmo
 
                 # Scale HWPSS for observing elevation
 
@@ -258,21 +290,35 @@ class SimHWPSS(Operator):
 
                 # Observe HWPSS with the detector
 
-                iquv = (transmission + reflection).T
+                iquv = (transmission + reflection)
+                iquv = iquv.T.copy()
                 iquss = (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                     uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 ) * scale
 
-                iquv = emission.T
+                if atmo is not None:
+                    # Atmospheric HWPSS is modulated by the relative
+                    # atmospheric fluctuation
+                    modulation = atmo / np.median(atmo)
+                    iquv = (transmission_atmo + reflection_atmo)
+                    iquv = iquv.T.copy()
+                    # Replace the generic T offset with the simulated atmosphere
+                    # offset
+                    iquv[0] += np.median(atmo) / det_scale - np.mean(iquv[0])
+                    iquss += (
+                        iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
+                        qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
+                        uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
+                    ) * scale * modulation
+
+                iquv = (emission).T.copy()
                 iquss += (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                     uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 )
-
-                iquss -= np.median(iquss)
 
                 if self.hwpss_random_drift:
                     # Apply detector couplings to HWPSS random drift common mode
@@ -295,6 +341,10 @@ class SimHWPSS(Operator):
 
                 # Co-add with the cached signal
 
+                if atmo is not None:
+                    # Avoid double-counting the atmosphere.
+                    # HWPSS has a copy of it
+                    signal -= atmo
                 signal += det_scale * iquss * (1 + drift * coupling)
 
         return
