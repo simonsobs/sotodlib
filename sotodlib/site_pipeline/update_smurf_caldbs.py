@@ -51,6 +51,7 @@ import sotodlib.site_pipeline.util as sp_util
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
+TES_BIAS_COUNT = 12  # per detset / primary file group
 
 logger = logging.getLogger('smurf_caldbs')
 if not logger.hasHandlers():
@@ -313,7 +314,7 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
 
         for bg, vb_bsa in enumerate(bsa['Vbias']):
             bl_label = f"{bsa['meta']['stream_id']}_b{bg:0>2}"
-            if np.isnan(vb_bsa):
+            if np.isnan(vb_bsa) or bg >= TES_BIAS_COUNT:
                 bias_line_is_valid[bl_label] = False
                 continue
 
