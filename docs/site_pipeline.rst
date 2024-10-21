@@ -562,13 +562,14 @@ The keys of this dict are the start times for combined focal planes and the ``ob
 
 solve_pointing_model
 --------------------
+
 This script solves for the pointing model parameters using moon observations. 
 The inputs are the the el_center, roll_center, and the UFM
 center locations as fit by finalize_focal_plane, 
 per each moon observation.
 The fitter uses lmfit with a Nelder-Mead minimization routine to minimize
 the distance between modeled data points and the reference data points. 
-By default, the measured UFM centers are the ``reference`` points, 
+By default, the measured UFM centers are the reference points, 
 and the quaternion rotations of the pointing model are applied to the nominal, template, UFM center locations.
 However, the model can be applied in reverse, with the template positions as reference -- some diagnostic plots are in this space, as it makes it easier to view residuals from multiple boresight orientations at once.
 See the ``xieta_model`` parameter comments for more details.
@@ -576,8 +577,13 @@ See the ``xieta_model`` parameter comments for more details.
 ``solve_pointing_model`` can be iterated once after the first parameter fit.
 Specifying ``iterate_cutoff`` in arcmin will exlude outliers from next round of fitting.
 
+.. automodule:: sotodlib.site_pipeline.solve_pointing_model
+   :members:
+   :undoc-members:
+
 Config file format
 ``````````````````
+
 Here is an annotated basic configuration file. 
 The first block are mandatory entries. The second block are optional.
 
@@ -652,14 +658,15 @@ The first block are mandatory entries. The second block are optional.
     append: ""
     save_output: True
 
+
 Output file format
 ``````````````````
+
 The inputs and outputs ``solve_pointing_model`` are stored as an AxisManager, before saving to an .h5 file.
 Only the pointing model parameters + version are saved to the ManifestdB ``db.sqlite``.
 
-.. code-block:: text
-    
-    pointing_model_data.h5
+.. code_block:: text
+
     - ancil (aman)
       - az_enc (num_obs * 7)
       - boresight_enc (num_obs * 7)
@@ -685,8 +692,6 @@ Only the pointing model parameters + version are saved to the ManifestdB ``db.sq
     #  - stderr 
     #  - correl #correlation with other fit params
     #- excluded (Data points)
-
-
 
 
 preprocess-tod
