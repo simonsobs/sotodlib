@@ -560,6 +560,132 @@ the ``focal_plane`` dataset. This can be done like so:
 This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
 The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
 
+solve_pointing_model
+--------------------
+This script solves for the pointing model parameters using moon observations. 
+The inputs are the the el_center, roll_center, and the UFM
+center locations as fit by finalize_focal_plane, 
+per each moon observation.
+The fitter uses lmfit with a Nelder-Mead minimization routine to minimize
+the distance between modeled data points and the reference data points. 
+By default, the measured UFM centers are the ``reference`` points, 
+and the quaternion rotations of the pointing model are applied to the nominal, template, UFM center locations.
+However, the model can be applied in reverse, with the template positions as reference -- some diagnostic plots are in this space, as it makes it easier to view residuals from multiple boresight orientations at once.
+See the ``xieta_model`` parameter comments for more details.
+
+``solve_pointing_model`` can be iterated once after the first parameter fit.
+Specifying ``iterate_cutoff`` in arcmin will exlude outliers from next round of fitting.
+Config file format
+``````````````````
+Here is an annotated basic configuration file. 
+The first block are mandatory entries. The second block are optional.
+
+.. code-block:: yaml
+    # Mandatory to include in config file
+
+    # Specify platform for the code to run on. (satp1, satp3 are supported)
+    platform: satp1
+    # pm_version tells coords.pointing_model which pointing model to use.
+    # It determines the quaternion model. Don't change this.
+    pm_version: sat_v1
+    # Tag for metadata versioning, will appended to output directory
+    solution_version_tag: YYMMDDr
+    # Output directory to save results in.
+    # A sub directory in {outdir} will be created as
+    #{platform}_pointing_model_{solution_version_tag}_{xieta_model}_{add_tag}
+    outdir: /your/save/directory
+    # Load data and reference focal plane templates
+    # ffp_path must be common mode subtracted version of focal_plane
+    ffp_path: "/path/to/centered/focal_plane/metadata/focal_plane_cmsub.h5"
+    # per_obs_fps are multiple per-observation focal_plane
+    # fits saved into one h5 file. These are fitted to moon measurements.
+    # only data from UFMs that had good detector fits are included.
+    per_obs_fps: /path/to/per-obs/finalize/focal/plane/results/per_obs/focal_plane.h5
+    # The provided context file is used to load boresight/elevation data from
+    # obs_ids included in per_obs_fps
+    context:
+        path: "/so/metadata/satp1/contexts/nominal/focal_plane.h5"
+    # List of ufms in order of wafer slot, not currently future
+    # proof when new ufms are swapped in.
+    # This assists unpacking per_obs_fps with its sparse UFM info.
+    ufms: ['ufm_mv19', 'ufm_mv18', 'ufm_mv22',
+           'ufm_mv29', 'ufm_mv7', 'ufm_mv9', 'ufm_mv15'] #satp1
+    # ufms: ['ufm_mv5', 'ufm_mv27', 'ufm_mv35',
+            'ufm_mv12', 'ufm_mv23', 'ufm_mv33', 'ufm_mv17'] #satp3
+
+    # Optional configuration parameters
+
+    # parameters included here will be fixed in the minimization.
+    # See comments for which to fix for different platforms.
+    fixed_params:
+      - az_rot          #all
+      - base_tilt_cos   #all
+      - base_tilt_sin   #all
+      - fp_rot_eta0     #all
+      - fp_offset_eta0  #all
+      - fp_rot_xi0      #satp3 only
+    # "xieta_model" decides which parameter space the fitting occurs in.
+    # "measured": The fitter applies pointing model to template UFM xi-eta
+    #             locations based on El and Roll of the obs, to get the modeled
+    #             xi-etas to match the measured data points.
+    #             Modeled data points get spread out based on boresight.
+    # "template": The fitter applies pointing model "backwards" on measured
+    #             xieta data points to match them to template locations.
+    #             The modeled data points cluster around
+    #             the nominal template locations.
+    # Each method gives slightly different results. "measured" is default.
+    xieta_model: measured
+    # Define a weight cutoff for fitting routine.
+    weight_cutoff: 0.2
+    # Cut out any known bad observations.
+    skip_tags:
+      - "_1713" #bad timing satp1
+      - "1716423951" #Just a very bad fit satp1
+    # Option to iterate parameter fitting. If not None, data points with
+    # fit residuals higher than cutoff will be excluded from second round of fits.
+    iterate_cutoff: None # or arcmin
+    # Make diagnostic plots.
+    make_plots: True
+    # any additional tag to append on results directory
+    append: ""
+    save_output: True
+
+Output file format
+``````````````````
+The inputs and outputs ``solve_pointing_model`` are stored as an AxisManager, before saving to an .h5 file.
+Only the pointing model parameters + version are saved to the ManifestdB ``db.sqlite``.
+.. code-block:: text
+    
+    pointing_model_data.h5
+    - ancil (aman)
+      - az_enc (num_obs * 7)
+      - boresight_enc (num_obs * 7)
+      - el_enc (num_obs * 7)
+    - ffp_ufm_center_fits ((xi, eta, gamma), num_obs * 7) #This where the info from per_obs_fps gets stored
+    - nom_ufm_centers ((xi, eta, gamma), num_obs * 7) #This is where info from cmsub focal_plane goes.
+    - obs_info (aman) 
+      - obs_ids (num_obs)
+    - roll_c (num_obs * 7)
+    - weights (num_obs * 7)
+    - model_fits (aman)
+      - eta (num_obs * 7)
+      - xi (num_obs * 7)    
+    - pointing_model (aman)
+      - pm_version
+      - parameters by name
+    #├── parameter_fit_stats #Not yet implemented in output, but visible in log file.
+    #│   ├── name 
+    #│   ├── value 
+    #│   ├── vary 
+    #│   ├── min 
+    #│   ├── max
+    #│   ├── stderr 
+    #│   └── correl #correlation with other fit params
+    #└── excluded
+
+
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
