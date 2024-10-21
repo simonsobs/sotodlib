@@ -1113,7 +1113,7 @@ class PCARelCal(_Preprocess):
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            if np.isinstance(self.calc_cfgs, bool):
+            if isinstance(self.calc_cfgs, bool):
                 result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal)
             else:
                 result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
