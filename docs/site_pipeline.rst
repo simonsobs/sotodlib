@@ -616,10 +616,10 @@ The first block are mandatory entries. The second block are optional.
     # List of ufms in order of wafer slot, not currently future
     # proof when new ufms are swapped in.
     # This assists unpacking per_obs_fps with its sparse UFM info.
-    ufms: ['ufm_mv19', 'ufm_mv18', 'ufm_mv22',
-           'ufm_mv29', 'ufm_mv7', 'ufm_mv9', 'ufm_mv15'] #satp1
-    # ufms: ['ufm_mv5', 'ufm_mv27', 'ufm_mv35',
-            'ufm_mv12', 'ufm_mv23', 'ufm_mv33', 'ufm_mv17'] #satp3
+    ufms: ['ufm_mv19', 'ufm_mv18', 'ufm_mv22', 'ufm_mv29', 
+           'ufm_mv7', 'ufm_mv9', 'ufm_mv15'] #satp1
+    # ufms: ['ufm_mv5', 'ufm_mv27', 'ufm_mv35', 'ufm_mv12',
+    # 'ufm_mv23', 'ufm_mv33', 'ufm_mv17'] #satp3
 
     # Optional configuration parameters
 
