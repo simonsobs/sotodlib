@@ -14,13 +14,14 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
+
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
     All processing configs go to `fft_trim`
 
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
-    name = "fft_trim"
+    name = "fft_trim"    
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
@@ -97,7 +98,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            t_piece: 100
+            t_pieces: 100
           save: True
           plot: True
           select:
@@ -112,7 +113,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-
+    
     def calc_and_save(self, aman, proc_aman):
         _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
@@ -365,6 +366,7 @@ class PSDCalc(_Preprocess):
 
         super().__init__(step_cfgs)
         
+
     def process(self, aman, proc_aman):
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
                                               **self.process_cfgs)
@@ -418,7 +420,7 @@ class Noise(_Preprocess):
         if self.psd not in aman:
             raise ValueError("PSD is not saved in AxisManager")
         psd = aman[self.psd]
-
+        
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
         
@@ -500,7 +502,7 @@ class Calibrate(_Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-    
+
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
@@ -563,7 +565,7 @@ class EstimateHWPSS(_Preprocess):
             plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
             plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
 
-    #@classmethod
+    @classmethod
     def gen_metric(cls, meta, proc_aman):
         """ Generate a QA metric for the coefficients of the HWPSS fit.
         Coefficient percentiles and mean are recorded for every mode and detset.
@@ -716,7 +718,7 @@ class EstimateAzSS(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"
-    
+
     def calc_and_save(self, aman, proc_aman):
         calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, calc_aman)
@@ -796,7 +798,7 @@ class FlagTurnarounds(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
-    
+
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         
@@ -920,7 +922,7 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-
+    
     def calc_and_save(self, aman, proc_aman):
         center_on = self.calc_cfgs.get('center_on', 'planet')
         # Get source from tags
@@ -1078,15 +1080,23 @@ class PCARelCal(_Preprocess):
     Example configuration file entry::
 
       - name: 'pca_relcal'
-        signal: 'hwpss_remove'
-        calc: True
+        signal: 'lpf_sig'
+        pca_run: 'run1'
+        calc:
+            xfac: 2
+            yfac: 1.5
+            calc_good_medianw: True
         save: True
-
+        plot:
+            plot_ds_factor: 20
+    
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.run = step_cfgs.get('pca_run', 'run1')
+        self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
 
@@ -1094,27 +1104,64 @@ class PCARelCal(_Preprocess):
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
         rc_aman = core.AxisManager(aman.dets, aman.samps)
+        pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
         relcal = np.zeros(aman.dets.count)
+        pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            rc_aman.wrap(f'{band}_mask', m0, [(0, 'dets')])
+            rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            med = np.median(pca_signal.weights[:,0])
-            relcal[m0] = med/pca_signal.weights[:,0]
+            result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
 
-            rc_aman.wrap(f'{band}_median', med)
-            rc_aman.wrap(f'{band}_pca_mode0', pca_signal.modes[0], [(0, 'samps')])
-        rc_aman.wrap('relcal', relcal, [(0,'dets')])
+            pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
+            relcal[m0] = result_aman['relcal']
+            pca_weight0[m0] = result_aman['pca_weight0']
+            rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
+            rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+            rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+            rc_aman.wrap(f'{band}_median', result_aman['median'])
+        
+        rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
+        rc_aman.wrap('relcal', relcal, [(0, 'dets')])
+        rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
+
         self.save(proc_aman, rc_aman)
 
-    def save(self, proc_aman, rc_aman):
+    def save(self, proc_aman, pca_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.name, rc_aman)
+            proc_aman.wrap(self.run_name, pca_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~proc_aman[self.run_name]['pca_det_mask']
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+    
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_pcabounds
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+
+            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = bands[bands != 'NC']
+            for band in bands:
+                pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1239,7 +1286,7 @@ class SubtractT2P(_Preprocess):
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
     
-    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_leakage
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
     """
     name = "subtract_t2p"
 
