@@ -1,5 +1,6 @@
 """FFTs and related operations
 """
+import sys
 import numdifftools as ndt
 import numpy as np
 import pyfftw
@@ -151,6 +152,7 @@ def build_rfft_object(n_det, n, direction="FFTW_FORWARD", **kwargs):
 
     a = pyfftw.empty_aligned((n_det, n), dtype="float32")
     b = pyfftw.empty_aligned((n_det, (n + 2) // 2), dtype="complex64")
+    
     if direction == "FFTW_FORWARD":
         t_fun = pyfftw.FFTW(a, b, direction=direction, **fftargs)
     elif direction == "FFTW_BACKWARD":
@@ -426,7 +428,8 @@ def fit_noise_model(
         pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
         fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
         p0 = [f[fidx], wnest, -pfit[0]]
-        res = minimize(neglnlike, p0, args=(f, p), method="Nelder-Mead")
+        bounds = [(0, None), (sys.float_info.min, None), (None, None)]
+        res = minimize(neglnlike, p0, args=(f, p), bounds=bounds, method="Nelder-Mead")
         try:
             Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
             hessian_ndt, _ = Hfun(res["x"])
