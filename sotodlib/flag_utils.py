@@ -74,7 +74,7 @@ def plot_glitch_stats(
         meansamps + stdsamps,
         color="wheat",
         alpha=0.2,
-        label=f"$\sigma$: {stdsamps:.2f}%",
+        label=f"$\\sigma$: {stdsamps:.2f}%",
     )
     ax[0].legend()
     ax[0].set_xlim(10**binmin, 10**binmax)
@@ -82,9 +82,9 @@ def plot_glitch_stats(
     ax[0].set_xlabel("Fraction of Samples Flagged\nper Detector [%]", fontsize=16)
     ax[0].set_ylabel("Counts", fontsize=16)
     ax[0].set_title(
-        "Samples Flagged Stats\n$N_{\mathrm{dets}}$ = "
+        "Samples Flagged Stats\n$N_{\\mathrm{dets}}$ = "
         + f"{tod.dets.count}"
-        + " and $N_{\mathrm{samps}}$ = "
+        + " and $N_{\\mathrm{samps}}$ = "
         + f"{tod.samps.count}",
         fontsize=18,
     )
@@ -114,14 +114,14 @@ def plot_glitch_stats(
         meanints + stdints,
         color="wheat",
         alpha=0.2,
-        label=f"$\sigma$: {stdints:.2f} intervals",
+        label=f"$\\sigma$: {stdints:.2f} intervals",
     )
 
     ax[1].legend()
     ax[1].set_xlabel("Number of Flag Intervals\nper Detector", fontsize=16)
     ax[1].set_ylabel("Counts", fontsize=16)
     ax[1].set_title(
-        "Ranges Flag Manager Stats\n$N_{\mathrm{dets}}$ with $\geq$ 1 interval = "
+        "Ranges Flag Manager Stats\n$N_{\\mathrm{dets}}$ with $\\geq$ 1 interval = "
         + f"{len(interval_glitches[interval_glitches > 0])}/{tod.dets.count}",
         fontsize=18,
     )
