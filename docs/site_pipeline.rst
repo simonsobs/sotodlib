@@ -575,12 +575,14 @@ See the ``xieta_model`` parameter comments for more details.
 
 ``solve_pointing_model`` can be iterated once after the first parameter fit.
 Specifying ``iterate_cutoff`` in arcmin will exlude outliers from next round of fitting.
+
 Config file format
 ``````````````````
 Here is an annotated basic configuration file. 
 The first block are mandatory entries. The second block are optional.
 
 .. code-block:: yaml
+
     # Mandatory to include in config file
 
     # Specify platform for the code to run on. (satp1, satp3 are supported)
@@ -654,6 +656,7 @@ Output file format
 ``````````````````
 The inputs and outputs ``solve_pointing_model`` are stored as an AxisManager, before saving to an .h5 file.
 Only the pointing model parameters + version are saved to the ManifestdB ``db.sqlite``.
+
 .. code-block:: text
     
     pointing_model_data.h5
@@ -673,15 +676,15 @@ Only the pointing model parameters + version are saved to the ManifestdB ``db.sq
     - pointing_model (aman)
       - pm_version
       - parameters by name
-    #├── parameter_fit_stats #Not yet implemented in output, but visible in log file.
-    #│   ├── name 
-    #│   ├── value 
-    #│   ├── vary 
-    #│   ├── min 
-    #│   ├── max
-    #│   ├── stderr 
-    #│   └── correl #correlation with other fit params
-    #└── excluded
+    #- parameter_fit_stats #Not yet implemented in output, but visible in log file.
+    #  - name 
+    #  - value 
+    #  - vary 
+    #  - min 
+    #  - max
+    #  - stderr 
+    #  - correl #correlation with other fit params
+    #- excluded (Data points)
 
 
 
