@@ -174,10 +174,14 @@ def objective_model_func_lmfit(
         return chi_sq(np.ones(len(dist)), np.array(dist))
 
 
-def get_RMS(model_xieta, ref_xieta, weights):
-    diff = (model_xieta[0] / ARCMIN - ref_xieta[0] / ARCMIN) ** 2 + (
-        model_xieta[1] / ARCMIN - ref_xieta[1] / ARCMIN
-    ) ** 2
+def get_RMS(model_xieta, ref_xieta, weights, use_inds=None):
+    if use_inds is not None:
+        diff = ((model_xieta[0] - ref_xieta[0])[use_inds] / ARCMIN) ** 2 + \
+                ((model_xieta[1] - ref_xieta[1])[use_inds] / ARCMIN) ** 2
+        weights = weights[use_inds]
+    else:
+        diff = ((model_xieta[0] - ref_xieta[0]) / ARCMIN) ** 2 + \
+                ((model_xieta[1] - ref_xieta[1]) / ARCMIN) ** 2
     return (np.nansum(diff * weights) / np.nansum(weights)) ** 0.5
 
 
@@ -390,22 +394,31 @@ def main(config_path: str):
         cutoff = np.nanstd(fit_residual_i1) + np.nanmedian(fit_residual_i1)
         logger.info(f"1 std away from residual Median: {cutoff / ARCMIN} arcmin")
         logger.info(f"Using {iterate_cutoff} as cutoff")
-        bad_fit_mask = np.where((fit_residual_i1 / ARCMIN) > iterate_cutoff)[0]
+        bad_fit_inds = np.where((fit_residual_i1 / ARCMIN) > iterate_cutoff)[0]
         logger.info("Bad fit indices:")
-        logger.info(bad_fit_mask)
+        logger.info(bad_fit_inds)
         logger.info(
             "%f data points are higher than %s arcmin",
-            len(bad_fit_mask),
+            len(bad_fit_inds),
             iterate_cutoff,
         )
-        bad_filename = bad_fit_mask // 7
-        bad_wafer = bad_fit_mask % 7
-        for mask_ind, full_ind in enumerate(bad_fit_mask):
-            logger.info(
-                f"{filelist[bad_filename[mask_ind]]} ws{bad_wafer[mask_ind]} is bad. Roll {solver_aman.roll_c[full_ind]}, El {solver_aman.ancil.el_enc[full_ind]}"
-            )
+        bad_filename = bad_fit_inds // 7
+        bad_wafer = bad_fit_inds % 7
+        logger.info("Outliers:")
+        for i, full_i in enumerate(bad_fit_inds):
+            logger.info(f"{filelist[bad_filename[i]]}; ws{bad_wafer[i]}; Resid. {np.round(fit_residual_i1[full_i] / ARCMIN, 4)}")
+            logger.info(f"--- Roll {solver_aman.roll_c[full_i]}; El {solver_aman.ancil.el_enc[full_i]}; weight {np.round(solver_aman.weights[full_i],4)}")
+            
+        num_bad_non_zero = sum([solver_aman.weights[ind] > 0 for ind in bad_fit_inds])
+        logger.info(f"Only {num_bad_non_zero} outliers with non-zero weight.")
 
-        solver_aman.weights[bad_fit_mask] = 0.0
+        #Print RMS of initial fits without outlying data points before 
+        #zero-ing the weights.
+        good_fit_inds = np.where((fit_residual_i1 / ARCMIN) < iterate_cutoff)[0]
+        masked_rms = get_RMS(model_fits, model_reference, solver_aman.weights, use_inds = good_fit_inds)
+        logger.info("RMS on initial fit without outliers: %f", masked_rms)
+
+        solver_aman.weights[bad_fit_inds] = 0.0
         use_weights = True
         model_solved_params = lmfit.minimize(
             objective_model_func_lmfit,
@@ -439,7 +452,7 @@ def main(config_path: str):
                 solver_aman.pointing_model, pm_version, solver_aman
             )
         logger.info(
-            "RMS on fit: %f", get_RMS(model_fits, model_reference, solver_aman.weights)
+            "RMS on secondary fit: %f", get_RMS(model_fits, model_reference, solver_aman.weights)
         )
         fit_residual_i2 = np.array(
             [
@@ -467,7 +480,7 @@ def main(config_path: str):
             plot_residuals_vs_ancil(solver_aman, config, save_dir, tag)
             plot_xieta_cross_residuals(solver_aman, config, save_dir, tag)
             plot_xieta_residuals(solver_aman, config, save_dir, tag)
-            plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, fit_residual_i2, bad_fit_mask)
+            plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, fit_residual_i2, bad_fit_inds)
     else:
         if config.get("make_plots"):
             plot_total_residuals(solver_aman, config, save_dir,  tag='', fit_residual_i1=fit_residual_i1)
@@ -668,7 +681,7 @@ def plot_residuals_vs_ancil(solver_aman, config, save_dir, tag):
     plt.savefig(f"{plot_dir}/{platform}_residuals_vs_ancillary{tag}.png", dpi=350)
     plt.close()
     
-def plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, fit_residual_i2=None, bad_fit_mask=None):
+def plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, fit_residual_i2=None, bad_fit_inds=None):
     plot_dir = os.path.join(save_dir, "plots")
     os.makedirs(plot_dir, exist_ok=True)
     iterate_cutoff = config.get("iterate_cutoff", None)
@@ -696,7 +709,7 @@ def plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, f
         
         ax2.plot(np.arange(len(fit_residual_i1)), (fit_residual_i2 - fit_residual_i1) / ARCMIN,
                  'k.', mew=0, alpha = 0.6, label = "Res i2 - Res i1")
-        ax2.plot(np.arange(len(fit_residual_i1))[bad_fit_mask], (fit_residual_i2 - fit_residual_i1)[bad_fit_mask] / ARCMIN,
+        ax2.plot(np.arange(len(fit_residual_i1))[bad_fit_inds], (fit_residual_i2 - fit_residual_i1)[bad_fit_inds] / ARCMIN,
                  'kx', lw=0.2, alpha = 0.6, label = "Excl. from i2 fit") 
         ax2.axhline(0, xmin=0, xmax=1, color="k", alpha=0.5, lw=0.8)
         ax2.legend(fontsize='x-small')
