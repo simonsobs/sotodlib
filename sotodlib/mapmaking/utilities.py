@@ -1,10 +1,11 @@
-import numpy as np
-from pixell import enmap, utils, fft, tilemap, resample
-import so3g
+from typing import Any, Union, Optional
 
-from .. import core
-from .. import tod_ops
-from .. import coords
+import numpy as np
+import so3g
+from pixell import enmap, fft, resample, tilemap, utils
+
+from .. import coords, core, tod_ops
+
 
 def deslope_el(tod, el, srate, inplace=False):
     if not inplace: tod = tod.copy()
@@ -134,7 +135,6 @@ def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
         idiv = div*0
         idiv[:,:,hit] = work.T
     return idiv
-
 
 
 def measure_cov(d, nmax=10000):
@@ -339,6 +339,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
     """Evaluate the quaternion that performs the coordinate recentering specified in
     info, which can be obtained from parse_recentering."""
     import ephem
+
     # Get the coordinates of the from, to and up points. This was a bit involved...
     def to_cel(lonlat, sys, ctime=None, site=None, weather=None):
         # Convert lonlat from sys to celestial coorinates. Maybe polish and put elswhere
@@ -370,6 +371,7 @@ def recentering_to_quat_lonlat(p1, p2, pu):
     """Return the quaternion that represents the rotation that takes point p1
     to p2, with the up direction pointing towards the point pu, all given as lonlat pairs"""
     from so3g.proj import quat
+
     # 1. First rotate our point to the north pole: Ry(-(90-dec1))Rz(-ra1)
     # 2. Apply the same rotation to the up point.
     # 3. We want the up point to be upwards, so rotate it to ra = 180°: Rz(pi-rau2)
@@ -439,8 +441,68 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1):
-    ncut  = rangemat_sum(obs.flags.glitch_flags)
+
+def parameter_in_path(obj: Any, rpath: str, sep: str = ".") -> bool:
+    """This function checks if a parameter path exists in an object.
+
+    Parameters
+    ----------
+    obj : Any
+        A python object. It needs to have a `__dict__` or a `_fields` parameter.
+    rpath : str
+        a string with a recursive path to verify if it exist. The path is separated
+        via a sep. For example 'flags.glitch_flags'.
+    sep : str, optional
+        A string separator, by default "."
+
+    Returns
+    -------
+    bool
+        Whether the rpath exists despite its value.
+    """
+    checker = obj.__dict__
+    if isinstance(obj, core.AxisManager):
+        checker = obj._fields
+
+    rpath = rpath.split(sep=sep)
+
+    if rpath[0] in checker and len(rpath)>1:
+        return parameter_in_path(checker[rpath[0]], sep.join(rpath[1:]), sep=sep)
+    elif rpath[0] in checker:
+        return True
+    else:
+        return False
+
+
+def get_flags_from_path(
+    aman: core.AxisManager, rpath: str, sep: str = "."
+) -> Union[so3g.proj.RangesMatrix, Any]:
+    """This function allows to pull data from an AxisManager based on a path.
+
+    Parameters
+    ----------
+    aman : core.AxisManager
+        An Axis Manager object
+    rpath : str
+        a string with a recursive path to extract data. The path is separated via a sep.
+                For example 'flags.glitch_flags'
+    sep : str, optional
+        a string separator, by default "."
+
+    Returns
+    -------
+    Union[so3g.proj.RangesMatrix, Any]
+        The flags that are in the rpath
+    """
+
+    for path in rpath.split(sep=sep):
+        aman = aman[path]
+
+    return aman
+
+
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
+    ncut  = rangemat_sum(get_flags_from_path(obs, glitch_flags))
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -499,7 +561,7 @@ def downsample_obs(obs, down):
             if isinstance(val, core.AxisManager):
                 res.wrap(key, val)
             else:
-                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+                axdesc = [(k, v) for k, v in enumerate(axes) if v is not None]
                 res.wrap(key, val, axdesc)
     # The normal sample stuff
     res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
@@ -507,20 +569,29 @@ def downsample_obs(obs, down):
     for key in ["az", "el", "roll"]:
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
-    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp),
+             [(0,"dets"),(1,"samps")])
 
-    # The cuts
-    # obs.flags will contain all types of flags. We should query it for glitch_flags and source_flags
-    cut_keys = ["glitch_flags"]
+    # # The cuts
+    # # obs.flags will contain all types of flags. We should query it for glitch_flags
+    # # and source_flags
+    cut_keys = []
+    if parameter_in_path(obs, "glitch_flags"):
+        cut_keys.append("glitch_flags")
+    elif parameter_in_path(obs, "flags.glitch_flags"):
+        cut_keys.append("flags.glitch_flags")
 
-    if "source_flags" in obs.flags:
+    if parameter_in_path(obs, "source_flags"):
         cut_keys.append("source_flags")
+    elif parameter_in_path(obs, "flags.source_flags"):
+        cut_keys.append("flags.source_flags")
 
     # We need to add a res.flags FlagManager to res
     res = res.wrap('flags', core.FlagManager.for_tod(res))
 
     for key in cut_keys:
-        res.flags.wrap(key, downsample_cut(getattr(obs.flags, key), down), [(0,"dets"),(1,"samps")])
+        res.flags.wrap(key, downsample_cut(get_flags_from_path(obs, key), down),
+                       [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
