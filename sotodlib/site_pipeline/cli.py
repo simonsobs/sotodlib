@@ -49,7 +49,8 @@ from . import (
     preprocess_tod,
     update_g3tsmurf_db,
     update_obsdb,
-    make_cosamp_hk
+    make_cosamp_hk,
+    solve_pointing_model
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -68,6 +69,7 @@ ELEMENTS = {
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
+    'solve-pointing-model': solve_pointing_model
 }
 
 CLI_NAME = 'so-site-pipeline'
