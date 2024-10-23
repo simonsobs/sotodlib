@@ -58,6 +58,8 @@ def _load_per_obs_data(config):
             weights_ufm[i, index] = np.nansum(this_OT.focal_planes[u].weights)
     weights_ufm = weights_ufm / 1720.0
     weights_ufm[weights_ufm < config.get("weight_cutoff")] = 0.0
+    initial_weights_mask = np.where(weights_ufm == 0)
+    obs_ufm_centers[initial_weights_mask] = np.nan
 
     return filelist, obs_ufm_centers, weights_ufm
 
@@ -333,7 +335,10 @@ def main(config_path: str):
     test_params = _round_params(model_solved_params.params.valuesdict(), 8)
     test_params["version"] = pm_version
     logger.info("Found best-fit pointing model parameters")
+    logger.info(test_params)
     logger.info(model_solved_params.params.pretty_print(precision=5, colwidth=11))
+    logger.info("Fit Report:")
+    logger.info(lmfit.fit_report(model_solved_params))
 
     # save pointing model parameters to axis manager
     param_aman = core.AxisManager()
@@ -409,9 +414,6 @@ def main(config_path: str):
             logger.info(f"{filelist[bad_filename[i]]}; ws{bad_wafer[i]}; Resid. {np.round(fit_residual_i1[full_i] / ARCMIN, 4)}")
             logger.info(f"--- Roll {solver_aman.roll_c[full_i]}; El {solver_aman.ancil.el_enc[full_i]}; weight {np.round(solver_aman.weights[full_i],4)}")
             
-        num_bad_non_zero = sum([solver_aman.weights[ind] > 0 for ind in bad_fit_inds])
-        logger.info(f"Only {num_bad_non_zero} outliers with non-zero weight.")
-
         #Print RMS of initial fits without outlying data points before 
         #zero-ing the weights.
         good_fit_inds = np.where((fit_residual_i1 / ARCMIN) < iterate_cutoff)[0]
@@ -431,7 +433,11 @@ def main(config_path: str):
         test_params = _round_params(model_solved_params.params.valuesdict(), 8)
         test_params["version"] = pm_version
         logger.info("Found best-fit pointing model parameters, second iteration")
+        logger.info(test_params)
         logger.info(model_solved_params.params.pretty_print(precision=5, colwidth=11))
+        logger.info("Fit Report:")
+        logger.info(lmfit.fit_report(model_solved_params))
+
 
         # save pointing model parameters to axis manager
         param_aman = core.AxisManager()
@@ -480,10 +486,21 @@ def main(config_path: str):
             plot_residuals_vs_ancil(solver_aman, config, save_dir, tag)
             plot_xieta_cross_residuals(solver_aman, config, save_dir, tag)
             plot_xieta_residuals(solver_aman, config, save_dir, tag)
-            plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, fit_residual_i2, bad_fit_inds)
+            plot_total_residuals(solver_aman=solver_aman,
+                                 config=config,
+                                 save_dir=save_dir,
+                                 tag=tag,
+                                 fit_residual_i1=fit_residual_i1,
+                                 fit_residual_i2=fit_residual_i2,
+                                 bad_fit_inds=bad_fit_inds,
+                                 )
     else:
         if config.get("make_plots"):
-            plot_total_residuals(solver_aman, config, save_dir,  tag='', fit_residual_i1=fit_residual_i1)
+            plot_total_residuals(solver_aman,
+                                 config,
+                                 save_dir,
+                                 tag='',
+                                 fit_residual_i1=fit_residual_i1)
             
 
     if config.get("save_output"):
@@ -495,6 +512,7 @@ def main(config_path: str):
         db = _create_db(dbfile, save_dir)
         db.add_entry({"dataset": "pointing_model"}, filename=h5_rel, replace=True)
         db.to_file(os.path.join(save_dir, dbfile))
+    logger.info("Done")
 
         
 ####################
@@ -531,7 +549,7 @@ def plot_ws0_model_fits(solver_aman, config, save_dir, tag=""):
         xi_ref[plotmask] / DEG,
         eta_ref[plotmask] / DEG,
         c=markercolor[plotmask],
-        alpha=0.5,
+        alpha=0.4,
         label="Data",
         edgecolors="k",
         linewidths=0.4,
@@ -554,8 +572,9 @@ def plot_ws0_model_fits(solver_aman, config, save_dir, tag=""):
     ax.legend(loc=1, fontsize="small")
     ax.set_xlabel("Xi (deg)")
     ax.set_ylabel("Eta (deg)")
-    plt.colorbar(im, location="top", fraction=0.046, pad=0.04)
-    ax.set_title(f"Fits, Colored by {coloredby} (deg)\n\n\n")
+    cb = plt.colorbar(im, fraction=0.046, pad=0.04)
+    cb.ax.set_title(coloredby)
+    ax.set_title(f"Fits, Colored by {coloredby} (deg)")
 
     # Plot lines connecting data to modeled data point
     xitoxi = np.empty((len(xi_model_fit), 2))
@@ -565,8 +584,9 @@ def plot_ws0_model_fits(solver_aman, config, save_dir, tag=""):
     etatoeta[:, 0] = eta_ref / DEG
     etatoeta[:, 1] = eta_model_fit / DEG
     ax.plot(xitoxi.T, etatoeta.T, "k", lw=0.4)
-    ax.set_xlim(-1, 1); ax.set_ylim(-1, 1)
-    plt.subplots_adjust(left=0.1, right=0.90, bottom=0.05, hspace=0.3)
+    ax.set_xlim(-1, .25); ax.set_ylim(-.5, .5)
+    #plt.subplots_adjust(left=0.1, right=0.90, bottom=0.05, hspace=0.3)
+    plt.tight_layout()
     plt.savefig(f"{plot_dir}/{platform}_ws0_model_fits{tag}.png", dpi=350)
     plt.close()
 
@@ -590,11 +610,15 @@ def plot_template_space_fits_per_wafer(solver_aman, config, save_dir, tag=""):
             eta_unmod[i::7] / ARCMIN - solver_aman.nom_ufm_centers[1, i] / ARCMIN,
             c=solver_aman.ancil.el_enc[i::7],
             s=scale_weights[i::7] * 80,
+            edgecolor="gray",
+            lw=0.3,
             marker="o",
-            lw=0,
             alpha=0.5,
             cmap="jet",
         )
+        ax[i // 4, i % 4].set_xlim(-12, 12)
+        ax[i // 4, i % 4].set_ylim(-12, 12)
+        ax[i // 4, i % 4].set_title(f"ws{i}")
     plt.colorbar(im, ax[1, 3], label="Elevation (deg)", fraction=0.046, pad=0.04)
     plt.tight_layout()
     plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_elevation{tag}.png", dpi=350)
@@ -608,13 +632,14 @@ def plot_template_space_fits_per_wafer(solver_aman, config, save_dir, tag=""):
             eta_unmod[i::7] / ARCMIN - solver_aman.nom_ufm_centers[1, i] / ARCMIN,
             c=solver_aman.ancil.boresight_enc[i::7],
             s=scale_weights[i::7] * 80,
+            edgecolor="gray",
+            lw=0.3,
             marker="o",
-            lw=0,
             alpha=0.5,
             cmap="jet",
         )
-        ax[i // 4, i % 4].set_xlim(-15, 15)
-        ax[i // 4, i % 4].set_ylim(-15, 15)
+        ax[i // 4, i % 4].set_xlim(-12, 12)
+        ax[i // 4, i % 4].set_ylim(-12, 12)
         ax[i // 4, i % 4].set_title(f"ws{i}")
     plt.colorbar(im, ax[1, 3], label="Boresight (deg)", fraction=0.046, pad=0.04)
     plt.tight_layout()
@@ -671,7 +696,10 @@ def plot_residuals_vs_ancil(solver_aman, config, save_dir, tag):
             w=scale_weights[plotmask],
         )
         xrange = np.arange(np.nanmin(x), np.nanmax(x))
-        ax[i, j].plot(xrange, mxb[0] * xrange + mxb[1], "r", lw=1)
+        ax[i, j].plot(xrange, mxb[0] * xrange + mxb[1], "r", lw=1,
+                      label=f'Slope {np.round(mxb[0],4)}\n [arcmin/deg]')
+        ax[i, j].legend(fontsize='small')
+
     ax[0, 0].set_ylabel("dXi [arcmin]")
     ax[1, 0].set_ylabel("dEta [arcmin]")
     ax[1, 0].set_xlabel("Azimuth [deg]")
@@ -681,12 +709,19 @@ def plot_residuals_vs_ancil(solver_aman, config, save_dir, tag):
     plt.savefig(f"{plot_dir}/{platform}_residuals_vs_ancillary{tag}.png", dpi=350)
     plt.close()
     
-def plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, fit_residual_i2=None, bad_fit_inds=None):
+def plot_total_residuals(solver_aman,
+                         config,
+                         save_dir,
+                         tag,
+                         fit_residual_i1,
+                         fit_residual_i2=None,
+                         bad_fit_inds=None,
+                         ):
     plot_dir = os.path.join(save_dir, "plots")
     os.makedirs(plot_dir, exist_ok=True)
     iterate_cutoff = config.get("iterate_cutoff", None)
     platform = config.get("platform")
-    
+    scale_weights = solver_aman.weights / np.nanmax(solver_aman.weights)
     if fit_residual_i2 is not None:
         fig = plt.figure(figsize=(6,4))
         gs = fig.add_gridspec(7,1)
@@ -703,14 +738,23 @@ def plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, f
         ax1.plot(np.arange(len(fit_residual_i2)),
                 fit_residual_i2 / ARCMIN, 'b*',
                 alpha=0.5, lw=0, mew=0, label = '2nd fit') 
+        xtox = np.empty((len(fit_residual_i2), 2))
+        xtox[:, 0] = np.arange(len(fit_residual_i1))
+        xtox[:, 1] = np.arange(len(fit_residual_i2))
+        ytoy = np.empty((len(fit_residual_i1), 2))
+        ytoy[:, 0] = fit_residual_i1 / ARCMIN
+        ytoy[:, 1] = fit_residual_i2 / ARCMIN
+        ax1.plot(xtox.T, ytoy.T, "k", lw=0.4)
+        
         ax1.axhline(0, xmin=0, xmax=1, color="k", alpha=0.5, lw=0.8)
         ax1.set_ylabel(r'Fit Residual $\left|\Delta\text{(xi, eta)}\right|$ [arcmin]')      
-        ax1.legend(loc=2)
+        ax1.legend(loc=2,fontsize='small')
         
-        ax2.plot(np.arange(len(fit_residual_i1)), (fit_residual_i2 - fit_residual_i1) / ARCMIN,
-                 'k.', mew=0, alpha = 0.6, label = "Res i2 - Res i1")
+        ax2.scatter(np.arange(len(fit_residual_i1)), (fit_residual_i2 - fit_residual_i1) / ARCMIN, c='k',
+                    marker = 'o', s = scale_weights*50,
+                    lw=0, alpha = 0.6, label = "Res i2 - Res i1")
         ax2.plot(np.arange(len(fit_residual_i1))[bad_fit_inds], (fit_residual_i2 - fit_residual_i1)[bad_fit_inds] / ARCMIN,
-                 'kx', lw=0.2, alpha = 0.6, label = "Excl. from i2 fit") 
+                 'kx', ms=7, lw=0.2, alpha = 0.6, label = "Excl. from i2 fit") 
         ax2.axhline(0, xmin=0, xmax=1, color="k", alpha=0.5, lw=0.8)
         ax2.legend(fontsize='x-small')
         ax2.set_xlabel('Data points')
@@ -718,12 +762,12 @@ def plot_total_residuals(solver_aman, config, save_dir,  tag, fit_residual_i1, f
         plt.savefig(f"{plot_dir}/{platform}_total_residuals{tag}.png", dpi=350)
         
     else:
-        fig, ax = plt.subplots()
+        fig, ax1 = plt.subplots()
         #Plot first fit iteration residuals
-        ax.plot(np.arange(len(fit_residual_i1)), fit_residual_i1 / ARCMIN,
-                'r.', mew=0, alpha=0.6, lw=0, label = '1st Fit')
-        ax.set_ylabel(r'Fit Residual $\left|\Delta\text{(xi, eta)}\right|$ [arcmin]')
-        ax.set_xlabel('Data points')
+        ax1.scatter(np.arange(len(fit_residual_i1)), fit_residual_i1 / ARCMIN,
+                    s = scale_weights*50, color='r', lw=0, alpha=0.6, label = '1st Fit')
+        ax1.set_ylabel(r'Fit Residual $\left|\Delta\text{(xi, eta)}\right|$ [arcmin]')
+        ax1.set_xlabel('Data points')
         plt.legend(loc=2)
         plt.savefig(f"{plot_dir}/{platform}_total_residuals{tag}.png", dpi=350)
     plt.close()
