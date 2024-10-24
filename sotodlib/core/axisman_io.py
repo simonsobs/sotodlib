@@ -25,7 +25,7 @@ def flatten_RangesMatrix(rm):
     shape = rm.shape
     if len(shape) == 1:
         intervals = rm.ranges().reshape(-1)
-        ends = [len(intervals)]
+        ends = np.array([len(intervals)])
         return {
             'shape': np.array(shape),
             'intervals': intervals,
