@@ -199,6 +199,12 @@ def main():
         action="store_true",
         help="Perform preprocessing on a copy of the data.",
     )
+    parser.add_argument(
+        "--log_config",
+        required=False,
+        default=None,
+        help="Dump out config log to this yaml file",
+    )
 
     # The operators and templates we want to configure from the command line
     # or a parameter file.
@@ -260,8 +266,13 @@ def main():
             os.makedirs(otherargs.out_dir, exist_ok=True)
 
     # Log the config that was actually used at runtime.
-    outlog = os.path.join(otherargs.out_dir, "config_log.toml")
-    toast.config.dump_toml(outlog, config, comm=comm)
+    if otherargs.log_config is not None:
+        # User wants to specify the location of the yaml config log
+        toast.config.dump_yaml(otherargs.log_config, config, comm=comm)
+    else:
+        # Log a toml file in the output directory
+        outlog = os.path.join(otherargs.out_dir, "config_log.toml")
+        toast.config.dump_toml(outlog, config, comm=comm)
 
     # If this is a dry run, exit
     if otherargs.dry_run:
