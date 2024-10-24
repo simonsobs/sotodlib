@@ -23,6 +23,14 @@ def flatten_RangesMatrix(rm):
       Dict with arrays called 'shape', 'intervals', and 'ends'.
     """
     shape = rm.shape
+    if len(shape) == 1:
+        intervals = rm.ranges().reshape(-1)
+        ends = [len(intervals)]
+        return {
+            'shape': np.array(shape),
+            'intervals': intervals,
+            'ends': ends,
+        }
     if len(shape) == 2:
         intervals = [r.ranges().reshape(-1) for r in rm.ranges]
         ends = np.cumsum([len(i) for i in intervals])
@@ -155,7 +163,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 item['special_axes'] = v._dets_name, v._samps_name
             else:
                 raise ValueError(f"No encoder system for {k}={v.__class__}")
-        elif isinstance(v, so3g.proj.RangesMatrix):
+        elif isinstance(v, (so3g.RangesInt32, so3g.proj.RangesMatrix)):
             item['encoding'] = 'rangesmatrix'
         elif isinstance(v, csr_array):
             item['encoding'] = 'csrarray'
