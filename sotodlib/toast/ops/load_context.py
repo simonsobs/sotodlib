@@ -1,18 +1,15 @@
 # Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-import os
 import re
 import yaml
 from datetime import datetime, timezone
 
 import numpy as np
-import traitlets
 from astropy import units as u
 from astropy.table import Column, QTable
 
 import toast
-from toast.dist import distribute_uniform
 from toast.timing import function_timer, Timer
 from toast.traits import (
     trait_docs,
@@ -26,7 +23,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger
+from toast.utils import Logger
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -34,9 +31,8 @@ import so3g
 
 from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
-from ...preprocess import Pipeline as PreProcPipe
 
-from ..instrument import SOFocalplane, SOSite
+from ..instrument import SOSite
 
 from .load_context_utils import (
     compute_boresight_pointing,
@@ -360,38 +356,23 @@ class LoadContext(Operator):
 
             # Build up the list of observing session properties, and optionally
             # only keep observations that match a regex.
-            cols = query_result.keys
             pat = None
             if self.observation_regex is not None:
                 pat = re.compile(self.observation_regex)
             session_props = list()
-            for row in query_result.rows:
-                rprops = {x: y for x, y in zip(cols, row)}
-                obs_id = str(rprops["obs_id"])
+            for row in query_result:
+                obs_id = str(row["obs_id"])
                 if pat is not None and pat.match(obs_id) is None:
                     continue
                 sprops = dict()
                 sprops["session_name"] = obs_id
-                sprops["session_start"] = float(rprops["start_time"])
-                sprops["session_stop"] = float(rprops["stop_time"])
-                sprops["n_samples"] = int(rprops["n_samples"])
-                sprops["tele_name"] = str(rprops["telescope"])
-                sprops["n_wafers"] = int(rprops["wafer_count"])
+                sprops["session_start"] = float(row["start_time"])
+                sprops["session_stop"] = float(row["stop_time"])
+                sprops["n_samples"] = int(row["n_samples"])
+                sprops["tele_name"] = str(row["telescope"])
+                sprops["n_wafers"] = int(row["wafer_count"])
+                sprops["wafers"] = list(row["stream_ids_list"].split(","))
                 session_props.append(sprops)
-
-            # For each observation, query the obsfiledb to get the set of tune files
-            # and hence the list of wafers that are available for this observation.
-            wafer_pat = re.compile(r"(ufm_.*)_.*_tune")
-            for sprops in session_props:
-                tune_names = ctx.obsfiledb.get_detsets(sprops["session_name"])
-                sprops["wafers"] = list()
-                for tune in tune_names:
-                    mat = wafer_pat.match(tune)
-                    if mat is None:
-                        msg = f"Observation {oprops['session_name']} has "
-                        msg += f"unexpected detset format '{tune}'"
-                        raise RuntimeError(msg)
-                    sprops["wafers"].append(mat.group(1))
 
             # Close the databases
             if self.context_file is not None:
@@ -552,15 +533,19 @@ class LoadContext(Operator):
                 del ctx
             n_samp = meta["samps"].count
 
-            if self.preprocess_config is not None:
-                # Cut detectors with preprocessing
-                prepipe = PreProcPipe(
-                    preproc_conf["process_pipe"],
-                    logger=log,
-                )
-                for process in prepipe:
-                    log.debug(f"Preprocess selecting on {process.name}")
-                    process.select(meta)
+            # FIXME:  Do we need to run preprocess select?  How expensive
+            # is that?  This would naturally be executed as part of the
+            # data loading.
+
+            # if self.preprocess_config is not None:
+            #     # Cut detectors with preprocessing
+            #     prepipe = PreProcPipe(
+            #         preproc_conf["process_pipe"],
+            #         logger=log,
+            #     )
+            #     for process in prepipe:
+            #         log.debug(f"Preprocess selecting on {process.name}")
+            #         process.select(meta)
 
             # Parse the axis manager metadata into observation metadata
             # and detector properties.
@@ -1035,6 +1020,7 @@ class LoadContext(Operator):
                 ob,
                 field,
                 axwafers,
+                self.axis_detector,
                 ax_field,
                 ax_dtype,
                 wafer_readers,
