@@ -169,21 +169,21 @@ class GapFillTest(unittest.TestCase):
         ts = np.arange(0, 1*60, 1/200)
         aman = get_glitchy_tod(ts, ndets=100)
         # test poly fill
-        up, mg = False, False
+        in_place, up, mg = False, False, None
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      wrap=mg)
+                                                      in_place=in_place, wrap_name=mg)
         self.assertTrue(np.max(np.abs(glitch_filled-aman.inputsignal)) < 1e-3)
 
         # test pca fill
-        up, mg = True, False
+        in_place, up, mg = False, True, None
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      wrap=mg)
+                                                      in_place=in_place, wrap_name=mg)
         print(np.max(np.abs(glitch_filled-aman.inputsignal)))
 
         # test wrap new field
-        up, mg = False, True
+        in_place, up, mg = False, False, "gap_filled"
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      wrap=mg)
+                                                      in_place=in_place, wrap_name=mg)
         self.assertTrue('gap_filled' in aman._assignments)
 
 class FilterTest(unittest.TestCase):

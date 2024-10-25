@@ -407,9 +407,11 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
     glitch_flags : RangesMatrix or None
         RangesMatrix containing flags to use for gap filling. If None then
         uses ``aman.flags.glitches``.
-    wrap : bool or str
-        If True wraps new field called ``gap_filled``, if False returns the
-        gap filled array, if a string wraps new field with provided name.
+    in_place : bool
+        If False it makes a copy of signal before gap filling and returns
+        the copy.
+    wrap_name : bool or str
+        If not None, wrap the gap filled data into tod with this name.
 
     Returns
     -------

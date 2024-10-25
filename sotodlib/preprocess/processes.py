@@ -14,13 +14,14 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
+
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
     All processing configs go to `fft_trim`
 
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
-    name = "fft_trim"
+    name = "fft_trim"    
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
@@ -97,7 +98,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            t_piece: 100
+            t_pieces: 100
           save: True
           plot: True
           select:
@@ -112,7 +113,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-
+    
     def calc_and_save(self, aman, proc_aman):
         _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
@@ -365,6 +366,7 @@ class PSDCalc(_Preprocess):
 
         super().__init__(step_cfgs)
         
+
     def process(self, aman, proc_aman):
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
                                               **self.process_cfgs)
@@ -418,7 +420,7 @@ class Noise(_Preprocess):
         if self.psd not in aman:
             raise ValueError("PSD is not saved in AxisManager")
         psd = aman[self.psd]
-
+        
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
         
@@ -500,7 +502,7 @@ class Calibrate(_Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-    
+
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
@@ -563,7 +565,7 @@ class EstimateHWPSS(_Preprocess):
             plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
             plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
 
-    #@classmethod
+    @classmethod
     def gen_metric(cls, meta, proc_aman):
         """ Generate a QA metric for the coefficients of the HWPSS fit.
         Coefficient percentiles and mean are recorded for every mode and detset.
@@ -716,7 +718,7 @@ class EstimateAzSS(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"
-    
+
     def calc_and_save(self, aman, proc_aman):
         calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, calc_aman)
@@ -796,7 +798,7 @@ class FlagTurnarounds(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
-    
+
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         
@@ -920,7 +922,7 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-
+    
     def calc_and_save(self, aman, proc_aman):
         center_on = self.calc_cfgs.get('center_on', 'planet')
         # Get source from tags
@@ -1284,7 +1286,7 @@ class SubtractT2P(_Preprocess):
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
     
-    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_leakage
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
     """
     name = "subtract_t2p"
 
