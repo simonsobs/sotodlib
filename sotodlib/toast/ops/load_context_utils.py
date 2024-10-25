@@ -313,6 +313,7 @@ def distribute_detector_data(
     field,
     axwafers,
     axis_dets,
+    axis_samples,
     axfield,
     axdtype,
     wafer_readers,
@@ -338,6 +339,7 @@ def distribute_detector_data(
         field (str):  The detdata field in the Observation.
         axwafers (dict):  The dictionary of wafer data loaded on this process.
         axis_dets (str):  The name of the detector LabelAxis in the AxisManagers.
+        axis_samples (str):  The name of the sample OffsetAxis in the AxisManagers.
         axfield (str):  The name of the data field in the AxisManagers.
         axdtype (np.dtype):  The dtype of the source buffer for sending the data
             from the AxisManager.
@@ -430,6 +432,17 @@ def distribute_detector_data(
                 for idet_ax, idet_send in restrict_to_send.items():
                     det_flags[idet_send] = 0
 
+                # Does the axis manager have a truncated number of samples?
+                restricted_samps = axwafers[wafer][axis_samples].count
+                if restricted_samps != obs.n_local_samples:
+                    ax_shift = (obs.n_local_samples - restricted_samps) // 2
+                    if 2 * ax_shift + restricted_samps != obs.n_local_samples:
+                        msg = f"{obs.name}: wafer {wafer}, AxisManager {axfield}"
+                        msg += " has a non-symmetric truncation in samples"
+                        log.warning(msg)
+                else:
+                    ax_shift = 0
+
                 # flat-packed buffer size of send buffer
                 flat_size = n_send_det * obs.n_local_samples
 
@@ -445,13 +458,13 @@ def distribute_detector_data(
                     if flag_invert:
                         sdata[:] = flag_mask
                         for idet_ax, idet_send in restrict_to_send.items():
-                            off = idet_send * obs.n_local_samples
+                            off = idet_send * obs.n_local_samples + ax_shift
                             for rg in axwafers[wafer][axfield][idet_ax].ranges():
                                 sdata[off + rg[0] : off + rg[1]] = 0
                     else:
                         sdata[:] = 0
                         for idet_ax, idet_send in restrict_to_send.items():
-                            off = idet_send * obs.n_local_samples
+                            off = idet_send * obs.n_local_samples + ax_shift
                             for rg in axwafers[wafer][axfield][idet_ax].ranges():
                                 sdata[off + rg[0] : off + rg[1]] = flag_mask
                 else:
@@ -466,16 +479,6 @@ def distribute_detector_data(
                             flat_size,
                             dtype=axdtype,
                         )
-                    # Does the axis manager have a truncated number of samples?
-                    ax_samples = len(axwafers[wafer][axfield][0])
-                    if ax_samples != obs.n_local_samples:
-                        ax_shift = (obs.n_local_samples - ax_samples) // 2
-                        if 2 * ax_shift + ax_samples != obs.n_local_samples:
-                            msg = f"{obs.name}: wafer {wafer}, AxisManager {axfield}"
-                            msg += " has a non-symmetric truncation in samples"
-                            log.warning(msg)
-                    else:
-                        ax_shift = 0
                     for idet_ax, idet_send in restrict_to_send.items():
                         off = idet_send * obs.n_local_samples + ax_shift
                         sdata[off : off + obs.n_local_samples] = axwafers[wafer][axfield][idet_ax, :]
