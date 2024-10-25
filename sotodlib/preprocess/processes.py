@@ -98,7 +98,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            n_pieces: 10
+            t_pieces: 100
           save: True
           plot: True
           select:
@@ -742,6 +742,8 @@ class GlitchFill(_Preprocess):
           nbuf: 10
           use_pca: False
           modes: 1
+          in_place: True
+          wrap_name: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
