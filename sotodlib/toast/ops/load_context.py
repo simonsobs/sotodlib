@@ -533,20 +533,6 @@ class LoadContext(Operator):
                 del ctx
             n_samp = meta["samps"].count
 
-            # FIXME:  Do we need to run preprocess select?  How expensive
-            # is that?  This would naturally be executed as part of the
-            # data loading.
-
-            # if self.preprocess_config is not None:
-            #     # Cut detectors with preprocessing
-            #     prepipe = PreProcPipe(
-            #         preproc_conf["process_pipe"],
-            #         logger=log,
-            #     )
-            #     for process in prepipe:
-            #         log.debug(f"Preprocess selecting on {process.name}")
-            #         process.select(meta)
-
             # Parse the axis manager metadata into observation metadata
             # and detector properties.
             obs_meta = dict()
@@ -1021,6 +1007,7 @@ class LoadContext(Operator):
                 field,
                 axwafers,
                 self.axis_detector,
+                self.axis_sample,
                 ax_field,
                 ax_dtype,
                 wafer_readers,
