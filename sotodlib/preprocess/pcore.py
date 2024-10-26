@@ -292,7 +292,11 @@ def _expand(new, full, wrap_valid=True):
                 assert tuple(new._assignments[k]) == ('dets', 'samps')
                 out[k] = _reform_csr_array(v, oidx, nidx, out[k].shape)
             else:
-                out[k][oidx] = v[nidx]
+                try:
+                    out[k][oidx] = v[nidx]
+                except TypeError:
+                    # Skip expansion for scalar array with no axes.
+                    out[k] = v
     if wrap_valid:
         x = Ranges( full.samps.count )
         m = x.mask()
@@ -382,7 +386,7 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, select=True, sim=False):
+    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -413,6 +417,11 @@ class Pipeline(list):
         sim: boolean (Optional)
             if running on sim (``sim=True``), proccesses with the flag
             ``skip_on_sim`` will be skipped.
+        update_plot: boolean (Optional)
+            if True, re-runs plotting (along with processes and selects)
+            given ``proc_aman`` is ``aman.preprocess``. This assumes
+            ``process.calc_and_save()`` has been run on this aman before and
+            has injested flags and other information into ``proc_aman``.
 
         Returns
         -------
@@ -425,6 +434,7 @@ class Pipeline(list):
             proc_aman = core.AxisManager( aman.dets, aman.samps)
             full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
+            update_plot = False
         else:
             if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
                 self.logger.warning("proc_aman has different detectors than aman. Cutting aman to match")
@@ -444,6 +454,8 @@ class Pipeline(list):
                 process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full, self.wrap_valid)
+            if update_plot:
+                process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)

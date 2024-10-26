@@ -17,6 +17,13 @@ def default_model(telescope):
         model.wrap('mechanical_offset_1', np.deg2rad(-1.66 - 90 + 49.1))
         model.wrap('mechanical_offset_2', np.deg2rad(-1.66 + 90 + 49.1))
 
+    elif telescope == 'satp2':
+        sign = core.AxisManager()
+        sign.wrap('pid', 1)
+        sign.wrap('offcenter', -1)
+        model.wrap('mechanical_offset_1', np.deg2rad(-1.66 - 90 + 7.7))
+        model.wrap('mechanical_offset_2', np.deg2rad(-1.66 + 90 + 7.7))
+
     elif telescope == 'satp3':
         sign = core.AxisManager()
         sign.wrap('pid', -1)
