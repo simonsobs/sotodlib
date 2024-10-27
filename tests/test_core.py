@@ -402,6 +402,8 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('c', np.str_('twelve'))
         aman.wrap('d', np.bool_(False))
 
+        aman.wrap('rangesint32', so3g.proj.Ranges.from_array(
+                  np.array([[0, 1], [10, 20]]).astype(np.int32), aman.samps.count))
         aman.wrap('sparse', csr_array( ((8,3), ([0,1], [1,54])), 
                                       shape=(aman.dets.count, aman.samps.count)))
 
