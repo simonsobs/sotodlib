@@ -1165,7 +1165,6 @@ class G3tHWP():
 
         return aman
 
-
     def _hwp_angle_calculator(
             self,
             counter,
@@ -1235,14 +1234,18 @@ class G3tHWP():
         # fix reference
         self._fix_ref()
 
-        # glitch removal
-        self._remove_glitch()
+        # correct references with glitches
+        self._correct_bad_refs()
 
         # reference filling
         if fast:
             self._fill_refs_fast()
         else:
             self._fill_refs()
+
+        # glitch removal
+        self._fix_datapoint_glitches()
+        self._fix_value_glitches()
 
         # assign IRIG synched timestamp
         self._time = scipy.interpolate.interp1d(
@@ -1277,52 +1280,48 @@ class G3tHWP():
 
     def _find_refs(self):
         """ Find reference slits """
-        # Calculate spacing between all clock values
-        diff = np.ediff1d(self._encd_clk)  # [1:]
-        n = 0
-        diff_split = []
-        for i in range(len(diff)):
-            diff_split.append(diff[n:n + (self._num_edges - 2):1])
-            n += (self._num_edges - 2)
-            if n >= len(diff):
-                break
-        offset = 1
-        # Conditions for idenfitying the ref slit
-        # Slit distance somewhere between 2 slits:
-        # 2 slit distances (defined above) +/- 10%
-        for i in range(len(diff_split)):
-            _diff = diff_split[i]
-            # eliminate upper/lower _slit_width_lim
-            _diff_upperlim = np.percentile(
-                _diff, (1 - self._slit_width_lim) * 100)
-            _diff_lowerlim = np.percentile(_diff, self._slit_width_lim * 100)
-            __diff = _diff[np.where(
-                (_diff < _diff_upperlim) & (_diff > _diff_lowerlim))]
-            # Define mean value as nominal slit distance
-            if len(__diff) == 0:
-                continue
-            slit_dist = np.mean(__diff)
+        # Function to find the mean off an array without outliers
+        def _mean(arr):
+            high = np.percentile(arr, 90)
+            low = np.percentile(arr, 10)
+            return np.mean(arr[(arr < high) & (arr > low)])
 
-            # Conditions for idenfitying the ref slit
-            # Slit distance somewhere between 2 slits:
-            # 2 slit distances (defined above) +/- ref_range
-            ref_hi_cond = ((self._ref_edges + 2) *
-                           slit_dist * (1 + self._ref_range))
-            ref_lo_cond = ((self._ref_edges + 1) *
-                           slit_dist * (1 - self._ref_range))
-            # Find the reference slit locations (indexes)
-            _ref_idx = np.argwhere(np.logical_and(
-                _diff < ref_hi_cond, _diff > ref_lo_cond)).flatten()
-            if len(_ref_idx) != 1:
-                continue
-            self._ref_indexes.append(_ref_idx[0] + offset)
-            offset += len(diff_split[i])
+        # Generate self._encd_diff
+        self._generate_sub_data(ref_clk=False)
+
+        # Find the instantaneous average encoder clk spacing between datapoints
+        rot_spacing = np.arange(0, len(self._encd_diff), self._num_edges - 2)
+        diff_split = np.split(self._encd_diff, rot_spacing[1:])
+        slit_dist = np.concatenate([np.ones(len(_diff)) * _mean(_diff) for _diff in diff_split])
+
+        # Generate thresholds to distinguish references and glitched references
+        ref_hi_cond = (self._ref_edges + 1) * slit_dist * (1 + self._ref_range)
+        ref_lo_cond = (self._ref_edges + 1) * slit_dist * (1 - self._ref_range)
+        ref_gl_cond = slit_dist * (1 + self._ref_range)
+
+        # Normal references
+        ref_ind = np.where((self._encd_diff > ref_lo_cond) & (self._encd_diff < ref_hi_cond))[0]
+        # Potential glitched references
+        ref_ind_glitch = np.where((self._encd_diff < ref_lo_cond) & (self._encd_diff > ref_gl_cond))[0]
+
+        # Find and add glitched references to normal references
+        used_ind_pairs = []
+        for ind in ref_ind_glitch:
+            # Check that there is sufficient space before and after the glitched reference
+            before = min(ref_ind, key=lambda x:abs(x - ind) + 1e8*(1 + np.sign(x - ind)))
+            after = min(ref_ind, key=lambda x:abs(x - ind) + 1e8*(1 - np.sign(x - ind)))
+            if all(np.array([after - ind, ind - before]) > 0.9 * self._num_edges):
+                if (before, after) in used_ind_pairs:
+                    continue
+                used_ind_pairs.append((before, after))
+                ref_ind = np.append(ref_ind, ind)
+
         # Define the reference slit line to be the line before
         # the two "missing" lines
         # Store the count and clock values of the reference lines
-        self._ref_indexes = np.array(self._ref_indexes)
+        self._ref_indexes = np.sort(ref_ind)
         if len(self._ref_indexes) == 0:
-            if len(diff) < self._num_edges:
+            if len(self._encd_diff) < self._num_edges:
                 logger.warning(
                     'cannot find reference points, # of data is less than # of slit')
             else:
@@ -1342,6 +1341,15 @@ class G3tHWP():
 
         return True
 
+    def _generate_sub_data(self, ref_clk=True):
+        """ Re-generates datafields derived from _encd_clk, _encd_cnt, and _ref_indexes """
+        self._encd_diff = np.ediff1d(self._encd_clk, to_begin=self._encd_clk[1]-self._encd_clk[0])
+        # Only generate if self._ref_indexes exists
+        if ref_clk:
+            self._ref_clk = np.take(self._encd_clk, self._ref_indexes)
+            self._ref_cnt = np.take(self._encd_cnt, self._ref_indexes)
+
+        return True
 
     def _fix_ref(self):
         """Delete unexpected ref slit indexes
@@ -1353,85 +1361,69 @@ class G3tHWP():
             logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
             self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
 
+    def _correct_bad_refs(self, plot=False, **kwargs):
+        """ Corrects glitches in reference slits """
+        # Generate statistics of the references
+        self._ref_mean = np.mean(self._encd_diff[self._ref_indexes])
+        self._ref_std = np.std(self._encd_diff[self._ref_indexes])
 
-    def _remove_glitch(self):
-        """If the number of data points in onre revolution is larger than expected.
-        We consider that gliches exit.
-        """
-        good_refs = np.where(np.diff(self._ref_indexes) == self._num_edges - 2)[0]
-        bad_refs = np.where(np.diff(self._ref_indexes) > self._num_edges - 2)[0]
-        if len(good_refs) < 1:
-            return False
-        if len(bad_refs) == 0:
-            return True
-        self._bad_ref = bad_refs
-        # get typical timestamp within one revolution
-        sub_encd_clk = np.split(self._encd_clk, self._ref_indexes)[1:-1]
-        period = [sub[-1]-sub[0] for sub in sub_encd_clk]
-        sub_encd_clk = np.array([sub_encd_clk[i] for i in good_refs])
-        avg_encd_clk = np.average(sub_encd_clk, axis=0)
+        # Find the glitched reference correction size
+        ref_corr_size = np.zeros(len(self._ref_indexes))
+        for index, ind in enumerate(self._ref_indexes):
+            # Only correct references 5 stds away from the mean
+            if self._encd_diff[ind] < self._ref_mean - 5*self._ref_std:
+                # Find the expected correction value and step size
+                # in the forward direction
+                cvf, csf = self._find_corr_size(ind, 1)
+                # Find the expected correction value and step size
+                # in the reverse direction
+                cvr, csr = self._find_corr_size(ind, -1)
+                # Return the step size which corrects better
+                ref_corr_size[index] = csf if cvf < cvr else -csr
 
-        remove = np.array([], dtype=int)
-        for bad_ref in bad_refs:
-            sl = slice(self._ref_indexes[bad_ref], self._ref_indexes[bad_ref + 1], 1)
-            sub_clk = self._encd_clk[sl]
-            scaled_avg_clk = avg_encd_clk * period[bad_ref] / np.average(period)
-            threshold = period[bad_ref]/ self._num_edges * 0.15
-            rm = self._find_glitch(sub_clk, scaled_avg_clk, threshold)
-            remove = np.append(remove, rm + self._ref_indexes[bad_ref])
+        # Mask out points that are glitched
+        encd_mask = np.ones(len(self._encd_clk))
+        for index, ind in enumerate(np.copy(self._ref_indexes)):
+            corr = int(ref_corr_size[index])
+            if corr == 0:
+                continue
+            elif corr > 0:
+                # Create glitch mask and edit other reference
+                encd_mask[ind:ind + corr] *= 0
+                self._ref_indexes[index + 1:] -= corr
+            else:
+                # Create glitch mask and edit other reference
+                encd_mask[ind + corr:ind] *= 0
+                self._ref_indexes[index:] += corr
 
-        # remove glitch
-        self._num_glitches = len(remove)
-        logger.warning(f'{self._num_glitches} glitches are removed')
-        self._encd_clk = np.delete(self._encd_clk, remove)
-        self._encd_cnt = self._encd_cnt[0] + np.arange(len(self._encd_cnt) - len(remove))
-        n_extra = np.diff(self._ref_indexes)[bad_refs] - self._num_edges + 2
-        for i, n in zip(bad_refs, n_extra):
-            self._ref_indexes[i + 1:] -= n
+        # Apply mask
+        self._encd_clk = self._encd_clk[encd_mask.astype(bool)]
+        for ind, value in enumerate(encd_mask.astype(bool)):
+            if not value:
+                self._encd_cnt[ind:] -= 1
+        self._encd_cnt = self._encd_cnt[encd_mask.astype(bool)]
+        # Re-generate various arrays
+        self._generate_sub_data()
+
         return True
 
-
-    def _find_glitch(self, sub_clk, scaled_avg_clk, threshold):
-        """Find glitch in one revolution and return bad index
-        """
-        n_extra = len(sub_clk) - self._num_edges + 2
-        bad_indexes = []
-        start = 0
-        mask = np.zeros_like(sub_clk, dtype=bool)
-        template = np.diff(scaled_avg_clk)
-
-        # Incrementally search for the glitch
-        for j in range(n_extra):
-            # Find glitches by comparing the timestamp with typical one
-            # Left and right time differences that are both further than
-            # threshold are considered glitches.
-            for i in range(start, self._num_edges - 4):
-                l = np.diff(sub_clk[~mask])[1:][i] - template[1:][i]
-                r = np.diff(sub_clk[~mask])[:-1][i] - template[:-1][i]
-                mismatch = np.min([np.abs(l), np.abs(r)])
-                if mismatch > threshold:
-                    mask[i + j + 1] = True
-                    start = i
-                    bad_indexes.append(i + j + 1)
-                    break
+    def _find_corr_size(self, ind, direction, glitch_steps = 10):
+        """ Finds how many datapoints to sum over in order to fix the glitch """
+        # Residual of summing up differences
+        running_avg = self._encd_diff[ind] - self._ref_mean
+        # Sum in a direction until the resisual starts increasing
+        for step in np.arange(1, 1 + glitch_steps):
+            # Make sure the next step index is reasonable
+            step_index = min(max(0, int(ind + direction*step)), len(self._encd_diff) - 1)
+            new_avg = running_avg + self._encd_diff[step_index]
+            if abs(new_avg) < abs(running_avg):
+                running_avg = new_avg
             else:
-                bad_indexes.append(np.delete(np.arange(len(sub_clk)), bad_indexes)[-1])
-            # if nothing goes beyond the threshold, the data point
-            # with smallest time difference is considered as glitch
-            #else:
-            #    i = np.argmin(np.diff(sub_clk[~mask]))
-            #    for k in sorted(bad_indexes):
-            #        if k <= i + 1:
-            #            i += 1
-            #    mask[i+1] = True  # NEED debug
-            #    bad_indexes.append(i+1)
-            #    start = 0
-        logger.debug('{}, {}'.format(n_extra, bad_indexes))
-
-        assert len(bad_indexes) == len(np.unique(bad_indexes))
-
-        return np.array(bad_indexes)
-
+                # Return the minimum residual and the number of steps to reach it
+                return abs(running_avg), step - 1
+        else:
+            logger.warning('Error: Reference optimization took too long')
+            return self._ref_mean, 0
 
     def _fill_refs(self):
         """ Fill in the reference edges """
@@ -1473,36 +1465,172 @@ class G3tHWP():
         if len(self._ref_clk) == 0:
             self._ref_clk = [self._encd_clk[0]]
             self._ref_cnt = [self._encd_cnt[0]]
-            return
-        # insert interpolate clk to reference points
-        lastsub = np.split(self._encd_clk, self._ref_indexes)[-1]
-        self._encd_clk = np.concatenate(
-            np.array(
-                [[sub_clk, np.linspace(self._encd_clk[ref_index - 1], self._encd_clk[ref_index], self._ref_edges + 2)[1:-1]]
-                 for ref_index, sub_clk
-                 in zip(self._ref_indexes, np.split(self._encd_clk, self._ref_indexes))], dtype=object
-            ).flatten()
-        )
-        self._encd_clk = np.append(self._encd_clk, lastsub)
+            return True
+        # Split the encoder clk/cnt arrays based on the references
+        encd_clk_split = np.split(self._encd_clk, self._ref_indexes)
+        filled_clks = [encd_clk_split[0]]
+        encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
+        filled_cnts = [encd_cnt_split[0]]
 
-        self._encd_cnt = self._encd_cnt[0] + np.arange(
-            len(self._encd_cnt) + len(self._ref_indexes) * self._ref_edges)
-        # Shift filled indexes
-        for fi in self._filled_ranges:
-            offset_start, offset_end = 0, 0
-            for ri in self._ref_indexes:
-                if fi[0] <= ri:
-                    break
-                if fi[0] > ri:
-                    offset_start += 2
-                if fi[1] > ri:
-                    offset_end += 2
-            fi[0] += offset_start
-            fi[1] += offset_end
-        # Shift ref indexes
-        self._ref_indexes += np.arange(len(self._ref_indexes)) * self._ref_edges
-        self._ref_cnt = self._encd_cnt[self._ref_indexes]
-        return
+        # Loop over every split
+        for i, ref_ind in enumerate(np.copy(self._ref_indexes)):
+            start_clk = self._encd_clk[ref_ind-1]
+            end_clk = self._encd_clk[ref_ind]
+
+            # Insert extra clks to fill the reference
+            filled_clks.append([int(start_clk+(end_clk-start_clk)/3),
+                                int(start_clk+(end_clk-start_clk)*2/3)])
+            filled_clks.append(encd_clk_split[i+1])
+
+            # Adjust the cnt for added clks
+            filled_cnts.append(2*i + encd_cnt_split[i+1][0] + np.array([0, 1]))
+            filled_cnts.append(2*(i + 1) + encd_cnt_split[i+1])
+
+            # Adjust the ref for added clks
+            self._ref_indexes[i+1:] += self._ref_edges
+
+        # Convert split arrays back into single array
+        self._encd_clk = np.array([clk for entry in filled_clks for clk in entry])
+        self._encd_cnt = np.array([cnt for entry in filled_cnts for cnt in entry])
+        self._generate_sub_data()
+
+        return True
+
+    def _fix_datapoint_glitches(self):
+        """ Removes glitches that add encoder datapoints """
+        # Find how many extra datapoints there are per revolution
+        self._glitches = np.ediff1d(self._ref_indexes, to_end=self._num_edges) - self._num_edges
+        self._bad_ref = np.where(self._glitches != 0)[0]
+        encd_diff_split = np.split(self._encd_diff, self._ref_indexes)
+
+        dead_rots = []
+        total_mask = [np.ones(len(encd_diff_split[0]))]
+        # Loop through every rotation and find which points to mask out
+        for i, diff in enumerate(encd_diff_split[1:]):
+            # Only process rotations which have a glitch
+            if self._glitches[i] != 0:
+                # Assuming the signal has some static duty cycle, the clk difference between
+                # two points follows a bimodal distribution. These lines find the average
+                # clk diff peaks of that distribution as well as whether the rotation starts
+                # with a high or low clock difference
+                high, low = self._find_high_low_values(diff)
+                start_high = self._find_rot_start_type(diff)
+
+                # Generate a glitch mask for this rotation
+                result, mask = self._glitch_mask(diff, high, low, start_high)
+                # If the mask could not be generated, remove the rotation
+                if not result:
+                    mask = np.full(len(diff), False)
+                    dead_rots.append(i)
+
+                total_mask.append(mask)
+
+                # Find how many glitches were removed
+                num_glitches = len(mask) - np.sum(mask)
+                self._ref_indexes[i+1:] -= num_glitches
+                logger.warning(f'{num_glitches}, {np.where(~np.array(mask))[0]}')
+            else:
+                total_mask.append(np.ones(len(diff)))
+
+        # Join the individual rotation masks into a single overall mask
+        total_mask = np.array([bool(mask) for entry in total_mask for mask in entry])
+        self._num_glitches = sum(~total_mask)
+        logger.warning(f'{self._num_glitches} glitches are removed')
+        self._encd_clk = self._encd_clk[total_mask]
+        for ind, value in enumerate(total_mask):
+            if not value:
+                self._encd_cnt[ind:] -= 1
+        self._encd_cnt = self._encd_cnt[total_mask]
+        self._ref_indexes = np.delete(self._ref_indexes, dead_rots)
+        self._generate_sub_data()
+
+        return True
+
+    def _find_high_low_values(self, arr):
+        """ Finds the two peaks of an array with a bimodal distribution """
+        med = np.median(arr[arr > 0.75*np.median(arr)])
+        high = np.median(arr[arr > med])
+        low = np.median(arr[np.logical_and(arr < med, arr > 0.75*med)])
+
+        return high, low
+
+    def _find_rot_start_type(self, arr):
+        """ Finds the starting pattern of an array with a bimodal distribution """
+        even = np.median(np.diff(arr)[::2])
+        odd = np.median(np.diff(arr)[1::2])
+
+        return True if even < odd else False
+
+    def _glitch_mask(self, diffs, high, low, start):
+        """
+        Generates a mask of 'good' points in an array which is expected to follow
+        a bimodal distribution
+        """
+        return_mask = []
+        toggle = not start
+        diff_sum = 0
+        prev_res = 0
+        # Iterate over ever point in the array, checking the rolling sum
+        # against what it is expected to be. If the residual doesn't follow
+        # the expected pattern, mask that point as a glitch
+        for diff in diffs:
+            diff_sum += diff
+            res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
+            if prev_res < res:
+                return_mask.append(True)
+                diff_sum = diff
+                toggle = not toggle
+                res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
+            else:
+                return_mask.append(False)
+
+            prev_res = res
+        else:
+            return_mask.append(True)
+            return_mask = return_mask[1:]
+
+        # Check that the number of valid points is what we expect in one rotation
+        if np.sum(return_mask) == self._num_edges:
+            return True, return_mask
+        else:
+            logger.warning('Warning: Could not remove glitches from rotation')
+            return False, None
+
+    def _fix_value_glitches(self):
+        """ Removes glitches that change the encoder value """
+        diff_matrix = np.split(self._encd_diff, self._ref_indexes)
+        # Find the average value in each rotation
+        norm_matrix = np.array([[np.mean(diff)] for diff in diff_matrix])
+        # Average rotation template
+        template = np.mean(diff_matrix[1:-1]/norm_matrix[1:-1], axis=0)
+        expectation = (norm_matrix*template).flatten()
+
+        # Handle the first and last rotations
+        cut_start = self._num_edges - len(diff_matrix[0])
+        cut_end = len(diff_matrix[-1]) - self._num_edges
+        expectation = expectation[cut_start:cut_end]
+
+        # Find which encd values differ from expectation in a way that
+        # looks like a glitch
+        error = self._encd_diff - expectation
+        for i in self._ref_indexes[:-1]:
+            for j in range(self._num_edges):
+                dist = abs(error[i+j]) - 0.01*expectation[i+j]
+                if dist > 0:
+                    dist_inds = 3 if j == self._num_edges - 1 else 1
+                    dist_sign = np.sign(error[i+j])
+
+                    try:
+                        error[i+j] -= dist_sign*dist
+                        error[i+j+1:i+j+1+dist_inds] += dist_sign*dist/dist_inds
+                    except IndexError:
+                        pass
+
+        # Recreate the encoder clock after accounting for value glitches
+        self._encd_clk = self._encd_clk + np.cumsum(expectation + error - self._encd_diff)
+        self._generate_sub_data()
+
+        return True
 
     def _calc_angle_linear(self, mod2pi=True):
         """ Calculate hwp angle of encoder counters for each revolution """
