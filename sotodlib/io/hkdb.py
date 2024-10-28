@@ -186,7 +186,10 @@ def update_file_index(hkcfg: HkConfig, session=None):
             if f.endswith('.g3')
         ])
 
-    existing_files = [path for path, in session.query(HkFile.path).all()]
+    existing_files = [
+        os.path.join(hkcfg.hk_root, path)
+        for path, in session.query(HkFile.path).all()
+    ]
     new_files = sorted(list(set(all_files) - set(existing_files)))
 
     files = []
