@@ -8,7 +8,9 @@ from pixell import enmap, utils as putils, fft, bunch, wcsutils, tilemap, colors
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import sotodlib.site_pipeline.util as util
 
-defaults = {"query": "1",
+defaults = {"area": None,
+            "nside": None,
+            "query": "1",
             "odir": "./output",
             "preprocess_config": None,
             "comps": "TQU",
@@ -46,12 +48,14 @@ def get_parser(parser=None):
     parser.add_argument("--config-file", type=str, default=None, 
                      help="Path to mapmaker config.yaml file")
     
-    parser.add_argument("--context",
-                        help='context file')    
-    parser.add_argument("--query",
-                        help='query, can be a file (list of obs_id) or selection string')
+    parser.add_argument("--context", type=str,
+                        help='context file')
     parser.add_argument("--area",
                         help='wcs kernel')
+    parser.add_argument("--nside",
+                        help='Nside if you want map in HEALPIX')
+    parser.add_argument("--query",
+                        help='query, can be a file (list of obs_id) or selection string')
     parser.add_argument("--odir",
                         help='output directory')
     parser.add_argument("--preprocess_config", type=str,
@@ -262,8 +266,14 @@ def main(config_file=None, defaults=defaults, **args):
     comm       = mpi.FAKE_WORLD # Fake communicator since we won't use MPI
     
     verbose = args['verbose'] - args['quiet']
-    shape, wcs = enmap.read_map_geometry(args['area'])
-    wcs        = wcsutils.WCS(wcs.to_header())
+    if args['area'] is not None:
+        shape, wcs = enmap.read_map_geometry(args['area'])
+        wcs        = wcsutils.WCS(wcs.to_header())
+    elif args['nside'] is not None:
+        nside = int(args['nside'])
+    else:
+        print('Neither rectangular area or nside specified, exiting.')
+        exit(1)
 
     noise_model = mapmaking.NmatWhite()
     ncomp      = len(args['comps'])
@@ -396,20 +406,21 @@ def main(config_file=None, defaults=defaults, **args):
     my_tods = list(itertools.chain.from_iterable(my_tods))
     my_ra_ref = list(itertools.chain.from_iterable(my_ra_ref))
     pwvs = list(itertools.chain.from_iterable(pwvs))
-    L.info('Starting with read_tods')
+    L.info('Done with read_tods')
 
-    # we will do the profile and footprint here, and then allgather the
-    # subshapes and subwcs.This way we don't have to communicate the
-    # massive arrays such as timestamps
-    subshapes = [] ; subwcses = []
-    for obs in my_tods:
-        if recenter is None:
-            subshape, subwcs = find_footprint(context, obs, wcs,)
-            subshapes.append(subshape) ; subwcses.append(subwcs)
-        else:
-            subshape = shape; subwcs = wcs
-            subshapes.append(subshape) ; subwcses.append(subwcs)
-    # subshape and subwcs are in the order given by my_oblists
+    if args['area'] is not None:
+        # we will do the profile and footprint here, and then allgather the
+        # subshapes and subwcs.This way we don't have to communicate the
+        # massive arrays such as timestamps
+        subshapes = [] ; subwcses = []
+        for obs in my_tods:
+            if recenter is None:
+                subshape, subwcs = find_footprint(context, obs, wcs,)
+                subshapes.append(subshape) ; subwcses.append(subwcs)
+            else:
+                subshape = shape; subwcs = wcs
+                subshapes.append(subshape) ; subwcses.append(subwcs)
+        # subshape and subwcs are in the order given by my_oblists
 
     run_list = []
     for oi in range(len(my_tods)):
@@ -424,8 +435,9 @@ def main(config_file=None, defaults=defaults, **args):
         t5      = ("%05d" % t)[:5]
         prefix  = "%s/%s/atomic_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
         
-        subshape = subshapes[oi]
-        subwcs   = subwcses[oi]
+        if args['area'] is not None:
+            subshape = subshapes[oi]
+            subwcs   = subwcses[oi]
 
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
@@ -479,12 +491,30 @@ def main(config_file=None, defaults=defaults, **args):
                                  pwv=pwv_atomic
                                 ))
         # inputs that are unique per atomic map go into run_list
-        run_list.append([obslist, subshape, subwcs, info, prefix, t])
+        if args['area'] is not None:
+            run_list.append([obslist, subshape, subwcs, info, prefix, t])
+        elif args['nside'] is not None:
+            run_list.append([obslist, info, prefix, t])
     # Done with creating run_list
+
     with ProcessPoolExecutor(args['nproc']) as exe:
-        futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0], r[1], r[2],
+        if args['area'] is not None:
+            futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
                                 noise_model, r[3], preprocess_config, r[4],
+                                shape=r[1], wcs=r[2],
                                 comm = comm, t0=r[5], tag=tag, recenter=recenter,
+                                dtype_map=args['dtype_map'],
+                                dtype_tod=args['dtype_tod'],
+                                comps=args['comps'],
+                                verbose=args['verbose'],
+                                split_labels=split_labels,
+                                singlestream=args['singlestream'],
+                                site=args['site']) for r in run_list]
+        elif args['nside'] is not None:
+            futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
+                                noise_model, r[1], preprocess_config, r[2],
+                                nside = nside,
+                                comm = comm, t0=r[3], tag=tag, recenter=recenter,
                                 dtype_map=args['dtype_map'],
                                 dtype_tod=args['dtype_tod'],
                                 comps=args['comps'],

@@ -379,30 +379,48 @@ class DemodSignalMap(DemodSignal):
 
         return oname
 
-def setup_demod_map(shape, wcs, noise_model, comm=mpi.COMM_WORLD,
-                   comps='TQU', split_labels=None, singlestream=False,
-                   dtype_tod=np.float32, dtype_map=np.float32,
-                   recenter=None, verbose=0):
+def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
+                    comm=mpi.COMM_WORLD, comps='TQU', split_labels=None,
+                    singlestream=False, dtype_tod=np.float32,
+                    dtype_map=np.float32, recenter=None, verbose=0):
     """
         Setup the classes for demod mapmaking and return
         a DemodMapmmaker object
     """
-    if split_labels==None:
-        # this is the case where we did not request any splits at all
-        signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                              dtype=dtype_map, tiled=False,
-                                              ofmt="", singlestream=singlestream,
-                                              recenter=recenter )
-    else:
-        # this is the case where we asked for at least 2 splits (1 split set).
-        # We count how many split we'll make, we need to define the Nsplits
-        # maps inside the DemodSignalMap
-        Nsplits = len(split_labels)
-        signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                              dtype=dtype_map, tiled=False,
-                                              ofmt="", Nsplits=Nsplits,
-                                              singlestream=singlestream,
-                                              recenter=recenter)
+    if shape is not None and wcs is not None:
+        if split_labels==None:
+            # this is the case where we did not request any splits at all
+            signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
+                                                  dtype=dtype_map, tiled=False,
+                                                  ofmt="", singlestream=singlestream,
+                                                  recenter=recenter )
+        else:
+            # this is the case where we asked for at least 2 splits (1 split set).
+            # We count how many split we'll make, we need to define the Nsplits
+            # maps inside the DemodSignalMap
+            Nsplits = len(split_labels)
+            signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
+                                                  dtype=dtype_map, tiled=False,
+                                                  ofmt="", Nsplits=Nsplits,
+                                                  singlestream=singlestream,
+                                                  recenter=recenter)
+    elif nside is not None:
+        if split_labels==None:
+            # this is the case where we did not request any splits at all
+            signal_map = DemodSignalMap.for_healpix(nside, comps=comps,
+                                                  dtype=dtype_map,
+                                                  ofmt="", singlestream=singlestream,
+                                                  ext="fits.gz")
+        else:
+            # this is the case where we asked for at least 2 splits (1 split set).
+            # We count how many split we'll make, we need to define the Nsplits
+            # maps inside the DemodSignalMap
+            Nsplits = len(split_labels)
+            signal_map = DemodSignalMap.for_healpix(nside, comps=comps,
+                                                  dtype=dtype_map,
+                                                  ofmt="", Nsplits=Nsplits,
+                                                  singlestream=singlestream,
+                                                  ext="fits.gz")
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=noise_model,
                                          dtype=dtype_tod,
@@ -440,8 +458,9 @@ def write_demod_info(oname, info, split_labels=None):
         for n_split in range(Nsplits):
             bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
 
-def make_demod_map(context, obslist, shape, wcs, noise_model, info,
-                    preprocess_config, prefix, comm=mpi.COMM_WORLD, comps="TQU", t0=0,
+def make_demod_map(context, obslist, noise_model, info,
+                    preprocess_config, prefix, shape=None, wcs=None,
+                    nside=None, comm=mpi.COMM_WORLD, comps="TQU", t0=0,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False):
@@ -456,10 +475,6 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, info,
             The obslist which is the output of the
             mapmaking.obs_grouping.build_obslists, contains the information of the
             single or multiple obs to map.
-        shape : tuple
-            Shape of the geometry to use for mapping.
-        wcs : dict
-            WCS kernel of the geometry to use for mapping.
         noise_model : sotodlib.mapmaking.Nmat
             Noise model to pass to DemodMapmaker.
         info : list
@@ -468,6 +483,12 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, info,
             Dictionary with the config yaml file for the preprocess database.
         prefix : str
             Prefix for the output files
+        shape : tuple, optional
+            Shape of the geometry to use for mapping.
+        wcs : dict, optional
+            WCS kernel of the geometry to use for mapping.
+        nside : int, optional
+            Nside for healpix pixelization
         comps : str, optional
             Which components to map, only TQU supported for now.
         t0 : int, optional
@@ -507,8 +528,8 @@ def make_demod_map(context, obslist, shape, wcs, noise_model, info,
         L = site_pipeline.util.init_logger("Demod filterbin mapmaking")
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
-    mapmaker = setup_demod_map(shape, wcs, noise_model, comm=comm,
-                    comps=comps, split_labels=split_labels, 
+    mapmaker = setup_demod_map(noise_model, shape=shape, wcs=wcs, nside=nside,
+                    comm=comm, comps=comps, split_labels=split_labels,
                     singlestream=singlestream, dtype_tod=dtype_tod,
                     dtype_map=dtype_map, recenter=recenter, verbose=verbose)
 
