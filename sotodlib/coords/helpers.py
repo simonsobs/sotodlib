@@ -1,6 +1,7 @@
 import so3g.proj
 import numpy as np
 from pixell import enmap, wcsutils, utils
+from . import healpix_utils as hp_utils
 
 import time
 import re
@@ -285,7 +286,16 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
+    If wcs_kernel is a string in the format "NSIDE=1024", returns a healpix geometry object
+    for an un-tiled Healpix map at given NSIDE with default ordering.
+
     """
+    if isinstance(wcs_kernel, str) and "nside" in wcs_kernel.lower():
+        wcs_kernel = wcs_kernel.lower().strip().replace(' ', '')
+        # Assume we are in the format "nside=1024"
+        nside = int(wcs_kernel[6:])
+        return hp_utils.get_geometry(nside)
+
     if isinstance(wcs_kernel, str):
         wcs_kernel = get_wcs_kernel(wcs_kernel)
 
