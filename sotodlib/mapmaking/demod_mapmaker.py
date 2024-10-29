@@ -407,20 +407,20 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
     elif nside is not None:
         if split_labels==None:
             # this is the case where we did not request any splits at all
-            signal_map = DemodSignalMap.for_healpix(nside, comps=comps,
-                                                  dtype=dtype_map,
-                                                  ofmt="", singlestream=singlestream,
-                                                  ext="fits.gz")
+            signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
+                                        comps=comps, dtype=dtype_map,
+                                        ofmt="", singlestream=singlestream,
+                                        ext="fits.gz")
         else:
             # this is the case where we asked for at least 2 splits (1 split set).
             # We count how many split we'll make, we need to define the Nsplits
             # maps inside the DemodSignalMap
             Nsplits = len(split_labels)
-            signal_map = DemodSignalMap.for_healpix(nside, comps=comps,
-                                                  dtype=dtype_map,
-                                                  ofmt="", Nsplits=Nsplits,
-                                                  singlestream=singlestream,
-                                                  ext="fits.gz")
+            signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
+                                        comps=comps, dtype=dtype_map,
+                                        ofmt="", Nsplits=Nsplits,
+                                        singlestream=singlestream,
+                                        ext="fits.gz")
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=noise_model,
                                          dtype=dtype_tod,
