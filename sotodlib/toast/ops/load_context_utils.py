@@ -396,11 +396,16 @@ def distribute_detector_data(
             send_data[wafer] = dict()
             # The wafer axis manager may have a different set of detectors than
             # the full data, if some detectors have been cut.  It may also have
-            # a symetric buffer of samples cut on either side of the observation.
+            # a symmetric buffer of samples cut on either side of the observation.
             # here we construct the mapping from full data into this restricted
             # axis manager.
             restricted_dets = axwafers[wafer][axis_dets].vals
             restricted_indices = {y: x for x, y in enumerate(restricted_dets)}
+
+            # if axfield == "signal":
+            #     for idet, det in enumerate(restricted_dets):
+            #         rms = np.std(axwafers[wafer][axfield][idet, :])
+            #         print(f"DBG AXMAN {det} = {rms}", flush=True)
 
             for receiver, send_dets in wafer_proc_dets[wafer].items():
                 # "send_dets" is the un-restricted range of wafer detectors.
@@ -414,12 +419,13 @@ def distribute_detector_data(
 
                 # The receiving detector names and their relative indices
                 recv_dets = proc_wafer_dets[receiver][wafer]
+                n_recv_det = recv_dets[1] - recv_dets[0]
                 recv_det_names = local_det_names[recv_dets[0]:recv_dets[1]]
                 recv_det_indices = {y: x for x, y in enumerate(recv_det_names)}
 
-                # Build the mapping send buffer indices to restricted indices
+                # Build the mapping of restricted indices to send buffer indices
                 restrict_to_send = {
-                    recv_det_indices[x]: y for x, y in recv_det_indices.items()
+                    restricted_indices[x]: y for x, y in recv_det_indices.items()
                     if x in restricted_indices
                 }
 
@@ -496,6 +502,12 @@ def distribute_detector_data(
                         obs.detdata[field][recv_dets[0] : recv_dets[1], :] = (
                             sdata.reshape((n_send_det, -1))
                         )
+                        # Update per-detector flags
+                    dflags = {
+                        obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
+                        for x in range(n_recv_det) if det_flags[x] != 0
+                    }
+                    obs.update_local_detector_flags(dflags)
                 else:
                     # Send asynchronously.
                     tag = (rank * gsize + receiver) * tag_stride + 2 * wf_index[wafer]
@@ -510,6 +522,7 @@ def distribute_detector_data(
 
     my_wafer_dets = proc_wafer_dets[rank]
     for wafer, recv_dets in my_wafer_dets.items():
+        n_recv_det = recv_dets[1] - recv_dets[0]
         sender = wafer_readers[wafer]
         if sender == rank:
             # This data was already copied locally above
@@ -518,7 +531,6 @@ def distribute_detector_data(
             # Receive from sender.  We always allocate a contiguous temporary buffer.
             tag = (sender * gsize + rank) * tag_stride + 2 * wf_index[wafer]
             flag_tag = tag + 1
-            n_recv_det = recv_dets[1] - recv_dets[0]
             recv_data = gcomm.recv(source=sender, tag=tag)
             det_flags = gcomm.recv(source=sender, tag=flag_tag)
             det_slc = slice(recv_dets[0], recv_dets[1], 1)
@@ -552,6 +564,12 @@ def distribute_detector_data(
     # Now safe to delete our dictionary of isend buffer handles, which might include
     # temporary buffers of ranges flags.
     del send_data
+
+    # if axfield == "signal":
+    #     for idet, det in enumerate(obs.local_detectors):
+    #         rms = np.std(obs.detdata["signal"][det, :])
+    #         flg = obs.local_detector_flags[det]
+    #         print(f"DBG OBS {det} ({flg}) = {rms}", flush=True)
 
 
 @function_timer

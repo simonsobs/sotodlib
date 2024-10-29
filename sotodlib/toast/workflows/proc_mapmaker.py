@@ -264,12 +264,27 @@ def mapmaker_run(job, otherargs, runargs, data, map_op):
                     obs_data = data.select(obs_uid=obs.uid)
                     # Set the output directory to the session name
                     map_op.output_dir = os.path.join(orig_outdir, obs.session.name)
+
+                    # Delete any solver or other products
+                    import re
+                    for k in list(obs_data.keys()):
+                        if re.match(r".*_solve_.*", k) is not None:
+                            del obs_data[k]
+
                     # Replace comm_world with the group communicator
                     obs_data._comm = new_comm
                     if isinstance(map_op, so_ops.Splits):
                         binner = map_op.mapmaker.binning
                     else:
                         binner = map_op.binning
+
+                    if binner.pixel_pointing.pixels in obs:
+                        del obs[binner.pixel_pointing.pixels]
+                    if binner.stokes_weights.weights in obs:
+                        del obs[binner.stokes_weights.weights]
+                    if binner.pixel_pointing.detector_pointing.quats in obs:
+                        del obs[binner.pixel_pointing.detector_pointing.quats]
+
                     orig_view = binner.pixel_pointing.view
                     if do_intervalmaps and orig_view is not None:
                         if isinstance(map_op, so_ops.Splits):
