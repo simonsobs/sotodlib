@@ -34,6 +34,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
         P_SAT in the IV analysis is the bias power at 90% Rn in pW.
+        If None, no flags are not applied from P_SAT. 
     rn_range : Tuple
         Tuple (lower_bound, upper_bound) for r_n det selection.
     si_nan : bool

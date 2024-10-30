@@ -98,7 +98,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            t_pieces: 100
+            t_piece: 100
           save: True
           plot: True
           select:
@@ -743,7 +743,7 @@ class GlitchFill(_Preprocess):
           use_pca: False
           modes: 1
           in_place: True
-          wrap_name: None
+          wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
@@ -1255,6 +1255,7 @@ class EstimateT2P(_Preprocess):
             T_sig_name: 'dsT'
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
+            joint_fit: True
             trim_samps: 2000
             lpf_cfgs:
               type: 'sine2'
