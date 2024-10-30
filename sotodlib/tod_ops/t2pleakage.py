@@ -26,15 +26,15 @@ def t2p_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demodU',
         Name of the Q polarization signal in `aman`. Default is 'demodQ'.
     U_sig_name : str
         Name of the U polarization signal in `aman`. Default is 'demodU'.
-    flag_name : str or None
-        Name of the flag field in `aman` to use for masking data. If None,
-        no masking is applied.
     sigma_T : array-like
         Array of standard deviations for the signal TOD used fitting.
         If None, all are set to unity.
     sigma_demod : array-like or None
         Array of standard deviations for the Q and U TODs used as weights
         while fitting.  If None, all are set to unity.
+    flag_name : str or None
+        Name of the flag field in `aman` to use for masking data. If None,
+        no masking is applied.
     ds_factor : float
         Factor by which to downsample the TODs prior to fitting. Default is 100. 
 
@@ -136,12 +136,12 @@ def t2p_joint_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demod
         Name of the Q polarization signal in `aman`. Default is 'demodQ'.
     U_sig_name : str
         Name of the U polarization signal in `aman`. Default is 'demodU'.
-    flag_name : str or None
-        Name of the flag field in `aman` to use for masking data. If None,
-        no masking is applied.
     sigma_demod : array-like or None
         Array of standard deviations for the Q and U TOD used as weights
         while fitting. If None, all are set to unity.
+    flag_name : str or None
+        Name of the flag field in `aman` to use for masking data. If None,
+        no masking is applied.
     ds_factor : float
         Factor by which to downsample the TODs prior to fitting. Default is 100. 
 
