@@ -61,7 +61,14 @@ def setup_simulate_sky_map_signal(operators):
             enabled=False,
         )
     )
-
+    operators.append(
+        toast.ops.DerivativesWeights(
+            name="derivatives_weights",
+            mode="d2I",
+            weights="weights_scan_map",
+            enabled=False,
+        )
+    )
 
 @workflow_timer
 def simulate_sky_map_signal(job, otherargs, runargs, data):
@@ -119,6 +126,10 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
         if job_ops.scan_map_weights.enabled:
             job_ops.scan_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
             job_ops.scan_map.stokes_weights = job_ops.scan_map_weights
+        elif job_ops.derivatives_weights.enabled:
+            job_ops.scan_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
+            job_ops.derivatives_weights.detector_pointing = job_ops.det_pointing_radec_sim
+            job_ops.scan_map.derivatives_weights = job_ops.derivatives_weights
         else:
             job_ops.scan_map.stokes_weights = job_ops.weights_radec
         job_ops.scan_map.save_pointing = otherargs.full_pointing
