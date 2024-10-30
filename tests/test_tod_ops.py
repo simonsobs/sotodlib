@@ -171,19 +171,19 @@ class GapFillTest(unittest.TestCase):
         # test poly fill
         in_place, up, mg = False, False, None
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      in_place=in_place, wrap_name=mg)
+                                                      in_place=in_place, wrap=mg)
         self.assertTrue(np.max(np.abs(glitch_filled-aman.inputsignal)) < 1e-3)
 
         # test pca fill
         in_place, up, mg = False, True, None
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      in_place=in_place, wrap_name=mg)
+                                                      in_place=in_place, wrap=mg)
         print(np.max(np.abs(glitch_filled-aman.inputsignal)))
 
         # test wrap new field
         in_place, up, mg = False, False, "gap_filled"
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      in_place=in_place, wrap_name=mg)
+                                                      in_place=in_place, wrap=mg)
         self.assertTrue('gap_filled' in aman._assignments)
 
 class FilterTest(unittest.TestCase):
