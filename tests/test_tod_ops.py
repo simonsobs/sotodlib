@@ -97,6 +97,37 @@ class PcaTest(unittest.TestCase):
         print(f'Amplitudes from {amps0} to {amps1}.')
         self.assertTrue(np.all(amps1 < amps0 * 1e-6))
 
+    def test_pca(self):
+        tod = get_tod('white')
+        x = tod.timestamps / tod.timestamps[-1]
+        comp0 = x**2 - x
+        comp1 = x**3 - .2
+        comp0, comp1 = [c / np.std(c) for c in [comp0, comp1]]
+        tod.signal += comp0 * 100
+        tod.signal[1] += comp1 * 50
+        mod = tod_ops.pca.get_pca_model(tod, n_modes=2)
+        tod_ops.pca.add_model(tod, mod, scale=-1)
+        assert (tod.signal.std(axis=1) < 1.).all()
+
+        # With a glitch
+        tod = get_tod('white')
+        tod.signal += comp0 * 100
+        tod.signal[1][10] = 1e6
+        mask = np.ones(tod.dets.count, bool)
+        mask[1] = False
+
+        # The glitch dominates this PCA, and white noise is not recovered.
+        pca = tod_ops.pca.get_pca(tod)
+        mod = tod_ops.pca.get_pca_model(tod, pca=pca, n_modes=1)
+        sig1 = tod_ops.pca.add_model(tod, mod, scale=-1, signal=tod.signal.copy())
+        assert (sig1[mask].std(axis=1) > 10.).any()
+
+        # Excluding det with glitch successfully cleans other dets.
+        pca = tod_ops.pca.get_pca(tod, mask=mask)
+        mod = tod_ops.pca.get_pca_model(tod, pca=pca, n_modes=1)
+        sig2 = tod_ops.pca.add_model(tod, mod, scale=-1, signal=tod.signal.copy())
+        assert (sig2[mask].std(axis=1) < 1.).all()
+
     def test_detrend(self):
         tod = get_tod('trendy')
         tod.wrap('sig1d', tod.signal[0], [(0, 'samps')])

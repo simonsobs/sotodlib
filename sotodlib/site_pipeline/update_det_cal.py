@@ -31,6 +31,7 @@ from sodetlib.operations.bias_steps import BiasStepAnalysis
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
+TES_BIAS_COUNT = 12  # per detset / primary file group
 
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
@@ -509,7 +510,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
 
             for bg, vb_bsa in enumerate(bsa.Vbias):
                 bl_label = f"{bsa.meta['stream_id']}_b{bg:0>2}"
-                if np.isnan(vb_bsa):
+                # Usually we can count on bias voltages of bias lines >= 12 to be
+                # Nan, however we have seen cases where they're not, so we also
+                # restrict by count.
+                if np.isnan(vb_bsa) or bg >= TES_BIAS_COUNT:
                     bias_line_is_valid[bl_label] = False
                     continue
 
