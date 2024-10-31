@@ -70,6 +70,11 @@ def _wrap_wg_hk(tod, ts_margin=1):
             This includes fields, which are related with the wire grid hardware.
             enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
 
+                - LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
+                - LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
+                - LSR1 : ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
+                - LSR2 : ON/OFF status of the limit switch RIGHT 2 (inside) of the actuator
+
     """
     tod_start = float(tod.obs_info.start_time) - _ts_margin
     tod_stop =  float(tod.obs_info.stop_time) + _ts_margin
@@ -308,10 +313,11 @@ def _get_operation_range(tod, stopped_time=None, ls_margin=None, is_restrict=Tru
 def initialize_wire_grid(tod, stopped_time=None, ls_margin=None, is_restrict=True, remove_trembling=True):
     """
     Including the information of the wire grid operation. Steps are follows:
-    (step 0) to wrap the house-keeping data(rotation encoder, limit switches),
-    (step 1) to correct the rotation angle based on the hardware design of the calibrator,
-    (step 2) to get opration range of a single calibration run,
-    (step 3) to wrap the stepwise rotation data into the tod (AxisManager) as tod.wg.cal_data.
+
+        - (step 0) to wrap the house-keeping data(rotation encoder, limit switches),
+        - (step 1) to correct the rotation angle based on the hardware design of the calibrator,
+        - (step 2) to get opration range of a single calibration run,
+        - (step 3) to wrap the stepwise rotation data into the tod (AxisManager) as tod.wg.cal_data.
 
     Parameters
     ----------
