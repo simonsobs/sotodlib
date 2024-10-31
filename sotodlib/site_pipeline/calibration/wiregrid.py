@@ -72,13 +72,6 @@ def _wrap_wg_hk(tod, ts_margin=1):
             This includes fields, which are related with the wire grid hardware.
             enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
 
-    Notes
-    -----
-        LSL1 is ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
-        LSL2 is ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
-        LSR1 is ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
-        LSR2 is ON/OFF status of the limit switch RIGHT 2 (inside) of the actuator
-
     """
     tod_start = float(tod.obs_info.start_time) - _ts_margin
     tod_stop =  float(tod.obs_info.stop_time) + _ts_margin
@@ -152,10 +145,6 @@ def _correct_wg_angle(tod):
         restrict : bool (default, True)
             this parameter restricts the sample of the axismanger by the operation range of the wire grid.
 
-    Returns
-    -------
-        (tod, idx_wg_inside) : Tuple
-            tod is an AxisManager, and idx_wg_inside is the flags that indicates the opration range of the wire grid.
     """
     _tel = tod.obs_info.telescope
     if _tel == 'satp1':
@@ -187,6 +176,7 @@ def _detect_action(count, flag=0):
     -------
         count: int
             counts in the same status related with the flag
+
     """
     if flag == 0:
         vecbool = count[1:]-count[:-1] != 0  # moving
@@ -373,14 +363,6 @@ def wrap_qu_cal(tod):
             This includes the characterics of the wire grid operation and the Q/U signal
             related with it.
 
-    Notes
-    -----
-        wg.cal_data.theta_wire_rad is the average direction of wires in each step
-        wg.cal_data.theta_wire_std is the standard deviation of the direction of wires in each step
-        wg.cal_data.ts_step_mid is the time stamps in the middle of each step
-        wg.cal_data.Q, wg.cal_data.U : Q (and U) signal by wires
-        wg.cal_data.Qerr, wg.cal_data.Uerr : the standard deviations of Q (and U) signal
-
     """
     if 'demodQ' in tod._fields.keys():
         _theta_wire = tod.wg.instrument.enc_rad
@@ -510,15 +492,6 @@ def fit_with_circle(tod):
         fit_results : list
             the result of the circle fitting of the wires' signal in the Q/U plane.
 
-    Notes
-    -----
-        With this process, tod will include the several parameters of the fittings as tod.wg.cfit_result.
-        cx0(_err) is the estimated x-offset value(, and its fit err).
-        cy0(_err) is the estimated y-offset value(, and its fit err).
-        cr(_err) is Estimated radius vaule(, and its fit err).
-        covariance is covariance matrix of the estimated parameters.
-        residual_var is Residual variance.
-        is_normally_stopped is the status of how fits end.
     """
     _cal_data = tod.wg.cal_data
     fit_results = []
@@ -612,14 +585,6 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
         tod (or _ax_gamma) : AxisManager
             which includes the calibrated angle of gamma in the sky coordinate, etc.
 
-    Notes
-    -----
-        gamma_raw(_err) is the raw output of the calibration for each wire grid step.
-        wires_relative_power is the signal intensity of the wires, which will relatively change depending on the ambient temperature.
-        gamma(_err) is the main result of the calibration using Sparse Wire Grid.
-        background_pol_rad or background_pol_relative_power is the Q/U-plane offsets of the detectors signal respect to the wires' reflection.
-        theta_det_instr is gamma translated to the instrumental angle printed on the silicon wafer.
-
     """
     _cal_data = tod.wg.cal_data
     _cfit_result = tod.wg.cfit_result
@@ -671,8 +636,8 @@ def _devide_tod(tod, forward_margin=None, backward_margin=None):
     """
     a function to devide the single time constant calibration run into the two range, forward rotating HWP and reversely rotating HWP
 
-    Paramters
-    ---------
+    Parameters
+    ----------
         tod : AxisManager
             a fully-scale tod of the time constant calbiration run
         forward/backward_margin : int
