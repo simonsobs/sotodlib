@@ -503,12 +503,12 @@ class Splits(Operator):
             "write_rcond",
             "write_solver_products",
             "save_cleaned",
-            "reset_pix_dist",
         ]
 
         # Possible traits we want to enable
         mapmaker_enable_traits = [
             "keep_final_products",
+            "reset_pix_dist",
         ]
 
         if hasattr(self.mapmaker, "map_binning"):

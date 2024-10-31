@@ -402,11 +402,6 @@ def distribute_detector_data(
             restricted_dets = axwafers[wafer][axis_dets].vals
             restricted_indices = {y: x for x, y in enumerate(restricted_dets)}
 
-            # if axfield == "signal":
-            #     for idet, det in enumerate(restricted_dets):
-            #         rms = np.std(axwafers[wafer][axfield][idet, :])
-            #         print(f"DBG AXMAN {det} = {rms}", flush=True)
-
             for receiver, send_dets in wafer_proc_dets[wafer].items():
                 # "send_dets" is the un-restricted range of wafer detectors.
                 # We will send a full-size (unrestricted) buffer to ease
@@ -564,12 +559,6 @@ def distribute_detector_data(
     # Now safe to delete our dictionary of isend buffer handles, which might include
     # temporary buffers of ranges flags.
     del send_data
-
-    # if axfield == "signal":
-    #     for idet, det in enumerate(obs.local_detectors):
-    #         rms = np.std(obs.detdata["signal"][det, :])
-    #         flg = obs.local_detector_flags[det]
-    #         print(f"DBG OBS {det} ({flg}) = {rms}", flush=True)
 
 
 @function_timer
