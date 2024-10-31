@@ -31,8 +31,7 @@ logger = util.init_logger('wiregrid', 'wiregrid: ')
 
 def interpolate_hk(hk_data):
     """
-    Simple function to get an interpolation function with a given house-keeping data loaded by so3g.hk.load_range.
-    This function can be used for the general usage, but currently is specified to the wire grid calibration.
+    Simple function to get an interpolation function with a given house-keeping data loaded by so3g.hk.load_range. This function can be used for the general usage, but currently is specified to the wire grid calibration.
     """
     interp_func = {}
     for key, val in hk_data.items():
@@ -43,8 +42,7 @@ def interpolate_hk(hk_data):
 # interp_func is the dictionary of functions to interpolate house-keeping data
 def cosamnple_hk(tod, interp_func, is_merge=False):
     """
-    Simple function to co-sampling house-keeping data along the timestamps in tod.
-    This function can be used for the general usage, but currently is specified to the wire grid calibration.
+    Simple function to co-sampling house-keeping data along the timestamps in tod. This function can be used for the general usage, but currently is specified to the wire grid calibration.
     """
     hk_aman = core.AxisManager(tod.samps)
     for key in interp_func.keys():
@@ -134,8 +132,7 @@ def _wrap_wg_hk(tod, ts_margin=1):
 # Correct wires' direction for each telescope
 def _correct_wg_angle(tod):
     """
-    Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first,
-    but developers need to implement offsets of other SATs as well.
+    Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first, but developers need to implement offsets of other SATs as well.
 
     Parameters
     ----------
@@ -201,9 +198,8 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
     Parameters
     ----------
         tod : AxisManager
-        stopped_time : int
-            the stopped time of your target calibration run,
-            (default) 10 sec. None is set to the defalt value
+        stopped_time : int (default 10 sec)
+            the stopped time of your target calibration run
         steps_thresholds : Tuple
             the thresholds on the encoder counts.
             the first element is the upper bound for the static state,
@@ -421,6 +417,7 @@ def _get_initial_param_circle(x):
     Returns
     -------
         params : the initial paramters for the circle fit
+
     """
     if len(np.shape(x)) == 2:
         A = np.nanmean(x[0])
@@ -444,6 +441,7 @@ def _circle_resid(params, x):
     Returns
     -------
         residual :  between the data point and the function under the input paramters
+
     """
     # (x-A)^2 + (y-B)^2 - C = 0
     if len(np.shape(x)) == 2:
@@ -551,7 +549,7 @@ def _ignore_outlier_angle(estimated_angle, num_bins=None, gap_size=None):
     Returns
     -------
         valid_angle : ndarray
-            a set of the validate angle limited to the majority.
+            a set of the validate angle limited to the majority
     """
     if num_bins is None: num_bins = 18
     if gap_size is None: gap_size = np.deg2rad(5.)
@@ -582,7 +580,7 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
 
     Returns
     -------
-        tod (or _ax_gamma) : AxisManager
+        tod, _ax_gamma : AxisManager
             which includes the calibrated angle of gamma in the sky coordinate, etc.
 
     """
@@ -756,9 +754,6 @@ def get_tc_result(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25), is_
         is_wrap : bool (defult True)
             whether this function wraps the result into both tods or not
 
-    Returns
-    -------
-        See the _fit_time_const function
     """
     #
     _hwp_speed1 = hwp_sign * np.gradient(np.unwrap(tod1.hwp_angle,period=2*np.pi)) / np.gradient(tod1.timestamps)/(2*np.pi)
