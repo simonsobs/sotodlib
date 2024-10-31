@@ -72,7 +72,8 @@ def _wrap_wg_hk(tod, ts_margin=1):
             This includes fields, which are related with the wire grid hardware.
             enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
 
-    Notes:
+    Notes
+    -----
         LSL1 is ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
         LSL2 is ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
         LSR1 is ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
@@ -372,7 +373,8 @@ def wrap_qu_cal(tod):
             This includes the characterics of the wire grid operation and the Q/U signal
             related with it.
 
-    Notes:
+    Notes
+    -----
         wg.cal_data.theta_wire_rad is the average direction of wires in each step
         wg.cal_data.theta_wire_std is the standard deviation of the direction of wires in each step
         wg.cal_data.ts_step_mid is the time stamps in the middle of each step
@@ -508,7 +510,8 @@ def fit_with_circle(tod):
         fit_results : list
             the result of the circle fitting of the wires' signal in the Q/U plane.
 
-    Notes:
+    Notes
+    -----
         With this process, tod will include the several parameters of the fittings as tod.wg.cfit_result.
         cx0(_err) is the estimated x-offset value(, and its fit err).
         cy0(_err) is the estimated y-offset value(, and its fit err).
@@ -609,7 +612,8 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
         tod (or _ax_gamma) : AxisManager
             which includes the calibrated angle of gamma in the sky coordinate, etc.
 
-    Notes:
+    Notes
+    -----
         gamma_raw(_err) is the raw output of the calibration for each wire grid step.
         wires_relative_power is the signal intensity of the wires, which will relatively change depending on the ambient temperature.
         gamma(_err) is the main result of the calibration using Sparse Wire Grid.
