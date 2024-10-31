@@ -13,20 +13,21 @@ Command line interface
 Usage
 -----
 
-To get calibrated angles for detectors, ``'gamma'``, users have to load an axismanger,
-which corresponds to the target run of the wire grid operation in this pipeline.
-And the calibration script of the wire grid requires the HWP preprocess,
-that is, ``hwp.demod_tod``.
+To get calibrated polarization angles for detectors, ``'gamma'``,
+users have to load an axismanger, which corresponds to the target run
+of the wire grid operation. And this calibration script requires the HWP preprocess,
+``hwp.demod_tod``, before applying wire grid methods.
 
 ``'gamma'`` here is the same definition as in the coords module:
     orientation of the detector, measured clockwise from
     North, i.e. 0 degrees is parall to the eta axis, and 90 degrees is
-    parallel to the xi axis.
+    parallel to the xi axis. Currently, the results are adjusted to
+    the longitudinal direction of the SAT cryostat.
 
 
 The main functions of the wire grid consists of 4 functions:
 
- - correct_wg_angle
+ - initialize_wire_grid
  - wrap_qu_cal
  - fit_with_circle
  - get_cal_gamma
@@ -34,15 +35,14 @@ The main functions of the wire grid consists of 4 functions:
 One can get calibration results by calling these functions.
 ``tod`` here stands for an AxisManager. For example::
 
-  # Get wires' direction in a single operation with hardware correction
-  _, idx_wg_inside = correct_wg_angle(tod)
-
-  # May have to restrict the AxisManger into the opration rangle
-  tod.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=True)
+  # Include the wire grid operation into your AxisManager
+  # with hardware correction. If you want to use any other
+  # step size data, 5 sec or 20 sec stopped time, please
+  # specify stopped_time argument here.
+  initialize_wire_grid(tod)
 
   # Wrap Q and U signal related to the steps of the wire grid
-  # stopped_time can be changed for each calibration
-  wrap_qu_cal(tod, stopped_time=10)
+  wrap_qu_cal(tod)
 
   # Fit the stepped QU signal by a circle
   fit_with_circle(tod)
@@ -52,6 +52,8 @@ One can get calibration results by calling these functions.
 
 Finally, the AxisManager has the field of ``gamma_cal`` that has:
 
+ - ``'gamma_raw'`` : raw estimated value corresponding to each step
+ - ``'gamma_raw_err'`` : error of the raw values
  - ``'gamma'``: gamma, theta_det by the wire grid calibration,
  - ``'gamma_err'``: statistical errors on gamma,
  - ``'wires_relative_power'``: input power of the wire grid itself, that is, input QU minus the center offset,
@@ -75,11 +77,11 @@ sky signal, and tiny amount of CMB.
 
 The static background polarization and the wire signal have polarization angle dependencies,
 :math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`, respectively.
-The demodulation by the HWP and the projection by the detector polarization response directions
-are multiplied as the overall factor in the polarization term.
+The demodulation by the HWP and the projection by the detector polarization response
+directions are multiplied as the overall factor in the polarization term.
 
-Unwrapping the charateristic of HWP from the TOD (Demodulation) gives the static background
-polarization and the polarized signal by wires independently
+Unwrapping the charateristic of HWP from the TOD (Demodulation) gives the static
+background(=offset) polarization and the polarized signal by wires independently
 
 .. math::
 
