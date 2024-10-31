@@ -31,7 +31,18 @@ logger = util.init_logger('wiregrid', 'wiregrid: ')
 
 def interpolate_hk(hk_data):
     """
-    Simple function to get an interpolation function with a given house-keeping data loaded by so3g.hk.load_range. This function can be used for the general usage, but currently is specified to the wire grid calibration.
+    Simple function to get an interpolation function with a given house-keeping data loaded by so3g.hk.load_range.
+
+    Parameters
+    ----------
+        hk_data : data
+            house-keeping data as the output of so3g.hk.load_range
+
+    Returns
+    -------
+        interp_func : function
+            a function to interpolate the house-keeping data
+
     """
     interp_func = {}
     for key, val in hk_data.items():
@@ -43,6 +54,19 @@ def interpolate_hk(hk_data):
 def cosamnple_hk(tod, interp_func, is_merge=False):
     """
     Simple function to co-sampling house-keeping data along the timestamps in tod. This function can be used for the general usage, but currently is specified to the wire grid calibration.
+
+    Parameters
+    ----------
+        tod : AxisManager
+        interp_func : function
+            output of the interpolate_hk
+        is_marge : bool (default False)
+            if merge the result into tod or not
+
+    Returns
+    -------
+        hk_aman : AxisManager
+
     """
     hk_aman = core.AxisManager(tod.samps)
     for key in interp_func.keys():
@@ -68,7 +92,7 @@ def _wrap_wg_hk(tod, ts_margin=1):
     -------
         tod : AxisManager
             This includes fields, which are related with the wire grid hardware.
-            enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
+            enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder):
 
                 - LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
                 - LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
@@ -138,15 +162,6 @@ def _wrap_wg_hk(tod, ts_margin=1):
 def _correct_wg_angle(tod):
     """
     Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first, but developers need to implement offsets of other SATs as well.
-
-    Parameters
-    ----------
-        tod : AxisManager
-        telescope : telescope type, e.g. satp1, satp3, etc.
-            this parameter will basically be filled by the obs_info wrapped in the axismanager.
-        restrict : bool (default, True)
-            this parameter restricts the sample of the axismanger by the operation range of the wire grid.
-
     """
     _tel = tod.obs_info.telescope
     if _tel == 'satp1':
@@ -243,15 +258,12 @@ def _get_operation_range(tod, stopped_time=None, ls_margin=None, is_restrict=Tru
         ls_margin : int
             the offsets to define the operation range of the wire grid calibration.
             (default) 2000 samples. None is set to the defalt value
-        is_restrict : bool
+        is_restrict : bool (default True)
             whether restrict TODs by the opration range or not
-            (default) True
-        remove_trembling : bool
+        remove_trembling : bool (default True)
             whether remove the steps in the encoder data under the motor-motion threshold, tremble_threshold
-            (default) True
-        tremble_threshold : float
+        tremble_threshold : float (default 1 deg)
             the threshold to remove the slight vibration in the steps of the wire grid rotation
-            (default) 1 deg
 
     Returns
     -------
@@ -586,7 +598,7 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
 
     Returns
     -------
-        tod, _ax_gamma : AxisManager
+        tod (or _ax_gamma) : AxisManager
             which includes the calibrated angle of gamma in the sky coordinate, etc.
 
     """
@@ -759,6 +771,10 @@ def get_tc_result(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25), is_
             the slice to cut tod2 before the fitting
         is_wrap : bool (defult True)
             whether this function wraps the result into both tods or not
+
+    Returns
+    -------
+        if ``is_wrap`` is False, then will return fit results for each. Otherwise, return is the AxisManager.
 
     """
     #
