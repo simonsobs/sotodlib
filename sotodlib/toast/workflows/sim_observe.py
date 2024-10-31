@@ -84,6 +84,14 @@ def setup_simulate_observing(parser, operators):
         "--schedule", required=False, default=None, help="Input observing schedule"
     )
     parser.add_argument(
+        "--sort_schedule",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Sort the observing schedule by mean boresight RA.  "
+        "This can limit the area of sky each process group deals with.",
+    )
+    parser.add_argument(
         "--realization",
         required=False,
         default=None,
@@ -142,10 +150,6 @@ def simulate_observing(job, otherargs, runargs, comm):
     # Configured operators for this job
     job_ops = job.operators
 
-    if not job_ops.sim_ground.enabled:
-        log.info_rank("Simulated observing is disabled", comm=comm)
-        return None
-
     # Make sure we have the required bands and schedule.  These might
     # not be set during a dry-run, but if we got this far they need to
     # be set.
@@ -175,6 +179,8 @@ def simulate_observing(job, otherargs, runargs, comm):
     # Load the schedule file
     schedule = toast.schedule.GroundSchedule()
     schedule.read(otherargs.schedule, comm=comm)
+    if otherargs.sort_schedule:
+        schedule.sort_by_RA()
     log.info_rank("  Loaded schedule in", comm=comm, timer=timer)
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"  After loading schedule:  {mem}", comm)
@@ -203,6 +209,7 @@ def simulate_observing(job, otherargs, runargs, comm):
     # Simulate the telescope pointing
 
     job_ops.sim_ground.telescope = telescope
+    job_ops.sim_ground.enabled = True
     job_ops.sim_ground.schedule = schedule
     if job_ops.sim_ground.weather is None:
         job_ops.sim_ground.weather = telescope.site.name
