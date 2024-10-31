@@ -193,6 +193,8 @@ def simulate_observing(job, otherargs, runargs, comm):
     # Load the schedule file
     schedule = toast.schedule.GroundSchedule()
     schedule.read(otherargs.schedule, comm=comm)
+    if otherargs.sort_schedule:
+        schedule.sort_by_RA()
     log.info_rank("  Loaded schedule in", comm=comm, timer=timer)
     if otherargs.sort_schedule:
         schedule.sort_by_RA()
