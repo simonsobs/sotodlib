@@ -365,4 +365,3 @@ def get_common_mode(
     if wrap is not None:
         tod.wrap(wrap, common_mode, [(0, 'samps')])
     return common_mode
-

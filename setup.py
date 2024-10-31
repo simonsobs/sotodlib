@@ -64,6 +64,7 @@ setup_opts["install_requires"] = [
     'pyfftw',
     'numdifftools',
     'psycopg2-binary',
+    'lmfit',
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
