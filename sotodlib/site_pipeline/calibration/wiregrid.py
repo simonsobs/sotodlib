@@ -8,8 +8,8 @@ import numpy as np
 import scipy
 from scipy import odr
 from scipy.stats import mode
+from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
-from iminuit import cost, Minuit
 from matplotlib.patches import Ellipse, Circle
 
 # SO specific
@@ -60,7 +60,7 @@ def cosamnple_hk(tod, interp_func, is_merge=False):
         tod : AxisManager
         interp_func : function
             output of the interpolate_hk
-        is_marge : bool (default False)
+        is_marge : bool (default, False)
             if merge the result into tod or not
 
     Returns
@@ -100,8 +100,8 @@ def _wrap_wg_hk(tod, ts_margin=1):
                 - LSR2 : ON/OFF status of the limit switch RIGHT 2 (inside) of the actuator
 
     """
-    tod_start = float(tod.obs_info.start_time) - _ts_margin
-    tod_stop =  float(tod.obs_info.stop_time) + _ts_margin
+    tod_start = float(tod.obs_info.start_time) - ts_margin
+    tod_stop =  float(tod.obs_info.stop_time) + ts_margin
 
     # Define house-keepind data configurations
     _tel = tod.obs_info.telescope
@@ -178,7 +178,7 @@ def _correct_wg_angle(tod):
 
 
 # Detect the motion of the wire grid
-def _detect_action(count, flag=0):
+def _detect_motion(count, flag=0):
     """
     Detect the rotation of the grid.
 
@@ -218,7 +218,7 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
     Parameters
     ----------
         tod : AxisManager
-        stopped_time : int (default 10 sec)
+        stopped_time : int (default, 10 sec)
             the stopped time of your target calibration run
         steps_thresholds : Tuple
             the thresholds on the encoder counts.
@@ -255,14 +255,13 @@ def _get_operation_range(tod, stopped_time=None, ls_margin=None, is_restrict=Tru
         tod : AxisManager
         stopped_time : int
             see also _detect_steps
-        ls_margin : int
+        ls_margin : int (default, 2000 samples)
             the offsets to define the operation range of the wire grid calibration.
-            (default) 2000 samples. None is set to the defalt value
-        is_restrict : bool (default True)
+        is_restrict : bool (default, True)
             whether restrict TODs by the opration range or not
-        remove_trembling : bool (default True)
+        remove_trembling : bool (default, True)
             whether remove the steps in the encoder data under the motor-motion threshold, tremble_threshold
-        tremble_threshold : float (default 1 deg)
+        tremble_threshold : float (default, 1 deg)
             the threshold to remove the slight vibration in the steps of the wire grid rotation
 
     Returns
@@ -324,12 +323,12 @@ def _get_operation_range(tod, stopped_time=None, ls_margin=None, is_restrict=Tru
 
 def initialize_wire_grid(tod, stopped_time=None, ls_margin=None, is_restrict=True, remove_trembling=True):
     """
-    Including the information of the wire grid operation. Steps are follows:
+    Including the information of the wire grid operation. Steps are as follows:
 
-        - (step 0) to wrap the house-keeping data(rotation encoder, limit switches),
-        - (step 1) to correct the rotation angle based on the hardware design of the calibrator,
-        - (step 2) to get opration range of a single calibration run,
-        - (step 3) to wrap the stepwise rotation data into the tod (AxisManager) as tod.wg.cal_data.
+        - step 0 : to wrap the house-keeping data(rotation encoder, limit switches),
+        - step 1 : to correct the rotation angle based on the hardware design of the calibrator,
+        - step 2 : to get opration range of a single calibration run,
+        - step 3 : to wrap the stepwise rotation data into the tod (AxisManager) as tod.wg.cal_data.
 
     Parameters
     ----------
@@ -589,7 +588,7 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
     Parameters
     ----------
         tod : AxisManager
-        wrap_aman : bool (default) True
+        wrap_aman : bool (default, True)
         remove_cal_data : bool (defalut) False
         num_bins : int
             see _ignore_outlier_angle
@@ -709,8 +708,11 @@ def binning_data(ref_data, target_data, num_bin=100):
     return _binned, _binned_err
 
 
-def linear_slope(x,a,b):
-    return 2*a*2*np.pi*x+b
+def linear_model(params, xval, yval, yerr):
+    a, b = params[0], params[1]
+    model = 2*a*2*np.pi*xval + b
+    chi = (yval - model) / yerr
+    return chi
 
 
 def _fit_time_const(ref_hwp_speed, normalized_angle, angle_err):
@@ -741,15 +743,18 @@ def _fit_time_const(ref_hwp_speed, normalized_angle, angle_err):
     ferr = []
     fchi2 = []
     for _i in range(np.shape(_y)[0]):
-        iparams = [1e-3, _yerr[_i][0]]
-        c = cost.LeastSquares(_x, _y[_i], _yerr[_i], linear_slope)
-        m = Minuit(c, a=iparams[0], b=iparams[1])
-        m.limits['a'] = (0,1e-1)
-        m.limits['b'] = (-2*np.pi, 2*np.pi)
-        m.migrad()
-        fres.append([m.values[0], m.values[1]])
-        ferr.append([m.errors[0], m.errors[1]])
-        fchi2.append(m.fmin.reduced_chi2)
+        iparams = np.array([1e-3, -2e-2])
+        bounds = ([0, -2*np.pi], [1e-1, 2*np.pi])
+        _res = least_squares(linear_model, x0=param_init, bounds=bounds, \
+                                args=(_x, _y[_i], _yerr[_i]))
+        # calculate fit error
+        _J = _res.jac
+        _cov = np.linalg.inv(_J.T.dot(_J))
+        _err = np.sqrt(np.diag(cov))
+        #
+        fres.append([_res.x[0], _res.x[1]])
+        ferr.append([_err[0], _err[1]])
+        fchi2.append(np.mean(linear_model(_res[_i].x, _x, _y[_i], _yerr[_i])**2))
     return np.array(fres), np.array(ferr), np.array(fchi2)
 
 
@@ -763,7 +768,7 @@ def get_tc_result(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25), is_
             tod for the 1st range in which the speed of HWP is decreasing to 0 Hz
         tod2 : AxisManager
             tod for the 2nd range in which the speed of HWP is increasing to 2 Hz
-        hwp_sign : int (default -1)
+        hwp_sign : int (default, -1)
             the sign of hwp rotation. the default value is determined by the SATP1 configuration
         slice0 :
             the slice to cut tod1 before the fitting
