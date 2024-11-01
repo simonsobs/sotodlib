@@ -135,7 +135,7 @@ The time constant of TES bolometers can look like in TODs like
 .. math::
 
     \mathrm{d} & \propto \exp\left i[-4\theta_\mathrm{HWP}(t)+\theta_\mathrm{det}\right] \\
-    & = \exp\left i[-4(\theta_\mathrm{HWP} - \omega_\mathrm{HWP}\tau_\mathrm{det})+\theta_\mathrm{det}\right].
+    & = \exp i \left[-4(\theta_\mathrm{HWP} - \omega_\mathrm{HWP}\tau_\mathrm{det})+\theta_\mathrm{det}\right].
 
 The observed angle :math:`\hat{\theta}_\mathrm{det}` will then be modified and seen as
 
