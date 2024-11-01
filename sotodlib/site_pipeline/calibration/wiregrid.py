@@ -376,6 +376,16 @@ def wrap_qu_cal(tod):
             This includes the characterics of the wire grid operation and the Q/U signal
             related with it.
 
+    Notes
+    -----
+        return includes fields as follows:
+
+            - wg.cal_data.theta_wire_rad is the average direction of wires in each step
+            - wg.cal_data.theta_wire_std is the standard deviation of the direction of wires in each step
+            - wg.cal_data.ts_step_mid is the time stamps in the middle of each step
+            - wg.cal_data.Q, wg.cal_data.U : Q (and U) signal by wires
+            - wg.cal_data.Qerr, wg.cal_data.Uerr : the standard deviations of Q (and U) signal
+
     """
     if 'demodQ' in tod._fields.keys():
         _theta_wire = tod.wg.instrument.enc_rad
@@ -507,6 +517,17 @@ def fit_with_circle(tod):
         fit_results : list
             the result of the circle fitting of the wires' signal in the Q/U plane.
 
+    Notes
+    -----
+        With this process, tod will include the several parameters of the fittings as tod.wg.cfit_result:
+
+            - cx0(_err) : the estimated x-offset value(, and its fit err).
+            - cy0(_err) : the estimated y-offset value(, and its fit err).
+            - cr(_err) : Estimated radius vaule(, and its fit err).
+            - covariance : covariance matrix of the estimated parameters.
+            - residual_var : Residual variance.
+            - is_normally_stopped : the status of how fits end.
+
     """
     _cal_data = tod.wg.cal_data
     fit_results = []
@@ -599,6 +620,14 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
     -------
         tod (or _ax_gamma) : AxisManager
             which includes the calibrated angle of gamma in the sky coordinate, etc.
+
+    Notes
+    -----
+        gamma_raw(_err) is the raw output of the calibration for each wire grid step.
+        wires_relative_power is the signal intensity of the wires, which will relatively change depending on the ambient temperature.
+        gamma(_err) is the main result of the calibration using Sparse Wire Grid.
+        background_pol_rad or background_pol_relative_power is the Q/U-plane offsets of the detectors signal respect to the wires' reflection.
+        theta_det_instr is gamma translated to the instrumental angle printed on the silicon wafer.
 
     """
     _cal_data = tod.wg.cal_data
