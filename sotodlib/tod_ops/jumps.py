@@ -331,6 +331,7 @@ def twopi_jumps(
     win_size=...,
     nsigma=...,
     atol=...,
+    max_tol=...,
     fix: Literal[True] = True,
     inplace=...,
     merge=...,
@@ -348,6 +349,7 @@ def twopi_jumps(
     win_size=...,
     nsigma=...,
     atol=...,
+    max_tol=...,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -364,6 +366,7 @@ def twopi_jumps(
     win_size: int = 20,
     nsigma: float = 5.0,
     atol: Optional[Union[float, NDArray[np.floating]]] = None,
+    max_tol: float = 0.0314,
     fix: bool = True,
     inplace: bool = False,
     merge: bool = True,
@@ -393,6 +396,9 @@ def twopi_jumps(
         atol: How close the jump height needs to be to N*2pi to count.
               If set to None, then nsigma times the WN level of the TOD is used.
               Note that in general this is faster than nsigma.
+
+        max_tol: Upper bound of the nsigma based thresh.
+                 atol ignores this.
 
         fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
 
@@ -424,7 +430,7 @@ def twopi_jumps(
         atol = nsigma * std_est(
             signal.astype(float), ds=win_size * 10, win_size=win_size
         )
-        np.clip(atol, 1e-8, 1e-2)
+        np.clip(atol, 1e-8, max_tol)
 
     _signal = _filter(signal, **filter_pars)
     _signal = np.atleast_2d(_signal)
