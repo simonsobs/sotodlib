@@ -78,7 +78,7 @@ def cosamnple_hk(tod, interp_func, is_merge=False):
 
 
 # Wrap house-keeping data
-def _wrap_wg_hk(tod, ts_margin=1):
+def wrap_wg_hk(tod, ts_margin=1):
     """
     Wrap the house-keeping data about the wire grid operation.
 
@@ -159,9 +159,18 @@ def _wrap_wg_hk(tod, ts_margin=1):
 
 
 # Correct wires' direction for each telescope
-def _correct_wg_angle(tod):
+def correct_wg_angle(tod):
     """
     Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first, but developers need to implement offsets of other SATs as well.
+
+    Parameters
+    ----------
+        tod : AxisManager
+        telescope : telescope type, e.g. satp1, satp3, etc.
+            this parameter will basically be filled by the obs_info wrapped in the axismanager.
+        restrict : bool (default, True)
+            this parameter restricts the sample of the axismanger by the operation range of the wire grid.
+
     """
     _tel = tod.obs_info.telescope
     if _tel == 'satp1':
@@ -342,10 +351,10 @@ def initialize_wire_grid(tod, stopped_time=None, ls_margin=None, is_restrict=Tru
 
     """
     # wrap house-keepind data of the wire grid
-    _wrap_wg_hk(tod)
+    wrap_wg_hk(tod)
 
     # correct wires' angle for each telescope
-    _correct_wg_angle(tod)
+    correct_wg_angle(tod)
 
     # get the opration range of the calibration
     idx_steps_start, idx_steps_stop  = _get_operation_range(tod, stopped_time=stopped_time, ls_margin=ls_margin, is_restrict=is_restrict, remove_trembling=True)
@@ -676,7 +685,7 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
 
 
 ## function for time constant measurement
-def _devide_tod(tod, forward_margin=None, backward_margin=None):
+def devide_tod(tod, forward_margin=None, backward_margin=None):
     """
     a function to devide the single time constant calibration run into the two range, forward rotating HWP and reversely rotating HWP
 
@@ -737,7 +746,7 @@ def binning_data(ref_data, target_data, num_bin=100):
     return _binned, _binned_err
 
 
-def linear_model(params, xval, yval, yerr):
+def _linear_model(params, xval, yval, yerr):
     a, b = params[0], params[1]
     model = 2*a*2*np.pi*xval + b
     chi = (yval - model) / yerr
@@ -774,7 +783,7 @@ def _fit_time_const(ref_hwp_speed, normalized_angle, angle_err):
     for _i in range(np.shape(_y)[0]):
         iparams = np.array([1e-3, -2e-2])
         bounds = ([0, -2*np.pi], [1e-1, 2*np.pi])
-        _res = least_squares(linear_model, x0=param_init, bounds=bounds, \
+        _res = least_squares(_linear_model, x0=param_init, bounds=bounds, \
                                 args=(_x, _y[_i], _yerr[_i]))
         # calculate fit error
         _J = _res.jac
@@ -783,7 +792,7 @@ def _fit_time_const(ref_hwp_speed, normalized_angle, angle_err):
         #
         fres.append([_res.x[0], _res.x[1]])
         ferr.append([_err[0], _err[1]])
-        fchi2.append(np.mean(linear_model(_res[_i].x, _x, _y[_i], _yerr[_i])**2))
+        fchi2.append(np.mean(_linear_model(_res[_i].x, _x, _y[_i], _yerr[_i])**2))
     return np.array(fres), np.array(ferr), np.array(fchi2)
 
 

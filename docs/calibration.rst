@@ -61,6 +61,31 @@ Finally, the AxisManager has the field of ``gamma_cal`` that has:
  - ``'background_pol_rad'``: the direction of the center offset,
  - ``'theta_det_instr'``: estimated instrumental polarization response direction
 
+For the time constant measurement, the results for both directions
+will be provided as follows:
+
+  # First, you need to devide the target opration, in which the rotation
+  # of HWP changes (+/-) 2 Hz to (-/+) 2 Hz.
+  tod1, tod2 = devide_tod(tod)
+
+  # After applying IIR filter and correcting hwp_angle,
+  # you must demodulate TOD with a specific band pass to use
+  # the broad speed range for the calibration.
+  bpf_cfg = {'type': 'butter4',
+            'center': 6,
+            'width': 8}
+  hwp.demod_tod(tod1, signal='signal', bpf_cfg=bpf_cfg)
+  hwp.demod_tod(tod2, signal='signal', bpf_cfg=bpf_cfg)
+
+  # Then, wrap the wire grid data just in case
+  wrap_wg_hk(tod1)
+  correct_wg_angle(tod1)
+  wrap_wg_hk(tod2)
+  correct_wg_angle(tod2)
+
+  # Finally, call get_tc_result to get the time constant
+  get_time_constant(tod1, tod2)
+
 Background
 ----------
 
@@ -104,6 +129,22 @@ This module gives the result of calibration as fields like:
  - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}^2 + U_\mathrm{offset}^2}`
  - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})` in radian,
  - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
+
+The time constant of TES bolometers can look like in TODs like
+
+.. math::
+
+    \mathrm{d} & \propto \exp\left i[-4\theta_\mathrm{HWP}(t)+\theta_\mathrm{det}\right]
+    & = \exp\left i[-4(\theta_\mathrm{HWP} - \omega_\mathrm{HWP}\tau_\mathrm{det})+\theta_\mathrm{det}\right].
+
+The observed angle :math:`\hat{\theta}_\mathrm{det}` will then be modified and seen as
+
+.. math::
+
+    \hat{\theta}_\mathrm{det} = \theta_\mathrm{det} + 2\omega_\mathrm{HWP}\tau_\mathrm{det}.
+
+The time constant measurement using HWP/wire grid works with the principle above.
+
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
