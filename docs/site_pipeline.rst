@@ -183,6 +183,13 @@ Here is a basic configuration file::
     - ufm_mv33
     - ufm_mv35
 
+Check the det_ids for sensibility... and if you need to force bandpass
+values, add a config file entry like this::
+
+  bandpass_remap:
+    90: 220
+    150: 280
+
 
 The output database ``wafer_info.sqlite`` and HDF5 file
 ``wafer_info.h5`` are written to the ``output_dir``, which is created

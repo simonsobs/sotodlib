@@ -98,7 +98,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            t_pieces: 100
+            t_piece: 100
           save: True
           plot: True
           select:
@@ -743,7 +743,7 @@ class GlitchFill(_Preprocess):
           use_pca: False
           modes: 1
           in_place: True
-          wrap_name: None
+          wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
@@ -1166,6 +1166,7 @@ class PCARelCal(_Preprocess):
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
+
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
 
@@ -1258,6 +1259,7 @@ class EstimateT2P(_Preprocess):
             T_sig_name: 'dsT'
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
+            joint_fit: True
             trim_samps: 2000
             lpf_cfgs:
               type: 'sine2'
