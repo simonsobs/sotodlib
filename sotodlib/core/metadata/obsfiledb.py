@@ -75,25 +75,20 @@ class ObsFileDb:
             in read-only mode.  Not valid on dbs held in :memory:.
 
         """
+        if init_db and readonly:
+            raise ValueError("Cannot initialize a read-only DB")
+        self._readonly = readonly
         if isinstance(map_file, sqlite3.Connection):
             self.conn = map_file
         else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
-            uri = False
-            if readonly:
-                if map_file == ':memory:':
-                    raise ValueError('Cannot honor request for readonly db '
-                                     'mapped to :memory:.')
-                map_file, uri = 'file:%s?mode=ro' % map_file, True
-
-            self.conn = sqlite3.connect(map_file, uri=uri)
-
+            self.conn = common.sqlite_connect(
+                filename=map_file,
+                mode=("r" if readonly else "w"),
+            )
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
         self.prefix = self._get_prefix(map_file, prefix)
-        if init_db and not readonly:
+        if init_db:
             self._create()
 
     @staticmethod
@@ -104,7 +99,7 @@ class ObsFileDb:
         """
         if prefix is not None:
             return prefix
-        if map_file == ':memory:':
+        if map_file is None:
             return ''
         return os.path.split(os.path.abspath(map_file))[0] + '/'
 
@@ -122,12 +117,20 @@ class ObsFileDb:
         return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
-    def from_file(cls, filename, prefix=None, fmt=None, force_new_db=True):
+    def from_file(
+            cls,
+            filename,
+            prefix=None,
+            fmt=None,
+            force_new_db=True,
+            readonly=False,
+        ):
         """This method calls
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
-        conn = common.sqlite_from_file(filename, fmt=fmt,
-                                       force_new_db=force_new_db)
+        conn = common.sqlite_from_file(
+            filename, fmt=fmt, force_new_db=force_new_db, readonly=readonly
+        )
         if prefix is None:
             prefix = os.path.split(filename)[0] + '/'
         return cls(conn, init_db=False, prefix=prefix, )
@@ -145,15 +148,14 @@ class ObsFileDb:
         connected to that sqlite file on disk.  Note that a quick way
         of writing a Db to disk to call copy(map_file=...).
         """
-        if map_file is None:
-            map_file = ':memory:'
         script = ' '.join(self.conn.iterdump())
-        if map_file != ':memory:' and os.path.exists(map_file):
-            if not overwrite:
+        if map_file is not None and os.path.exists(map_file):
+            if overwrite:
+                os.remove(map_file)
+            else:
                 raise RuntimeError("Output database '%s' exists -- remove or "
                                    "pass overwrite=True to copy." % map_file)
-            os.remove(map_file)
-        new_db = ObsFileDb(map_file, init_db=False)
+        new_db = ObsFileDb(map_file, init_db=False, readonly=False)
         new_db.conn.executescript(script)
         new_db.prefix = self.prefix
         return new_db
@@ -194,6 +196,8 @@ class ObsFileDb:
             this detset.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot add_dataset() on a read-only DB")
         for d in detector_names:
             q = 'insert into detsets (name,det) values (?,?)'
             self.conn.execute(q, (detset_name, d))
@@ -214,6 +218,8 @@ class ObsFileDb:
           sample_stop (int): sample_start + n_samples.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot add_obsfile() on a read-only DB")
         self.conn.execute(
             'insert into files (name,detset,obs_id,sample_start,sample_stop) '
             'values (?,?,?,?,?)',
@@ -229,7 +235,7 @@ class ObsFileDb:
         """
         c = self.conn.execute('select distinct obs_id from files')
         return [r[0] for r in c]
-    
+
     def get_obs_with_detset(self, detset):
         """Returns a list of all obs_ids that include a specified detset"""
         c = self.conn.execute(
@@ -409,6 +415,8 @@ class ObsFileDb:
         files that are no longer covered by the database (with prefix).
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot drop_obs() on a read-only DB")
         # What files does this affect?
         c = self.conn.execute('select name from files where obs_id=?',
                               (obs_id,))
@@ -428,6 +436,8 @@ class ObsFileDb:
         prefix).
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot drop_detset() on a read-only DB")
         # What files does this affect?
         c = self.conn.execute('select name from files where detset=?',
                               (detset,))
@@ -451,6 +461,8 @@ class ObsFileDb:
         longer included in the database.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot drop_incomplete() on a read-only DB")
         affected_files = []
         scan = self.verify()
         for obs_id, info in scan['grids'].items():
