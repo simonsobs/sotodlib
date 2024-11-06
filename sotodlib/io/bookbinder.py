@@ -28,6 +28,10 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
+class NoHKFiles(Exception):
+    """Exception raised when we cannot find any HK data around the book time"""
+    pass
+
 class NoMountData(Exception):
     """Exception raised when we cannot find mount data"""
     pass
@@ -270,6 +274,13 @@ class AncilProcessor:
             self.log = logging.getLogger('bookbinder')
         else:
             self.log = log
+
+        if len(self.files) == 0:
+            if self.require_acu or self.require_hwp:
+                raise NoHKFiles("No HK files specified for book")
+            self.log.warning("No HK files found for book")
+            for fld in ['az', 'el', 'boresight', 'corotator_enc','az_mode', 'hwp_freq']:
+                setattr(self.hkdata, fld, None)
 
         if self.require_acu and self.hkdata.az is None:
             self.log.warning("No ACU data specified in hk_fields!")
@@ -820,9 +831,7 @@ class BookBinder:
         self.data_root = data_root
         self.hk_root = os.path.join(data_root, 'hk')
         self.meta_root = os.path.join(data_root, 'smurf')
-        self.hkfiles = get_hk_files(self.hk_root, 
-                                    book.start.timestamp(),
-                                    book.stop.timestamp())
+        
         self.obsdb = obsdb
         self.outdir = outdir
 
@@ -850,6 +859,24 @@ class BookBinder:
 
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
         self.log = setup_logger(logfile)
+
+        try:
+            self.hkfiles = get_hk_files(
+                self.hk_root, 
+                book.start.timestamp(),
+                book.stop.timestamp()
+            )
+        except NoHKFiles as e:
+            if require_hwp or require_acu:
+                self.log.error(
+                    "HK files are required if we require ACU or HWP data"
+                )
+                raise e
+            self.log.warning(
+                "Found no HK files during book time, binding anyway because "
+                "require_acu and require_hwp are False"
+            )
+            self.hkfiles = []            
 
         self.ancil = AncilProcessor(
             self.hkfiles, 
@@ -1251,8 +1278,10 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
     m = (start-tbuff <= file_times) & (file_times < stop+tbuff)
     if not np.any(m):
         check = np.where( file_times <= start )
-        if len(check) < 1:
-            raise ValueError("Cannot find HK files we need")
+        if len(check) < 1 or len(check[0]) < 1:
+            raise NoHKFiles(
+                f"Cannot find HK files between {start} and {stop}"
+            )
         fidxs = [check[0][-1]]
         m[fidxs] = 1
     else:
