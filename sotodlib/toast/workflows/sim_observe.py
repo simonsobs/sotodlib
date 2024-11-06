@@ -175,13 +175,21 @@ def simulate_observing(job, otherargs, runargs, comm):
         thinfp=otherargs.thinfp,
         comm=comm,
     )
+    ndet = len(telescope.focalplane.detectors)
+    log.info_rank(
+        f"  Simulated focalplane with {ndet} detectors "
+        f"(thinfp = {otherargs.thinfp}) in",
+        comm=comm,
+        timer=timer,
+    )
 
     # Load the schedule file
     schedule = toast.schedule.GroundSchedule()
     schedule.read(otherargs.schedule, comm=comm)
+    log.info_rank("  Loaded schedule in", comm=comm, timer=timer)
     if otherargs.sort_schedule:
         schedule.sort_by_RA()
-    log.info_rank("  Loaded schedule in", comm=comm, timer=timer)
+        log.info_rank("  Sorted schedule in", comm=comm, timer=timer)
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"  After loading schedule:  {mem}", comm)
 
@@ -215,7 +223,7 @@ def simulate_observing(job, otherargs, runargs, comm):
         job_ops.sim_ground.weather = telescope.site.name
     if otherargs.realization is not None:
         job_ops.sim_ground.realization = otherargs.realization
-    log.info_rank("  Running simulated observing...", comm=data.comm.comm_world)
+    log.info_rank("  Running simulated observing...", comm=comm)
     job_ops.sim_ground.apply(data)
     log.info_rank("  Simulated telescope pointing in", comm=comm, timer=timer)
 
@@ -224,17 +232,13 @@ def simulate_observing(job, otherargs, runargs, comm):
 
     # Apply LAT co-rotation
     if job_ops.corotate_lat.enabled:
-        log.info_rank(
-            "  Running simulated LAT corotation...", comm=data.comm.comm_world
-        )
+        log.info_rank("  Running simulated LAT corotation...", comm=comm)
         job_ops.corotate_lat.apply(data)
         log.info_rank("  Apply LAT co-rotation in", comm=comm, timer=timer)
 
     # Perturb HWP spin
     if job_ops.perturb_hwp.enabled:
-        log.info_rank(
-            "  Running simulated HWP perturbation...", comm=data.comm.comm_world
-        )
+        log.info_rank("  Running simulated HWP perturbation...", comm=comm)
         job_ops.perturb_hwp.apply(data)
         log.info_rank("  Perturbed HWP rotation in", comm=comm, timer=timer)
     return data
