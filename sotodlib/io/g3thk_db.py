@@ -550,7 +550,14 @@ class G3tHk:
             configs["g3thk_db"]
         )
 
-    def delete_file(self, hkfile, dry_run=False, my_logger=None):
+    def batch_delete_files(self, file_list, dry_run=False, my_logger=None):
+        for f in file_list:
+            self.delete_file(
+                f, dry_run=dry_run, my_logger=my_logger, commit=False
+            )
+        self.session.commit()
+
+    def delete_file(self, hkfile, dry_run=False, my_logger=None, commit=True):
         """WARNING: Removes actual files from file system.
 
         Delete an hkfile instance, its on-disk file, and all associated agents
@@ -590,4 +597,5 @@ class G3tHk:
         my_logger.info(f"remove {hkfile.path} from database")
         if not dry_run:
             self.session.delete(hkfile)
-            self.session.commit()
+            if commit:
+                self.session.commit()

@@ -612,7 +612,7 @@ class G3tSmurf:
 
         if not os.path.exists(db_file.name):
             my_logger.warning(
-                f"Database file {db_file.name} appears already" " deleted on disk"
+                f"Database file {db_file.name} appears already deleted on disk"
             )
         else:
             my_logger.info(f"Deleting file {db_file.name}")
@@ -1155,7 +1155,9 @@ class G3tSmurf:
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
-    def delete_observation_files(self, obs, session, dry_run=False, my_logger=None):
+    def delete_observation_files(
+        self, obs, session, dry_run=False, my_logger=None
+    ):
         """WARNING: Deletes files from the file system
 
         Args

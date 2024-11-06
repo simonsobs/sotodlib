@@ -1437,7 +1437,7 @@ class Imprinter:
             return self.get_files_for_stray_book(book)
         
         elif book.type == "hk":
-            HK = self.get_g3thk(book.tel_tube)
+            HK = self.get_g3thk()
             flist = (
                 HK.session.query(HKFiles)
                 .filter(
@@ -1464,7 +1464,7 @@ class Imprinter:
 
         else:
             raise NotImplementedError(
-                f"book type {book.type} not understood for" " file search"
+                f"book type {book.type} not understood for file search"
             )
 
     def get_files_for_stray_book(
@@ -1700,8 +1700,9 @@ class Imprinter:
                 return False, e
         return True, None
             
-    def check_book_offsite(self, book, raise_on_error=True):
-        """have the librarian validate the books is stored offsite
+    def check_book_offsite(self, book, n_copies=1, raise_on_error=True):
+        """have the librarian validate the books is stored offsite. returns true
+        if at least n_copies are storied offsite.
         """
         if self.librarian is None:
             self._librarian_connect()
@@ -1711,11 +1712,17 @@ class Imprinter:
                 [(x.librarian != 'site-librarian') and 
                  (x.computed_same_checksum) for x in
                 resp]
-            ) >= 1
-        except:
+            ) >= n_copies
+            if not offsite:
+                self.logger.debug(f"received response from librarian {resp}")
+        except Exception as e:
             if raise_on_error:
                 raise e
             else: 
+                self.logger.warning(
+                    f"Failed to check libraian status for {book.bid}: {e}"
+                )
+                self.logger.warning(traceback.format_exc())
                 offsite = False
         return offsite
         
@@ -1729,12 +1736,14 @@ class Imprinter:
             if true, just prints plans to self.logger.info
         """
         if book.status != UPLOADED:
-            raise ValueError(f"Book must be bound to delete level 2 files")
-
+            raise ValueError(f"Book must be uploaded to delete level 2 files")
+        if book.lvl2_deleted:
+            self.logger.info(f"Level 2 for {book.bid} has already been deleted")
+            return
         self.logger.info(f"Removing level 2 files for {book.bid}")
         if book.type == "obs" or book.type == "oper":
             session, SMURF = self.get_g3tsmurf_session(
-                book.tel_tube, return_archive=True
+                return_archive=True
             )
             odic = self.get_g3tsmurf_obs_for_book(book)
 
@@ -1744,7 +1753,7 @@ class Imprinter:
                 )
         elif book.type == "stray":
             session, SMURF = self.get_g3tsmurf_session(
-                book.tel_tube, return_archive=True
+                return_archive=True
             )
             flist = self.get_files_for_book(book)
             for f in flist:
@@ -1752,12 +1761,24 @@ class Imprinter:
                 SMURF.delete_file(
                     db_file, session, dry_run=dry_run, my_logger=self.logger
                 )
+        elif book.type == "smurf":
+            tcode = int(book.bid.split("_")[1])
+            basepath = os.path.join(
+                self.lvl2_data_root, 'smurf', str(tcode)
+            )
+            shutil.rmtree(basepath)
+
         elif book.type == "hk":
-            HK = self.get_g3thk(book.tel_tube)
+            HK = self.get_g3thk()
             flist = self.get_files_for_book(book)
-            for f in flist:
-                hkfile = HK.session.query(HKFiles).filter(HKFiles.path == f).one()
-                HK.delete_file(hkfile, dry_run=dry_run, my_logger=self.logger)
+            hkf_list = [
+                HK.session.query(HKFiles).filter(
+                    HKFiles.path == f
+                ).one() for f in flist
+            ]
+            HK.batch_delete_files(
+                hkf_list, dry_run=dry_run, my_logger=self.logger
+            )
         else:
             raise NotImplementedError(
                 f"Do not know how to delete level 2 files"
@@ -1767,7 +1788,7 @@ class Imprinter:
             book.lvl2_deleted = True
             self.session.commit()
 
-    def delete_book_files(self, book):
+    def delete_book_staged(self, book, override=False):
         """Delete all files associated with a book
 
         Parameters
@@ -1775,13 +1796,24 @@ class Imprinter:
         book: Book object
 
         """
+        if not override:
+            if book.status < UPLOADED:
+                self.logger.error(
+                    "Cannot delete non-uploaded books without override"
+                )
+                return
         # remove all files within the book
         book_path = self.get_book_abs_path(book)
         try:
+            self.logger.info(
+                f"Removing {book.bid} from staged"
+            )
             shutil.rmtree( book_path )
         except Exception as e:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
+        book.status = DONE
+        self.session.commit()
 
     def find_missing_lvl2_obs_from_books(
         self, min_ctime, max_ctime
