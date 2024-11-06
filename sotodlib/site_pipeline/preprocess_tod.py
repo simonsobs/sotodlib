@@ -14,6 +14,7 @@ from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
+import sotodlib.site_pipeline.preprocess_common as sp_com
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
@@ -28,7 +29,7 @@ def dummy_preproc(obs_id, group_list, logger,
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -55,77 +56,6 @@ def dummy_preproc(obs_id, group_list, logger,
             outputs.append(db_data)
     if run_parallel:
         return error, dest_file, outputs
-
-def _get_preprocess_context(configs, context=None):
-    if type(configs) == str:
-        configs = yaml.safe_load(open(configs, "r"))
-    
-    if context is None:
-        context = core.Context(configs["context_file"])
-        
-    if type(context) == str:
-        context = core.Context(context)
-    
-    # if context doesn't have the preprocess archive it in add it
-    # allows us to use same context before and after calculations
-    found=False
-    if context.get("metadata") is None:
-        context["metadata"] = []
-
-    for key in context.get("metadata"):
-        if key.get("unpack") == "preprocess":
-            found=True
-            break
-    if not found:
-        context["metadata"].append( 
-            {
-                "db" : configs["archive"]["index"],
-                "unpack" : "preprocess"
-            }
-        )
-    return configs, context
-
-def _get_groups(obs_id, configs, context):
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    for i, gb in enumerate(group_by):
-        if gb.startswith('dets:'):
-            group_by[i] = gb.split(':',1)[1]
-
-        if (gb == 'detset') and (len(group_by) == 1):
-            groups = context.obsfiledb.get_detsets(obs_id)
-            return group_by, [[g] for g in groups]
-        
-    det_info = context.get_det_info(obs_id)
-    rs = det_info.subset(keys=group_by).distinct()
-    groups = [[b for a,b in r.items()] for r in rs]
-    return group_by, groups
-
-def _get_preprocess_db(configs, group_by):
-    if os.path.exists(configs['archive']['index']):
-        logger.info(f"Mapping {configs['archive']['index']} for the "
-                    "archive index.")
-        db = core.metadata.ManifestDb(configs['archive']['index'])
-    else:
-        logger.info(f"Creating {configs['archive']['index']} for the "
-                     "archive index.")
-        scheme = core.metadata.ManifestScheme()
-        scheme.add_exact_match('obs:obs_id')
-        for gb in group_by:
-            scheme.add_exact_match('dets:' + gb)
-        scheme.add_data_field('dataset')
-        db = core.metadata.ManifestDb(
-            configs['archive']['index'],
-            scheme=scheme
-        )
-    return db
-
-def swap_archive(config, fpath):
-    tc = copy.deepcopy(config)
-    tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
-    dname = os.path.dirname(tc['archive']['policy']['filename'])
-    if not(os.path.exists(dname)):
-        os.makedirs(dname)
-    return tc
 
 def preproc_or_load_group(obs_id, configs, dets, logger=None, 
                           context=None, overwrite=False):
@@ -183,7 +113,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
     for g in all_groups:
@@ -211,8 +141,8 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
 
     if dbexist and (not overwrite):
         logger.info(f"db exists for {obs_id} {dets} loading data and applying preprocessing.")
-        aman = load_preprocess_tod(obs_id=obs_id, dets=dets,
-                                   configs=configs, context=context)
+        aman = sp_com.load_preprocess_tod(obs_id=obs_id, dets=dets,
+                                          configs=configs, context=context)
         error = 'load_success'
         return error, [obs_id, dets], aman
     else:
@@ -236,7 +166,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         newpath = f'temp/{obs_id}'
         for cg in cur_groups[0]:
             newpath += f'_{cg}'
-        temp_config = swap_archive(configs, newpath+'.h5')
+        temp_config = sp_util.swap_archive(configs, newpath+'.h5')
         policy = sp_util.ArchivePolicy.from_params(temp_config['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
         for gb, g in zip(group_by, cur_groups[0]):
@@ -256,7 +186,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
             db_data['dets:'+gb] = g
         outputs['db_data'] = db_data
         return error, outputs, aman
-          
+
 def cleanup_mandb(error, outputs, configs, logger):
     """
     Function to update the manifest db when data is collected from the
@@ -287,7 +217,7 @@ def cleanup_mandb(error, outputs, configs, logger):
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
         group_by =  [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
-        db = _get_preprocess_db(configs, group_by)
+        db = sp_util.get_preprocess_db(configs, group_by, logger)
         h5_path = os.path.relpath(dest_file,
                                   start=os.path.dirname(configs['archive']['index']))
 
@@ -316,11 +246,11 @@ def cleanup_mandb(error, outputs, configs, logger):
         f.close()
 
 def preprocess_tod(obs_id, 
-                    configs, 
-                    verbosity=0,
-                    group_list=None, 
-                    overwrite=False,
-                    run_parallel=False):
+                   configs, 
+                   verbosity=0,
+                   group_list=None, 
+                   overwrite=False,
+                   run_parallel=False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
     the ManifestDb specified in the configs.   
@@ -346,9 +276,9 @@ def preprocess_tod(obs_id,
     
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
-  
+
     context = core.Context(configs["context_file"])
-    group_by, groups = _get_groups(obs_id, configs, context)
+    group_by, groups = sp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -380,17 +310,17 @@ def preprocess_tod(obs_id,
             return error, None, [None, None]
         else:
             return
-    
+
     if not(run_parallel):
-        db = _get_preprocess_db(configs, group_by)
-    
+        db = sp_util.get_preprocess_db(configs, group_by, logger)
+
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
 
     if configs.get("lmsi_config", None) is not None:
         make_lmsi = True
     else:
         make_lmsi = False
-    
+
     n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -451,7 +381,7 @@ def preprocess_tod(obs_id,
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
-    
+
     if run_parallel:
         if n_fail == len(groups):
             # If no groups make it to the end of the processing return error.
@@ -463,37 +393,11 @@ def preprocess_tod(obs_id,
             error = None
             return error, dest_file, outputs
 
-def load_preprocess_det_select(obs_id, configs, context=None,
-                               dets=None, meta=None):
-    """ Loads the metadata information for the Observation and runs through any
-    data selection specified by the Preprocessing Pipeline.
-
-    Arguments
-    ----------
-    obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
-        `context.get_obs`
-    configs: string or dictionary
-        config file or loaded config directory
-    dets: dict
-        dets to restrict on from info in det_info. See context.get_meta.
-    meta: AxisManager
-        Contains supporting metadata to use for loading.
-        Can be pre-restricted in any way. See context.get_meta.
-    """
-    configs, context = _get_preprocess_context(configs, context)
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
-    
-    meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    logger.info(f"Cutting on the last process: {pipe[-1].name}")
-    pipe[-1].select(meta)
-    return meta
-
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
                             context=None, dets=None,
                             meta=None, modulated=True):
-    """ Loads the saved information from the preprocessing pipeline and runs the
+    """Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
     Assumes preprocess_tod has already been run on the requested observation. 
@@ -517,8 +421,9 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         into a modulated signal.
         If False, scan the simulation into demodulated timestreams.
     """
-    configs, context = _get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
+    configs, context = sp_util.get_preprocess_context(configs, context)
+    meta = sp_com.load_preprocess_det_select(obs_id, configs=configs, context=context,
+                                             dets=dets, meta=meta)
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -535,39 +440,6 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated)
         pipe.run(aman, aman.preprocess, sim=True)
         return aman
-
-def load_preprocess_tod(obs_id, configs="preprocess_configs.yaml",
-                        context=None, dets=None, meta=None):
-    """ Loads the saved information from the preprocessing pipeline and runs the
-    processing section of the pipeline. 
-
-    Assumes preprocess_tod has already been run on the requested observation. 
-    
-    Arguments
-    ----------
-    obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
-        `context.get_obs`
-    configs: string or dictionary
-        config file or loaded config directory
-    dets: dict
-        dets to restrict on from info in det_info. See context.get_meta.
-    meta: AxisManager
-        Contains supporting metadata to use for loading.
-        Can be pre-restricted in any way. See context.get_meta.
-    """
-    configs, context = _get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context, dets=dets, meta=meta)
-
-    if meta.dets.count == 0:
-        logger.info(f"No detectors left after cuts in obs {obs_id}")
-        return None
-    else:
-        pipe = Pipeline(configs["process_pipe"], logger=logger)
-        aman = context.get_obs(meta)
-        pipe.run(aman, aman.preprocess)
-        return aman
-
 
 def get_parser(parser=None):
     if parser is None:
@@ -639,7 +511,7 @@ def main(
         verbosity: Optional[int] = None,
         nproc: Optional[int] = 4
  ):
-    configs, context = _get_preprocess_context(configs)
+    configs, context = sp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
@@ -689,7 +561,7 @@ def main(
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = _get_groups(obs["obs_id"], configs, context)
+            group_by, groups = sp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
@@ -717,7 +589,7 @@ def main(
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                      group_list=r[1], verbosity=verbosity,
-                     configs=swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
+                     configs=sp_util.swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
             logger.info('New future as_completed result')
@@ -734,7 +606,7 @@ def main(
             futures.remove(future)
 
             logger.info(f'Processing future result db_dataset: {db_datasets}')
-            db = _get_preprocess_db(configs, group_by)
+            db = sp_util.get_preprocess_db(configs, group_by, logger)
             logger.info('Database connected')
             if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
                 nfile += 1
