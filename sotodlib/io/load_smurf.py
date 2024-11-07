@@ -194,6 +194,7 @@ class G3tSmurf:
         self.meta_path = meta_path
         self.db_path = db_path
         self.hk_db_path = hk_db_path
+        self.HK = None
         self.finalize = finalize
 
         if os.path.exists(self.db_path):
@@ -1396,27 +1397,33 @@ class G3tSmurf:
                 session.add(tcf)
                 session.commit()
 
+    def get_HK(self):
+        if self.hk_db_path is None:
+            raise ValueError("HK database path required")
+
+        if self.HK is None:
+            iids = []
+            for server in self.finalize.get("servers", []):
+                for key in server.keys():
+                    # Append the value (iid) to the iids list
+                    iids.append(server[key])
+
+            self.HK = G3tHk(
+                os.path.join(os.path.split(self.archive_path)[0], "hk"),
+                iids = iids,
+                db_path = self.hk_db_path,
+            )
+        return self.HK
+
     def update_finalization(self, update_time, session=None):
         """Update the finalization time rows in the database"""
-        if self.hk_db_path is None:
-            raise ValueError("HK database path required to update finalization" " time")
-
+        
         if session is None:
             session = self.Session()
         # look for new rows to add to table
         self._start_finalization(session)
 
-        iids = []
-        for server in self.finalize.get("servers", []):
-            for key in server.keys():
-                # Append the value (iid) to the iids list
-                iids.append(server[key])
-
-        HK = G3tHk(
-            os.path.join(os.path.split(self.archive_path)[0], "hk"),
-            iids = iids,
-            db_path = self.hk_db_path,
-        )
+        HK = self.get_HK()
 
         agent_list = session.query(Finalize).all()
         for agent in agent_list:
@@ -1458,15 +1465,19 @@ class G3tSmurf:
         session.commit()
 
     def get_final_time(
-        self, stream_ids, start=None, stop=None, check_control=True, session=None
+        self, stream_ids, start=None, stop=None, check_control=True,
+        session=None
     ):
-        """Return the ctime to which database is finalized for a set of stream_ids
-        between ctimes start and stop. If check_control is True it will use the
-        pysmurf-monitor entries in the HK database to determine which
-        pysmurf-monitors were in control of which stream_ids between start and stop.
+        """Return the ctime to which database is finalized for a set of 
+        stream_ids between ctimes start and stop. If check_control is True it 
+        will use the pysmurf-monitor entries in the HK database to determine 
+        which pysmurf-monitors were in control of which stream_ids between 
+        start and stop.
         """
         if check_control and self.hk_db_path is None:
-            raise ValueError("HK database path required to update finalization" " time")
+            raise ValueError(
+                "HK database path required to update finalization time"
+            )
         if check_control and ((start is None) or (stop is None)):
             raise ValueError(
                 "start and stop ctimes are required to check which"
@@ -1474,10 +1485,8 @@ class G3tSmurf:
             )
         if session is None:
             session = self.Session()
-        HK = G3tHk(
-            os.path.join(os.path.split(self.archive_path)[0], "hk"),
-            self.hk_db_path,
-        )
+        
+        HK = self.get_HK()
 
         agent_list = []
         if "servers" not in self.finalize:
