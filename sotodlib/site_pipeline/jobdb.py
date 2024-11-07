@@ -231,6 +231,10 @@ class JobManager:
         with self.session_scope() as session:
             session.add(job)
             session.commit()
+            # Force a retrieval of job.id, before expunging --
+            # otherwise some fields will dangle and sqlalchemy can
+            # complain later about the detached object.
+            job.id
             session.expunge(job)
         return job
 
