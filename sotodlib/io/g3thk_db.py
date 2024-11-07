@@ -540,7 +540,7 @@ class G3tHk:
         return max([a.stop for a in last_file.agents])
 
     @classmethod
-    def from_configs(cls, configs):
+    def from_configs(cls, configs, iids=None):
         """
         Create a G3tHK instance from a configs dictionary
 
@@ -551,11 +551,14 @@ class G3tHk:
         if type(configs) == str:
             configs = load_configs(configs)
 
-        iids = []
-        for server in configs["finalization"]["servers"]:
-            for key in server.keys():
-                # Append the value (iid) to the iids list
-                iids.append(server[key])
+        if iids is None:
+            iids = []
+            if "finalization" in configs:
+                servers = configs["finalization"].get("servers", {})
+                for server in servers:
+                    for key in server.keys():
+                        # Append the value (iid) to the iids list
+                        iids.append(server[key])
 
         return cls(
             hkarchive_path = os.path.join(configs["data_prefix"], "hk"), 
