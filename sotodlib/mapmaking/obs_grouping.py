@@ -16,7 +16,7 @@ depth-1 maps, etc.
 """
 
 __all__ = ['build_obslists']
-import numpy as np
+import numpy as np, sys
 from pixell import utils
 from scipy import ndimage
 
