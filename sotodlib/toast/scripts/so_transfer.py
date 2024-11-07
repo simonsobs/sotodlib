@@ -176,7 +176,10 @@ def signal_realizations(job, otherargs, runargs, data):
         )
         map_binner.full_pointing = True
 
-    if job_ops.demodulate.enabled and job_ops.demodulate.purge:
+    if (
+        (job_ops.demodulate.enabled and job_ops.demodulate.purge)
+        and not otherargs.simulate_demodulated
+    ):
         log.warning_rank(
             "Demodulation configured to purge original data.  Overriding.",
             comm=data.comm.comm_world,
