@@ -1406,9 +1406,16 @@ class G3tSmurf:
         # look for new rows to add to table
         self._start_finalization(session)
 
+        iids = []
+        for server in self.finalize.get("servers", []):
+            for key in server.keys():
+                # Append the value (iid) to the iids list
+                iids.append(server[key])
+
         HK = G3tHk(
             os.path.join(os.path.split(self.archive_path)[0], "hk"),
-            self.hk_db_path,
+            iids = iids,
+            db_path = self.hk_db_path,
         )
 
         agent_list = session.query(Finalize).all()
