@@ -12,7 +12,6 @@ import so3g.proj
 
 from .. import core
 from .. import coords
-from .. import site_pipeline
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
 from .utilities import import_optional, get_flags
 from .noise_model import NmatWhite
@@ -384,8 +383,8 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                     singlestream=False, dtype_tod=np.float32,
                     dtype_map=np.float32, recenter=None, verbose=0):
     """
-        Setup the classes for demod mapmaking and return
-        a DemodMapmmaker object
+    Setup the classes for demod mapmaking and return
+    a DemodMapmmaker object
     """
     if shape is not None and wcs is not None:
         if split_labels==None:
@@ -430,7 +429,7 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
 
 def write_demod_maps(prefix, data, split_labels=None):
     """
-        Write maps from data into files
+    Write maps from data into files
     """
     if split_labels==None:
         # we have no splits, so we save index 0 of the lists
@@ -465,64 +464,65 @@ def make_demod_map(context, obslist, noise_model, info,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False):
     """
-        Make a demodulated map from the list of observations in obslist.
+    Make a demodulated map from the list of observations in obslist.
 
-        Arguments
-        ---------
-        context : str
-            File path to context used to load obs from.
-        obslist : dict
-            The obslist which is the output of the
-            mapmaking.obs_grouping.build_obslists, contains the information of the
-            single or multiple obs to map.
-        noise_model : sotodlib.mapmaking.Nmat
-            Noise model to pass to DemodMapmaker.
-        info : list
-            Information for the database, will be written as a .hdf file.
-        preprocess_config : dict
-            Dictionary with the config yaml file for the preprocess database.
-        prefix : str
-            Prefix for the output files
-        shape : tuple, optional
-            Shape of the geometry to use for mapping.
-        wcs : dict, optional
-            WCS kernel of the geometry to use for mapping.
-        nside : int, optional
-            Nside for healpix pixelization
-        comps : str, optional
-            Which components to map, only TQU supported for now.
-        t0 : int, optional
-            Ctime to use as the label in the map files.
-        dtype_tod : numpy.dtype, optional
-            The data type to use for the time-ordered data. Only tested
-            with float32.
-        dtype_map : numpy.dtype, optional
-            The data type to use for the maps.
-        tag : str, optional
-            Prefix tag for the logger.
-        verbose : bool, optional
-        split_labels : list or None, optional
-            A list of strings with the splits requested. If None then no splits
-            were asked for, i.e. we will produce one map.
-        L : logger, optional
-            Logger for printing on the screen.
-        site : str, optional
-            Plataform name for the pointing matrix.
-        recenter : str or None
-            String to make object-centered maps, such as Moon/Sun/Planet centered maps.
-            Look at sotodlib.mapmaking.parse_recentering for details.
-        singlestream : Bool
-            If True, do not perform demodulated filter+bin mapmaking but
-            rather regular filter+bin mapmaking, i.e. map from obs.signal
-            rather than from obs.dsT, obs.demodQ, obs.demodU.
+    Arguments
+    ---------
+    context : str
+        File path to context used to load obs from.
+    obslist : dict
+        The obslist which is the output of the
+        mapmaking.obs_grouping.build_obslists, contains the information of the
+        single or multiple obs to map.
+    noise_model : sotodlib.mapmaking.Nmat
+        Noise model to pass to DemodMapmaker.
+    info : list
+        Information for the database, will be written as a .hdf file.
+    preprocess_config : dict
+        Dictionary with the config yaml file for the preprocess database.
+    prefix : str
+        Prefix for the output files
+    shape : tuple, optional
+        Shape of the geometry to use for mapping.
+    wcs : dict, optional
+        WCS kernel of the geometry to use for mapping.
+    nside : int, optional
+        Nside for healpix pixelization
+    comps : str, optional
+        Which components to map, only TQU supported for now.
+    t0 : int, optional
+        Ctime to use as the label in the map files.
+    dtype_tod : numpy.dtype, optional
+        The data type to use for the time-ordered data. Only tested
+        with float32.
+    dtype_map : numpy.dtype, optional
+        The data type to use for the maps.
+    tag : str, optional
+        Prefix tag for the logger.
+    verbose : bool, optional
+    split_labels : list or None, optional
+        A list of strings with the splits requested. If None then no splits
+        were asked for, i.e. we will produce one map.
+    L : logger, optional
+        Logger for printing on the screen.
+    site : str, optional
+        Platform name for the pointing matrix.
+    recenter : str or None
+        String to make object-centered maps, such as Moon/Sun/Planet centered maps.
+        Look at sotodlib.mapmaking.parse_recentering for details.
+    singlestream : Bool
+        If True, do not perform demodulated filter+bin mapmaking but
+        rather regular filter+bin mapmaking, i.e. map from obs.signal
+        rather than from obs.dsT, obs.demodQ, obs.demodU.
 
-        Returns
-        -------
-        errors : list
-            List of errors from preprocess database. To be used in cleanup_mandb.
-        outputs : list
-            List of outputs from preprocess database. To be used in cleanup_mandb.
+    Returns
+    -------
+    errors : list
+        List of errors from preprocess database. To be used in cleanup_mandb.
+    outputs : list
+        List of outputs from preprocess database. To be used in cleanup_mandb.
     """
+    from .. import site_pipeline
     context = core.Context(context)
     if L is None:
         L = site_pipeline.util.init_logger("Demod filterbin mapmaking")
