@@ -560,7 +560,7 @@ class G3tHk:
                         # Append the value (iid) to the iids list
                         iids.append(server[key])
             else:
-                self.logger.debug(
+                logger.debug(
                     "No finalization information in configuration, agents and "
                     "fields will not be added."
                 )
