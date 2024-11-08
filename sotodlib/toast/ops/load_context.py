@@ -117,6 +117,8 @@ class LoadContext(Operator):
 
     readout_ids = List(list(), help="Only load this list of readout_id values")
 
+    stream_ids = List(list(), help="Only load this list of stream_id values")
+
     detsets = List(list(), help="Only load this list of detset values")
 
     bands = List(list(), help="Only load this list of band values")
@@ -292,12 +294,18 @@ class LoadContext(Operator):
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
 
-        # Build our detector selection dictionary
+        # Build our detector selection dictionary.  Merge our explicit traits
+        # with any pre-existing detector selection.
         dets_select = None
         if len(self.dets_select) > 0:
             # Use the full dictionary provided by the user
             dets_select = self.dets_select
-        elif len(self.readout_ids) > 0 or len(self.bands) > 0 or len(self.detsets) > 0:
+        elif (
+            len(self.readout_ids) > 0
+            or len(self.bands) > 0
+            or len(self.detsets) > 0
+            or len(self.stream_ids) > 0
+        ):
             # We have some selection, build the dictionary
             dets_select = dict()
             if len(self.readout_ids) > 0:
@@ -306,6 +314,18 @@ class LoadContext(Operator):
                 dets_select["band"] = list(self.bands)
             if len(self.detsets) > 0:
                 dets_select["detset"] = list(self.detsets)
+            if len(self.stream_ids) > 0:
+                dets_select["stream_id"] = list(self.stream_ids)
+
+        # Get any selection of wafers
+        keep_wafers = None
+        if dets_select is not None and "stream_id" in dets_select:
+            if isinstance(dets_select["stream_id"], (list, tuple, set)):
+                keep_wafers = set(dets_select["stream_id"])
+            else:
+                # Scalar
+                keep_wafers = set()
+                keep_wafers.add(dets_select["stream_id"])
 
         # One global process queries the observation metadata and computes
         # the observation distribution among process groups.
@@ -387,15 +407,24 @@ class LoadContext(Operator):
                     oprops = dict(sprops)
                     oprops["name"] = oprops["session_name"]
                     oprops["wafer"] = "all"
-                    obs_props.append(oprops)
+                    if keep_wafers is not None:
+                        new_wafers = list()
+                        for wf in oprops["wafers"]:
+                            if wf in keep_wafers:
+                                new_wafers.append(wf)
+                        oprops["n_wafers"] = len(new_wafers)
+                        oprops["wafers"] = new_wafers
+                    if oprops["n_wafers"] > 0:
+                        obs_props.append(oprops)
                 else:
                     # One observation per wafer
                     for wf in sprops["wafers"]:
-                        oprops = dict(sprops)
-                        oprops["n_wafers"] = 1
-                        oprops["name"] = f"{oprops['session_name']}_{wf}"
-                        oprops["wafer"] = wf
-                        obs_props.append(oprops)
+                        if (keep_wafers is None) or (wf in keep_wafers):
+                            oprops = dict(sprops)
+                            oprops["n_wafers"] = 1
+                            oprops["name"] = f"{oprops['session_name']}_{wf}"
+                            oprops["wafer"] = wf
+                            obs_props.append(oprops)
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
