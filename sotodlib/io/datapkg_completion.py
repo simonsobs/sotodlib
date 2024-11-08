@@ -61,21 +61,28 @@ class DataPackaging:
         self.imprint = Imprinter.for_platform(platform)
         self.logger = combine_loggers(self.imprint, fname=log_filename)
         self.session = self.imprint.get_session()
-        self.g3session, self.SMURF = self.imprint.get_g3tsmurf_session(return_archive=True)
+        if self.imprint.build_det:
+            self.g3session, self.SMURF = self.imprint.get_g3tsmurf_session(return_archive=True)
+        else: 
+            self.g3session = None
+            self.SMURF = None
         self.HK = self.imprint.get_g3thk()
 
     def all_files_in_timecode(self, timecode, include_hk=True):
-        stc = os.path.join(self.SMURF.meta_path, str(timecode))
-        ttc = os.path.join(self.SMURF.archive_path, str(timecode))
-        htc = os.path.join(self.HK.hkarchive_path, str(timecode))
-
-        flist = ls.walk_files(stc, include_suprsync=True)
-        flist.extend( ls.walk_files(ttc, include_suprsync=True))
+        flist = []
+        if self.imprint.build_det:
+            stc = os.path.join(self.SMURF.meta_path, str(timecode))
+            flist.extend(ls.walk_files(stc, include_suprsync=True))
+            ttc = os.path.join(self.SMURF.archive_path, str(timecode))
+            flist.extend(ls.walk_files(ttc, include_suprsync=True))
         if include_hk:
-            flist.extend( ls.walk_files(htc, include_suprsync=True))
+            htc = os.path.join(self.HK.hkarchive_path, str(timecode))
+            flist.extend(ls.walk_files(htc, include_suprsync=True))
         return flist
 
     def get_suprsync_files(self, timecode):
+        if not self.imprint.build_det:
+            return []
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
         flist = []
@@ -91,6 +98,31 @@ class DataPackaging:
                 for name in files:
                     flist.append(os.path.join(stc, root, name))
         return flist
+
+    def check_hk_registered(self, timecode, complete):
+        min_ctime = timecode*1e5
+        max_ctime = (timecode+1)*1e5
+
+        self.imprint.register_hk_books(
+            min_ctime=min_ctime, 
+            max_ctime=max_ctime, 
+        )
+        # check the hk book is registered
+        book = self.session.query(Books).filter( 
+            Books.bid == f"hk_{timecode}_{self.platform}"
+        ).one_or_none()
+        if book is None:
+            complete[0] = False
+            complete[1] += f"HK book hk_{timecode}_{self.platform} missing\n"
+        elif book.status == UNBOUND:
+            try:
+                self.imprint.bind_book(book)
+            except:
+                self.logger.warning(f"Failed to bind {book.bid}")
+            if book.status < BOUND:
+                complete[0] = False
+                complete[1] += f"Book hk_{timecode}_{self.platform} not bound"
+        return complete
 
     def make_timecode_complete(
         self, timecode, try_binding_books=True, try_single_obs=True,
@@ -118,6 +150,20 @@ class DataPackaging:
         """
         
         complete = [True, ""]
+        min_ctime = timecode*1e5
+        max_ctime = (timecode+1)*1e5
+
+        if not self.imprint.build_det:
+            ## no detector data tracked by imprinter
+            if include_hk:
+                return self.check_hk_registered(timecode, complete)
+            else:
+                self.logger.warning(
+                    f"No detector data built for platform "
+                    f"{self.imprint.daq_node} and not checking HK. Nothing to "
+                    "check for completion"
+                )
+                return complete
 
         has_smurf, has_timestreams = True, True
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
@@ -139,11 +185,7 @@ class DataPackaging:
         if not has_smurf and not has_timestreams:
             return complete
         if not has_smurf and has_timestreams:
-            self.logger.error(f"TC {timecode}: Has timestreams folder without smurf!")
-
-        min_ctime = timecode*1e5
-        max_ctime = (timecode+1)*1e5
-        
+            self.logger.error(f"TC {timecode}: Has timestreams folder without smurf!")        
         
         overall_final_ctime = self.SMURF.get_final_time(
             self.imprint.all_slots, check_control=False
@@ -351,10 +393,6 @@ class DataPackaging:
             min_ctime=min_ctime, 
             max_ctime=max_ctime, 
         )
-        self.imprint.register_hk_books(
-            min_ctime=min_ctime, 
-            max_ctime=max_ctime, 
-        )
 
         if try_binding_books:
             books = self.session.query(Books).filter(
@@ -379,13 +417,7 @@ class DataPackaging:
             complete[0] = False
             complete[1] += f"SMuRF book smurf_{timecode}_{self.platform} missing\n"
         if include_hk:
-            # check the hk book is registered
-            book = self.session.query(Books).filter( 
-                Books.bid == f"hk_{timecode}_{self.platform}"
-            ).one_or_none()
-            if book is None:
-                complete[0] = False
-                complete[1] += f"HK book hk_{timecode}_{self.platform} missing\n"
+            complete = self.check_hk_registered(timecode, complete)
         
         # check if there's a stray book
         stray = self.session.query(Books).filter( 
@@ -460,7 +492,7 @@ class DataPackaging:
             Books.start < dt.datetime.utcfromtimestamp(max_ctime),
         )
         not_ready = q.filter( not_(or_( 
-            Books.status == WONT_BIND, Books.status == UPLOADED)
+            Books.status == WONT_BIND, Books.status >= UPLOADED)
         )).count()
         if not_ready > 0:
             self.logger.error(
@@ -471,7 +503,7 @@ class DataPackaging:
                 "this timecode\n"
         if not include_hk:
             q = q.filter(Books.type != 'hk')
-        book_list = q.filter(Books.status == UPLOADED).all()
+        book_list = q.filter(Books.status >= UPLOADED).all()
         self.logger.debug(
             f"Found {len(book_list)} books in time code {timecode}"
         )
@@ -655,6 +687,8 @@ class DataPackaging:
             verify_with_librarian=verify_with_librarian,
         )
 
+        if not self.imprint.build_det:
+            return
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
 
