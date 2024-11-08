@@ -559,6 +559,11 @@ class G3tHk:
                     for key in server.keys():
                         # Append the value (iid) to the iids list
                         iids.append(server[key])
+            else:
+                self.logger.debug(
+                    "No finalization information in configuration, agents and "
+                    "fields will not be added."
+                )
 
         return cls(
             hkarchive_path = os.path.join(configs["data_prefix"], "hk"), 
