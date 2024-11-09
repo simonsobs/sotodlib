@@ -33,7 +33,7 @@ from .bookbinder import log as book_logger
 
 def combine_loggers(imprint, fname=None):
     log_list = [imprint.logger, smurf_log, book_logger]
-    logger = logging.getLogger("main:")
+    logger = logging.getLogger("DataPackaging")
     logger.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter(
