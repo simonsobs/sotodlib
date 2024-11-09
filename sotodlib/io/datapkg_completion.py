@@ -40,13 +40,12 @@ def combine_loggers(imprint, fname=None):
         '%(levelname)s - %(name)s - %(message)s'
     )
     # Create a file handler
-    if fname is None:
-        fname = f"dpkg_utils_log_{imprint.daq_node}.log"
-    handler = logging.FileHandler(fname)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    [l.addHandler(handler) for l in log_list]  
+    if fname is not None:
+        handler = logging.FileHandler(fname)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        [l.addHandler(handler) for l in log_list]  
 
     # Create a stream handler to print logs to the console
     console_handler = logging.StreamHandler()
@@ -67,6 +66,23 @@ class DataPackaging:
             self.g3session = None
             self.SMURF = None
         self.HK = self.imprint.get_g3thk()
+
+    def get_first_timecode_on_disk(self, include_hk=True):
+        tc = 50000
+        if self.imprint.build_det:
+            tc = min([
+                tc,
+                int(sorted(os.listdir(self.SMURF.meta_path))[0]),
+                int(sorted(os.listdir(self.SMURF.archive_path))[0]),
+            ])
+        if include_hk:
+            tc = min([
+                tc,
+                int(sorted(os.listdir(self.HK.hkarchive_path))[0])
+            ])
+        if tc == 50000:
+            raise ValueError(f"Found no timecode folders for {self.platform}")
+        return tc   
 
     def all_files_in_timecode(self, timecode, include_hk=True):
         flist = []
@@ -595,6 +611,8 @@ class DataPackaging:
         verify_with_librarian=True,
     ):
         book_list = self.books_in_timecode(timecode, include_hk=include_hk)
+        books_not_deleted = []
+
         for book in book_list:
             if book.lvl2_deleted:
                 self.logger.info(
@@ -606,31 +624,44 @@ class DataPackaging:
                     book, n_copies=1, raise_on_error=False
                 )
                 if not offsite:
-                    self.logger.info(
+                    self.logger.warning(
                         f"Book {book.bid} does not have a copy offsite,"
                         " will not delete level 2"
                     )
+                    books_not_deleted.append(book)
                     continue
             else:
                 if book.status < UPLOADED:
-                    self.logger.info(
+                    self.logger.warning(
                         f"Book {book.bid} status is not uploaded,"
                         " will not delete level 2"
                     )
+                    books_not_deleted.append(book)
                     continue
             self.imprint.delete_level2_files(book, dry_run=dry_run)
+        
+        if len(books_not_deleted) > 0:
+            msg = "Could not delete stages for books:\n"
+            for book in books_not_deleted:
+                msg += f'\t{book.bid}\n'   
+            logger.error(msg)
+            return False, ""
+        return True, ""
+
     
     def delete_timecode_staged(
         self, timecode, include_hk=True, verify_with_librarian=True,
         check_level2=True,
     ):
         book_list = self.books_in_timecode(timecode, include_hk=include_hk)
+        books_not_deleted = []
         for book in book_list:
             if check_level2 and not book.lvl2_deleted:
                 self.logger.warning(
                     f"Level 2 data not deleted for {book.bid}, not deleting "
                     "staged"
                 )
+                books_not_deleted.append(book)
                 continue
             if book.status == DONE:
                 self.logger.debug(
@@ -646,6 +677,7 @@ class DataPackaging:
                         f"Book {book.bid} does not have 2 copies offsite,"
                         " will not delete staged"
                     )
+                    books_not_deleted.append(book)
                     continue
             else:
                 if book.status < UPLOADED:
@@ -653,6 +685,7 @@ class DataPackaging:
                         f"Book {book.bid} status is not uploaded,"
                         " will not delete level 2"
                     )
+                    books_not_deleted.append(book)
                     continue
             self.imprint.delete_book_staged(book)
         
@@ -664,6 +697,14 @@ class DataPackaging:
                 )
                 if os.path.exists(path) and len(os.listdir(path))==0:
                     os.rmdir(path)
+        
+        if len(books_not_deleted) > 0:
+            msg = "Could not delete stages for books:\n"
+            for book in books_not_deleted:
+                msg += f'\t{book.bid}\n'   
+            logger.error(msg)
+            return False, ""
+        return True, ""
     
     def check_and_delete_timecode(
         self, timecode, include_hk=True, verify_with_librarian=True
@@ -672,7 +713,7 @@ class DataPackaging:
         if not check[0]:
             self.logger.error(f"Timecode {timecode} not complete")
             self.logger.error(check[1])
-            return
+            return check
         check = self.verify_timecode_deletable(
             timecode, include_hk=include_hk, 
             verify_with_librarian=False,
@@ -680,15 +721,15 @@ class DataPackaging:
         if not check[0]:
             self.logger.error(f"Timecode {timecode} not ready to delete")
             self.logger.error(check[1])
-            return
+            return check
         
-        self.delete_timecode_level2(
+        check = self.delete_timecode_level2(
             timecode, dry_run=False, include_hk=include_hk,
             verify_with_librarian=verify_with_librarian,
         )
 
         if not self.imprint.build_det:
-            return
+            return check
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
 
@@ -698,3 +739,4 @@ class DataPackaging:
         if os.path.exists(ttc):
             if len(os.listdir(ttc)) == 0 or ls.just_suprsync(ttc):
                 shutil.rmtree(ttc)
+        return check

@@ -1735,11 +1735,11 @@ class Imprinter:
         dry_run: bool
             if true, just prints plans to self.logger.info
         """
-        if book.status != UPLOADED:
-            raise ValueError(f"Book must be uploaded to delete level 2 files")
         if book.lvl2_deleted:
             self.logger.info(f"Level 2 for {book.bid} has already been deleted")
             return
+        if book.status < UPLOADED:
+            raise ValueError(f"Book must be uploaded to delete level 2 files")
         self.logger.info(f"Removing level 2 files for {book.bid}")
         if book.type == "obs" or book.type == "oper":
             session, SMURF = self.get_g3tsmurf_session(
