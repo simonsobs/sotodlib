@@ -37,7 +37,7 @@ def level2_completion(
 
     if len( check_list ) > 0 and raise_incomplete:
         raise ValueError(
-            "Data Packaging cannot be completed for {check_list}"
+            f"Data Packaging cannot be completed for {check_list}"
         )
 
 def do_delete_level2(
@@ -63,12 +63,12 @@ def do_delete_level2(
     for timecode in range(min_timecode, max_timecode):
         check = dpk.check_and_delete_timecode(timecode)
         if not check[0]:
-            logger.error("Failed to remove level 2 for {timecode}")
+            logger.error(f"Failed to remove level 2 for {timecode}")
             delete_list.append( (timecode, check[1]))
             continue
     if len( delete_list ) > 0 and raise_incomplete:
         raise ValueError(
-            "Level 2 Deletion not finished for {delete_list}"
+            f"Level 2 Deletion not finished for {delete_list}"
         )
 
 def do_delete_staged(
@@ -94,12 +94,12 @@ def do_delete_staged(
     for timecode in range(min_timecode, max_timecode):
         check = dpk.delete_timecode_staged(timecode)
         if not check[0]:
-            logger.error("Failed to remove staged for {timecode}")
+            logger.error(f"Failed to remove staged for {timecode}")
             delete_list.append( (timecode, check[1]))
             continue
     if len( delete_list ) > 0 and raise_incomplete:
         raise ValueError(
-            "Staged Deletion not finished for {delete_list}"
+            f"Staged Deletion not finished for {delete_list}"
         )
 
 

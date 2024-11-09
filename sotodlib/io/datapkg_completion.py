@@ -641,7 +641,7 @@ class DataPackaging:
             self.imprint.delete_level2_files(book, dry_run=dry_run)
         
         if len(books_not_deleted) > 0:
-            msg = "Could not delete stages for books:\n"
+            msg = "Could not delete level 2 for books:\n"
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
