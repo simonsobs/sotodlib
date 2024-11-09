@@ -573,7 +573,7 @@ class DataPackaging:
         # smurf books. mostly watching out for .dat files
         ignore = shutil.ignore_patterns(*SMURF_EXCLUDE_PATTERNS)
         ignored_files = ignore("", files_on_disk)
-        self.logger.info(
+        self.logger.debug(
             f"Timecode {timecode} has {len(ignored_files)} ignored files"
         )
         files_in_database, deletable = self.file_list_from_database(
@@ -615,7 +615,7 @@ class DataPackaging:
 
         for book in book_list:
             if book.lvl2_deleted:
-                self.logger.info(
+                self.logger.debug(
                     f"Book {book.bid} has already had level 2 files deleted"
                 )
                 continue
@@ -644,7 +644,7 @@ class DataPackaging:
             msg = "Could not delete stages for books:\n"
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
-            logger.error(msg)
+            self.logger.error(msg)
             return False, ""
         return True, ""
 
@@ -702,7 +702,7 @@ class DataPackaging:
             msg = "Could not delete stages for books:\n"
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
-            logger.error(msg)
+            self.logger.error(msg)
             return False, ""
         return True, ""
     

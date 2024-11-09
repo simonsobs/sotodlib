@@ -593,13 +593,13 @@ class G3tHk:
             my_logger = logger
 
         # remove field info
-        my_logger.info(f"removing field entries for {hkfile.path} from database")
+        my_logger.debug(f"removing field entries for {hkfile.path} from database")
         if not dry_run:
             for f in hkfile.fields:
                 self.session.delete(f)
 
         # remove agent info
-        my_logger.info(f"removing agent entries for {hkfile.path} from database")
+        my_logger.debug(f"removing agent entries for {hkfile.path} from database")
         if not dry_run:
             for a in hkfile.agents:
                 self.session.delete(a)
