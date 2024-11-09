@@ -18,15 +18,15 @@ def level2_completion(
 ):
 
     ## build time range where we require timecodes to be complete
-    if min_complete_timecode is None:
-        min_complete_timecode = dpk.get_first_timecode_on_disk()
-    if max_complete_timecode is None:
+    if min_timecode is None:
+        min_timecode = dpk.get_first_timecode_on_disk()
+    if max_timecode is None:
         x = dt.datetime.now() - dt.timedelta(days=lag)
-        max_complete_timecode = int( x.timestamp() // 1e5)
+        max_timecode = int( x.timestamp() // 1e5)
 
     logger.info(
-        f"Checking Timecode completion from {min_complete_timecode} to "
-        f"{max_complete_timecode}."
+        f"Checking Timecode completion from {min_timecode} to "
+        f"{max_timecode}."
     )
 
     check_list = []
