@@ -11,6 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import h5py
 import copy
 from sotodlib.coords import demod as demod_mm
+from sotodlib.coords import pointing_model
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -532,6 +533,7 @@ def load_preprocess_tod_sim(obs_id, sim_map,
             # WARNING : should be turned off in the config file
             # to filter simulations
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
+            pointing_model.apply_pointing_model(aman)
             aman.move("signal", None)
 
         demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated,

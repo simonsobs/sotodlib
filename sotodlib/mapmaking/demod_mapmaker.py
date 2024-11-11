@@ -554,6 +554,7 @@ def make_demod_map(context, obslist, noise_model, info,
         obs.wrap("site",    np.full(1, site))
         obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds 
                        + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
+        coords.pointing_model.apply_pointing_model(obs)
         mapmaker.add_obs(name, obs, split_labels=split_labels)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
