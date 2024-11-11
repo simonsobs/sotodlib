@@ -349,7 +349,7 @@ def main(config_file=None, defaults=defaults, **args):
 
     # We open the data base for checking if we have maps already,
     # if we do we will not run them again.
-    if os.path.isfile('./'+args['atomic_db']) and not args['only_hits']:
+    if os.path.isfile(args['atomic_db']) and not args['only_hits']:
         conn = sqlite3.connect('./'+args['atomic_db']) # open the connector, in reading mode only
         cursor = conn.cursor()
         keys_to_remove = []

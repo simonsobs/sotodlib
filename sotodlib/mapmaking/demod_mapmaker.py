@@ -574,10 +574,32 @@ def make_demod_map(context, obslist, noise_model, info,
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
     mapdata = bunch.Bunch(wmap=wmap, weights=weights, signal=mapmaker.signals[0], t0=t0)
+
+    info = add_weights_to_info(info, weights, split_labels)
+
     # output to files
     write_demod_maps(prefix, mapdata, split_labels=split_labels, )
     write_demod_info(prefix, info, split_labels=split_labels )
     return errors, outputs
+
+def add_weights_to_info(info, weights, split_labels):
+    Nsplits = 1 if split_labels is None else len(split_labels)
+    for isplit in range(Nsplits):
+        sub_info = info[isplit]
+        sub_weights = weights[isplit]
+        # Assuming weights are TT, QQ, UU
+        if sub_weights.shape[0] != 3:
+            raise ValueError(f"sub_weights has unexpected shape {sub_weights.shape}. First axis should be (3,) for TT, QQ, UU")
+        mean_qu = np.mean(sub_weights[1:], axis=0)
+        positive = np.where(mean_qu > 0)
+        sumweights = np.sum(mean_qu[positive])
+        meanweights = np.mean(mean_qu[positive])
+        medianweights = np.median(mean_qu[positive])
+        sub_info['total_weight_qu'] = sumweights
+        sub_info['mean_weight_qu'] = meanweights
+        sub_info['median_weight_qu'] = medianweights
+        info[isplit] = sub_info
+    return info
 
 def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weightsQU, wrapper=lambda x:x):
     """
