@@ -492,7 +492,8 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
                             context=None, dets=None,
-                            meta=None, modulated=True):
+                            meta=None, modulated=True,
+                            site=None, ordering=None):
     """ Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
@@ -532,7 +533,9 @@ def load_preprocess_tod_sim(obs_id, sim_map,
             # to filter simulations
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
             aman.move("signal", None)
-        demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated)
+
+        demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated,
+                          weather="toco", site=site, ordering=ordering)
         pipe.run(aman, aman.preprocess, sim=True)
         return aman
 
