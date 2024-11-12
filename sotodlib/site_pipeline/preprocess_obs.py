@@ -12,35 +12,6 @@ from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
 
-def _get_preprocess_context(configs, context=None):
-    if type(configs) == str:
-        configs = yaml.safe_load(open(configs, "r"))
-    
-    if context is None:
-        context = core.Context(configs["context_file"])
-        
-    if type(context) == str:
-        context = core.Context(context)
-    
-    # if context doesn't have the preprocess archive it in add it
-    # allows us to use same context before and after calculations
-    found=False
-    if context.get("metadata") is None:
-        context["metadata"] = []
-
-    for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
-            found=True
-            break
-    if not found:
-        context["metadata"].append( 
-            {
-                "db" : configs["archive"]["index"],
-                "name" : "preprocess"
-            }
-        )
-    return configs, context
-
 def preprocess_obs(
     obs_id, 
     configs,  
@@ -122,30 +93,6 @@ def preprocess_obs(
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
 
-def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
-    """ Loads the saved information from the preprocessing pipeline and runs the
-    processing section of the pipeline. 
-
-    Assumes preprocess_tod has already been run on the requested observation. 
-    
-    Arguments
-    ----------
-    obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
-        `context.get_obs`
-    configs: string or dictionary
-        config file or loaded config directory
-    """
-
-    configs, context = _get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
-    
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
-    aman = context.get_obs(meta, no_signal=True)
-    pipe.run(aman, aman.preprocess)
-    return aman
-
-
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -209,7 +156,7 @@ def main(
     planet_obs: bool = False,
     verbosity: Optional[int] = None,
  ):
-    configs, context = _get_preprocess_context(configs)
+    configs, context = sp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     if (min_ctime is None) and (update_delay is not None):
         # If min_ctime is provided it will use that..

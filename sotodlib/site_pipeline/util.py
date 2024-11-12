@@ -4,6 +4,7 @@ import inspect
 import logging
 import time
 import sys
+import copy
 import argparse
 import yaml
 import numpy as np
@@ -386,6 +387,71 @@ def get_groups(obs_id, configs, context):
     rs = det_info.subset(keys=group_by).distinct()
     groups = [[b for a,b in r.items()] for r in rs]
     return group_by, groups
+
+def get_preprocess_db(configs, group_by, logger=None):
+    """Get or create a ManifestDb found for a given
+    config.
+    
+    Arguments
+    ----------
+    configs : dict
+        The configuration dictionary.
+    group_by : list of str
+        The list of keys used to group the detectors.
+    logger : PythonLogger
+        Optional. Logger object.  If None, a new logger
+        is created.
+    
+    Returns
+    -------
+    db : ManifestDb
+        ManifestDb object
+    """
+    
+    if logger is None:
+        logger = init_logger("preprocess_db")
+    
+    if os.path.exists(configs['archive']['index']):
+        logger.info(f"Mapping {configs['archive']['index']} for the "
+                    "archive index.")
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+    else:
+        logger.info(f"Creating {configs['archive']['index']} for the "
+                     "archive index.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        for gb in group_by:
+            scheme.add_exact_match('dets:' + gb)
+        scheme.add_data_field('dataset')
+        db = core.metadata.ManifestDb(
+            configs['archive']['index'],
+            scheme=scheme
+        )
+    return db
+
+def swap_archive(config, fpath):
+    """Update the configuration archive policy filename,
+    create an output archive directory if it doesn't exist,
+    and return a copy of the config.
+    
+    Arguments
+    ----------
+    configs : dict
+        The configuration dictionary.
+    fpath : str
+        The archive policy filename to write to.
+    
+    Returns
+    -------
+    tc : dict
+        Copy of the configuration file with an updated archive policy filename
+    """
+    tc = copy.deepcopy(config)
+    tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
+    dname = os.path.dirname(tc['archive']['policy']['filename'])
+    if not(os.path.exists(dname)):
+        os.makedirs(dname)
+    return tc
 
 def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None, 
                 update_delay=None, tags=None, planet_obs=False):
