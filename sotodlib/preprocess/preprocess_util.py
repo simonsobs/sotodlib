@@ -29,10 +29,10 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     pipe[-1].select(meta)
     return meta
 
-def load_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                    no_signal=None):
-    """ Loads the saved information from the preprocessing pipeline and runs the
-    processing section of the pipeline. 
+def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
+                        no_signal=None):
+    """ Loads the saved information from the preprocessing pipeline and runs
+    the processing section of the pipeline. 
 
     Assumes preprocess_tod has already been run on the requested observation. 
     
@@ -73,7 +73,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
     The dets dictionary must match the grouping specified in the preprocess
     config file. If the preprocess database entry for this obsid-dets group
     already exists then this function will just load back the processed tod
-    calling the ``load_preprocess`` function. If the db entry does not
+    calling the ``load_and_preprocess`` function. If the db entry does not
     exist of the overwrite flag is set to True then the full preprocessing
     steps defined in the configs are run and the outputs are written to a
     unique h5 file. Any errors, the info to populate the database, the file
@@ -150,7 +150,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
 
     if dbexist and (not overwrite):
         logger.info(f"db exists for {obs_id} {dets} loading data and applying preprocessing.")
-        aman = load_preprocess(obs_id=obs_id, dets=dets, configs=configs, context=context)
+        aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs, context=context)
         error = 'load_success'
         return error, [obs_id, dets], aman
     else:
