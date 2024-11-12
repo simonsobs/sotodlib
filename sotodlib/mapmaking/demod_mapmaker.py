@@ -523,6 +523,7 @@ def make_demod_map(context, obslist, noise_model, info,
         List of outputs from preprocess database. To be used in cleanup_mandb.
     """
     from .. import site_pipeline
+    from ..preprocess import preprocess_util
     context = core.Context(context)
     if L is None:
         L = site_pipeline.util.init_logger("Demod filterbin mapmaking")
@@ -542,7 +543,7 @@ def make_demod_map(context, obslist, noise_model, info,
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
-        error, output, obs = site_pipeline.preprocess_tod.preproc_or_load_group(obs_id,
+        error, output, obs = preprocess_util.preproc_or_load_group(obs_id,
                             configs=preprocess_config,
                             dets={'wafer_slot':detset, 'wafer.bandpass':band}, 
                             logger=L, context=context, overwrite=False)
