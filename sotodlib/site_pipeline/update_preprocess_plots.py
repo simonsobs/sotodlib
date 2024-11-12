@@ -87,7 +87,7 @@ def plot_preprocess_tod_from_db(obs_id, group_by, group, configs, context, verbo
     configs: string or dictionary
         config file or loaded config directory
     """
-    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     
