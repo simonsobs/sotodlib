@@ -10,7 +10,7 @@ from scipy.signal import welch
 from sotodlib import core
 
 from . import detrend_tod
-
+from .flags import get_subscan_signal
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -281,6 +281,32 @@ def calc_psd(
         aman.wrap("Pxx", Pxx, [(0,"dets"),(1,"nusamps")])
     return freqs, Pxx
 
+def calc_psd_subscan(aman, signal=None, freq_spacing=None, merge=False, wrap=None, **kwargs):
+    if signal is None:
+        signal = aman.signal
+
+    fs = 1 / np.nanmedian(np.diff(aman.timestamps))
+    if "nperseg" not in kwargs:
+        if freq_spacing is not None:
+            nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
+        else:
+            duration_samps = np.around((aman.subscans.stop_time - aman.subscans.start_time) * fs)
+            nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
+        kwargs["nperseg"] = nperseg
+
+    Pxx = []
+    for iss in range(aman.subscans.subscans.count):
+        signal_ss = get_subscan_signal(aman, signal, iss)
+        freqs, pxx_sub = welch(signal_ss, fs, **kwargs)
+        Pxx.append(pxx_sub)
+    Pxx = np.array(Pxx)
+    Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
+    if merge:
+        wrap = "Pxx_ss" if wrap is None else wrap
+        aman.merge( core.AxisManager(core.OffsetAxis("nusamps_ss", len(freqs))))
+        aman.wrap("freqs_ss", freqs, [(0,"nusamps_ss")])
+        aman.wrap(wrap, Pxx, [(0,aman.dets),(1,"nusamps_ss"), (2, "subscans")])
+    return freqs, Pxx
 
 def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     """

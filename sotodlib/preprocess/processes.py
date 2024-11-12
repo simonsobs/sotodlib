@@ -172,6 +172,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
           buffer: 10
           hp_fc: 1
           n_sig: 10
+          subscan: False
         save: True
         plot:
             plot_ds_factor: 50
@@ -340,6 +341,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
             plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
+
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
     "psd" field.
@@ -349,6 +351,7 @@ class PSDCalc(_Preprocess):
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
+        "subscan": False # optional
         "process":
           "psd_cfgs": # optional, kwargs to scipy.welch
             "nperseg": 1024
@@ -363,13 +366,19 @@ class PSDCalc(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
+        self.subscan = step_cfgs.get('subscan', False)
 
         super().__init__(step_cfgs)
         
 
     def process(self, aman, proc_aman):
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **self.process_cfgs)
+        if not self.subscan:
+            calc_psd = tod_ops.fft_ops.calc_psd
+        else:
+            calc_psd = tod_ops.fft_ops.calc_psd_subscan
+
+        freqs, Pxx = calc_psd(aman, signal=aman[self.signal],
+                              **self.process_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("nusamps",len(freqs))
@@ -384,6 +393,74 @@ class PSDCalc(_Preprocess):
     def save(self, proc_aman, fft_aman):
         if not(self.save_cfgs is None):
             proc_aman.wrap(self.wrap, fft_aman)
+
+
+class IdentifySubscans(_Preprocess):
+    """ Get subscan info and wrap it into aman.subscans.
+
+    Example config block::
+
+      - "name : "subscans"
+        "calc": True
+        "save": True
+
+    """
+
+    name = "subscans"
+
+    def __init__(self, step_cfgs):
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        tod_ops.flags.get_subscans(aman, merge=True)
+
+    def calc_and_save(self, aman, proc_aman):
+        self.save(proc_aman, aman.subscans)
+
+    def save(self, proc_aman, subscan_aman):
+        if not(self.save_cfgs is None):
+            proc_aman.wrap('subscans', subscan_aman)
+
+class TODStats(_Preprocess):
+    """ Get basic statistics from a TOD or its power spectrum.
+
+    Example config block:
+
+      - "name : "stats"
+        "signal: "signal" # optional
+        "wrap": "stats" # optional
+        "calc":
+          "stat_names": ["median", "std"]
+          "split_subscans": False # optional
+          "mask": # optional, for cutting a power spectrum in frequency
+            "psd_aman": "psd"
+            "low_f": 1
+            "high_f": 10
+        "save": True
+
+    """
+    name = "stats"
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+        self.wrap = step_cfgs.get('wrap', 'stats')
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs.get('mask') is not None:
+            mask_dict = self.calc_cfgs.get('mask')
+            freqs = aman[mask_dict['psd_aman']]['freqs']
+            low_f, high_f = mask_dict['low_f'], mask_dict['high_f']
+            fmask = np.all([freqs >= low_f, freqs <= high_f], axis=0)
+            self.calc_cfgs['mask'] = fmask
+
+        stats_aman = tod_ops.flags.get_stats(aman, aman[self.signal], **self.calc_cfgs)
+        self.save(proc_aman, stats_aman)
+
+    def save(self, proc_aman, stats_aman):
+        if not(self.save_cfgs is None):
+            proc_aman.wrap(self.wrap, stats_aman)
+
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
