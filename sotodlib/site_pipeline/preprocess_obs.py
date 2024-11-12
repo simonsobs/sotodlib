@@ -8,6 +8,7 @@ from typing import Optional, List
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
+from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
@@ -66,7 +67,7 @@ def preprocess_obs(
     if success != 'end':
         return
 
-    policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+    policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
     dest_file, dest_dataset = policy.get_dest(obs_id)
     logger.info(f"Saving data to {dest_file}:{dest_dataset}")
     proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
@@ -156,39 +157,13 @@ def main(
     planet_obs: bool = False,
     verbosity: Optional[int] = None,
  ):
-    configs, context = sp_util.get_preprocess_context(configs)
+    configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
-
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
     
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tags[i].lower()
-            if '=' not in tags[i]:
-                tags[i] += '=1'
-
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
+    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
+                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
+                                   planet_obs=planet_obs)
+    
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []

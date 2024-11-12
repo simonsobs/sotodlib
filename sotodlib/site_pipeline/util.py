@@ -278,13 +278,12 @@ def init_logger(name, announce='', verbosity=2):
         logger.info(f'{announce}Log timestamps are relative to {text}')
     else:
         for handler in logger.handlers:
-          if isinstance(handler, logging.StreamHandler):
-              handler.setLevel(level)
-              break
+            if isinstance(handler, logging.StreamHandler):
+                handler.setLevel(level)
+                break
 
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
-
 
     return logger
 
@@ -307,151 +306,6 @@ def main_launcher(main_func, parser_func, args=None):
     if args is None:
         args = sys.argv[1:]
     return main_func(**vars(parser_func().parse_args(args=args)))
-
-def get_preprocess_context(configs, context=None):
-    """Load the provided config file and context file. To be used in
-    ``preprocess_*.py`` site pipeline scripts.
-
-    Parameters
-    ----------
-    configs : str or dict
-        The configuration file or dictionary.
-    context : str or core.Context, optional
-        The context to use. If None, it is created from the configuration file.
-
-    Returns
-    -------
-    configs : dict
-        The configuration dictionary.
-    context : core.Context
-        The context file.
-    """
-    if type(configs) == str:
-        configs = yaml.safe_load(open(configs, "r"))
-    
-    if context is None:
-        context = core.Context(configs["context_file"])
-        
-    if type(context) == str:
-        context = core.Context(context)
-    
-    # if context doesn't have the preprocess archive it in add it
-    # allows us to use same context before and after calculations
-    found=False
-    if context.get("metadata") is None:
-        context["metadata"] = []
-
-    for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
-            found=True
-            break
-    if not found:
-        context["metadata"].append( 
-            {
-                "db" : configs["archive"]["index"],
-                "name" : "preprocess"
-            }
-        )
-    return configs, context
-
-def get_groups(obs_id, configs, context):
-    """Get subobs group method and groups. To be used in
-    ``preprocess_*.py`` site pipeline scripts.
-
-    Parameters
-    ----------
-    obs_id : str
-        The obsid.
-    configs : dict
-        The configuration dictionary.
-    context : core.Context
-        The Context file to use.
-
-    Returns
-    -------
-    group_by : list of str
-        The list of keys used to group the detectors.
-    groups : list of list of int
-        The list of groups of detectors.
-    """
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    for i, gb in enumerate(group_by):
-        if gb.startswith('dets:'):
-            group_by[i] = gb.split(':',1)[1]
-
-        if (gb == 'detset') and (len(group_by) == 1):
-            groups = context.obsfiledb.get_detsets(obs_id)
-            return group_by, [[g] for g in groups]
-        
-    det_info = context.get_det_info(obs_id)
-    rs = det_info.subset(keys=group_by).distinct()
-    groups = [[b for a,b in r.items()] for r in rs]
-    return group_by, groups
-
-def get_preprocess_db(configs, group_by, logger=None):
-    """Get or create a ManifestDb found for a given
-    config.
-    
-    Arguments
-    ----------
-    configs : dict
-        The configuration dictionary.
-    group_by : list of str
-        The list of keys used to group the detectors.
-    logger : PythonLogger
-        Optional. Logger object.  If None, a new logger
-        is created.
-    
-    Returns
-    -------
-    db : ManifestDb
-        ManifestDb object
-    """
-    
-    if logger is None:
-        logger = init_logger("preprocess_db")
-    
-    if os.path.exists(configs['archive']['index']):
-        logger.info(f"Mapping {configs['archive']['index']} for the "
-                    "archive index.")
-        db = core.metadata.ManifestDb(configs['archive']['index'])
-    else:
-        logger.info(f"Creating {configs['archive']['index']} for the "
-                     "archive index.")
-        scheme = core.metadata.ManifestScheme()
-        scheme.add_exact_match('obs:obs_id')
-        for gb in group_by:
-            scheme.add_exact_match('dets:' + gb)
-        scheme.add_data_field('dataset')
-        db = core.metadata.ManifestDb(
-            configs['archive']['index'],
-            scheme=scheme
-        )
-    return db
-
-def swap_archive(config, fpath):
-    """Update the configuration archive policy filename,
-    create an output archive directory if it doesn't exist,
-    and return a copy of the config.
-    
-    Arguments
-    ----------
-    configs : dict
-        The configuration dictionary.
-    fpath : str
-        The archive policy filename to write to.
-    
-    Returns
-    -------
-    tc : dict
-        Copy of the configuration file with an updated archive policy filename
-    """
-    tc = copy.deepcopy(config)
-    tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
-    dname = os.path.dirname(tc['archive']['policy']['filename'])
-    if not(os.path.exists(dname)):
-        os.makedirs(dname)
-    return tc
 
 def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None, 
                 update_delay=None, tags=None, planet_obs=False):

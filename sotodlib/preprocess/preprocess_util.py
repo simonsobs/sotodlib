@@ -1,7 +1,257 @@
-import sotodlib.site_pipeline.util as sp_util
-from sotodlib.preprocess import _Preprocess, Pipeline, processes
+import os
+import logging
+import time
+import sys
+import copy
+import yaml
+import numpy as np
 
-logger = sp_util.init_logger("preprocess")
+from .. import core
+
+from . import _Preprocess, Pipeline, processes
+
+class ArchivePolicy:
+    """Storage policy assistance.  Helps to determine the HDF5
+    filename and dataset name for a result.
+
+    Make me better!
+
+    """
+    @staticmethod
+    def from_params(params):
+        if params['type'] == 'simple':
+            return ArchivePolicy(**params)
+        if params['type'] == 'directory':
+            return DirectoryArchivePolicy(**params)
+        raise ValueError('No handler for "type"="%s"' % params['type'])
+
+    def __init__(self, **kwargs):
+        self.filename = kwargs['filename']
+
+    def get_dest(self, product_id):
+        """Returns (hdf_filename, dataset_addr).
+
+        """
+        return self.filename, product_id
+
+
+class DirectoryArchivePolicy:
+    """Storage policy for stuff organized directly on the filesystem.
+
+    """
+    def __init__(self, **kwargs):
+        self.root_dir = kwargs['root_dir']
+        self.pattern = kwargs['pattern']
+
+    def get_dest(self, **kw):
+        """Returns full path to destination directory.
+
+        """
+        return os.path.join(self.root_dir, self.pattern.format(**kw))
+
+
+class _ReltimeFormatter(logging.Formatter):
+    def __init__(self, *args, t0=None, **kw):
+        super().__init__(*args, **kw)
+        if t0 is None:
+            t0 = time.time()
+        self.start_time = t0
+
+    def formatTime(self, record, datefmt=None):
+        if datefmt is None:
+            datefmt = '%8.3f'
+        return datefmt % (record.created - self.start_time)
+
+
+def init_logger(name, announce='', verbosity=2):
+    """Configure and return a logger for site_pipeline elements.  It is
+    disconnected from general sotodlib (propagate=False) and displays
+    relative instead of absolute timestamps.
+
+    """
+    logger = logging.getLogger(name)
+
+    if verbosity == 0:
+        level = logging.ERROR
+    elif verbosity == 1:
+        level = logging.WARNING
+    elif verbosity == 2:
+        level = logging.INFO
+    elif verbosity == 3:
+        level = logging.DEBUG
+
+    # add handler only if it doesn't exist
+    if len(logger.handlers) == 0:
+        ch = logging.StreamHandler(sys.stdout)
+        formatter = _ReltimeFormatter('%(asctime)s: %(message)s (%(levelname)s)')
+
+        ch.setLevel(level)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+        i, r = formatter.start_time // 1, formatter.start_time % 1
+        text = (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(i))
+              + (',%03d' % (r*1000)))
+        logger.info(f'{announce}Log timestamps are relative to {text}')
+    else:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                handler.setLevel(level)
+                break
+
+    logger.propagate = False
+    logger.setLevel(logging.DEBUG)
+
+    return logger
+
+
+def get_preprocess_context(configs, context=None):
+    """Load the provided config file and context file. To be used in
+    ``preprocess_*.py`` site pipeline scripts.
+
+    Parameters
+    ----------
+    configs : str or dict
+        The configuration file or dictionary.
+    context : str or core.Context, optional
+        The context to use. If None, it is created from the configuration file.
+
+    Returns
+    -------
+    configs : dict
+        The configuration dictionary.
+    context : core.Context
+        The context file.
+    """
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+    
+    if context is None:
+        context = core.Context(configs["context_file"])
+        
+    if type(context) == str:
+        context = core.Context(context)
+    
+    # if context doesn't have the preprocess archive it in add it
+    # allows us to use same context before and after calculations
+    found=False
+    if context.get("metadata") is None:
+        context["metadata"] = []
+
+    for key in context.get("metadata"):
+        if key.get("name") == "preprocess":
+            found=True
+            break
+    if not found:
+        context["metadata"].append( 
+            {
+                "db" : configs["archive"]["index"],
+                "name" : "preprocess"
+            }
+        )
+    return configs, context
+
+
+def get_groups(obs_id, configs, context):
+    """Get subobs group method and groups. To be used in
+    ``preprocess_*.py`` site pipeline scripts.
+
+    Parameters
+    ----------
+    obs_id : str
+        The obsid.
+    configs : dict
+        The configuration dictionary.
+    context : core.Context
+        The Context file to use.
+
+    Returns
+    -------
+    group_by : list of str
+        The list of keys used to group the detectors.
+    groups : list of list of int
+        The list of groups of detectors.
+    """
+    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+    for i, gb in enumerate(group_by):
+        if gb.startswith('dets:'):
+            group_by[i] = gb.split(':',1)[1]
+
+        if (gb == 'detset') and (len(group_by) == 1):
+            groups = context.obsfiledb.get_detsets(obs_id)
+            return group_by, [[g] for g in groups]
+        
+    det_info = context.get_det_info(obs_id)
+    rs = det_info.subset(keys=group_by).distinct()
+    groups = [[b for a,b in r.items()] for r in rs]
+    return group_by, groups
+
+
+def get_preprocess_db(configs, group_by, logger=None):
+    """Get or create a ManifestDb found for a given
+    config.
+    
+    Arguments
+    ----------
+    configs : dict
+        The configuration dictionary.
+    group_by : list of str
+        The list of keys used to group the detectors.
+    logger : PythonLogger
+        Optional. Logger object.  If None, a new logger
+        is created.
+    
+    Returns
+    -------
+    db : ManifestDb
+        ManifestDb object
+    """
+    
+    if logger is None:
+        logger = init_logger("preprocess_db")
+    
+    if os.path.exists(configs['archive']['index']):
+        logger.info(f"Mapping {configs['archive']['index']} for the "
+                    "archive index.")
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+    else:
+        logger.info(f"Creating {configs['archive']['index']} for the "
+                     "archive index.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        for gb in group_by:
+            scheme.add_exact_match('dets:' + gb)
+        scheme.add_data_field('dataset')
+        db = core.metadata.ManifestDb(
+            configs['archive']['index'],
+            scheme=scheme
+        )
+    return db
+
+
+def swap_archive(config, fpath):
+    """Update the configuration archive policy filename,
+    create an output archive directory if it doesn't exist,
+    and return a copy of the config.
+    
+    Arguments
+    ----------
+    configs : dict
+        The configuration dictionary.
+    fpath : str
+        The archive policy filename to write to.
+    
+    Returns
+    -------
+    tc : dict
+        Copy of the configuration file with an updated archive policy filename
+    """
+    tc = copy.deepcopy(config)
+    tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
+    dname = os.path.dirname(tc['archive']['policy']['filename'])
+    if not(os.path.exists(dname)):
+        os.makedirs(dname)
+    return tc
+
 
 def load_preprocess_det_select(obs_id, configs, context=None,
                                dets=None, meta=None):
@@ -21,7 +271,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
     """
-    configs, context = sp_util.get_preprocess_context(configs, context)
+    configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
     
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
@@ -53,7 +303,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
     """
-    configs, context = sp_util.get_preprocess_context(configs, context)
+    configs, context = get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
                                       dets=dets, meta=meta)
 
@@ -65,7 +315,8 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         aman = context.get_obs(meta, no_signal=no_signal)
         pipe.run(aman, aman.preprocess)
         return aman
-    
+
+
 def preproc_or_load_group(obs_id, configs, dets, logger=None, 
                           context=None, overwrite=False):
     """
@@ -116,13 +367,13 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
     error = None
     outputs = {}
     if logger is None: 
-        logger = sp_util.init_logger("preprocess")
+        logger = init_logger("preprocess")
 
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups = sp_util.get_groups(obs_id, configs, context)
+    group_by, groups = get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
     for g in all_groups:
@@ -174,8 +425,8 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         newpath = f'temp/{obs_id}'
         for cg in cur_groups[0]:
             newpath += f'_{cg}'
-        temp_config = sp_util.swap_archive(configs, newpath+'.h5')
-        policy = sp_util.ArchivePolicy.from_params(temp_config['archive']['policy'])
+        temp_config = swap_archive(configs, newpath+'.h5')
+        policy = ArchivePolicy.from_params(temp_config['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
         for gb, g in zip(group_by, cur_groups[0]):
             if gb == 'detset':
@@ -194,6 +445,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
             db_data['dets:'+gb] = g
         outputs['db_data'] = db_data
         return error, outputs, aman
+
 
 def cleanup_mandb(error, outputs, configs, logger):
     """
@@ -225,7 +477,7 @@ def cleanup_mandb(error, outputs, configs, logger):
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
         group_by = [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
-        db = sp_util.get_preprocess_db(configs, group_by, logger)
+        db = get_preprocess_db(configs, group_by, logger)
         h5_path = os.path.relpath(dest_file,
                                   start=os.path.dirname(configs['archive']['index']))
 

@@ -29,7 +29,7 @@ def dummy_preproc(obs_id, group_list, logger,
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
-    group_by, groups = sp_util.get_groups(obs_id, configs, context)
+    group_by, groups = pp_util.get_groups(obs_id, configs, context)
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -37,7 +37,7 @@ def dummy_preproc(obs_id, group_list, logger,
                                      core.OffsetAxis('samps', 1000))
         proc_aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
         proc_aman.wrap_new('timestamps', ('samps',))[:] = (np.arange(proc_aman.samps.count) / 200)
-        policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+        policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
         for gb, g in zip(group_by, group):
             if gb == 'detset':
@@ -58,11 +58,11 @@ def dummy_preproc(obs_id, group_list, logger,
         return error, dest_file, outputs
 
 def preprocess_tod(obs_id, 
-                    configs, 
-                    verbosity=0,
-                    group_list=None, 
-                    overwrite=False,
-                    run_parallel=False):
+                   configs, 
+                   verbosity=0,
+                   group_list=None, 
+                   overwrite=False,
+                   run_parallel=False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
     the ManifestDb specified in the configs.   
@@ -90,7 +90,7 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
   
     context = core.Context(configs["context_file"])
-    group_by, groups = sp_util.get_groups(obs_id, configs, context)
+    group_by, groups = pp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -124,7 +124,7 @@ def preprocess_tod(obs_id,
             return
     
     if not(run_parallel):
-        db = sp_util.get_preprocess_db(configs, group_by)
+        db = pp_util.get_preprocess_db(configs, group_by)
     
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
 
@@ -161,7 +161,7 @@ def preprocess_tod(obs_id,
             n_fail += 1
             continue
 
-        policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+        policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
         for gb, g in zip(group_by, group):
             if gb == 'detset':
@@ -233,7 +233,7 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         into a modulated signal.
         If False, scan the simulation into demodulated timestreams.
     """
-    configs, context = sp_util.get_preprocess_context(configs, context)
+    configs, context = pp_util.get_preprocess_context(configs, context)
     meta = pp_util.load_preprocess_det_select(obs_id, configs=configs,
                                               context=context, dets=dets, meta=meta)
 
@@ -323,44 +323,16 @@ def main(
         verbosity: Optional[int] = None,
         nproc: Optional[int] = 4
  ):
-    configs, context = sp_util.get_preprocess_context(configs)
+    configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
     multiprocessing.set_start_method('spawn')
 
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
-
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
-
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tag.lower()
-            if '=' not in tag:
-                tags[i] += '=1'
-
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
+    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
+                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
+                                   planet_obs=planet_obs)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
@@ -373,7 +345,7 @@ def main(
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = sp_util.get_groups(obs["obs_id"], configs, context)
+            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
@@ -401,7 +373,7 @@ def main(
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                      group_list=r[1], verbosity=verbosity,
-                     configs=sp_util.swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
+                     configs=pp_util.swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
             logger.info('New future as_completed result')
@@ -418,7 +390,7 @@ def main(
             futures.remove(future)
 
             logger.info(f'Processing future result db_dataset: {db_datasets}')
-            db = sp_util.get_preprocess_db(configs, group_by)
+            db = pp_util.get_preprocess_db(configs, group_by)
             logger.info('Database connected')
             if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
                 nfile += 1
