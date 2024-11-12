@@ -1788,7 +1788,8 @@ class Imprinter:
             book.lvl2_deleted = True
             self.session.commit()
 
-    def delete_book_staged(self, book, override=False):
+    def delete_book_staged(self, book, verify_with_librarian=True,
+        check_level2=True, override=False):
         """Delete all files associated with a book
 
         Parameters
@@ -1796,12 +1797,34 @@ class Imprinter:
         book: Book object
 
         """
+        if book.status == DONE:
+            self.logger.debug(
+                f"Book {book.bid} has already had staged files deleted"
+            )
+            return 0
         if not override:
             if book.status < UPLOADED:
-                self.logger.error(
+                self.logger.warning(
                     "Cannot delete non-uploaded books without override"
                 )
-                return
+                return 1
+        if check_level2 and not book.lvl2_deleted:
+            self.logger.warning(
+                f"Level 2 data not deleted for {book.bid}, not deleting "
+                "staged"
+            )
+            return 2
+        if verify_with_librarian:
+            offsite = self.check_book_offsite(
+                book, n_copies=2, raise_on_error=False
+            )
+            if not offsite:
+                self.logger.warning(
+                    f"Book {book.bid} does not have 2 copies offsite,"
+                    " will not delete staged"
+                )
+                return 3
+
         # remove all files within the book
         book_path = self.get_book_abs_path(book)
         try:
@@ -1814,6 +1837,7 @@ class Imprinter:
             self.logger.error(traceback.format_exc())
         book.status = DONE
         self.session.commit()
+        return 0
 
     def find_missing_lvl2_obs_from_books(
         self, min_ctime, max_ctime

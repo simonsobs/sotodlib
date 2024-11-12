@@ -656,39 +656,12 @@ class DataPackaging:
         book_list = self.books_in_timecode(timecode, include_hk=include_hk)
         books_not_deleted = []
         for book in book_list:
-            if check_level2 and not book.lvl2_deleted:
-                self.logger.warning(
-                    f"Level 2 data not deleted for {book.bid}, not deleting "
-                    "staged"
-                )
-                books_not_deleted.append(book)
-                continue
-            if book.status == DONE:
-                self.logger.debug(
-                    f"Book {book.bid} has already had staged files deleted"
-                )
-                continue
-            if verify_with_librarian:
-                offsite = self.imprint.check_book_offsite(
-                    book, n_copies=2, raise_on_error=False
-                )
-                if not offsite:
-                    self.logger.info(
-                        f"Book {book.bid} does not have 2 copies offsite,"
-                        " will not delete staged"
-                    )
-                    books_not_deleted.append(book)
-                    continue
-            else:
-                if book.status < UPLOADED:
-                    self.logger.info(
-                        f"Book {book.bid} status is not uploaded,"
-                        " will not delete level 2"
-                    )
-                    books_not_deleted.append(book)
-                    continue
-            self.imprint.delete_book_staged(book)
-        
+            stat = self.imprint.delete_book_staged(
+                book, check_level2=check_level2, 
+                verify_with_librarian=verify_with_librarian
+            )
+            if stat > 0:
+                books_not_deleted.append(book)        
         # cleanup
         for tube in self.imprint.tubes:
             for btype in ['obs', 'oper']:
