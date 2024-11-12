@@ -241,7 +241,7 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
     """
     if stopped_time is None: stopped_time = 10
 
-    if threshosteps_thresholdslds is None:
+    if steps_thresholds is None:
         steps_thresholds = (10, 300) # upper bound of the static, lower bound of its diff
     cdiff0 = np.where(_detect_motion(tod.wg.instrument.enc_rad/wg_counts2rad) < steps_thresholds[0], 1, 0)
     cdiff1 = np.where(_detect_motion(cdiff0, flag=1) > steps_thresholds[1], 0, 1)
@@ -796,7 +796,7 @@ def _fit_time_const(ref_hwp_speed, normalized_angle, angle_err):
     return np.array(fres), np.array(ferr), np.array(fchi2)
 
 
-def get_tc_result(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25), is_wrap=True):
+def get_time_constant(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25), is_wrap=True):
     """
     function to get the values of time constants measured by HWP/wire grid.
 
