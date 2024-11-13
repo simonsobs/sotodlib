@@ -522,11 +522,10 @@ def make_demod_map(context, obslist, noise_model, info,
     outputs : list
         List of outputs from preprocess database. To be used in cleanup_mandb.
     """
-    from .. import site_pipeline
     from ..preprocess import preprocess_util
     context = core.Context(context)
     if L is None:
-        L = site_pipeline.util.init_logger("Demod filterbin mapmaking")
+        L = preprocess_util.init_logger("Demod filterbin mapmaking")
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     mapmaker = setup_demod_map(noise_model, shape=shape, wcs=wcs, nside=nside,
