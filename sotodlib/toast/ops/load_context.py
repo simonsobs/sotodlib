@@ -1047,7 +1047,16 @@ class LoadContext(Operator):
                 flag_mask=mask,
             )
 
-        # Original wafer data no longer needed
+        # Original wafer data no longer needed.  AxisManager does not seem to
+        # have a clean destructor, so do it manually.
+        def _ax_del_children(ax):
+            for k in list(ax.keys()):
+                if isinstance(ax[k], AxisManager):
+                    _ax_del_children(ax[k])
+                del ax[k]
+        for wfname in list(axwafers.keys()):
+            _ax_del_children(axwafers[wfname])
+            del axwafers[wfname]
         del axwafers
 
         log.debug_rank(

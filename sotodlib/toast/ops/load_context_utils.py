@@ -436,11 +436,7 @@ def distribute_detector_data(
                 # Does the axis manager have a truncated number of samples?
                 restricted_samps = axwafers[wafer][axis_samples].count
                 if restricted_samps != obs.n_local_samples:
-                    ax_shift = (obs.n_local_samples - restricted_samps) // 2
-                    if 2 * ax_shift + restricted_samps != obs.n_local_samples:
-                        msg = f"{obs.name}: wafer {wafer}, AxisManager {axfield}"
-                        msg += " has a non-symmetric truncation in samples"
-                        log.warning(msg)
+                    ax_shift = axwafers[wafer][axis_samples].offset
                 else:
                     ax_shift = 0
 
