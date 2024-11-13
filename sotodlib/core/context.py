@@ -5,8 +5,6 @@ import importlib
 import logging
 import numpy as np
 
-from typing import Union, Dict, Tuple, List
-
 from . import metadata
 from .util import tag_substr
 from .axisman import AxisManager, OffsetAxis, AxisInterface
