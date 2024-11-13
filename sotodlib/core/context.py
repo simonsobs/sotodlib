@@ -145,6 +145,10 @@ class Context(odict):
                     logger.error(f'DB failure when loading {key} from {self[key]} -> {db_file}\n')
                     raise e
                 setattr(self, key, db)
+        # Special overrides.
+        if self.get('obsfiledb.prefix'):
+            self.obsfiledb.prefix = self['obsfiledb.prefix']
+
         # The metadata loader.
         if load_list == 'all' or 'loader' in load_list:
             self.loader \

@@ -314,6 +314,17 @@ def identity_filter(freqs, tod, invert=False):
     return np.ones(len(freqs))
 
 @fft_filter
+def gain(freqs, tod, gain=1.):
+    """Filter that simply applies a simple gain (which could be complex)
+    to the entire spectrum.
+
+    This can be used (with gain=1) as an identity filter for testing
+    the filter preprocessing.
+
+    """
+    return gain * np.ones(len(freqs))
+
+@fft_filter
 def low_pass_butter4(freqs, tod, fc):
     """4th-order low-pass filter with f3db at fc (Hz).
 
@@ -510,6 +521,9 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
                                              sub_iir_params['fscale'] != _fscale,])):
                             raise ValueError('iir parameters are not uniform.')
             iir_params = sub_iir_params
+            # check if iir_params from axis manager are None
+            if iir_params['a'] is None or iir_params['b'] is None:
+                raise ValueError('axis manager iir parameters are empty')
         try:
             a = iir_params['a']
             b = iir_params['b']

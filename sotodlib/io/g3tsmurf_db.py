@@ -49,7 +49,12 @@ class TimeCodes(Base):
     """
 
     __tablename__ = "time_codes"
-    __table_args__ = (db.UniqueConstraint("stream_id", "suprsync_type", "timecode"),)
+    __table_args__ = (db.UniqueConstraint(
+        "stream_id", 
+        "suprsync_type", 
+        "timecode",
+        "agent",
+    ),)
     id = db.Column(db.Integer, primary_key=True)
     stream_id = db.Column(db.String)
     suprsync_type = db.Column(db.Integer)

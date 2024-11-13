@@ -5,6 +5,8 @@ import logging
 import time
 import sys
 import argparse
+import yaml
+import numpy as np
 
 from astropy import units as u
 
@@ -304,3 +306,145 @@ def main_launcher(main_func, parser_func, args=None):
     if args is None:
         args = sys.argv[1:]
     return main_func(**vars(parser_func().parse_args(args=args)))
+
+def get_preprocess_context(configs, context=None):
+    """Load the provided config file and context file. To be used in
+    ``preprocess_*.py`` site pipeline scripts.
+
+    Parameters
+    ----------
+    configs : str or dict
+        The configuration file or dictionary.
+    context : str or core.Context, optional
+        The context to use. If None, it is created from the configuration file.
+
+    Returns
+    -------
+    configs : dict
+        The configuration dictionary.
+    context : core.Context
+        The context file.
+    """
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+    
+    if context is None:
+        context = core.Context(configs["context_file"])
+        
+    if type(context) == str:
+        context = core.Context(context)
+    
+    # if context doesn't have the preprocess archive it in add it
+    # allows us to use same context before and after calculations
+    found=False
+    if context.get("metadata") is None:
+        context["metadata"] = []
+
+    for key in context.get("metadata"):
+        if key.get("name") == "preprocess":
+            found=True
+            break
+    if not found:
+        context["metadata"].append( 
+            {
+                "db" : configs["archive"]["index"],
+                "name" : "preprocess"
+            }
+        )
+    return configs, context
+
+def get_groups(obs_id, configs, context):
+    """Get subobs group method and groups. To be used in
+    ``preprocess_*.py`` site pipeline scripts.
+
+    Parameters
+    ----------
+    obs_id : str
+        The obsid.
+    configs : dict
+        The configuration dictionary.
+    context : core.Context
+        The Context file to use.
+
+    Returns
+    -------
+    group_by : list of str
+        The list of keys used to group the detectors.
+    groups : list of list of int
+        The list of groups of detectors.
+    """
+    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+    for i, gb in enumerate(group_by):
+        if gb.startswith('dets:'):
+            group_by[i] = gb.split(':',1)[1]
+
+        if (gb == 'detset') and (len(group_by) == 1):
+            groups = context.obsfiledb.get_detsets(obs_id)
+            return group_by, [[g] for g in groups]
+        
+    det_info = context.get_det_info(obs_id)
+    rs = det_info.subset(keys=group_by).distinct()
+    groups = [[b for a,b in r.items()] for r in rs]
+    return group_by, groups
+
+def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None, 
+                update_delay=None, tags=None, planet_obs=False):
+    """Query the obs database with a given query.
+    
+    Parameters
+    ----------
+    context : core.Context
+        The context to use for the obsdb.
+    query : str, optional
+        A query string for the obsdb.
+    obs_id : str, optional
+        The specific obsid to retrieve.
+    min_ctime : int, optional
+        The minimum ctime of obs to retrieve.
+    max_ctime : int, optional
+        The maximum ctime of obs to retrieve.
+    update_delay : int, optional
+        The number of days to subtract from the current time to set the minimum ctime.
+    tags : list of str, optional
+        A list of tags to use for the query.
+    planet_obs : bool, optional
+        If True, format query and tags for planet obs.
+    
+    Returns
+    -------
+    obs_list : list
+        The list of obs found from the query.
+    """
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) - update_delay*86400
+
+    if obs_id is not None:
+        tot_query = f"obs_id=='{obs_id}'"
+    else:
+        tot_query = "and "
+        if min_ctime is not None:
+            tot_query += f"timestamp>={min_ctime} and "
+        if max_ctime is not None:
+            tot_query += f"timestamp<={max_ctime} and "
+        if query is not None:
+            tot_query += query + " and "
+        tot_query = tot_query[4:-4]
+        if tot_query=="":
+            tot_query="1"
+
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tag.lower()
+            if '=' not in tag:
+                tags[i] += '=1'
+
+    if planet_obs:
+        obs_list = []
+        for tag in tags:
+            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+    else:
+        obs_list = context.obsdb.query(tot_query, tags=tags)
+    
+    return obs_list

@@ -447,9 +447,10 @@ def preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
-                  Path(configs["lmsi_config"]),
-                  Path(os.path.join(new_plots, 'index.html')))
+        if os.path.exists(new_plots):
+            lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
+                      Path(configs["lmsi_config"]),
+                      Path(os.path.join(new_plots, 'index.html')))
     
     if run_parallel:
         if n_fail == len(groups):

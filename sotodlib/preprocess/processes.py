@@ -98,8 +98,9 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            n_pieces: 10
+            t_piece: 100
           save: True
+          plot: True
           select:
             kind: "any"
     
@@ -133,13 +134,24 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             proc_aman = meta.preprocess
         if self.select_cfgs["kind"] == "any":
             keep = ~has_any_cuts(proc_aman.trends.trend_flags)
-        elif self.select_cfgs == "all":
+        elif self.select_cfgs["kind"] == "all":
             keep = ~has_all_cut(proc_aman.trends.trend_flags)
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
                                 "understood. Expect 'any' or 'all'")
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_trending_flags
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
 
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
@@ -161,6 +173,8 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
           hp_fc: 1
           n_sig: 10
         save: True
+        plot:
+            plot_ds_factor: 50
         select:
           max_n_glitch: 10
           sig_glitch: 10
@@ -197,6 +211,19 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            plot_signal_diff(aman, proc_aman.glitches, flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
+                             plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
+            plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
 
 class FixJumps(_Preprocess):
@@ -240,11 +267,15 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
     Example config block::
 
       - name: "jumps"
-        signal: "hwpss_remove"
         calc:
           function: "twopi_jumps"
         save:
           jumps_name: "jumps_2pi"
+        plot:
+            plot_ds_factor: 50
+        select:
+            max_n_jumps: 5
+        
 
     .. autofunction:: sotodlib.tod_ops.jumps.find_jumps
     """
@@ -294,6 +325,20 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
+
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal_diff, plot_flag_stats
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            name = self.save_cfgs.get('jumps_name', 'jumps')
+            plot_signal_diff(aman, proc_aman[name], flag_type='jumps', flag_threshold=self.select_cfgs.get("max_n_jumps", 5), 
+                             plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
+            plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
@@ -697,6 +742,8 @@ class GlitchFill(_Preprocess):
           nbuf: 10
           use_pca: False
           modes: 1
+          in_place: True
+          wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
@@ -1068,7 +1115,10 @@ class PCARelCal(_Preprocess):
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
+            if isinstance(self.calc_cfgs, bool):
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal)
+            else:
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
 
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
@@ -1115,6 +1165,7 @@ class PCARelCal(_Preprocess):
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1208,6 +1259,7 @@ class EstimateT2P(_Preprocess):
             T_sig_name: 'dsT'
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
+            joint_fit: True
             trim_samps: 2000
             lpf_cfgs:
               type: 'sine2'
