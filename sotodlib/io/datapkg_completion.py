@@ -374,7 +374,11 @@ class DataPackaging:
                 self.logger.info(
                     f"{len(failed)} books failed to bind. trying to autofix"
                 )
-                autofix_failed_books(self.imprint)
+                autofix_failed_books(
+                    self.imprint,
+                    min_ctime=min_ctime,
+                    max_ctime=max_ctime,
+                )
         
         is_final, reason = utils.get_timecode_final(self.imprint, timecode)
         if not is_final:

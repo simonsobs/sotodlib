@@ -1706,7 +1706,8 @@ class Imprinter:
             basepath = os.path.join(
                 self.lvl2_data_root, 'smurf', str(tcode)
             )
-            shutil.rmtree(basepath)
+            if not dry_run:
+                shutil.rmtree(basepath)
 
         elif book.type == "hk":
             HK = self.get_g3thk()

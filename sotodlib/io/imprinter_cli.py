@@ -13,9 +13,10 @@ timestreams into the stray books), or do nothing.
 
 import os
 import argparse
+import datetime as dt
 from typing import Optional
 
-from sotodlib.io.imprinter import Imprinter, Books
+from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
 
 def main():
@@ -110,9 +111,21 @@ def _last_line(book):
         if len(s) > 0:
             return s
 
-def autofix_failed_books(imprint:Imprinter, test_mode=False):
-    fail_list = imprint.get_failed_books()
-    for book in fail_list:
+def autofix_failed_books(
+    imprint:Imprinter, test_mode=False, min_ctime=None, max_ctime=None,
+):
+    session = imprint.get_session()
+    failed = session.query(Books).filter(Books.status == FAILED)
+    if min_ctime is not None:
+        failed = failed.filter(
+            Books.start >= dt.datetime.utcfromtimestamp(min_ctime),
+        )
+    if max_ctime is not None:
+        failed = failed.filter(
+            Books.start <= dt.datetime.utcfromtimestamp(max_ctime),
+        )
+    failed = failed.all()
+    for book in failed:
         print("-----------------------------------------------------")
         print(f"On book {book.bid}. Has error:\n{_last_line(book)}")
         if 'SECOND-FAIL' in book.message:
