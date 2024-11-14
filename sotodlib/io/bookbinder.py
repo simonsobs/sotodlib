@@ -1222,9 +1222,12 @@ class TimeCodeBinder:
     def bind(self, pbar=False):
         if self.compress_output:
             if self.file_list is None:
-                self.file_list = walk_files(self.indir, include_suprsync=False)
+                self.file_list = walk_files(self.indir, include_suprsync=True)
                 ignore = shutil.ignore_patterns(*self.ignore_pattern)
-                self.file_list = sorted(ignore("", self.file_list))
+                to_ignore = ignore("", self.file_list)
+                self.file_list = sorted(
+                    [f for f in self.file_list if f not in to_ignore]
+                )
             with ZipFile(self.outdir, mode='x') as zf:
                 for f in self.file_list:
                     relpath = os.path.relpath(f, self.indir)
