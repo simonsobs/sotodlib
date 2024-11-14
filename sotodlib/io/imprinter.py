@@ -1804,7 +1804,7 @@ class Imprinter:
         ).all()]
         missing_obs = g3session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
-            G3tObservations.timestamp <= max_ctime,
+            G3tObservations.timestamp < max_ctime,
             G3tObservations.stream_id.in_(self.all_slots),
             G3tObservations.obs_id.not_in(registered_obs)
         ).all()

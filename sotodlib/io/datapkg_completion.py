@@ -189,10 +189,13 @@ class DataPackaging:
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
 
-        if not os.path.exists(stc) and not os.path.exists(ttc):
-            self.logger.debug(f"TC {timecode}: No level 2 folders")
-            has_smurf, has_timestreams = False, False
-        
+        if not os.path.exists(stc):
+            self.logger.debug(f"TC {timecode}: No level 2 smurf folder")
+            has_smurf = False
+        if not os.path.exists(ttc):
+            self.logger.debug(f"TC {timecode}: No level 2 timestream folder")
+            has_timestreams = False
+
         if os.path.exists(ttc) and just_suprsync(ttc):
             self.logger.info(
                 f"TC {timecode}: Level 2 timestreams is only suprsync"
@@ -324,8 +327,8 @@ class DataPackaging:
         ) 
         if add_new_detector_books and len(missing) > 0:
             self.logger.info(
-                f"{len(missing)} lvl2 observations are not registered in books. "
-                "Trying to register them"
+                f"{len(missing)} lvl2 observations are not registered in books."
+                " Trying to register them"
             )
             ## add time to max_ctime to account for observations on the edge
             self.imprint.update_bookdb_from_g3tsmurf(
