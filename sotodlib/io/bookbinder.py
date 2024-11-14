@@ -13,7 +13,12 @@ import os
 import logging
 import sys
 import shutil
+import yaml
+import datetime as dt
+from zipfile import ZipFile
+import sotodlib
 from sotodlib.site_pipeline.util import init_logger
+from .datapkg_utils import walk_files
 
 
 log = logging.getLogger('bookbinder')
@@ -72,13 +77,11 @@ def setup_logger(logfile=None):
 
     return log
 
-
 def get_frame_iter(files):
     """
     Returns a continuous iterator over frames for a list of files.
     """
     return itertools.chain(*[core.G3File(f) for f in files])
-
 
 def close_writer(writer):
     """
@@ -88,7 +91,6 @@ def close_writer(writer):
     if writer is None:
         return
     writer(core.G3Frame(core.G3FrameType.EndProcessing))
-
 
 def next_scan(it):
     """
@@ -101,7 +103,6 @@ def next_scan(it):
             return frame, interm_frames
         interm_frames.append(frame)
     return None, interm_frames
-
 
 class HkDataField:
     """
@@ -491,7 +492,6 @@ class AncilProcessor:
             if k not in frame:
                 frame[k] = np.nan
 
-
 class SmurfStreamProcessor:
     def __init__(self, obs_id, files, book_id, readout_ids,
                  log=None, allow_bad_timing=False):
@@ -768,10 +768,10 @@ class SmurfStreamProcessor:
         if pbar.n >= pbar.total:
             pbar.close()
 
-
 class BookBinder:
     """
-    Class for combining smurf and hk L2 data to create books.
+    Class for combining smurf and hk L2 data to create books containing detector
+    timestreams.
 
     Parameters
     ----------
@@ -834,6 +834,8 @@ class BookBinder:
         
         self.obsdb = obsdb
         self.outdir = outdir
+
+        assert book.schema==0, "obs/oper books only have schema=0"
 
         self.max_samps_per_frame = max_samps_per_frame
         self.max_file_size = max_file_size
@@ -994,6 +996,34 @@ class BookBinder:
 
         self.meta_files = meta_files
 
+    def write_M_files(self, telescope, tube_config):
+        # write M_book file
+        m_book_file = os.path.join(self.outdir, "M_book.yaml")
+        book_meta = {}
+        book_meta["book"] = {
+            "type": self.book.type,
+            "schema_version": self.book.schema,
+            "book_id": self.book.bid,
+            "finalized_at": dt.datetime.utcnow().isoformat(),
+        }
+        book_meta["bookbinder"] = {
+            "codebase": sotodlib.__file__,
+            "version": sotodlib.__version__,
+            # leaving this in but KH doesn't know what it's supposed to be for
+            "context": "unknown", 
+        }
+        with open(m_book_file, "w") as f:
+            yaml.dump(book_meta, f)
+        
+        mfile = os.path.join(self.outdir, "M_index.yaml")
+        with open(mfile, "w") as f:
+            yaml.dump(
+                self.get_metadata(
+                    telescope=telescope,
+                    tube_config=tube_config,
+                ), f
+            )
+
     def get_metadata(self, telescope=None, tube_config={}):
         """
         Returns metadata dict for the book
@@ -1118,6 +1148,105 @@ class BookBinder:
         self.log.info("Finished binding data. Exiting.")
         return True
 
+class TimeCodeBinder:
+    """Class for building the timecode based books, smurf, stray, and hk books. 
+    These books are built primarily just by copying specified files from level 
+    2 locations to new locations at level 2.
+    """
+
+    def __init__(
+        self, book, timecode, indir, outdir, file_list=None, 
+        ignore_pattern=None,
+    ):
+        self.book = book
+        self.timecode = timecode
+        self.indir = indir
+        self.outdir = outdir
+        self.file_list = file_list
+        if ignore_pattern is not None:
+            self.ignore_pattern = ignore_pattern
+        else:
+            self.ignore_pattern = []
+        
+        if book.type == 'smurf' and book.schema > 0:
+            self.compress_output = True
+        else:
+            self.compress_output = False    
+
+    def get_metadata(self, telescope=None, tube_config={}):
+        return {
+            "book_id": self.book.bid,
+            # dummy start and stop times
+            "start_time": float(self.timecode) * 1e5,
+            "stop_time": (float(self.timecode) + 1) * 1e5,
+            "telescope": telescope,
+            "type": self.book.type,
+        }
+    
+    def write_M_files(self, telescope, tube_config):
+        # write M_book file
+        
+        book_meta = {}
+        book_meta["book"] = {
+            "type": self.book.type,
+            "schema_version": self.book.schema,
+            "book_id": self.book.bid,
+            "finalized_at": dt.datetime.utcnow().isoformat(),
+        }
+        book_meta["bookbinder"] = {
+            "codebase": sotodlib.__file__,
+            "version": sotodlib.__version__,
+            # leaving this in but KH doesn't know what it's supposed to be for
+            "context": "unknown", 
+        }
+        if self.compress_output:
+            with ZipFile(self.outdir, mode='a') as zf:
+                zf.writestr("M_book.yaml", yaml.dump(book_meta))
+        else:
+            m_book_file = os.path.join(self.outdir, "M_book.yaml")
+            with open(m_book_file, "w") as f:
+                yaml.dump(book_meta, f)
+        
+        index = self.get_metadata(
+            telescope=telescope,
+            tube_config=tube_config,
+        )
+        if self.compress_output:
+            with ZipFile(self.outdir, mode='a') as zf:
+                zf.writestr("M_index.yaml", yaml.dump(index))
+        else:
+            mfile = os.path.join(self.outdir, "M_index.yaml")
+            with open(mfile, "w") as f:
+                yaml.dump(index, f)
+
+    def bind(self, pbar=False):
+        if self.compress_output:
+            if self.file_list is None:
+                self.file_list = walk_files(self.indir, include_suprsync=False)
+                ignore = shutil.ignore_patterns(*self.ignore_pattern)
+                self.file_list = sorted(ignore("", self.file_list))
+            with ZipFile(self.outdir, mode='x') as zf:
+                for f in self.file_list:
+                    relpath = os.path.relpath(f, self.indir)
+                    zf.write(f, arcname=relpath)
+        elif self.file_list is None:
+            shutil.copytree(
+                self.indir,
+                self.outdir,
+                ignore=shutil.ignore_patterns(
+                    *self.ignore_pattern,
+                ),
+            )
+        else:
+            if not os.path.exists(self.outdir):
+                os.makedirs(self.outdir)
+            for f in self.file_list:
+                relpath = os.path.relpath(f, self.indir)
+                path = os.path.join(self.outdir, relpath)
+                base, _ = os.path.split(path)
+                if not os.path.exists(base):
+                    os.makedirs(base)
+                shutil.copy(f, os.path.join(self.outdir, relpath))
 
 def fill_time_gaps(ts):
     """
@@ -1159,7 +1288,6 @@ def fill_time_gaps(ts):
 
     return new_ts, ~m
 
-
 _primary_idx_map = {}
 def get_frame_times(frame, allow_bad_timing=False):
     """
@@ -1199,7 +1327,6 @@ def get_frame_times(frame, allow_bad_timing=False):
         ## don't change this error message. used in Imprinter CLI
         raise TimingSystemOff("Timing counters not incrementing")
 
-
 def split_ts_bits(c):
     """
     Split up 64 bit to 2x32 bit
@@ -1210,7 +1337,6 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
-
 def counters_to_timestamps(c0, c2):
     s, ns = split_ts_bits(c2)
 
@@ -1219,7 +1345,6 @@ def counters_to_timestamps(c0, c2):
     c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
     ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
     return ts
-
 
 def find_ref_idxs(refs, vs):
     """
@@ -1399,7 +1524,6 @@ def find_frame_splits(ancil, t0=None, t1=None):
     )
     idxs = locate_scan_events(az.times[msk], az.data[msk], filter_window=100)
     return az.times[msk][idxs]
-
 
 def get_smurf_files(obs, meta_path, all_files=False):
     """

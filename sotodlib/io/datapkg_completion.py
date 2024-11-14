@@ -7,7 +7,6 @@ import datetime as dt
 from sqlalchemy import or_, and_, not_
 from collections import OrderedDict
 
-import sotodlib.io.load_smurf as ls
 from .load_smurf import (
     TimeCodes,
     SupRsyncType,
@@ -28,6 +27,7 @@ from .imprinter import (
 )
 import sotodlib.io.imprinter_utils as utils
 from .imprinter_cli import autofix_failed_books
+from .datapkg_utils import walk_files, just_suprsync
 
 from .bookbinder import log as book_logger
 
@@ -88,12 +88,12 @@ class DataPackaging:
         flist = []
         if self.imprint.build_det:
             stc = os.path.join(self.SMURF.meta_path, str(timecode))
-            flist.extend(ls.walk_files(stc, include_suprsync=True))
+            flist.extend(walk_files(stc, include_suprsync=True))
             ttc = os.path.join(self.SMURF.archive_path, str(timecode))
-            flist.extend(ls.walk_files(ttc, include_suprsync=True))
+            flist.extend(walk_files(ttc, include_suprsync=True))
         if include_hk:
             htc = os.path.join(self.HK.hkarchive_path, str(timecode))
-            flist.extend(ls.walk_files(htc, include_suprsync=True))
+            flist.extend(walk_files(htc, include_suprsync=True))
         return flist
 
     def get_suprsync_files(self, timecode):
@@ -189,12 +189,12 @@ class DataPackaging:
             self.logger.debug(f"TC {timecode}: No level 2 folders")
             has_smurf, has_timestreams = False, False
         
-        if os.path.exists(ttc) and ls.just_suprsync(ttc):
+        if os.path.exists(ttc) and just_suprsync(ttc):
             self.logger.info(
                 f"TC {timecode}: Level 2 timestreams is only suprsync"
             )
             has_timestreams = False
-        if os.path.exists(stc) and ls.just_suprsync(stc):
+        if os.path.exists(stc) and just_suprsync(stc):
             self.logger.info(f"TC {timecode}: Level 2 smurf is only suprsync")
             has_smurf = False
         
@@ -707,9 +707,9 @@ class DataPackaging:
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
 
         if os.path.exists(stc): 
-            if len(os.listdir(stc)) == 0 or ls.just_suprsync(stc):
+            if len(os.listdir(stc)) == 0 or just_suprsync(stc):
                 shutil.rmtree(stc)
         if os.path.exists(ttc):
-            if len(os.listdir(ttc)) == 0 or ls.just_suprsync(ttc):
+            if len(os.listdir(ttc)) == 0 or just_suprsync(ttc):
                 shutil.rmtree(ttc)
         return check

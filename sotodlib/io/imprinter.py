@@ -17,7 +17,7 @@ import so3g
 from spt3g import core
 
 import sotodlib
-from .bookbinder import BookBinder
+from .bookbinder import BookBinder, TimeCodeBinder
 from .load_smurf import (
     G3tSmurf,
     Observations as G3tObservations,
@@ -134,6 +134,7 @@ class Books(Base):
     timing = db.Column(db.Boolean)
     path = db.Column(db.String)
     lvl2_deleted = db.Column(db.Boolean, default=False)
+    schema = db.Column(db.Integer, default=0)
 
     def __repr__(self):
         return f"<Book: {self.bid}>"
@@ -375,6 +376,7 @@ class Imprinter:
         if bid is None:
             bid = obsset.get_id()
         assert obsset.mode is not None
+        assert obsset.mode in ['obs','oper']
         # check whether book exists in the database
         if self.book_exists(bid, session=session):
             raise BookExistsError(f"Book {bid} already exists in the database")
@@ -410,6 +412,7 @@ class Imprinter:
                 [s for s in obsset.slots if obsset.contains_stream(s)]
             ),  # not worth having a extra table
             timing=timing_on,
+            schema=0,
         )
         book.path = self.get_book_path(book)
 
@@ -474,6 +477,7 @@ class Imprinter:
                 start=dt.datetime.utcfromtimestamp(int(ctime) * 1e5),
                 stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
                 tel_tube=self.daq_node,  
+                schema=0,
             )
             book.path = self.get_book_path(book)
             session.add(book)
@@ -556,6 +560,7 @@ class Imprinter:
                     tel_tube=self.daq_node,
                     start=book_start,
                     stop=book_stop,
+                    schema=1,
                 )
                 smurf_book.path = self.get_book_path(smurf_book)
                 session.add(smurf_book)
@@ -597,6 +602,7 @@ class Imprinter:
                     tel_tube=self.daq_node,
                     start=book_start,
                     stop=book_stop,
+                    schema=0,
                 )
                 stray_book.path = self.get_book_path(stray_book)            
                 self.logger.info(f"registering {book_id}")
@@ -622,8 +628,10 @@ class Imprinter:
             root = op.join(self.lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            odir = op.join(book.tel_tube, book.type)
-            return os.path.join(odir, book.bid)
+            odir = op.join(book.tel_tube, book.type, book.bid)
+            if book.type == 'smurf' and book.schema > 0:
+                return odir + '.zip'
+            return odir
         elif book.type in ["stray"]:
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
@@ -672,85 +680,42 @@ class Imprinter:
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
             root = op.join(self.lvl2_data_root, book.type)
-            first5 = book.bid.split("_")[1]
-            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            book_path_src = op.join(root, first5)
+            timecode = book.bid.split("_")[1]
+            assert timecode.isdigit(), f"timecode of {book.bid} is not a digit"
+            book_path_src = op.join(root, timecode)
 
             # get target directory for hk book
-            odir = op.join(self.output_root, book.tel_tube, book.type)
+            book_path_tgt = self.get_book_abs_path(book)
+            odir, _ = op.split(book_path_tgt)
             if not op.exists(odir):
                 os.makedirs(odir)
-            book_path_tgt = os.path.join(odir, book.bid)
-
-            class _FakeBinder:  # dummy class to mimic baseline bookbinder
-                def __init__(self, indir, outdir):
-                    self.indir = indir
-                    self.outdir = outdir
-
-                def get_metadata(self, telescope=None, tube_config={}):
-                    return {
-                        "book_id": book.bid,
-                        # dummy start and stop times
-                        "start_time": float(first5) * 1e5,
-                        "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": telescope,
-                        "type": book.type,
-                    }
-
-                def bind(self, pbar=False):
-                    shutil.copytree(
-                        self.indir,
-                        self.outdir,
-                        ignore=shutil.ignore_patterns(
-                           *SMURF_EXCLUDE_PATTERNS
-                        ),
-                    )
-
-            return _FakeBinder(book_path_src, book_path_tgt)
+            
+            bookbinder = TimeCodeBinder(
+                book, timecode, book_path_src, book_path_tgt,
+                ignore_pattern=SMURF_EXCLUDE_PATTERNS,
+            )
+            return bookbinder
 
         elif book.type in ["stray"]:
             flist = self.get_files_for_book(book)
 
             # get source directory for stray book
             root = op.join(self.lvl2_data_root, "timestreams")
-            first5 = book.bid.split("_")[1]
-            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            book_path_src = op.join(root, first5)
+            timecode = book.bid.split("_")[1]
+            assert timecode.isdigit(), f"timecode of {book.bid} is not a digit"
+            book_path_src = op.join(root, timecode)
 
-            # get target directory for hk book
-            odir = op.join(self.output_root, book.tel_tube, book.type)
+           # get target directory for book
+            book_path_tgt = self.get_book_abs_path(book)
+            odir, _ = op.split(book_path_tgt)
             if not op.exists(odir):
                 os.makedirs(odir)
-            book_path_tgt = os.path.join(odir, book.bid)
-
-            class _FakeBinder:  # dummy class to mimic baseline bookbinder
-                def __init__(self, indir, outdir, file_list):
-                    self.indir = indir
-                    self.outdir = outdir
-                    self.file_list = file_list
-
-                def get_metadata(self, telescope=None, tube_config={}):
-                    return {
-                        "book_id": book.bid,
-                        # dummy start and stop times
-                        "start_time": float(first5) * 1e5,
-                        "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": telescope,
-                        "type": book.type,
-                    }
-
-                def bind(self, pbar=False):
-                    if not os.path.exists(self.outdir):
-                        os.makedirs(self.outdir)
-                    for f in self.file_list:
-                        relpath = os.path.relpath(f, self.indir)
-                        path = os.path.join(self.outdir, relpath)
-                        base, _ = os.path.split(path)
-                        if not os.path.exists(base):
-                            os.makedirs(base)
-                        shutil.copy(f, os.path.join(self.outdir, relpath))
-
-            return _FakeBinder(book_path_src, book_path_tgt, flist)
+                    
+            bookbinder = TimeCodeBinder(
+                book, timecode, book_path_src, book_path_tgt, 
+                file_list=flist,
+            )
+            return bookbinder
         else:
             raise NotImplementedError(
                 f"binder for book type {book.type} not implemented"
@@ -828,38 +793,13 @@ class Imprinter:
                 require_hwp=require_hwp,
             )
             binder.bind(pbar=pbar)
-
-            # write M_book file
-            m_book_file = os.path.join(binder.outdir, "M_book.yaml")
-            book_meta = {}
-            book_meta["book"] = {
-                "type": book.type,
-                "schema_version": 0,
-                "book_id": book.bid,
-                "finalized_at": dt.datetime.utcnow().isoformat(),
-            }
-            book_meta["bookbinder"] = {
-                "codebase": sotodlib.__file__,
-                "version": sotodlib.__version__,
-                "context": self.config.get("context", "unknown"),
-            }
-            with open(m_book_file, "w") as f:
-                yaml.dump(book_meta, f)
-
+            
             # write M_index file
             if book.type in ['obs', 'oper']:
                 tc = self.tube_configs[book.tel_tube]
             else:
                 tc = {}
-            
-            mfile = os.path.join(binder.outdir, "M_index.yaml")
-            with open(mfile, "w") as f:
-                yaml.dump(
-                    binder.get_metadata(
-                        telescope=self.daq_node,
-                        tube_config = tc,
-                    ), f
-                )
+            binder.write_M_files(self.daq_node, tc)
 
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly

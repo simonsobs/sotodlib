@@ -80,7 +80,12 @@ def set_book_rebind(imprint, book, update_level2=False):
 
     if op.exists(book_dir):
         print(f"Removing all files from {book_dir}")
-        shutil.rmtree(book_dir)
+        if os.path.isfile(book_dir):
+            os.remove(book_dir)
+        elif os.path.isdir(book_dir):
+            shutil.rmtree(book_dir)
+        else:
+            print("How is this not a file or directory")
     else: 
         print(f"Found no files in {book_dir} to remove")
 

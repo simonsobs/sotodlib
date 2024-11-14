@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 from .. import core
 from . import load as io_load
-from .datapkg_utils import load_configs
+from .datapkg_utils import load_configs, walk_files, just_suprsync
 from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 from .g3thk_utils import pysmurf_monitor_control_list
 
@@ -1793,7 +1793,6 @@ class G3tSmurf:
         db_list = q.all()
         return [f.name for f in db_list if f.obs_id is None]
         
-
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look
         and act like core.metadata.obsfiledb.lookup_file.
@@ -1978,38 +1977,6 @@ class G3tSmurf:
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
-def just_suprsync(path):
-    """check if timecode folder only has suprsync folder in it
-    """
-    flist = os.listdir( path )
-    if len(flist) == 1 and flist[0] == "suprsync":
-        return True
-    return False
-
-def walk_files(path, include_suprsync=False):
-    """get a list of the files in a timecode folder, optional flag to ignore
-    suprsync files
-    
-    Arguments
-    ----------
-    path: path to a level 2 timecode folder, either smurf or timestreams
-    include_suprsync: optional, bool
-        if true, includes the suprsync files in the returned list
-
-    Returns
-    --------
-    files (list): list of the absolute paths to all files in a timecode folder
-    """
-    if not os.path.exists(path):
-        return []
-    flist = []
-    for root, _, files in os.walk(path):
-        if not include_suprsync and 'suprsync' in root:
-            continue
-        for f in files:
-            flist.append( os.path.join(path, root, f))
-    return flist
-
 def dump_DetDb(archive, detdb_file):
     """
     Take a G3tSmurf archive and create a a DetDb of the type used with Context
@@ -2045,7 +2012,6 @@ def dump_DetDb(archive, detdb_file):
         )
     session.close()
     return my_db
-
 
 def make_DetDb_single_obs(obsfiledb, obs_id):
     # find relevant files to get status
@@ -2111,17 +2077,14 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     detdb.conn.commit()
     return detdb
 
-
 def obs_detdb_context_hook(ctx, obs_id, *args, **kwargs):
     ddb = make_DetDb_single_obs(ctx.obsfiledb, obs_id)
     ctx.obs_detdb = ddb
     return ddb
 
-
 core.Context.hook_sets["obs_detdb_load"] = {
     "before-use-detdb": obs_detdb_context_hook,
 }
-
 
 class SmurfStatus:
     """
@@ -2480,7 +2443,6 @@ class SmurfStatus:
         """
         return self.mask_inv[band, chan]
 
-
 def get_channel_mask(
     ch_list, status, archive=None, obsfiledb=None, ignore_missing=True
 ):
@@ -2663,7 +2625,6 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     session.close()
     return ruids
 
-
 def _get_detset_channel_names(status, ch_map, obsfiledb):
     """Update channel maps with name from obsfiledb"""
     # tune file in status
@@ -2734,7 +2695,6 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
 
     return ruids
 
-
 def _get_channel_mapping(status, ch_map):
     """Generate baseline channel map from status object"""
     for i, ch in enumerate(ch_map["idx"]):
@@ -2750,7 +2710,6 @@ def _get_channel_mapping(status, ch_map):
             ch_map[i]["band"] = -1
             ch_map[i]["channel"] = -1
     return ch_map
-
 
 def get_channel_info(
     status,
@@ -2835,7 +2794,6 @@ def get_channel_info(
 
     return ch_info
 
-
 def _get_sample_info(filenames):
     """Scan through a list of files and count samples. Starts counting
     from the first file in the list. Used in load_file for sample restiction
@@ -2875,7 +2833,6 @@ def _get_sample_info(filenames):
         start += samps
     return out
 
-
 def split_ts_bits(c):
     """Split up 64 bit to 2x32 bit"""
     NUM_BITS_PER_INT = 32
@@ -2883,7 +2840,6 @@ def split_ts_bits(c):
     a = (c >> NUM_BITS_PER_INT) & MAXINT
     b = c & MAXINT
     return a, b
-
 
 def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     """Calculate the timestamp field for loaded data
@@ -2935,7 +2891,6 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     if load_type == TimingParadigm.G3Timestream:
         return io_load.hstack_into(None, streams["time"])
     logger.error("Timing System could not be determined")
-
 
 def load_file(
     filename,
@@ -3193,7 +3148,6 @@ def load_file(
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
 
     return aman
-
 
 def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, no_signal=None, **kwargs):
     """Obsloader function for g3tsmurf data archives.
