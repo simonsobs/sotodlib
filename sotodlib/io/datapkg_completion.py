@@ -119,6 +119,10 @@ class DataPackaging:
         min_ctime = timecode*1e5
         max_ctime = (timecode+1)*1e5
 
+        self.HK.add_hkfiles(
+            min_ctime=min_ctime, max_ctime=max_ctime, 
+            show_pb=False, update_last_file=False,
+        )
         self.imprint.register_hk_books(
             min_ctime=min_ctime, 
             max_ctime=max_ctime, 
