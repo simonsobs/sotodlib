@@ -1788,7 +1788,10 @@ class Imprinter:
             self.logger.info(
                 f"Removing {book.bid} from staged"
             )
-            shutil.rmtree( book_path )
+            if book.type == 'smurf' and book.schema == 1:
+                os.remove(book_path)
+            else:
+                shutil.rmtree( book_path )
         except Exception as e:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
