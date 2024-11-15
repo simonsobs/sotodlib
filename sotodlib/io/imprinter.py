@@ -1675,10 +1675,15 @@ class Imprinter:
             if true, just prints plans to self.logger.info
         """
         if book.lvl2_deleted:
-            self.logger.info(f"Level 2 for {book.bid} has already been deleted")
-            return
+            self.logger.debug(
+                f"Level 2 for {book.bid} has already been deleted"
+            )
+            return 0
         if book.status < UPLOADED:
-            raise ValueError(f"Book must be uploaded to delete level 2 files")
+            self.logger.warning(
+                f"Book {book.bid} is not uploaded, not deleting level 2"
+            )
+            return 1
         if verify_with_librarian:
             in_lib = self.check_book_in_librarian(
                 book, n_copies=n_copies_in_lib, raise_on_error=False
@@ -1688,7 +1693,7 @@ class Imprinter:
                     f"Book {book.bid} does not have {n_copies_in_lib} copies"
                     " will not delete staged"
                 )
-                return
+                return 2
         
         self.logger.info(f"Removing level 2 files for {book.bid}")
         if book.type == "obs" or book.type == "oper":
@@ -1738,6 +1743,7 @@ class Imprinter:
         if not dry_run:
             book.lvl2_deleted = True
             self.session.commit()
+        return 0
 
     def delete_book_staged(self, book, check_level2=False, 
         verify_with_librarian=False, n_copies_in_lib=1, override=False):

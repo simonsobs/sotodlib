@@ -49,7 +49,7 @@ def level2_completion(
 
 def do_delete_level2(
     dpk: DataPackaging, 
-    lag: Optional[float] = 14,
+    lag: Optional[float] = 28,
     min_timecode: Optional[int] = None, 
     max_timecode: Optional[int] = None, 
     raise_incomplete: Optional[bool] =True,

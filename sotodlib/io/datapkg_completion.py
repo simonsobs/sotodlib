@@ -635,31 +635,12 @@ class DataPackaging:
         books_not_deleted = []
 
         for book in book_list:
-            if book.lvl2_deleted:
-                self.logger.debug(
-                    f"Book {book.bid} has already had level 2 files deleted"
-                )
-                continue
-            if verify_with_librarian:
-                offsite = self.imprint.check_book_offsite(
-                    book, n_copies=1, raise_on_error=False
-                )
-                if not offsite:
-                    self.logger.warning(
-                        f"Book {book.bid} does not have a copy offsite,"
-                        " will not delete level 2"
-                    )
-                    books_not_deleted.append(book)
-                    continue
-            else:
-                if book.status < UPLOADED:
-                    self.logger.warning(
-                        f"Book {book.bid} status is not uploaded,"
-                        " will not delete level 2"
-                    )
-                    books_not_deleted.append(book)
-                    continue
-            self.imprint.delete_level2_files(book, dry_run=dry_run)
+            stat = self.imprint.delete_level2_files(
+                book, verify_with_librarian=verify_with_librarian,
+                n_copies_in_lib=2, dry_run=dry_run
+            )
+            if stat > 0:
+                books_not_deleted.append(book)    
         
         if len(books_not_deleted) > 0:
             msg = "Could not delete level 2 for books:\n"
