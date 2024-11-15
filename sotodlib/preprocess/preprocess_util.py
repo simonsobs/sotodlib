@@ -124,13 +124,13 @@ def get_preprocess_context(configs, context=None):
     """
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
-    
+
     if context is None:
         context = core.Context(configs["context_file"])
-        
+
     if type(context) == str:
         context = core.Context(context)
-    
+
     # if context doesn't have the preprocess archive it in add it
     # allows us to use same context before and after calculations
     found=False
@@ -142,7 +142,7 @@ def get_preprocess_context(configs, context=None):
             found=True
             break
     if not found:
-        context["metadata"].append( 
+        context["metadata"].append(
             {
                 "db" : configs["archive"]["index"],
                 "name" : "preprocess"
@@ -179,7 +179,7 @@ def get_groups(obs_id, configs, context):
         if (gb == 'detset') and (len(group_by) == 1):
             groups = context.obsfiledb.get_detsets(obs_id)
             return group_by, [[g] for g in groups]
-        
+
     det_info = context.get_det_info(obs_id)
     rs = det_info.subset(keys=group_by).distinct()
     groups = [[b for a,b in r.items()] for r in rs]
@@ -189,7 +189,7 @@ def get_groups(obs_id, configs, context):
 def get_preprocess_db(configs, group_by, logger=None):
     """Get or create a ManifestDb found for a given
     config.
-    
+
     Arguments
     ----------
     configs : dict
@@ -199,16 +199,16 @@ def get_preprocess_db(configs, group_by, logger=None):
     logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
-    
+
     Returns
     -------
     db : ManifestDb
         ManifestDb object
     """
-    
+
     if logger is None:
         logger = init_logger("preprocess_db")
-    
+
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
                     "archive index.")
@@ -232,14 +232,14 @@ def swap_archive(config, fpath):
     """Update the configuration archive policy filename,
     create an output archive directory if it doesn't exist,
     and return a copy of the config.
-    
+
     Arguments
     ----------
     configs : dict
         The configuration dictionary.
     fpath : str
         The archive policy filename to write to.
-    
+
     Returns
     -------
     tc : dict
@@ -261,7 +261,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     Arguments
     ----------
     obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
+        passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
     configs: string or dictionary
         config file or loaded config directory
@@ -273,7 +273,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     """
     configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
-    
+
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
     logger.info(f"Cutting on the last process: {pipe[-1].name}")
     pipe[-1].select(meta)
@@ -282,14 +282,14 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
                         no_signal=None):
     """ Loads the saved information from the preprocessing pipeline and runs
-    the processing section of the pipeline. 
+    the processing section of the pipeline.
 
-    Assumes preprocess_tod has already been run on the requested observation. 
-    
+    Assumes preprocess_tod has already been run on the requested observation.
+
     Arguments
     ----------
     obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
+        passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
     configs: string or dictionary
         config file or loaded config directory
@@ -298,7 +298,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     meta: AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    no_signal: bool 
+    no_signal: bool
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
@@ -317,7 +317,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         return aman
 
 
-def preproc_or_load_group(obs_id, configs, dets, logger=None, 
+def preproc_or_load_group(obs_id, configs, dets, logger=None,
                           context=None, overwrite=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
@@ -366,7 +366,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
     """
     error = None
     outputs = {}
-    if logger is None: 
+    if logger is None:
         logger = init_logger("preprocess")
 
     if type(configs) == str:
@@ -437,7 +437,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         proc_aman.save(dest_file, dest_dataset, overwrite)
         # Collect info for saving h5 file.
         outputs['temp_file'] = dest_file
-        
+
         # Collect index info.
         db_data = {'obs:obs_id': obs_id,
                     'dataset': dest_dataset}
@@ -454,13 +454,13 @@ def cleanup_mandb(error, outputs, configs, logger):
     function is expected to be run from rank 0 after a ``comm.gather``.
     See the ``preproc_or_load_group`` docstring for the varying expected
     values of ``error`` and the associated ``outputs``. This function will
-    either: 
-    
+    either:
+
     1) Update the mandb sqlite file and move the h5 archive from its temporary
     location to its permanent path if error is ``None``.
-    
+
     2) Return nothing if error is ``load_success``.
-    
+
     3) Update the error log if error is anything else.
     """
     if error is None:

@@ -19,7 +19,7 @@ from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
 
-def dummy_preproc(obs_id, group_list, logger, 
+def dummy_preproc(obs_id, group_list, logger,
                   configs, overwrite, run_parallel):
     """
     Dummy function that can be put in place of preprocess_tod in the
@@ -45,8 +45,8 @@ def dummy_preproc(obs_id, group_list, logger,
             else:
                 dest_dataset += "_" + gb + "_" + str(g)
         logger.info(f"Saving data to {dest_file}:{dest_dataset}")
-        proc_aman.save(dest_file, dest_dataset, overwrite)        
-        
+        proc_aman.save(dest_file, dest_dataset, overwrite)
+
         # Collect index info.
         db_data = {'obs:obs_id': obs_id,
                    'dataset': dest_dataset}
@@ -57,15 +57,15 @@ def dummy_preproc(obs_id, group_list, logger,
     if run_parallel:
         return error, dest_file, outputs
 
-def preprocess_tod(obs_id, 
-                   configs, 
+def preprocess_tod(obs_id,
+                   configs,
                    verbosity=0,
-                   group_list=None, 
+                   group_list=None,
                    overwrite=False,
                    run_parallel=False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
-    the ManifestDb specified in the configs.   
+    the ManifestDb specified in the configs.
 
     Arguments
     ----------
@@ -85,10 +85,10 @@ def preprocess_tod(obs_id,
     """
     outputs = []
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    
+
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
-  
+
     context = core.Context(configs["context_file"])
     group_by, groups = pp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
@@ -122,17 +122,17 @@ def preprocess_tod(obs_id,
             return error, None, [None, None]
         else:
             return
-    
+
     if not(run_parallel):
         db = pp_util.get_preprocess_db(configs, group_by)
-    
+
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
 
     if configs.get("lmsi_config", None) is not None:
         make_lmsi = True
     else:
         make_lmsi = False
-    
+
     n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -157,7 +157,7 @@ def preprocess_tod(obs_id,
             continue
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
-            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}") 
+            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}")
             n_fail += 1
             continue
 
@@ -193,7 +193,7 @@ def preprocess_tod(obs_id,
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
-    
+
     if run_parallel:
         if n_fail == len(groups):
             # If no groups make it to the end of the processing return error.
@@ -212,12 +212,12 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     """ Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
-    Assumes preprocess_tod has already been run on the requested observation. 
-    
+    Assumes preprocess_tod has already been run on the requested observation.
+
     Arguments
     ----------
     obs_id: multiple
-        passed to ``context.get_obs`` to load AxisManager, see Notes for 
+        passed to ``context.get_obs`` to load AxisManager, see Notes for
         `context.get_obs`
     sim_map: pixell.enmap.ndmap
         signal map containing (T, Q, U) fields
@@ -258,9 +258,9 @@ def get_parser(parser=None):
         parser = argparse.ArgumentParser()
     parser.add_argument('configs', help="Preprocessing Configuration File")
     parser.add_argument(
-        '--query', 
+        '--query',
         help="Query to pass to the observation list. Use \\'string\\' to "
-             "pass in strings within the query.",  
+             "pass in strings within the query.",
         type=str
     )
     parser.add_argument(
@@ -312,8 +312,8 @@ def get_parser(parser=None):
 
 def main(
         configs: str,
-        query: Optional[str] = None, 
-        obs_id: Optional[str] = None, 
+        query: Optional[str] = None,
+        obs_id: Optional[str] = None,
         overwrite: bool = False,
         min_ctime: Optional[int] = None,
         max_ctime: Optional[int] = None,
@@ -330,8 +330,8 @@ def main(
                           'errlog.txt')
     multiprocessing.set_start_method('spawn')
 
-    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
-                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
+    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
+                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags,
                                    planet_obs=planet_obs)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
