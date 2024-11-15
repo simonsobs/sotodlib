@@ -35,7 +35,7 @@ def level2_completion(
         if not check[0]:
             check_list.append( (timecode, check[1]) )
             continue
-        check = self.verify_timecode_deletable(
+        check = dpk.verify_timecode_deletable(
             timecode, include_hk=True, 
             verify_with_librarian=False,
         ) 
@@ -103,7 +103,7 @@ def do_delete_staged(
         if not check[0]:
             check_list.append( (timecode, check[1]) )
             continue
-        check = self.verify_timecode_deletable(
+        check = dpk.verify_timecode_deletable(
             timecode, include_hk=True, 
             verify_with_librarian=False,
         ) 
