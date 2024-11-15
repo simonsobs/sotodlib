@@ -92,7 +92,7 @@ def do_delete_staged(
     if max_timecode is None:
         x = dt.datetime.now() - dt.timedelta(days=lag)
         max_timecode = int( x.timestamp() // 1e5)
-    
+        
     logger.info(
         f"Removing staged from {min_timecode} to "
         f"{max_timecode}."
@@ -101,14 +101,14 @@ def do_delete_staged(
     for timecode in range(min_timecode, max_timecode):
         check = dpk.make_timecode_complete(timecode)
         if not check[0]:
-            check_list.append( (timecode, check[1]) )
+            delete_list.append( (timecode, check[1]) )
             continue
         check = dpk.verify_timecode_deletable(
             timecode, include_hk=True, 
             verify_with_librarian=False,
         ) 
         if not check[0]:
-            check_list.append( (timecode, check[1]) )
+            delete_list.append( (timecode, check[1]) )
             continue
         check = dpk.delete_timecode_staged(timecode)
         if not check[0]:
