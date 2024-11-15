@@ -1691,7 +1691,7 @@ class Imprinter:
             if not in_lib:
                 self.logger.warning(
                     f"Book {book.bid} does not have {n_copies_in_lib} copies"
-                    " will not delete staged"
+                    " will not delete level 2"
                 )
                 return 2
         
