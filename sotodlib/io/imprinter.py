@@ -1640,7 +1640,7 @@ class Imprinter:
                 return False, e
         return True, None
             
-    def check_book_offsite(self, book, n_copies=1, raise_on_error=True):
+    def check_book_in_librarian(self, book, n_copies=1, raise_on_error=True):
         """have the librarian validate the books is stored offsite. returns true
         if at least n_copies are storied offsite.
         """
@@ -1648,12 +1648,10 @@ class Imprinter:
             self._librarian_connect()
         try:
             resp = self.librarian.validate_file(book.path)
-            offsite = sum(
-                [(x.librarian != 'site-librarian') and 
-                 (x.computed_same_checksum) for x in
-                resp]
+            in_lib = sum(
+                [(x.computed_same_checksum) for x in resp]
             ) >= n_copies
-            if not offsite:
+            if not in_lib:
                 self.logger.debug(f"received response from librarian {resp}")
         except Exception as e:
             if raise_on_error:
@@ -1663,10 +1661,11 @@ class Imprinter:
                     f"Failed to check libraian status for {book.bid}: {e}"
                 )
                 self.logger.warning(traceback.format_exc())
-                offsite = False
-        return offsite
+                in_lib = False
+        return in_lib
         
-    def delete_level2_files(self, book, dry_run=True):
+    def delete_level2_files(self, book, verify_with_librarian=True,        
+        n_copies_in_lib=2, dry_run=True):
         """Delete level 2 data from already bound books
 
         Parameters
@@ -1680,6 +1679,17 @@ class Imprinter:
             return
         if book.status < UPLOADED:
             raise ValueError(f"Book must be uploaded to delete level 2 files")
+        if verify_with_librarian:
+            in_lib = self.check_book_in_librarian(
+                book, n_copies=n_copies_in_lib, raise_on_error=False
+            )
+            if not in_lib:
+                self.logger.warning(
+                    f"Book {book.bid} does not have {n_copies_in_lib} copies"
+                    " will not delete staged"
+                )
+                return
+        
         self.logger.info(f"Removing level 2 files for {book.bid}")
         if book.type == "obs" or book.type == "oper":
             session, SMURF = self.get_g3tsmurf_session(
@@ -1729,8 +1739,8 @@ class Imprinter:
             book.lvl2_deleted = True
             self.session.commit()
 
-    def delete_book_staged(self, book, verify_with_librarian=True,
-        check_level2=True, override=False):
+    def delete_book_staged(self, book, check_level2=False, 
+        verify_with_librarian=False, n_copies_in_lib=1, override=False):
         """Delete all files associated with a book
 
         Parameters
@@ -1756,12 +1766,12 @@ class Imprinter:
             )
             return 2
         if verify_with_librarian:
-            offsite = self.check_book_offsite(
-                book, n_copies=2, raise_on_error=False
+            in_lib = self.check_book_in_librarian(
+                book, n_copies=n_copies_in_lib, raise_on_error=False
             )
-            if not offsite:
+            if not in_lib:
                 self.logger.warning(
-                    f"Book {book.bid} does not have 2 copies offsite,"
+                    f"Book {book.bid} does not have {n_copies_in_lib} copies"
                     " will not delete staged"
                 )
                 return 3

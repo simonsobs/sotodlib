@@ -84,6 +84,16 @@ class DataPackaging:
             raise ValueError(f"Found no timecode folders for {self.platform}")
         return tc   
 
+    def get_first_timecode_in_staged(self, include_hk=True):
+        q = self.session.query(Books).filter(
+            Books.status == UPLOADED,
+        )
+        if not include_hk:
+            q = q.filter(Books.type != 'hk')
+        first = q.order_by(Books.start).first()
+        tc = int( first.start.timestamp() // 1e5)
+        return tc   
+
     def all_files_in_timecode(self, timecode, include_hk=True):
         flist = []
         if self.imprint.build_det:
@@ -539,12 +549,12 @@ class DataPackaging:
             if book.lvl2_deleted:
                 continue
             if verify_with_librarian:
-                offsite = self.imprint.check_book_offsite(
+                in_lib = self.imprint.check_book_in_librarian(
                     book, n_copies=1, raise_on_error=False
                 )
-                if not offsite:
+                if not in_lib:
                     deletable[0] = False
-                    deletable[1] += f"{book.bid} has not been transfered offsite\n"
+                    deletable[1] += f"{book.bid} has not been uploaded to librarain\n"
 
             flist = self.imprint.get_files_for_book(book)
             if isinstance(flist, OrderedDict):
@@ -661,8 +671,8 @@ class DataPackaging:
 
     
     def delete_timecode_staged(
-        self, timecode, include_hk=True, verify_with_librarian=True,
-        check_level2=True,
+        self, timecode, include_hk=True, verify_with_librarian=False,
+        check_level2=False,
     ):
         book_list = self.books_in_timecode(timecode, include_hk=include_hk)
         books_not_deleted = []

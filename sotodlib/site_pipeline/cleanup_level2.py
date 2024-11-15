@@ -14,7 +14,7 @@ def level2_completion(
     lag: Optional[float] = 14,
     min_timecode: Optional[int] = None, 
     max_timecode: Optional[int] = None, 
-    raise_incomplete: Optional[bool] =True,
+    raise_incomplete: Optional[bool] = True,
 ):
 
     ## build time range where we require timecodes to be complete
@@ -32,6 +32,13 @@ def level2_completion(
     check_list = []
     for timecode in range(min_timecode, max_timecode):
         check = dpk.make_timecode_complete(timecode)
+        if not check[0]:
+            check_list.append( (timecode, check[1]) )
+            continue
+        check = self.verify_timecode_deletable(
+            timecode, include_hk=True, 
+            verify_with_librarian=False,
+        ) 
         if not check[0]:
             check_list.append( (timecode, check[1]) )
 
@@ -80,7 +87,7 @@ def do_delete_staged(
 ):
     ## build time range where we should be deleting
     if min_timecode is None:
-        min_timecode = dpk.get_first_timecode_on_disk()
+        min_timecode = dpk.get_first_timecode_in_staged()
 
     if max_timecode is None:
         x = dt.datetime.now() - dt.timedelta(days=lag)
@@ -92,6 +99,14 @@ def do_delete_staged(
     )
     delete_list = []
     for timecode in range(min_timecode, max_timecode):
+        check = dpk.make_timecode_complete(timecode)
+        if not check[0]:
+            check_list.append( (timecode, check[1]) )
+            continue
+        check = self.verify_timecode_deletable(
+            timecode, include_hk=True, 
+            verify_with_librarian=False,
+        ) 
         check = dpk.delete_timecode_staged(timecode)
         if not check[0]:
             logger.error(f"Failed to remove staged for {timecode}")
@@ -106,17 +121,17 @@ def do_delete_staged(
 def main(
     platform: str,
     check_complete: Optional[bool]= False,
-    delete_lvl2: Optional[bool]= False,
     delete_staged: Optional[bool] = False,
+    delete_lvl2: Optional[bool]= False,
     completion_lag: Optional[float] = 14,
     min_complete_timecode: Optional[int] = None,
     max_complete_timecode: Optional[int] = None,
-    lvl2_deletion_lag: Optional[float] = 28,
-    min_lvl2_delete_timecode: Optional[int] = None,
-    max_lvl2_delete_timecode: Optional[int] = None,
     staged_deletion_lag: Optional[float] = 28,
     min_staged_delete_timecode: Optional[int] = None,
     max_staged_delete_timecode: Optional[int] = None,
+    lvl2_deletion_lag: Optional[float] = 28,
+    min_lvl2_delete_timecode: Optional[int] = None,
+    max_lvl2_delete_timecode: Optional[int] = None,
     ):
     """
     Use the imprinter database to clean up already bound level 2 files. 
