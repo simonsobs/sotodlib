@@ -444,8 +444,6 @@ class DataPackaging:
                 except:
                     self.logger.warning(f"Failed to bind {book.bid}")
         
-        assert has_smurf, "I shouldn't be able to hit this?"
-
         # check the smurf book is registered
         book = self.session.query(Books).filter( 
             Books.bid == f"smurf_{timecode}_{self.platform}"
