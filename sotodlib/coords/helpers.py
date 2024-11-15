@@ -321,35 +321,36 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
 
     asm = so3g.proj.Assembly.attach(sight, fp1)
-    output = np.zeros((len(fake_dets), n_samp, 4))
+    planar = np.zeros((len(fake_dets), n_samp, 4))
     proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     if rot:
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
-    proj.get_planar(asm, output=output)
-
-    output2 = output*0
-    proj.get_coords(asm, output=output2)
+    proj.get_planar(asm, output=planar)
 
     # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
     delts  = wcs_kernel.wcs.cdelt * DEG
-    planar = output[:,:,:2]
-    ranges = utils.minmax(planar/delts,(0,1))
-    # These are in units of pixel *offsets* from crval. crval
-    # might not correspond to a pixel center, though. So the
-    # thing that should be integer-valued to preserve pixel compatibility
-    # is crpix + ranges, not just ranges. Let's add crpix to transform this
-    # into offsets from the bottom-left pixel to make it easier to reason
-    # about integers
-    ranges += wcs_kernel.wcs.crpix
-    del output
+    ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    del planar
 
-    # Start a new WCS and set the lower left corner.
+    # These planar ranges are in units of pixels away from the
+    # reference point.  The reference point is not necessarily on a
+    # pixel center -- that depends on whether crpix is an integer.  So
+    # transform ranges by +(crpix - 1), making them relative to the
+    # bottom left pixel of wcs_kernel.  Note the -1 here accounts for
+    # FITS numbering of pixels starting at (1, 1).
+    ranges += (wcs_kernel.wcs.crpix - 1)
+
+    # Round ranges, which in pixel offset units, to nearest integer.
+    corners = utils.nint(ranges)
+
+    # Start a new WCS. Adjust crpix to put our footprint in the
+    # bottom-left pixel.
     w = wcs_kernel.deepcopy()
-    corners      = utils.nint(ranges)
     w.wcs.crpix -= corners[0]
-    shape        = tuple(corners[1]-corners[0]+1)[::-1]
+    shape = tuple(corners[1] - corners[0] + 1)[::-1]
     return (shape, w)
+
 
 def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
                           xieta=None):
