@@ -678,7 +678,7 @@ class DataPackaging:
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
-            return False, ""
+            return False, "msg"
         return True, ""
     
     def check_and_delete_timecode(

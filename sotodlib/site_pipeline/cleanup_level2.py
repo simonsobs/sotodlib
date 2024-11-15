@@ -107,6 +107,9 @@ def do_delete_staged(
             timecode, include_hk=True, 
             verify_with_librarian=False,
         ) 
+        if not check[0]:
+            check_list.append( (timecode, check[1]) )
+            continue
         check = dpk.delete_timecode_staged(timecode)
         if not check[0]:
             logger.error(f"Failed to remove staged for {timecode}")
