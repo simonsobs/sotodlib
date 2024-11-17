@@ -13,7 +13,7 @@ defaults = {"area": None,
             "query": "type == 'obs' and subtype == 'cmb'",
             "odir": "./output",
             "preprocess_config": None,
-            "update-delay": None,
+            "update_delay": None,
             "comps": "TQU",
             "mode": "per_obs",
             "nproc": 1,
@@ -61,7 +61,7 @@ def get_parser(parser=None):
                         help='output directory')
     parser.add_argument("--preprocess_config", type=str,
                         help='file with the config file to run the preprocessing pipeline')
-    parser.add_argument('--update-delay', type=int,
+    parser.add_argument('--update_delay', type=int,
                         help="Number of days (unit is days) in the past to start observation list.")
     parser.add_argument("--mode", type=str, )
     parser.add_argument("--nproc", type=int, help='Number of procs in the multiprocessing pool')
