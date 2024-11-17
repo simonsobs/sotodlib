@@ -338,8 +338,17 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
+        if isinstance(weights_map, tilemap.TileMap):
+            if dest is None:
+                dest = tilemap.zeros(weights_map.geometry)
+            dest[:] = helpers._invert_weights_map(
+                weights_map, eigentol=eigentol, UPLO='U')
+            return dest
+
         if self.pix_scheme == "healpix":
             tile_list = self._get_hp_tile_list(weights_map)
+            # Ensure map is in compressed form, i.e. a simple numpy
+            # array, for easy use of _invert_weights_map.
             if tile_list is not None:
                 weights_map = hp_utils.tiled_to_compressed(weights_map, -1)
             if dest is None:
@@ -376,13 +385,21 @@ class P:
           weights_map: the matrix W.  Shape should be (n_comp, n_comp,
             n_row, n_col), but only the upper diagonal in the first
             two dimensions needs to be populated.  If this is None,
-            then W will be computed by a call to
+            then W will be computed and inverted via
+            ``self.to_inverse_weights``.
 
         """
         if inverse_weights_map is None:
             inverse_weights_map = self.to_inverse_weights(weights_map=weights_map, **kwargs)
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
+
+        if isinstance(inverse_weights_map, tilemap.TileMap):
+            if dest is None:
+                dest = tilemap.zeros(inverse_weights_map[0].geometry)
+            dest[:] = helpers._apply_inverse_weights_map(
+                inverse_weights_map, signal_map)
+            return dest
 
         if self.pix_scheme == "healpix":
             tile_list = self._get_hp_tile_list(signal_map)
@@ -448,7 +465,13 @@ class P:
         if dest is None:
             dest = np.zeros(tod_shape, np.float32)
         assert(dest.shape == tod_shape)  # P.fp/P.sight and dest argument disagree
-        proj.from_map(self._prepare_map(signal_map), self._get_asm(), signal=dest, comps=comps)
+
+        if self.tiled and self.pix_scheme == 'rectpix':
+            # so3g <= 0.1.15 has a dims check on signal_map that fails on the tiled map format.
+            so3g.proj.wcs._ProjectionistBase.from_map(
+                proj, self._prepare_map(signal_map), self._get_asm(), signal=dest, comps=comps)
+        else:
+            proj.from_map(self._prepare_map(signal_map), self._get_asm(), signal=dest, comps=comps)
 
         if wrap is not None:
             if wrap in tod:
@@ -561,7 +584,7 @@ class P:
 
     def _prepare_map(self, map):
         if self.tiled and self.pix_scheme == "rectpix":
-            return map.tiles
+            return list(map.tiles)
         else:
             return map
 
@@ -672,3 +695,4 @@ def _infer_pix_scheme(geom):
     else:
         raise fail_err
     return pix_scheme
+

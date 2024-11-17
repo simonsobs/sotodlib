@@ -24,8 +24,8 @@ class PmatTest(unittest.TestCase):
         comps = 'T'
         out = run_test(obs, (shape, wcs), comps, None, False, False) # Basic
         _ = run_test(obs, None, comps, wcs, False, False) # Use wcs_kernel
-        #out2 = run_test(obs, tilemap.geometry(shape, wcs, tile_shape=(100, 100)), comps, None, False, True) # Tiled
-        #assert np.array_equal(out, out2)
+        out2 = run_test(obs, tilemap.geometry(shape, wcs, tile_shape=(100, 100)), comps, None, False, True) # Tiled
+        assert np.array_equal(out, out2)
 
     def test_pmat_healpix(self):
         obs = quick_tod(10, 10000)
