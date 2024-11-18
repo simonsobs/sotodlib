@@ -338,31 +338,21 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
-        if isinstance(weights_map, tilemap.TileMap):
-            if dest is None:
-                dest = tilemap.zeros(weights_map.geometry)
-            dest[:] = helpers._invert_weights_map(
+        weights_map, wcs_w = self._flatten_map(weights_map)
+
+        if dest is not None:
+            dest, wcs_dest = self._flatten_map(dest)
+            _confirm_wcs(wcs_w, wcs_dest)
+
+        _dest = helpers._invert_weights_map(
                 weights_map, eigentol=eigentol, UPLO='U')
-            return dest
+        if dest is not None:
+            dest[:] = _dest
+        else:
+            dest = _dest
+        del _dest
 
-        if self.pix_scheme == "healpix":
-            tile_list = self._get_hp_tile_list(weights_map)
-            # Ensure map is in compressed form, i.e. a simple numpy
-            # array, for easy use of _invert_weights_map.
-            if tile_list is not None:
-                weights_map = hp_utils.tiled_to_compressed(weights_map, -1)
-            if dest is None:
-                dest = np.zeros_like(weights_map)
-        elif (self.pix_scheme == "rectpix") and (dest is None):
-            dest = self._enmapify(np.zeros_like(weights_map),
-                                  wcs=_confirm_wcs(weights_map))
-
-        logger.info('to_inverse_weights: calling _invert_weights_map')
-        dest[:] = helpers._invert_weights_map(
-            weights_map, eigentol=eigentol, UPLO='U')
-
-        if self.pix_scheme == "healpix" and tile_list is not None:
-            dest = hp_utils.compressed_to_tiled(dest, tile_list, -1)
+        dest = self._unflatten_map(dest)
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -394,32 +384,18 @@ class P:
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
 
-        if isinstance(inverse_weights_map, tilemap.TileMap):
-            if dest is None:
-                dest = tilemap.zeros(inverse_weights_map[0].geometry)
-            dest[:] = helpers._apply_inverse_weights_map(
-                inverse_weights_map, signal_map)
-            return dest
+        # Get flat numpy-compatible forms for the maps.
+        signal_map, wcs_sig = self._flatten_map(signal_map)
+        inverse_weights_map, wcs_iw = self._flatten_map(inverse_weights_map)
 
-        if self.pix_scheme == "healpix":
-            tile_list = self._get_hp_tile_list(signal_map)
-            if tile_list is not None:
-                signal_map = hp_utils.tiled_to_compressed(signal_map, -1)
-                inverse_weights_map = hp_utils.tiled_to_compressed(inverse_weights_map, -1)
-            if dest is None:
-                dest = np.zeros_like(signal_map)
-        elif self.pix_scheme == "rectpix":
-            if dest is None:
-                wcs_to_use = _confirm_wcs(inverse_weights_map, signal_map)
-                dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype),
-                                      wcs=wcs_to_use)
-            else:
-                _confirm_wcs(inverse_weights_map, signal_map, dest)
+        if dest is not None:
+            dest, wcs_dest = self._flatten_map(dest)
+            _confirm_wcs(wcs_sig, wcs_iw, wcs_dest)
+        else:
+            _confirm_wcs(wcs_sig, wcs_iw)
 
-        dest[:] = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map)
-
-        if self.pix_scheme == "healpix" and tile_list is not None:
-            dest = hp_utils.compressed_to_tiled(dest, tile_list, -1)
+        dest = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map, out=dest)
+        dest = self._unflatten_map(dest)
         return dest
 
 
@@ -553,6 +529,11 @@ class P:
             if self.pix_scheme == "healpix":
                 self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
                 self.geom.ntile = 12*proj.nside_tile**2
+            elif self.pix_scheme == 'rectpix':
+                # Promote geometry to one with the active tiles marked.
+                self.geom = tilemap.geometry(
+                    self.geom.shape, self.geom.wcs, self.geom.tile_shape,
+                    active=self.active_tiles)
             proj = self._get_proj() # Add active_tiles to proj
 
         if self.threads is False:
@@ -583,22 +564,70 @@ class P:
         return so3g.proj.Assembly.attach(self.sight, so3g_fp)
 
     def _prepare_map(self, map):
+        """Gently reformat a map in order to send it to so3g."""
         if self.tiled and self.pix_scheme == "rectpix":
             return list(map.tiles)
         else:
             return map
 
-    def _enmapify(self, data, wcs=None):
-        """Promote a numpy.ndarray to an enmap.ndmap by attaching a wcs.  In
-        sensible cases (e.g. data is an ndarray or ndmap) this will
-        not cause a copy of the underlying data array.
+    def _flatten_map(self, map):
+        """Get a version of the map that is a numpy array, for passing
+        to per-pixel math operations.  Relies on (self.pix_scheme,
+        self.tiled, self.geom, self.active_tiles) to determine what is
+        acceptable for the input map, and what should be done with it
+        to flatten it.
 
-        If a wcs is not passed in, then wcs=self.geom[1] is used.
+        This also tries to extract wcs info from the map, for inline
+        consistency checking (e.g. so we're not happily projecting
+        into a map we loaded from disk that has the same shape but is
+        off by a few pixels from what pmat thinks is the right
+        footprint).
+
+        Returns:
+          array: The map, reformatted as an array (could simply be the
+            input arg map, or a view of that, or a copy if necessary).
+          wcs: wcs object, if one could be extracted from the input
+            map; otherwise None.
 
         """
-        if wcs is None:
-            wcs = self.geom[1]
-        return enmap.ndmap(data, wcs=wcs)
+        wcs = None
+        if self.pix_scheme == 'healpix':
+            if self.tiled:
+                assert list(self.active_tiles) == [_i for (_i, _m) in enumerate(map) if _m is not None]
+                map = hp_utils.tiled_to_compressed(map, -1)
+            else:
+                pass
+        elif self.pix_scheme == 'rectpix':
+            if self.tiled:
+                if isinstance(map, tilemap.TileMap):
+                    wcs = map.geometry.wcs
+            else:
+                if isinstance(map, enmap.ndmap):
+                    wcs = map.wcs
+        return map, wcs
+
+    def _unflatten_map(self, map):
+        """Restore a map to full format, assuming it's currently an
+        ndarray.  Intended as the inverse op to _flatten_map.
+
+        """
+        if self.pix_scheme == 'healpix':
+            if self.tiled:
+                tile_list = self._get_hp_tile_list()
+                map = hp_utils.compressed_to_tiled(map, tile_list, -1)
+            else:
+                pass
+        elif self.pix_scheme == 'rectpix':
+            if self.tiled:
+                if not isinstance(map, tilemap.TileMap):
+                    g = self.geom
+                    g = tilemap.geometry(map.shape[:-1] + g.shape, g.wcs, g.tile_shape,
+                                         active=self.active_tiles)
+                    map = tilemap.TileMap(map, g)
+            else:
+                if not isinstance(map, enmap.ndmap):
+                    map = enmap.ndmap(map, self.geom.wcs)
+        return map
 
     def _get_hp_tile_list(self, tiled_arr=None):
         """For healpix maps, get len(nTile) bool array of whether tiles are active. None if un-tiled.

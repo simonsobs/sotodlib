@@ -477,23 +477,23 @@ def get_supergeom(*geoms, tol=1e-3):
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
 
-def _confirm_wcs(*maps):
-    """Insist that all arguments either have the same .wcs, or do not have
-    a wcs.  Each argument should be either an ndmap (with a .wcs
-    attribute) or an ndarray (without a .wcs attribute).
+def _confirm_wcs(*wcss):
+    """Insist that all arguments are either the same wcs, or None.
 
-    Raises a ValueError if more than one argument has a .wcs attribute
-    and they do not all agree.  Returns either the first .wcs
-    attribute encountered, or None if there aren't any.
+    Raises a ValueError if more than one argument is a wcs, and not
+    all wcs agree.  Returns either the first valid wcs, or None if
+    there aren't any.
 
     """
     wcs_to_use = None
-    for i, m in enumerate(maps):
-        if hasattr(m, 'wcs'):
-            if wcs_to_use is None:
-                wcs_to_use = m.wcs
-            elif not wcsutils.equal(wcs_to_use, m.wcs):
-                raise ValueError('The wcs from %ith item is discordant with prior ones.' % i)
+    for i, wcs in enumerate(wcss):
+        if wcs is None:
+            continue
+        if wcs_to_use is None:
+            wcs_to_use = wcs
+        elif not wcsutils.equal(wcs_to_use, wcs):
+            raise ValueError(
+                f'The wcs from {i}th item ({wcs}) is discordant with prior ones ({wcs_to_use})')
     return wcs_to_use
 
 def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
@@ -565,23 +565,23 @@ def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
     # Reshape the output to match what was passed in.
     return iw.transpose(1,2,0).reshape(weights.shape)
 
-def _apply_inverse_weights_map(inverse_weights, target):
+def _apply_inverse_weights_map(inverse_weights, target, out=None):
     """Apply a map of matrices to a map of vectors.
 
     Assumes inverse_weights.shape = (a, b, ...) and target.shape =
     (b, ...); the result has shape (a, ...).
 
     """
-    # master had:
-    #iw = inverse_weights.transpose((2,3,0,1))
-    #m = target.transpose((1,2,0)).reshape(
-    #    target.shape[1], target.shape[2], target.shape[0], 1)
-    #m1 = np.matmul(iw, m)
-    #return m1.transpose(2,3,0,1).reshape(target.shape)
+    if out is None:
+        out = np.empty(inverse_weights.shape[1:],
+                       dtype=target.dtype)
+    # Recall matmul(a, b) operates on the last two axes of (a, b). So
+    # move axes, and create a second one in target; re-order at end.
     iw = np.moveaxis(inverse_weights, (0,1), (-2,-1))
     t  = np.moveaxis(target[:,None],  (0,1), (-2,-1))
-    m  = np.matmul(iw, t)
-    return np.moveaxis(m, (-2,-1), (0,1))[:,0]
+    out_moved = np.moveaxis(out[:,None], (0,1), (-2,-1))
+    np.matmul(iw, t, out=out_moved)
+    return out
 
 class ScalarLastQuat(np.ndarray):
     """Wrapper class for numpy arrays carrying quaternions with the ijk1
