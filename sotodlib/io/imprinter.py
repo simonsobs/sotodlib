@@ -512,6 +512,10 @@ class Imprinter:
         session = session or self.get_session()
         g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
 
+        final_time = SMURF.get_final_time(
+            self.all_slots, min_ctime, max_ctime, check_control=False
+        )
+        final_tc = int(final_time//1e5)
         servers = SMURF.finalize["servers"]
         meta_agents = [s["smurf-suprsync"] for s in servers]
         files_agents = [s["timestream-suprsync"] for s in servers]
@@ -527,6 +531,12 @@ class Imprinter:
         tcs = tcs.distinct().all()
 
         for (tc,) in tcs:
+            if tc >= final_tc:
+                self.logger.info(
+                    f"Not ready to make timecode books for {tc} because final"
+                    f" timecode is {final_tc}"
+                )
+                continue
             q = g3session.query(TimeCodes).filter(
                 TimeCodes.timecode == tc,
             )
@@ -625,7 +635,6 @@ class Imprinter:
             return os.path.join(odir, book.bid)
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
-            root = op.join(self.lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
             odir = op.join(book.tel_tube, book.type, book.bid)
