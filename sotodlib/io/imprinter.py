@@ -884,65 +884,6 @@ class Imprinter:
         return session.query(Books).filter(
             Books.status == status
         ).order_by(Books.start).all()
-    
-    def get_level2_deleteable_books(
-            self, session=None, cleanup_delay=None, max_time=None
-        ):
-        """Get all bound books from database where we need to delete the level2
-        data
-
-        Parameters
-        ----------
-        session: BookDB session
-        cleanup_delay: float
-            amount of time to delay book deletation relative to g3tsmurf finalization
-            time in units of days. 
-        max_time: datetime
-            maxmimum time of book start to search. Overrides cleanup_delay if
-            earlier
-        
-        Returns
-        -------
-        books: list of book objects
-        """
-        raise NotImplementedError("This function hasn't been fixed yet")
-        if session is None:
-            session = self.get_session()
-        if cleanup_delay is None:
-            cleanup_delay = 0
-
-        base_filt = and_(
-            Books.status == BOUND,
-            Books.lvl2_deleted == False,
-            or_(  ## not implementing smurf deletion just yet
-                Books.type == "obs",
-                Books.type == "oper",
-                Books.type == "stray",
-                Books.type == "hk",
-            ),
-        )
-        sources = session.query(
-            Books.tel_tube
-        ).filter(base_filt).distinct().all()
-
-        source_filt = []
-        for source, in sources:
-            streams = self.tubes[source].get("slots")
-            _, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
-            limit = SMURF.get_final_time(streams, check_control=False)
-            max_stop = dt.datetime.utcfromtimestamp(limit) - dt.timedelta(days=cleanup_delay)
-            
-            source_filt.append( and_(Books.tel_tube == source, Books.stop <= max_stop) )
-
-        q = session.query(Books).filter(
-            base_filt,
-            or_(*source_filt),
-        )
-        
-        if max_time is not None:
-            q = q.filter(Books.stop <= max_time)
-
-        return q.all()
 
     # some aliases for readability
     def get_unbound_books(self, session=None):
@@ -973,6 +914,20 @@ class Imprinter:
         """
         return self.get_books_by_status(BOUND, session)
     
+    def get_done_books(self, session=None):
+        """Get all "done" books from database. Done means staged files are deleted.
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of book objects
+
+        """
+        return self.get_books_by_status(DONE, session)
+
     def get_failed_books(self, session=None):
         """Get all failed books from database
 

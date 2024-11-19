@@ -2,10 +2,20 @@ import argparse
 import datetime as dt
 import time
 from typing import Optional
+from sqlalchemy import not_
 
-from sotodlib.io.imprinter import Imprinter
 from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.site_pipeline.util import init_logger
+
+from sotodlib.io.imprinter import (
+    Imprinter,
+    Books,
+    BOUND,
+    UNBOUND,
+    UPLOADED,
+    FAILED,
+    DONE,
+)
 
 logger = init_logger(__name__, "update_book_plan: ")
 
@@ -134,9 +144,13 @@ def record_book_counts(monitor, imprinter):
     log_tags = {}
     script_run = time.time()
 
+    session = imprinter.get_session()
+    def get_count( q ):
+        return session.query(Books).filter(q).count()
+    
     monitor.record(
         "unbound", 
-        [ len(imprinter.get_unbound_books()) ], 
+        [ get_count(Books.status == UNBOUND) ], 
         [script_run], 
         tags, 
         imprinter.config["monitor"]["measurement"], 
@@ -145,7 +159,7 @@ def record_book_counts(monitor, imprinter):
 
     monitor.record(
         "bound", 
-        [ len(imprinter.get_bound_books()) ], 
+        [ get_count(Books.status == BOUND) ], 
         [script_run], 
         tags, 
         imprinter.config["monitor"]["measurement"], 
@@ -154,7 +168,7 @@ def record_book_counts(monitor, imprinter):
 
     monitor.record(
         "uploaded", 
-        [ len(imprinter.get_uploaded_books()) ], 
+        [ get_count(Books.status == UPLOADED) ], 
         [script_run], 
         tags, 
         imprinter.config["monitor"]["measurement"], 
@@ -163,7 +177,25 @@ def record_book_counts(monitor, imprinter):
 
     monitor.record(
         "failed", 
-        [ len(imprinter.get_failed_books()) ], 
+        [ get_count(Books.status == FAILED) ], 
+        [script_run], 
+        tags, 
+        imprinter.config["monitor"]["measurement"], 
+        log_tags=log_tags
+    )
+
+    monitor.record(
+        "done", 
+        [ get_count(Books.status == DONE) ], 
+        [script_run], 
+        tags, 
+        imprinter.config["monitor"]["measurement"], 
+        log_tags=log_tags
+    )
+
+    monitor.record(
+        "has_level2", 
+        [ get_count(not_(Books.lvl2_deleted)) ], 
         [script_run], 
         tags, 
         imprinter.config["monitor"]["measurement"], 
