@@ -224,6 +224,8 @@ def build_period_obslists(obs_info, periods, context, nset=None,
                 band_list = ['f090', 'f150']
             elif row.tube_flavor == 'uhf':
                 band_list = ['f230', 'f280']
+            elif row.tube_flavor == 'lf':
+                raise ValueError('Band list for lf not implemented yet.')
         for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)
