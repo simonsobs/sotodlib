@@ -537,6 +537,8 @@ class G3tHk:
             .order_by(db.desc(HKFiles.global_start_time))
             .first()
         )
+        if len(last_file.agents) == 0:
+            return last_file.global_start_time
         return max([a.stop for a in last_file.agents])
 
     @classmethod
