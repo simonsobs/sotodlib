@@ -106,7 +106,9 @@ def init_logger(name, announce='', verbosity=2):
 
 def get_preprocess_context(configs, context=None):
     """Load the provided config file and context file. To be used in
-    ``preprocess_*.py`` site pipeline scripts.
+    ``preprocess_*.py`` site pipeline scripts. If the provided context
+    file does not have a metadata entry for preprocess then one will
+    be added based on the definition in the config file.
 
     Parameters
     ----------
