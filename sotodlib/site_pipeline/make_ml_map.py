@@ -1,12 +1,18 @@
 from argparse import ArgumentParser
-import numpy as np, sys, time, warnings, os, so3g
-from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
-from sotodlib import mapmaking
-from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-from sotodlib import tod_ops
-from sotodlib.site_pipeline import util
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi
+import os
+import sys
+import time
+import warnings
+from typing import Union
+
+import numpy as np
 import yaml
+from pixell import bunch, enmap, fft, mpi, utils, wcsutils
+from sotodlib import mapmaking, tod_ops
+from sotodlib.core import AxisManager, Context, FlagManager, IndexAxis
+from sotodlib.io import metadata  # PerDetectorHdf5 work-around
+from sotodlib.site_pipeline import util
+import so3g
 
 defaults = {"query": "1",
             "odir": "./outputs",
@@ -33,12 +39,11 @@ defaults = {"query": "1",
             "interpol": "nearest"
            }
 
-def get_parser(parser=None):
+def get_parser(parser: ArgumentParser=None) -> ArgumentParser:
     if parser is None:
         parser = ArgumentParser()
     parser.add_argument("--config-file", type=str, default=None,
-                     help="Path to mapmaker config.yaml file")
-
+                        help="Path to mapmaker config.yaml file")
     parser.add_argument("--query", type=str)
     parser.add_argument("--freq", type=str, help="Frequency band. (f090, f150...)")
     parser.add_argument("--area", type=str, help="Path to FITS file describing the mapping geometry")
@@ -68,11 +73,11 @@ def get_parser(parser=None):
     return parser
 
 
-def _get_config(config_file):
+def _get_config(config_file: str) -> dict:
     return yaml.safe_load(open(config_file,'r'))
 
 
-def _setup_passes(downsample="1", maxiter="500", interpol="nearest"):
+def _setup_passes(downsample: Union[str, int]="1", maxiter: Union[str, int]="500", interpol: str="nearest") -> bunch.Bunch:
     tmp = bunch.Bunch()
     tmp.downsample = utils.parse_ints(downsample)
     tmp.maxiter = utils.parse_ints(maxiter)
@@ -90,7 +95,7 @@ def _setup_passes(downsample="1", maxiter="500", interpol="nearest"):
     return passes
 
 
-def main(config_file=None, defaults=defaults, **args):
+def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
 
     cfg = dict(defaults)
 
@@ -99,7 +104,7 @@ def main(config_file=None, defaults=defaults, **args):
         cfg_from_file = _get_config(config_file)
         cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
-        print("No config file provided, assuming default values")
+        L.info("No config file provided, assuming default values")
 
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
@@ -107,13 +112,13 @@ def main(config_file=None, defaults=defaults, **args):
     required_fields = ['freq','area','context']
     for req in required_fields:
         if req not in cfg.keys():
-            raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
+            raise KeyError(f"{req} is a required argument. Please supply it in a config file or via the command line")
 
     args = cfg
     warnings.simplefilter('ignore')
-    SITE    = args['site']
+    SITE = args['site']
     verbose = args['verbose'] - args['quiet']
-    comm    = mpi.COMM_WORLD
+    comm = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args['area'])
 
     # Reconstruct that wcs in case default fields have changed; otherwise
@@ -155,9 +160,9 @@ def main(config_file=None, defaults=defaults, **args):
 
     if len(ids) == 0:
         if comm.rank == 0:
-            print("No tods found!")
+            L.info("No tods found!")
         sys.exit(1)
-    L.info("Reading %d tods" % (len(ids)))
+    L.info(f"Reading {len(ids)} tods")
 
     if args['inject']:
         map_to_inject = enmap.read_map(args['inject']).astype(dtype_map)
@@ -167,20 +172,13 @@ def main(config_file=None, defaults=defaults, **args):
     )
     for pass_ind, pass_cfg in enumerate(passes):
         L.info(
-            "Starting pass %d/%d maxit %d down %d interp %s"
-            % (
-                ipass + 1,
-                len(passes),
-                passinfo.maxiter,
-                passinfo.downsample,
-                passinfo.interpol,
-            )
+            f"Starting pass {pass_ind + 1}/{len(passes)} maxit {pass_cfg.maxiter} down {pass_cfg.downsample} interp {pass_cfg.interpol}"
         )
         pass_prefix = f"{prefix}pass{pass_ind:03d}_"
         if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
         elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1,
                 downweight=[1e-4, 0.25, 0.50], window=args['window'])
-        else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
+        else: raise ValueError(f"Unrecognized noise model {args['nmat']}")
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
         signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, recenter=recenter, tiled=args['tiled'] > 0)
@@ -197,8 +195,8 @@ def main(config_file=None, defaults=defaults, **args):
 
             for detset in detsets:
                 if args['nset'] is not None and nset_kept >= args['nset']: continue
-                name = "%s_%s" % (obs_id, detset)
-                L.debug("Processing %s" % (name))
+                name = "{obs_id}_{detset}"
+                L.debug(f"Processing {name}")
 
                 # Cut out detector wafers we're not interested in, if args.wafer is specified
                 if args['wafer'] is not None:
@@ -213,20 +211,20 @@ def main(config_file=None, defaults=defaults, **args):
                 if args['max_dets'] is not None:
                     meta.restrict('dets', meta['dets'].vals[:args['max_dets']])
                 if len(dets) == 0:
-                    L.debug("Skipped %s (no dets left)" % (name))
+                    L.debug(f"Skipped {name} (no dets left)")
                     continue
 
-                with mapmaking.mark("read_obs %s" % name):
+                with mapmaking.mark(f"read_obs {name}"):
                     obs = context.get_obs(obs_id=obs_id, meta=meta)
 
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
-                srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
+                srate = (obs.samps.count - 1) / (obs.timestamps[-1] - obs.timestamps[0])
 
                 # Add site and weather, since they're not in obs yet
                 obs.wrap("weather", np.full(1, "vacuum"))
-                obs.wrap("site",    np.full(1, "so"))
+                obs.wrap("site", np.full(1, "so"))
 
                 # Prepare our data. FFT-truncate for faster fft ops
                 obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
@@ -249,23 +247,23 @@ def main(config_file=None, defaults=defaults, **args):
                     good_dets = mapmaking.find_usable_detectors(obs, glitch_flags="glitch_flags")
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
-                        L.debug("Skipped %s (all dets cut)" % (name))
+                        L.debug(f"Skipped {name} (all dets cut)")
                         continue
                     # Gapfill glitches. This function name isn't the clearest
                     tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                     # Gain calibration
                     gain  = 1
-                    for gtype in ["relcal","abscal"]:
-                        gain *= obs[gtype][:,None]
+                    for gtype in ["relcal", "abscal"]:
+                        gain *= obs[gtype][:, None]
                     obs.signal *= gain
                     # Fourier-space calibration
-                    fsig  = fft.rfft(obs.signal)
-                    freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    fsig = fft.rfft(obs.signal)
+                    freq = fft.rfftfreq(obs.samps.count, 1/srate)
                     # iir filter
-                    iir_filter  = tod_ops.filters.iir_filter()(freq, obs)
-                    fsig       /= iir_filter
-                    gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= tod_ops.filters.timeconst_filter(None)(freq, obs)
+                    iir_filter = tod_ops.filters.iir_filter()(freq, obs)
+                    fsig /= iir_filter
+                    gain /= iir_filter[0].real # keep track of total gain for our record
+                    fsig /= tod_ops.filters.timeconst_filter(None)(freq, obs)
                     fft.irfft(fsig, obs.signal, normalize=True)
                     del fsig
 
@@ -273,8 +271,8 @@ def main(config_file=None, defaults=defaults, **args):
                     #obs.focal_plane.xi    += obs.boresight_offset.xi
                     #obs.focal_plane.eta   += obs.boresight_offset.eta
                     #obs.focal_plane.gamma += obs.boresight_offset.gamma
-                    obs.focal_plane.xi    += obs.boresight_offset.dx
-                    obs.focal_plane.eta   += obs.boresight_offset.dy
+                    obs.focal_plane.xi += obs.boresight_offset.dx
+                    obs.focal_plane.eta += obs.boresight_offset.dy
                     obs.focal_plane.gamma += obs.boresight_offset.gamma
 
                 # Injecting at this point makes us insensitive to any bias introduced
@@ -288,15 +286,15 @@ def main(config_file=None, defaults=defaults, **args):
                     obs = mapmaking.downsample_obs(obs, passinfo['downsample'])
 
                 # Maybe load precomputed noise model
-                nmat_file = nmat_dir + "/nmat_%s.hdf" % name
+                nmat_file = f"{nmat_dir}/nmat_{name}.hdf"
                 if args['nmat_mode'] == "load" or args['nmat_mode'] == "cache" and os.path.isfile(nmat_file):
-                    print("Reading noise model %s" % nmat_file)
+                    L.info(f"Reading noise model {nmat_file}")
                     nmat = mapmaking.read_nmat(nmat_file)
                 else: nmat = None
 
                 # And add it to the mapmaker
                 # FIXME: How to handle multipass here?
-                with mapmaking.mark("add_obs %s" % name):
+                with mapmaking.mark(f"add_obs {name}"):
                     signal_estimate = None if pass_ind == 0 else mapmaker.transeval(name, obs, mapmaker_prev, x_prev)
                     mapmaker.add_obs(name, obs, noise_model=nmat, signal_estimate=signal_estimate)
 
@@ -307,7 +305,7 @@ def main(config_file=None, defaults=defaults, **args):
                 # Maybe save the noise model we built (only if we actually built one rather than
                 # reading one in)
                 if args['nmat_mode'] in ["save", "cache"] and nmat is None:
-                    print("Writing noise model %s" % nmat_file)
+                    L.info(f"Writing noise model {nmat_file}")
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
             nset_kept_tot += nset_kept
@@ -335,11 +333,11 @@ def main(config_file=None, defaults=defaults, **args):
         for step in mapmaker.solve(maxiter=passinfo['maxiter'], x0=x0):
             t2 = time.time()
             dump = step.i % 10 == 0
-            L.info("CG step %4d %15.7e %8.3f %s" % (step.i, step.err, t2-t1, "" if not dump else "(write)"))
+            L.info(f"CG step {step.i:4d} {step.err:15.7e} {t2-t1:8.3f} {'(write)' if dump else ''}")
             if dump:
                 for signal, val in zip(signals, step.x):
                     if signal.output:
-                        signal.write(prefix, "map%04d" % step.i, val)
+                        signal.write(prefix, f"map{step.i:4d}", val)
             t1 = time.time()
 
         L.info("Done")
