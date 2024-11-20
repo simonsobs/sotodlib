@@ -135,6 +135,7 @@ def multilayer_preprocess_tod(obs_id,
             # now run the pipeline on the processed axis manager
             logger.info(f"Beginning processing pipeline for {obs_id}:{group}")
             proc_aman, success = pipe_proc.run(aman)
+            proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_proc))
 
         except Exception as e:
             errmsg = f'{type(e)}: {e}'

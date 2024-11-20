@@ -507,6 +507,24 @@ def cleanup_mandb(error, outputs, configs, logger):
         f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
 
+def get_pcfg_check_aman(pipe):
+    """
+    Given a preprocess pipeline class return an axis manager containing
+    the ordered steps of the pipeline with all arguments for each step.
+    """
+    pcfg_ref = core.AxisManager()
+    for i, pp in enumerate(pipe):
+        pcfg_ref.wrap(f'{i}_{pp.name}', core.AxisManager())
+        for memb in inspect.getmembers(pp, lambda a:not(inspect.isroutine(a))):
+            if not memb[0][0] == '_':
+                if type(memb[1]) is dict:
+                    pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], core.AxisManager())
+                    for itm in memb[1].items():
+                        pcfg_ref[f'{i}_{pp.name}'][memb[0]].wrap(itm[0], str(itm[1]))
+                else:
+                    pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], memb[1])
+    return pcfg_ref
+
 def _check_assignment_length(a, b):
     """
     Helper function to check if the set of assignments in axis manager ``a`` matches
@@ -520,6 +538,10 @@ def _check_assignment_length(a, b):
         return True, aa, bb
 
 def check_cfg_match(ref, loaded, logger=None):
+    """
+    Checks that the ``ref`` and ``loaded`` axis managers containing the ordered
+    preprocess pipelines match one another.
+    """
     if logger is None:
         logger = init_logger("preprocess")
     check, ref_items, loaded_items = check_assignment_length(ref, loaded)
