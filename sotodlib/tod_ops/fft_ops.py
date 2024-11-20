@@ -10,7 +10,6 @@ from scipy.signal import welch
 from sotodlib import core
 
 from . import detrend_tod
-from .flags import get_subscan_signal
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -282,6 +281,13 @@ def calc_psd(
     return freqs, Pxx
 
 def calc_psd_subscan(aman, signal=None, freq_spacing=None, merge=False, wrap=None, **kwargs):
+    """
+    Calculate the power spectrum density of subscans using signal.welch().
+    Data defaults to aman.signal. aman.timestamps is used for times.
+    aman.subscans is used to identify subscans.
+    See calc_psd for arguments.
+    """
+    from .flags import get_subscan_signal
     if signal is None:
         signal = aman.signal
 
@@ -290,15 +296,20 @@ def calc_psd_subscan(aman, signal=None, freq_spacing=None, merge=False, wrap=Non
         if freq_spacing is not None:
             nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
         else:
-            duration_samps = np.around((aman.subscans.stop_time - aman.subscans.start_time) * fs)
+            duration_samps = np.sum(aman.subscans.subscan_flags.mask(), axis=1)
+            duration_samps = duration_samps[duration_samps > 0]
             nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
         kwargs["nperseg"] = nperseg
 
     Pxx = []
     for iss in range(aman.subscans.subscans.count):
         signal_ss = get_subscan_signal(aman, signal, iss)
-        freqs, pxx_sub = welch(signal_ss, fs, **kwargs)
-        Pxx.append(pxx_sub)
+        axis = -1 if "axis" not in kwargs else kwargs["axis"]
+        if signal_ss.shape[axis] >= kwargs["nperseg"]:
+            freqs, pxx_sub = welch(signal_ss, fs, **kwargs)
+            Pxx.append(pxx_sub)
+        else:
+            Pxx.append(np.full((signal.shape[0], kwargs["nperseg"]//2+1), np.nan)) # Add nans if subscan is too short
     Pxx = np.array(Pxx)
     Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
     if merge:
@@ -379,6 +390,8 @@ def fit_noise_model(
     f_max=100,
     merge_name="noise_fit_stats",
     merge_psd=True,
+    freq_spacing=None,
+    approx_fit=False,
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of signal.
@@ -418,6 +431,10 @@ def fit_noise_model(
         If ``merge_fit`` is True then addes into axis manager with merge_name.
     merge_psd : bool
         If ``merg_psd`` is True then adds fres and Pxx to the axis manager.
+    freq_spacing : float
+        The approximate desired frequency spacing of the PSD. Passed to calc_psd.
+    approx_fit : bool
+        Get a rough fit instead of minimizing loglike.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -431,13 +448,14 @@ def fit_noise_model(
     if f is None or pxx is None:
         if psdargs is None:
             f, pxx = calc_psd(
-                aman, signal=signal, timestamps=aman.timestamps, merge=merge_psd
+                aman, signal=signal, timestamps=aman.timestamps, freq_spacing=freq_spacing, merge=merge_psd
             )
         else:
             f, pxx = calc_psd(
                 aman,
                 signal=signal,
                 timestamps=aman.timestamps,
+                freq_spacing=freq_spacing,
                 merge=merge_psd,
                 **psdargs,
             )
@@ -454,17 +472,21 @@ def fit_noise_model(
         pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
         fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
         p0 = [f[fidx], wnest, -pfit[0]]
-        bounds = [(0, None), (sys.float_info.min, None), (None, None)]
-        res = minimize(neglnlike, p0, args=(f, p), bounds=bounds, method="Nelder-Mead")
-        try:
-            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
-            hessian_ndt, _ = Hfun(res["x"])
-            # Inverse of the hessian is an estimator of the covariance matrix
-            # sqrt of the diagonals gives you the standard errors.
-            covout[i] = np.linalg.inv(hessian_ndt)
-        except np.linalg.LinAlgError:
+        if approx_fit:
             covout[i] = np.full((3, 3), np.nan)
-        fitout[i] = res.x
+            fitout[i] = p0
+        else:
+            bounds = [(0, None), (sys.float_info.min, None), (None, None)]
+            res = minimize(neglnlike, p0, args=(f, p), bounds=bounds, method="Nelder-Mead")
+            try:
+                Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
+                hessian_ndt, _ = Hfun(res["x"])
+                # Inverse of the hessian is an estimator of the covariance matrix
+                # sqrt of the diagonals gives you the standard errors.
+                covout[i] = np.linalg.inv(hessian_ndt)
+            except np.linalg.LinAlgError:
+                covout[i] = np.full((3, 3), np.nan)
+            fitout[i] = res.x
 
     noise_model_coeffs = ["fknee", "white_noise", "alpha"]
     noise_fit_stats = core.AxisManager(
@@ -478,6 +500,68 @@ def fit_noise_model(
         "cov",
         covout,
         [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")],
+    )
+
+    if merge_fit:
+        aman.wrap(merge_name, noise_fit_stats)
+    return noise_fit_stats
+
+
+def fit_noise_model_subscan(
+    aman,
+    signal=None,
+    f=None,
+    pxx=None,
+    psdargs={},
+    fwhite=(10, 100),
+    lowf=1,
+    merge_fit=False,
+    f_max=100,
+    merge_name="noise_fit_stats_ss",
+    merge_psd=True,
+    freq_spacing=None,
+    approx_fit=False,
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of signal subscans.
+    Args are as for fit_noise_model.
+    """
+    fitout = np.empty((aman.dets.count, 3, aman.subscans.subscans.count))
+    covout = np.empty((aman.dets.count, 3, 3, aman.subscans.subscans.count))
+
+    if signal is None:
+        signal = aman.signal
+
+    if f is None or pxx is None:
+        f, pxx = calc_psd_subscan(
+            aman,
+            signal=signal,
+            freq_spacing=freq_spacing,
+            merge=merge_psd,
+            **psdargs,
+            )
+
+    for isub in range(aman.subscans.subscans.count):
+        if np.all(np.isnan(pxx[...,isub])): # Subscan has been fully cut
+            fitout[..., isub] = np.full((aman.dets.count, 3), np.nan)
+            covout[..., isub] = np.full((aman.dets.count, 3, 3), np.nan)
+        else:
+            noise_model = fit_noise_model(aman, f=f, pxx=pxx[...,isub], fwhite=fwhite, lowf=lowf,
+                                          merge_fit=False, f_max=f_max, merge_psd=False, approx_fit=approx_fit)
+
+            fitout[..., isub] = noise_model.fit
+            covout[..., isub] = noise_model.cov
+
+    noise_fit_stats = core.AxisManager(
+        aman.dets,
+        noise_model.noise_model_coeffs,
+        aman.subscans.subscans
+        )
+    noise_fit_stats.wrap("fit", fitout, [(0, "dets"), (1, "noise_model_coeffs"), (2, "subscans")])
+    noise_fit_stats.wrap(
+        "cov",
+        covout,
+        [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, "subscans")],
     )
 
     if merge_fit:
