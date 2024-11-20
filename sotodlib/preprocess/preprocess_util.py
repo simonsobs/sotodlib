@@ -506,3 +506,37 @@ def cleanup_mandb(error, outputs, configs, logger):
         f.write(f'{time.time()}, {error}\n')
         f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
+
+def _check_assignment_length(a, b):
+    """
+    Helper function to check if the set of assignments in axis manager ``a`` matches
+    the length of assignments in axis manager ``b``.
+    """
+    aa = np.fromiter(a._assignments.keys(), dtype='<U32')
+    bb = np.fromiter(b._assignments.keys(), dtype='<U32')
+    if len(aa) != len(bb):
+        return False, None, None
+    else:
+        return True, aa, bb
+
+def check_cfg_match(ref, loaded, logger=None):
+    if logger is None:
+        logger = init_logger("preprocess")
+    check, ref_items, loaded_items = check_assignment_length(ref, loaded)
+    if check:
+        for ri, li in zip (ref_items, loaded_items):
+            if ri != li:
+                logger.warning('Config check fails due to ordered pipeline element names not matching.')
+                return False
+            else:
+                if type(ref[ri]) is core.AxisManager:
+                    check_cfg_match(ref[ri], loaded[li])
+                elif ref[ri] == loaded[li]:
+                    continue
+                else:
+                    print(f'Config check fails due to arguments of {li} not matching')
+                    return False
+        return True
+    else:
+        logger.warning('Config check fails due to pipeline list not being of equal length')
+        return False
