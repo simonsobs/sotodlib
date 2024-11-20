@@ -9,7 +9,7 @@ from typing import Optional
 import copy
 
 from sotodlib import core
-import sotodlib.site_pipeline.util as sp_util
+import sotodlib.preprocess.preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
@@ -30,7 +30,7 @@ def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
     
-    group_by, groups = sp_util.get_groups(obs_id, configs, context)
+    group_by, groups = pp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -182,7 +182,7 @@ def main(
     preprocess_tod to define the obs you want to run plotting on.
 
     """
-    configs, context = sp_util.get_preprocess_context(configs)
+    configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     if not os.path.exists(configs['archive']['index']):
