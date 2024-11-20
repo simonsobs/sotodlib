@@ -13,11 +13,10 @@ import copy
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
-import sotodlib.site_pipeline.util as sp_util
-import sotodlib.site_pipeline.preprocess_common as sp_com
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
+import sotodlib.preprocess.preprocess_util as pp_util
 
-logger = sp_util.init_logger("preprocess")
+logger = pp_util.init_logger("preprocess")
 
 def multilayer_preprocess_tod(obs_id, 
                               configs_init,
@@ -52,7 +51,7 @@ def multilayer_preprocess_tod(obs_id,
         dB info and errors and does no sqlite writing inside the function.
     """
 
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
     # list to hold error, destination file, and db data
     outputs = []
@@ -66,8 +65,8 @@ def multilayer_preprocess_tod(obs_id,
     context_proc = core.Context(configs_proc["context_file"])
 
     # get groups
-    group_by_init, groups_init = sp_util.get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc = sp_util.get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init = pp_util.get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc = pp_util.get_groups(obs_id, configs_proc, context_proc)
 
     all_groups_proc = groups_proc.copy()
 
@@ -107,7 +106,7 @@ def multilayer_preprocess_tod(obs_id,
 
     # get or create the processing database
     if not(run_parallel):
-        db = sp_util.get_preprocess_db(configs_proc, group_by_proc, logger)
+        db = pp_util.get_preprocess_db(configs_proc, group_by_proc, logger)
 
     # pipeline for processing config
     pipe_proc = Pipeline(configs_proc["process_pipe"],
@@ -124,7 +123,7 @@ def multilayer_preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         try:
             # load and process the axis manager from the init config
-            aman = sp_com.load_preprocess_tod(obs_id=obs_id, dets={gb:gg for gb, gg in zip(group_by_proc, group)},
+            aman = pp_util.load_and_preprocess(obs_id=obs_id, dets={gb:gg for gb, gg in zip(group_by_proc, group)},
                                               configs=configs_init, context=context_init)
 
             # tags from context proc
@@ -150,7 +149,7 @@ def multilayer_preprocess_tod(obs_id,
             continue
 
         # get the destination files
-        policy = sp_util.ArchivePolicy.from_params(configs_proc['archive']['policy'])
+        policy = pp_util.ArchivePolicy.from_params(configs_proc['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
 
         for gb, g in zip(group_by_proc, group):
@@ -266,11 +265,11 @@ def main(configs_init: str,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4):
 
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
     # Get configs and contexts
-    configs_init, context_init = sp_util.get_preprocess_context(configs_init)
-    configs_proc, context_proc = sp_util.get_preprocess_context(configs_proc)
+    configs_init, context_init = pp_util.get_preprocess_context(configs_init)
+    configs_proc, context_proc = pp_util.get_preprocess_context(configs_proc)
 
     errlog_proc = os.path.join(os.path.dirname(configs_proc['archive']['index']),'errlog.txt')
 
@@ -331,8 +330,8 @@ def main(configs_init: str,
 
         # loop over obs_id's in obs_list
         for obs in obs_list:
-            group_by_init, groups_init = sp_util.get_groups(obs["obs_id"], configs_init, context_init)
-            group_by_proc, groups_proc = sp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
+            group_by_init, groups_init = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
+            group_by_proc, groups_proc = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
 
             found_groups_init = []
             found_groups_proc = []
@@ -375,7 +374,7 @@ def main(configs_init: str,
             futures = [exe.submit(multilayer_preprocess_tod, obs_id=r[0]['obs_id'],
                         group_list=r[1], verbosity=verbosity,
                         configs_init=configs_init, 
-                        configs_proc=sp_util.swap_archive(configs_proc, f'temp/{r[0]["obs_id"]}.h5'),
+                        configs_proc=pp_util.swap_archive(configs_proc, f'temp/{r[0]["obs_id"]}.h5'),
                         overwrite=overwrite, run_parallel=True) for r in run_list_proc]
             for future in as_completed(futures):
                 logger.info('New future as_completed result')
@@ -392,7 +391,7 @@ def main(configs_init: str,
                 futures.remove(future)
 
                 logger.info(f'Processing future result db_dataset: {db_datasets}')
-                db = sp_util.get_preprocess_db(configs_proc, group_by_proc, logger)
+                db = pp_util.get_preprocess_db(configs_proc, group_by_proc, logger)
 
                 logger.info('Database connected')
                 if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
