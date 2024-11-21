@@ -424,18 +424,16 @@ class TODStats(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        def get_sub(aman, name): # Helper fn to access nested aman entries eg aman.psd.Pxx
-            cmd = "aman"+"".join([str([xx]) for xx in name.split(".")])
-            return eval(cmd)
-
         if self.calc_cfgs.get('mask') is not None:
             mask_dict = self.calc_cfgs.get('mask')
-            freqs = get_sub(aman, mask_dict['freqs'])
+            _f = attrgetter(mask_dict['freqs'])
+            freqs = _f(aman)
             low_f, high_f = mask_dict['low_f'], mask_dict['high_f']
             fmask = np.all([freqs >= low_f, freqs <= high_f], axis=0)
             self.calc_cfgs['mask'] = fmask
 
-        stats_aman = tod_ops.flags.get_stats(aman, get_sub(aman, self.signal), **self.calc_cfgs)
+        _f = attrgetter(self.signal)
+        stats_aman = tod_ops.flags.get_stats(aman, _f(aman), **self.calc_cfgs)
         self.save(proc_aman, stats_aman)
 
     def save(self, proc_aman, stats_aman):
