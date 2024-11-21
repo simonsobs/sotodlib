@@ -16,6 +16,11 @@ The two access points in this submodule are:
     This can be used to load single G3 files (or a set of
     sample-contiguous G3 files) from a book, by filename.
 
+Reading from g3 files can be slow on some filesystems.  Use
+SOTODLIB_TOD_CACHE envvar to point to a directory where tempfiles can
+be safely made, for faster acccess, such as a scratch, local, or RAM
+disk.
+
 """
 
 import so3g
@@ -27,6 +32,8 @@ import itertools
 import logging
 import os
 import re
+import shutil
+import tempfile
 import yaml
 
 import sotodlib
@@ -805,14 +812,30 @@ class Accumulator2d(Accumulator):
         return self.data
 
 
-def _frames_iterator(files, prefix, samples, smurf_proc=None):
+def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None):
     """Iterates over frames in files.  yields only frames that might be of
     interest for timestream unpacking.
 
     Yields each (frame, offset).  The offset is the global offset
     associated with the start of the frame.
 
+    If use_temp_dir is a string, data files are copied to that dir
+    before reading from them.  If use_temp_dir is None, and
+    SOTODLIB_TOD_CACHE envvar is defined, then a TemporaryDirectory
+    (which can clean up after itself) will be created inside
+    SOTODLIB_TOD_CACHE and that will be used as the temp_dir.
+
     """
+    if use_temp_dir is None:
+        cache_dir = os.getenv('SOTODLIB_TOD_CACHE')
+        if cache_dir:
+            # Just return things from _frames_iterator, but within a
+            # tempdir context that will clean up after last iteration.
+            with tempfile.TemporaryDirectory(dir=cache_dir) as temp_dir:
+                for item in _frames_iterator(files, prefix, samples, smurf_proc, temp_dir):
+                    yield item
+            return
+
     offset = 0
     for f, i0, i1 in files:
         if i0 is None:
@@ -826,6 +849,10 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None):
 
         filename = os.path.join(prefix, f)
         offset = i0
+
+        if use_temp_dir:
+            filename, orig_filename = os.path.join(use_temp_dir, 'framefile'), filename
+            shutil.copyfile(orig_filename, filename)
 
         for frame in spt3g_core.G3File(filename):
             if smurf_proc is not None and smurf_proc.process(frame):
