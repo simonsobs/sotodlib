@@ -99,7 +99,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
     del pairs_req
 
-    file_map = db.get_files(obs_id)
+    file_map = db.get_files(obs_id, detsets=detsets_req)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
     
     # Figure out how many samples we're loading.
@@ -115,8 +115,6 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         samples[1] = sample_range[1] + samples[1]
     samples[0] = min(max(0, samples[0]), sample_range[1])
     samples[1] = min(max(samples), sample_range[1])
-
-    file_map = db.get_files(obs_id)
 
     # Consider pre-allocating the signal buffer.
     signal_buffer = None
