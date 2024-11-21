@@ -693,7 +693,7 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
 
     return mskinvar
 
-def get_subscans(aman, merge=True, include_turnarounds=False):
+def get_subscans(aman, merge=True, include_turnarounds=False, overwrite=True):
     """
     Returns an axis manager with information about subscans.
     This includes direction, start time, stop time, and a ranges matrix (subscans samps)
@@ -724,7 +724,10 @@ def get_subscans(aman, merge=True, include_turnarounds=False):
     rm = RangesMatrix([Ranges.from_array(np.atleast_2d(ss), tt.size) for ss in ss_ind])
     subscan_aman.wrap('subscan_flags', rm, [(0, 'subscans'), (1, 'samps')]) # True in the subscan
     if merge:
-        aman.wrap('subscans', subscan_aman)
+        name = 'subscan_info'
+        if overwrite and name in aman:
+            aman.move(name, None)
+        aman.wrap(name, subscan_aman)
     return subscan_aman
 
 def get_subscan_signal(aman, arr, isub=None, trim=False):
@@ -744,13 +747,13 @@ def get_subscan_signal(aman, arr, isub=None, trim=False):
     if isinstance(arr, str):
         arr = aman[arr]
     if np.isscalar(isub):
-        out = apply_rng(arr, aman.subscans.subscan_flags[isub])
+        out = apply_rng(arr, aman.subscan_info.subscan_flags[isub])
         if trim and out.size == 0:
             out = None
     else:
         if isub is None:
-            isub = range(len(aman.subscans.subscan_flags))
-        out = [apply_rng(arr, aman.subscans.subscan_flags[ii]) for ii in isub]
+            isub = range(len(aman.subscan_info.subscan_flags))
+        out = [apply_rng(arr, aman.subscan_info.subscan_flags[ii]) for ii in isub]
         if trim:
             out = [x for x in out if x.size > 0]
 
@@ -782,7 +785,7 @@ def wrap_info(aman, info_aman_name, info, info_names, merge=True):
         info_aman = core.AxisManager(aman.dets)
         axmap = [(0, 'dets')]
     elif info[0].ndim == 2:
-        info_aman = core.AxisManager(aman.dets, aman.subscans.subscans)
+        info_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
         axmap = [(0, 'dets'), (1, 'subscans')]
 
     for ii in range(len(info_names)):
@@ -823,7 +826,7 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
         if mask is not None:
             raise ValueError("Cannot mask samples and split subscans")
         stats_arr = []
-        for iss in range(aman.subscans.subscans.count):
+        for iss in range(aman.subscan_info.subscans.count):
             data = get_subscan_signal(aman, signal, iss)
             if data.size > 0:
                 stats_arr.append([fn_dict[name](data, axis=1) for name in stat_names]) # Samps axis assumed to be 1

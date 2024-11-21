@@ -296,13 +296,13 @@ def calc_psd_subscan(aman, signal=None, freq_spacing=None, merge=False, wrap=Non
         if freq_spacing is not None:
             nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
         else:
-            duration_samps = np.sum(aman.subscans.subscan_flags.mask(), axis=1)
+            duration_samps = np.sum(aman.subscan_info.subscan_flags.mask(), axis=1)
             duration_samps = duration_samps[duration_samps > 0]
             nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
         kwargs["nperseg"] = nperseg
 
     Pxx = []
-    for iss in range(aman.subscans.subscans.count):
+    for iss in range(aman.subscan_info.subscans.count):
         signal_ss = get_subscan_signal(aman, signal, iss)
         axis = -1 if "axis" not in kwargs else kwargs["axis"]
         if signal_ss.shape[axis] >= kwargs["nperseg"]:
@@ -526,8 +526,8 @@ def fit_noise_model_subscan(
     Fits noise model with white and 1/f noise to the PSD of signal subscans.
     Args are as for fit_noise_model.
     """
-    fitout = np.empty((aman.dets.count, 3, aman.subscans.subscans.count))
-    covout = np.empty((aman.dets.count, 3, 3, aman.subscans.subscans.count))
+    fitout = np.empty((aman.dets.count, 3, aman.subscan_info.subscans.count))
+    covout = np.empty((aman.dets.count, 3, 3, aman.subscan_info.subscans.count))
 
     if signal is None:
         signal = aman.signal
@@ -541,7 +541,7 @@ def fit_noise_model_subscan(
             **psdargs,
             )
 
-    for isub in range(aman.subscans.subscans.count):
+    for isub in range(aman.subscan_info.subscans.count):
         if np.all(np.isnan(pxx[...,isub])): # Subscan has been fully cut
             fitout[..., isub] = np.full((aman.dets.count, 3), np.nan)
             covout[..., isub] = np.full((aman.dets.count, 3, 3), np.nan)
@@ -555,7 +555,7 @@ def fit_noise_model_subscan(
     noise_fit_stats = core.AxisManager(
         aman.dets,
         noise_model.noise_model_coeffs,
-        aman.subscans.subscans
+        aman.subscan_info.subscans
         )
     noise_fit_stats.wrap("fit", fitout, [(0, "dets"), (1, "noise_model_coeffs"), (2, "subscans")])
     noise_fit_stats.wrap(

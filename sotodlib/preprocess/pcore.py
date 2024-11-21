@@ -270,7 +270,7 @@ def _expand(new, full, wrap_valid=True):
                 continue
             out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
             oidx=[]; nidx=[]
-            for a in new._assignments[k]:
+            for ii, a in enumerate(new._assignments[k]):
                 if a == 'dets':
                     oidx.append(fs_dets)
                     nidx.append(ns_dets)
@@ -278,8 +278,17 @@ def _expand(new, full, wrap_valid=True):
                     oidx.append(fs_samps)
                     nidx.append(ns_samps)
                 else:
-                    oidx.append(slice(None))
-                    nidx.append(slice(None))
+                    if (ii == 0) and isinstance(out[k], RangesMatrix): # Treat like dets
+                        if a in full._axes:
+                            _, fs, ns = full[a].intersection(new[a], return_slices=True)
+                        else:
+                            fs = range(new[a].count)
+                            ns = range(new[a].count)
+                        oidx.append(fs)
+                        nidx.append(ns)
+                    else: # Treat like samps
+                        oidx.append(slice(None))
+                        nidx.append(slice(None))
             oidx = tuple(oidx)
             nidx = tuple(nidx)
             if isinstance(out[k], RangesMatrix):

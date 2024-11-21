@@ -372,19 +372,22 @@ class PSDCalc(_Preprocess):
         
 
     def process(self, aman, proc_aman):
-        if not self.subscan:
-            calc_psd = tod_ops.fft_ops.calc_psd
-        else:
+        if self.subscan:
             calc_psd = tod_ops.fft_ops.calc_psd_subscan
+        else:
+            calc_psd = tod_ops.fft_ops.calc_psd
 
         freqs, Pxx = calc_psd(aman, signal=aman[self.signal],
                               **self.process_cfgs)
-        fft_aman = core.AxisManager(
-            aman.dets, 
-            core.OffsetAxis("nusamps",len(freqs))
-        )
+        axis_list = [aman.dets, core.OffsetAxis("nusamps", len(freqs))]
+        pxx_axis_map = [(0, "dets"), (1, "nusamps")]
+        if self.subscan:
+            axis_list.append(aman.subscan_info.subscans)
+            pxx_axis_map.append((2, "subscans"))
+
+        fft_aman = core.AxisManager(*axis_list)
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
-        fft_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
+        fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
         aman.wrap(self.wrap, fft_aman)
 
     def calc_and_save(self, aman, proc_aman):
@@ -400,17 +403,17 @@ class TODStats(_Preprocess):
 
     Example config block:
 
-      - "name : "stats"
-        "signal: "signal" # optional
-        "wrap": "stats" # optional
-        "calc":
-          "stat_names": ["median", "std"]
-          "split_subscans": False # optional
-          "mask": # optional, for cutting a power spectrum in frequency
-            "psd_aman": "psd"
-            "low_f": 1
-            "high_f": 10
-        "save": True
+      - name : "stats"
+        signal: "signal" # optional
+        wrap: "stats" # optional
+        calc:
+          stat_names: ["median", "std"]
+          split_subscans: False # optional
+          mask: # optional, for cutting a power spectrum in frequency
+            freqs: "psd.freqs"
+            low_f: 1
+            high_f: 10
+        save: True
 
     """
     name = "stats"
@@ -421,14 +424,18 @@ class TODStats(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        def get_sub(aman, name): # Helper fn to access nested aman entries eg aman.psd.Pxx
+            cmd = "aman"+"".join([str([xx]) for xx in name.split(".")])
+            return eval(cmd)
+
         if self.calc_cfgs.get('mask') is not None:
             mask_dict = self.calc_cfgs.get('mask')
-            freqs = aman[mask_dict['psd_aman']]['freqs']
+            freqs = get_sub(aman, mask_dict['freqs'])
             low_f, high_f = mask_dict['low_f'], mask_dict['high_f']
             fmask = np.all([freqs >= low_f, freqs <= high_f], axis=0)
             self.calc_cfgs['mask'] = fmask
 
-        stats_aman = tod_ops.flags.get_stats(aman, aman[self.signal], **self.calc_cfgs)
+        stats_aman = tod_ops.flags.get_stats(aman, get_sub(aman, self.signal), **self.calc_cfgs)
         self.save(proc_aman, stats_aman)
 
     def save(self, proc_aman, stats_aman):
@@ -464,6 +471,7 @@ class Noise(_Preprocess):
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
+        self.subscan = step_cfgs.get('subscan', False)
 
         super().__init__(step_cfgs)
 
@@ -476,7 +484,11 @@ class Noise(_Preprocess):
             self.calc_cfgs = {}
         
         if self.fit:
-            calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx, 
+            if not self.subscan:
+                fit_noise_model = tod_ops.fft_ops.fit_noise_model
+            else:
+                fit_noise_model = tod_ops.fft_ops.fit_noise_model_subscan
+            calc_aman = fit_noise_model(aman, pxx=psd.Pxx,
                                                         f=psd.freqs, 
                                                         merge_fit=True,
                                                         **self.calc_cfgs)
@@ -484,8 +496,12 @@ class Noise(_Preprocess):
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
                                          freqs=psd.freqs,
                                          **self.calc_cfgs)
-            calc_aman = core.AxisManager(aman.dets)
-            calc_aman.wrap("white_noise", wn, [(0,"dets")])
+            if not self.subscan:
+                calc_aman = core.AxisManager(aman.dets)
+                calc_aman.wrap("white_noise", wn, [(0,"dets")])
+            else:
+                calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
+                calc_aman.wrap("white_noise", wn, [(0,"dets"), (1,"subscans")])
 
         self.save(proc_aman, calc_aman)
     
@@ -513,10 +529,12 @@ class Noise(_Preprocess):
         self.select_cfgs['name'] = self.select_cfgs.get('name','noise')
 
         if self.fit:
-            keep = proc_aman[self.select_cfgs['name']].fit[:,1] <= self.select_cfgs["max_noise"]
+            wn = proc_aman[self.select_cfgs['name']].fit[:,1]
         else:
-            keep = proc_aman[self.select_cfgs['name']].white_noise <= self.select_cfgs["max_noise"]
-
+            wn = proc_aman[self.select_cfgs['name']].white_noise
+        if self.subscan:
+            wn = np.nanmean(wn, axis=-1) # Mean over subscans
+        keep = wn <= np.float64(self.select_cfgs["max_noise"])
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -843,7 +861,7 @@ class FlagTurnarounds(_Preprocess):
             calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
 
         if ('merge_subscans' not in self.calc_cfgs) or (self.calc_cfgs['merge_subscans']):
-            subscan_aman = aman.subscans
+            subscan_aman = aman.subscan_info
         else:
             subscan_aman = None
 
@@ -855,7 +873,7 @@ class FlagTurnarounds(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
             if subscan_aman is not None:
-                proc_aman.wrap("subscans", subscan_aman)
+                proc_aman.wrap("subscan_info", subscan_aman)
 
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
@@ -1385,3 +1403,4 @@ _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
+_Preprocess.register(TODStats)
