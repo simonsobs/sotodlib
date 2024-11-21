@@ -108,6 +108,10 @@ def multilayer_preprocess_tod(obs_id,
     if not(run_parallel):
         db = pp_util.get_preprocess_db(configs_proc, group_by_proc, logger)
 
+    # pipeline for init config
+    pipe_init = Pipeline(configs_init["process_pipe"],
+                         plot_dir=configs_init["plot_dir"], logger=logger)
+
     # pipeline for processing config
     pipe_proc = Pipeline(configs_proc["process_pipe"],
                          plot_dir=configs_proc["plot_dir"], logger=logger)
@@ -124,7 +128,7 @@ def multilayer_preprocess_tod(obs_id,
         try:
             # load and process the axis manager from the init config
             aman = pp_util.load_and_preprocess(obs_id=obs_id, dets={gb:gg for gb, gg in zip(group_by_proc, group)},
-                                              configs=configs_init, context=context_init)
+                                               configs=configs_init, context=context_init, logger=logger)
 
             # tags from context proc
             tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
@@ -135,7 +139,7 @@ def multilayer_preprocess_tod(obs_id,
             # now run the pipeline on the processed axis manager
             logger.info(f"Beginning processing pipeline for {obs_id}:{group}")
             proc_aman, success = pipe_proc.run(aman)
-            proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_proc))
+            proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_init))
 
         except Exception as e:
             errmsg = f'{type(e)}: {e}'

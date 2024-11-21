@@ -5,6 +5,7 @@ import sys
 import copy
 import yaml
 import numpy as np
+import inspect
 
 from .. import core
 
@@ -256,23 +257,29 @@ def swap_archive(config, fpath):
 
 
 def load_preprocess_det_select(obs_id, configs, context=None,
-                               dets=None, meta=None):
+                               dets=None, meta=None, logger=None):
     """Loads the metadata information for the Observation and runs through any
     data selection specified by the Preprocessing Pipeline.
 
     Arguments
     ----------
     obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for
+        Passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
     configs: string or dictionary
-        config file or loaded config directory
+        Config file or loaded config directory
     dets: dict
-        dets to restrict on from info in det_info. See context.get_meta.
+        Dets to restrict on from info in det_info. See context.get_meta.
     meta: AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
     """
+
+    if logger is None:
+        logger = init_logger("preprocess")
+
     configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
@@ -281,9 +288,10 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     pipe[-1].select(meta)
     return meta
 
+
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None):
-    """ Loads the saved information from the preprocessing pipeline and runs
+                        no_signal=None, logger=None):
+    """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
     Assumes preprocess_tod has already been run on the requested observation.
@@ -291,12 +299,12 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     Arguments
     ----------
     obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for
+        Passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
     configs: string or dictionary
-        config file or loaded config directory
+        Config file or loaded config directory
     dets: dict
-        dets to restrict on from info in det_info. See context.get_meta.
+        Dets to restrict on from info in det_info. See context.get_meta.
     meta: AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
@@ -304,10 +312,16 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
     """
+
+    if logger is None:
+        logger = init_logger("preprocess")
+
     configs, context = get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
-                                      dets=dets, meta=meta)
+                                      dets=dets, meta=meta, logger=logger)
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -317,6 +331,68 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         aman = context.get_obs(meta, no_signal=no_signal)
         pipe.run(aman, aman.preprocess)
         return aman
+
+
+def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
+                                   context_init=None, context_proc=None,
+                                   dets=None, meta=None, no_signal=None,
+                                   logger=None):
+    """Loads the saved information from the preprocessing pipeline and runs
+    the processing section of the pipeline.
+
+    Assumes preprocess_tod has already been run on the requested observation.
+
+    Arguments
+    ----------
+    obs_id: multiple
+        Passed to `context.get_obs` to load AxisManager, see Notes for
+        `context.get_obs`
+    configs_init: string or dictionary
+        Config file or loaded config directory
+    configs_proc : string or dictionary
+        Second config file or loaded config dictionary to load
+        dependent databases generated using multilayer_preprocess_tod.py.
+    dets: dict
+        Dets to restrict on from info in det_info. See context.get_meta.
+    meta: AxisManager
+        Contains supporting metadata to use for loading.
+        Can be pre-restricted in any way. See context.get_meta.
+    no_signal: bool
+        If True, signal will be set to None.
+        This is a way to get the axes and pointing info without
+        the (large) TOD blob.  Not all loaders may support this.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    """
+
+    if logger is None:
+        logger = init_logger("preprocess")
+
+    configs_init, context_init = get_preprocess_context(configs_init, context_init)
+    meta_init = context_init.get_meta(obs_id, dets=dets, meta=meta)
+
+    configs_proc, context_proc = get_preprocess_context(configs_proc, context_proc)
+    meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
+
+    if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
+        logger.info(f"No detectors left after cuts in obs {obs_id}")
+        return None
+    else:
+        pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
+        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+
+        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'], logger=logger):
+            aman = context_init.get_obs(meta_proc, no_signal=no_signal)
+            logger.info("Running initial pipeline")
+            pipe_init.run(aman, aman.preprocess)
+
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+            logger.info("Running dependent pipeline")
+            pipe_proc.run(aman, meta_proc.preprocess)
+
+            return aman
+        else:
+            return None
 
 
 def preproc_or_load_group(obs_id, configs, dets, logger=None,
@@ -403,7 +479,8 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
 
     if dbexist and (not overwrite):
         logger.info(f"db exists for {obs_id} {dets} loading data and applying preprocessing.")
-        aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs, context=context)
+        aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs, context=context,
+                                   logger=logger)
         error = 'load_success'
         return error, [obs_id, dets], aman
     else:
@@ -507,6 +584,7 @@ def cleanup_mandb(error, outputs, configs, logger):
         f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
 
+
 def get_pcfg_check_aman(pipe):
     """
     Given a preprocess pipeline class return an axis manager containing
@@ -525,6 +603,7 @@ def get_pcfg_check_aman(pipe):
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], memb[1])
     return pcfg_ref
 
+
 def _check_assignment_length(a, b):
     """
     Helper function to check if the set of assignments in axis manager ``a`` matches
@@ -532,10 +611,12 @@ def _check_assignment_length(a, b):
     """
     aa = np.fromiter(a._assignments.keys(), dtype='<U32')
     bb = np.fromiter(b._assignments.keys(), dtype='<U32')
+
     if len(aa) != len(bb):
         return False, None, None
     else:
         return True, aa, bb
+
 
 def check_cfg_match(ref, loaded, logger=None):
     """
@@ -544,7 +625,7 @@ def check_cfg_match(ref, loaded, logger=None):
     """
     if logger is None:
         logger = init_logger("preprocess")
-    check, ref_items, loaded_items = check_assignment_length(ref, loaded)
+    check, ref_items, loaded_items = _check_assignment_length(ref, loaded)
     if check:
         for ri, li in zip (ref_items, loaded_items):
             if ri != li:
@@ -556,7 +637,7 @@ def check_cfg_match(ref, loaded, logger=None):
                 elif ref[ri] == loaded[li]:
                     continue
                 else:
-                    print(f'Config check fails due to arguments of {li} not matching')
+                    logger.warning(f'Config check fails due to arguments of {li} not matching')
                     return False
         return True
     else:
