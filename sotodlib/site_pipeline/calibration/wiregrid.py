@@ -78,9 +78,8 @@ def cosamnple_hk(tod, interp_func, is_merge=False):
         tod.wrap('hk_data', hk_aman)
     return hk_aman
 
-
 # Wrap house-keeping data
-def wrap_wg_hk(tod, ts_margin=1):
+def wrap_wg_hk(tod, hk_dir, ts_margin=1, wg_encoder_fields=None, wg_actuator_fields=None):
     """
     Wrap the house-keeping data about the wire grid operation.
 
@@ -94,8 +93,8 @@ def wrap_wg_hk(tod, ts_margin=1):
     -------
         tod : AxisManager
             This includes fields, which are related with the wire grid hardware.
-            enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder):
 
+                - enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder):
                 - LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
                 - LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
                 - LSR1 : ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
@@ -104,19 +103,22 @@ def wrap_wg_hk(tod, ts_margin=1):
     """
     tod_start = float(tod.obs_info.start_time) - ts_margin
     tod_stop =  float(tod.obs_info.stop_time) + ts_margin
-
-    # Define house-keepind data configurations
     _tel = tod.obs_info.telescope
-    hk_dir = '/so/level2-daq/' + _tel + '/hk'
-    wg_encoder_fields = {
+
+    if hk_dir is None:
+        print("Please specify the directory of the house-keeping data.")
+        return False
+    if wg_encoder_fields is None:
+        wg_encoder_fields = {
             'enc_rad_raw': _tel + '.wg-encoder.feeds.wgencoder_full.reference_count',
-    }
-    wg_actuator_fields = {
-        'LSL1': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
-        'LSL2': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
-        'LSR1': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
-        'LSR2': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSR2',
-    }
+        }
+    if wg_actuator_fields is None:
+        wg_actuator_fields = {
+            'LSL1': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
+            'LSL2': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
+            'LSR1': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
+            'LSR2': _tel + '.wg-actuator.feeds.wgactuator.limitswitch_LSR2',
+        }
 
     try:
         # for encoder data
@@ -158,6 +160,12 @@ def wrap_wg_hk(tod, ts_margin=1):
 
     # tod, which has the wire grid data with samps axis
     return tod
+
+
+# Wrap house-keeping data with hkdb
+def wrap_wg_hkdb(tod, hkdb_config, ts_margin=1):
+    # wrap function will be replaced by this in the near future
+    pass
 
 
 # Correct wires' direction for each telescope
@@ -243,7 +251,8 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
         idx_steps_start, idx_steps_stop : sample index of the start/stop for each step
 
     """
-    if stopped_time is None: stopped_time = 10
+    if stopped_time is None:
+        stopped_time = 10
 
     if steps_thresholds is None:
         steps_thresholds = (10, 300) # upper bound of the static, lower bound of its diff
@@ -364,7 +373,8 @@ def initialize_wire_grid(tod, stopped_time=None, ls_margin=None, is_restrict=Tru
     # get the opration range of the calibration
     idx_steps_start, idx_steps_stop  = _get_operation_range(tod, stopped_time=stopped_time, ls_margin=ls_margin, is_restrict=is_restrict, remove_trembling=True)
 
-    if 'cal_data' in tod.wg._fields.keys(): tod.wg.move('cal_data', None)
+    if 'cal_data' in tod.wg._fields.keys():
+        tod.wg.move('cal_data', None)
     _cal_data = core.AxisManager(tod.samps, tod.dets, core.IndexAxis('wg_steps'))
     _cal_data.wrap('idx_steps_start', idx_steps_start, [(0, 'wg_steps')])
     _cal_data.wrap('idx_steps_stop',  idx_steps_stop,  [(0, 'wg_steps')])
@@ -569,7 +579,8 @@ def fit_with_circle(tod):
         _cfitcov.append(fit_results[-1].cov_beta)
         _cfitresvar.append(fit_results[-1].res_var)
         _is_normally_stopped.append(True if fit_results[-1].stopreason[0] == 'Parameter convergence' else False)
-    if 'cfit_result' in tod.wg._fields.keys(): tod.wg.move('cfit_result', None)
+    if 'cfit_result' in tod.wg._fields.keys():
+        tod.wg.move('cfit_result', None)
     _ax_cfit = core.AxisManager(tod.dets)
     _ax_cfit.wrap('cx0',                 np.array(_cfitval)[:,0],        [(0, 'dets')])
     _ax_cfit.wrap('cy0',                 np.array(_cfitval)[:,1],        [(0, 'dets')])
@@ -603,8 +614,10 @@ def _ignore_outlier_angle(estimated_angle, num_bins=None, gap_size=None):
         valid_angle : ndarray
             a set of the validate angle limited to the majority
     """
-    if num_bins is None: num_bins = 18
-    if gap_size is None: gap_size = np.deg2rad(5.)
+    if num_bins is None:
+        num_bins = 18
+    if gap_size is None:
+        gap_size = np.deg2rad(5.)
     _low_bins = np.digitize(estimated_angle%np.pi, bins=np.linspace(-gap_size,np.pi-gap_size,num_bins))
     _high_bins = np.digitize(estimated_angle%np.pi, bins=np.linspace(0,np.pi+gap_size,num_bins))
     _is_likely = np.where(
@@ -680,9 +693,11 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=None, gap
     _ax_gamma.wrap('background_pol_rad',            _bg_theta,         [(0, 'dets')])
     _ax_gamma.wrap('background_pol_relative_power', _bg_amp,           [(0, 'dets')])
     _ax_gamma.wrap('theta_det_instr',               0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
-    if remove_cal_data: tod.move('wg', None)
+    if remove_cal_data:
+        tod.move('wg', None)
     if wrap_aman:
-        if 'gamma_cal' in tod._fields.keys(): tod.move('gamma_cal', None)
+        if 'gamma_cal' in tod._fields.keys():
+            tod.move('gamma_cal', None)
         tod.wrap('gamma_cal', _ax_gamma)
         return tod
     else:
@@ -709,8 +724,10 @@ def divide_tod(tod, forward_margin=None, backward_margin=None):
             tod, which corresponds to 2nd hwp-direction range
 
     """
-    if forward_margin is None: forward_margin = 60000
-    if backward_margin is None: backward_margin = 2000
+    if forward_margin is None:
+        forward_margin = 60000
+    if backward_margin is None:
+        backward_margin = 2000
     _flip_idx1 = np.where(tod.hwp_solution.quad_1[1:] - tod.hwp_solution.quad_1[:-1])[0]
     _flip_idx2 = np.where(tod.hwp_solution.quad_2[1:] - tod.hwp_solution.quad_2[:-1])[0]
     try:
@@ -718,7 +735,7 @@ def divide_tod(tod, forward_margin=None, backward_margin=None):
         flip_at = _flip_idx1
     except AssertionError:
         flip_at = int(0.5*(_flip_idx1 + _flip_idx2))
-        logger.warning("quad sign recorded in the hardware status of HWP is not simultaniously flipped. The average idx is assigned.")
+        logger.warning("The flip indexes of the quadature(direction of rotation) data are different. The average is assigned.")
     tod1 = tod.restrict('samps', (tod.samps.offset, flip_at - forward_margin), in_place=False)
     tod2 = tod.restrict('samps', (tod.samps.offset + flip_at + backward_margin, -1), in_place=False)
     return tod1, tod2
@@ -726,7 +743,23 @@ def divide_tod(tod, forward_margin=None, backward_margin=None):
 
 def binning_data(ref_data, target_data, num_bin=100):
     """
-    a function binning given data against a reference data
+    This function returns the binned data and its error along with the binning of the reference data.
+
+    Parameters
+    ----------
+        ref_data: ndarray
+            the reference data to bin the target data
+        target_data: ndarray
+            the target data to be binned
+        num_bin: int
+            the number of bins to divide the reference data
+
+    Returns
+    -------
+        binned: ndarray
+            the binned data
+        binned_err: ndarray
+            the error of the binned data
     """
     _hist = np.histogram(ref_data, bins=num_bin)
     _bins = np.digitize(ref_data, _hist[1][1:], right=True)
@@ -789,20 +822,20 @@ def _fit_time_const(ref_hwp_speed, normalized_angle, angle_err):
     for _i in range(np.shape(_y)[0]):
         iparams = np.array([1e-3, -2e-2])
         bounds = ([0, -2*np.pi], [1e-1, 2*np.pi])
-        _res = least_squares(_linear_model, x0=param_init, bounds=bounds, \
+        _res = least_squares(_linear_model, x0=iparams, bounds=bounds, \
                                 args=(_x, _y[_i], _yerr[_i]))
         # calculate fit error
         _J = _res.jac
         _cov = np.linalg.inv(_J.T.dot(_J))
-        _err = np.sqrt(np.diag(cov))
+        _err = np.sqrt(np.diag(_cov))
 
         fres.append([_res.x[0], _res.x[1]])
         ferr.append([_err[0], _err[1]])
-        fchi2.append(np.mean(_linear_model(_res[_i].x, _x, _y[_i], _yerr[_i])**2))
+        fchi2.append(np.mean(_linear_model(_res.x, _x, _y[_i], _yerr[_i])**2))
     return np.array(fres), np.array(ferr), np.array(fchi2)
 
 
-def get_time_constant(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25), is_wrap=True):
+def get_time_const(tod, hwp_direction="forward", slice_bin=(20,-20), angle_offsets=None, is_wrap=True):
     """
     function to get the values of time constants measured by HWP/wire grid.
 
@@ -826,42 +859,31 @@ def get_time_constant(tod1, tod2, hwp_sign=-1, slice0=(20,-20), slice1=(10,-25),
         if ``is_wrap`` is False, then will return fit results for each. Otherwise, return is the AxisManager.
 
     """
+    # be careful about the convention of the hwp direction, hwp_sign below is defined by the satp1 configuration
+    if hwp_direction == "forward":
+        hwp_sign = 1
+    elif hwp_direction == "reverse":
+        hwp_sign = -1
 
-    _hwp_speed1 = hwp_sign * np.gradient(np.unwrap(tod1.hwp_angle,period=2*np.pi)) / np.gradient(tod1.timestamps)/(2*np.pi)
-    _hwp_speed2 = hwp_sign * np.gradient(np.unwrap(tod2.hwp_angle,period=2*np.pi)) / np.gradient(tod2.timestamps)/(2*np.pi)
+    _hwp_spped = hwp_sign * np.gradient(np.unwrap(tod.hwp_angle, period=2*np.pi)) / np.gradient(tod.timestamps) / (2*np.pi)
 
-    # maybe we should separate binning function in the next pull request.
-    bin_hwp_speed1, bin_hwp_speed_err1 = binning_data(tod1.timestamps, _hwp_speed1)
-    _angle1 = 0.5*np.arctan2(tod1.demodU, tod1.demodQ)
-    bin_angle1, bin_angle_err1 = binning_data(tod1.timestamps, _angle1)
+    _raw_angle = 0.5*np.arctan2(tod.demodU, tod.demodQ)
+    bin_hwp_speed, bin_hwp_speed_err = binning_data(tod.timestamps, _hwp_spped)
+    bin_angle, bin_angle_err = binning_data(tod.timestamps, _raw_angle)
 
-    bin_hwp_speed2, bin_hwp_speed_err2 = binning_data(tod2.timestamps, _hwp_speed2)
-    _angle2 = 0.5*np.arctan2(tod2.demodU, tod2.demodQ)
-    bin_angle2, bin_angle_err2 = binning_data(tod2.timestamps, _angle2)
+    sl0, sl1 = slice_bin
+    if angle_offsets is None:
+        angle_offsets = bin_angle[:,0]
+    _ref = bin_hwp_speed[sl0:sl1]
+    _data = hwp_sign * bin_angle[:,sl0:sl1] - hwp_sign * angle_offsets[:,np.newaxis]
+    _err = bin_angle_err[:,sl0:sl1]
 
-    # we may not have to remove the offsets from the eadh data,
-    # but here we normalize the result to a kind of simplicity
-    _cut0, _cut1 = slice0
-    ref1 = bin_hwp_speed1[_cut0:_cut1]
-    _data1 = bin_angle1[:,_cut0:_cut1]
-    data1 = hwp_sign * _data1 - hwp_sign * _data1[:,0][:,np.newaxis]
-    err1 = bin_angle_err1[:,_cut0:_cut1]
-
-    _cut0, _cut1 = slice1
-    ref2 = bin_hwp_speed2[_cut0:_cut1]
-    _data2 = bin_angle2[:,_cut0:_cut1]
-    data2 = hwp_sign * _data2 - hwp_sign * _data1[:,0][:,np.newaxis] # _data1 is not typo
-    err2 = bin_angle_err2[:,_cut0:_cut1]
-
-    fres1, ferr1, fchi2_1 = _fit_time_const(ref1, data1, err1)
-    fres2, ferr2 ,fchi2_2 = _fit_time_const(ref2, data2, err2)
+    fres, ferr, fchi2 = _fit_time_const(_ref, _data, _err)
 
     if is_wrap:
-        _ax_tc = core.AxisManager(tod1.dets)
-        _ax_tc.wrap("forward", fres1[:,0],[(0,'dets')])
-        _ax_tc.wrap("reverse", fres2[:,0],[(0,'dets')])
-        tod1.wg.wrap("time_consts", _ax_tc)
-        tod2.wg.wrap("time_consts", _ax_tc)
-        return True
+        _ax_tc = core.AxisManager(tod.dets)
+        _ax_tc.wrap("tau", fres[:,0],[(0,'dets')])
+        tod.wg.wrap("time_consts", _ax_tc)
+        return True, angle_offsets
     else:
-        return (fres1, ferr1, fchi2_1), (fres2, ferr2, fchi2_2)
+        return (fres, ferr, fchi2), angle_offsets

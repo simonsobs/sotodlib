@@ -130,12 +130,12 @@ This module gives the result of calibration as fields like:
  - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})` in radian,
  - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
 
-The time constant of TES bolometers can look like in TODs like
+The time constant of TES bolometers in TODs looks like
 
 .. math::
 
-    \mathrm{d} & \propto \exp i \left[-4\theta_\mathrm{HWP}(t)+\theta_\mathrm{det}\right] \\
-    & = \exp i \left[-4(\theta_\mathrm{HWP} - \omega_\mathrm{HWP}\tau_\mathrm{det})+\theta_\mathrm{det}\right].
+    \mathrm{d} & \propto \exp i \left[-4\theta_\mathrm{HWP}(t)+2\theta_\mathrm{det}\right] \\
+    & = \exp i \left[-4(\theta_\mathrm{HWP} - \omega_\mathrm{HWP}\tau_\mathrm{det})+2\theta_\mathrm{det}\right].
 
 The observed angle :math:`\hat{\theta}_\mathrm{det}` will then be modified and seen as
 
