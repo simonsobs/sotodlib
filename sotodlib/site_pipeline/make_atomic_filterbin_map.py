@@ -59,7 +59,6 @@ def get_parser(parser=None):
         parser = ArgumentParser()
     parser.add_argument("--config-file", type=str, default=None, 
                      help="Path to mapmaker config.yaml file")
-    
     parser.add_argument("--context", type=str,
                         help='context file')
     parser.add_argument("--area",
@@ -179,10 +178,6 @@ def read_tods(context, obslist,
               dtype_tod=np.float32, only_hits=False, site='so_sat3',
               l2_data=None,
               dec_ref=None):
-    """
-        context : str
-        Path to context file
-    """
     context = Context(context)
     # this function will run on multiprocessing and can be returned in any random order
     # we will also return the obslist to keep track of the order
@@ -216,7 +211,7 @@ def read_tods(context, obslist,
     else:
         pwvs.append(np.nan)
     del tod_temp
-    return obslist, my_tods, my_ra_ref, pwvs
+    return bunch.Bunch(obslist=obslist, my_tods=my_tods, my_ra_ref=my_ra_ref, pwvs=pwvs)
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,
@@ -386,7 +381,7 @@ def main(config_file=None, defaults=defaults, **args):
         conn.close() # I close since I only wanted to read
 
     obslists_arr = [item for key, item in obslists.items()]
-    my_oblists=[]; my_tods = []; my_ra_ref=[]; pwvs=[]
+    tod_list = [] # this list will receive the outputs from read_tods
     L.info('Starting with read_tods')
     with ProcessPoolExecutor(args['nproc']) as exe:
         futures = [exe.submit(read_tods, args['context'], obslist, 
@@ -398,11 +393,7 @@ def main(config_file=None, defaults=defaults, **args):
         for future in as_completed(futures):
             #L.info('New future as_completed result')
             try:
-                my_obslist_here, my_tods_here, my_ra_ref_here, pwvs_here = future.result()
-                my_oblists.append(my_obslist_here)
-                my_tods.append(my_tods_here)
-                my_ra_ref.append(my_ra_ref_here)
-                pwvs.append(pwvs_here)
+                tod_list.append(future.result())
             except Exception as e:
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
@@ -413,33 +404,26 @@ def main(config_file=None, defaults=defaults, **args):
                 continue
             futures.remove(future)
     # flatten the list of lists
-    my_oblists = list(itertools.chain.from_iterable(my_oblists))
-    my_tods = list(itertools.chain.from_iterable(my_tods))
-    my_ra_ref = list(itertools.chain.from_iterable(my_ra_ref))
-    pwvs = list(itertools.chain.from_iterable(pwvs))
     L.info('Done with read_tods')
 
+    my_tods = [bb.my_tods for bb in tod_list]
     if args['area'] is not None:
-        # we will do the profile and footprint here, and then allgather the
-        # subshapes and subwcs.This way we don't have to communicate the
-        # massive arrays such as timestamps
         subgeoms = []
         for obs in my_tods:
             if recenter is None:
-                subshape, subwcs = find_footprint(context, obs, wcs,)
+                subshape, subwcs = find_footprint(context, obs[0], wcs,)
                 subgeoms.append((subshape, subwcs))
             else:
-                subshape = shape; subwcs = wcs
+                subshape = shape
+                subwcs = wcs
                 subgeoms.append((subshape, subwcs))
-        # subshape and subwcs are in the order given by my_oblists
-
     run_list = []
     for oi in range(len(my_tods)):
-        # we will need to build the obskey from my_oblists
-        pid = my_oblists[oi][3]
-        detset = my_oblists[oi][1]
-        band = my_oblists[oi][2]
-        obslist = [my_oblists[oi]]
+        # tod_list[oi].obslist[0] is the old obslist
+        pid = tod_list[oi].obslist[0][3]
+        detset = tod_list[oi].obslist[0][1]
+        band = tod_list[oi].obslist[0][2]
+        obslist = tod_list[oi].obslist
         t       = putils.floor(periods[pid,0])
         t5      = ("%05d" % t)[:5]
         prefix  = "%s/%s/atomic_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
@@ -455,10 +439,8 @@ def main(config_file=None, defaults=defaults, **args):
             os.path.isfile(prefix + "_full_ivar.fits") and 
             os.path.isfile(prefix + "_full_hits.fits")
         )
-        #L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
-
-        my_ra_ref_atomic = [my_ra_ref[oi]]
-        pwv_atomic = [pwvs[oi]]
+        my_ra_ref_atomic = tod_list[oi].my_ra_ref
+        pwv_atomic = tod_list[oi].pwvs[0]
         # Save file for data base of atomic maps. We will write an individual file,
         # another script will loop over those files and write into sqlite data base
         if not args['only_hits']:
@@ -477,7 +459,7 @@ def main(config_file=None, defaults=defaults, **args):
                              azimuth=obs_infos[obslist[0][3]].az_center,
                              RA_ref_start=my_ra_ref_atomic[0][0],
                              RA_ref_stop=my_ra_ref_atomic[0][1],
-                             pwv=pwv_atomic
+                             pwv=float(pwv_atomic)
                             ))
         # inputs that are unique per atomic map go into run_list
         if args['area'] is not None:
