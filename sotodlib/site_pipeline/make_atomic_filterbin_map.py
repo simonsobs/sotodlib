@@ -121,8 +121,8 @@ def get_ra_ref(obs, site='so_sat3', dec_ref=-40):
     # ra_ref @ dec=-40 deg.
     t_start = obs.obs_info.start_time
     t_stop = obs.obs_info.stop_time
-    az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*putils.degree,
-                   (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*putils.degree, 0.5*putils.degree)
+    az = np.arange((obs.obs_info.az_center-1.0*obs.obs_info.az_throw),
+                    (obs.obs_info.az_center+1.0*obs.obs_info.az_throw), 1.0)*putils.degree
     el = obs.obs_info.el_center*putils.degree
     csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
