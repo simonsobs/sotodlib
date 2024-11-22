@@ -33,6 +33,7 @@ defaults = {"area": None,
             "wafer": None,
             "freq": None,
             "center_at": None,
+            "dec_ref": -40.0,
             "site": 'so_sat3',
             "max_dets": None, # not implemented yet
             "verbose": 0,
@@ -94,42 +95,41 @@ def get_parser(parser=None):
                         help="Detector set to map with")
     parser.add_argument("--freq", type=str,
                         help="Frequency band to map with")
-    parser.add_argument("--max-dets", type=int, )
+    parser.add_argument("--dec_ref", type=float,
+                        help="Decl. at which we will calculate the reference R.A.")
+    parser.add_argument("--center_at", type=str)
+    parser.add_argument("--max_dets", type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
     parser.add_argument("--min_dur", type=int, )
     parser.add_argument("--site", type=str, )
     parser.add_argument("--verbose", action="count", )
     parser.add_argument("--quiet", action="count", )
     parser.add_argument("--window", type=float, )
-    parser.add_argument("--dtype_tod", )
-    parser.add_argument("--dtype_map", )
-    parser.add_argument("--atomic_db",
-                        help='name of the atomic map database, will be saved where make_filterbin_map is being run')
-    parser.add_argument("--l2_data_path",
-                        help='Path to level-2 data')
+    parser.add_argument("--dtype_tod", type=str)
+    parser.add_argument("--dtype_map", type=str)
+    parser.add_argument("--atomic_db", type=str,
+                        help='name of the atomic map database, will be saved where this script is being run')
+    parser.add_argument("--hk_data_path",
+                        help='Path to housekeeping data')
     return parser
 
 def _get_config(config_file):
     return yaml.safe_load(open(config_file,'r'))
 
-def get_ra_ref(obs, site='so_sat3'):
+def get_ra_ref(obs, site='so_sat3', dec_ref=-40):
     # pass an AxisManager of the observation, and return two
-    # ra_ref @ dec=-40 deg.   
-    # 
-    #t = [obs.obs_info.start_time, obs.obs_info.start_time, obs.obs_info.stop_time, obs.obs_info.stop_time]
+    # ra_ref @ dec=-40 deg.
     t_start = obs.obs_info.start_time
     t_stop = obs.obs_info.stop_time
     az = np.arange((obs.obs_info.az_center-0.5*obs.obs_info.az_throw)*putils.degree,
                    (obs.obs_info.az_center+0.5*obs.obs_info.az_throw)*putils.degree, 0.5*putils.degree)
     el = obs.obs_info.el_center*putils.degree
-    
     csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    ra_ref_start = np.interp(-40*putils.degree, dec_, ra_)
-    
+    ra_ref_start = np.interp(dec_ref*putils.degree, dec_, ra_)
     csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    ra_ref_stop = np.interp(-40*putils.degree, dec_, ra_)
+    ra_ref_stop = np.interp(dec_ref*putils.degree, dec_, ra_)
     return ra_ref_start, ra_ref_stop
 
 def find_footprint(context, tod, ref_wcs, return_pixboxes=False, pad=1):
@@ -139,7 +139,8 @@ def find_footprint(context, tod, ref_wcs, return_pixboxes=False, pad=1):
     my_shape, my_wcs = coords.get_footprint(tod, ref_wcs)
     my_pixbox = enmap.pixbox_of(ref_wcs, my_shape, my_wcs)
     pixboxes.append(my_pixbox)
-    if len(pixboxes) == 0: raise DataMissing("No usable obs to estimate footprint from")
+    if len(pixboxes) == 0:
+        raise DataMissing("No usable obs to estimate footprint from")
     pixboxes = np.array(pixboxes)
     # Handle sky wrapping. This assumes cylindrical coordinates with sky-wrapping
     # in the x-direction, and that there's an integer number of pixels around
@@ -176,7 +177,8 @@ def get_pwv(obs, data_dir):
 
 def read_tods(context, obslist,
               dtype_tod=np.float32, only_hits=False, site='so_sat3',
-              l2_data='/global/cfs/cdirs/sobs/untracked/data/site/hk'):
+              l2_data=None,
+              dec_ref=None):
     """
         context : str
         Path to context file
@@ -199,7 +201,7 @@ def read_tods(context, obslist,
     for field in to_remove:
         tod.move(field, None)
     if only_hits==False:
-        ra_ref_start, ra_ref_stop = get_ra_ref(tod)
+        ra_ref_start, ra_ref_stop = get_ra_ref(tod, site=site, dec_ref=dec_ref)
         my_ra_ref.append((ra_ref_start/putils.degree,
                           ra_ref_stop/putils.degree))
     else:
@@ -209,7 +211,10 @@ def read_tods(context, obslist,
     my_tods.append(tod)
 
     tod_temp = tod.restrict('dets', meta.dets.vals[:1], in_place=False)
-    pwvs.append(get_pwv(tod_temp, data_dir=l2_data))
+    if l2_data is not None:
+        pwvs.append(get_pwv(tod_temp, data_dir=l2_data))
+    else:
+        pwvs.append(np.nan)
     del tod_temp
     return obslist, my_tods, my_ra_ref, pwvs
 
@@ -248,15 +253,6 @@ class LogInfoFilter(logging.Filter):
         record.resmem= memory.resident()/1024.**3
         record.memmax= memory.max()/1024.**3
         return record
-
-def handle_empty(prefix, tag, e, L):
-    # This happens if we ended up with no valid tods for some reason
-    L.info("%s Skipped: %s" % (tag, str(e)))
-    putils.mkdir(os.path.dirname(prefix))
-    with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
-
-def make_demod_map_dummy(context):
-    return None
 
 def main(config_file=None, defaults=defaults, **args):
     # Set up logging.
@@ -347,13 +343,17 @@ def main(config_file=None, defaults=defaults, **args):
     
     split_labels = []
     if args['det_in_out']:
-        split_labels.append('det_in');split_labels.append('det_out')
+        split_labels.append('det_in')
+        split_labels.append('det_out')
     if args['det_left_right']:
-        split_labels.append('det_left');split_labels.append('det_right')
+        split_labels.append('det_left')
+        split_labels.append('det_right')
     if args['det_upper_lower']:
-        split_labels.append('det_upper');split_labels.append('det_lower')
+        split_labels.append('det_upper')
+        split_labels.append('det_lower')
     if args['scan_left_right']:
-        split_labels.append('scan_left');split_labels.append('scan_right')
+        split_labels.append('scan_left')
+        split_labels.append('scan_right')
     if not split_labels:
         split_labels = None
 
@@ -402,9 +402,11 @@ def main(config_file=None, defaults=defaults, **args):
     L.info('Starting with read_tods')
     with ProcessPoolExecutor(args['nproc']) as exe:
         futures = [exe.submit(read_tods, args['context'], obslist, 
-                             dtype_tod=args['dtype_tod'],
-                              only_hits=args['only_hits'],
-                              l2_data=args['l2_data_path']) for obslist in obslists_arr]
+                            dtype_tod=args['dtype_tod'],
+                            only_hits=args['only_hits'],
+                            l2_data=args['hk_data_path'],
+                            site=args['site'],
+                            dec_ref=args['dec_ref']) for obslist in obslists_arr]
         for future in as_completed(futures):
             #L.info('New future as_completed result')
             try:
@@ -446,11 +448,9 @@ def main(config_file=None, defaults=defaults, **args):
     run_list = []
     for oi in range(len(my_tods)):
         # we will need to build the obskey from my_oblists
-        #obs_1722126466_satp1_1111111', 'ws3', 'f150', 0)
-        pid = my_oblists[oi][3];
-        detset = my_oblists[oi][1];
-        band = my_oblists[oi][2];
-        #obskey = (pid, detset, band)
+        pid = my_oblists[oi][3]
+        detset = my_oblists[oi][1]
+        band = my_oblists[oi][2]
         obslist = [my_oblists[oi]]
         t       = putils.floor(periods[pid,0])
         t5      = ("%05d" % t)[:5]
