@@ -337,10 +337,12 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    context_init=None, context_proc=None,
                                    dets=None, meta=None, no_signal=None,
                                    logger=None):
-    """Loads the saved information from the preprocessing pipeline and runs
-    the processing section of the pipeline.
+    """Loads the saved information from the preprocessing pipeline from a
+    reference and a dependent database and runs the processing section of
+    the pipeline for each.
 
-    Assumes preprocess_tod has already been run on the requested observation.
+    Assumes preprocess_tod and multilayer_preprocess_tod have already been run
+    on the requested observation.
 
     Arguments
     ----------
@@ -388,7 +390,10 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
-            pipe_proc.run(aman, meta_proc.preprocess)
+            proc_aman = context_proc.get_meta(obs_id, dets=dets, meta=meta_proc)
+            aman.preprocess.merge(proc_aman.preprocess)
+
+            pipe_proc.run(aman, aman.preprocess)
 
             return aman
         else:
@@ -442,10 +447,12 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
     aman: Core.AxisManager
         Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
     """
-    error = None
-    outputs = {}
+    
     if logger is None:
         logger = init_logger("preprocess")
+    
+    error = None
+    outputs = {}
 
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
