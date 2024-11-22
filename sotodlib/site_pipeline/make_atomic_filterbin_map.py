@@ -1,64 +1,65 @@
 from argparse import ArgumentParser
-import sys
 import time
 import warnings
 import os
 import logging
 import yaml
-import itertools
 import multiprocessing
 import traceback
 import numpy as np
 import so3g
 from sotodlib import coords, mapmaking
-from sotodlib.core import Context,  metadata as metadata_core, FlagManager, AxisManager, OffsetAxis
-from sotodlib.io import metadata, hk_utils
+from sotodlib.core import Context
+from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
-from pixell import enmap, utils as putils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
+from pixell import enmap, utils as putils, bunch
+from pixell import wcsutils, colors, memory, mpi
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import sotodlib.site_pipeline.util as util
 
-defaults = {"area": None,
-            "nside": None,
-            "query": "type == 'obs' and subtype == 'cmb'",
-            "odir": "./output",
-            "preprocess_config": None,
-            "update_delay": None,
-            "comps": "TQU",
-            "mode": "per_obs",
-            "nproc": 1,
-            "ntod": None,
-            "tods": None,
-            "nset": None,
-            "wafer": None,
-            "freq": None,
-            "center_at": None,
-            "dec_ref": -40.0,
-            "site": 'so_sat3',
-            "max_dets": None, # not implemented yet
-            "verbose": 0,
-            "quiet": 0,
-            "tiled": 0, # not implemented yet
-            "singlestream": False,
-            "only_hits": False,
-            "det_in_out": False,
-            "det_left_right":False,
-            "det_upper_lower":False,
-            "scan_left_right":False,
-            "window":0.0, # not implemented yet
-            "dtype_tod": 'float32',
-            "dtype_map": 'float64',
-            "atomic_db": "atomic_maps.db",
-            "fixed_time": None,
-            "min_dur": None,
-            "hk_data_path": None,
-           }
+defaults = {
+    "area": None,
+    "nside": None,
+    "query": "type == 'obs' and subtype == 'cmb'",
+    "odir": "./output",
+    "preprocess_config": None,
+    "update_delay": None,
+    "comps": "TQU",
+    "mode": "per_obs",
+    "nproc": 1,
+    "ntod": None,
+    "tods": None,
+    "nset": None,
+    "wafer": None,
+    "freq": None,
+    "center_at": None,
+    "dec_ref": -40.0,
+    "site": 'so_sat3',
+    "max_dets": None,  # not implemented yet
+    "verbose": 0,
+    "quiet": 0,
+    "tiled": 0,  # not implemented yet
+    "singlestream": False,
+    "only_hits": False,
+    "det_in_out": False,
+    "det_left_right": False,
+    "det_upper_lower": False,
+    "scan_left_right": False,
+    "window": 0.0,  # not implemented yet
+    "dtype_tod": 'float32',
+    "dtype_map": 'float64',
+    "atomic_db": "atomic_maps.db",
+    "fixed_time": None,
+    "min_dur": None,
+    "hk_data_path": None,
+    }
+
 
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
-    parser.add_argument("--config-file", type=str, default=None, 
-                     help="Path to mapmaker config.yaml file")
+    parser.add_argument("--config-file", type=str, default=None,
+                        help="Path to mapmaker config.yaml file")
     parser.add_argument("--context", type=str,
                         help='context file')
     parser.add_argument("--area",
@@ -66,27 +67,31 @@ def get_parser(parser=None):
     parser.add_argument("--nside",
                         help='Nside if you want map in HEALPIX')
     parser.add_argument("--query",
-                        help='query, can be a file (list of obs_id) or selection string')
+                        help='query, can be a file (list of obs_id)\
+                        or selection string')
     parser.add_argument("--odir",
                         help='output directory')
     parser.add_argument("--preprocess_config", type=str,
-                        help='file with the config file to run the preprocessing pipeline')
+                        help='file with the config file to run the\
+                        preprocessing pipeline')
     parser.add_argument('--update_delay', type=int,
-                        help="Number of days (unit is days) in the past to start observation list.")
+                        help="Number of days (unit is days) in the past\
+                        to start observation list.")
     parser.add_argument("--mode", type=str, )
-    parser.add_argument("--nproc", type=int, help='Number of procs in the multiprocessing pool')
+    parser.add_argument("--nproc", type=int, help='Number of procs in\
+    the multiprocessing pool')
     parser.add_argument("--comps", type=str,)
     parser.add_argument("--singlestream", action="store_true")
-    parser.add_argument("--only_hits", action="store_true") # this will work only when we don't request splits, since I want to avoid loading the signal
-    
+    parser.add_argument("--only_hits", action="store_true")
+
     # detector position splits (fixed in time)
     parser.add_argument("--det_in_out", action="store_true")
     parser.add_argument("--det_left_right", action="store_true")
     parser.add_argument("--det_upper_lower", action="store_true")
-    
+
     # time samples splits
     parser.add_argument("--scan_left_right", action="store_true")
-    
+
     parser.add_argument("--ntod", type=int, )
     parser.add_argument("--tods", type=str, )
     parser.add_argument("--nset", type=int, )
@@ -95,7 +100,8 @@ def get_parser(parser=None):
     parser.add_argument("--freq", type=str,
                         help="Frequency band to map with")
     parser.add_argument("--dec_ref", type=float,
-                        help="Decl. at which we will calculate the reference R.A.")
+                        help="Decl. at which we will calculate the\
+                        reference R.A.")
     parser.add_argument("--center_at", type=str)
     parser.add_argument("--max_dets", type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
@@ -107,29 +113,34 @@ def get_parser(parser=None):
     parser.add_argument("--dtype_tod", type=str)
     parser.add_argument("--dtype_map", type=str)
     parser.add_argument("--atomic_db", type=str,
-                        help='name of the atomic map database, will be saved where this script is being run')
+                        help='name of the atomic map database, will be\
+                        saved where this script is being run')
     parser.add_argument("--hk_data_path",
                         help='Path to housekeeping data')
     return parser
 
+
 def _get_config(config_file):
-    return yaml.safe_load(open(config_file,'r'))
+    return yaml.safe_load(open(config_file, 'r'))
+
 
 def get_ra_ref(obs, site='so_sat3', dec_ref=-40):
-    # pass an AxisManager of the observation, and return two
-    # ra_ref @ dec=-40 deg.
     t_start = obs.obs_info.start_time
     t_stop = obs.obs_info.stop_time
     az = np.arange((obs.obs_info.az_center-1.0*obs.obs_info.az_throw),
-                    (obs.obs_info.az_center+1.0*obs.obs_info.az_throw), 1.0)*putils.degree
+        (obs.obs_info.az_center+1.0*obs.obs_info.az_throw),
+        1.0)*putils.degree
     el = obs.obs_info.el_center*putils.degree
-    csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
+    csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)),
+        az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
     ra_ref_start = np.interp(dec_ref*putils.degree, dec_, ra_)
-    csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
+    csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)),
+        az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
     ra_ref_stop = np.interp(dec_ref*putils.degree, dec_, ra_)
     return ra_ref_start, ra_ref_stop
+
 
 def find_footprint(context, tod, ref_wcs, return_pixboxes=False, pad=1):
     # Measure the pixel bounds of each observation relative to our
@@ -141,61 +152,73 @@ def find_footprint(context, tod, ref_wcs, return_pixboxes=False, pad=1):
     if len(pixboxes) == 0:
         raise DataMissing("No usable obs to estimate footprint from")
     pixboxes = np.array(pixboxes)
-    # Handle sky wrapping. This assumes cylindrical coordinates with sky-wrapping
-    # in the x-direction, and that there's an integer number of pixels around
-    # the sky. Could be done more generally, but would be much more involved,
+    # Handle sky wrapping. This assumes cylindrical coordinates
+    # with sky-wrapping in the x-direction, and that there's an
+    # integer number of pixels around the sky. Could be done more
+    # generally, but would be much more involved,
     # and this should be good enough.
-    nphi     = putils.nint(np.abs(360/ref_wcs.wcs.cdelt[0]))
-    widths   = pixboxes[:,1,0]-pixboxes[:,0,0]
-    pixboxes[:,0,0] = putils.rewind(pixboxes[:,0,0],
-                                   ref=pixboxes[0,0,0],
+    nphi = putils.nint(np.abs(360/ref_wcs.wcs.cdelt[0]))
+    widths = pixboxes[:, 1, 0]-pixboxes[:, 0, 0]
+    pixboxes[:, 0, 0] = putils.rewind(pixboxes[:, 0, 0],
+                                   ref=pixboxes[0, 0, 0],
                                    period=nphi)
-    pixboxes[:,1,0] = pixboxes[:,0,0] + widths
+    pixboxes[:, 1, 0] = pixboxes[:, 0, 0] + widths
     # It's now safe to find the total pixel bounding box
-    union_pixbox = np.array([np.min(pixboxes[:,0],0)-pad,np.max(pixboxes[:,1],0)
-                             +pad])
+    union_pixbox = np.array([np.min(pixboxes[:, 0], 0)-pad,
+                             np.max(pixboxes[:, 1], 0)
+                             + pad])
     # Use this to construct the output geometry
     shape = union_pixbox[1]-union_pixbox[0]
-    wcs   = ref_wcs.deepcopy()
-    wcs.wcs.crpix -= union_pixbox[0,::-1]
-    if return_pixboxes: return shape, wcs, pixboxes
-    else: return shape, wcs
+    wcs = ref_wcs.deepcopy()
+    wcs.wcs.crpix -= union_pixbox[0, ::-1]
+    if return_pixboxes:
+        return shape, wcs, pixboxes
+    else:
+        return shape, wcs
 
-class DataMissing(Exception): pass
+
+class DataMissing(Exception):
+    pass
+
 
 def get_pwv(obs, data_dir):
     try:
         pwv_info = hk_utils.get_detcosamp_hkaman(obs, alias=['pwv'],
-                                        fields = ['site.env-radiometer-class.feeds.pwvs.pwv',],
-                                        data_dir = data_dir)
-        pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
+                                        fields=['site.env-radiometer-\
+                                        class.feeds.pwvs.pwv',],
+                                        data_dir=data_dir)
+        pwv_all = pwv_info['env-radiometer-class']['env-radiometer\
+        -class'][0]
         pwv = np.nanmedian(pwv_all)
     except (KeyError, ValueError):
         pwv = 0.0
     return pwv
+
 
 def read_tods(context, obslist,
               dtype_tod=np.float32, only_hits=False, site='so_sat3',
               l2_data=None,
               dec_ref=None):
     context = Context(context)
-    # this function will run on multiprocessing and can be returned in any random order
-    # we will also return the obslist to keep track of the order
-    my_obslist = [] ; my_tods = [] ; my_ra_ref = [] ; pwvs = [] 
-    inds = range(len(obslist))
+    # this function will run on multiprocessing and can be returned in any
+    # random order we will also return the obslist to keep track of the order
+    my_tods = []
+    my_ra_ref = []
+    pwvs = []
     ind = 0
     obs_id, detset, band, obs_ind = obslist[ind]
-    meta = context.get_meta(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band},)
+    meta = context.get_meta(obs_id, dets={"wafer_slot": detset, "wafer.bandpass": band},)
     tod = context.get_obs(meta, no_signal=True)
     #tod = context.get_obs(obs_id, dets={"wafer_slot":detset,
     #                                    "wafer.bandpass":band},
     #                      no_signal=True)
     to_remove = []
     for field in tod._fields:
-        if field!='obs_info' and field!='flags' and field!='signal' and field!='focal_plane' and field!='timestamps' and field!='boresight': to_remove.append(field)
+        if field!='obs_info' and field!='flags' and field!='signal' and field!='focal_plane' and field!='timestamps' and field!='boresight': 
+            to_remove.append(field)
     for field in to_remove:
         tod.move(field, None)
-    if only_hits==False:
+    if only_hits is False:
         ra_ref_start, ra_ref_stop = get_ra_ref(tod, site=site, dec_ref=dec_ref)
         my_ra_ref.append((ra_ref_start/putils.degree,
                           ra_ref_stop/putils.degree))
@@ -213,6 +236,7 @@ def read_tods(context, obslist,
     del tod_temp
     return bunch.Bunch(obslist=obslist, my_tods=my_tods, my_ra_ref=my_ra_ref, pwvs=pwvs)
 
+
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,
                                     'INFO':colors.lgreen,
@@ -221,12 +245,14 @@ class ColoredFormatter(logging.Formatter):
                                     'CRITICAL':colors.lpurple}):
         logging.Formatter.__init__(self, msg)
         self.colors = colors
+
     def format(self, record):
         try:
             col = self.colors[record.levelname]
         except KeyError:
             col = colors.reset
         return col + logging.Formatter.format(self, record) + colors.reset
+
 
 class LogInfoFilter(logging.Filter):
     def __init__(self, rank=0):
@@ -248,6 +274,7 @@ class LogInfoFilter(logging.Filter):
         record.resmem= memory.resident()/1024.**3
         record.memmax= memory.max()/1024.**3
         return record
+
 
 def main(config_file=None, defaults=defaults, **args):
     # Set up logging.
@@ -391,7 +418,7 @@ def main(config_file=None, defaults=defaults, **args):
                             site=args['site'],
                             dec_ref=args['dec_ref']) for obslist in obslists_arr]
         for future in as_completed(futures):
-            #L.info('New future as_completed result')
+            # L.info('New future as_completed result')
             try:
                 tod_list.append(future.result())
             except Exception as e:
@@ -453,8 +480,9 @@ def main(config_file=None, defaults=defaults, **args):
                              wafer=detset.encode(),
                              ctime=int(t),
                              split_label=split_label.encode(),
-                             split_detail=''.encode(), # DONT FORGET TO IMPLEMENT THIS
-                             prefix_path=str(cwd+'/'+prefix+'_%s'%split_label).encode(),
+                             split_detail=''.encode(),  # DONT FORGET TO IMPLEMENT THIS
+                             prefix_path=str(cwd+'/'+prefix+
+                             '_%s'%split_label).encode(),
                              elevation=obs_infos[obslist[0][3]].el_center,
                              azimuth=obs_infos[obslist[0][3]].az_center,
                              RA_ref_start=my_ra_ref_atomic[0][0],
@@ -471,7 +499,8 @@ def main(config_file=None, defaults=defaults, **args):
         futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
                                 noise_model, r[3], preprocess_config, r[4],
                                 shape=r[1], wcs=r[2], nside=args['nside'],
-                                comm = comm, t0=r[5], tag=tag, recenter=recenter,
+                                comm=comm, t0=r[5], tag=tag,
+                                recenter=recenter,
                                 dtype_map=args['dtype_map'],
                                 dtype_tod=args['dtype_tod'],
                                 comps=args['comps'],
@@ -488,15 +517,18 @@ def main(config_file=None, defaults=defaults, **args):
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 L.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
                 f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+                f.write(f'\n{time.time()}, future.result() \
+                error\n{errmsg}\n{tb}\n')
                 f.close()
                 continue
             futures.remove(future)
             if preprocess_config is not None:
                 for ii in range(len(errors)):
-                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii], preprocess_config, L)
+                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii],
+                                                  preprocess_config, L)
     L.info("Done")
     return True
+
 
 if __name__ == '__main__':
     util.main_launcher(main, get_parser)
