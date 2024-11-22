@@ -1307,17 +1307,17 @@ class SplitFlags(_Preprocess):
 
         - name : "split_flags"
           calc:
-            'high_gain': 0.115
-            'high_noise': 3.5e-5
-            'high_tau': 1.5e-3
-            'det_A': 'A'
-            'pol_angle': 35
-            'det_top': 'B'
-            'high_leakage': 1e-3
-            'high_2f': 1.5e-3
-            'right_focal_plane': 0
-            'top_focal_plane': 0
-            'central_pixels': 0.071
+            high_gain: 0.115
+            high_noise: 3.5e-5
+            high_tau: 1.5e-3
+            det_A: A
+            pol_angle: 35
+            det_top: B
+            high_leakage: 1.0e-3
+            high_2f: 1.5e-3
+            right_focal_plane: 0
+            top_focal_plane: 0
+            central_pixels: 0.071
           save: True
 
     .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
