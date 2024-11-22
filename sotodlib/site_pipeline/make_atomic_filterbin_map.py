@@ -324,15 +324,15 @@ def main(config_file=None, defaults=defaults, **args):
     try:
         obslists, obskeys, periods, \
             obs_infos = mapmaking.build_obslists(context,
-                                                     args['query'],
-                                                     mode=args['mode'],
-                                                     nset=args['nset'],
-                                                     wafer=args['wafer'],
-                                                     freq=args['freq'],
-                                                     ntod=args['ntod'],
-                                                     tods=args['tods'],
-                                                     fixed_time=args['fixed_time'],
-                                                     mindur=args['min_dur'])
+                         args['query'],
+                         mode=args['mode'],
+                         nset=args['nset'],
+                         wafer=args['wafer'],
+                         freq=args['freq'],
+                         ntod=args['ntod'],
+                         tods=args['tods'],
+                         fixed_time=args['fixed_time'],
+                         mindur=args['min_dur'])
     except mapmaking.NoTODFound as err:
         L.info(err)
         exit(1)
@@ -355,7 +355,7 @@ def main(config_file=None, defaults=defaults, **args):
         split_labels.append('scan_left')
         split_labels.append('scan_right')
     if not split_labels:
-        split_labels = None
+        split_labels.append('full')
 
     # We open the data base for checking if we have maps already,
     # if we do we will not run them again.
@@ -366,32 +366,20 @@ def main(config_file=None, defaults=defaults, **args):
         # Now we have obslists and splits ready, we look through the database
         # to remove the maps we already have from it
         for key, value in  obslists.items():
-            if split_labels == None:
-                # we want to run only full maps
-                query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="full"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1] )
+            missing_split = False
+            for split_label in split_labels:
+                query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="%s"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1], split_label )
                 res = cursor.execute(query_)
                 matches = res.fetchall()
-                if len(matches)>0:
-                    # this means the map (key,value) is already in the data base,
-                    # so we have to remove it to not run it again
-                    # it seems that removing the maps from the obskeys is enough.
-                    keys_to_remove.append(key)
-            else:
-                # we are asking for splits
-                missing_split = False
-                for split_label in split_labels:
-                    query_ = 'SELECT * from atomic where obs_id="%s" and telescope="%s" and freq_channel="%s" and wafer="%s" and split_label="%s"'%(value[0][0], obs_infos[value[0][3]].telescope, key[2], key[1], split_label )
-                    res = cursor.execute(query_)
-                    matches = res.fetchall()
-                    if len(matches)==0:
-                        # this means one of the requested splits is missing
-                        # in the data base
-                        missing_split = True
-                        break
-                if missing_split == False:
-                    # this means we have all the splits we requested for the
-                    # particular obs_id/telescope/freq/wafer
-                    keys_to_remove.append(key)
+                if len(matches)==0:
+                    # this means one of the requested splits is missing
+                    # in the data base
+                    missing_split = True
+                    break
+            if missing_split == False:
+                # this means we have all the splits we requested for the
+                # particular obs_id/telescope/freq/wafer
+                keys_to_remove.append(key)
         for key in keys_to_remove:
             obskeys.remove(key)
             del obslists[key]
@@ -435,14 +423,14 @@ def main(config_file=None, defaults=defaults, **args):
         # we will do the profile and footprint here, and then allgather the
         # subshapes and subwcs.This way we don't have to communicate the
         # massive arrays such as timestamps
-        subshapes = [] ; subwcses = []
+        subgeoms = []
         for obs in my_tods:
             if recenter is None:
                 subshape, subwcs = find_footprint(context, obs, wcs,)
-                subshapes.append(subshape) ; subwcses.append(subwcs)
+                subgeoms.append((subshape, subwcs))
             else:
                 subshape = shape; subwcs = wcs
-                subshapes.append(subshape) ; subwcses.append(subwcs)
+                subgeoms.append((subshape, subwcs))
         # subshape and subwcs are in the order given by my_oblists
 
     run_list = []
@@ -457,8 +445,7 @@ def main(config_file=None, defaults=defaults, **args):
         prefix  = "%s/%s/atomic_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
         
         if args['area'] is not None:
-            subshape = subshapes[oi]
-            subwcs   = subwcses[oi]
+            subshape, subwcs = subgeoms[oi]
 
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
@@ -476,65 +463,33 @@ def main(config_file=None, defaults=defaults, **args):
         # another script will loop over those files and write into sqlite data base
         if not args['only_hits']:
             info = []
-            if split_labels is None:
-                # this means the mapmaker was run without any splits requested
+            for split_label in split_labels:
                 info.append(bunch.Bunch(pid=pid,
-                                 obs_id=obslist[0][0].encode(),
-                                 telescope=obs_infos[obslist[0][3]].telescope.encode(),
-                                 freq_channel=band.encode(),
-                                 wafer=detset.encode(),
-                                 ctime=int(t),
-                                 split_label='full'.encode(),
-                                 split_detail='full'.encode(),
-                                 prefix_path=str(cwd+'/'+prefix+'_full').encode(),
-                                 elevation=obs_infos[obslist[0][3]].el_center,
-                                 azimuth=obs_infos[obslist[0][3]].az_center,
-                                 RA_ref_start=my_ra_ref_atomic[0][0],
-                                 RA_ref_stop=my_ra_ref_atomic[0][1],
-                                 pwv=pwv_atomic
-                                ))
-            else:
-                # splits were requested and we loop over them
-                for split_label in split_labels:
-                    info.append(bunch.Bunch(pid=pid,
-                                 obs_id=obslist[0][0].encode(),
-                                 telescope=obs_infos[obslist[0][3]].telescope.encode(),
-                                 freq_channel=band.encode(),
-                                 wafer=detset.encode(),
-                                 ctime=int(t),
-                                 split_label=split_label.encode(),
-                                 split_detail=''.encode(),
-                                 prefix_path=str(cwd+'/'+prefix+'_%s'%split_label).encode(),
-                                 elevation=obs_infos[obslist[0][3]].el_center,
-                                 azimuth=obs_infos[obslist[0][3]].az_center,
-                                 RA_ref_start=my_ra_ref_atomic[0][0],
-                                 RA_ref_stop=my_ra_ref_atomic[0][1],
-                                 pwv=pwv_atomic
-                                ))
+                             obs_id=obslist[0][0].encode(),
+                             telescope=obs_infos[obslist[0][3]].telescope.encode(),
+                             freq_channel=band.encode(),
+                             wafer=detset.encode(),
+                             ctime=int(t),
+                             split_label=split_label.encode(),
+                             split_detail=''.encode(), # DONT FORGET TO IMPLEMENT THIS
+                             prefix_path=str(cwd+'/'+prefix+'_%s'%split_label).encode(),
+                             elevation=obs_infos[obslist[0][3]].el_center,
+                             azimuth=obs_infos[obslist[0][3]].az_center,
+                             RA_ref_start=my_ra_ref_atomic[0][0],
+                             RA_ref_stop=my_ra_ref_atomic[0][1],
+                             pwv=pwv_atomic
+                            ))
         # inputs that are unique per atomic map go into run_list
         if args['area'] is not None:
             run_list.append([obslist, subshape, subwcs, info, prefix, t])
         elif args['nside'] is not None:
-            run_list.append([obslist, info, prefix, t])
+            run_list.append([obslist, None, None, info, prefix, t])
     # Done with creating run_list
     with ProcessPoolExecutor(args['nproc']) as exe:
-        if args['area'] is not None:
-            futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
+        futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
                                 noise_model, r[3], preprocess_config, r[4],
-                                shape=r[1], wcs=r[2],
+                                shape=r[1], wcs=r[2], nside=args['nside'],
                                 comm = comm, t0=r[5], tag=tag, recenter=recenter,
-                                dtype_map=args['dtype_map'],
-                                dtype_tod=args['dtype_tod'],
-                                comps=args['comps'],
-                                verbose=args['verbose'],
-                                split_labels=split_labels,
-                                singlestream=args['singlestream'],
-                                site=args['site']) for r in run_list]
-        elif args['nside'] is not None:
-            futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
-                                noise_model, r[1], preprocess_config, r[2],
-                                nside = nside,
-                                comm = comm, t0=r[3], tag=tag, recenter=recenter,
                                 dtype_map=args['dtype_map'],
                                 dtype_tod=args['dtype_tod'],
                                 comps=args['comps'],
