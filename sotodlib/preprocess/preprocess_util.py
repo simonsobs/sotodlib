@@ -256,7 +256,7 @@ def swap_archive(config, fpath):
 
 
 def load_preprocess_det_select(obs_id, configs, context=None,
-                               dets=None, meta=None):
+                               dets=None, meta=None, logger=None):
     """Loads the metadata information for the Observation and runs through any
     data selection specified by the Preprocessing Pipeline.
 
@@ -272,7 +272,14 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     meta: AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
+    logger : PythonLogger
+        Optional. Logger object.  If None, a new logger
+        is created.
     """
+    
+    if logger is None:
+        logger = init_logger("preprocess_db")
+
     configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
@@ -282,7 +289,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     return meta
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None):
+                        no_signal=None, logger=None):
     """ Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -304,7 +311,14 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
+    logger : PythonLogger
+        Optional. Logger object.  If None, a new logger
+        is created.
     """
+    
+    if logger is None:
+        logger = init_logger("preprocess_db")
+    
     configs, context = get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
                                       dets=dets, meta=meta)
@@ -366,10 +380,11 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
     aman: Core.AxisManager
         Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
     """
-    error = None
-    outputs = {}
     if logger is None:
         logger = init_logger("preprocess")
+    
+    error = None
+    outputs = {}
 
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
