@@ -248,14 +248,23 @@ def handle_empty(prefix, tag, e, L):
 def make_demod_map_dummy(context):
     return None
 
-def main(config_file=None, defaults=defaults, **args):    
+def main(config_file=None, defaults=defaults, **args):
+    # Set up logging.
+    L   = logging.getLogger(__name__)
+    L.setLevel(logging.INFO)
+    ch  = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(ColoredFormatter(" %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s"))
+    ch.addFilter(LogInfoFilter())
+    L.addHandler(ch)
+
     cfg = dict(defaults)
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
         cfg_from_file = _get_config(config_file)
         cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
-        print("No config file provided, assuming default values") 
+        L.info("No config file provided, assuming default values") 
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
     # Certain fields are required. Check if they are all supplied here
@@ -275,7 +284,7 @@ def main(config_file=None, defaults=defaults, **args):
     elif args['nside'] is not None:
         nside = int(args['nside'])
     else:
-        print('Neither rectangular area or nside specified, exiting.')
+        L.info('Neither rectangular area or nside specified, exiting.')
         exit(1)
 
     noise_model = mapmaking.NmatWhite()
@@ -286,15 +295,6 @@ def main(config_file=None, defaults=defaults, **args):
     recenter = None
     if args['center_at']:
         recenter = mapmaking.parse_recentering(args['center_at'])
-    
-    # Set up logging.
-    L   = logging.getLogger(__name__)
-    L.setLevel(logging.INFO)
-    ch  = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(ColoredFormatter(" %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s"))
-    ch.addFilter(LogInfoFilter())
-    L.addHandler(ch)
     
     if args['preprocess_config'] is not None:
         preprocess_config = yaml.safe_load(open(args['preprocess_config'],'r'))
@@ -328,7 +328,7 @@ def main(config_file=None, defaults=defaults, **args):
                                                      fixed_time=args['fixed_time'],
                                                      mindur=args['mindur'])
     except mapmaking.NoTODFound as err:
-        print(err)
+        L.info(err)
         exit(1)
     L.info(f'Done with build_obslists, running {len(obslists)} maps')
 
@@ -507,7 +507,6 @@ def main(config_file=None, defaults=defaults, **args):
         elif args['nside'] is not None:
             run_list.append([obslist, info, prefix, t])
     # Done with creating run_list
-
     with ProcessPoolExecutor(args['nproc']) as exe:
         if args['area'] is not None:
             futures = [exe.submit(mapmaking.make_demod_map, args['context'], r[0],
@@ -549,7 +548,7 @@ def main(config_file=None, defaults=defaults, **args):
             if preprocess_config is not None:
                 for ii in range(len(errors)):
                     pt.cleanup_mandb(errors[ii], outputs[ii], preprocess_config, L)
-    print("Done")
+    L.info("Done")
     return True
 
 if __name__ == '__main__':
