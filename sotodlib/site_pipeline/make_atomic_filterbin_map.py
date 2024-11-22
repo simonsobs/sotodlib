@@ -1,9 +1,19 @@
 from argparse import ArgumentParser
-import numpy as np, sys, time, warnings, os, so3g, logging, yaml, itertools, multiprocessing, traceback
+import sys
+import time
+import warnings
+import os
+import logging
+import yaml
+import itertools
+import multiprocessing
+import traceback
+import numpy as np
+import so3g
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context,  metadata as metadata_core, FlagManager, AxisManager, OffsetAxis
 from sotodlib.io import metadata, hk_utils
-from sotodlib.site_pipeline import preprocess_tod as pt
+from sotodlib.preprocess import preprocess_util
 from pixell import enmap, utils as putils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import sotodlib.site_pipeline.util as util
@@ -35,12 +45,12 @@ defaults = {"area": None,
             "det_upper_lower":False,
             "scan_left_right":False,
             "window":0.0, # not implemented yet
-            "dtype_tod": np.float32,
-            "dtype_map": np.float64,
+            "dtype_tod": 'float32',
+            "dtype_map": 'float64',
             "atomic_db": "atomic_maps.db",
             "fixed_time": None,
-            "mindur": None,
-            "l2_data_path": "/global/cfs/cdirs/sobs/untracked/data/site/hk",           
+            "min_dur": None,
+            "hk_data_path": None,
            }
 
 def get_parser(parser=None):
@@ -86,7 +96,7 @@ def get_parser(parser=None):
                         help="Frequency band to map with")
     parser.add_argument("--max-dets", type=int, )
     parser.add_argument("--fixed_ftime", type=int, )
-    parser.add_argument("--mindur", type=int, )
+    parser.add_argument("--min_dur", type=int, )
     parser.add_argument("--site", type=str, )
     parser.add_argument("--verbose", action="count", )
     parser.add_argument("--quiet", action="count", )
@@ -326,7 +336,7 @@ def main(config_file=None, defaults=defaults, **args):
                                                      ntod=args['ntod'],
                                                      tods=args['tods'],
                                                      fixed_time=args['fixed_time'],
-                                                     mindur=args['mindur'])
+                                                     mindur=args['min_dur'])
     except mapmaking.NoTODFound as err:
         L.info(err)
         exit(1)
@@ -547,7 +557,7 @@ def main(config_file=None, defaults=defaults, **args):
             futures.remove(future)
             if preprocess_config is not None:
                 for ii in range(len(errors)):
-                    pt.cleanup_mandb(errors[ii], outputs[ii], preprocess_config, L)
+                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii], preprocess_config, L)
     L.info("Done")
     return True
 
