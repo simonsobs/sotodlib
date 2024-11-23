@@ -851,6 +851,19 @@ Command line arguments
    :func: get_parser
 
 
+make-atomic-filterbin-map
+-------------------------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.make_atomic_filterbin_map` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_atomic_filterbin_map
+   :func: get_parser
+   :prog: make-atomic-filterbin-map
 
 Default Mapmaker Values
 ```````````````````````

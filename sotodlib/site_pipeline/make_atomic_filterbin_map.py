@@ -24,7 +24,6 @@ defaults = {
     "odir": "./output",
     "update_delay": None,
     "comps": "TQU",
-    "mode": "per_obs",
     "nproc": 1,
     "ntod": None,
     "tods": None,
@@ -59,28 +58,33 @@ def get_parser(parser=None):
         parser = ArgumentParser()
     parser.add_argument("--config-file", type=str, default=None,
                         help="Path to mapmaker config.yaml file")
-    parser.add_argument("--context", type=str, help='context file')
+    parser.add_argument("--context", type=str, help='Path to context file')
     parser.add_argument("--preprocess_config", type=str,
-                        help='file with the config file to run the\
+                        help='Path to config file to run the\
                         preprocessing pipeline')
     parser.add_argument("--area",
-                        help='wcs kernel')
+                        help='WCS kernel for rectangular pixels')
     parser.add_argument("--nside",
-                        help='Nside if you want map in HEALPIX')
+                        help='Nside for HEALPIX pixels')
     parser.add_argument("--query",
-                        help='query, can be a file (list of obs_id)\
-                        or selection string')
+                        help='Query, can be a file (list of obs_id)\
+                        or selection string (will select only CMB scans\
+                        by default)')
     parser.add_argument("--odir",
-                        help='output directory')
+                        help='Output directory')
     parser.add_argument('--update_delay', type=int,
                         help="Number of days (unit is days) in the past\
-                        to start observation list.")
-    parser.add_argument("--mode", type=str, )
-    parser.add_argument("--nproc", type=int, help='Number of procs in\
-    the multiprocessing pool')
-    parser.add_argument("--comps", type=str,)
-    parser.add_argument("--singlestream", action="store_true")
-    parser.add_argument("--only_hits", action="store_true")
+                        to start observation list")
+    parser.add_argument("--nproc", type=int,
+                        help='Number of procs in\
+                        the multiprocessing pool')
+    parser.add_argument("--comps", type=str,
+                        help="Components to map (TQU by default)")
+    parser.add_argument("--singlestream", action="store_true",
+                        help="Map without demodulation (e.g. with\
+                        a static HWP)")
+    parser.add_argument("--only_hits", action="store_true",
+                        help='Only create a hits map')
 
     # detector position splits (fixed in time)
     parser.add_argument("--det_in_out", action="store_true")
@@ -346,7 +350,6 @@ def main(config_file=None, defaults=defaults, **args):
         obslists, obskeys, periods, \
             obs_infos = mapmaking.build_obslists(context,
                          args['query'],
-                         mode=args['mode'],
                          nset=args['nset'],
                          wafer=args['wafer'],
                          freq=args['freq'],
