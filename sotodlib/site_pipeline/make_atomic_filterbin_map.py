@@ -22,7 +22,6 @@ defaults = {
     "nside": None,
     "query": "type == 'obs' and subtype == 'cmb'",
     "odir": "./output",
-    "preprocess_config": None,
     "update_delay": None,
     "comps": "TQU",
     "mode": "per_obs",
@@ -60,8 +59,10 @@ def get_parser(parser=None):
         parser = ArgumentParser()
     parser.add_argument("--config-file", type=str, default=None,
                         help="Path to mapmaker config.yaml file")
-    parser.add_argument("--context", type=str,
-                        help='context file')
+    parser.add_argument("--context", type=str, help='context file')
+    parser.add_argument("--preprocess_config", type=str,
+                        help='file with the config file to run the\
+                        preprocessing pipeline')
     parser.add_argument("--area",
                         help='wcs kernel')
     parser.add_argument("--nside",
@@ -71,9 +72,6 @@ def get_parser(parser=None):
                         or selection string')
     parser.add_argument("--odir",
                         help='output directory')
-    parser.add_argument("--preprocess_config", type=str,
-                        help='file with the config file to run the\
-                        preprocessing pipeline')
     parser.add_argument('--update_delay', type=int,
                         help="Number of days (unit is days) in the past\
                         to start observation list.")
@@ -275,6 +273,13 @@ class LogInfoFilter(logging.Filter):
         record.memmax= memory.max()/1024.**3
         return record
 
+def future_write_to_log(e, errlog):
+    errmsg = f'{type(e)}: {e}'
+    tb = ''.join(traceback.format_tb(e.__traceback__))
+    f = open(errlog, 'a')
+    f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+    f.close()
+
 
 def main(config_file=None, defaults=defaults, **args):
     # Set up logging.
@@ -292,14 +297,15 @@ def main(config_file=None, defaults=defaults, **args):
         cfg_from_file = _get_config(config_file)
         cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
-        L.info("No config file provided, assuming default values") 
+        L.error("No config file provided, assuming default values") 
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
     # Certain fields are required. Check if they are all supplied here
-    required_fields = ['context','area']
+    required_fields = ['context','preprocess_config']
     for req in required_fields:
         if req not in cfg.keys():
-            raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
+            raise KeyError("{} is a required argument. Please supply it in a\
+            config file or via the command line".format(req))
     args = cfg
     warnings.simplefilter('ignore')
 
@@ -312,7 +318,7 @@ def main(config_file=None, defaults=defaults, **args):
     elif args['nside'] is not None:
         nside = int(args['nside'])
     else:
-        L.info('Neither rectangular area or nside specified, exiting.')
+        L.error('Neither rectangular area or nside specified, exiting.')
         exit(1)
 
     noise_model = mapmaking.NmatWhite()
@@ -323,19 +329,12 @@ def main(config_file=None, defaults=defaults, **args):
     recenter = None
     if args['center_at']:
         recenter = mapmaking.parse_recentering(args['center_at'])
-    
-    if args['preprocess_config'] is not None:
-        preprocess_config = yaml.safe_load(open(args['preprocess_config'],'r'))
-        outs = []
-        errlog = os.path.join(os.path.dirname(preprocess_config['archive']['index']),
-                          'errlog.txt')
-    else:
-        preprocess_config = None
-        outs = None
-        errlog = None
+    preprocess_config = yaml.safe_load(open(args['preprocess_config'],'r'))
+    outs = []
+    errlog = os.path.join(os.path.dirname(preprocess_config['archive']['index']),
+                      'errlog.txt')
 
     multiprocessing.set_start_method('spawn')
-
     if (args['update_delay'] is not None):
         min_ctime = int(time.time()) - args['update_delay']*86400
         args['query'] += f" and timestamp>={min_ctime}"
@@ -356,7 +355,7 @@ def main(config_file=None, defaults=defaults, **args):
                          fixed_time=args['fixed_time'],
                          mindur=args['min_dur'])
     except mapmaking.NoTODFound as err:
-        L.info(err)
+        L.exception(err)
         exit(1)
     L.info(f'Done with build_obslists, running {len(obslists)} maps')
 
@@ -418,16 +417,10 @@ def main(config_file=None, defaults=defaults, **args):
                             site=args['site'],
                             dec_ref=args['dec_ref']) for obslist in obslists_arr]
         for future in as_completed(futures):
-            # L.info('New future as_completed result')
             try:
                 tod_list.append(future.result())
             except Exception as e:
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                L.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-                f.close()
+                future_write_to_log(e, errlog)
                 continue
             futures.remove(future)
     # flatten the list of lists
@@ -480,7 +473,8 @@ def main(config_file=None, defaults=defaults, **args):
                              wafer=detset.encode(),
                              ctime=int(t),
                              split_label=split_label.encode(),
-                             split_detail=''.encode(),  # DONT FORGET TO IMPLEMENT THIS
+                             # DONT FORGET TO IMPLEMENT THIS
+                             split_detail=''.encode(),
                              prefix_path=str(cwd+'/'+prefix+
                              '_%s'%split_label).encode(),
                              elevation=obs_infos[obslist[0][3]].el_center,
@@ -513,13 +507,7 @@ def main(config_file=None, defaults=defaults, **args):
             try:
                 errors, outputs = future.result()
             except Exception as e:
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                L.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() \
-                error\n{errmsg}\n{tb}\n')
-                f.close()
+                future_write_to_log(e, errlog)
                 continue
             futures.remove(future)
             if preprocess_config is not None:
