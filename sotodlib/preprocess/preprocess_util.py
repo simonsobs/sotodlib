@@ -5,6 +5,8 @@ import sys
 import copy
 import yaml
 import numpy as np
+import h5py
+import traceback
 
 from .. import core
 
@@ -278,7 +280,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     """
     
     if logger is None:
-        logger = init_logger("preprocess_db")
+        logger = init_logger("preprocess")
 
     configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
@@ -317,7 +319,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     """
     
     if logger is None:
-        logger = init_logger("preprocess_db")
+        logger = init_logger("preprocess")
     
     configs, context = get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
@@ -464,7 +466,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         return error, outputs, aman
 
 
-def cleanup_mandb(error, outputs, configs, logger):
+def cleanup_mandb(error, outputs, configs, logger=None):
     """
     Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
@@ -480,6 +482,9 @@ def cleanup_mandb(error, outputs, configs, logger):
 
     3) Update the error log if error is anything else.
     """
+    if logger is None:
+        logger = init_logger("preprocess")
+    
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
