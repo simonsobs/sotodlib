@@ -98,7 +98,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
           signal: "signal" # optional
           calc:
             max_trend: 2.5
-            n_pieces: 10
+            t_piece: 100
           save: True
           plot: True
           select:
@@ -742,6 +742,8 @@ class GlitchFill(_Preprocess):
           nbuf: 10
           use_pca: False
           modes: 1
+          in_place: True
+          wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
@@ -1074,20 +1076,26 @@ class FourierFilter(_Preprocess):
 class PCARelCal(_Preprocess):
     """
     Estimate the relcal factor from the atmosphere using PCA.
-    
+
     Example configuration file entry::
 
       - name: 'pca_relcal'
         signal: 'lpf_sig'
         pca_run: 'run1'
         calc:
-            xfac: 2
-            yfac: 1.5
-            calc_good_medianw: True
+            pca:
+                xfac: 2
+                yfac: 1.5
+                calc_good_medianw: True
+            lpf:
+                type: "low_pass_sine2"
+                cutoff: 1
+                width: 0.1
+            trim_samps: 2000
         save: True
         plot:
             plot_ds_factor: 20
-    
+
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
@@ -1099,6 +1107,22 @@ class PCARelCal(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs.get("lpf") is not None:
+            filt = tod_ops.filters.get_lpf(self.calc_cfgs.get("lpf"))
+            filt_tod = tod_ops.fourier_filter(aman, filt, signal_name='signal')
+
+            filt_aman = core.AxisManager(aman.dets, aman.samps)
+            filt_aman.wrap(self.signal, filt_tod, [(0, 'dets'), (1, 'samps')])
+
+            if self.calc_cfgs.get("trim_samps") is not None:
+                trim = self.calc_cfgs["trim_samps"]
+                aman.restrict('samps', (aman.samps.offset + trim,
+                                        aman.samps.offset + aman.samps.count - trim))
+                proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
+                                             proc_aman.samps.offset + proc_aman.samps.count - trim))
+                filt_aman.restrict('samps', (filt_aman.samps.offset + trim,
+                                             filt_aman.samps.offset + filt_aman.samps.count - trim))
+
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
         rc_aman = core.AxisManager(aman.dets, aman.samps)
@@ -1110,10 +1134,16 @@ class PCARelCal(_Preprocess):
             rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
 
+            filt_aman = filt_aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+            band_aman.merge(filt_aman)
+
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
+            if self.calc_cfgs.get("pca") is None:
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal)
+            else:
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs.get("pca"))
 
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
@@ -1122,7 +1152,7 @@ class PCARelCal(_Preprocess):
             rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
             rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
             rc_aman.wrap(f'{band}_median', result_aman['median'])
-        
+
         rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
         rc_aman.wrap('relcal', relcal, [(0, 'dets')])
         rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
@@ -1160,6 +1190,7 @@ class PCARelCal(_Preprocess):
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1253,6 +1284,7 @@ class EstimateT2P(_Preprocess):
             T_sig_name: 'dsT'
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
+            joint_fit: True
             trim_samps: 2000
             lpf_cfgs:
               type: 'sine2'

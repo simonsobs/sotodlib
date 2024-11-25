@@ -15,12 +15,16 @@ dividing individual obs, for depth-1 maps it will be the ctimes dividing
 depth-1 maps, etc.
 """
 
-__all__ = ['build_obslists']
+__all__ = ['build_obslists','NoTODFound']
 import numpy as np
 from pixell import utils
 from scipy import ndimage
 
 from .utilities import get_ids
+
+class NoTODFound(Exception):
+    def __init__(self, msg):
+        self.msg = msg
 
 def build_obslists(context, query, mode=None, nset=None, wafer=None,
         freq=None, ntod=None, tods=None, fixed_time=None, mindur=None, ):
@@ -78,8 +82,7 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     if tods: ids = np.array(eval("ids"+tods)).reshape(-1)
     if ntod: ids = ids[:ntod]
     if len(ids) == 0:
-        print("No tods found!")
-        sys.exit(1)
+        raise NoTODFound("No tods found!")
     # Extract info about the selected ids
     obs_infos = context.obsdb.query("obs_id in (%s)" % ",".join(["'%s'" % id for id in ids]))
     obs_infos = obs_infos.asarray().view(np.recarray)
@@ -100,8 +103,7 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
             periods   = split_periods(periods, 24*3600) # If fixed_time was not set, 
             #then we do 24 hrs by default and it will be the same as depth_1
     else:
-        print("Invalid mode!")
-        sys.exit(1)
+        raise NoTODFound("Invalid mode!")
     
     # We will make one map per period-detset-band
     obslists = build_period_obslists(obs_infos, periods, context, nset=nset, 
@@ -214,14 +216,16 @@ def build_period_obslists(obs_info, periods, context, nset=None,
         if wafer is not None:
             wafer_list = [wafer]
         else:
-            meta = context.get_meta(row.obs_id)
-            wafer_list = np.unique(meta.det_info.wafer_slot)
+            wafer_list = row.wafer_slots_list.split(',')
         if freq is not None:
             band_list = [freq]
         else:
-            if 'meta' not in locals(): meta = context.get_meta(row.obs_id)
-            band_list = np.unique(meta.det_info.wafer.bandpass)
-            band_list = np.delete(band_list,np.where(band_list=='NC'))
+            if row.tube_flavor == 'mf':
+                band_list = ['f090', 'f150']
+            elif row.tube_flavor == 'uhf':
+                band_list = ['f230', 'f280']
+            elif row.tube_flavor == 'lf':
+                raise ValueError('Band list for lf not implemented yet.')
         for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)

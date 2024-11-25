@@ -53,6 +53,65 @@ def load_toast_h5_obs(db, obs_id, dets=None, samples=None, prefix=None,
         raise RuntimeError(msg)
     return components[0]
 
+def load_toast_h5_dichroic_hack(db, obs_id, dets=None, samples=None, prefix=None,
+                                no_signal=None,
+                                **kwargs):
+    """Obsloader function for TOAST HDF5 output TODs, in the specific case
+    that each detset contains detectors for two bands and those
+    detectors are distributed into two separate HDF5 files.
+
+    See API template, `sotodlib.core.context.obsloader_template`, for
+    details.
+
+    """
+    if prefix is None:
+        prefix = db.prefix
+        if prefix is None:
+            prefix = './'
+
+    # Get a ResultSet<[dets:detset,dets:readout_id], N rows>
+    props = db.get_det_table(obs_id)
+    if dets is None:
+        detsets = props.subset(keys=['dets:detset']).distinct()['dets:detset']
+    elif len(dets) == 0:
+        props = props.subset(rows=[0])
+        detsets = props['dets:detset']
+    else:
+        # Cross-match.
+        vals, i0, i1 = core.util.get_coindices(props['dets:readout_id'], dets)
+        if len(i1) != len(dets):
+            raise ValueError('Some dets not found.')
+        # Implicated detsets?
+        detsets = props.subset(rows=i0, keys=['dets:detset']).distinct()['dets:detset']
+
+    # Filter dets by band ...
+    band_dets = {b: [] for b in ['f090', 'f150']}
+    for d in props['dets:readout_id']:
+        for b, dest in band_dets.items():
+            if b in d:
+                dest.append(d)
+                break
+
+    bands_here = sorted([b for b, d in band_dets.items() if len(d)])
+    files_by_detset = db.get_files(obs_id, detsets=detsets)
+    base_band = [b for b in bands_here if b in list(files_by_detset.items())[0][1][0][0]][0]
+
+    components = []
+    for detset, files in files_by_detset.items():
+        assert(len(files) == 1)
+        detset_dets = props.subset(rows=(props['dets:detset'] == detset))['dets:readout_id']
+        for band in bands_here:
+            band_file = files[0][0].replace(base_band, band)
+            _dets = [d for d in detset_dets if d in band_dets[band]]
+            components.append(
+                load_toast_h5_file(
+                    band_file, dets=_dets, no_signal=no_signal, samples=samples))
+
+    if len(components) > 1:
+        return components[0].concatenate(components, axis='dets', other_fields='first')
+
+    return components[0]
+
 def load_toast_h5_file(filename, dets=None, samples=None, no_signal=False,
                        enhance=False):
     """Reads data from a single HDF5 file.  Returns an AxisManager with
