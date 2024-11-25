@@ -1232,7 +1232,7 @@ class G3tHWP():
             return [], []
 
         # fix reference
-        self._fix_ref()
+        # self._fix_ref()
 
         # correct references with glitches
         self._correct_bad_refs()
@@ -1280,10 +1280,15 @@ class G3tHWP():
 
     def _find_refs(self):
         """ Find reference slits """
-        # Function to find the mean off an array without outliers
+        # Function to find the mean of an array without outliers
         def _mean(arr):
             high = np.percentile(arr, 90)
             low = np.percentile(arr, 10)
+            return np.mean(arr[(arr < high) & (arr > low)])
+        # Function to find the mean of an array larger than the median without outliers
+        def _mean_high(arr):
+            high = np.percentile(arr, 90)
+            low = np.percentile(arr, 55)
             return np.mean(arr[(arr < high) & (arr > low)])
 
         # Generate self._encd_diff
@@ -1293,11 +1298,12 @@ class G3tHWP():
         rot_spacing = np.arange(0, len(self._encd_diff), self._num_edges - 2)
         diff_split = np.split(self._encd_diff, rot_spacing[1:])
         slit_dist = np.concatenate([np.ones(len(_diff)) * _mean(_diff) for _diff in diff_split])
+        slit_dist_high = np.concatenate([np.ones(len(_diff)) * _mean_high(_diff) for _diff in diff_split])
 
         # Generate thresholds to distinguish references and glitched references
         ref_hi_cond = (self._ref_edges + 1) * slit_dist * (1 + self._ref_range)
         ref_lo_cond = (self._ref_edges + 1) * slit_dist * (1 - self._ref_range)
-        ref_gl_cond = slit_dist * (1 + self._ref_range)
+        ref_gl_cond = slit_dist_high * (1 + self._ref_range)
 
         # Normal references
         ref_ind = np.where((self._encd_diff > ref_lo_cond) & (self._encd_diff < ref_hi_cond))[0]
@@ -1306,10 +1312,14 @@ class G3tHWP():
 
         # Find and add glitched references to normal references
         used_ind_pairs = []
+        def _before(x, ind):
+            return abs(x - ind) + 1e8*(1 - np.sign(x + ind))
+        def _after(x, ind):
+            return abs(x - ind) + 1e8*(1 - np.sign(x - ind))
         for ind in ref_ind_glitch:
             # Check that there is sufficient space before and after the glitched reference
-            before = min(ref_ind, key=lambda x:abs(x - ind) + 1e8*(1 + np.sign(x - ind)))
-            after = min(ref_ind, key=lambda x:abs(x - ind) + 1e8*(1 - np.sign(x - ind)))
+            before = ref_ind[np.argmin(_before(ref_ind, ind))]
+            after = ref_ind[np.argmin(_after(ref_ind, ind))]
             if all(np.array([after - ind, ind - before]) > 0.9 * self._num_edges):
                 if (before, after) in used_ind_pairs:
                     continue
@@ -1528,13 +1538,13 @@ class G3tHWP():
                 # Find how many glitches were removed
                 num_glitches = len(mask) - np.sum(mask)
                 self._ref_indexes[i+1:] -= num_glitches
-                logger.warning(f'{num_glitches}, {np.where(~np.array(mask))[0]}')
+                logger.debug(f'{num_glitches}, {np.where(~np.array(mask))[0]}')
             else:
                 total_mask.append(np.ones(len(diff)))
 
         # Join the individual rotation masks into a single overall mask
         total_mask = np.array([bool(mask) for entry in total_mask for mask in entry])
-        self._num_glitches = sum(~total_mask)
+        self._num_glitches = int(sum(~total_mask))
         logger.warning(f'{self._num_glitches} glitches are removed')
         self._encd_clk = self._encd_clk[total_mask]
         for ind, value in enumerate(total_mask):
