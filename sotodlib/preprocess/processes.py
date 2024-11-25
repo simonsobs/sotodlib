@@ -1143,7 +1143,7 @@ class PCARelCal(_Preprocess):
             if self.calc_cfgs.get("pca") is None:
                 result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal)
             else:
-                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, self.calc_cfgs.get("pca"))
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs.get("pca"))
 
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
