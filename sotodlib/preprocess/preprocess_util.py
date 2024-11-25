@@ -5,6 +5,8 @@ import sys
 import copy
 import yaml
 import numpy as np
+import h5py
+import traceback
 import inspect
 
 from .. import core
@@ -273,10 +275,11 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     meta: AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    logger: PythonLogger
-        Optional. Logger object or None will generate a new one.
+    logger : PythonLogger
+        Optional. Logger object.  If None, a new logger
+        is created.
     """
-
+    
     if logger is None:
         logger = init_logger("preprocess")
 
@@ -291,7 +294,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
                         no_signal=None, logger=None):
-    """Loads the saved information from the preprocessing pipeline and runs
+    """ Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
     Assumes preprocess_tod has already been run on the requested observation.
@@ -312,13 +315,14 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
-    logger: PythonLogger
-        Optional. Logger object or None will generate a new one.
+    logger : PythonLogger
+        Optional. Logger object.  If None, a new logger
+        is created.
     """
-
+    
     if logger is None:
         logger = init_logger("preprocess")
-
+    
     configs, context = get_preprocess_context(configs, context)
     meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
                                       dets=dets, meta=meta, logger=logger)
@@ -447,7 +451,6 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
     aman: Core.AxisManager
         Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
     """
-    
     if logger is None:
         logger = init_logger("preprocess")
     
@@ -533,7 +536,7 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
         return error, outputs, aman
 
 
-def cleanup_mandb(error, outputs, configs, logger):
+def cleanup_mandb(error, outputs, configs, logger=None):
     """
     Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
@@ -549,6 +552,9 @@ def cleanup_mandb(error, outputs, configs, logger):
 
     3) Update the error log if error is anything else.
     """
+    if logger is None:
+        logger = init_logger("preprocess")
+    
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
