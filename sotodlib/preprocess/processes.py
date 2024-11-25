@@ -341,7 +341,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
             plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
 class PSDCalc(_Preprocess):
-    """ Calculate the PSD of the data and add it to the AxisManager under the
+    """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
     "psd" field.
 
     Example config block::
@@ -349,11 +349,10 @@ class PSDCalc(_Preprocess):
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
-        "process":
+        "calc":
           "psd_cfgs": # optional, kwargs to scipy.welch
             "nperseg": 1024
           "wrap_name": "psd" # optional
-        "calc": True
         "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
@@ -365,21 +364,17 @@ class PSDCalc(_Preprocess):
         self.wrap = step_cfgs.get('wrap', 'psd')
 
         super().__init__(step_cfgs)
-        
 
-    def process(self, aman, proc_aman):
+    def calc_and_save(self, aman, proc_aman):
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **self.process_cfgs)
+                                              **self.calc_cfgs)
         fft_aman = core.AxisManager(
             aman.dets, 
             core.OffsetAxis("nusamps",len(freqs))
         )
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, [(0,"dets"), (1,"nusamps")])
-        aman.wrap(self.wrap, fft_aman)
-
-    def calc_and_save(self, aman, proc_aman):
-        self.save(proc_aman, aman[self.wrap])
+        self.save(proc_aman, fft_aman)
 
     def save(self, proc_aman, fft_aman):
         if not(self.save_cfgs is None):
@@ -387,7 +382,7 @@ class PSDCalc(_Preprocess):
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
-    wrapped into the AxisManager. All calculation configs goes to `calc_wn`. 
+    wrapped into the preprocessing AxisManager. All calculation configs goes to `calc_wn`. 
 
     Saves the results into the "noise" field of proc_aman. 
 
@@ -417,9 +412,9 @@ class Noise(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.psd not in aman:
-            raise ValueError("PSD is not saved in AxisManager")
-        psd = aman[self.psd]
+        if self.psd not in proc_aman:
+            raise ValueError("PSD is not saved in Preprocessing AxisManager")
+        psd = proc_aman[self.psd]
         
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
