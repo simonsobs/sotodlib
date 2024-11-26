@@ -127,62 +127,6 @@ def _get_config(config_file):
     return yaml.safe_load(open(config_file, 'r'))
 
 
-def get_ra_ref(obs, site='so_sat3', dec_ref=-40):
-    t_start = obs.obs_info.start_time
-    t_stop = obs.obs_info.stop_time
-    az = np.arange(
-        (obs.obs_info.az_center-1.0*obs.obs_info.az_throw),
-        (obs.obs_info.az_center+1.0*obs.obs_info.az_throw),
-        1.0)*putils.degree
-    el = obs.obs_info.el_center*putils.degree
-    csl = so3g.proj.CelestialSightLine.az_el(
-        t_start*np.ones(len(az)),
-        az, el*np.ones(len(az)),
-        site=site, weather='toco')
-    ra_, dec_ = csl.coords().transpose()[:2]
-    ra_ref_start = np.interp(dec_ref*putils.degree, dec_, ra_)
-    csl = so3g.proj.CelestialSightLine.az_el(
-        t_stop*np.ones(len(az)), az, el*np.ones(len(az)),
-        site=site, weather='toco')
-    ra_, dec_ = csl.coords().transpose()[:2]
-    ra_ref_stop = np.interp(dec_ref*putils.degree, dec_, ra_)
-    return ra_ref_start, ra_ref_stop
-
-
-def find_footprint(context, tod, ref_wcs, return_pixboxes=False, pad=1):
-    # Measure the pixel bounds of each observation relative to our
-    # reference wcs
-    pixboxes = []
-    my_shape, my_wcs = coords.get_footprint(tod, ref_wcs)
-    my_pixbox = enmap.pixbox_of(ref_wcs, my_shape, my_wcs)
-    pixboxes.append(my_pixbox)
-    if len(pixboxes) == 0:
-        raise DataMissing("No usable obs to estimate footprint from")
-    pixboxes = np.array(pixboxes)
-    # Handle sky wrapping. This assumes cylindrical coordinates
-    # with sky-wrapping in the x-direction, and that there's an
-    # integer number of pixels around the sky. Could be done more
-    # generally, but would be much more involved,
-    # and this should be good enough.
-    nphi = putils.nint(np.abs(360/ref_wcs.wcs.cdelt[0]))
-    widths = pixboxes[:, 1, 0]-pixboxes[:, 0, 0]
-    pixboxes[:, 0, 0] = putils.rewind(
-        pixboxes[:, 0, 0], ref=pixboxes[0, 0, 0], period=nphi)
-    pixboxes[:, 1, 0] = pixboxes[:, 0, 0] + widths
-    # It's now safe to find the total pixel bounding box
-    union_pixbox = np.array([np.min(pixboxes[:, 0], 0)-pad,
-                             np.max(pixboxes[:, 1], 0)
-                             + pad])
-    # Use this to construct the output geometry
-    shape = union_pixbox[1]-union_pixbox[0]
-    wcs = ref_wcs.deepcopy()
-    wcs.wcs.crpix -= union_pixbox[0, ::-1]
-    if return_pixboxes:
-        return shape, wcs, pixboxes
-    else:
-        return shape, wcs
-
-
 class DataMissing(Exception):
     pass
 
@@ -208,7 +152,6 @@ def read_tods(context, obslist,
     # this function will run on multiprocessing and can be returned in any
     # random order we will also return the obslist to keep track of the order
     my_tods = []
-    my_ra_ref = []
     pwvs = []
     ind = 0
     obs_id, detset, band, obs_ind = obslist[ind]
@@ -221,12 +164,6 @@ def read_tods(context, obslist,
             to_remove.append(field)
     for field in to_remove:
         tod.move(field, None)
-    if only_hits is False:
-        ra_ref_start, ra_ref_stop = get_ra_ref(tod, site=site, dec_ref=dec_ref)
-        my_ra_ref.append((ra_ref_start/putils.degree,
-                          ra_ref_stop/putils.degree))
-    else:
-        my_ra_ref.append(None)
     tod.flags.wrap(
         'glitch_flags', so3g.proj.RangesMatrix.zeros(tod.shape[:2]),
         [(0, 'dets'), (1, 'samps')])
@@ -238,8 +175,7 @@ def read_tods(context, obslist,
     else:
         pwvs.append(np.nan)
     del tod_temp
-    return bunch.Bunch(obslist=obslist, my_tods=my_tods,
-                       my_ra_ref=my_ra_ref, pwvs=pwvs)
+    return bunch.Bunch(obslist=obslist, my_tods=my_tods, pwvs=pwvs)
 
 
 class ColoredFormatter(logging.Formatter):
@@ -453,7 +389,6 @@ def main(config_file=None, defaults=defaults, **args):
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        my_ra_ref_atomic = tod_list[oi].my_ra_ref
         pwv_atomic = tod_list[oi].pwvs[0]
         # Save file for data base of atomic maps.
         # We will write an individual file,
@@ -470,14 +405,11 @@ def main(config_file=None, defaults=defaults, **args):
                     wafer=detset.encode(),
                     ctime=int(t),
                     split_label=split_label.encode(),
-                    # DONT FORGET TO IMPLEMENT THIS
                     split_detail=''.encode(),
                     prefix_path=str(cwd + '/' + prefix + '_%s' %
                                     split_label).encode(),
                     elevation=obs_infos[obslist[0][3]].el_center,
                     azimuth=obs_infos[obslist[0][3]].az_center,
-                    RA_ref_start=my_ra_ref_atomic[0][0],
-                    RA_ref_stop=my_ra_ref_atomic[0][1],
                     pwv=float(pwv_atomic)))
         # inputs that are unique per atomic map go into run_list
         if args['area'] is not None:

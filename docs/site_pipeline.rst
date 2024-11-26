@@ -934,8 +934,11 @@ Example of a config file:
 make-atomic-filterbin-map
 -------------------------
 
-For a description and documentation of the config file format, see
-:mod:`sotodlib.site_pipeline.make_atomic_filterbin_map` module autodocumentation below.
+This script will create atomic maps (maps of individual observations by wafer and
+frequency, and associated splits). These maps are HWP-demodulated and filtered
+and binned. Every atomic map consist of a ``weights``, ``wmap`` (weighted map),
+and ``hits`` map, as well as a information file that is used for adding the map
+to an atomic map database.
 
 Command line arguments
 ``````````````````````
@@ -944,6 +947,40 @@ Command line arguments
    :module: sotodlib.site_pipeline.make_atomic_filterbin_map
    :func: get_parser
    :prog: make-atomic-filterbin-map
+
+Config file format
+``````````````````
+
+The only mandatory parameters are ``context`` for a context file and ``preprocess_config``,
+a preprocess database configuration file that will tell the script how to process the
+timestreams. A typical configuration file could look like this:
+
+.. code-block:: yaml
+
+        context: /global/homes/c/chervias/CMBwork/SimonsObs/SAT/protoISO/contexts/satp3/use_this_local.yaml
+        
+        # Use a pixell area file for rectangular pixel maps or use an nside value for Healpix maps.
+        # Both 
+        area: 'data/band_car_fejer1_5arcmin.fits'
+        #nside: 512
+        
+        # A query can be a file with a list of obs, or an obsdb query
+        query: 'data/tod_list_100obs_satp3.txt'
+        #query: "subtype == 'cmb' and timestamp >= 1708743600 and timestamp < 1713672000"
+        
+        odir: output_directory
+        preprocess_config: preprocess_config.yaml
+        
+        # Limit the number of obs, map a specific wafer or band
+        #ntod: 3
+        #wafer: ws0
+        #freq: f090
+        
+        # Plataform to map
+        site: so_sat1
+        
+        # Path to housekeeping data (this is used for extracting pwv)
+        hk_data_path: '/global/cfs/cdirs/sobs/data/site/hk/'
 
 
 QDS Monitor
