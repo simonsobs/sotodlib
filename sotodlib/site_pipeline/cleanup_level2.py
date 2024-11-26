@@ -163,16 +163,16 @@ def main(
             min_complete_timecode, max_complete_timecode,
         )
     
-    if delete_lvl2:
-        do_delete_level2(
-            dpk, lvl2_deletion_lag,  
-            min_lvl2_delete_timecode, max_lvl2_delete_timecode,
-        )
-    
     if delete_staged:
         do_delete_staged(
             dpk, staged_deletion_lag, 
             min_staged_delete_timecode, max_staged_delete_timecode
+        )
+    
+    if delete_lvl2:
+        do_delete_level2(
+            dpk, lvl2_deletion_lag,  
+            min_lvl2_delete_timecode, max_lvl2_delete_timecode,
         )
 
 
