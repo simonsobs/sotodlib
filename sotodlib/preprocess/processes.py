@@ -1318,7 +1318,44 @@ class SubtractT2P(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
+class SplitFlags(_Preprocess):
+    """Get flags used for map splitting/bundling.
 
+    Saves results in proc_aman under the "split_flags" field.
+
+     Example config block::
+
+        - name : "split_flags"
+          calc:
+            high_gain: 0.115
+            high_noise: 3.5e-5
+            high_tau: 1.5e-3
+            det_A: A
+            pol_angle: 35
+            det_top: B
+            high_leakage: 1.0e-3
+            high_2f: 1.5e-3
+            right_focal_plane: 0
+            top_focal_plane: 0
+            central_pixels: 0.071
+          save: True
+
+    .. autofunction:: sotodlib.obs_ops.flags.get_split_flags
+    """
+    name = "split_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        split_flg_aman = obs_ops.flags.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
+
+        self.save(proc_aman, split_flg_aman)
+
+    def save(self, proc_aman, split_flg_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("split_flags", split_flg_aman)
+
+_Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
 _Preprocess.register(InvVarFlags)
