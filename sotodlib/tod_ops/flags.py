@@ -699,6 +699,9 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
         except:
             raise ValueError('proc_aman is None and no preprocess field in aman provide valid preprocess metadata')
 
+    if (not 't2p' in proc_aman) | (not 'hwpss_stats' in proc_aman):
+        raise ValueError('t2p or hwpss_stats not in proc_aman must run after those steps in the pipeline.')
+
     # Set default set of splits
     default_cfg = {'high_gain': 0.115, 'high_noise': 3.5e-5, 'high_tau': 1.5e-3, 
                    'det_A': 'A', 'pol_angle': 35, 'det_top': 'B', 'high_leakage': 1e-3,
@@ -716,13 +719,13 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
 
     split_aman.wrap('high_gain_flag', aman.det_cal.phase_to_pW > split_cfg['high_gain'],
                     [(0, 'dets')])
-    split_aman.wrap('high_gain_avg', np.nanmean(aman.det_cal.phase_to_pW))
+    split_aman.wrap('gain_avg', np.nanmean(aman.det_cal.phase_to_pW))
     split_aman.wrap('high_noise_flag', proc_aman.noiseQ_fit.fit[:,1] > split_cfg['high_noise'],
                     [(0, 'dets')])
-    split_aman.wrap('high_noise_avg', np.nanmean(proc_aman.noiseQ_fit.fit[:,1]))
+    split_aman.wrap('noise_avg', np.nanmean(proc_aman.noiseQ_fit.fit[:,1]))
     split_aman.wrap('high_tau_flag', aman.det_cal.tau_eff > split_cfg['high_tau'], 
                     [(0, 'dets')])
-    split_aman.wrap('high_tau_avg', np.nanmean(aman.det_cal.tau_eff))
+    split_aman.wrap('tau_avg', np.nanmean(aman.det_cal.tau_eff))
     split_aman.wrap('det_A_flag', aman.det_info.wafer.pol <= split_cfg['det_A'],
                     [(0, 'dets')])
     split_aman.wrap('pol_angle_flag', aman.det_info.wafer.angle > split_cfg['pol_angle'], 
@@ -731,11 +734,11 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
                     [(0, 'dets')])
     split_aman.wrap('high_leakage_flag', np.sqrt(proc_aman.t2p.lamQ**2 + proc_aman.t2p.lamU**2) > split_cfg['high_leakage'],
                     [(0, 'dets')])
-    split_aman.wrap('high_leakage_avg', np.nanmean(np.sqrt(proc_aman.t2p.lamQ**2 + proc_aman.t2p.lamU**2)),
+    split_aman.wrap('leakage_avg', np.nanmean(np.sqrt(proc_aman.t2p.lamQ**2 + proc_aman.t2p.lamU**2)),
                     [(0, 'dets')])
     a2 = aman.det_cal.phase_to_pW*np.sqrt(proc_aman.hwpss_stats.coeffs[:,2]**2 + proc_aman.hwpss_stats.coeffs[:,3]**2)
     split_aman.wrap('high_2f_flag', a2 > split_cfg['high_2f'], [(0, 'dets')])
-    split_aman.wrap('high_2f_avg', np.nanmean(a2), [(0, 'dets')])
+    split_aman.wrap('2f_avg', np.nanmean(a2), [(0, 'dets')])
     split_aman.wrap('right_focal_plane_flag', aman.focal_plane.xi > split_cfg['right_focal_plane'], [(0, 'dets')])
     split_aman.wrap('top_focal_plane_flag', aman.focal_plane.eta > split_cfg['top_focal_plane'], [(0, 'dets')])
     split_aman.wrap('central_pixels_flag', np.sqrt(aman.focal_plane.xi**2 + aman.focal_plane.eta**2) < split_cfg['central_pixels'],

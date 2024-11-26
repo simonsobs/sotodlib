@@ -1320,7 +1320,7 @@ class SplitFlags(_Preprocess):
             central_pixels: 0.071
           save: True
 
-    .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
+    .. autofunction:: sotodlib.tod_ops.flags.get_split_flags
     """
     name = "split_flags"
 
