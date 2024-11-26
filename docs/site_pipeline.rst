@@ -937,7 +937,7 @@ make-atomic-filterbin-map
 This script will create atomic maps (maps of individual observations by wafer and
 frequency, and associated splits). These maps are HWP-demodulated and filtered
 and binned. Every atomic map consist of a ``weights``, ``wmap`` (weighted map),
-and ``hits`` map, as well as a information file that is used for adding the map
+and ``hits`` map, as well as an information file that is used for adding the map
 to an atomic map database.
 
 Command line arguments
@@ -960,7 +960,7 @@ timestreams. A typical configuration file could look like this:
         context: /global/homes/c/chervias/CMBwork/SimonsObs/SAT/protoISO/contexts/satp3/use_this_local.yaml
         
         # Use a pixell area file for rectangular pixel maps or use an nside value for Healpix maps.
-        # Both 
+        # Only use one of these options
         area: 'data/band_car_fejer1_5arcmin.fits'
         #nside: 512
         
