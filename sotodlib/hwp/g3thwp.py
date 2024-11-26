@@ -1545,7 +1545,8 @@ class G3tHWP():
         # Join the individual rotation masks into a single overall mask
         total_mask = np.array([bool(mask) for entry in total_mask for mask in entry])
         self._num_glitches = int(sum(~total_mask))
-        logger.warning(f'{self._num_glitches} glitches are removed')
+        if self._num_glitches > 0:
+            logger.warning(f'{self._num_glitches} glitches are removed')
         self._encd_clk = self._encd_clk[total_mask]
         for ind, value in enumerate(total_mask):
             if not value:
