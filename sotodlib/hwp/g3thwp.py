@@ -1320,15 +1320,17 @@ class G3tHWP():
             return abs(x - ind) + 1e8*(1 - np.sign(x + ind))
         def _after(x, ind):
             return abs(x - ind) + 1e8*(1 - np.sign(x - ind))
-        for ind in ref_ind_glitch:
-            # Check that there is sufficient space before and after the glitched reference
-            before = ref_ind[np.argmin(_before(ref_ind, ind))]
-            after = ref_ind[np.argmin(_after(ref_ind, ind))]
-            if all(np.array([after - ind, ind - before]) > 0.9 * self._num_edges):
-                if (before, after) in used_ind_pairs:
-                    continue
-                used_ind_pairs.append((before, after))
-                ref_ind = np.append(ref_ind, ind)
+
+        if len(ref_ind) > 0:
+            for ind in ref_ind_glitch:
+                # Check that there is sufficient space before and after the glitched reference
+                before = ref_ind[np.argmin(_before(ref_ind, ind))]
+                after = ref_ind[np.argmin(_after(ref_ind, ind))]
+                if all(np.array([after - ind, ind - before]) > 0.9 * self._num_edges):
+                    if (before, after) in used_ind_pairs:
+                        continue
+                    used_ind_pairs.append((before, after))
+                    ref_ind = np.append(ref_ind, ind)
 
         # Define the reference slit line to be the line before
         # the two "missing" lines
