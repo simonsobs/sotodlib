@@ -1616,7 +1616,7 @@ class Imprinter:
                 [(x.computed_same_checksum) for x in resp]
             ) >= n_copies
             if not in_lib:
-                self.logger.debug(f"received response from librarian {resp}")
+                self.logger.info(f"received response from librarian {resp}")
         except Exception as e:
             if raise_on_error:
                 raise e

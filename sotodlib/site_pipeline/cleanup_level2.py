@@ -129,7 +129,7 @@ def main(
     completion_lag: Optional[float] = 14,
     min_complete_timecode: Optional[int] = None,
     max_complete_timecode: Optional[int] = None,
-    staged_deletion_lag: Optional[float] = 28,
+    staged_deletion_lag: Optional[float] = 14,
     min_staged_delete_timecode: Optional[int] = None,
     max_staged_delete_timecode: Optional[int] = None,
     lvl2_deletion_lag: Optional[float] = 28,
