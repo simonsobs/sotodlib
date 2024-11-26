@@ -1210,6 +1210,10 @@ class G3tHWP():
         self._num_glitches = 0
         self._bad_ref = []
 
+        # if no data, skip analysis
+        if len(self._encd_clk) == 0:
+            return [], []
+
         # check duplication in data
         self._duplication_check()
 
