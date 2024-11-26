@@ -57,7 +57,7 @@ defaults = {
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
-    parser.add_argument("--config-file", type=str, default=None,
+    parser.add_argument("--config_file", type=str, default=None,
                         help="Path to mapmaker config.yaml file")
     parser.add_argument("--context", type=str, help='Path to context file')
     parser.add_argument("--preprocess_config", type=str,
@@ -193,8 +193,7 @@ def get_pwv(obs, data_dir):
             obs, alias=['pwv'],
             fields=['site.env-radiometer-class.feeds.pwvs.pwv'],
             data_dir=data_dir)
-        pwv_all = pwv_info['env-radiometer-class']['env-radiometer\
-        -class'][0]
+        pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
         pwv = np.nanmedian(pwv_all)
     except (KeyError, ValueError):
         pwv = 0.0
@@ -218,9 +217,7 @@ def read_tods(context, obslist,
     tod = context.get_obs(meta, no_signal=True)
     to_remove = []
     for field in tod._fields:
-        if (field != 'obs_info' and field != 'flags' and field != 'signal'
-            and field != 'focal_plane' and field != 'timestamps'
-                and field != 'boresight'):
+        if field not in ['obs_info', 'flags', 'signal', 'focal_plane', 'timestamps', 'boresight']:
             to_remove.append(field)
     for field in to_remove:
         tod.move(field, None)
@@ -434,7 +431,7 @@ def main(config_file=None, defaults=defaults, **args):
         subgeoms = []
         for obs in my_tods:
             if recenter is None:
-                subshape, subwcs = find_footprint(context, obs[0], wcs,)
+                subshape, subwcs = coords.get_footprint(obs[0], wcs)
                 subgeoms.append((subshape, subwcs))
             else:
                 subshape = shape

@@ -850,21 +850,6 @@ Command line arguments
    :module: sotodlib.site_pipeline.make_ml_map
    :func: get_parser
 
-
-make-atomic-filterbin-map
--------------------------
-
-For a description and documentation of the config file format, see
-:mod:`sotodlib.site_pipeline.make_atomic_filterbin_map` module autodocumentation below.
-
-Command line arguments
-``````````````````````
-
-.. argparse::
-   :module: sotodlib.site_pipeline.make_atomic_filterbin_map
-   :func: get_parser
-   :prog: make-atomic-filterbin-map
-
 Default Mapmaker Values
 ```````````````````````
 The following code block contains the hard-coded default values for non-
@@ -945,6 +930,20 @@ Example of a config file:
         # Scripting tools
         verbose: True
         quiet: False
+
+make-atomic-filterbin-map
+-------------------------
+
+For a description and documentation of the config file format, see
+:mod:`sotodlib.site_pipeline.make_atomic_filterbin_map` module autodocumentation below.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_atomic_filterbin_map
+   :func: get_parser
+   :prog: make-atomic-filterbin-map
 
 
 QDS Monitor
