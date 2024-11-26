@@ -957,15 +957,15 @@ timestreams. A typical configuration file could look like this:
 
 .. code-block:: yaml
 
-        context: /global/homes/c/chervias/CMBwork/SimonsObs/SAT/protoISO/contexts/satp3/use_this_local.yaml
+        context: /global/cfs/projectdirs/sobs/metadata/satp1/contexts/use_this_local.yaml
         
         # Use a pixell area file for rectangular pixel maps or use an nside value for Healpix maps.
         # Only use one of these options
-        area: 'data/band_car_fejer1_5arcmin.fits'
+        area: band_car_fejer1_5arcmin.fits
         #nside: 512
         
         # A query can be a file with a list of obs, or an obsdb query
-        query: 'data/tod_list_100obs_satp3.txt'
+        query: obs_list.txt
         #query: "subtype == 'cmb' and timestamp >= 1708743600 and timestamp < 1713672000"
         
         odir: output_directory
@@ -980,7 +980,7 @@ timestreams. A typical configuration file could look like this:
         site: so_sat1
         
         # Path to housekeeping data (this is used for extracting pwv)
-        hk_data_path: '/global/cfs/cdirs/sobs/data/site/hk/'
+        hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
 
 QDS Monitor
