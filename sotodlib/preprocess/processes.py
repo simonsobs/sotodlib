@@ -1320,12 +1320,12 @@ class SplitFlags(_Preprocess):
             central_pixels: 0.071
           save: True
 
-    .. autofunction:: sotodlib.tod_ops.flags.get_split_flags
+    .. autofunction:: sotodlib.obs_ops.flags.get_split_flags
     """
     name = "split_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        split_flg_aman = tod_ops.flags.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
+        split_flg_aman = obs_ops.flags.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
 
         self.save(proc_aman, split_flg_aman)
 
