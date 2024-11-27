@@ -17,8 +17,7 @@ def make_db(info_file_list, atomic_db_path):
     cursor = conn.cursor()
     
     entries = [('obs_id', 'TEXT'), ('telescope', 'TEXT'), ('freq_channel', 'TEXT'), ('wafer', 'TEXT'), ('ctime', 'INTEGER'), ('split_label', 'TEXT'),
-               ('split_detail', 'TEXT'), ('prefix_path', 'TEXT'), ('elevation', 'REAL'), ('azimuth', 'REAL'), ('RA_ref_start', 'REAL'),
-               ('RA_ref_stop', 'REAL'), ('pwv', 'REAL'), ('total_weight_qu', 'REAL'), ('median_weight_qu', 'REAL'), ('mean_weight_qu', 'REAL')]
+               ('split_detail', 'TEXT'), ('prefix_path', 'TEXT'), ('elevation', 'REAL'), ('azimuth', 'REAL'), ('pwv', 'REAL'), ('total_weight_qu', 'REAL'), ('median_weight_qu', 'REAL'), ('mean_weight_qu', 'REAL')]
 
     cmd = f"CREATE TABLE IF NOT EXISTS atomic ({', '.join([' '.join(tup) for tup in entries])})"
     cursor.execute(cmd)
