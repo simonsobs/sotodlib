@@ -371,13 +371,13 @@ class PSDCalc(_Preprocess):
         freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
                                               **self.calc_cfgs)
 
-        axis_list = [aman.dets, core.OffsetAxis("nusamps", len(freqs))]
+        fft_aman = core.AxisManager(aman.dets,
+                                    core.OffsetAxis("nusamps", len(freqs)))
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
         if self.calc_cfgs.get('subscan', False):
-            axis_list.append(aman.subscan_info.subscans)
-            pxx_axis_map.append((2, "subscans"))
+            fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
+            Pxx = np.mean(Pxx, axis=-1) # Mean of subscans
 
-        fft_aman = core.AxisManager(*axis_list)
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
 
