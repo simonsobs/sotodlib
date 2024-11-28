@@ -386,6 +386,19 @@ class PSDCalc(_Preprocess):
     def save(self, proc_aman, fft_aman):
         if not(self.save_cfgs is None):
             proc_aman.wrap(self.wrap, fft_aman)
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_psd
+
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            filename = filename.replace('{name}', f'{ufm}_{self.wrap}')
+
+            plot_psd(aman, signal_name=f"{self.wrap}.Pxx", x_name=f"{self.wrap}.freqs", filename=filename, **self.plot_cfgs)
 
 
 class GetStats(_Preprocess):
@@ -430,6 +443,19 @@ class GetStats(_Preprocess):
         if not(self.save_cfgs is None):
             proc_aman.wrap(self.wrap, stats_aman)
 
+    def plot(self, aman, proc_aman, filename):
+        if self.plot_cfgs is None:
+            return
+        if self.plot_cfgs:
+            from .preprocess_plot import plot_signal
+
+            filename = filename.replace('{ctime}', f'{str(aman.timestamps[0])[:5]}')
+            filename = filename.replace('{obsid}', aman.obs_info.obs_id)
+            det = aman.dets.vals[0]
+            ufm = det.split('_')[2]
+            filename = filename.replace('{name}', f'{ufm}_{self.signal}')
+
+            plot_signal(aman, signal_name=self.signal, x_name="timestamps", filename=filename, **self.plot_cfgs)
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
