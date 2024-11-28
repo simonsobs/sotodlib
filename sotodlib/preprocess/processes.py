@@ -388,34 +388,34 @@ class PSDCalc(_Preprocess):
             proc_aman.wrap(self.wrap, fft_aman)
 
 
-class TODStats(_Preprocess):
+class GetStats(_Preprocess):
     """ Get basic statistics from a TOD or its power spectrum.
 
     Example config block:
 
-      - name : "stats"
+      - name : "get_stats"
         signal: "signal" # optional
-        wrap: "stats" # optional
+        wrap: "tod_stats" # optional
         calc:
           stat_names: ["median", "std"]
           split_subscans: False # optional
-          mask: # optional, for cutting a power spectrum in frequency
+          psd_mask: # optional, for cutting a power spectrum in frequency
             freqs: "psd.freqs"
             low_f: 1
             high_f: 10
         save: True
 
     """
-    name = "stats"
+    name = "tod_stats"
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
-        self.wrap = step_cfgs.get('wrap', 'stats')
+        self.wrap = step_cfgs.get('wrap', 'tod_stats')
 
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.calc_cfgs.get('mask') is not None:
-            mask_dict = self.calc_cfgs.get('mask')
+        if self.calc_cfgs.get('psd_mask') is not None:
+            mask_dict = self.calc_cfgs.get('psd_mask')
             _f = attrgetter(mask_dict['freqs'])
             freqs = _f(aman)
             low_f, high_f = mask_dict['low_f'], mask_dict['high_f']
@@ -844,19 +844,15 @@ class FlagTurnarounds(_Preprocess):
             calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
 
         if ('merge_subscans' not in self.calc_cfgs) or (self.calc_cfgs['merge_subscans']):
-            subscan_aman = aman.subscan_info
-        else:
-            subscan_aman = None
+            calc_aman.wrap('subscan_info', aman.subscan_info)
 
-        self.save(proc_aman, calc_aman, subscan_aman)
+        self.save(proc_aman, calc_aman)
 
-    def save(self, proc_aman, turn_aman, subscan_aman):
+    def save(self, proc_aman, turn_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
-            if subscan_aman is not None:
-                proc_aman.wrap("subscan_info", subscan_aman)
 
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
@@ -1448,4 +1444,4 @@ _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
-_Preprocess.register(TODStats)
+_Preprocess.register(GetStats)

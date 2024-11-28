@@ -279,6 +279,8 @@ def _expand(new, full, wrap_valid=True):
                     nidx.append(ns_samps)
                 else:
                     if (ii == 0) and isinstance(out[k], RangesMatrix): # Treat like dets
+                        # _ranges_matrix_match expects oidx[0] and nidx[0] to be list(inds), not slice.
+                        # Unknown axes treated as dets if first entry, else like samps. Added to support (subscans, samps) RangesMatrix.
                         if a in full._axes:
                             _, fs, ns = full[a].intersection(new[a], return_slices=True)
                         else:
