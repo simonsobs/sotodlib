@@ -3,10 +3,29 @@ import numpy as np
 import sqlite3
 from glob import glob
 import os
+import warnings
+
+defaults = {"odir": "output",
+            "atomic_db_path": "atomic_maps.db",
+            "delete": False,
+           }
+
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--odir", help='Output directory')
+    parser.add_argument(
+        "--atomic_db_path", help='Path of the atomic map database')
+    parser.add_argument(
+        "--delete", action="store_true",
+        help='Delete the hdf files after reading them'
+    )
+    return parser
 
 def make_db_from_outdir(odir, atomic_db_path):
     """Make an atomic db from all atomics in a directory and its subdirectories"""
-    file_list = glob(os.path.join(odir, '**/*info.hdf'), recursive=True)
+    file_list = glob(os.path.join(odir, '**/*_info.hdf'), recursive=True)
     make_db(file_list, atomic_db_path)
     return read_db(atomic_db_path)
     
@@ -74,10 +93,13 @@ def info_dict_to_tuple(dct, entry_list):
         out.append(dtype(dct[entry[0]]))
     return tuple(out)
 
-def main():
+def main(defaults=defaults, **args):
     import sys
-    odir, atomic_db_path = sys.argv[1:3]
-    make_db_from_outdir(odir, atomic_db_path)
-    
+    cfg = dict(defaults)
+    cfg.update({k: v for k, v in args.items() if v is not None})
+    args = cfg
+    warnings.simplefilter('ignore')
+    make_db_from_outdir(args['odir'], args['atomic_db_path'])
+
 if __name__ == '__main__':
-    main()
+    util.main_launcher(main, get_parser)
