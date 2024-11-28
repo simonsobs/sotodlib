@@ -42,6 +42,7 @@ import argparse
 from . import (
     analyze_bright_ptsrc,
     check_book,
+    make_atomic_db,
     make_atomic_filterbin_map,
     make_det_info_wafer,
     make_ml_map,
@@ -61,6 +62,7 @@ from . import (
 ELEMENTS = {
     'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
+    'make-atomic-db': make_atomic_db,
     'make-atomic-filterbin-map': make_atomic_filterbin_map,
     'make-det-info-wafer': make_det_info_wafer,
     'make-ml-map': make_ml_map,
