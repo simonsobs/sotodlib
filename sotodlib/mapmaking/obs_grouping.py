@@ -216,14 +216,16 @@ def build_period_obslists(obs_info, periods, context, nset=None,
         if wafer is not None:
             wafer_list = [wafer]
         else:
-            meta = context.get_meta(row.obs_id)
-            wafer_list = np.unique(meta.det_info.wafer_slot)
+            wafer_list = row.wafer_slots_list.split(',')
         if freq is not None:
             band_list = [freq]
         else:
-            if 'meta' not in locals(): meta = context.get_meta(row.obs_id)
-            band_list = np.unique(meta.det_info.wafer.bandpass)
-            band_list = np.delete(band_list,np.where(band_list=='NC'))
+            if row.tube_flavor == 'mf':
+                band_list = ['f090', 'f150']
+            elif row.tube_flavor == 'uhf':
+                band_list = ['f230', 'f280']
+            elif row.tube_flavor == 'lf':
+                raise ValueError('Band list for lf not implemented yet.')
         for detset in wafer_list[:nset]:
             for band in band_list:
                 key = (pids[i], detset, band)

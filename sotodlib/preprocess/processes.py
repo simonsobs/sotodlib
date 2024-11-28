@@ -343,7 +343,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
 
 class PSDCalc(_Preprocess):
-    """ Calculate the PSD of the data and add it to the AxisManager under the
+    """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
     "psd" field.
 
     Example config block::
@@ -351,12 +351,10 @@ class PSDCalc(_Preprocess):
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
-        "subscan": False # optional
-        "process":
+        "calc":
           "psd_cfgs": # optional, kwargs to scipy.welch
             "nperseg": 1024
           "wrap_name": "psd" # optional
-        "calc": True
         "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
@@ -366,32 +364,24 @@ class PSDCalc(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
-        self.subscan = step_cfgs.get('subscan', False)
 
         super().__init__(step_cfgs)
-        
 
-    def process(self, aman, proc_aman):
-        if self.subscan:
-            calc_psd = tod_ops.fft_ops.calc_psd_subscan
-        else:
-            calc_psd = tod_ops.fft_ops.calc_psd
+    def calc_and_save(self, aman, proc_aman):
+        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                              **self.calc_cfgs)
 
-        freqs, Pxx = calc_psd(aman, signal=aman[self.signal],
-                              **self.process_cfgs)
         axis_list = [aman.dets, core.OffsetAxis("nusamps", len(freqs))]
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
-        if self.subscan:
+        if self.calc_cfgs.get('subscan', False):
             axis_list.append(aman.subscan_info.subscans)
             pxx_axis_map.append((2, "subscans"))
 
         fft_aman = core.AxisManager(*axis_list)
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
-        aman.wrap(self.wrap, fft_aman)
 
-    def calc_and_save(self, aman, proc_aman):
-        self.save(proc_aman, aman[self.wrap])
+        self.save(proc_aman, fft_aman)
 
     def save(self, proc_aman, fft_aman):
         if not(self.save_cfgs is None):
@@ -443,7 +433,7 @@ class TODStats(_Preprocess):
 
 class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
-    wrapped into the AxisManager. All calculation configs goes to `calc_wn`. 
+    wrapped into the preprocessing AxisManager. All calculation configs goes to `calc_wn`.
 
     Saves the results into the "noise" field of proc_aman. 
 
@@ -469,24 +459,19 @@ class Noise(_Preprocess):
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
-        self.subscan = step_cfgs.get('subscan', False)
 
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.psd not in aman:
-            raise ValueError("PSD is not saved in AxisManager")
-        psd = aman[self.psd]
+        if self.psd not in proc_aman:
+            raise ValueError("PSD is not saved in Preprocessing AxisManager")
+        psd = proc_aman[self.psd]
         
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
         
         if self.fit:
-            if not self.subscan:
-                fit_noise_model = tod_ops.fft_ops.fit_noise_model
-            else:
-                fit_noise_model = tod_ops.fft_ops.fit_noise_model_subscan
-            calc_aman = fit_noise_model(aman, pxx=psd.Pxx,
+            calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx,
                                                         f=psd.freqs, 
                                                         merge_fit=True,
                                                         **self.calc_cfgs)
@@ -494,7 +479,7 @@ class Noise(_Preprocess):
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
                                          freqs=psd.freqs,
                                          **self.calc_cfgs)
-            if not self.subscan:
+            if not self.calc_cfgs.get('subscan', False):
                 calc_aman = core.AxisManager(aman.dets)
                 calc_aman.wrap("white_noise", wn, [(0,"dets")])
             else:
@@ -1150,20 +1135,26 @@ class FourierFilter(_Preprocess):
 class PCARelCal(_Preprocess):
     """
     Estimate the relcal factor from the atmosphere using PCA.
-    
+
     Example configuration file entry::
 
       - name: 'pca_relcal'
         signal: 'lpf_sig'
         pca_run: 'run1'
         calc:
-            xfac: 2
-            yfac: 1.5
-            calc_good_medianw: True
+            pca:
+                xfac: 2
+                yfac: 1.5
+                calc_good_medianw: True
+            lpf:
+                type: "low_pass_sine2"
+                cutoff: 1
+                width: 0.1
+            trim_samps: 2000
         save: True
         plot:
             plot_ds_factor: 20
-    
+
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
@@ -1175,6 +1166,22 @@ class PCARelCal(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs.get("lpf") is not None:
+            filt = tod_ops.filters.get_lpf(self.calc_cfgs.get("lpf"))
+            filt_tod = tod_ops.fourier_filter(aman, filt, signal_name='signal')
+
+            filt_aman = core.AxisManager(aman.dets, aman.samps)
+            filt_aman.wrap(self.signal, filt_tod, [(0, 'dets'), (1, 'samps')])
+
+            if self.calc_cfgs.get("trim_samps") is not None:
+                trim = self.calc_cfgs["trim_samps"]
+                aman.restrict('samps', (aman.samps.offset + trim,
+                                        aman.samps.offset + aman.samps.count - trim))
+                proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
+                                             proc_aman.samps.offset + proc_aman.samps.count - trim))
+                filt_aman.restrict('samps', (filt_aman.samps.offset + trim,
+                                             filt_aman.samps.offset + filt_aman.samps.count - trim))
+
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
         rc_aman = core.AxisManager(aman.dets, aman.samps)
@@ -1186,13 +1193,16 @@ class PCARelCal(_Preprocess):
             rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
 
+            filt_aman = filt_aman.restrict('dets', aman.dets.vals[m0], in_place=False)
+            band_aman.merge(filt_aman)
+
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            if isinstance(self.calc_cfgs, bool):
+            if self.calc_cfgs.get("pca") is None:
                 result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal)
             else:
-                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs.get("pca"))
 
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
@@ -1201,7 +1211,7 @@ class PCARelCal(_Preprocess):
             rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
             rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
             rc_aman.wrap(f'{band}_median', result_aman['median'])
-        
+
         rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
         rc_aman.wrap('relcal', relcal, [(0, 'dets')])
         rc_aman.wrap('pca_weight0', pca_weight0, [(0, 'dets')])
@@ -1372,7 +1382,44 @@ class SubtractT2P(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
+class SplitFlags(_Preprocess):
+    """Get flags used for map splitting/bundling.
 
+    Saves results in proc_aman under the "split_flags" field.
+
+     Example config block::
+
+        - name : "split_flags"
+          calc:
+            high_gain: 0.115
+            high_noise: 3.5e-5
+            high_tau: 1.5e-3
+            det_A: A
+            pol_angle: 35
+            det_top: B
+            high_leakage: 1.0e-3
+            high_2f: 1.5e-3
+            right_focal_plane: 0
+            top_focal_plane: 0
+            central_pixels: 0.071
+          save: True
+
+    .. autofunction:: sotodlib.obs_ops.flags.get_split_flags
+    """
+    name = "split_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        split_flg_aman = obs_ops.flags.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
+
+        self.save(proc_aman, split_flg_aman)
+
+    def save(self, proc_aman, split_flg_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("split_flags", split_flg_aman)
+
+_Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
 _Preprocess.register(InvVarFlags)
