@@ -390,12 +390,16 @@ def plot_trending_flags(aman, trend_aman, filename='./trending_flags.png'):
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
 
-def plot_signal(aman, signal_name="signal", x_name="timestamps", plot_ds_factor=50, plot_ds_factor_dets=None, xlim=None, alpha=0.2, yscale='linear', y_unit=None, filename="./signal.png"):
+def plot_signal(aman, signal=None, xx=None, signal_name="signal", x_name="timestamps", plot_ds_factor=50, plot_ds_factor_dets=None, xlim=None, alpha=0.2, yscale='linear', y_unit=None, filename="./signal.png"):
     from operator import attrgetter
     if plot_ds_factor_dets is None:
         plot_ds_factor_dets = plot_ds_factor
-    yy = attrgetter(signal_name)(aman)[::plot_ds_factor_dets, 1::plot_ds_factor].copy() # (dets, samps); (dets, nusamps); (dets, nusamps, subscans)
-    xx = attrgetter(x_name)(aman)[1::plot_ds_factor].copy() # (samps); (nusamps)
+    if signal is None:
+        signal = attrgetter(signal_name)(aman)
+    if xx is None:
+        xx = attrgetter(x_name)(aman)
+    yy = signal[::plot_ds_factor_dets, 1::plot_ds_factor].copy() # (dets, samps); (dets, nusamps); (dets, nusamps, subscans)
+    xx = xx[1::plot_ds_factor].copy() # (samps); (nusamps)
     if x_name == "timestamps":
         xx -= xx[0]
     if yy.ndim > 2: # Flatten subscan axis into dets
@@ -421,8 +425,8 @@ def plot_signal(aman, signal_name="signal", x_name="timestamps", plot_ds_factor=
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
 
-def plot_psd(aman, signal_name="psd.Pxx", x_name="psd.freqs", plot_ds_factor=4, plot_ds_factor_dets=20, xlim=None, alpha=0.2, yscale='log', y_unit=None, filename="./psd.png"):
-    return plot_signal(aman, signal_name, x_name, plot_ds_factor, plot_ds_factor_dets, xlim, alpha, yscale, y_unit, filename)
+def plot_psd(aman, signal=None, xx=None, signal_name="psd.Pxx", x_name="psd.freqs", plot_ds_factor=4, plot_ds_factor_dets=20, xlim=None, alpha=0.2, yscale='log', y_unit=None, filename="./psd.png"):
+    return plot_signal(aman, signal, xx, signal_name, x_name, plot_ds_factor, plot_ds_factor_dets, xlim, alpha, yscale, y_unit, filename)
 
 def plot_signal_diff(aman, flag_aman, flag_type="glitches", flag_threshold=10, plot_ds_factor=50, filename="./glitch_signal_diff.png"):
     """

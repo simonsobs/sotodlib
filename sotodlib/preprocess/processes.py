@@ -376,7 +376,7 @@ class PSDCalc(_Preprocess):
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
         if self.calc_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
-            Pxx = np.mean(Pxx, axis=-1) # Mean of subscans
+            Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
 
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
@@ -398,7 +398,8 @@ class PSDCalc(_Preprocess):
             ufm = det.split('_')[2]
             filename = filename.replace('{name}', f'{ufm}_{self.wrap}')
 
-            plot_psd(aman, signal_name=f"{self.wrap}.Pxx", x_name=f"{self.wrap}.freqs", filename=filename, **self.plot_cfgs)
+            plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
+                     xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
 
 
 class GetStats(_Preprocess):
@@ -406,7 +407,7 @@ class GetStats(_Preprocess):
 
     Example config block:
 
-      - name : "get_stats"
+      - name : "tod_stats"
         signal: "signal" # optional
         wrap: "tod_stats" # optional
         calc:
@@ -430,13 +431,21 @@ class GetStats(_Preprocess):
         if self.calc_cfgs.get('psd_mask') is not None:
             mask_dict = self.calc_cfgs.get('psd_mask')
             _f = attrgetter(mask_dict['freqs'])
-            freqs = _f(aman)
+            try:
+                freqs = _f(aman)
+            except KeyError:
+                freqs = _f(proc_aman)
             low_f, high_f = mask_dict['low_f'], mask_dict['high_f']
             fmask = np.all([freqs >= low_f, freqs <= high_f], axis=0)
             self.calc_cfgs['mask'] = fmask
+            del self.calc_cfgs['psd_mask']
 
         _f = attrgetter(self.signal)
-        stats_aman = tod_ops.flags.get_stats(aman, _f(aman), **self.calc_cfgs)
+        try:
+            signal = _f(aman)
+        except KeyError:
+            signal = _f(proc_aman)
+        stats_aman = tod_ops.flags.get_stats(aman, signal, **self.calc_cfgs)
         self.save(proc_aman, stats_aman)
 
     def save(self, proc_aman, stats_aman):
@@ -485,6 +494,7 @@ class Noise(_Preprocess):
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
+        self.subscan = step_cfgs.get('subscan', False)
 
         super().__init__(step_cfgs)
 
@@ -492,20 +502,23 @@ class Noise(_Preprocess):
         if self.psd not in proc_aman:
             raise ValueError("PSD is not saved in Preprocessing AxisManager")
         psd = proc_aman[self.psd]
-        
+        pxx = psd.Pxx_ss if self.subscan else psd.Pxx
+
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
-        
+
         if self.fit:
-            calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=psd.Pxx,
+            if self.calc_cfgs.get('subscan') is None:
+                self.calc_cfgs['subscan'] = self.subscan
+            calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs, 
                                                         merge_fit=True,
                                                         **self.calc_cfgs)
         else:
-            wn = tod_ops.fft_ops.calc_wn(aman, pxx=psd.Pxx,
+            wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          **self.calc_cfgs)
-            if not self.calc_cfgs.get('subscan', False):
+            if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
                 calc_aman.wrap("white_noise", wn, [(0,"dets")])
             else:
@@ -1169,9 +1182,9 @@ class PCARelCal(_Preprocess):
                 yfac: 1.5
                 calc_good_medianw: True
             lpf:
-                type: "low_pass_sine2"
+                type: "sine2"
                 cutoff: 1
-                width: 0.1
+                trans_width: 0.1
             trim_samps: 2000
         save: True
         plot:
@@ -1188,6 +1201,7 @@ class PCARelCal(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        self.plot_signal = self.signal
         if self.calc_cfgs.get("lpf") is not None:
             filt = tod_ops.filters.get_lpf(self.calc_cfgs.get("lpf"))
             filt_tod = tod_ops.fourier_filter(aman, filt, signal_name='signal')
@@ -1203,6 +1217,8 @@ class PCARelCal(_Preprocess):
                                              proc_aman.samps.offset + proc_aman.samps.count - trim))
                 filt_aman.restrict('samps', (filt_aman.samps.offset + trim,
                                              filt_aman.samps.offset + filt_aman.samps.count - trim))
+            if self.plot_cfgs:
+                self.plot_signal = filt_aman[self.signal]
 
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
@@ -1270,7 +1286,7 @@ class PCARelCal(_Preprocess):
             for band in bands:
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
 
 class PTPFlags(_Preprocess):

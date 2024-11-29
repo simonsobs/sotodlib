@@ -322,7 +322,7 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, **kwargs):
     Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
     return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10, lowf_fk=1):
+def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.

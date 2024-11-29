@@ -5,6 +5,7 @@ import numpy as np
 from .. import core
 from so3g.proj import Ranges, RangesMatrix
 from scipy.sparse import csr_array
+from matplotlib import pyplot as plt
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -467,6 +468,7 @@ class Pipeline(list):
                 update_full_aman( proc_aman, full, self.wrap_valid)
             if update_plot:
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
+            plt.close()
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
