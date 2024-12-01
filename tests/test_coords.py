@@ -10,6 +10,7 @@ import unittest
 import numpy as np
 
 from sotodlib import coords, core
+from sotodlib.coords import optics as co
 import so3g
 from pixell import enmap
 
@@ -183,6 +184,17 @@ class CoordsUtilsTest(unittest.TestCase):
         np.testing.assert_allclose([xi0, eta0, R], [x0, y0, R0],
                                    atol=R*0.05)
         self.assertEqual(len(xi), 16)
+
+class OpticsTest(unittest.TestCase):
+    def test_sat_fp(self):
+        x = np.array([-100, 0, 100]) 
+        y = x.copy()
+        pol = x.copy()
+
+        xi, eta, gamma = co.get_focal_plane(None, x, y, pol, 0, "SAT", "ws1", ufm_to_fp_pars={'theta': 60.0, 'dx': 0.0, 'dy': 128.5})
+        self.assertTrue(np.all(np.isclose(xi, np.array([-6.4406e-02,  0,  5.58489e-02]))))
+        self.assertTrue(np.all(np.isclose(eta, np.array([0.01425728, -0.2207397, -0.404499]))))
+        self.assertTrue(np.all(np.isclose(gamma, np.array([5.409, 3.6846, 1.8156]))))
 
 if __name__ == '__main__':
     unittest.main()

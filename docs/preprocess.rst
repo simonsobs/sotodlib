@@ -51,13 +51,11 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.preprocess_tod
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_det_select
+.. autofunction:: sotodlib.preprocess.preprocess_util.load_preprocess_det_select
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod
+.. autofunction:: sotodlib.preprocess.preprocess_util.load_and_preprocess
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
-
-.. autofunction:: sotodlib.site_pipeline.preprocess_obs.load_preprocess_obs
 
 Example TOD Pipeline Configuration File
 ---------------------------------------

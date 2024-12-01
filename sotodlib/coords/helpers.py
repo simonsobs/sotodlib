@@ -1,6 +1,7 @@
 import so3g.proj
 import numpy as np
 from pixell import enmap, wcsutils, utils
+from . import healpix_utils as hp_utils
 
 import time
 import re
@@ -285,7 +286,16 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
+    If wcs_kernel is a string in the format "NSIDE=1024", returns a healpix geometry object
+    for an un-tiled Healpix map at given NSIDE with default ordering.
+
     """
+    if isinstance(wcs_kernel, str) and "nside" in wcs_kernel.lower():
+        wcs_kernel = wcs_kernel.lower().strip().replace(' ', '')
+        # Assume we are in the format "nside=1024"
+        nside = int(wcs_kernel[6:])
+        return hp_utils.get_geometry(nside)
+
     if isinstance(wcs_kernel, str):
         wcs_kernel = get_wcs_kernel(wcs_kernel)
 
@@ -311,35 +321,36 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
 
     asm = so3g.proj.Assembly.attach(sight, fp1)
-    output = np.zeros((len(fake_dets), n_samp, 4))
+    planar = np.zeros((len(fake_dets), n_samp, 4))
     proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     if rot:
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
-    proj.get_planar(asm, output=output)
-
-    output2 = output*0
-    proj.get_coords(asm, output=output2)
+    proj.get_planar(asm, output=planar)
 
     # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
     delts  = wcs_kernel.wcs.cdelt * DEG
-    planar = output[:,:,:2]
-    ranges = utils.minmax(planar/delts,(0,1))
-    # These are in units of pixel *offsets* from crval. crval
-    # might not correspond to a pixel center, though. So the
-    # thing that should be integer-valued to preserve pixel compatibility
-    # is crpix + ranges, not just ranges. Let's add crpix to transform this
-    # into offsets from the bottom-left pixel to make it easier to reason
-    # about integers
-    ranges += wcs_kernel.wcs.crpix
-    del output
+    ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    del planar
 
-    # Start a new WCS and set the lower left corner.
+    # These planar ranges are in units of pixels away from the
+    # reference point.  The reference point is not necessarily on a
+    # pixel center -- that depends on whether crpix is an integer.  So
+    # transform ranges by +(crpix - 1), making them relative to the
+    # bottom left pixel of wcs_kernel.  Note the -1 here accounts for
+    # FITS numbering of pixels starting at (1, 1).
+    ranges += (wcs_kernel.wcs.crpix - 1)
+
+    # Round ranges, which in pixel offset units, to nearest integer.
+    corners = utils.nint(ranges)
+
+    # Start a new WCS. Adjust crpix to put our footprint in the
+    # bottom-left pixel.
     w = wcs_kernel.deepcopy()
-    corners      = utils.nint(ranges)
     w.wcs.crpix -= corners[0]
-    shape        = tuple(corners[1]-corners[0]+1)[::-1]
+    shape = tuple(corners[1] - corners[0] + 1)[::-1]
     return (shape, w)
+
 
 def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
                           xieta=None):
@@ -410,11 +421,21 @@ def get_supergeom(*geoms, tol=1e-3):
     wcs1), ...], return a geometry (shape, wcs) that includes all of
     them as a subset.
 
+    Each argument can be a geometry (shape, wcs) or an ndmap.
+
     """
-    s0, w0 = geoms[0]
+    def as_geom(item):
+        if isinstance(item, enmap.ndmap):
+            shape, wcs = item.geometry
+        else:
+            shape, wcs = item
+        return (shape[-2:], wcs)
+
+    s0, w0 = as_geom(geoms[0])
     w0 = w0.deepcopy()
 
-    for s, w in geoms[1:]:
+    for item in geoms[1:]:
+        s, w = as_geom(item)
         # is_compatible is necessary but not sufficient.
         if not wcsutils.is_compatible(w0, w):
             raise ValueError('Incompatible wcs: %s <- %s' % (w0, w))
@@ -455,6 +476,25 @@ def get_supergeom(*geoms, tol=1e-3):
         w0.wcs.crpix -= corner_a[::-1]
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
+
+def _confirm_wcs(*maps):
+    """Insist that all arguments either have the same .wcs, or do not have
+    a wcs.  Each argument should be either an ndmap (with a .wcs
+    attribute) or an ndarray (without a .wcs attribute).
+
+    Raises a ValueError if more than one argument has a .wcs attribute
+    and they do not all agree.  Returns either the first .wcs
+    attribute encountered, or None if there aren't any.
+
+    """
+    wcs_to_use = None
+    for i, m in enumerate(maps):
+        if hasattr(m, 'wcs'):
+            if wcs_to_use is None:
+                wcs_to_use = m.wcs
+            elif not wcsutils.equal(wcs_to_use, m.wcs):
+                raise ValueError('The wcs from %ith item is discordant with prior ones.' % i)
+    return wcs_to_use
 
 def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
                         UPLO='U'):

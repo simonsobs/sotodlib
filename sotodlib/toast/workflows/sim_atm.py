@@ -126,6 +126,17 @@ def simulate_atmosphere_signal(job, otherargs, runargs, data):
     # Configured operators for this job
     job_ops = job.operators
 
+    # Check if we need an extra copy of the atmospheric signal
+    final_signal = job_ops.sim_atmosphere.det_data
+    if (
+            hasattr(job_ops, "sim_hwpss")
+            and job_ops.sim_hwpss.enabled
+            and job_ops.sim_hwpss.atmo_data is not None
+        ):
+        temp_signal = job_ops.sim_hwpss.atmo_data
+    else:
+        temp_signal = None
+
     if otherargs.realization is not None:
         job_ops.sim_atmosphere_coarse.realization = 1000000 + otherargs.realization
         job_ops.sim_atmosphere.realization = otherargs.realization
@@ -133,11 +144,32 @@ def simulate_atmosphere_signal(job, otherargs, runargs, data):
     for sim_atm in job_ops.sim_atmosphere_coarse, job_ops.sim_atmosphere:
         if not sim_atm.enabled:
             continue
-        sim_atm.detector_pointing = job_ops.det_pointing_azel
+        sim_atm.detector_pointing = job_ops.det_pointing_azel_sim
         if sim_atm.polarization_fraction != 0:
             sim_atm.detector_weights = job_ops.weights_azel
+        if temp_signal is not None:
+            # Write the simulated atmosphere to a temporary array
+            sim_atm.det_data = temp_signal
         log.info_rank(f"  Running {sim_atm.name}...", comm=data.comm.comm_world)
         sim_atm.apply(data)
         log.info_rank(
             f"  Applied {sim_atm.name} in", comm=data.comm.comm_world, timer=timer
+        )
+        if temp_signal is not None:
+            # Restore original configuration
+            sim_atm.det_data = final_signal
+
+    if temp_signal is not None:
+        # Add the atmospheric signal to the final target but also keep the
+        # separate copy
+        combine = toast.ops.Combine(
+            op="add",
+            first=final_signal,
+            second=temp_signal,
+            result=final_signal,
+        ).apply(data)
+        log.info_rank(
+            f"  Added {temp_signal} to {final_signal} in",
+            comm=data.comm.comm_world,
+            timer=timer,
         )

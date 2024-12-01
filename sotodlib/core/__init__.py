@@ -15,3 +15,5 @@ from .flagman import FlagManager
 from .hardware import Hardware
 
 from . import util
+
+from .resources import get_local_file, RESOURCE_DEFAULTS

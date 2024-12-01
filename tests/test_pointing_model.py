@@ -82,7 +82,7 @@ class CoordsUtilsTest(unittest.TestCase):
         az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll)))
 
         params = dict(params0)
-        params['enc_offset_az'] = 1.
+        params['enc_offset_az'] = 1. * DEG
         az1, el1, roll1 = to_deg(*pm.model_sat_v1(params, *to_rad(az, el, roll)))
         assert np.all(center_branch(az1 - az) > 0)
 
@@ -124,9 +124,11 @@ class CoordsUtilsTest(unittest.TestCase):
         # Boresight center.
         params = dict(params0)
         params.update({
-            'bs_xi0': 0.4 * DEG,
-            'bs_eta0': 0.1 * DEG,
-        })
+            'fp_rot_xi0': 0.4 * DEG,
+            'fp_rot_eta0': 0.1 * DEG,
+            #'fp_offset_xi0': 0.05 * DEG,
+            #'fp_offset_eta0': 0.01 * DEG,        
+            })
         az, el, roll = full_vectors(roll=np.linspace(0., 360., 20), el=45.)
         for xi, eta, sig in [
                 (0.4, 0.1, 0.),

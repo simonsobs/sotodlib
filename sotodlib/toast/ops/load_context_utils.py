@@ -506,9 +506,10 @@ def compute_boresight_pointing(
     )
 
     # Gather all samples to rank zero and set the shared object elements.
-    ftype = None
-    qtype = None
-    if gcomm is not None:
+    if gcomm is None:
+        ftype = None
+        qtype = None
+    else:
         ftype = MPI.UNSIGNED_CHAR
         qtype = MPI.DOUBLE
     for name, local_data, nnz, mtype in [
@@ -520,7 +521,7 @@ def compute_boresight_pointing(
         final_data = None
 
         if gcomm is None:
-            all_data = local_data
+            final_data = local_data
         else:
             counts = [x * nnz for x in sample_count]
             displ = [x * nnz for x in sample_displ]

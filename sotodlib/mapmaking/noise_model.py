@@ -230,6 +230,86 @@ class NmatDetvecs(Nmat):
                 window=data.window, nwin=data.nwin, downweight=data.downweight,
                 bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
 
+class NmatWhite(Nmat):
+    def __init__(self, window=2, ivar=None, nwin=None):
+        """
+        This is a white noise model for the mapmaker.
+        The white noise model is characterized by 
+        (1) no correlations between detectors 
+        (2) a white (flat) spectrum per detector  
+        (3) the weights, if not passed in through ivar, are computed simply
+        from the inverse variance of the timestream.
+        
+        Parameters
+        ----------
+        window : float, optional
+            Size of the window in seconds to apply before taking the FFT and applying the model 
+            in harmonic space
+        ivar : numpy.ndarray or None, optional
+            Overwrite the inverse variance per detector
+        nwin: int or None, optional
+            Overwrite the window size in number of samples
+        
+        Returns
+        -------
+        noise_model : An Nmat object with the noise model
+
+        """
+        
+        self.ivar  = ivar
+        self.window     = window
+        self.nwin       = nwin
+        self.ready = ivar is not None
+    def build(self, tod, srate, **kwargs):
+        #ndet, nsamps = tod.shape
+        nwin  = utils.nint(self.window*srate)
+        ivar = 1.0/np.var(tod, 1)
+        return NmatWhite(ivar=ivar, window=self.window, nwin=nwin)
+    def apply(self, tod, inplace=True):
+        if not inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
+        tod *= self.ivar[:,None]
+        apply_window(tod, self.nwin)
+        return tod
+    def white(self, tod, inplace=True):
+        if not inplace: tod = np.array(tod)
+        apply_window(tod, self.nwin)
+        tod *= self.ivar[:,None]
+        apply_window(tod, self.nwin)
+        return tod
+    def write(self, fname):
+        bunch.write(fname, bunch.Bunch(type="NmatWhite"))
+    @staticmethod
+    def from_bunch(data): 
+        return NmatWhite(ivar=data.ivar, window=window, nwin=nwin)
+
+class NmatUnit(Nmat):
+    """
+    
+    This is a noise model that does nothing, equivalent to multiply by a 
+    unit noise matrix
+    
+    """
+    
+    def __init__(self, ivar=None):
+        self.ivar  = ivar
+        self.ready = ivar is not None
+    def build(self, tod, **kwargs):
+        ndet, nsamps = tod.shape
+        ivar = np.ones(ndet)
+        return NmatUnit(ivar=ivar)
+    def apply(self, tod):
+        # the tod is returned intact
+        return tod
+    def white(self, tod):
+        # the tod is returned intact
+        return tod
+    def write(self, fname):
+        bunch.write(fname, bunch.Bunch(type="NmatUnit"))
+    @staticmethod
+    def from_bunch(data): 
+        return NmatUnit(ivar=data.ivar)
+
 def write_nmat(fname, nmat):
     nmat.write(fname)
 
