@@ -4,6 +4,7 @@ from pixell import enmap, utils, tilemap, bunch
 from .. import coords
 from .utilities import *
 from .pointing_matrix import *
+import so3g.proj
 
 class MLMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
@@ -212,14 +213,9 @@ class SignalMap(Signal):
         ctime  = obs.timestamps
         pcut   = PmatCut(obs.glitch_flags) # could pass this in, but fast to construct
         if pmap is None:
-            # Build the local geometry and pointing matrix for this observation
-            if self.recenter:
-                rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                    ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
-            else: rot = None
-            pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
-                rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
-                interpol=self.interpol)
+            pmap = get_pmap(obs, comps=self.comps, geom=self.rhs.geometry,
+                threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
+                interpol=self.interpol, recenter=self.recenter)
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
@@ -348,13 +344,9 @@ class SignalMap(Signal):
         # resolution changes in the future (probably not useful though)
         self._checkcompat(other)
         # Build the local geometry and pointing matrix for this observation
-        if self.recenter:
-            rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
-        else: rot = None
         pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
-            rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
-            interpol=self.interpol)
+            threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
+            interpol=self.interpol, recenter=self.recenter)
         # Build the RHS for this observation
         pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
         return tod
@@ -460,3 +452,94 @@ class SignalCut(Signal):
         # And project onto the tod
         spcut.forward(tod, sjunk)
         return tod
+
+
+# Needed for multi-beam support in SignalMap. These should probably be moved somewhere
+# eventually. Maybe Projectionist should be generalized to support multiple beams so
+# shit somewhat fragile construction isn't needed in the first place.
+class MultiProj(so3g.proj.Projectionist):
+    def to_map(self, signal, assemblies, output=None, det_weights=None, threads=None, comps=None):
+        for ai, assembly in enumerate(assemblies):
+            output = super().to_map(signal, assembly, output=output, det_weights=det_weights,
+                threads=threads[ai] if threads is not None else None, comps=comps)
+        return output
+    def to_weights(self, assemblies, output=None, det_weights=None, threads=None, comps=None):
+        for ai, assembly in enumerate(assemblies):
+            output = super().to_weights(signal, assembly, output=output, det_weights=det_weights,
+                threads=threads[ai] if threads is not None else None, comps=comps)
+        return output
+    def from_map(self, src_map, assemblies, signal=None, comps=None):
+        for ai, assembly in enumerate(assemblies):
+            signal = super().from_map(src_map, assembly, signal=signal, comps=comps)
+        return signal
+    def get_active_tiles(self, assemblies, assign=False):
+        infos = []
+        for ai, assembly in enumerate(assemblies):
+            infos.append(super().get_active_tiles(assembly, assign=assign))
+        active = list(np.unique(np.concatenate([info["active_tiles"] for info in infos])))
+        # Mapping from old active to new
+        amap   = [utils.find(active, info["active_tiles"]) for info in infos]
+        hits   = np.zeros(len(active),int)
+        for i, info in enumerate(infos):
+            hits[amap[i]] += info["hit_counts"]
+        # group_ranges and group_tiles are harder. We skip them for now.
+        # They are only used by the "tiles" thread partitioning, not the
+        # standard "domdir"
+        return {"active_tiles":active, "hit_counts":hits}
+    def assign_threads(self, assemblies, method='domdir', n_threads=None):
+        return [super().assign_threads(assembly, method=method, n_threads=n_threads) for assembly in assemblies]
+    def assign_threads_from_map(self, assembly, tmap, n_threads=None):
+        return [super().assign_threads_from_map(assembly, tmap, n_threads=n_threads) for assembly in assemblies]
+
+class PmatMultibeam(coords.pmat.P):
+    def __init__(self, fps, **kwargs):
+        super().init(fp=fps[0], **kwargs)
+        self.fps = fps
+    @classmethod
+    def for_tod(cls, tod, focal_planes, threads=None, **kwargs):
+        tmp = super().for_tod(tod, **kwargs)
+        fps = [coords.helpers.get_fplane(tod, focal_plane=fplane) for fplane in focal_planes]
+        return cls(sight=tmp.sight, fps=fps, geom=tmp.geom, comps=tmp.comps,
+            cuts=tmp.cuts, threads=threads, det_weights=det_weights, interpol=intepol)
+    def _get_proj(self):
+        if self.geom is None:
+            raise ValueError("Can't project without a geometry!")
+        # Backwards compatibility for old so3g
+        interpol_kw = _get_interpol_args(self.interpol)
+        if self.tiled:
+            return MultiProj.for_tiled(
+                self.geom.shape, self.geom.wcs, self.geom.tile_shape,
+                active_tiles=self.active_tiles, **interpol_kw)
+        else:
+            return MultiProj.for_geom(self.geom.shape, self.geom.wcs, **interpol_kw)
+    def _get_asm(self):
+        return [so3g.proj.Assembly.attach(self.sight, fp) for fp in self.fps]
+
+# Need a way to get PmatMultibeam into SignalMap. Either SignalMap must
+# construct it itself, or it must be passed to its add_obs. We don't have
+# direct access to its add_obs here though, and it's not really the
+# mapmaking class' business to deal with pointing details like this.
+# Cleanest solution is probably to modify the way SignalMap.add_obs
+# allocates its pointing matrix, making it make a normal P unless obs
+# is populated with multibeam info (though, since multibeam is a superset
+# of single-beam, one could just use multibeam always. Longer term it might
+# be best to just modify so3g to have multibeam support from the start.
+# But for now let's keep it here.
+#
+# How should the multibeam info be recorded in obs? Each beam is fully
+# described by a focal_plane entry. Could modify that to be a list, but
+# this might break things, and it could still be good to keep the standard
+# responses available. So how about making a separate multibeam structure
+# that containes this more detailed description of the beam? It would then
+# be populated from simpler leakage beam parameters. Let's go with that for now.
+
+def get_pmap(obs, geom, recenter=None, **kwargs):
+    if recenter:
+        t0  = obs.timestamps[obs.samps.count//2]
+        rot = recentering_to_quat_lonlat(*evaluate_recentering(recenter,
+            ctime=t0, geom=geom, site=unarr(obs.site)))
+    else: rot = None
+    if "multibeam" in obs:
+        return PmatMultibeam.for_tod(obs, focal_planes=obs.multibeam, geom=geom, rot=rot, **kwargs)
+    else:
+        return coords.pmat.P.for_tod(obs, geom=geom, rot=rot, **kwargs)

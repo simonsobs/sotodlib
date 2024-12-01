@@ -1,4 +1,4 @@
-import numpy as np
+import numpy as np, warnings
 from pixell import enmap, utils, fft, tilemap, resample
 import so3g
 
@@ -292,6 +292,137 @@ def get_ids(query, context=None):
             return [line.split()[0] for line in fname]
     except IOError:
         return context.obsdb.query(query or "1")['obs_id']
+
+def get_subids(query, context=None, method="auto"):
+    """A subid has the form obs_id:wafer_slot:band, and is a natural
+    unit to use for mapmaking."""
+    if method == "auto":
+        try: return get_subids_file(query, context=context)
+        except IOError: return get_subids_query(query, context=context)
+    elif method == "file":
+        return get_subids_file(query, context=context)
+    elif method == "query":
+        return get_subids_query(query, context=context)
+    else:
+        raise ValueError("Unrecognized method for get_subids: '%s'" % (str(method)))
+
+def get_subids_query(query, context):
+    obs_ids = context.obsdb.query(query or "1")['obs_id']
+    sub_ids = expand_ids(obs_ids, context)
+    return sub_ids
+
+def get_subids_file(fname, context=None):
+    with open(fname, "r") as fname:
+        sub_ids = [line.split()[0] for line in fname]
+    sub_ids = expand_ids(sub_ids, context=context)
+    return sub_ids
+
+def expand_ids(obs_ids, context=None, bands=None):
+    """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
+    into sub_ids and return the resulting list.
+
+    To infer the bands available either bands or context must be passed.
+    If bands is passed then it should be a list of the multichroic bands
+    available for all the wafers. Example: bands=["f090","f150"].
+
+    Otherwise a Context should be passed, and the bands will be inferred
+    per obs by querying its obsdb. This is the standard case.
+    """
+    if len(obs_ids) == 0: return []
+    # Get the tube flavor for each. We will need this to get the bands.
+    if context is not None:
+        info   = context.obsdb.query()
+        actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
+        inds   = utils.find(info["obs_id"], actual_obs_ids)
+        flavors= info["tube_flavor"][inds]
+        flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280")}
+    elif bands is not None:
+        flavors    = ["a"]*len(obs_ids)
+        flavor_map = {"a": bands}
+    else:
+        raise ValueError("Either bands or context must be passed")
+    # Then loop through each and expand as necessary
+    sub_ids = []
+    for obs_id, flavor in zip(obs_ids, flavors):
+        bands  = flavor_map[flavor]
+        toks   = obs_id.split(":")
+        if len(toks) == 3:
+            # Already sub_id
+            sub_ids.append(obs_id)
+        elif len(toks) != 1:
+            raise ValueError("Invalid obs_id '%s'" % (str(obs_id)))
+        else:
+            toks = obs_id.split("_")
+            wafer_mask = toks[3]
+            # Loop through wafer slots
+            for si, status in enumerate(wafer_mask):
+                if status == "1":
+                    for band in bands:
+                        sub_ids.append("%s:ws%d:%s" % (obs_id, si, band))
+    return sub_ids
+
+def filter_subids(subids, wafers=None, bands=None):
+    subids = np.asarray(subids)
+    if wafers is not None:
+        wafs   = astr_tok(subids,":",1)
+        subids = subids[np.isin(wafs, wafers)]
+    if bands is not None:
+        bpass  = astr_tok(subids,":",2)
+        subids = subids[np.isin(bpass, bands)]
+    return subids
+
+def astr_cat(*arrs):
+    res = np.char.add(arrs[0], arrs[1])
+    for arr in arrs[2:]:
+        res = np.char.add(res,arr)
+    return res
+
+def astr_tok(astr, sep, i):
+    for j in range(i):
+        astr = np.char.partition(astr,sep)[:,2]
+    return np.char.partition(astr,sep)[:,0]
+
+# THe specs stuff will be phased out
+
+def get_specs(query, context=None, wafers=None, bands=None, comm=None):
+    warnings.warn("obs_specs are deprecated. Use subobs_ids instead")
+    try:
+        with open(query, "r") as fname:
+            obs_specs = [line.split()[0] for line in fname]
+            if len(obs_specs)>0 and ":" not in obs_specs[0]:
+                return get_obs_specs(obs_specs, context, wafers=wafers, bands=bands, comm=comm)
+            else:
+                return filter_obs_specs(obs_specs, wafers=wafers, bands=bands)
+    except IOError:
+        obs_ids = context.obsdb.query(query or "1")['obs_id']
+        return get_obs_specs(obs_ids, context, wafers=wafers, bands=bands, comm=comm)
+
+def get_obs_specs(ids, context, wafers=None, bands=None, comm=None):
+    warnings.warn("obs_specs are deprecated. Use subobs_ids instead")
+    if comm is None:
+        from pixell import mpi
+        comm = mpi.COMM_WORLD
+    specs = []
+    for ind in range(comm.rank, len(ids), comm.size):
+        meta = context.get_meta(obs_id=ids[ind])
+        wafs = astr_tok(meta.dets.vals,"_",2)
+        bpass= meta.det_info.wafer.bandpass
+        good = bpass != "NC"
+        if bands is not None:
+            good &= np.isin(bpass, bands)
+        if wafers is not None:
+            good &= np.isin(wafs, wafers)
+        arrs = np.unique(astr_cat(wafs[good],":",bpass[good]))
+        specs.append(astr_cat(ids[ind], ":", arrs))
+    specs = np.concatenate(specs)
+    specs = np.char.decode(utils.allgather(np.char.encode(specs), comm).reshape(-1))
+    return specs
+
+def filter_obs_specs(obs_specs, wafers=None, bands=None):
+    return split_subids(obs_specs, wafers=wafers, bands=bands)
+
+def split_obs_spec(obs_spec):
+    return obs_spec.split(":")
 
 def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
