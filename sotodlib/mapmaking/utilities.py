@@ -382,48 +382,6 @@ def astr_tok(astr, sep, i):
         astr = np.char.partition(astr,sep)[:,2]
     return np.char.partition(astr,sep)[:,0]
 
-# THe specs stuff will be phased out
-
-def get_specs(query, context=None, wafers=None, bands=None, comm=None):
-    warnings.warn("obs_specs are deprecated. Use subobs_ids instead")
-    try:
-        with open(query, "r") as fname:
-            obs_specs = [line.split()[0] for line in fname]
-            if len(obs_specs)>0 and ":" not in obs_specs[0]:
-                return get_obs_specs(obs_specs, context, wafers=wafers, bands=bands, comm=comm)
-            else:
-                return filter_obs_specs(obs_specs, wafers=wafers, bands=bands)
-    except IOError:
-        obs_ids = context.obsdb.query(query or "1")['obs_id']
-        return get_obs_specs(obs_ids, context, wafers=wafers, bands=bands, comm=comm)
-
-def get_obs_specs(ids, context, wafers=None, bands=None, comm=None):
-    warnings.warn("obs_specs are deprecated. Use subobs_ids instead")
-    if comm is None:
-        from pixell import mpi
-        comm = mpi.COMM_WORLD
-    specs = []
-    for ind in range(comm.rank, len(ids), comm.size):
-        meta = context.get_meta(obs_id=ids[ind])
-        wafs = astr_tok(meta.dets.vals,"_",2)
-        bpass= meta.det_info.wafer.bandpass
-        good = bpass != "NC"
-        if bands is not None:
-            good &= np.isin(bpass, bands)
-        if wafers is not None:
-            good &= np.isin(wafs, wafers)
-        arrs = np.unique(astr_cat(wafs[good],":",bpass[good]))
-        specs.append(astr_cat(ids[ind], ":", arrs))
-    specs = np.concatenate(specs)
-    specs = np.char.decode(utils.allgather(np.char.encode(specs), comm).reshape(-1))
-    return specs
-
-def filter_obs_specs(obs_specs, wafers=None, bands=None):
-    return split_subids(obs_specs, wafers=wafers, bands=bands)
-
-def split_obs_spec(obs_spec):
-    return obs_spec.split(":")
-
 def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
 def parse_recentering(desc):
