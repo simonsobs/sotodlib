@@ -1,6 +1,7 @@
 import numpy as np, warnings
 from pixell import enmap, utils, fft, tilemap, resample
 import so3g
+import importlib
 
 from .. import core
 from .. import tod_ops
@@ -544,7 +545,7 @@ def rangemat_sum(rangemat):
     return res
 
 def find_usable_detectors(obs, maxcut=0.1):
-    ncut  = rangemat_sum(obs.glitch_flags)
+    ncut  = rangemat_sum(obs.flags.glitch_flags)
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -611,15 +612,13 @@ def downsample_obs(obs, down, skip_signal=False):
     if not skip_signal:
         res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
     # The cuts
-    # TODO: The TOD will include a Flagmanager with all the flags. Update this part
-    # accordingly.
     cut_keys = ["glitch_flags"]
-
-    if "source_flags" in obs:
+    if "source_flags" in obs.flags:
         cut_keys.append("source_flags")
-
+    # We need to add a res.flags FlagManager to res
+    res = res.wrap('flags', core.FlagManager.for_tod(res))
     for key in cut_keys:
-        res.wrap(key, downsample_cut(getattr(obs, key), down), [(0,"dets"),(1,"samps")])
+        res.flags.wrap(key, downsample_cut(getattr(obs.flags, key), down), [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
@@ -633,3 +632,33 @@ def get_wrappable(axman, key):
         axes   = axman._assignments[key]
         axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
         return key, val, axdesc
+
+def get_flags(obs, flagnames):
+    """Parse detector-set splits"""
+    cuts_out = None
+    if flagnames is None:
+        return so3g.proj.RangesMatrix.zeros(obs.shape)
+    det_splits = ['det_left','det_right','det_in','det_out','det_upper','det_lower']
+    for flagname in flagnames:
+        if flagname in det_splits:
+            cuts = obs.det_flags[flagname]
+        elif flagname == 'scan_left':
+            cuts = obs.flags.left_scan
+        elif flagname == 'scan_right':
+            cuts = obs.flags.right_scan
+        else:
+            cuts = getattr(obs.flags, flagname) # obs.flags.flagname
+
+        ## Add to the output matrix
+        if cuts_out is None:
+            cuts_out = cuts
+        else:
+            cuts_out += cuts
+    return cuts_out
+
+def import_optional(module_name):
+    try:
+        module = importlib.import_module(module_name)
+        return module
+    except:
+        return None

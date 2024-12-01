@@ -33,12 +33,8 @@ class ReadoutFilter(Operator):
         "iir_params", help="Observation key for readout filter parameters"
     )
 
-    timeconst = Unicode(
-        "timeconst", help="Observation key for time constant"
-    )
-
-    readout_filter_cal = Unicode(
-        "readout_filter_cal", help="Observation key for readout filter gain"
+    wafer_key = Unicode(
+        "det_info:stream_id", help="Focalplane key for the wafer name"
     )
 
     def __init__(self, **kwargs):
@@ -56,42 +52,58 @@ class ReadoutFilter(Operator):
             (rate, dt, dt_min, dt_max, dt_std) = rate_from_times(
                 ob.shared[self.times].data
             )
+            freq = fft.rfftfreq(ob.n_local_samples, dt)
 
             if self.iir_params not in ob:
                 msg = f"Cannot apply readout filter. "
                 msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
                 raise RuntimeError(msg)
-            signal = ob.detdata[self.det_data].data
-            ndet, nsample = np.atleast_2d(signal).shape
 
-            # From https://github.com/simonsobs/pwg-scripts/blob/99557fb4410a4751b0416687431b2713e38085b7/pwg-pmn/simple_ml_mapmaker/mapmaker.py#L230
-            # Fourier-space calibration
-            fsig = fft.rfft(signal)
-            freq = fft.rfftfreq(nsample, dt)
-            # iir filter
-            iir_filter  = filters.iir_filter()(freq, ob)
-            fsig /= iir_filter
+            # Get valid local detectors
+            local_dets = ob.select_local_detectors()
+            local_set_dets = set(local_dets)
 
-            if self.timeconst is not None:
-                if self.timeconst in ob:
-                    fsig /= filters.timeconst_filter(None)(freq, ob)
-                else:
-                    msg = f"Cannot deconvolve time constant. "
-                    msg += f"'{self.timeconst}' not in '{ob.name}'"
-                    log.warning_rank(msg, comm=gcomm)
-            fft.irfft(fsig, signal, normalize=True)
+            # Get the rows of the focalplane table containing these dets
+            det_table = ob.telescope.focalplane.detector_data
+            fp_rows = np.array(
+                [x for x, y in enumerate(det_table["name"]) if y in local_set_dets]
+            )
 
-            # Correct for the readout filter gain
-            # (unclear why there is one)
-            if self.readout_filter_cal is not None:
-                if self.readout_filter_cal in ob:
-                    gain = ob[self.readout_filter_cal]
-                    signal /= gain[:, np.newaxis]
-                else:
-                    msg = f"Cannot correct for readout filter gain. "
-                    msg += f"'{self.readout_filter_cal}' not in '{ob.name}'"
-                    log.warning_rank(msg, comm=gcomm)
-        return
+            # Get the set of all stream IDs
+            all_wafers = set(det_table[self.wafer_key][fp_rows])
+
+            # The IIR filter parameters will either be in a single, top-level dictionary
+            # or they are organized per-UFM.
+            if (
+                "per_stream" in ob[self.iir_params] and
+                ob[self.iir_params]["per_stream"]
+            ):
+                # We need to filter one wafer at a time.
+                for wf in all_wafers:
+                    wafer_dets = [
+                        x for x, y in zip(
+                            local_dets, det_table[self.wafer_key][fp_rows]
+                        ) if y == wf
+                    ]
+                    signal = ob.detdata[self.det_data][wafer_dets, :]
+                    self._filter_detectors(freq, signal, ob[wf])
+            else:
+                # We are filtering all detectors at once
+                signal = ob.detdata[self.det_data][local_dets, :]
+                self._filter_detectors(freq, signal, ob[self.iir_params])
+
+    def _filter_detectors(self, freq, det_array, iir_props):
+        ndet, nsample = det_array.shape
+
+        # Array of detector ffts
+        fsig = fft.rfft(det_array)
+
+        # Apply iir filter kernel
+        iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
+        fsig /= iir_filter
+
+        # Inverse fft
+        fft.irfft(fsig, det_array, normalize=True)
 
     def _finalize(self, data, **kwargs):
         return

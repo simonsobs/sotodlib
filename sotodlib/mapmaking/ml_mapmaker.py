@@ -211,7 +211,7 @@ class SignalMap(Signal):
         """
         Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
-        pcut   = PmatCut(obs.glitch_flags) # could pass this in, but fast to construct
+        pcut   = PmatCut(obs.flags.glitch_flags) # could pass this in, but fast to construct
         if pmap is None:
             pmap = get_pmap(obs, comps=self.comps, geom=self.rhs.geometry,
                 threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
@@ -369,7 +369,7 @@ class SignalCut(Signal):
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data."""
         Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-        pcut    = PmatCut(obs.glitch_flags, model=self.cut_type)
+        pcut    = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
         # Build our RHS
         obs_rhs = np.zeros(pcut.njunk, self.dtype)
         pcut.backward(Nd, obs_rhs)
@@ -441,7 +441,7 @@ class SignalCut(Signal):
         self._checkcompat(other)
         # We have to make a pointing matrix from scratch because add_obs
         # won't have been called yet at this point
-        spcut = PmatCut(obs.glitch_flags, model=self.cut_type)
+        spcut = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
         # We do have one for other though, since that will be the output
         # from the previous round of multiplass mapmaking.
         odata = other.data[id]

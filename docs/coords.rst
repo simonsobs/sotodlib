@@ -129,9 +129,19 @@ should work::
   wcsk = coords.get_wcs_kernel('car', 0., 0., 0.01*coords.DEG)
   P = coords.P.for_tod(tod, wcs_kernel=wcsk)
 
-  map1 = P.remove_weights(tod)
+  map1 = P.remove_weights(tod=tod)
   map1.write('output_car.fits')
 
+It is also possible to make maps in Healpix pixelization::
+
+  import healpy as hp
+
+  hp_geom = coords.healpix_utils.get_geometry(nside=512, nside_tile=8)
+  P = coords.P.for_tod(tod, geom=hp_geom)
+
+  map1 = P.remove_weights(tod=tod)
+  map1 = coords.healpix_utils.tiled_to_full(map1)
+  hp.write_map('output_healpix.fits.gz', map1, nest=True)
 
 For more advice, see :class:`P` in the module reference.  See also the
 `pwg-tutorials`_ repository (this may be private to SO members),
@@ -267,6 +277,8 @@ Map and Geometry helpers
 .. autofunction:: get_footprint
 .. autofunction:: get_wcs_kernel
 .. autofunction:: get_supergeom
+.. autofunction:: sotodlib.coords.healpix_utils.get_geometry
+.. autofunction:: sotodlib.coords.healpix_utils.tiled_to_full
 
 Planet Mapmaking support
 ------------------------

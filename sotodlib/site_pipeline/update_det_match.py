@@ -3,11 +3,12 @@ import numpy as np
 import os
 import yaml
 from copy import deepcopy
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from dataclasses import dataclass
 from tqdm.auto import tqdm
 import logging
 import argparse
+import time
 
 from sotodlib.coords import det_match, optics
 from sotodlib import core
@@ -75,6 +76,10 @@ class UpdateDetMatchesConfig:
         have a res-set npy file for each stream_id that is expected in the
         matching, formatted like ``<resonator_set_dir>/<stream_id>.npy``, which
         contains the result from ``np.save(fname, match.merged.as_array())``.
+    time_before_cache_failure: float
+        Time in seconds before a failed detset will be added to the cache. This
+        is to prevent new detsets still acquiring data from being added right
+        away.
     
     Attributes
     -------------
@@ -95,6 +100,7 @@ class UpdateDetMatchesConfig:
     write_relpath: bool = True
     solution_type: str = 'kaiwen_handmade'
     resonator_set_dir: Optional[str] = None
+    time_before_cache_failure: float = float(3600 * 24 * 7)
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -138,10 +144,17 @@ class Runner:
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
 
         for d in self.ctx['metadata']:
-            if d['name'] == cfg.detset_meta_name:
+            if 'name' in d:
+                entry_name = d['name']
+            elif 'label' in d:
+                entry_name = d['label']
+            else:
+                continue
+            if entry_name == cfg.detset_meta_name:
                 self.detset_db = core.metadata.ManifestDb(d['db'])
-            elif d['name'] == cfg.detcal_meta_name:
+            elif entry_name == cfg.detcal_meta_name:
                 self.detcal_db = core.metadata.ManifestDb(d['db'])
+
         if self.detset_db is None:
             raise Exception(
                 f"Could not find detset metadata entry with name: {cfg.detset_meta_name}")
@@ -153,17 +166,13 @@ class Runner:
         self.match_dir = os.path.join(cfg.results_path, 'matches')
         if not os.path.exists(self.match_dir):
             os.mkdir(self.match_dir)
-        
-    def run_next_match(self):
+
+    def get_remaining_detsets(self) -> List[str]:
         detsets_all = set(self.detset_db.get_entries(['dataset'])['dataset'])
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
-        if len(remaining_detsets) == 0:
-            return False
-        logger.info(f"Number of detsets remaining: {len(remaining_detsets)}")
-        run_match(self, remaining_detsets[0])
-        return True
+        return remaining_detsets
 
 def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
     cfg = runner.cfg
@@ -187,7 +196,18 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         rs.name = 'sol'
         return rs
 
-def add_to_failed_cache(cache_file, detset, msg):
+def get_detset_time(detset: str) -> float:
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
+    return float(detset.split('_')[-2])
+
+def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
+    if time.time() - get_detset_time(detset) < cfg.time_before_cache_failure:
+        logger.info(f"{detset} is too recent to add to failed cache")
+        return
+
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
             x = yaml.safe_load(f)
@@ -228,11 +248,16 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
     return match
 
-def run_match(runner: Runner, detset: str):
+def run_match(runner: Runner, detset: str) -> bool:
     """
     Creates match files for specified detset, along with any other unmatched
     detsets in the loaded observation. If match fails for a known reason, this
     will add it to the failed_detset_cache so that it is not re-attempted.
+
+    Returns
+    -------
+    success: bool
+        True if match was successful
     """
     # Find obs-id with cal info
     obs_all = set(runner.ctx.obsdb.query("type=='obs'")['obs_id'])
@@ -246,10 +271,10 @@ def run_match(runner: Runner, detset: str):
         key=lambda s:s.split('_')[1])[::-1]
     if len(obs_ids) == 0:
         add_to_failed_cache(
-            runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL"
+            runner.failed_detset_cache_path, detset, "NO_OBSID_WITH_CAL", runner.cfg
         )
         logger.error(f"Cannot find obsid for detset {detset}")
-        return None
+        return False
 
     obs_id = obs_ids[0]
 
@@ -292,7 +317,7 @@ def run_match(runner: Runner, detset: str):
         match.save(fpath)
         logger.info(f"Saved match to file: {fpath}")
 
-    return aman
+    return True
 
 
 def scan_for_freq_offset(rs0, rs1, freq_offsets, match_pars=None, show_pb=True):
@@ -405,13 +430,19 @@ def main(config_file: str, all: bool=False):
 
     runner = Runner(cfg)
 
+    remaining_detsets = runner.get_remaining_detsets()
+    logger.info(f"{len(remaining_detsets)} detsets to match")
     if all:
         update_manifests_all(runner)
-        while runner.run_next_match():
+        for detset in remaining_detsets:
+            run_match(runner, detset)
             update_manifests_all(runner)
     else:
-        runner.run_next_match()
-        update_manifests_all(runner)
+        for detset in remaining_detsets:
+            success = run_match(runner, detset)
+            update_manifests_all(runner)
+            if success:
+                break
 
 if __name__ == '__main__':
     parser = make_parser()

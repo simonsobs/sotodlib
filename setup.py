@@ -27,7 +27,9 @@ setup_opts["entry_points"] = {
         "so-data-package = sotodlib.io.imprinter_cli:main",
         "toast_so_sim = sotodlib.toast.scripts.so_sim:cli",
         "toast_so_map = sotodlib.toast.scripts.so_map:cli",
+        "toast_so_transfer = sotodlib.toast.scripts.so_transfer:cli",
         "toast_so_convert = sotodlib.toast.scripts.so_convert:cli",
+        "toast_so_batch_control = sotodlib.toast.scripts.so_batch_control:cli",
         "get_wafer_offset = sotodlib.toast.scripts.get_wafer_offset:main",
     ]
 }
@@ -41,7 +43,7 @@ setup_opts["author_email"] = "so_software@simonsobservatory.org"
 setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
-setup_opts["requires"] = ["Python (>3.7.0)", ]
+setup_opts["python_requires"] = ">=3.8.0"
 setup_opts["package_data"] = {
     "sotodlib": [
         "toast/ops/data/*"
@@ -49,7 +51,7 @@ setup_opts["package_data"] = {
 }
 setup_opts["include_package_data"] = True
 setup_opts["install_requires"] = [
-    'numpy',
+    'numpy<2',
     'scipy',
     'matplotlib',
     'quaternionarray',
@@ -62,11 +64,14 @@ setup_opts["install_requires"] = [
     'pyfftw',
     'numdifftools',
     'psycopg2-binary',
+    'lmfit',
 ]
 setup_opts["extras_require"] = {
     "site_pipeline": [
         "influxdb",
-        "venn"
+        "venn",
+        "sodetlib @ git+https://github.com/simonsobs/sodetlib",
+        "let-me-scroll-it",
     ],
     "tests": [
         "socs",

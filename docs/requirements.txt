@@ -4,7 +4,7 @@ sphinx_rtd_theme>=2.0.0
 sphinx-argparse>=0.4.0
 
 # Required because it is used at root level in some modules.
-numpy
+numpy<2
 so3g
 
 # Required in order to support using Quantities for default function
