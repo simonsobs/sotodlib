@@ -686,10 +686,10 @@ class Demodulate(_Preprocess):
         hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
-            aman.restrict('samps', (aman.samps.offset + trim,
-                                    aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (aman.samps.offset + trim,
                                          aman.samps.offset + aman.samps.count - trim))
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
 
 
 class EstimateAzSS(_Preprocess):
