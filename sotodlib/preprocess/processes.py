@@ -1376,7 +1376,6 @@ class UnionFlags(_Preprocess):
         total_flags = so3g.proj.RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for label in self.process_cfgs['flag_labels']:
             _label = attrgetter(label)
-            print('Shapes = %s' % label, _label(proc_aman).shape, total_flags.shape)
             total_flags += _label(proc_aman) # The + operator is the union operator in this case
         aman['flags'].wrap('glitch_flags', total_flags)
 
