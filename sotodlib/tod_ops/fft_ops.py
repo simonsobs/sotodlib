@@ -11,6 +11,7 @@ from sotodlib import core
 
 from . import detrend_tod
 
+
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
     return so3g.useful_info().get("omp_num_threads", 4)
@@ -362,7 +363,6 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
         wn2 = np.median(pxx[:, fmsk], axis=1)
 
     wn = np.sqrt(wn2)
-
     return wn
 
 
@@ -437,6 +437,8 @@ def fit_noise_model(
         If ``merg_psd`` is True then adds fres and Pxx to the axis manager.
     freq_spacing : float
         The approximate desired frequency spacing of the PSD. Passed to calc_psd.
+    subscan : bool
+        If True, fit noise on subscans.
     Returns
     -------
     noise_fit_stats : AxisManager

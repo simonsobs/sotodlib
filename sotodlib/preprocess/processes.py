@@ -355,6 +355,7 @@ class PSDCalc(_Preprocess):
           "psd_cfgs": # optional, kwargs to scipy.welch
             "nperseg": 1024
           "wrap_name": "psd" # optional
+          "subscan": False
         "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
@@ -477,6 +478,8 @@ class Noise(_Preprocess):
     Example config block::
 
      - name: "noise"
+       fit: False
+       subscan: False
        calc:
          low_f: 5
          high_f: 10
