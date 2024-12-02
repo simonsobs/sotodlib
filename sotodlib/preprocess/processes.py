@@ -14,6 +14,8 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 
+import so3g
+
 
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
@@ -1355,6 +1357,29 @@ class SplitFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("split_flags", split_flg_aman)
 
+class UnionFlags(_Preprocess):
+    """Do the union of relevant flags for mapping
+    Typically you would include turnarounds, glitches, etc.
+
+    Saves results for aman under the "flags.glitch_flags" field.
+
+     Example config block::
+
+        - name : "union_flags"
+          process:
+            flag_labels: ['jumps_2pi.jump_flag', 'glitches.glitch_flags', 'turnaround_flags.turnarounds']
+
+    """
+    name = "union_flags"
+    
+    def process(self, aman, proc_aman):
+        total_flags = so3g.proj.RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
+        for label in self.process_cfgs['flag_labels']:
+            _label = attrgetter(label)
+            print('Shapes = %s' % label, _label(proc_aman).shape, total_flags.shape)
+            total_flags += _label(proc_aman) # The + operator is the union operator in this case
+        aman['flags'].wrap('glitch_flags', total_flags)
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1384,3 +1409,4 @@ _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
+_Preprocess.register(UnionFlags)
