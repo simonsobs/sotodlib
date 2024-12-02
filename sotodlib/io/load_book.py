@@ -16,11 +16,6 @@ The two access points in this submodule are:
     This can be used to load single G3 files (or a set of
     sample-contiguous G3 files) from a book, by filename.
 
-Reading from g3 files can be slow on some filesystems.  Use
-SOTODLIB_TOD_CACHE envvar to point to a directory where tempfiles can
-be safely made, for faster acccess, such as a scratch, local, or RAM
-disk.
-
 """
 
 import so3g
@@ -28,6 +23,7 @@ from spt3g import core as spt3g_core
 import numpy as np
 
 from glob import glob
+import contextlib
 import itertools
 import logging
 import os
@@ -51,6 +47,8 @@ SIGNAL_RESCALE = np.pi / 2**15
 
 DEG = np.pi / 180
 
+TMPDIR_VAR = 'SOTODLIB_TOD_TMPDIR'
+
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                   no_signal=None,
@@ -59,6 +57,13 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     See API template, `sotodlib.core.context.obsloader_template`, for
     details of all supported arguments.
+
+    Reading from g3 files can be slow on some filesystems.  Use
+    SOTODLIB_TOD_TMPDIR envvar to point to a directory (such as a
+    place on scratch server, local disk, or RAM disk) where tempfiles
+    can be safely made, for faster access.  Files are created in a
+    randomly named temporary directory that will (normally) be removed
+    immediately after use.
 
     """
     if any([v is not None for v in kwargs.values()]):
@@ -812,57 +817,50 @@ class Accumulator2d(Accumulator):
         return self.data
 
 
-def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None):
+def _frames_iterator(files, prefix, samples, smurf_proc=None):
     """Iterates over frames in files.  yields only frames that might be of
     interest for timestream unpacking.
 
     Yields each (frame, offset).  The offset is the global offset
     associated with the start of the frame.
 
-    If use_temp_dir is a string, data files are copied to that dir
-    before reading from them.  If use_temp_dir is None, and
-    SOTODLIB_TOD_CACHE envvar is defined, then a TemporaryDirectory
-    (which can clean up after itself) will be created inside
-    SOTODLIB_TOD_CACHE and that will be used as the temp_dir.
-
     """
-    if use_temp_dir is None:
-        cache_dir = os.getenv('SOTODLIB_TOD_CACHE')
-        if cache_dir:
-            # Just return things from _frames_iterator, but within a
-            # tempdir context that will clean up after last iteration.
-            with tempfile.TemporaryDirectory(dir=cache_dir) as temp_dir:
-                for item in _frames_iterator(files, prefix, samples, smurf_proc, temp_dir):
-                    yield item
-            return
+    tmpdir_root = os.getenv(TMPDIR_VAR)
+    if tmpdir_root:
+        cmgr = tempfile.TemporaryDirectory(dir=tmpdir_root)
+    else:
+        # This yields None
+        cmgr = contextlib.nullcontext()
 
-    offset = 0
-    for f, i0, i1 in files:
-        if i0 is None:
-            i0 = offset
+    with cmgr as tmpdir:
+        offset = 0
+        for f, i0, i1 in files:
+            if i0 is None:
+                i0 = offset
 
-        if smurf_proc is not None:
-            if (i1 is not None) and (i1 <= samples[0]):
-                continue
-            if samples[1] is not None and i0 >= samples[1]:
-                break
+            if smurf_proc is not None:
+                if (i1 is not None) and (i1 <= samples[0]):
+                    continue
+                if samples[1] is not None and i0 >= samples[1]:
+                    break
 
-        filename = os.path.join(prefix, f)
-        offset = i0
+            filename = os.path.join(prefix, f)
+            offset = i0
 
-        if use_temp_dir:
-            filename, orig_filename = os.path.join(use_temp_dir, 'framefile'), filename
-            shutil.copyfile(orig_filename, filename)
+            if tmpdir:
+                filename, orig_filename = os.path.join(tmpdir, 'framefile'), filename
+                logger.debug('Copying data file %s to %s.' % (orig_filename, filename))
+                shutil.copyfile(orig_filename, filename)
 
-        for frame in spt3g_core.G3File(filename):
-            if smurf_proc is not None and smurf_proc.process(frame):
-                # We found a dump frame, so stop looking.
-                smurf_proc = None
-            if frame.type is not spt3g_core.G3FrameType.Scan:
-                continue
-            yield frame, offset
-            offset += len(frame['ancil'].times)
-            # Alternately, use frame['sample_range']
+            for frame in spt3g_core.G3File(filename):
+                if smurf_proc is not None and smurf_proc.process(frame):
+                    # We found a dump frame, so stop looking.
+                    smurf_proc = None
+                if frame.type is not spt3g_core.G3FrameType.Scan:
+                    continue
+                yield frame, offset
+                offset += len(frame['ancil'].times)
+                # Alternately, use frame['sample_range']
 
 
 def get_cal_obsids(ctx, obs_id, cal_type):
