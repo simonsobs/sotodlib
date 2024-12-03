@@ -104,7 +104,7 @@ class ReadoutFilter(Operator):
         fsig /= iir_filter
 
         # Inverse fft
-        fft.irfft(fsig, det_array, normalize=True)
+        fft.irfft(fsig, tod=det_array, normalize=True)
 
     def _finalize(self, data, **kwargs):
         return
