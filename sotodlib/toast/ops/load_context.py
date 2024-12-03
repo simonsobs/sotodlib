@@ -1,18 +1,15 @@
 # Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-import os
 import re
 import yaml
 from datetime import datetime, timezone
 
 import numpy as np
-import traitlets
 from astropy import units as u
 from astropy.table import Column, QTable
 
 import toast
-from toast.dist import distribute_uniform
 from toast.timing import function_timer, Timer
 from toast.traits import (
     trait_docs,
@@ -26,7 +23,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
-from toast.utils import Environment, Logger
+from toast.utils import Logger
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -34,9 +31,8 @@ import so3g
 
 from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
-from ...preprocess import Pipeline as PreProcPipe
 
-from ..instrument import SOFocalplane, SOSite
+from ..instrument import SOSite
 
 from .load_context_utils import (
     compute_boresight_pointing,
@@ -120,6 +116,8 @@ class LoadContext(Operator):
     observations = List(list(), help="List of observation IDs to load")
 
     readout_ids = List(list(), help="Only load this list of readout_id values")
+
+    stream_ids = List(list(), help="Only load this list of stream_id values")
 
     detsets = List(list(), help="Only load this list of detset values")
 
@@ -282,6 +280,11 @@ class LoadContext(Operator):
 
         comm = data.comm
 
+        if self.combine_wafers:
+            msg = "Combining multiple wafers in a single observation is"
+            msg += " currently broken"
+            raise NotImplementedError(msg)
+
         if self.context is None:
             if self.context_file is None:
                 msg = "Either the context or context_file must be specified"
@@ -291,12 +294,18 @@ class LoadContext(Operator):
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
 
-        # Build our detector selection dictionary
+        # Build our detector selection dictionary.  Merge our explicit traits
+        # with any pre-existing detector selection.
         dets_select = None
         if len(self.dets_select) > 0:
             # Use the full dictionary provided by the user
             dets_select = self.dets_select
-        elif len(self.readout_ids) > 0 or len(self.bands) > 0 or len(self.detsets) > 0:
+        elif (
+            len(self.readout_ids) > 0
+            or len(self.bands) > 0
+            or len(self.detsets) > 0
+            or len(self.stream_ids) > 0
+        ):
             # We have some selection, build the dictionary
             dets_select = dict()
             if len(self.readout_ids) > 0:
@@ -305,6 +314,18 @@ class LoadContext(Operator):
                 dets_select["band"] = list(self.bands)
             if len(self.detsets) > 0:
                 dets_select["detset"] = list(self.detsets)
+            if len(self.stream_ids) > 0:
+                dets_select["stream_id"] = list(self.stream_ids)
+
+        # Get any selection of wafers
+        keep_wafers = None
+        if dets_select is not None and "stream_id" in dets_select:
+            if isinstance(dets_select["stream_id"], (list, tuple, set)):
+                keep_wafers = set(dets_select["stream_id"])
+            else:
+                # Scalar
+                keep_wafers = set()
+                keep_wafers.add(dets_select["stream_id"])
 
         # One global process queries the observation metadata and computes
         # the observation distribution among process groups.
@@ -332,52 +353,78 @@ class LoadContext(Operator):
         obs_props = None
         preproc_conf = None
         if comm.world_rank == 0:
-            obs_props = list()
-            obs_list = self.observations
+            obs_list = list(sorted(self.observations))
             if self.preprocess_config is not None:
                 with open(self.preprocess_config, "r") as f:
                     preproc_conf = yaml.safe_load(f)
+
+            # Query the obsdb directly so that we only have one DB query,
+            # rather than doing one query per observation.
+            sort_by = ["obs_id"]
+            if len(obs_list) > 0:
+                query_str = "obs.obs_id IN ("
+                for oid in obs_list:
+                    query_str += f"'{oid}',"
+                query_str = query_str.rstrip(",")
+                query_str += ")"
+            else:
+                query_str = "1"
+
+            # Open the databases and query
             ctx = open_context(context=self.context, context_file=self.context_file)
+            query_result = ctx.obsdb.query(query_text=query_str, sort=sort_by)
+
+            # Build up the list of observing session properties, and optionally
+            # only keep observations that match a regex.
+            pat = None
             if self.observation_regex is not None:
-                # Match against the full list of observation IDs
-                obs_list = []
                 pat = re.compile(self.observation_regex)
-                all_obs = ctx.obsdb.query()
-                for result in all_obs:
-                    if pat.match(result["obs_id"]) is not None:
-                        obs_list.append(result["obs_id"])
+            session_props = list()
+            for row in query_result:
+                obs_id = str(row["obs_id"])
+                if pat is not None and pat.match(obs_id) is None:
+                    continue
+                sprops = dict()
+                sprops["session_name"] = obs_id
+                sprops["session_start"] = float(row["start_time"])
+                sprops["session_stop"] = float(row["stop_time"])
+                sprops["n_samples"] = int(row["n_samples"])
+                sprops["tele_name"] = str(row["telescope"])
+                sprops["n_wafers"] = int(row["wafer_count"])
+                sprops["wafers"] = list(row["stream_ids_list"].split(","))
+                session_props.append(sprops)
 
-            for iobs, obs_id in enumerate(obs_list):
-                meta = ctx.get_meta(obs_id=obs_id, dets=dets_select)
-                if self.combine_wafers:
-                    # Place all wafers into a single session
-                    oprops = dict()
-                    oprops["name"] = obs_id
-                    oprops["session_name"] = obs_id
-                    oprops["wafer"] = "all"
-                    oprops["duration"] = meta["obs_info"]["duration"]
-                    oprops["n_det"] = len(meta["dets"].vals)
-                    obs_props.append(oprops)
-                else:
-                    # Get list of wafers from meta...
-                    duration = meta["obs_info"]["duration"]
-                    selected_wafers = list(
-                        sorted(set(meta["det_info"][self.ax_detinfo_wafer_key]))
-                    )
-                    for wf in selected_wafers:
-                        oprops = dict()
-                        oprops["name"] = f"{obs_id}_{wf}"
-                        oprops["session_name"] = obs_id
-                        oprops["wafer"] = wf
-                        oprops["duration"] = duration
-
-                        # Get number of dets in this wafer
-                        oprops["n_det"] = np.count_nonzero(
-                            meta["det_info"][self.ax_detinfo_wafer_key] == wf
-                        )
-                        obs_props.append(oprops)
+            # Close the databases
             if self.context_file is not None:
                 del ctx
+
+            # Now construct the list of observation properties, either with all wafers
+            # in a single observation or one observation per wafer.
+            obs_props = list()
+            for sprops in session_props:
+                if self.combine_wafers:
+                    # Place all wafers into a single observation
+                    oprops = dict(sprops)
+                    oprops["name"] = oprops["session_name"]
+                    oprops["wafer"] = "all"
+                    if keep_wafers is not None:
+                        new_wafers = list()
+                        for wf in oprops["wafers"]:
+                            if wf in keep_wafers:
+                                new_wafers.append(wf)
+                        oprops["n_wafers"] = len(new_wafers)
+                        oprops["wafers"] = new_wafers
+                    if oprops["n_wafers"] > 0:
+                        obs_props.append(oprops)
+                else:
+                    # One observation per wafer
+                    for wf in sprops["wafers"]:
+                        if (keep_wafers is None) or (wf in keep_wafers):
+                            oprops = dict(sprops)
+                            oprops["n_wafers"] = 1
+                            oprops["name"] = f"{oprops['session_name']}_{wf}"
+                            oprops["wafer"] = wf
+                            obs_props.append(oprops)
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
@@ -395,7 +442,7 @@ class LoadContext(Operator):
         # Distribute observations among groups- we use the detector-seconds
         # for load balancing.
 
-        obs_sizes = [int(x["n_det"] * x["duration"]) for x in obs_props]
+        obs_sizes = [int(x["n_wafers"] * x["n_samples"]) for x in obs_props]
         groupdist = distribute_discrete(obs_sizes, comm.ngroups)
         group_firstobs = groupdist[comm.group].offset
         group_numobs = groupdist[comm.group].n_elem
@@ -416,6 +463,11 @@ class LoadContext(Operator):
 
             # One process in the group loads the metadata, builds the focalplane
             # model, and broadcasts to the rest of the group.
+            #
+            # FIXME: in the case of multiple wafers per observation, each wafer
+            # reader needs to do this step, in order to pull in unique metadata
+            # that is per-wafer and merge.
+            #
             obs_meta, det_props, n_samp = self._load_metadata(
                 obs_name,
                 obs_props[obindx]["session_name"],
@@ -439,6 +491,7 @@ class LoadContext(Operator):
                 telescope,
                 n_samp,
                 fp_flags,
+                obs_meta,
             )
 
             # Read and communicate data
@@ -498,6 +551,9 @@ class LoadContext(Operator):
         det_props = None
         obs_meta = None
         n_samp = None
+
+        # FIXME: This only works if there is one wafer per observation (and
+        # hence one reader).
         if rank == 0:
             # Load metadata
             ctx = open_context(context=self.context, context_file=self.context_file)
@@ -505,16 +561,6 @@ class LoadContext(Operator):
             if self.context_file is not None:
                 del ctx
             n_samp = meta["samps"].count
-
-            if self.preprocess_config is not None:
-                # Cut detectors with preprocessing
-                prepipe = PreProcPipe(
-                    preproc_conf["process_pipe"],
-                    logger=log,
-                )
-                for process in prepipe:
-                    log.debug(f"Preprocess selecting on {process.name}")
-                    process.select(meta)
 
             # Parse the axis manager metadata into observation metadata
             # and detector properties.
@@ -675,7 +721,7 @@ class LoadContext(Operator):
 
     @function_timer
     def _create_observation(
-        self, obs_name, session_name, comm, telescope, n_samp, fp_flags
+        self, obs_name, session_name, comm, telescope, n_samp, fp_flags, meta
     ):
         """Create the observation.
 
@@ -689,6 +735,7 @@ class LoadContext(Operator):
             telescope (Telescope):  The Telescope for this observation.
             n_samp (int):  The number of samples in the observation.
             fp_flags (dict):  The per-detector flags to apply.
+            meta (dict):  The observation metadata to populate.
 
         Returns:
             (tuple):  The (Observation, have_pointing), where the second
@@ -809,6 +856,9 @@ class LoadContext(Operator):
             )
             ob.detdata.create(self.det_flags, dtype=np.uint8)
 
+        if meta is not None:
+            ob.update(meta)
+
         log.debug_rank(
             f"LoadContext {obs_name} allocate Observation in",
             comm=comm.comm_group,
@@ -897,7 +947,12 @@ class LoadContext(Operator):
         # populate in the observation.  Since all wafers have the same
         # ancil data (and the same field names, just with different
         # detectors), we can just do this on one process and broadcast
-        # the result
+        # the result.
+        #
+        # FIXME:  In the case of multiple wafers (and readers) per
+        # observation, every reader must parse every wafer and merge
+        # all the metadata information.
+        #
         temp_shared = None
         if ob.comm.group_rank == 0:
             first_wafer = list(axwafers.keys())[0]
@@ -980,6 +1035,8 @@ class LoadContext(Operator):
                 ob,
                 field,
                 axwafers,
+                self.axis_detector,
+                self.axis_sample,
                 ax_field,
                 ax_dtype,
                 wafer_readers,
@@ -990,7 +1047,16 @@ class LoadContext(Operator):
                 flag_mask=mask,
             )
 
-        # Original wafer data no longer needed
+        # Original wafer data no longer needed.  AxisManager does not seem to
+        # have a clean destructor, so do it manually.
+        def _ax_del_children(ax):
+            for k in list(ax.keys()):
+                if isinstance(ax[k], AxisManager):
+                    _ax_del_children(ax[k])
+                del ax[k]
+        for wfname in list(axwafers.keys()):
+            _ax_del_children(axwafers[wfname])
+            del axwafers[wfname]
         del axwafers
 
         log.debug_rank(
