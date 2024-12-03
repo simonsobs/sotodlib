@@ -9,8 +9,7 @@ import numpy as np
 import yaml
 from pixell import bunch, enmap, fft, mpi, utils, wcsutils
 from sotodlib import mapmaking, tod_ops
-from sotodlib.core import AxisManager, Context, FlagManager, IndexAxis
-from sotodlib.io import metadata  # PerDetectorHdf5 work-around
+from sotodlib.core import Context, FlagManager
 from sotodlib.site_pipeline import util
 import so3g
 
@@ -99,12 +98,13 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
 
     cfg = dict(defaults)
 
+    logger = mapmaking.log.init(level=mapmaking.log.DEBUG, rank=comm.rank)
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
         cfg_from_file = _get_config(config_file)
         cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
-        L.info("No config file provided, assuming default values")
+        logger.info("No config file provided, assuming default values")
 
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
@@ -136,7 +136,6 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
     prefix= args['odir'] + "/"
     if args['prefix']: prefix += args['prefix'] + "_"
     utils.mkdir(args['odir'])
-    L = mapmaking.log.init(level=mapmaking.log.DEBUG, rank=comm.rank)
 
     recenter = None
     if args['center_at']:
@@ -160,18 +159,18 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
 
     if len(ids) == 0:
         if comm.rank == 0:
-            L.info("No tods found!")
+            logger.info("No tods found!")
         sys.exit(1)
-    L.info(f"Reading {len(ids)} tods")
+    logger.info(f"Reading {len(ids)} tods")
 
     if args['inject']:
         map_to_inject = enmap.read_map(args['inject']).astype(dtype_map)
 
-    passes = setup_passes(
-        downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol
+    passes = _setup_passes(
+        downsample=args["downsample"], maxiter=args["maxiter"], interpol=args["interpol"]
     )
     for pass_ind, pass_cfg in enumerate(passes):
-        L.info(
+        logger.info(
             f"Starting pass {pass_ind + 1}/{len(passes)} maxit {pass_cfg.maxiter} down {pass_cfg.downsample} interp {pass_cfg.interpol}"
         )
         pass_prefix = f"{prefix}pass{pass_ind:03d}_"
@@ -195,8 +194,8 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
 
             for detset in detsets:
                 if args['nset'] is not None and nset_kept >= args['nset']: continue
-                name = "{obs_id}_{detset}"
-                L.debug(f"Processing {name}")
+                name = f"{obs_id}_{detset}"
+                logger.debug(f"Processing {name}")
 
                 # Cut out detector wafers we're not interested in, if args.wafer is specified
                 if args['wafer'] is not None:
@@ -211,7 +210,7 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
                 if args['max_dets'] is not None:
                     meta.restrict('dets', meta['dets'].vals[:args['max_dets']])
                 if len(dets) == 0:
-                    L.debug(f"Skipped {name} (no dets left)")
+                    logger.debug(f"Skipped {name} (no dets left)")
                     continue
 
                 with mapmaking.mark(f"read_obs {name}"):
@@ -247,7 +246,7 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
                     good_dets = mapmaking.find_usable_detectors(obs, glitch_flags="glitch_flags")
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
-                        L.debug(f"Skipped {name} (all dets cut)")
+                        logger.debug(f"Skipped {name} (all dets cut)")
                         continue
                     # Gapfill glitches. This function name isn't the clearest
                     tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
@@ -283,12 +282,12 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
                 utils.deslope(obs.signal, w=5, inplace=True)
 
                 if args['downsample'] != 1:
-                    obs = mapmaking.downsample_obs(obs, passinfo['downsample'])
+                    obs = mapmaking.downsample_obs(obs, pass_cfg['downsample'])
 
                 # Maybe load precomputed noise model
                 nmat_file = f"{nmat_dir}/nmat_{name}.hdf"
                 if args['nmat_mode'] == "load" or args['nmat_mode'] == "cache" and os.path.isfile(nmat_file):
-                    L.info(f"Reading noise model {nmat_file}")
+                    logger.info(f"Reading noise model {nmat_file}")
                     nmat = mapmaking.read_nmat(nmat_file)
                 else: nmat = None
 
@@ -305,7 +304,7 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
                 # Maybe save the noise model we built (only if we actually built one rather than
                 # reading one in)
                 if args['nmat_mode'] in ["save", "cache"] and nmat is None:
-                    L.info(f"Writing noise model {nmat_file}")
+                    logger.info(f"Writing noise model {nmat_file}")
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
             nset_kept_tot += nset_kept
@@ -313,34 +312,34 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
         nset_kept_tot = comm.allreduce(nset_kept_tot)
         if nset_kept_tot == 0:
             if comm.rank == 0:
-                L.info("All tods failed. Giving up")
+                logger.info("All tods failed. Giving up")
             sys.exit(1)
 
-        L.info("Done building")
+        logger.info("Done building")
 
         with mapmaking.mark("prepare"):
             mapmaker.prepare()
 
-        L.info("Done preparing")
+        logger.info("Done preparing")
 
         signal_map.write(pass_prefix, "rhs", signal_map.rhs)
         signal_map.write(pass_prefix, "div", signal_map.div)
         signal_map.write(pass_prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs))
 
-        L.info("Wrote rhs, div, bin")
+        logger.info("Wrote rhs, div, bin")
         x0 = None if pass_ind == 0 else mapmaker.translate(mapmaker_prev, x_prev)
         t1 = time.time()
-        for step in mapmaker.solve(maxiter=passinfo['maxiter'], x0=x0):
+        for step in mapmaker.solve(maxiter=pass_cfg['maxiter'], x0=x0):
             t2 = time.time()
             dump = step.i % 10 == 0
-            L.info(f"CG step {step.i:4d} {step.err:15.7e} {t2-t1:8.3f} {'(write)' if dump else ''}")
+            logger.info(f"CG step {step.i:4d} {step.err:15.7e} {t2-t1:8.3f} {'(write)' if dump else ''}")
             if dump:
                 for signal, val in zip(signals, step.x):
                     if signal.output:
                         signal.write(prefix, f"map{step.i:4d}", val)
             t1 = time.time()
 
-        L.info("Done")
+        logger.info("Done")
         for signal, val in zip(signals, step.x):
             if signal.output:
                 signal.write(prefix, "map", val)
