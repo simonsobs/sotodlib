@@ -23,10 +23,13 @@ from spt3g import core as spt3g_core
 import numpy as np
 
 from glob import glob
+import contextlib
 import itertools
 import logging
 import os
 import re
+import shutil
+import tempfile
 import yaml
 
 import sotodlib
@@ -44,6 +47,8 @@ SIGNAL_RESCALE = np.pi / 2**15
 
 DEG = np.pi / 180
 
+TMPDIR_VAR = 'SOTODLIB_TOD_TMPDIR'
+
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                   no_signal=None,
@@ -52,6 +57,13 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     See API template, `sotodlib.core.context.obsloader_template`, for
     details of all supported arguments.
+
+    Reading from g3 files can be slow on some filesystems.  Use
+    SOTODLIB_TOD_TMPDIR envvar to point to a directory (such as a
+    place on scratch server, local disk, or RAM disk) where tempfiles
+    can be safely made, for faster access.  Files are created in a
+    randomly named temporary directory that will (normally) be removed
+    immediately after use.
 
     """
     if any([v is not None for v in kwargs.values()]):
@@ -99,7 +111,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
     del pairs_req
 
-    file_map = db.get_files(obs_id)
+    file_map = db.get_files(obs_id, detsets=detsets_req)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
     
     # Figure out how many samples we're loading.
@@ -115,8 +127,6 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         samples[1] = sample_range[1] + samples[1]
     samples[0] = min(max(0, samples[0]), sample_range[1])
     samples[1] = min(max(samples), sample_range[1])
-
-    file_map = db.get_files(obs_id)
 
     # Consider pre-allocating the signal buffer.
     signal_buffer = None
@@ -815,29 +825,42 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None):
     associated with the start of the frame.
 
     """
-    offset = 0
-    for f, i0, i1 in files:
-        if i0 is None:
-            i0 = offset
+    tmpdir_root = os.getenv(TMPDIR_VAR)
+    if tmpdir_root:
+        cmgr = tempfile.TemporaryDirectory(dir=tmpdir_root)
+    else:
+        # This yields None
+        cmgr = contextlib.nullcontext()
 
-        if smurf_proc is not None:
-            if (i1 is not None) and (i1 <= samples[0]):
-                continue
-            if samples[1] is not None and i0 >= samples[1]:
-                break
+    with cmgr as tmpdir:
+        offset = 0
+        for f, i0, i1 in files:
+            if i0 is None:
+                i0 = offset
 
-        filename = os.path.join(prefix, f)
-        offset = i0
+            if smurf_proc is not None:
+                if (i1 is not None) and (i1 <= samples[0]):
+                    continue
+                if samples[1] is not None and i0 >= samples[1]:
+                    break
 
-        for frame in spt3g_core.G3File(filename):
-            if smurf_proc is not None and smurf_proc.process(frame):
-                # We found a dump frame, so stop looking.
-                smurf_proc = None
-            if frame.type is not spt3g_core.G3FrameType.Scan:
-                continue
-            yield frame, offset
-            offset += len(frame['ancil'].times)
-            # Alternately, use frame['sample_range']
+            filename = os.path.join(prefix, f)
+            offset = i0
+
+            if tmpdir:
+                filename, orig_filename = os.path.join(tmpdir, 'framefile'), filename
+                logger.debug('Copying data file %s to %s.' % (orig_filename, filename))
+                shutil.copyfile(orig_filename, filename)
+
+            for frame in spt3g_core.G3File(filename):
+                if smurf_proc is not None and smurf_proc.process(frame):
+                    # We found a dump frame, so stop looking.
+                    smurf_proc = None
+                if frame.type is not spt3g_core.G3FrameType.Scan:
+                    continue
+                yield frame, offset
+                offset += len(frame['ancil'].times)
+                # Alternately, use frame['sample_range']
 
 
 def get_cal_obsids(ctx, obs_id, cal_type):
