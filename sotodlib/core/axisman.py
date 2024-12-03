@@ -349,7 +349,7 @@ class AxisManager:
             self._fields[new_name] = self._fields.pop(name)
             self._assignments[new_name] = self._assignments.pop(name)
         return self
-    
+
     def add_axis(self, a):
         assert isinstance( a, AxisInterface)
         self._axes[a.name] = a.copy()
@@ -358,20 +358,38 @@ class AxisManager:
         return name in self._fields or name in self._axes
 
     def __getitem__(self, name):
-        if name in self._fields:
-            return self._fields[name]
-        if name in self._axes:
-            return self._axes[name]
-        raise KeyError(name)
+
+        # We want to support options like:
+        # aman.focal_plane.xi . aman['focal_plane.xi']
+        # We will safely assume that a getitem will always have '.' as the separator
+        attrs = name.split(".")
+        tmp_item = self
+        while attrs:
+            attr_name = attrs.pop(0)
+            if attr_name in tmp_item._fields:
+                tmp_item = tmp_item._fields[attr_name]
+            elif attr_name in tmp_item._axes:
+                tmp_item = tmp_item._axes[attr_name]
+            else:
+                raise KeyError(attr_name)
+        return tmp_item
 
     def __setitem__(self, name, val):
-        if name in self._fields:
-            self._fields[name] = val
+
+        last_pos = name.rfind(".")
+        val_key = name[last_pos:]
+        attrs = name[:last_pos]
+        tmp_item = self[attrs]
+
+        if val_key in tmp_item._fields:
+            tmp_item._fields[name] = val
         else:
-            raise KeyError(name)
+            raise KeyError(val_key)
 
     def __setattr__(self, name, value):
         # Assignment to members update those members
+        # We will assume that a path exists until the last member.
+        # If any member prior to that does not exist a keyerror is raised.
         if "_fields" in self.__dict__ and name in self._fields.keys():
             self._fields[name] = value
         else:
@@ -381,7 +399,11 @@ class AxisManager:
     def __getattr__(self, name):
         # Prevent members from override special class members.
         if name.startswith("__"): raise AttributeError(name)
-        return self[name]
+        try:
+            val = self[name]
+        except KeyError as ex:
+            raise AttributeError(name) from ex
+        return val
 
     def __dir__(self):
         return sorted(tuple(self.__dict__.keys()) + tuple(self.keys()))
@@ -514,12 +536,12 @@ class AxisManager:
                 output.wrap(k, new_data[k], axis_map)
             else:
                 if other_fields == "exact":
-                    ## if every item named k is a scalar 
+                    ## if every item named k is a scalar
                     err_msg = (f"The field '{k}' does not share axis '{axis}'; " 
                               f"{k} is not identical across all items " 
                               f"pass other_fields='drop' or 'first' or else " 
                               f"remove this field from the targets.")
-                                
+
                     if np.any([np.isscalar(i[k]) for i in items]):
                         if not np.all([np.isscalar(i[k]) for i in items]):
                             raise ValueError(err_msg)
@@ -527,14 +549,14 @@ class AxisManager:
                             raise ValueError(err_msg)
                         output.wrap(k, items[0][k], axis_map)
                         continue
-                        
+
                     elif not np.all([i[k].shape==items[0][k].shape for i in items]):
                         raise ValueError(err_msg)
                     elif not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
                         raise ValueError(err_msg)
-                        
+
                     output.wrap(k, items[0][k].copy(), axis_map)
-                    
+
                 elif other_fields == 'fail':
                     raise ValueError(
                         f"The field '{k}' does not share axis '{axis}'; "
