@@ -76,7 +76,7 @@ class MLMapmaker(Operator):
         help="The format is [from=](ra:dec|name),[to=(ra:dec|name)],[up=(ra:dec|name|system)]",
     )
 
-    comps = Unicode("T", help="Components (must be 'T', 'QU' or 'TQU')")
+    comps = Unicode("TQU", help="Components (must be 'T', 'QU' or 'TQU')")
 
     Nmat = Instance(klass=mm.Nmat, allow_none=True, help="The noise matrix to use")
 
@@ -143,7 +143,7 @@ class MLMapmaker(Operator):
     )
 
     tiled = Bool(
-        False,
+        True,
         help="If True, the map will be represented as distributed tiles in memory. "
         "For large maps this is faster and more memory efficient, but for small "
         "maps it has some overhead due to extra communication."
@@ -168,7 +168,7 @@ class MLMapmaker(Operator):
     maxerr = Float(1e-6, help="Maximum error in the CG solver")
 
     truncate_tod = Bool(
-        False,
+        True,
         help="Truncate TOD to an easily factorizable length to ensure efficient FFT.",
     )
 
