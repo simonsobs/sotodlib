@@ -64,8 +64,8 @@ def get_parser(parser: ArgumentParser=None) -> ArgumentParser:
     parser.add_argument(      "--nocal",   action="store_true", default=True, help="No relcal or abscal")
     parser.add_argument(      "--nmat-dir", type=str, help="Directory to where nmats are loaded from/saved to")
     parser.add_argument(      "--nmat-mode", type=str, help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat-dir, otherwise build and save. 'load': Load from nmat-dir, error if missing. 'save': Build from tod and save.")
-    parser.add_argument("-d", "--downsample", type=int, help="Downsample TOD by this factor")
-    parser.add_argument(      "--maxiter",    type=int, help="Maximum number of iterative steps")
+    parser.add_argument("-d", "--downsample", type=str, help="Downsample TOD by this factor")
+    parser.add_argument(      "--maxiter",    type=str, help="Maximum number of iterative steps")
     parser.add_argument("-T", "--tiled"  ,    type=int)
     parser.add_argument("-W", "--wafer"  ,   type=str, nargs='+', help="Detector wafer subset to map with")
     parser.add_argument("--interpol", type=str)
@@ -98,6 +98,7 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
 
     cfg = dict(defaults)
 
+    comm = mpi.COMM_WORLD
     logger = mapmaking.log.init(level=mapmaking.log.DEBUG, rank=comm.rank)
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
@@ -118,7 +119,6 @@ def main(config_file: str=None, defaults: dict=defaults, **args) -> None:
     warnings.simplefilter('ignore')
     SITE = args['site']
     verbose = args['verbose'] - args['quiet']
-    comm = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args['area'])
 
     # Reconstruct that wcs in case default fields have changed; otherwise
