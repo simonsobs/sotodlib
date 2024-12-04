@@ -134,7 +134,7 @@ class MapmakerPointingTest(unittest.TestCase):
             out_dir=testdir.name,
             comps="TQU",
             nmat_type="Nmat",
-            maxiter=3,
+            maxiter=[3],
             truncate_tod=False,
             write_hits=True,
             write_rhs=False,
