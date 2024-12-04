@@ -1469,29 +1469,26 @@ class UnionFlags(_Preprocess):
      Example config block::
 
         - name : "union_flags"
-          calc:
-            flag_labels: ['jumps_2pi.jump_flag', 'glitches.glitch_flags', 'turnaround_flags.turnarounds']
           process:
+            flag_labels: ['jumps_2pi.jump_flag', 'glitches.glitch_flags', 'turnaround_flags.turnarounds']
             total_flags_label: 'glitch_flags'
 
     """
     name = "union_flags"
-    
-    def calc_and_save(self, aman, proc_aman):
-        from so3g.proj import RangesMatrix
-        total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
-        for label in self.calc_cfgs['flag_labels']:
-            _label = attrgetter(label)
-            total_flags += _label(proc_aman) # The + operator is the union operator in this case
-        self.save(proc_aman, total_flags)
 
     def process(self, aman, proc_aman):
+        from so3g.proj import RangesMatrix
+        total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
+        for label in self.process_cfgs['flag_labels']:
+            _label = attrgetter(label)
+            total_flags += _label(proc_aman) # The + operator is the union operator in this case
+
         if 'flags' not in aman._fields:
             from sotodlib.core import FlagManager
             aman.wrap('flags', FlagManager.for_tod(aman))
         if self.process_cfgs['total_flags_label'] in aman['flags']:
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
-        aman['flags'].wrap(self.process_cfgs['total_flags_label'], proc_aman.total_flags)
+        aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
             
 _Preprocess.register(SplitFlags)
