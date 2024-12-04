@@ -377,11 +377,17 @@ class AxisManager:
     def __setitem__(self, name, val):
 
         last_pos = name.rfind(".")
-        val_key = name[last_pos + 1:]
-        attrs = name[:last_pos]
-        tmp_item = self[attrs]
+        val_key = name
+        tmp_item = self
+        if last_pos > -1:
+            val_key = name[last_pos + 1:]
+            attrs = name[:last_pos]
+            tmp_item = self[attrs]
+
         if val_key in tmp_item._fields:
             tmp_item._fields[val_key] = val
+        else:
+            raise KeyError(name)
 
     def __setattr__(self, name, value):
         # Assignment to members update those members
