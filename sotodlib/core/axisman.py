@@ -374,17 +374,15 @@ class AxisManager:
                 raise KeyError(attr_name)
         return tmp_item
 
-    def __setitem__(self, name, val):
+    def __setitem__(self, name:str, val: "AxisManager"):
 
+        if not isinstance(val, AxisManager):
+            raise ValueError("Only AxisManagers can be setting values")
         last_pos = name.rfind(".")
-        val_key = name[last_pos:]
+        val_key = name[last_pos + 1:]
         attrs = name[:last_pos]
         tmp_item = self[attrs]
-
-        if val_key in tmp_item._fields:
-            tmp_item._fields[name] = val
-        else:
-            raise KeyError(val_key)
+        tmp_item.wrap(name=val_key, data=val, overwrite=True)
 
     def __setattr__(self, name, value):
         # Assignment to members update those members
