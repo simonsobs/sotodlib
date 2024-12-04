@@ -252,6 +252,7 @@ Flagging and Products
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
 .. autoclass:: sotodlib.preprocess.processes.DarkDets
 .. autoclass:: sotodlib.preprocess.processes.SourceFlags
+.. autoclass:: sotodlib.preprocess.processes.GetStats
 
 HWP Related
 :::::::::::

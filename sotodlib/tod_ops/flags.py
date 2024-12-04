@@ -138,7 +138,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
-                         truncate=False, qlim=1):
+                         truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
     """
     Compute turnaround flags for a dataset.
 
@@ -172,6 +172,10 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         (Optional). Truncate unstable scan segments if True in ``scanspeed`` method.
     qlim : float
         (Optional). Azimuth threshold percentile for ``az`` method turnaround detection.
+    merge_subscans : bool
+        (Optional). Also merge an AxisManager with subscan information.
+    turnarounds_in_subscan : bool
+        (Optional). Turnarounds are included as part of a subscan.
 
     Returns
     -------
@@ -299,6 +303,10 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
             aman.flags[name] = ta_flag
         else:
             aman.flags.wrap(name, ta_flag)   
+
+    if merge_subscans:
+        get_subscans(aman, merge=True, include_turnarounds=turnarounds_in_subscan)
+
     if method == 'az':
         ta_exp = RangesMatrix([ta_flag for i in range(aman.dets.count)])
         return ta_exp
@@ -319,7 +327,8 @@ def get_glitch_flags(aman,
                      overwrite=False,
                      name="glitches",
                      full_output=False,
-                     edge_guard=2000):
+                     edge_guard=2000,
+                     subscan=False):
     """
     Find glitches with fourier filtering. Translation from moby2 as starting point
 
@@ -350,6 +359,8 @@ def get_glitch_flags(aman,
     edge_guard : int
         Number of samples at the beginning and end of the tod to exclude from
         the returned glitch RangesMatrix. Defaults to 2000 samples (10 sec).
+    subscan : bool
+        If True, compute the glitch threshold on a per-subscan basis. Includes turnarounds.
 
     Returns
     -------
@@ -370,9 +381,18 @@ def get_glitch_flags(aman,
         ds = int(fvec.shape[1]/20000)
     else: 
         ds = 1
-    iqr_range = 0.741 * stats.iqr(fvec[:,::ds], axis=1)
-    # get flags
-    msk = fvec > iqr_range[:, None] * n_sig
+
+    if subscan:
+        # We include turnarounds
+        subscan_indices = np.concatenate([aman.flags.left_scan.ranges(), (~aman.flags.left_scan).ranges()])
+    else:
+        subscan_indices = np.array([[0, fvec.shape[1]]])
+
+    msk = np.zeros_like(fvec, dtype='bool')
+    for ss in subscan_indices:
+        iqr_range = 0.741 * stats.iqr(fvec[:,ss[0]:ss[1]:ds], axis=1)
+        # get flags
+        msk[:,ss[0]:ss[1]] = fvec[:,ss[0]:ss[1]] > iqr_range[:, None] * n_sig
     msk[:,:edge_guard] = False
     msk[:,-edge_guard:] = False
     flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
@@ -672,3 +692,208 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
             aman.flags.wrap(inv_var_flag_name, mskinvar, [(0, 'dets'), (1, 'samps')])
 
     return mskinvar
+
+def get_subscans(aman, merge=True, include_turnarounds=False, overwrite=True):
+    """
+    Returns an axis manager with information about subscans.
+    This includes direction and a ranges matrix (subscans samps)
+    True inside each subscan.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input AxisManager.
+    merge : bool
+        Merge into aman as 'subscan_info'
+    include_turnarounds : bool
+        Include turnarounds in the subscan ranges
+    overwrite : bool
+        If true, write over subscan_info.
+
+    Returns
+    -------
+    subscan_aman : AxisManager
+        AxisManager containing information about the subscans.
+        "direction" is a (subscans,) array of strings 'left' or 'right'
+        "subscan_flags" is a (subscans, samps) RangesMatrix; True inside the subscan.
+    """
+    if not include_turnarounds:
+        ss_ind = (~aman.flags.turnarounds).ranges() # sliceable indices (first inclusive, last exclusive) for subscans
+    else:
+        left = aman.flags.left_scan.ranges()
+        right = aman.flags.right_scan.ranges()
+        start_left = 0 if (left[0,0] < right[0,0]) else 1
+        ss_ind = np.empty((left.shape[0] + right.shape[0], 2), dtype=left.dtype)
+        ss_ind[start_left::2] = left
+        ss_ind[(start_left-1)%2::2] = right
+
+    start_inds, end_inds = ss_ind.T
+    n_subscan = ss_ind.shape[0]
+    tt = aman.timestamps
+    subscan_aman = core.AxisManager(aman.samps, core.IndexAxis("subscans", n_subscan))
+
+    is_left = aman.flags.left_scan.mask()[start_inds]
+    subscan_aman.wrap('direction', np.array(['left' if is_left[ii] else 'right' for ii in range(n_subscan)]), [(0, 'subscans')])
+
+    rm = RangesMatrix([Ranges.from_array(np.atleast_2d(ss), tt.size) for ss in ss_ind])
+    subscan_aman.wrap('subscan_flags', rm, [(0, 'subscans'), (1, 'samps')]) # True in the subscan
+    if merge:
+        name = 'subscan_info'
+        if overwrite and name in aman:
+            aman.move(name, None)
+        aman.wrap(name, subscan_aman)
+    return subscan_aman
+
+def get_subscan_signal(aman, arr, isub=None, trim=False):
+    """
+    Split an array into subscans.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input AxisManager.
+    arr : Array
+        Input array.
+    isub : int
+        Index of the desired subscan. May also be a list of indices.
+        If None, all are used.
+    trim : bool
+        Do not include size-zero arrays from empty subscans in the output.
+
+    Returns
+    -------
+    out : list
+        If isub is a scalar, return an Array of arr cut on the samps axis to the given subscan.
+        If isub is a list or None, return a list of such Arrays.
+    """
+    if isinstance(arr, str):
+        arr = aman[arr]
+    if np.isscalar(isub):
+        out = apply_rng(arr, aman.subscan_info.subscan_flags[isub])
+        if trim and out.size == 0:
+            out = None
+    else:
+        if isub is None:
+            isub = range(len(aman.subscan_info.subscan_flags))
+        out = [apply_rng(arr, aman.subscan_info.subscan_flags[ii]) for ii in isub]
+        if trim:
+            out = [x for x in out if x.size > 0]
+
+    return out
+
+
+def apply_rng(arr, rng):
+    """
+    Apply a Ranges object to an array. rng should be True on the samples you want to keep.
+
+    Parameters
+    ----------
+    arr : Array
+        Array containing the signal. Should have one axis of len (samps).
+    rng : Ranges
+        Ranges object of len (samps) selecting the desired range.
+    """
+    if rng.ranges().size == 0:
+        slices = [slice(0,0)] #  Return an empty array if rng is empty
+    else:
+        slices = [slice(*irng) for irng in rng.ranges()]
+
+    # Identify the samps axis
+    isamps = np.where(np.array(arr.shape) == rng.count)[0]
+    if isamps.size != 1:
+        # Check for axis mismatch between arr and rng, or multiple axes with the same size
+        raise RuntimeError("Could not identify axis matching Ranges")
+    # Apply ranges
+    out = []
+    for slc in slices:
+        ndslice = tuple((slice(None) if ii != isamps[0] else slc for ii in range(arr.ndim)))
+        out.append(arr[ndslice])
+    return np.concatenate(out, axis=isamps[0])
+
+def wrap_stats(aman, info_aman_name, info, info_names, merge=True):
+    """
+    Wrap multiple stats into a new aman, checking for subscan information. Stats can be (dets,) or (dets, subscans).
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input AxisManager.
+    info_aman_name : str
+        Name for info_aman when wrapped into input.
+    info : Array
+        (stats, dets,) or (stats, dets, subscans) containing the information you want to wrap.
+    info_names : list
+        List of str names for each entry in the new aman.
+    merge : bool
+        If True merge info_aman into aman.
+
+    Returns
+    -------
+    info_aman : AxisManager
+        (dets,) or (dets, subscans) aman with a field for each item in info_names.
+    """
+    info_names = np.atleast_1d(info_names)
+    info = np.atleast_2d(info)
+    if info.shape == (len(info_names), aman.dets.count): # (stats, dets)
+        if len(info_names) == aman.dets.count and aman.dets.count == aman.subscan_info.subscans.count:
+            raise RuntimeError("Cannot infer axis mapping") # Catch corner case
+        info_aman = core.AxisManager(aman.dets)
+        axmap = [(0, 'dets')]
+
+    else:
+        info = np.atleast_3d(info) # (stats, dets, subscans)
+        info_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
+        axmap = [(0, 'dets'), (1, 'subscans')]
+
+    for ii in range(len(info_names)):
+        info_aman.wrap(info_names[ii], info[ii], axmap)
+    if merge:
+        if info_aman_name in aman.keys():
+            aman[info_aman_name].merge(info_aman)
+        else:
+            aman.wrap(info_aman_name, info_aman)
+    return info_aman
+
+def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="stats", merge=False):
+    """
+    Calculate basic statistics on a TOD or power spectrum.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input AxisManager.
+    signal : Array
+        Input signal. Statistics will be computed over *axis 1*.
+    stat_names : list
+        List of strings identifying which statistics to run.
+    split_subscans : bool
+        If True statistics will be computed on subscans. Assumes aman.subscan_info exists already.
+    mask : Array
+        Mask to apply before computation. 1d array for advanced indexing (keep True), or a slice object.
+    name : str
+        Name of axis manager to add to aman if merge is True.
+    """
+    stat_names = np.atleast_1d(stat_names)
+    fn_dict = {'mean': np.mean, 'median': np.median, 'ptp': np.ptp, 'std': np.std,
+                     'kurtosis': stats.kurtosis, 'skew': stats.skew}
+
+    if isinstance(signal, str):
+        signal = aman[signal]
+    if split_subscans:
+        if mask is not None:
+            raise ValueError("Cannot mask samples and split subscans")
+        stats_arr = []
+        for iss in range(aman.subscan_info.subscans.count):
+            data = get_subscan_signal(aman, signal, iss)
+            if data.size > 0:
+                stats_arr.append([fn_dict[name](data, axis=1) for name in stat_names]) # Samps axis assumed to be 1
+            else:
+                stats_arr.append(np.full((len(stat_names), signal.shape[0]), np.nan)) # Add nans if subscan has been entirely cut
+        stats_arr = np.array(stats_arr).transpose(1, 2, 0) # stat, dets, subscan
+    else:
+        if mask is None:
+            mask = slice(None)
+        stats_arr = np.array([fn_dict[name](signal[:, mask], axis=1) for name in stat_names]) # Samps axis assumed to be 1
+
+    info_aman = wrap_stats(aman, name, stats_arr, stat_names, merge)
+    return info_aman
