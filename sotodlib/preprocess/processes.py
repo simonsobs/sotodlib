@@ -1388,25 +1388,6 @@ class UnionFlags(_Preprocess):
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], proc_aman.total_flags)
 
-
-class PointingModel(_Preprocess):
-    """Apply pointing model to the TOD.
-
-    Saves results in proc_aman under the "pointing" field. 
-
-     Example config block::
-
-        - name : "pointing_model"
-          calc: True
-          
-    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
-    """
-    name = "pointing_model"
-    
-    def calc_and_save(self, aman, proc_aman):
-        from sotodlib.coords import pointing_model
-        if self.calc_cfgs:
-            pointing_model.apply_pointing_model(aman)
             
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -1438,4 +1419,3 @@ _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(PointingModel)
