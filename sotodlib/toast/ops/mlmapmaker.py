@@ -152,6 +152,18 @@ class MLMapmaker(Operator):
         help="If True, clear all observation detector data after accumulating",
     )
 
+    checkpoint_interval = Int(
+        0,
+        help="If greater than zero, the CG solver will store its state and"
+        "restart from a checkpoint when available.",
+    )
+
+    skip_existing = Bool(
+        False,
+        help="If True, the mapmaker will not write any map products that "
+        "already exist on disk.  See `checkpoint`."
+    )
+
     tiled = Bool(
         True,
         help="If True, the map will be represented as distributed tiles in memory. "
@@ -203,6 +215,13 @@ class MLMapmaker(Operator):
         check = proposal["value"]
         if check not in ["T", "QU", "TQU"]:
             raise traitlets.TraitError("Invalid comps (must be 'T', 'QU' or 'TQU')")
+        return check
+
+    @traitlets.validate("checkpoint_interval")
+    def _check_checkpoint_interval(self, proposal):
+        check = proposal["value"]
+        if check < 0:
+            raise traitlets.TraitError("Invalid checkpoint_interval. Must be non-negative.")
         return check
 
     @traitlets.validate("shared_flag_mask")
@@ -457,25 +476,41 @@ class MLMapmaker(Operator):
         # a sky map, or where we solve for multiple sky maps. The mapmaker itself supports it,
         # the problem is the direct access to the rhs, div and idiv members
         if self.write_rhs:
-            fname = signal_map.write(prefix, "rhs", signal_map.rhs)
-            log.info_rank(f"Wrote rhs to {fname}", comm=comm)
+            fname = f"{prefix}sky_rhs.fits"
+            if self.skip_existing and os.path.isfile(fname):
+                log.info_rank(f"Skipping existing rhs in {fname}", comm=comm)
+            else:
+                fname = signal_map.write(prefix, "rhs", signal_map.rhs)
+                log.info_rank(f"Wrote rhs to {fname}", comm=comm)
 
         if self.write_div:
             #signal_map.write(prefix, "div", signal_map.div)
             # FIXME : only writing the TT variance to avoid integer overflow in communication
-            fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
-            log.info_rank(f"Wrote div to {fname}", comm=comm)
+            fname = f"{prefix}sky_div.fits"
+            if self.skip_existing and os.path.isfile(fname):
+                log.info_rank(f"Skipping existing div in {fname}", comm=comm)
+            else:
+                fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
+                log.info_rank(f"Wrote div to {fname}", comm=comm)
 
         if self.write_hits:
-            fname = signal_map.write(prefix, "hits", signal_map.hits)
-            log.info_rank(f"Wrote hits to {fname}", comm=comm)
+            fname = f"{prefix}sky_hits.fits"
+            if self.skip_existing and os.path.isfile(fname):
+                log.info_rank(f"Skipping existing div in {fname}", comm=comm)
+            else:
+                fname = signal_map.write(prefix, "hits", signal_map.hits)
+                log.info_rank(f"Wrote hits to {fname}", comm=comm)
 
         mmul = tilemap.map_mul if self.tiled else enmap.map_mul
         if self.write_bin:
-            fname = signal_map.write(
-                prefix, "bin", mmul(signal_map.idiv, signal_map.rhs)
-            )
-            log.info_rank(f"Wrote bin to {fname}", comm=comm)
+            fname = f"{prefix}sky_bin.fits"
+            if self.skip_existing and os.path.isfile(fname):
+                log.info_rank(f"Skipping existing bin in {fname}", comm=comm)
+            else:
+                fname = signal_map.write(
+                    prefix, "bin", mmul(signal_map.idiv, signal_map.rhs)
+                )
+                log.info_rank(f"Wrote bin to {fname}", comm=comm)
 
         if comm is not None:
             comm.barrier()
@@ -498,8 +533,20 @@ class MLMapmaker(Operator):
         tstep = Timer()
         tstep.start()
 
+        if self.checkpoint_interval > 0:
+            fname_checkpoint = f"{prefix}checkpoint.{comm.rank:04}.hdf"
+            there = os.path.isfile(fname_checkpoint)
+            if there:
+                log.info_rank(f"Checkpoint detected. Will start from previous solver state", comm=comm)
+        else:
+            fname_checkpoint = None
+
         for step in mapmaker.solve(
-                maxiter=passinfo.maxiter, maxerr=self.maxerr, x0=x0
+                maxiter=passinfo.maxiter,
+                maxerr=self.maxerr,
+                x0=x0,
+                fname_checkpoint=fname_checkpoint,
+                checkpoint_interval=self.checkpoint_interval,
         ):
             if self.write_iter_map < 1:
                 dump = False
