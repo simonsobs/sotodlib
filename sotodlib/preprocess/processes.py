@@ -1468,15 +1468,15 @@ class PointingModel(_Preprocess):
      Example config block::
 
         - name : "pointing_model"
-          calc: True
+          process: True
           
-    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
+    .. autofunction:: sotodlib.coords.pointing_model.apply_pointing_model
     """
     name = "pointing_model"
-    
-    def calc_and_save(self, aman, proc_aman):
+
+    def process(self, aman, proc_aman):
         from sotodlib.coords import pointing_model
-        if self.calc_cfgs:
+        if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
             
 _Preprocess.register(SplitFlags)
