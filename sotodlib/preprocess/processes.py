@@ -1399,7 +1399,6 @@ class PointingModel(_Preprocess):
         if self.calc_cfgs:
             pointing_model.apply_pointing_model(aman)
             
->>>>>>> origin/pointing_preproc_maps
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
