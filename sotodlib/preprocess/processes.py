@@ -1460,6 +1460,36 @@ class SplitFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("split_flags", split_flg_aman)
 
+class UnionFlags(_Preprocess):
+    """Do the union of relevant flags for mapping
+    Typically you would include turnarounds, glitches, etc.
+
+    Saves results for aman under the "flags.[total_flags_label]" field.
+
+     Example config block::
+
+        - name : "union_flags"
+          process:
+            flag_labels: ['jumps_2pi.jump_flag', 'glitches.glitch_flags', 'turnaround_flags.turnarounds']
+            total_flags_label: 'glitch_flags'
+
+    """
+    name = "union_flags"
+
+    def process(self, aman, proc_aman):
+        from so3g.proj import RangesMatrix
+        total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
+        for label in self.process_cfgs['flag_labels']:
+            _label = attrgetter(label)
+            total_flags += _label(proc_aman) # The + operator is the union operator in this case
+
+        if 'flags' not in aman._fields:
+            from sotodlib.core import FlagManager
+            aman.wrap('flags', FlagManager.for_tod(aman))
+        if self.process_cfgs['total_flags_label'] in aman['flags']:
+            aman['flags'].move(self.process_cfgs['total_flags_label'], None)
+        aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
+
 class PointingModel(_Preprocess):
     """Apply pointing model to the TOD.
 
@@ -1509,4 +1539,5 @@ _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
+_Preprocess.register(UnionFlags)
 _Preprocess.register(PointingModel)
