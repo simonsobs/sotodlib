@@ -6,7 +6,7 @@
 
 """This module provids a simple logging/output interface."""
 import time
-from logging import *
+from logging import Filter, INFO, Formatter, getLogger, DEBUG, FileHandler, StreamHandler, ERROR
 from pixell import memory, colors, mpi
 
 class EnFilter(Filter):
