@@ -287,6 +287,9 @@ class MLMapmaker(Operator):
         return check
 
     def __init__(self, **kwargs):
+        self.shape = None
+        self.wcs = None
+        self.recenter = None
         self.signal_map = None
         self.mapmaker = None
         super().__init__(**kwargs)
@@ -429,8 +432,9 @@ class MLMapmaker(Operator):
             # FFT-truncate for faster fft ops
             axobs.restrict("samps", [0, fft.fft_len(axobs.samps.count)])
 
-        if self.deslope:
-            utils.deslope(axobs.signal, w=5, inplace=True)
+        # MLMapmaker.add_obs will apply deslope
+        # if self.deslope:
+        #    utils.deslope(axobs.signal, w=5, inplace=True)
 
         if self.downsample != 1:
             axobs = mm.downsample_obs(axobs, passinfo.downsample)
@@ -486,13 +490,13 @@ class MLMapmaker(Operator):
                 log.info_rank(f"Wrote rhs to {fname}", comm=comm)
 
         if self.write_div:
-            #signal_map.write(prefix, "div", signal_map.div)
-            # FIXME : only writing the TT variance to avoid integer overflow in communication
             fname = f"{prefix}sky_div.fits"
             if self.skip_existing and os.path.isfile(fname):
                 log.info_rank(f"Skipping existing div in {fname}", comm=comm)
             else:
-                fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
+                # FIXME : only writing the TT variance to avoid integer overflow in communication
+                fname = signal_map.write(prefix, "div", signal_map.div)
+                # fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
                 log.info_rank(f"Wrote div to {fname}", comm=comm)
 
         if self.write_hits:
@@ -597,12 +601,12 @@ class MLMapmaker(Operator):
         # nmat_type is guaranteed to be a valid Nmat class
         noise_model = getattr(mm, self.nmat_type)()
 
-        self._shape, self._wcs = enmap.read_map_geometry(self.area)
+        shape, wcs = enmap.read_map_geometry(self.area)
 
         if self.center_at is None:
-            self._recenter = None
+            recenter = None
         else:
-            self._recenter = mm.parse_recentering(self.center_at)
+            recenter = mm.parse_recentering(self.center_at)
         dtype_tod = np.float32
         dtype_map = np.dtype(self.dtype_map)
 
@@ -627,12 +631,12 @@ class MLMapmaker(Operator):
 
             signal_cut = mm.SignalCut(comm, dtype=dtype_tod)
             signal_map = mm.SignalMap(
-                self._shape,
-                self._wcs,
+                shape,
+                wcs,
                 comm,
                 comps=self.comps,
                 dtype=dtype_map,
-                recenter=self._recenter,
+                recenter=recenter,
                 tiled=self.tiled,
                 interpol=passinfo.interpol,
             )
@@ -652,7 +656,11 @@ class MLMapmaker(Operator):
 
                 axobs = self._wrap_obs(ob, dets, passinfo)
                 mapmaker.add_obs(
-                    ob.name, axobs, noise_model=nmat, signal_estimate=None,
+                    ob.name,
+                    axobs,
+                    deslope=self.deslope,
+                    noise_model=nmat,
+                    signal_estimate=None,
                 )
                 del axobs
 
@@ -685,8 +693,11 @@ class MLMapmaker(Operator):
                 mapmaker, x0, passinfo, pass_prefix, comm
             )
 
-            # Save the mapmaker and signal map, may get dropped later
+            # Save metadata, may get dropped later
 
+            self.shape = shape
+            self.wcs = wcs
+            self.recenter = recenter
             self.signal_map = signal_map
             self.mapmaker = mapmaker
 
