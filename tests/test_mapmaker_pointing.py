@@ -150,7 +150,7 @@ class MapmakerPointingTest(unittest.TestCase):
             pmap = mapmaker.signal_map.data[obs.name].pmap
             det_quats = pmap._get_asm().dets
             coords = np.array(pmap.sight.coords(det_quats))
-            dets = mapmaker._mapmaker.data[0].dets
+            dets = mapmaker.mapmaker.data[0].dets
             ndet = len(dets)
 
             pointing.apply(data)
