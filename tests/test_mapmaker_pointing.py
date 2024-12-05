@@ -26,7 +26,7 @@ except ImportError as e:
 if toast_available:
     import healpy as hp
 
-from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
+from _helpers import calibration_schedule, close_data_and_comm, simulation_test_data
 
 
 class MapmakerPointingTest(unittest.TestCase):
