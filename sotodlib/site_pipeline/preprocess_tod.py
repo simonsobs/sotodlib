@@ -161,23 +161,34 @@ def preprocess_tod(obs_id,
             n_fail += 1
             continue
 
-        policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+        newpath = f'temp/{obs_id}'
+        for cg in group:
+            newpath += f'_{cg}'
+        temp_config = pp_util.swap_archive(configs, newpath+'.h5')
+        policy = pp_util.ArchivePolicy.from_params(temp_config['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
         for gb, g in zip(group_by, group):
             if gb == 'detset':
                 dest_dataset += "_" + g
             else:
                 dest_dataset += "_" + gb + "_" + str(g)
+
         logger.info(f"Saving data to {dest_file}:{dest_dataset}")
         proc_aman.save(dest_file, dest_dataset, overwrite)
 
+        outputs_grp = {}
+        # Collect info for saving h5 file.
+        outputs_grp['temp_file'] = dest_file
+
         # Collect index info.
         db_data = {'obs:obs_id': obs_id,
-                'dataset': dest_dataset}
+                    'dataset': dest_dataset}
         for gb, g in zip(group_by, group):
             db_data['dets:'+gb] = g
+        outputs_grp['db_data'] = db_data
+
         if run_parallel:
-            outputs.append(db_data)
+            outputs.append(outputs_grp)
         else:
             logger.info(f"Saving to database under {db_data}")
             if len(db.inspect(db_data)) == 0:
@@ -203,7 +214,7 @@ def preprocess_tod(obs_id,
         else:
             logger.info('Returning data to futures')
             error = None
-            return error, dest_file, outputs
+            return error, outputs
 
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
@@ -378,7 +389,7 @@ def main(
         for future in as_completed(futures):
             logger.info('New future as_completed result')
             try:
-                err, src_file, db_datasets = future.result()
+                err, db_datasets = future.result()
             except Exception as e:
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
@@ -390,36 +401,8 @@ def main(
             futures.remove(future)
 
             logger.info(f'Processing future result db_dataset: {db_datasets}')
-            db = pp_util.get_preprocess_db(configs, group_by)
-            logger.info('Database connected')
-            if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
-                nfile += 1
-                dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
-                logger.info('Starting a new h5 file.')
-
-            h5_path = os.path.relpath(dest_file,
-                            start=os.path.dirname(configs['archive']['index']))
-
-            if err is None:
-                logger.info(f'Moving files from temp to final destination.')
-                with h5py.File(dest_file,'a') as f_dest:
-                    with h5py.File(src_file,'r') as f_src:
-                        for dts in f_src.keys():
-                            f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                            for member in f_src[dts]:
-                                if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                                    f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-                for db_data in db_datasets:
-                    logger.info(f"Saving to database under {db_data}")
-                    if len(db.inspect(db_data)) == 0:
-                        db.add_entry(db_data, h5_path)
-                logger.info(f'Deleting {src_file}.')
-                os.remove(src_file)
-            else:
-                logger.info(f'Writing {db_datasets[0]} to error log')
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}\n')
-                f.close()
+            for db_dataset in db_datasets:
+                pp_util.cleanup_mandb(err, db_dataset, configs, logger)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)
