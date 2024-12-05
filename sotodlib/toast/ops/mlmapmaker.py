@@ -287,6 +287,7 @@ class MLMapmaker(Operator):
         return check
 
     def __init__(self, **kwargs):
+        self.signal_map = None
         super().__init__(**kwargs)
 
     @function_timer
@@ -682,6 +683,10 @@ class MLMapmaker(Operator):
             mapmaker_prev, x_prev = self._apply_mapmaker(
                 mapmaker, x0, passinfo, pass_prefix, comm
             )
+
+            # Save the signal map, may get dropped later
+
+            self.signal_map = signal_map
 
         return
 
