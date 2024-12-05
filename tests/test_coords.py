@@ -185,6 +185,33 @@ class CoordsUtilsTest(unittest.TestCase):
                                    atol=R*0.05)
         self.assertEqual(len(xi), 16)
 
+        # Works with nans?
+        xy[0,0] = np.nan
+        coords.helpers.get_focal_plane_cover(xieta=xy)
+
+        # Exclude dets using det_weights?
+        det_weights = np.ones(xy.shape[1])
+        det_weights[3:34] = 0.
+        for dtype in ['float', 'int', 'bool']:
+            coords.helpers.get_focal_plane_cover(
+                xieta=xy, det_weights=det_weights.astype(dtype))
+
+        # Works for only a single det?
+        det_weights[2:] = 0.
+        (xi0, eta0), R0, _ = \
+            coords.helpers.get_focal_plane_cover(xieta=xy, det_weights=det_weights)
+
+        # Fails if all dets excluded somehow?
+        det_weights[1] = 0.
+        with self.assertRaises(ValueError):
+            coords.helpers.get_focal_plane_cover(xieta=xy, det_weights=det_weights)
+
+        # Fails with all nans?
+        xy[1,1:] = np.nan
+        with self.assertRaises(ValueError):
+            coords.helpers.get_focal_plane_cover(xieta=xy)
+            
+
 class OpticsTest(unittest.TestCase):
     def test_sat_fp(self):
         x = np.array([-100, 0, 100]) 
