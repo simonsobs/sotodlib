@@ -581,6 +581,10 @@ class MLMapmaker(Operator):
         gcomm = data.comm.comm_group
         timer.start()
 
+        if comm is None and self.tiled:
+            log.info("WARNING: Tiled mapmaking not supported without MPI.")
+            self.tiled = False
+
         for trait in ["area"]:
             value = getattr(self, trait)
             if value is None:
