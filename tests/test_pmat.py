@@ -24,8 +24,8 @@ class PmatTest(unittest.TestCase):
         comps = 'T'
         out = run_test(obs, (shape, wcs), comps, None, False, False) # Basic
         _ = run_test(obs, None, comps, wcs, False, False) # Use wcs_kernel
-        #out2 = run_test(obs, tilemap.geometry(shape, wcs, tile_shape=(100, 100)), comps, None, False, True) # Tiled
-        #assert np.array_equal(out, out2)
+        out2 = run_test(obs, tilemap.geometry(shape, wcs, tile_shape=(100, 100)), comps, None, False, True) # Tiled
+        assert np.array_equal(out, out2)
 
     def test_pmat_healpix(self):
         obs = quick_tod(10, 10000)
@@ -57,6 +57,22 @@ def run_test(obs, geom, comps, wcs_kernel, is_healpix, is_tiled):
     tod = pmat.from_map(remove_weights)
     TOL = 1e-9
     assert np.all(np.abs(tod-obs.signal) < TOL)
+
+    # Confirm we can do map-space ops without a pointing op first
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    _ = pmat.to_inverse_weights(weights)
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    _ = pmat.remove_weights(weights)
+
+    # Confirm from_map works on uninitialized pmat
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    tod2 = pmat.from_map(remove_weights)
+    assert np.all(np.abs(tod - tod2) < TOL)
+
+    # And also zeros.
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    pmat.zeros()
+
     if is_tiled:
         if is_healpix:
             remove_weights = hp_utils.tiled_to_full(remove_weights)
