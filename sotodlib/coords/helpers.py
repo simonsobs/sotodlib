@@ -353,7 +353,7 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
 
 
 def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
-                          xieta=None, det_weights=None):
+                          xieta=None):
     """Process a bunch of detector positions into a center and radius such
     that a circle with that center and radius contains all the
     detectors.  Also return detector positions, arranged approximately
@@ -366,9 +366,6 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         not passed in
       xieta (array): (2, n) array (or similar) of xi and eta
         detector positions.
-      det_weights (array): If provided, must be same length as the xi
-        and eta vectors. Only dets with non-zero value for det_weights
-        will be included in the evaluation of the cover.
 
     Returns:
       xieta0: array[2] with array center, (xi0, eta0).
@@ -377,21 +374,8 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         coords of the circular convex hull.
 
     Notes:
-      If count=0, an empty list is returned for xietas. Otherwise,
+      If count=0, an empty list is returned for xietas.  Otherwise,
       count must be at least 3 so that the shape is not degenerate.
-
-      Any xi, eta that are not finite (e.g. nan or inf) are excluded
-      from the computation. If no detectors remain after the combined
-      finiteness and det_weights cuts, a ValueError is raised.
-
-      Note that ``det_weights`` can be int, float, or bool
-      type. Sometimes you might want to only include optical dets in
-      the result; e.g.::
-
-          ..., det_weights=(aman.det_info.wafer.type=="OPTC"), ...
-
-      In degenerate cases (all dets are in exactly the same place), a
-      radius of zero may be returned.
 
     """
     if xieta is None:
@@ -401,17 +385,6 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         eta = focal_plane.eta
     else:
         xi, eta = xieta[:2]
-    mask = np.isfinite(xi) * np.isfinite(eta)
-    if det_weights is not None:
-        mask *= det_weights.astype(bool)
-
-    if not np.any(mask):
-        raise ValueError('All provided (xi, eta) coords are excluded; '
-                         'cannot estimate a focal plane cover.')
-
-    # Restrict to only dets under consideration.
-    xi, eta = xi[mask], eta[mask]
-
     qs = so3g.proj.quat.rotation_xieta(xi, eta)
 
     # Starting guess for center
