@@ -66,7 +66,7 @@ class TestAxisManager(unittest.TestCase):
 
         # This should return a separate thing.
         rman = aman.restrict('samps', (10, 30), in_place=False)
-        #self.assertNotEqual(aman.a1[0], 0.)
+        # self.assertNotEqual(aman.a1[0], 0.)
         self.assertEqual(len(aman.a1), 100)
         self.assertEqual(len(rman.a1), 20)
         self.assertNotEqual(aman.a1[10], 0.)
@@ -190,23 +190,23 @@ class TestAxisManager(unittest.TestCase):
 
         # ... other_fields="exact"
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         ## add scalars
         amanA.wrap("ans", 42)
         amanB.wrap("ans", 42)
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="exact"
         amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="exact" and arrays of different shapes
         amanB.move("azimuth", None)
         amanB.wrap("azimuth", np.array([43,5,2,3]))
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="fail"
         amanB.move("azimuth",None)
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
@@ -298,6 +298,20 @@ class TestAxisManager(unittest.TestCase):
         self.assertNotEqual(aman.a1[0, 0, 0, 1], 0.)
 
     # wrap of AxisManager, merge.
+
+    def test_get_set(self):
+        dets = ["det0", "det1", "det2"]
+        n, ofs = 1000, 0
+        aman = core.AxisManager(
+            core.LabelAxis("dets", dets), core.OffsetAxis("samps", n, ofs)
+        )
+        child = core.AxisManager(
+            core.LabelAxis("dets", dets + ["det3"]),
+            core.OffsetAxis("samps", n, ofs - n // 2),
+        )
+        aman.wrap("child", child)
+        self.assertAlmostEqual(aman["child.dets"].count, 3)
+        self.assertAlmostEqual(aman["child.dets"].name, "dets")
 
     def test_400_child(self):
         dets = ['det0', 'det1', 'det2']
