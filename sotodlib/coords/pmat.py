@@ -338,11 +338,10 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
-        weights_map, wcs_w = self._flatten_map(weights_map)
+        weights_map, uf_info = self._flatten_map(weights_map)
 
         if dest is not None:
-            dest, wcs_dest = self._flatten_map(dest)
-            _confirm_wcs(wcs_w, wcs_dest)
+            dest, uf_info = self._flatten_map(dest, uf_info)
 
         _dest = helpers._invert_weights_map(
                 weights_map, eigentol=eigentol, UPLO='U')
@@ -352,7 +351,7 @@ class P:
             dest = _dest
         del _dest
 
-        dest = self._unflatten_map(dest)
+        dest = self._unflatten_map(dest, uf_info)
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -385,17 +384,14 @@ class P:
             signal_map = self.to_map(**kwargs)
 
         # Get flat numpy-compatible forms for the maps.
-        signal_map, wcs_sig = self._flatten_map(signal_map)
-        inverse_weights_map, wcs_iw = self._flatten_map(inverse_weights_map)
+        signal_map, uf_info = self._flatten_map(signal_map)
+        inverse_weights_map, uf_info = self._flatten_map(inverse_weights_map, uf_info)
 
         if dest is not None:
-            dest, wcs_dest = self._flatten_map(dest)
-            _confirm_wcs(wcs_sig, wcs_iw, wcs_dest)
-        else:
-            _confirm_wcs(wcs_sig, wcs_iw)
+            dest, uf_info = self._flatten_map(dest, uf_info)
 
         dest = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map, out=dest)
-        dest = self._unflatten_map(dest)
+        dest = self._unflatten_map(dest, uf_info)
         return dest
 
 
@@ -570,63 +566,81 @@ class P:
         else:
             return map
 
-    def _flatten_map(self, map):
+    def _flatten_map(self, map, uf_base=None):
         """Get a version of the map that is a numpy array, for passing
         to per-pixel math operations.  Relies on (self.pix_scheme,
-        self.tiled, self.geom, self.active_tiles) to determine what is
-        acceptable for the input map, and what should be done with it
-        to flatten it.
+        self.tiled) to interpret map.
 
-        This also tries to extract wcs info from the map, for inline
-        consistency checking (e.g. so we're not happily projecting
-        into a map we loaded from disk that has the same shape but is
-        off by a few pixels from what pmat thinks is the right
-        footprint).
+        This also tries to extract wcs info (if rectpix) from the map,
+        for inline consistency checking (e.g. so we're not happily
+        projecting into a map we loaded from disk that has the same
+        shape but is off by a few pixels from what pmat thinks is the
+        right footprint).  It also looks at active_tiles / tile_list,
+        and stores that for downstream compatibility checking with
+        other flattened maps.
+
+        If uf_base is passed in, it should be an unflatten_info dict
+        (likely from a previous call to _flatten_map).  The analysis
+        here will be checked against it for compatibility and any
+        missing values (ahem wcs) will be used to augment the
+        unflatten_info that is returned.
 
         Returns:
           array: The map, reformatted as an array (could simply be the
             input arg map, or a view of that, or a copy if necessary).
-          wcs: wcs object, if one could be extracted from the input
-            map; otherwise None.
+          unflatten_info: dict with misc compatibility info.
 
         """
+        ufinfo = {'pix_scheme': self.pix_scheme,
+                  'tiled': self.tiled}
         wcs = None
+        crit_dims = 1
         if self.pix_scheme == 'healpix':
             if self.tiled:
-                assert list(self.active_tiles) == [_i for (_i, _m) in enumerate(map) if _m is not None]
+                ufinfo['tile_list'] = [_m is not None for _m in map]
                 map = hp_utils.tiled_to_compressed(map, -1)
+                crit_dims = 2
             else:
                 pass
         elif self.pix_scheme == 'rectpix':
             if self.tiled:
                 if isinstance(map, tilemap.TileMap):
                     wcs = map.geometry.wcs
+                    ufinfo['active_tiles'] = list(map.active)
+                    ufinfo['tile_geom'] = map.geometry.copy(pre=())
             else:
                 if isinstance(map, enmap.ndmap):
                     wcs = map.wcs
-        return map, wcs
+                crit_dims = 2
+        ufinfo.update({'wcs': wcs,
+                       'crit_dims': crit_dims,
+                       'shape': map.shape})
+        if uf_base is not None:
+            ufinfo['wcs'] = _check_compat(uf_base, ufinfo)
+        return map, ufinfo
 
-    def _unflatten_map(self, map):
+    def _unflatten_map(self, map, uf_info):
         """Restore a map to full format, assuming it's currently an
         ndarray.  Intended as the inverse op to _flatten_map.
+        Minimize the use of cached self.* here ... rely instead on
+        uf_info.
 
         """
-        if self.pix_scheme == 'healpix':
-            if self.tiled:
-                tile_list = self._get_hp_tile_list()
-                map = hp_utils.compressed_to_tiled(map, tile_list, -1)
+        if uf_info['pix_scheme'] == 'healpix':
+            if uf_info['tiled']:
+                map = hp_utils.compressed_to_tiled(map, uf_info['tile_list'], -1)
             else:
                 pass
-        elif self.pix_scheme == 'rectpix':
-            if self.tiled:
+        elif uf_info['pix_scheme'] == 'rectpix':
+            if uf_info['tiled']:
                 if not isinstance(map, tilemap.TileMap):
-                    g = self.geom
+                    g = uf_info['tile_geom']
                     g = tilemap.geometry(map.shape[:-1] + g.shape, g.wcs, g.tile_shape,
-                                         active=self.active_tiles)
+                                         active=uf_info['active_tiles'])
                     map = tilemap.TileMap(map, g)
             else:
-                if not isinstance(map, enmap.ndmap):
-                    map = enmap.ndmap(map, self.geom.wcs)
+                if not isinstance(map, enmap.ndmap) and uf_info['wcs']:
+                    map = enmap.ndmap(map, uf_info['wcs'])
         return map
 
     def _get_hp_tile_list(self, tiled_arr=None):
@@ -725,3 +739,26 @@ def _infer_pix_scheme(geom):
         raise fail_err
     return pix_scheme
 
+def _check_compat(*uf_infos):
+    # Given one or more "uf_info" dicts, as returned by _flatten_map,
+    # check that the flattened arrays are pixel-correspondent,
+    # including (for rectpix cases) the wcs.
+    #
+    # Raises an error if any of that doesn't pan out.  On success,
+    # returns the agreed-upon wcs (which could be None).
+    ref_uf = uf_infos[0]
+    for uf in uf_infos[1:]:
+        for k in ['pix_scheme', 'tiled', 'active_tiles']:
+            if ref_uf.get(k) != uf.get(k):
+                raise ValueError(f"Inconsistent map structures: {uf_infos}")
+        # Not sure how to handle broadcasting of lefter dims, so focus
+        # on the pixel dim(s).
+        dims_to_check = ref_uf['crit_dims']
+        if ref_uf['shape'][-dims_to_check:] != uf['shape'][-dims_to_check:]:
+            raise ValueError(f"Non-broadcastable map shapes: {uf_infos}")
+
+    # And the wcs.
+    wcss = [uf.get('wcs') for uf in uf_infos]
+    wcs_to_use = _confirm_wcs(*wcss)
+
+    return wcs_to_use

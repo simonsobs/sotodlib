@@ -57,6 +57,18 @@ def run_test(obs, geom, comps, wcs_kernel, is_healpix, is_tiled):
     tod = pmat.from_map(remove_weights)
     TOL = 1e-9
     assert np.all(np.abs(tod-obs.signal) < TOL)
+
+    # Confirm we can do map-space ops without a pointing op first
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    _ = pmat.to_inverse_weights(weights)
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    _ = pmat.remove_weights(weights)
+
+    # Confirm from_map works on uninitialized pmat
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    tod2 = pmat.from_map(remove_weights)
+    assert np.all(np.abs(tod - tod2) < TOL)
+
     if is_tiled:
         if is_healpix:
             remove_weights = hp_utils.tiled_to_full(remove_weights)
