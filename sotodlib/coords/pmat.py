@@ -648,18 +648,6 @@ class P:
                     map = enmap.ndmap(map, uf_info['wcs'])
         return map
 
-    def _get_hp_tile_list(self, tiled_arr=None):
-        """For healpix maps, get len(nTile) bool array of whether tiles are active. None if un-tiled.
-        If tiled_arr is not None, get tiling from there. Else get from self.geom"""
-        if isinstance(tiled_arr, list): # Assume we are tiled iff tiled_arr is a list instead of ndarr
-            tile_list = hp_utils.get_active_tile_list(tiled_arr)
-        elif self.tiled:
-            tile_list = np.zeros(12*self.geom.nside_tile**2, dtype='bool')
-            tile_list[self.active_tiles] = True # The tiling must be initiated already
-        else:
-            tile_list = None # Un-tiled
-        return tile_list
-
 
 class P_PrecompDebug:
     def __init__(self, geom, pixels, phases):
