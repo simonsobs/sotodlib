@@ -380,6 +380,12 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc, context_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
+    group_by_init, groups_init = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc = get_groups(obs_id, configs_proc, context_proc)
+
+    if (group_by_init != group_by_proc).any():
+        raise ValueError('init and proc groups do not match')
+
     if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
         logger.info(f"No detectors in obs {obs_id}")
         return None
@@ -395,7 +401,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=meta_proc)
-            aman.preprocess.merge(proc_aman)
+            aman.preprocess.merge(proc_aman.preprocess)
 
             pipe_proc.run(aman, aman.preprocess)
 
@@ -405,6 +411,27 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
 
 def find_db(obs_id, configs, dets, context=None):
+    """This function checks if the manifest db from
+    a config file exists and searches if it contains
+    an entry for the provided Obs id and set of detectors.
+
+    Arguments
+    ----------
+    obs_id: str
+        Obs id to process or load
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    dets: dict
+        Dictionary specifying which detectors/wafers to load see ``Context.obsdb.get_obs``.
+    context: fpath or core.Context
+        Optional. Filepath or context object used for data loading/querying.
+
+    Returns
+    -------
+    dbexist : bool
+        True if db exists and entry for input detectors is found.
+    """
+
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
     if context is None:
@@ -426,7 +453,31 @@ def find_db(obs_id, configs, dets, context=None):
     return dbexist
 
 
-def save_group(proc_aman, obs_id, configs, dets, context=None, subdir='temp', overwrite=False):
+def save_group(obs_id, configs, dets, context=None, subdir='temp'):
+    """This function returns a dictionary containing the data destination filename
+    and the values to populate the manifest db.
+
+    Arguments
+    ----------
+    obs_id: str
+        Obs id to process or load
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    dets: dict
+        Dictionary specifying which detectors/wafers to load see ``Context.obsdb.get_obs``.
+    context: fpath or core.Context
+        Optional. Filepath or context object used for data loading/querying.
+    subdir: str
+        Optional. Subdirectory to save the output files into.  If it does not exist, it is created.
+    overwrite: bool
+        Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
+
+    Returns
+    -------
+    dbexist : bool
+        True if db exists and entry for input detectors is found.
+    """
+
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
     if context is None:
@@ -445,7 +496,6 @@ def save_group(proc_aman, obs_id, configs, dets, context=None, subdir='temp', ov
         else:
             dest_dataset += "_" + gb + "_" + str(g)
 
-    proc_aman.save(dest_file, dest_dataset, overwrite)
     # Collect info for saving h5 file.
     outputs = {}
     outputs['temp_file'] = dest_file
@@ -510,7 +560,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
         If ``error == 'load_success'`` then output is just ``[obs_id, dets]``.
         If ``error`` is anything else then output stores what to save in the error log.
     output_proc: list:
-        See output_init
+        See output_init for possible values.
     aman: Core.AxisManager
         Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
     """
@@ -557,7 +607,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
 
     if db_init_exist and (not overwrite):
         if db_proc_exist:
-            logger.info(f"db and depdendent db exist for {obs_id} {dets} loading data and applying preprocessing.")
+            logger.info(f"both db and depdendent db exist for {obs_id} {dets} loading data and applying preprocessing.")
             aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
                                                   configs_proc=configs_proc, context_init=context_init,
                                                   context_proc=context_proc, logger=logger)
@@ -587,10 +637,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
 
                     proc_aman, success = pipe_proc.run(aman)
                     proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
-                    aman.preprocess.merge(proc_aman)
 
-                    outputs_proc = save_group(proc_aman, obs_id, configs_proc, dets, context_proc,
-                                              subdir='temp_proc/', overwrite=overwrite)
+                    outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+                    if overwrite or not os.path.exists(outputs_proc['temp_file']):
+                        logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
+                        proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                    else:
+                        logger.info(f"{outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']} already exists.")
 
                 except Exception as e:
                     error = f'Failed to load: {obs_id} {dets}'
@@ -623,8 +676,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
             # If a single group fails we don't log anywhere just mis an entry in the db.
             return success, [obs_id, dets], [obs_id, dets], None
 
-        outputs_init = save_group(proc_aman, obs_id, configs_init, dets, context_init,
-                                      subdir='temp/', overwrite=overwrite)
+        outputs_init = save_group(obs_id, configs_init, dets, context_init, subdir='temp')
+        if overwrite or not os.path.exists(outputs_init['temp_file']):
+            logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
+            proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
+        else:
+            logger.info(f"{outputs_init['temp_file']}:{outputs_init['db_data']['dataset']} already exists.")
+
         if configs_proc is None:
             return error, outputs_init, [obs_id, dets], aman
         else:
@@ -650,8 +708,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 logger.info(f"{error}\n{errmsg}\n{tb}")
                 return error, [errmsg, tb], [errmsg, tb], None
 
-            outputs_proc = save_group(proc_aman, obs_id, configs_proc, dets, context_proc,
-                                      subdir='temp_proc/', overwrite=overwrite)
+            outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+            if overwrite or not os.path.exists(outputs_proc['temp_file']):
+                logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
+                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+            else:
+                logger.info(f"{outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']} already exists.")
+
             return success, outputs_init, outputs_proc, aman
 
 
