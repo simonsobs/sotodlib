@@ -69,6 +69,10 @@ def run_test(obs, geom, comps, wcs_kernel, is_healpix, is_tiled):
     tod2 = pmat.from_map(remove_weights)
     assert np.all(np.abs(tod - tod2) < TOL)
 
+    # And also zeros.
+    pmat = coords.pmat.P.for_tod(obs, comps=comps, geom=geom, wcs_kernel=wcs_kernel)
+    pmat.zeros()
+
     if is_tiled:
         if is_healpix:
             remove_weights = hp_utils.tiled_to_full(remove_weights)

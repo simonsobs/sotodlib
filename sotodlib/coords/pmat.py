@@ -239,16 +239,13 @@ class P:
         """
         if super_shape is None:
             super_shape = (self._comp_count(comps), )
+        proj, _ = self._get_proj_tiles()
         if self.pix_scheme == 'healpix':
-            proj, _ = self._get_proj_threads()
             return proj.zeros(super_shape)
         elif self.pix_scheme == 'rectpix':
             if self.tiled:
-                # Need to fully resolve tiling to get occupied tiles.
-                proj, _ = self._get_proj_threads()
                 return tilemap.from_tiles(proj.zeros(super_shape), self.geom)
             else:
-                proj = self._get_proj()
                 return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
 
     def to_map(self, tod=None, dest=None, comps=None, signal=None,
@@ -425,11 +422,9 @@ class P:
         """
         assert cuts is None  # whoops, not implemented.
 
-        # _get_proj doesn't set up the tiling info, so
-        # must call get_proj_threads. This is ugly, since from_map
-        # doesn't need the threading structures. Can we find a better design?
-        if self.tiled: proj, _ = self._get_proj_threads()
-        else:          proj    = self._get_proj()
+        # This is not free but it is pretty fast, doesn't do thread
+        # assignments.
+        proj, _ = self._get_proj_tiles()
 
         if comps is None:
             comps = self.comps
@@ -487,6 +482,28 @@ class P:
                 return so3g.proj.Projectionist.for_geom(self.geom.shape,
                     self.geom.wcs, **interpol_kw)
 
+    def _get_proj_tiles(self, assign=False):
+        # Get Projectionist and compute self.active_tiles if it's not
+        # already known.  Return Projectionist with active_tiles set,
+        # which is suitable for from_map and zeros (though not for
+        # threaded to_map etc).
+        proj = self._get_proj()
+        if not self.tiled or (self.active_tiles is not None and not assign):
+            return proj, {}
+        tile_info = proj.get_active_tiles(self._get_asm(), assign=assign)
+        self.active_tiles = tile_info['active_tiles']
+
+        if self.pix_scheme == "healpix":
+            self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
+            self.geom.ntile = 12*proj.nside_tile**2
+        elif self.pix_scheme == 'rectpix':
+            # Promote geometry to one with the active tiles marked.
+            self.geom = tilemap.geometry(
+                self.geom.shape, self.geom.wcs, self.geom.tile_shape,
+                active=self.active_tiles)
+
+        return self._get_proj(), tile_info
+
     def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and sample-thread assignment for the
         present geometry.  If the thread assignment has not been
@@ -513,24 +530,12 @@ class P:
             elif self.pix_scheme == "healpix":
                 self.threads = 'tiles' if (self.geom.nside_tile is not None) else 'simple'
 
-        if self.tiled and self.active_tiles is None:
-            logger.info('_get_proj_threads: get_active_tiles')
-            if isinstance(self.threads, str) and self.threads == 'tiles':
-                logger.info('_get_proj_threads: assigning using "tiles"')
-                tile_info = proj.get_active_tiles(self._get_asm(), assign=True)
-                _tile_threads = wrap_ranges(tile_info['group_ranges'])
-            else:
-                tile_info = proj.get_active_tiles(self._get_asm())
-            self.active_tiles = tile_info['active_tiles']
-            if self.pix_scheme == "healpix":
-                self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
-                self.geom.ntile = 12*proj.nside_tile**2
-            elif self.pix_scheme == 'rectpix':
-                # Promote geometry to one with the active tiles marked.
-                self.geom = tilemap.geometry(
-                    self.geom.shape, self.geom.wcs, self.geom.tile_shape,
-                    active=self.active_tiles)
-            proj = self._get_proj() # Add active_tiles to proj
+        need_tiles = (self.active_tiles is None)
+        need_assign = (self.threads in ['tiles'])
+        if need_tiles or need_assign:
+            proj, tile_info = self._get_proj_tiles(need_assign)
+        if need_assign:
+            _tile_threads = wrap_ranges(tile_info['group_ranges'])
 
         if self.threads is False:
             return proj, ~cuts
