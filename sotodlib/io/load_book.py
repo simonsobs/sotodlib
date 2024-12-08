@@ -90,7 +90,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     all_pairs = [tuple(r) for r in c.fetchall()]
 
     # Now filter to only the dets requested.
-    if dets is None:
+    if not dets:
         pairs_req = all_pairs
     else:
         pairs_req = [p for p in all_pairs if p[1] in dets]
