@@ -1450,7 +1450,7 @@ class SplitFlags(_Preprocess):
     name = "split_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        split_flg_aman = obs_ops.flags.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
+        split_flg_aman = obs_ops.splits.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
 
         self.save(proc_aman, split_flg_aman)
 
