@@ -278,13 +278,16 @@ class ObsFileDb:
             prefix = self.prefix
 
         if detsets is None:
-            detsets = self.get_detsets(obs_id)
-
-        c = self.conn.execute('select detset, name, sample_start, sample_stop '
-                              'from files where obs_id=? and detset in (%s) '
-                              'order by detset, sample_start' %
-                              ','.join(['?' for _ in detsets]),
-                              (obs_id,) + tuple(detsets))
+            c = self.conn.execute('select detset, name, sample_start, sample_stop '
+                                  'from files where obs_id=? '
+                                  'order by detset, sample_start',
+                                  (obs_id,))
+        else:
+            c = self.conn.execute('select detset, name, sample_start, sample_stop '
+                                  'from files where obs_id=? and detset in (%s) '
+                                  'order by detset, sample_start' %
+                                  ','.join(['?' for _ in detsets]),
+                                  (obs_id,) + tuple(detsets))
         output = OrderedDict()
         for r in c:
             if not r[0] in output:
