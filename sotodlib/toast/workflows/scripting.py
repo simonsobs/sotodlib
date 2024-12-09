@@ -34,7 +34,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
     timer = toast.timing.Timer()
     timer.start()
 
-    if job_ops.sim_ground.enabled:
+    if job_ops.sim_ground.enabled or otherargs.schedule is not None:
         data = wrk.simulate_observing(job, otherargs, runargs, comm)
         wrk.select_pointing(job, otherargs, runargs, data)
         wrk.simple_noise_models(job, otherargs, runargs, data)
