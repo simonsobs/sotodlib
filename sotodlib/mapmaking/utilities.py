@@ -528,14 +528,35 @@ def downsample_obs(obs, down):
     return res
 
 def get_flags(obs, flagnames):
+    from sotodlib.core import FlagManager
+
     """Parse detector-set splits"""
     cuts_out = None
+    fm = FlagManager.for_tod(obs)
     if flagnames is None:
-        return so3g.proj.RangesMatrix.zeros(obs.shape)
+        return fm.get_zeros()
     det_splits = ['det_left','det_right','det_in','det_out','det_upper','det_lower']
     for flagname in flagnames:
         if flagname in det_splits:
-            cuts = obs.det_flags[flagname]
+            # Remember that the detectors you want to keep must be False here
+            if flagname == 'det_left':
+                fm.wrap_dets('det_left', obs.preprocess.split_flags.right_focal_plane_flag)
+                cuts = fm.det_left
+            elif flagname == 'det_right':
+                fm.wrap_dets('det_right', ~obs.preprocess.split_flags.right_focal_plane_flag)
+                cuts = fm.det_right
+            elif flagname == 'det_in':
+                fm.wrap_dets('det_in', ~obs.preprocess.split_flags.central_pixels_flag)
+                cuts = fm.det_in
+            elif flagname == 'det_out':
+                fm.wrap_dets('det_out', obs.preprocess.split_flags.central_pixels_flag)
+                cuts = fm.det_out
+            elif flagname == 'det_upper':
+                fm.wrap_dets('det_upper', ~obs.preprocess.split_flags.top_focal_plane_flag)
+                cuts = fm.det_upper
+            elif flagname == 'det_lower':
+                fm.wrap_dets('det_lower', obs.preprocess.split_flags.top_focal_plane_flag)
+                cuts = fm.det_lower
         elif flagname == 'scan_left':
             cuts = obs.flags.left_scan
         elif flagname == 'scan_right':
