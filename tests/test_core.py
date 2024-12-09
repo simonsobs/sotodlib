@@ -66,7 +66,7 @@ class TestAxisManager(unittest.TestCase):
 
         # This should return a separate thing.
         rman = aman.restrict('samps', (10, 30), in_place=False)
-        #self.assertNotEqual(aman.a1[0], 0.)
+        # self.assertNotEqual(aman.a1[0], 0.)
         self.assertEqual(len(aman.a1), 100)
         self.assertEqual(len(rman.a1), 20)
         self.assertNotEqual(aman.a1[10], 0.)
@@ -190,23 +190,23 @@ class TestAxisManager(unittest.TestCase):
 
         # ... other_fields="exact"
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         ## add scalars
         amanA.wrap("ans", 42)
         amanB.wrap("ans", 42)
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="exact"
         amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="exact" and arrays of different shapes
         amanB.move("azimuth", None)
         amanB.wrap("azimuth", np.array([43,5,2,3]))
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="fail"
         amanB.move("azimuth",None)
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
@@ -298,6 +298,44 @@ class TestAxisManager(unittest.TestCase):
         self.assertNotEqual(aman.a1[0, 0, 0, 1], 0.)
 
     # wrap of AxisManager, merge.
+    def test_get_set(self):
+        dets = ["det0", "det1", "det2"]
+        n, ofs = 1000, 0
+        aman = core.AxisManager(
+            core.LabelAxis("dets", dets), core.OffsetAxis("samps", n, ofs)
+        )
+        child = core.AxisManager(
+            core.LabelAxis("dets", dets + ["det3"]),
+            core.OffsetAxis("samps", n, ofs - n // 2),
+        )
+
+        child2 = core.AxisManager(
+            core.LabelAxis("dets2", ["det4", "det5"]),
+            core.OffsetAxis("samps", n, ofs - n // 2),
+        )
+        aman.wrap("child", child)
+        aman["child"].wrap("child2", child2)
+        self.assertEqual(aman["child.child2.dets2"].count, 2)
+        self.assertEqual(aman["child.dets"].name, "dets")
+        np.testing.assert_array_equal(aman["child.child2.dets2"].vals, np.array(["det4", "det5"]))
+        with self.assertRaises(KeyError):
+            aman["child.someentry"]
+
+        with self.assertRaises(KeyError):
+            aman["child2"]
+
+        with self.assertRaises(AttributeError):
+            aman["child.dets.an_extra_layer"]
+
+        self.assertIn("child.dets", aman)
+        self.assertIn("child.dets2", aman) # I am not sure why this is true
+        self.assertNotIn("child.child2.someentry", aman)
+
+        aman["child"] = child2
+        print(aman["child"])
+        self.assertEqual(aman["child.dets2"].count, 2)
+        self.assertEqual(aman["child.dets2"].name, "dets2")
+        np.testing.assert_array_equal(aman["child.dets2"].vals, np.array(["det4", "det5"]))
 
     def test_400_child(self):
         dets = ['det0', 'det1', 'det2']
