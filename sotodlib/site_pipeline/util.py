@@ -8,6 +8,7 @@ import copy
 import argparse
 import yaml
 import numpy as np
+import copy
 
 from astropy import units as u
 

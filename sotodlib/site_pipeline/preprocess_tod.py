@@ -33,29 +33,22 @@ def dummy_preproc(obs_id, group_list, logger,
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
+        dets = {gb:gg for gb, gg in zip(group_by, group)}
         proc_aman = core.AxisManager(core.LabelAxis('dets', ['det%i' % i for i in range(3)]),
                                      core.OffsetAxis('samps', 1000))
         proc_aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
         proc_aman.wrap_new('timestamps', ('samps',))[:] = (np.arange(proc_aman.samps.count) / 200)
-        policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
-        dest_file, dest_dataset = policy.get_dest(obs_id)
-        for gb, g in zip(group_by, group):
-            if gb == 'detset':
-                dest_dataset += "_" + g
-            else:
-                dest_dataset += "_" + gb + "_" + str(g)
-        logger.info(f"Saving data to {dest_file}:{dest_dataset}")
-        proc_aman.save(dest_file, dest_dataset, overwrite)
 
-        # Collect index info.
-        db_data = {'obs:obs_id': obs_id,
-                   'dataset': dest_dataset}
-        for gb, g in zip(group_by, group):
-            db_data['dets:'+gb] = g
+        outputs_grp = pp_util.save_group(obs_id, configs, dets, context, subdir='temp')
+        logger.info(f"Saving data to {outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']}")
+        proc_aman.save(outputs_grp['temp_file'], outputs_grp['db_data']['dataset'], overwrite)
+
         if run_parallel:
-            outputs.append(db_data)
+            outputs.append(outputs_grp)
+
     if run_parallel:
-        return error, dest_file, outputs
+        return error, outputs
+
 
 def preprocess_tod(obs_id,
                    configs,
@@ -119,7 +112,7 @@ def preprocess_tod(obs_id,
                        f"No analysis to run.")
         error = 'no_group_overlap'
         if run_parallel:
-            return error, None, [None, None]
+            return error, [None, None]
         else:
             return
 
@@ -136,6 +129,7 @@ def preprocess_tod(obs_id,
     n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
+        dets = {gb:gg for gb, gg in zip(group_by, group)}
         try:
             aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
@@ -161,29 +155,21 @@ def preprocess_tod(obs_id,
             n_fail += 1
             continue
 
-        policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
-        dest_file, dest_dataset = policy.get_dest(obs_id)
-        for gb, g in zip(group_by, group):
-            if gb == 'detset':
-                dest_dataset += "_" + g
-            else:
-                dest_dataset += "_" + gb + "_" + str(g)
-        logger.info(f"Saving data to {dest_file}:{dest_dataset}")
-        proc_aman.save(dest_file, dest_dataset, overwrite)
-
-        # Collect index info.
-        db_data = {'obs:obs_id': obs_id,
-                'dataset': dest_dataset}
-        for gb, g in zip(group_by, group):
-            db_data['dets:'+gb] = g
-        if run_parallel:
-            outputs.append(db_data)
+        outputs_grp = pp_util.save_group(obs_id, configs, dets, context, subdir='temp')
+        if overwrite or not os.path.exists(outputs_grp['temp_file']):
+            # try to allow for individual group files to already exist
+            logger.info(f"Saving data to {outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']}")
+            proc_aman.save(outputs_grp['temp_file'], outputs_grp['db_data']['dataset'], overwrite)
         else:
-            logger.info(f"Saving to database under {db_data}")
-            if len(db.inspect(db_data)) == 0:
-                h5_path = os.path.relpath(dest_file,
+            logger.info(f"{outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']} already exists.")
+        if run_parallel:
+            outputs.append(outputs_grp)
+        else:
+            logger.info(f"Saving to database under {outputs_grp['db_data']}")
+            if len(db.inspect(outputs_grp['db_data'])) == 0:
+                h5_path = os.path.relpath(outputs_grp['temp_file'],
                         start=os.path.dirname(configs['archive']['index']))
-                db.add_entry(db_data, h5_path)
+                db.add_entry(outputs_grp['db_data'], h5_path)
 
     if make_lmsi:
         from pathlib import Path
@@ -199,17 +185,18 @@ def preprocess_tod(obs_id,
             # If no groups make it to the end of the processing return error.
             logger.info(f'ERROR: all groups failed for {obs_id}')
             error = 'all_fail'
-            return error, None, [obs_id, 'all groups']
+            return error, [obs_id, 'all groups']
         else:
             logger.info('Returning data to futures')
             error = None
-            return error, dest_file, outputs
+            return error, outputs
+
 
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
                             context=None, dets=None,
                             meta=None, modulated=True):
-    """ Loads the saved information from the preprocessing pipeline and runs the
+    """Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
     Assumes preprocess_tod has already been run on the requested observation.
@@ -310,6 +297,7 @@ def get_parser(parser=None):
     )
     return parser
 
+
 def main(
         configs: str,
         query: Optional[str] = None,
@@ -373,12 +361,12 @@ def main(
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                      group_list=r[1], verbosity=verbosity,
-                     configs=pp_util.swap_archive(configs, f'temp/{r[0]["obs_id"]}.h5'),
+                     configs=configs,
                      overwrite=overwrite, run_parallel=True) for r in run_list]
         for future in as_completed(futures):
             logger.info('New future as_completed result')
             try:
-                err, src_file, db_datasets = future.result()
+                err, db_datasets = future.result()
             except Exception as e:
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
@@ -390,36 +378,9 @@ def main(
             futures.remove(future)
 
             logger.info(f'Processing future result db_dataset: {db_datasets}')
-            db = pp_util.get_preprocess_db(configs, group_by)
-            logger.info('Database connected')
-            if os.path.exists(dest_file) and os.path.getsize(dest_file) >= 10e9:
-                nfile += 1
-                dest_file = basename + '_'+str(nfile).zfill(3)+'.h5'
-                logger.info('Starting a new h5 file.')
-
-            h5_path = os.path.relpath(dest_file,
-                            start=os.path.dirname(configs['archive']['index']))
-
-            if err is None:
-                logger.info(f'Moving files from temp to final destination.')
-                with h5py.File(dest_file,'a') as f_dest:
-                    with h5py.File(src_file,'r') as f_src:
-                        for dts in f_src.keys():
-                            f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
-                            for member in f_src[dts]:
-                                if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
-                                    f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-                for db_data in db_datasets:
-                    logger.info(f"Saving to database under {db_data}")
-                    if len(db.inspect(db_data)) == 0:
-                        db.add_entry(db_data, h5_path)
-                logger.info(f'Deleting {src_file}.')
-                os.remove(src_file)
-            else:
-                logger.info(f'Writing {db_datasets[0]} to error log')
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, {err}, {db_datasets[0]}\n{db_datasets[1]}\n')
-                f.close()
+            if err is None and db_datasets:
+                for db_dataset in db_datasets:
+                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)
