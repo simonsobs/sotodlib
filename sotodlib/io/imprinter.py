@@ -17,7 +17,7 @@ import so3g
 from spt3g import core
 
 import sotodlib
-from .bookbinder import BookBinder
+from .bookbinder import BookBinder, TimeCodeBinder
 from .load_smurf import (
     G3tSmurf,
     Observations as G3tObservations,
@@ -49,6 +49,8 @@ DONE = 4
 # tel tube, stream_id, slot mapping
 VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 
+# file patterns excluded from smurf books
+SMURF_EXCLUDE_PATTERNS = ["*.dat", "*_mask.txt", "*_freq.txt"]
 
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
@@ -132,6 +134,7 @@ class Books(Base):
     timing = db.Column(db.Boolean)
     path = db.Column(db.String)
     lvl2_deleted = db.Column(db.Boolean, default=False)
+    schema = db.Column(db.Integer, default=0)
 
     def __repr__(self):
         return f"<Book: {self.bid}>"
@@ -237,10 +240,12 @@ class Imprinter:
         self.config = load_configs(im_config)
 
         self.db_path = self.config.get("db_path")
-        self.daq_node = self.config.get("daq_node")
+        self.daq_node = self.config.get("daq_node")        
         self.output_root = self.config.get("output_root")
         self.g3tsmurf_config = self.config.get("g3tsmurf")
-        
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
+        self.lvl2_data_root = g3tsmurf_cfg["data_prefix"]
+
         self.build_hk = self.config.get("build_hk")
         self.build_det = self.config.get("build_det")
 
@@ -371,6 +376,7 @@ class Imprinter:
         if bid is None:
             bid = obsset.get_id()
         assert obsset.mode is not None
+        assert obsset.mode in ['obs','oper']
         # check whether book exists in the database
         if self.book_exists(bid, session=session):
             raise BookExistsError(f"Book {bid} already exists in the database")
@@ -406,6 +412,7 @@ class Imprinter:
                 [s for s in obsset.slots if obsset.contains_stream(s)]
             ),  # not worth having a extra table
             timing=timing_on,
+            schema=0,
         )
         book.path = self.get_book_path(book)
 
@@ -444,9 +451,6 @@ class Imprinter:
         session = session or self.get_session()
         if not self.build_hk:
             return
-        
-        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
-        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if min_ctime is None:
             min_ctime = 16000e5
@@ -454,7 +458,7 @@ class Imprinter:
             max_ctime = 5e10
 
         # all ctime dir except the last ctime dir will be considered complete
-        ctime_dirs = sorted(glob(op.join(lvl2_data_root, "hk", "*")))
+        ctime_dirs = sorted(glob(op.join(self.lvl2_data_root, "hk", "*")))
         for ctime_dir in ctime_dirs[:-1]:
             ctime = op.basename(ctime_dir)
             if int(ctime) < int(min_ctime//1e5):
@@ -473,6 +477,7 @@ class Imprinter:
                 start=dt.datetime.utcfromtimestamp(int(ctime) * 1e5),
                 stop=dt.datetime.utcfromtimestamp((int(ctime) + 1) * 1e5),
                 tel_tube=self.daq_node,  
+                schema=0,
             )
             book.path = self.get_book_path(book)
             session.add(book)
@@ -498,9 +503,8 @@ class Imprinter:
 
         smurf books are registered whenever all the relevant metadata timecode
         entries have been found. stray books are registered when metadata and
-        file timecode entries exist ASSUMING all obs/oper books in that time
+        file timecode entries exist AND all obs/oper books in that time
         range have been bound successfully.
-
         """
 
         if not self.build_det:
@@ -508,6 +512,10 @@ class Imprinter:
         session = session or self.get_session()
         g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
 
+        final_time = SMURF.get_final_time(
+            self.all_slots, min_ctime, max_ctime, check_control=False
+        )
+        final_tc = int(final_time//1e5)
         servers = SMURF.finalize["servers"]
         meta_agents = [s["smurf-suprsync"] for s in servers]
         files_agents = [s["timestream-suprsync"] for s in servers]
@@ -523,6 +531,12 @@ class Imprinter:
         tcs = tcs.distinct().all()
 
         for (tc,) in tcs:
+            if tc >= final_tc:
+                self.logger.info(
+                    f"Not ready to make timecode books for {tc} because final"
+                    f" timecode is {final_tc}"
+                )
+                continue
             q = g3session.query(TimeCodes).filter(
                 TimeCodes.timecode == tc,
             )
@@ -556,6 +570,7 @@ class Imprinter:
                     tel_tube=self.daq_node,
                     start=book_start,
                     stop=book_stop,
+                    schema=1,
                 )
                 smurf_book.path = self.get_book_path(smurf_book)
                 session.add(smurf_book)
@@ -580,21 +595,26 @@ class Imprinter:
             )
             if q.count() > 0:
                 self.logger.info(
-                    f"Not ready to bind {book_id} due to unbound or "
+                    f"Not ready to register {book_id} due to unbound or "
                     "failed obs/oper books."
                 )
                 continue
-            stray_book = Books(
-                bid=book_id,
-                type="stray",
-                status=UNBOUND,
-                tel_tube=self.daq_node,
-                start=book_start,
-                stop=book_stop,
+
+            flist = self.get_files_for_stray_book(
+                min_ctime= tc * 1e5,
+                max_ctime= (tc + 1) * 1e5
             )
-            stray_book.path = self.get_book_path(stray_book)
-            flist = self.get_files_for_book(stray_book)
             if len(flist) > 0:
+                stray_book = Books(
+                    bid=book_id,
+                    type="stray",
+                    status=UNBOUND,
+                    tel_tube=self.daq_node,
+                    start=book_start,
+                    stop=book_stop,
+                    schema=0,
+                )
+                stray_book.path = self.get_book_path(stray_book)            
                 self.logger.info(f"registering {book_id}")
                 session.add(stray_book)
                 session.commit()
@@ -607,8 +627,6 @@ class Imprinter:
         return os.path.join(self.output_root, book_path)
 
     def get_book_path(self, book):
-        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
-        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
             session_id = book.bid.split("_")[1]
@@ -617,11 +635,12 @@ class Imprinter:
             return os.path.join(odir, book.bid)
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
-            root = op.join(lvl2_data_root, book.type)
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            odir = op.join(book.tel_tube, book.type)
-            return os.path.join(odir, book.bid)
+            odir = op.join(book.tel_tube, book.type, book.bid)
+            if book.type == 'smurf' and book.schema > 0:
+                return odir + '.zip'
+            return odir
         elif book.type in ["stray"]:
             first5 = book.bid.split("_")[1]
             assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
@@ -641,8 +660,6 @@ class Imprinter:
         require_acu=True,
     ):
         """get the appropriate bookbinder for the book based on its type"""
-        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
-        lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
             book_path = self.get_book_abs_path(book)
@@ -660,7 +677,7 @@ class Imprinter:
 
             # bind book using bookbinder library
             bookbinder = BookBinder(
-                book, obsdb, filedb, lvl2_data_root, readout_ids, book_path, hk_fields,
+                book, obsdb, filedb, self.lvl2_data_root, readout_ids, book_path, hk_fields,
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
                 allow_bad_timing=allow_bad_timing,
@@ -671,86 +688,43 @@ class Imprinter:
 
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
-            root = op.join(lvl2_data_root, book.type)
-            first5 = book.bid.split("_")[1]
-            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            book_path_src = op.join(root, first5)
+            root = op.join(self.lvl2_data_root, book.type)
+            timecode = book.bid.split("_")[1]
+            assert timecode.isdigit(), f"timecode of {book.bid} is not a digit"
+            book_path_src = op.join(root, timecode)
 
             # get target directory for hk book
-            odir = op.join(self.output_root, book.tel_tube, book.type)
+            book_path_tgt = self.get_book_abs_path(book)
+            odir, _ = op.split(book_path_tgt)
             if not op.exists(odir):
                 os.makedirs(odir)
-            book_path_tgt = os.path.join(odir, book.bid)
-
-            class _FakeBinder:  # dummy class to mimic baseline bookbinder
-                def __init__(self, indir, outdir):
-                    self.indir = indir
-                    self.outdir = outdir
-
-                def get_metadata(self, telescope=None, tube_config={}):
-                    return {
-                        "book_id": book.bid,
-                        # dummy start and stop times
-                        "start_time": float(first5) * 1e5,
-                        "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": telescope,
-                        "type": book.type,
-                    }
-
-                def bind(self, pbar=False):
-                    shutil.copytree(
-                        self.indir,
-                        self.outdir,
-                        ignore=shutil.ignore_patterns(
-                            "*.dat", "*_mask.txt", "*_freq.txt"
-                        ),
-                    )
-
-            return _FakeBinder(book_path_src, book_path_tgt)
+            
+            bookbinder = TimeCodeBinder(
+                book, timecode, book_path_src, book_path_tgt,
+                ignore_pattern=SMURF_EXCLUDE_PATTERNS,
+            )
+            return bookbinder
 
         elif book.type in ["stray"]:
             flist = self.get_files_for_book(book)
 
             # get source directory for stray book
-            root = op.join(lvl2_data_root, "timestreams")
-            first5 = book.bid.split("_")[1]
-            assert first5.isdigit(), f"first5 of {book.bid} is not a digit"
-            book_path_src = op.join(root, first5)
+            root = op.join(self.lvl2_data_root, "timestreams")
+            timecode = book.bid.split("_")[1]
+            assert timecode.isdigit(), f"timecode of {book.bid} is not a digit"
+            book_path_src = op.join(root, timecode)
 
-            # get target directory for hk book
-            odir = op.join(self.output_root, book.tel_tube, book.type)
+           # get target directory for book
+            book_path_tgt = self.get_book_abs_path(book)
+            odir, _ = op.split(book_path_tgt)
             if not op.exists(odir):
                 os.makedirs(odir)
-            book_path_tgt = os.path.join(odir, book.bid)
-
-            class _FakeBinder:  # dummy class to mimic baseline bookbinder
-                def __init__(self, indir, outdir, file_list):
-                    self.indir = indir
-                    self.outdir = outdir
-                    self.file_list = file_list
-
-                def get_metadata(self, telescope=None, tube_config={}):
-                    return {
-                        "book_id": book.bid,
-                        # dummy start and stop times
-                        "start_time": float(first5) * 1e5,
-                        "stop_time": (float(first5) + 1) * 1e5,
-                        "telescope": telescope,
-                        "type": book.type,
-                    }
-
-                def bind(self, pbar=False):
-                    if not os.path.exists(self.outdir):
-                        os.makedirs(self.outdir)
-                    for f in self.file_list:
-                        relpath = os.path.relpath(f, self.indir)
-                        path = os.path.join(self.outdir, relpath)
-                        base, _ = os.path.split(path)
-                        if not os.path.exists(base):
-                            os.makedirs(base)
-                        shutil.copy(f, os.path.join(self.outdir, relpath))
-
-            return _FakeBinder(book_path_src, book_path_tgt, flist)
+                    
+            bookbinder = TimeCodeBinder(
+                book, timecode, book_path_src, book_path_tgt, 
+                file_list=flist,
+            )
+            return bookbinder
         else:
             raise NotImplementedError(
                 f"binder for book type {book.type} not implemented"
@@ -828,38 +802,13 @@ class Imprinter:
                 require_hwp=require_hwp,
             )
             binder.bind(pbar=pbar)
-
-            # write M_book file
-            m_book_file = os.path.join(binder.outdir, "M_book.yaml")
-            book_meta = {}
-            book_meta["book"] = {
-                "type": book.type,
-                "schema_version": 0,
-                "book_id": book.bid,
-                "finalized_at": dt.datetime.utcnow().isoformat(),
-            }
-            book_meta["bookbinder"] = {
-                "codebase": sotodlib.__file__,
-                "version": sotodlib.__version__,
-                "context": self.config.get("context", "unknown"),
-            }
-            with open(m_book_file, "w") as f:
-                yaml.dump(book_meta, f)
-
+            
             # write M_index file
             if book.type in ['obs', 'oper']:
                 tc = self.tube_configs[book.tel_tube]
             else:
                 tc = {}
-            
-            mfile = os.path.join(binder.outdir, "M_index.yaml")
-            with open(mfile, "w") as f:
-                yaml.dump(
-                    binder.get_metadata(
-                        telescope=self.daq_node,
-                        tube_config = tc,
-                    ), f
-                )
+            binder.write_M_files(self.daq_node, tc)
 
             if book.type in ['obs', 'oper']:
                 # check that detectors books were written out correctly
@@ -944,65 +893,6 @@ class Imprinter:
         return session.query(Books).filter(
             Books.status == status
         ).order_by(Books.start).all()
-    
-    def get_level2_deleteable_books(
-            self, session=None, cleanup_delay=None, max_time=None
-        ):
-        """Get all bound books from database where we need to delete the level2
-        data
-
-        Parameters
-        ----------
-        session: BookDB session
-        cleanup_delay: float
-            amount of time to delay book deletation relative to g3tsmurf finalization
-            time in units of days. 
-        max_time: datetime
-            maxmimum time of book start to search. Overrides cleanup_delay if
-            earlier
-        
-        Returns
-        -------
-        books: list of book objects
-        """
-        raise NotImplementedError("This function hasn't been fixed yet")
-        if session is None:
-            session = self.get_session()
-        if cleanup_delay is None:
-            cleanup_delay = 0
-
-        base_filt = and_(
-            Books.status == BOUND,
-            Books.lvl2_deleted == False,
-            or_(  ## not implementing smurf deletion just yet
-                Books.type == "obs",
-                Books.type == "oper",
-                Books.type == "stray",
-                Books.type == "hk",
-            ),
-        )
-        sources = session.query(
-            Books.tel_tube
-        ).filter(base_filt).distinct().all()
-
-        source_filt = []
-        for source, in sources:
-            streams = self.tubes[source].get("slots")
-            _, SMURF = self.get_g3tsmurf_session(source, return_archive=True)
-            limit = SMURF.get_final_time(streams, check_control=False)
-            max_stop = dt.datetime.utcfromtimestamp(limit) - dt.timedelta(days=cleanup_delay)
-            
-            source_filt.append( and_(Books.tel_tube == source, Books.stop <= max_stop) )
-
-        q = session.query(Books).filter(
-            base_filt,
-            or_(*source_filt),
-        )
-        
-        if max_time is not None:
-            q = q.filter(Books.stop <= max_time)
-
-        return q.all()
 
     # some aliases for readability
     def get_unbound_books(self, session=None):
@@ -1033,6 +923,20 @@ class Imprinter:
         """
         return self.get_books_by_status(BOUND, session)
     
+    def get_done_books(self, session=None):
+        """Get all "done" books from database. Done means staged files are deleted.
+
+        Parameters
+        ----------
+        session: BookDB session
+
+        Returns
+        -------
+        books: list of book objects
+
+        """
+        return self.get_books_by_status(DONE, session)
+
     def get_failed_books(self, session=None):
         """Get all failed books from database
 
@@ -1138,23 +1042,23 @@ class Imprinter:
             session = self.get_session()
         session.rollback()
 
-    def _find_incomplete(self, min_ctime, max_ctime, stream_filt=None):
+    @property
+    def all_slots(self):
+        return [x for xs in [
+            t.get('slots') for (_,t) in self.tubes.items()
+        ] for x in xs]
+
+    def _find_incomplete(self, min_ctime, max_ctime, streams=None):
         """return G3tSmurf session query for incomplete observations
         """
-        if stream_filt is None:
-            streams = []
-            streams.extend(
-                *[t.get("slots") for (_,t) in self.tubes.items()]
-            )
-            stream_filt = or_(
-                *[G3tObservations.stream_id == s for s in streams]
-            )
+        if streams is None:
+            streams = self.all_slots
 
         session = self.get_g3tsmurf_session()
         q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp <= max_ctime,
-            stream_filt,
+            G3tObservations.stream_id.in_(streams),
             or_(
                 G3tObservations.stop == None,
                 G3tObservations.stop >= dt.datetime.utcfromtimestamp(max_ctime),
@@ -1226,9 +1130,6 @@ class Imprinter:
             streams = stream_ids
         self.logger.debug(f"Looking for observations from stream_ids {streams}")
 
-        # restrict to given stream ids (wafers)
-        stream_filt = or_(*[G3tObservations.stream_id == s for s in streams])
-
         # check data transfer finalization
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
@@ -1238,7 +1139,7 @@ class Imprinter:
         self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range
-        q_incomplete = self._find_incomplete(min_ctime, max_ctime, stream_filt)
+        q_incomplete = self._find_incomplete(min_ctime, max_ctime, streams)
 
         # if we have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
@@ -1275,7 +1176,7 @@ class Imprinter:
         obs_q = session.query(G3tObservations).filter(
             G3tObservations.timestamp >= min_ctime,
             G3tObservations.timestamp < max_ctime,
-            stream_filt,
+            G3tObservations.stream_id.in_(streams),
             G3tObservations.stop < max_stop,
             not_(G3tObservations.stop == None),
             G3tObservations.obs_id.not_in(already_registered),
@@ -1311,7 +1212,7 @@ class Imprinter:
                         # observations from other streams
                         q = obs_q.filter(
                             G3tObservations.stream_id != str_obs.stream_id,
-                            stream_filt,
+                            G3tObservations.stream_id.in_(streams),
                             or_(
                                 and_(
                                     G3tObservations.start <= str_obs.start,
@@ -1437,38 +1338,10 @@ class Imprinter:
                 res[o.obs_id] = sorted([f.name for f in o.files])
             return res
         elif book.type in ["stray"]:
-            session = self.get_session()
-            
-            ## build list of files already in bound books
-            book_list = session.query(Books).filter(
-                Books.start >= book.start,
-                Books.start < book.stop,
-                or_(Books.type == 'obs', Books.type == 'oper'),
-                Books.status != WONT_BIND,
-            ).all()
-            files_in_books = []
-            for b in book_list:
-                flist = self.get_files_for_book(b)
-                for k in flist:
-                    files_in_books.extend(flist[k])
-            
-            g3session = self.get_g3tsmurf_session()
-            tcode = int(book.bid.split("_")[1])
-
-            files_in_tc = g3session.query(Files).filter(
-                Files.name.like(f"%/{tcode}/%"),
-            ).all()
-            files_in_tc = [f.name for f in files_in_tc]
-            
-            files_into_stray = []
-            for f in files_in_tc:
-                if f in files_in_books:
-                    continue
-                files_into_stray.append(f)
-            return files_into_stray
+            return self.get_files_for_stray_book(book)
         
         elif book.type == "hk":
-            HK = self.get_g3thk(book.tel_tube)
+            HK = self.get_g3thk()
             flist = (
                 HK.session.query(HKFiles)
                 .filter(
@@ -1478,11 +1351,81 @@ class Imprinter:
                 .all()
             )
             return [f.path for f in flist]
+        elif book.type == "smurf":
+            tcode = int(book.bid.split("_")[1])
+            basepath = os.path.join(
+                self.lvl2_data_root, 'smurf', str(tcode)
+            )
+            ignore = shutil.ignore_patterns(*SMURF_EXCLUDE_PATTERNS)
+            flist = []
+            for root, _, files in os.walk(basepath):
+                to_ignore = ignore('', files)
+                flist.extend([
+                    os.path.join(basepath, root, f) 
+                    for f in files if f not in to_ignore
+                ])
+            return flist
 
         else:
             raise NotImplementedError(
-                f"book type {book.type} not understood for" " file search"
+                f"book type {book.type} not understood for file search"
             )
+
+    def get_files_for_stray_book(
+        self, book=None, min_ctime=None, max_ctime=None
+    ):
+        """generate list of files that are not in detector books and should
+        going into stray books. if book is None then we expect both min and max
+        ctime to be provided
+
+        Arguments
+        ----------
+        book: optional, book instance
+        min_ctime: optional, minimum ctime value to search
+        max_ctime: optional, maximum ctime value to search
+
+        Returns
+        --------
+        list of files that should go into a stray book
+        """
+        if book is None:
+            assert min_ctime is not None and max_ctime is not None
+            start = dt.datetime.utcfromtimestamp(min_ctime)
+            stop = dt.datetime.utcfromtimestamp(max_ctime)
+
+            tcode = int(min_ctime//1e5)
+            if max_ctime > (tcode+1)*1e5:
+                self.logger.error(
+                    f"Max ctime {max_ctime} is higher than would be expected "
+                    f"for a single stray book with min ctime {min_ctime}. only"
+                    " checking the first timecode directory"
+                )
+        else:
+            assert book.type == 'stray'
+            start = book.start
+            stop = book.stop
+            tcode = int(book.bid.split("_")[1])
+        
+        session = self.get_session()
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        path = os.path.join(SMURF.archive_path, str(tcode))
+        registered_obs = [ 
+            x[0] for x in session.query(Observations.obs_id).join(Books).filter(
+            Books.start >= start, 
+            Books.start < stop,
+            Books.status != WONT_BIND,
+        ).all()]
+        db_files = g3session.query(Files).filter(
+            Files.name.like(f"{path}%")
+        ).all()
+
+        stray_files = []
+        for f in db_files:
+            if f.obs_id is None or f.obs_id not in registered_obs:
+                stray_files.append(f.name)
+
+        return stray_files
+            
 
     def get_readout_ids_for_book(self, book):
         """
@@ -1611,6 +1554,19 @@ class Imprinter:
         )
         return {o.obs_id: o for o in obs}
 
+    def _librarian_connect(self):
+        """
+        start connection to librarian
+        """
+        from hera_librarian import LibrarianClient
+        from hera_librarian.settings import client_settings
+        conn = client_settings.connections.get(
+            self.config.get("librarian_conn")
+        )
+        if conn is None:
+            raise ValueError(f"'librarian_conn' not in imprinter config")
+        self.librarian = LibrarianClient.from_info(conn)
+
     def upload_book_to_librarian(self, book, session=None, raise_on_error=True):
         """Upload bound book to the librarian
 
@@ -1626,14 +1582,7 @@ class Imprinter:
         if session is None:
             session = self.get_session()
         if self.librarian is None:
-            from hera_librarian import LibrarianClient
-            from hera_librarian.settings import client_settings
-            conn = client_settings.connections.get(
-                self.config.get("librarian_conn")
-            )
-            if conn is None:
-                raise ValueError(f"'librarian_conn' not in imprinter config")
-            self.librarian = LibrarianClient.from_info(conn)
+            self._librarian_connect()
         
         assert book.status == BOUND, "cannot upload unbound books"
 
@@ -1655,8 +1604,32 @@ class Imprinter:
                 return False, e
         return True, None
             
-
-    def delete_level2_files(self, book, dry_run=True):
+    def check_book_in_librarian(self, book, n_copies=1, raise_on_error=True):
+        """have the librarian validate the books is stored offsite. returns true
+        if at least n_copies are storied offsite.
+        """
+        if self.librarian is None:
+            self._librarian_connect()
+        try:
+            resp = self.librarian.validate_file(book.path)
+            in_lib = sum(
+                [(x.computed_same_checksum) for x in resp]
+            ) >= n_copies
+            if not in_lib:
+                self.logger.info(f"received response from librarian {resp}")
+        except Exception as e:
+            if raise_on_error:
+                raise e
+            else: 
+                self.logger.warning(
+                    f"Failed to check libraian status for {book.bid}: {e}"
+                )
+                self.logger.warning(traceback.format_exc())
+                in_lib = False
+        return in_lib
+        
+    def delete_level2_files(self, book, verify_with_librarian=True,        
+        n_copies_in_lib=2, dry_run=True):
         """Delete level 2 data from already bound books
 
         Parameters
@@ -1665,13 +1638,31 @@ class Imprinter:
         dry_run: bool
             if true, just prints plans to self.logger.info
         """
-        if book.status != BOUND:
-            raise ValueError(f"Book must be bound to delete level 2 files")
-
+        if book.lvl2_deleted:
+            self.logger.debug(
+                f"Level 2 for {book.bid} has already been deleted"
+            )
+            return 0
+        if book.status < UPLOADED:
+            self.logger.warning(
+                f"Book {book.bid} is not uploaded, not deleting level 2"
+            )
+            return 1
+        if verify_with_librarian:
+            in_lib = self.check_book_in_librarian(
+                book, n_copies=n_copies_in_lib, raise_on_error=False
+            )
+            if not in_lib:
+                self.logger.warning(
+                    f"Book {book.bid} does not have {n_copies_in_lib} copies"
+                    " will not delete level 2"
+                )
+                return 2
+        
         self.logger.info(f"Removing level 2 files for {book.bid}")
         if book.type == "obs" or book.type == "oper":
             session, SMURF = self.get_g3tsmurf_session(
-                book.tel_tube, return_archive=True
+                return_archive=True
             )
             odic = self.get_g3tsmurf_obs_for_book(book)
 
@@ -1681,7 +1672,7 @@ class Imprinter:
                 )
         elif book.type == "stray":
             session, SMURF = self.get_g3tsmurf_session(
-                book.tel_tube, return_archive=True
+                return_archive=True
             )
             flist = self.get_files_for_book(book)
             for f in flist:
@@ -1689,12 +1680,25 @@ class Imprinter:
                 SMURF.delete_file(
                     db_file, session, dry_run=dry_run, my_logger=self.logger
                 )
+        elif book.type == "smurf":
+            tcode = int(book.bid.split("_")[1])
+            basepath = os.path.join(
+                self.lvl2_data_root, 'smurf', str(tcode)
+            )
+            if not dry_run:
+                shutil.rmtree(basepath)
+
         elif book.type == "hk":
-            HK = self.get_g3thk(book.tel_tube)
+            HK = self.get_g3thk()
             flist = self.get_files_for_book(book)
-            for f in flist:
-                hkfile = HK.session.query(HKFiles).filter(HKFiles.path == f).one()
-                HK.delete_file(hkfile, dry_run=dry_run, my_logger=self.logger)
+            hkf_list = [
+                HK.session.query(HKFiles).filter(
+                    HKFiles.path == f
+                ).one() for f in flist
+            ]
+            HK.batch_delete_files(
+                hkf_list, dry_run=dry_run, my_logger=self.logger
+            )
         else:
             raise NotImplementedError(
                 f"Do not know how to delete level 2 files"
@@ -1703,8 +1707,10 @@ class Imprinter:
         if not dry_run:
             book.lvl2_deleted = True
             self.session.commit()
+        return 0
 
-    def delete_book_files(self, book):
+    def delete_book_staged(self, book, check_level2=False, 
+        verify_with_librarian=False, n_copies_in_lib=1, override=False):
         """Delete all files associated with a book
 
         Parameters
@@ -1712,27 +1718,80 @@ class Imprinter:
         book: Book object
 
         """
+        if book.status == DONE:
+            self.logger.debug(
+                f"Book {book.bid} has already had staged files deleted"
+            )
+            return 0
+        if not override:
+            if book.status < UPLOADED:
+                self.logger.warning(
+                    "Cannot delete non-uploaded books without override"
+                )
+                return 1
+        if check_level2 and not book.lvl2_deleted:
+            self.logger.warning(
+                f"Level 2 data not deleted for {book.bid}, not deleting "
+                "staged"
+            )
+            return 2
+        if verify_with_librarian:
+            in_lib = self.check_book_in_librarian(
+                book, n_copies=n_copies_in_lib, raise_on_error=False
+            )
+            if not in_lib:
+                self.logger.warning(
+                    f"Book {book.bid} does not have {n_copies_in_lib} copies"
+                    " will not delete staged"
+                )
+                return 3
+
         # remove all files within the book
         book_path = self.get_book_abs_path(book)
         try:
-            shutil.rmtree( book_path )
+            self.logger.info(
+                f"Removing {book.bid} from staged"
+            )
+            if book.type == 'smurf' and book.schema == 1:
+                os.remove(book_path)
+            else:
+                shutil.rmtree( book_path )
         except Exception as e:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
+        book.status = DONE
+        self.session.commit()
+        return 0
 
+    def find_missing_lvl2_obs_from_books(
+        self, min_ctime, max_ctime
+    ):
+        """create a list of level 2 observation IDs that are not registered in 
+        the imprinter database
+        
+        Arguments
+        ----------
+        min_ctime: minimum ctime value to search
+        max_ctime: maximum ctime value to search
 
-    def all_bound_until(self):
-        """report a datetime object to indicate that all books are bound
-        by this datetime.
+        Returns
+        --------
+        list of level 2 observation ids not in books
         """
         session = self.get_session()
-        # sort by start time and find the start time by which
-        # all books are bound
-        books = session.query(Books).order_by(Books.start).all()
-        for book in books:
-            if book.status < BOUND:
-                return book.start
-        return book.start  # last book
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        registered_obs = [
+            x[0] for x in session.query(Observations.obs_id).join(Books).filter(
+            Books.start >= dt.datetime.utcfromtimestamp(min_ctime), 
+            Books.start < dt.datetime.utcfromtimestamp(max_ctime),
+        ).all()]
+        missing_obs = g3session.query(G3tObservations).filter(
+            G3tObservations.timestamp >= min_ctime,
+            G3tObservations.timestamp < max_ctime,
+            G3tObservations.stream_id.in_(self.all_slots),
+            G3tObservations.obs_id.not_in(registered_obs)
+        ).all()
+        return missing_obs
 
 #####################
 # Utility functions #
