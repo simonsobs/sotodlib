@@ -105,3 +105,6 @@ venv.bak/
 
 # pychram
 .idea
+
+# vscode
+.vscode
