@@ -355,7 +355,17 @@ class AxisManager:
         self._axes[a.name] = a.copy()
 
     def __contains__(self, name):
-        return name in self._fields or name in self._axes
+        attrs = name.split(".")
+        tmp_item = self
+        while attrs:
+            attr_name = attrs.pop(0)
+            if attr_name in tmp_item._fields:
+                tmp_item = tmp_item._fields[attr_name]
+            elif attr_name in tmp_item._axes:
+                tmp_item = tmp_item._axes[attr_name]
+            else:
+                return False
+        return True
 
     def __getitem__(self, name):
 
