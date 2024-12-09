@@ -298,7 +298,6 @@ class TestAxisManager(unittest.TestCase):
         self.assertNotEqual(aman.a1[0, 0, 0, 1], 0.)
 
     # wrap of AxisManager, merge.
-
     def test_get_set(self):
         dets = ["det0", "det1", "det2"]
         n, ofs = 1000, 0
@@ -309,9 +308,34 @@ class TestAxisManager(unittest.TestCase):
             core.LabelAxis("dets", dets + ["det3"]),
             core.OffsetAxis("samps", n, ofs - n // 2),
         )
+
+        child2 = core.AxisManager(
+            core.LabelAxis("dets2", ["det4", "det5"]),
+            core.OffsetAxis("samps", n, ofs - n // 2),
+        )
         aman.wrap("child", child)
-        self.assertAlmostEqual(aman["child.dets"].count, 3)
-        self.assertAlmostEqual(aman["child.dets"].name, "dets")
+        aman["child"].wrap("child2", child2)
+        self.assertEqual(aman["child.child2.dets2"].count, 2)
+        self.assertEqual(aman["child.dets"].name, "dets")
+        np.testing.assert_array_equal(aman["child.child2.dets2"].vals, np.array(["det4", "det5"]))
+        with self.assertRaises(KeyError):
+            aman["child.someentry"]
+
+        with self.assertRaises(KeyError):
+            aman["child2"]
+
+        with self.assertRaises(AttributeError):
+            aman["child.dets.an_extra_layer"]
+
+        self.assertIn("child.dets", aman)
+        self.assertIn("child.dets2", aman) # I am not sure why this is true
+        self.assertNotIn("child.child2.someentry", aman)
+
+        aman["child"] = child2
+        print(aman["child"])
+        self.assertEqual(aman["child.dets2"].count, 2)
+        self.assertEqual(aman["child.dets2"].name, "dets2")
+        np.testing.assert_array_equal(aman["child.dets2"].vals, np.array(["det4", "det5"]))
 
     def test_400_child(self):
         dets = ['det0', 'det1', 'det2']
