@@ -6,6 +6,7 @@ from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters
 import logging
+import so3g
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     
 def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
             apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
-             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
+            apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
             merge_stats=True, azss_stats_name='azss_stats',
             merge_model=True, azss_model_name='azss_model'):
@@ -325,3 +326,139 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
         
     if remove_template:
         aman.move(azss_template_name, None)
+
+
+def get_azss_lr(aman, signal='signal', bins=100, 
+                apodize_edges_sec=100, apodize_flags_sec=1,
+                method='fit', max_mode=10,
+                merge_stats=True, azss_stats_name='azss_stats',
+                merge_model=True, azss_model_name='azss_model'):
+    """Compute the azimuthal scan synchronous signal (AZSS) for left and right scans.
+    
+       Parameters:
+       ----------
+        aman : object
+            The data manager object containing the scan data and flags.
+        signal : str, optional
+            The name of the signal to process. Default is 'signal'.
+        bins : int, optional
+            Number of bins for the histogram. Default is 100.
+        apodize_edges_sec : int, optional
+            Number of seconds to apodize at the edges of the scan. Default is 100.
+        apodize_flags_sec : int, optional
+            Number of seconds to apodize around flagged regions. Default is 1.
+        bad_flags : array-like, optional
+            Additional flags to consider as bad. Default is None.
+        method : str, optional
+            Method to use for fitting the AZSS. Default is 'fit'.
+        max_mode : int, optional
+            Maximum mode to consider for the fit. Default is 10.
+        merge_stats : bool, optional
+            Whether to merge the computed statistics into the data manager. Default is True.
+        azss_stats_name : str, optional
+            Name to use for the merged statistics in the data manager. Default is 'azss_stats'.
+        merge_model : bool, optional
+            Whether to merge the computed model into the data manager. Default is True.
+        azss_model_name : str, optional
+            Name to use for the merged model in the data manager. Default is 'azss_model'.
+
+        Returns:
+        ----------
+        tuple
+            A tuple containing the left and right AZSS statistics and models:
+            (azss_stats_left, azss_stats_right, azss_model_left, azss_model_right).
+        """
+    
+    mask_for_valid_left_scans = aman.flags.right_scan
+    mask_for_valid_right_scans = aman.flags.left_scan
+
+    if "bad_subscan" in aman.flags:
+        if "valid_right_scans" not in aman: 
+            aman.flags.reduce(flags=['bad_subscan', 'left_scan'], 
+                                method='union', wrap=True, 
+                                new_flag='valid_left_scans', remove_reduced=False)
+            aman.flags.reduce(flags=['bad_subscan', 'right_scan'], 
+                                method='union', wrap=True, 
+                                new_flag='valid_right_scans', remove_reduced=False)
+        mask_for_valid_left_scans = aman.flags.valid_left_scans
+        mask_for_valid_right_scans = aman.flags.valid_right_scans
+    
+    apodize_edges_samps = int(apodize_edges_sec * np.round(1/np.median(np.diff(aman.timestamps))))
+    apodize_flags_samps = int(apodize_flags_sec * np.round(1/np.median(np.diff(aman.timestamps))))
+    
+    azss_stats_left, azss_model_left = get_azss(aman, signal=signal, merge_stats=False, merge_model=False,
+                                                flags=mask_for_valid_left_scans, bins=bins, apodize_flags=True,
+                                                method=method, max_mode=max_mode, apodize_flags_samps=apodize_flags_samps,
+                                                apodize_edges_samps=apodize_edges_samps)
+
+    azss_stats_right, azss_model_right = get_azss(aman, signal=signal, merge_stats=False, merge_model=False,
+                                                  flags=mask_for_valid_right_scans, bins=bins, apodize_flags=True,
+                                                  method=method, max_mode=max_mode, apodize_flags_samps=apodize_flags_samps,
+                                                  apodize_edges_samps=apodize_edges_samps)
+    aman.flags.move('valid_left_scans', None)
+    aman.flags.move('valid_right_scans', None)
+
+    # If AZSS is not modeled for all AZ set zero to nan
+    if np.any(np.isnan(azss_model_left)) or np.any(np.isnan(azss_model_right)):
+        azss_model_left[np.isnan(azss_model_left)] = 0
+        azss_model_right[np.isnan(azss_model_right)] = 0
+    
+    if merge_stats:
+        aman.wrap(azss_stats_name+"_left", azss_stats_left)
+        aman.wrap(azss_stats_name+"_right", azss_stats_right)
+    if merge_model:
+        aman.wrap(azss_model_name+"_left", azss_model_left, [(0, 'dets'), (1, 'samps')])
+        aman.wrap(azss_model_name+"_right", azss_model_right, [(0, 'dets'), (1, 'samps')])
+    
+    return azss_stats_left, azss_stats_right, azss_model_left, azss_model_right
+    
+
+def subtract_azss_lr(aman, signal='signal', merge_stats=True, merge_model=True,
+                     azss_stats_name='azss_stats', azss_model_name='azss_model', 
+                     bins=100, apodize_edges_sec=100, apodize_flags_sec=1,
+                     method='fit', max_mode=10,): 
+    """
+    Subtracts the azimuth synchronous signal (AZSS) from the given signal in the aman object, 
+    for both left and right scans.
+
+    Parameters:
+    ----------
+    aman : object
+        The data object containing the signal and flags.
+    signal : str, optional
+        The name of the signal to be processed. Default is 'signal'.
+    merge_stats : bool, optional
+        If True, merges statistics after subtraction into aman. Default is True.
+    azss_model_name : str, optional
+        The base name of the AzSS model to be subtracted. Default is 'azss_model'.
+    bins : int, optional
+        The number of bins to use for AzSS calculation. Default is 100.
+
+    Returns:
+    ----------
+    None
+    """
+    left_flags = aman.flags.left_scan.mask()
+    right_flags = aman.flags.right_scan.mask()
+
+    aman[signal][:, left_flags] -= aman[f"{azss_model_name}{signal[-1]}_left"][:, left_flags]
+    aman[signal][:, right_flags] -= aman[f"{azss_model_name}{signal[-1]}_right"][:, right_flags]
+
+    if merge_stats or merge_model:
+        apodize_edges_samps = int(apodize_edges_sec * np.round(1/np.median(np.diff(aman.timestamps))))
+        apodize_flags_samps = int(apodize_flags_sec * np.round(1/np.median(np.diff(aman.timestamps))))
+
+        azss_stats_left, azss_stats_right, \
+            azss_model_left, azss_model_right = \
+                get_azss_lr(aman, signal=signal, merge_stats=False, merge_model=False, bins=bins,
+                            apodize_edges_sec=apodize_edges_samps, apodize_flags_sec=apodize_flags_samps,
+                            method=method, max_mode=max_mode)
+        if merge_stats:
+            aman.wrap(azss_stats_name+"_left_after", azss_stats_left)
+            aman.wrap(azss_stats_name+"_right_after", azss_stats_right)
+        if merge_model:
+            aman.wrap(azss_model_name+"_left_after", azss_model_left, [(0, 'dets'), (1, 'samps')])
+            aman.wrap(azss_model_name+"_right_after", azss_model_right, [(0, 'dets'), (1, 'samps')])
+
+        del azss_model_left, azss_model_right, azss_stats_left, azss_stats_right
+    return

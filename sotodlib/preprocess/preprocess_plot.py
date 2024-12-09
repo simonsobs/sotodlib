@@ -88,7 +88,7 @@ def plot_4f_2f_counts(aman, modes=np.arange(1,49), filename='./4f_2f_counts.png'
         a_4f = np.sqrt(stats.coeffs[:,6]**2 + stats.coeffs[:,7]**2)
         a_2f = np.sqrt(stats.coeffs[:,2]**2 + stats.coeffs[:,3]**2)
         hwpss_ratsatp1[band] = a_4f/a_2f
-
+        
         hist, bins = np.histogram(hwpss_ratsatp1[band], bins=50)
         logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]),len(bins))
         _ = axs[0, i].hist(hwpss_ratsatp1[band], bins = logbins,
@@ -515,7 +515,9 @@ def plot_flag_stats(aman, flag_aman, flag_type="glitches", N_bins=30, filename="
     )
     glitchlog = np.log10(frac_samp_glitches[frac_samp_glitches > 0])
     if glitchlog.size == 0:
-        raise ValueError("No flags found (empty array).")
+        # raise ValueError("No flags found (empty array).")
+        print("No flags found (empty array).")
+        return
     binmin = int(np.floor(np.min(glitchlog)))
     binmax = int(np.ceil(np.max(glitchlog)))
     _ = ax[0].hist(

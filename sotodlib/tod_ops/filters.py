@@ -538,6 +538,36 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
         return A / B
     return B / A
 
+# SA
+@fft_filter
+def correct_medQU(obs):
+    """
+    Corrects the demodulated Q and U components of the observed data by 
+    removing the contribution of the median Q and U vectors. The process 
+    involves calculating the median along axis 0, determining the correction 
+    coefficients, and applying them to the respective components.
+
+    Parameters:
+    obs : object
+        An object containing `demodQ` and `demodU` attributes, which are 
+        arrays of demodulated Q and U data.
+
+    Returns:
+    None
+        The function modifies the `demodQ` and `demodU` attributes of the 
+        input object in place.
+    """
+    def correct_component(component):
+        med = np.median(component, axis=0)
+        vects = np.atleast_2d(med)
+        I = np.linalg.inv(np.tensordot(vects, vects, (1, 1)))
+        coeffs = np.dot(I, np.dot(component, vects.T).T).T
+        return component - coeffs * med
+    
+    obs.demodQ = correct_component(obs.demodQ)
+    obs.demodU = correct_component(obs.demodU)
+
+
 
 # Functions to derive low/high/band pass filter from configuration
 ##################################################################
