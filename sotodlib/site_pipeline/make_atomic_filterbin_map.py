@@ -209,14 +209,15 @@ def read_tods(context, obslist,
 
 
 class ColoredFormatter(logging.Formatter):
-    def __init__(self, msg, colors={'DEBUG': colors.reset,
-                                    'INFO': colors.lgreen,
-                                    'WARNING': colors.lbrown,
-                                    'ERROR': colors.lred,
-                                    'CRITICAL': colors.lpurple}):
+    def __init__(self, msg, colors={'DEBUG':colors.reset,
+                                    'INFO':colors.lgreen,
+                                    'WARNING':colors.lbrown,
+                                    'ERROR':colors.lred,
+                                    'CRITICAL':colors.lpurple}):
         logging.Formatter.__init__(self, msg)
         self.colors = colors
 
+        
     def format(self, record):
         try:
             col = self.colors[record.levelname]
@@ -224,7 +225,7 @@ class ColoredFormatter(logging.Formatter):
             col = colors.reset
         return col + logging.Formatter.format(self, record) + colors.reset
 
-
+    
 class LogInfoFilter(logging.Filter):
     def __init__(self, rank=0):
         self.rank = rank
@@ -255,6 +256,7 @@ def future_write_to_log(e, errlog):
     f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
     f.close()
 
+    
 def main(config_file: str) -> None:
     args = Cfg.from_yaml(config_file)
 
@@ -472,6 +474,7 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
         "--config_file", type=str, help="yaml file with configuration."
     )
     return p
+
 
 if __name__ == '__main__':
     util.main_launcher(main, get_parser)
