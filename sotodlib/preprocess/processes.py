@@ -835,6 +835,8 @@ class SSOFootprint(_Preprocess):
                 else:
                     planet_aman.wrap(ws, False)
 
+            planet_aman.wrap('distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
+
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
         

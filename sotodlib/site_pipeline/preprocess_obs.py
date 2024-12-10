@@ -101,6 +101,7 @@ def preprocess_obs(
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
         scheme.add_data_field('coverage')
+        scheme.add_data_field('source_distance')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
             scheme=scheme
@@ -135,14 +136,19 @@ def preprocess_obs(
         for _source in proc_aman.sso_footprint._assignments.keys():
             nearby_source_names.append(_source)
         coverage = []
+        distances = []
         for source_name in source_names:
             if source_name in nearby_source_names:
                 for ws in wafer_slots:
                     if proc_aman.sso_footprint[source_name][ws]:
                         coverage.append(f"{source_name}:{ws}")
+
+                distances.append(f"{source_name}:{proc_aman.sso_footprint[source_name]['distance']}")
         db_data['coverage'] = ','.join(coverage)
+        db_data['source_distance'] = ','.join(distances)
     else:
         db_data['coverage'] = None
+        db_data['source_distance'] = None
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
