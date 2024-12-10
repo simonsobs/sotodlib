@@ -64,8 +64,10 @@ def det_splits_relative(aman, det_left_right=False, det_upper_lower=False, det_i
 
 def get_split_flags(aman, proc_aman=None, split_cfg=None):
     '''
-    Function returning flags used for null splits consumed by the mapmaking and bundling codes.                             Fields labeled ``field_name_flag`` contain boolean masks and ``_avg`` are the mean
-    of the numerical based split flags to be used for observation level splits.
+    Function returning flags used for null splits consumed by the mapmaking
+    and bundling codes. Fields labeled ``field_name_flag`` contain boolean
+    masks and ``_avg`` are the mean of the numerical based split flags to 
+    be used for observation level splits.
 
     Arguments
     ---------
