@@ -538,7 +538,6 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
         return A / B
     return B / A
 
-# SA
 @fft_filter
 def correct_medQU(obs):
     """

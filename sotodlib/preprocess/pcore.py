@@ -378,7 +378,6 @@ class Pipeline(list):
             name = item.get("name")
             if name is None:
                 raise ValueError(f"Processes made from dictionary must have a 'name' key")
-            #self.logger.info(f'{name}') # SA
             cls = self.PIPELINE.get(name)
             if cls is None:
                 raise ValueError(f"'{name}' not registered as a pipeline element")
