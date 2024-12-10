@@ -1664,6 +1664,51 @@ class PointingModel(_Preprocess):
         from sotodlib.coords import pointing_model
         if self.calc_cfgs:
             pointing_model.apply_pointing_model(aman)
+
+class EstimateAzSSsubscan(_Preprocess):
+    """
+    .. autofunction:: sotodlib.tod_ops.azss.get_azss_lr
+    """
+    name = "estimate_azss_lr"
+    
+    def calc_and_save(self, aman, proc_aman):
+        calc_aman_left, calc_aman_right, model_left, model_right = tod_ops.azss.get_azss_lr(aman, **self.calc_cfgs)
+        self.save(proc_aman, calc_aman_left, "left", "stats")
+        self.save(proc_aman, calc_aman_right, "right", "stats")
+        self.save(proc_aman, model_left, "left", "model")
+        self.save(proc_aman, model_right, "right", "model")
+    
+    def save(self, proc_aman, calc_aman, leftright, modelstats):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            if modelstats == "stats":
+                _azss_stats_dict = {
+                    f'{leftright}_{self.calc_cfgs["signal"]}': calc_aman
+                    }
+                azss_stats = AxisManager(calc_aman.dets, calc_aman.bin_az_samps)
+                azss_stats.wrap('binned_az', calc_aman['binned_az'], [(0, 'bin_az_samps')])
+                for key, val in _azss_stats_dict.items():
+                    azss_stats.wrap('binned_signal_'+key, val['binned_signal'], [(0, 'dets'), (1, 'bin_az_samps')])
+                    azss_stats.wrap('binned_signal_sigma_'+key, val['binned_signal_sigma'], [(0, 'dets'), (1, 'bin_az_samps')])
+                    azss_stats.wrap('uniform_binned_signal_sigma_'+key, val['uniform_binned_signal_sigma'], [(0, 'dets')])
+                    azss_stats.wrap('binned_model_'+key, val['binned_model'], [(0, 'dets'), (1, 'bin_az_samps')])
+                    azss_stats.wrap('redchi2s_'+key, val['redchi2s'], [(0, 'dets')])
+                proc_aman.wrap(self.calc_cfgs["azss_stats_name"]+"_"+leftright, azss_stats)
+            elif modelstats == "model":
+                azss_model = core.AxisManager(proc_aman.dets, proc_aman.samps)
+                azss_model.wrap('azss_model', calc_aman)
+                proc_aman.wrap(self.calc_cfgs["azss_model_name"]+"_"+leftright, azss_model) #calc_aman)
+
+class SubtractAzSSsubscan(_Preprocess):
+    """
+    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_lr
+    """
+    name = "subtract_azss_lr"
+    
+    def process(self, aman, proc_aman):
+        tod_ops.azss.subtract_azss_lr(aman, **self.process_cfgs)
+
             
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
