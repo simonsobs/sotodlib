@@ -14,6 +14,7 @@ from .. import core
 from .. import coords
 from . import filters
 from . import fourier_filter 
+from . import sub_polyf
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_nan=False,
@@ -543,6 +544,24 @@ def get_trending_flags(aman,
     return cut
 
 def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
+    """
+    Identify and flag dark detectors in the given aman object.
+    Parameters:
+    aman : object
+        An object containing detector information and flags.
+    merge : bool, optional
+        If True, merge the dark detector flags into the aman.flags. Default is True.
+    overwrite : bool, optional
+        If True, overwrite existing flags with the same name. Default is True.
+    dark_flags_name : str, optional
+        The name to use for the dark detector flags in aman.flags. Default is 'darks'.
+    Returns:
+    RangesMatrix
+        A matrix of ranges indicating the dark detectors.
+    Raises:
+    ValueError
+        If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
+    """
     darks = np.array(aman.det_info.wafer.type != 'OPTC')
     x = Ranges(aman.samps.count)
     mskdarks = RangesMatrix([Ranges.ones_like(x) if Y
@@ -897,3 +916,176 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
 
     info_aman = wrap_stats(aman, name, stats_arr, stat_names, merge)
     return info_aman
+
+def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='fp_flags'):
+    """
+    Generate flags for invalid detectors in the focal plane.
+        The tod.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    invalid_flags_name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    msk_invalid_fp : RangesMatrix
+        RangesMatrix of invalid detectors in the focal plane.
+    """
+    # Available detectors in focalplane
+    xi_nan = np.isnan(aman.focal_plane.xi)
+    eta_nan = np.isnan(aman.focal_plane.eta)
+    x = Ranges(aman.samps.count)
+    msk_invalid_fp = RangesMatrix([
+        Ranges.ones_like(x) if Y else Ranges.zeros_like(x) 
+        for Y in flag_invalid_fp
+    ])
+    flag_valid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) == 0
+    flag_invalid_fp = ~flag_valid_fp
+    msk_invalid_fp = RangesMatrix([Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in flag_invalid_fp])
+    
+    if merge:
+        if invalid_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {invalid_flags_name} already exists in aman.flags")
+        if invalid_flags_name in aman.flags:
+            aman.flags[invalid_flags_name] = msk_invalid_fp
+        else:
+            aman.flags.wrap(invalid_flags_name, msk_invalid_fp, [(0, 'dets'), (1, 'samps')])
+
+    return msk_invalid_fp
+
+
+def get_badsubscan_flags(aman, nstd_threshold=3.0, Tptp_pW_threshold=0.5, kurt_threshold=0.5, 
+                         skew_threshold=0.5, merge=False, overwrite=False, name="bad_subscan"):
+    """
+    Identify and flag bad subscans based on various statistical thresholds.
+        The tod.
+    nstd_threshold : float
+        Threshold for standard deviation.
+    Tptp_pW_threshold : float
+        Threshold for peak-to-peak values in pW.
+    kurt_threshold : float
+        Threshold for kurtosis.
+    skew_threshold : float
+        Threshold for skewness.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    badsubscan_flags : RangesMatrix
+        RangesMatrix of bad subscans.
+    """
+    if 'flags' not in aman:
+        overwrite = False
+        merge = False
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+
+    subscan_indices_l = sub_polyf._get_subscan_range_index(aman.flags["left_scan"].mask())
+    subscan_indices_r = sub_polyf._get_subscan_range_index(aman.flags["right_scan"].mask())
+    subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
+    subscan_indices = subscan_indices[np.argsort(subscan_indices[:, 0])]
+
+    num_dets = aman.dets.count
+    num_subscans = len(subscan_indices)
+    subscan_stats = {
+        'Tptp': np.zeros((num_dets, num_subscans)),
+        'Qstd': np.zeros((num_dets, num_subscans)),
+        'Ustd': np.zeros((num_dets, num_subscans)),
+        'Qkurt': np.zeros((num_dets, num_subscans)),
+        'Ukurt': np.zeros((num_dets, num_subscans)),
+        'Qskew': np.zeros((num_dets, num_subscans)),
+        'Uskew': np.zeros((num_dets, num_subscans))
+    }
+
+    for subscan_i, subscan in enumerate(subscan_indices):
+        _Tsig = aman.dsT[:, subscan[0]:subscan[1] + 1]
+        _Qsig = aman.demodQ[:, subscan[0]:subscan[1] + 1]
+        _Usig = aman.demodU[:, subscan[0]:subscan[1] + 1]
+
+        subscan_stats['Tptp'][:, subscan_i] = np.ptp(_Tsig, axis=1)
+        subscan_stats['Qstd'][:, subscan_i] = np.std(_Qsig, axis=1)
+        subscan_stats['Ustd'][:, subscan_i] = np.std(_Usig, axis=1)
+        subscan_stats['Qkurt'][:, subscan_i] = stats.kurtosis(_Qsig, axis=1)
+        subscan_stats['Ukurt'][:, subscan_i] = stats.kurtosis(_Usig, axis=1)
+        subscan_stats['Qskew'][:, subscan_i] = stats.skew(_Qsig, axis=1)
+        subscan_stats['Uskew'][:, subscan_i] = stats.skew(_Usig, axis=1)
+
+    median_Qstd = np.median(subscan_stats['Qstd'], axis=1)[:, np.newaxis]
+    median_Ustd = np.median(subscan_stats['Ustd'], axis=1)[:, np.newaxis]
+
+    badsubscan_indicator = (
+        (subscan_stats['Tptp'] > Tptp_pW_threshold) |
+        (subscan_stats['Qstd'] > median_Qstd * nstd_threshold) |
+        (subscan_stats['Ustd'] > median_Ustd * nstd_threshold) |
+        (np.abs(subscan_stats['Qkurt']) > kurt_threshold) |
+        (np.abs(subscan_stats['Ukurt']) > kurt_threshold) |
+        (np.abs(subscan_stats['Qskew']) > skew_threshold) |
+        (np.abs(subscan_stats['Uskew']) > skew_threshold)
+    )
+
+    badsubscan_flags = np.zeros((num_dets, aman.samps.count), dtype=bool)
+    for subscan_i, subscan in enumerate(subscan_indices):
+        badsubscan_flags[:, subscan[0]:subscan[1] + 1] = badsubscan_indicator[:, subscan_i, np.newaxis]
+    
+    # Detectors which are "bad" for > 50% of the the subscan duration
+    baddetector_flags = np.mean(badsubscan_flags, axis=1) > 0.5
+
+    badsubscan_flags = RangesMatrix.from_mask(badsubscan_flags)
+    baddetector_flags = Ranges.from_mask(baddetector_flags)
+
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {name} already exists in aman.flags")
+        aman.flags.wrap(name, badsubscan_flags)
+
+    return badsubscan_flags, baddetector_flags
+
+
+def whitenoi_fknee_cuts(aman, low_wn, high_wn, high_fk):
+    """
+    Evaluate white noise and fknee cuts based on provided boundaries.
+
+    Parameters:
+    aman : object
+        An object containing noise fit statistics and noise model coefficients.
+    low_wn : float or None
+        The lower boundary for white noise. If None, white noise flagging is skipped.
+    high_wn : float or None
+        The upper boundary for white noise. If None, white noise flagging is skipped.
+    high_fk : float or None
+        The upper boundary for fknee. If None, fknee flagging is skipped.
+
+    Returns:
+    tuple or None
+        A tuple containing flags for valid white noise and fknee if both boundaries are provided.
+        If only one boundary is provided, returns the corresponding flag.
+        If no boundaries are provided, returns None.
+    """
+    noise = aman.noise_fit_stats_signal.fit
+    fk = noise[:, 0]
+    wn = noise[:, 1]
+    if low_wn is None:
+        print(f"white noise boundaries are not defined, skipping.")
+        flag_valid_wn = None
+    else:
+        flag_valid_wn = (low_wn < wn * 1e6) & (wn * 1e6 < high_wn)
+    if high_fk is None:
+        print(f"fknee boundaries are not defined, skipping.")
+        flag_valid_fk = None
+    else:
+        flag_valid_fk = fk < high_fk
+    if low_wn is not None and high_fk is not None:
+        return flag_valid_wn, flag_valid_fk
+    elif low_wn is not None:
+        return flag_valid_wn
+    elif high_fk is not None:
+        return flag_valid_fk
+    else:
+        return None
