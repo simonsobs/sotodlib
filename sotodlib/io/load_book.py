@@ -111,7 +111,9 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         dets_req.extend([p[1] for p in pairs_req if p[0] == _ds])
     del pairs_req
 
-    file_map = db.get_files(obs_id, detsets=detsets_req)
+    # Don't pass a restriction of detsets here, as we need at least
+    # one result for some downstream processing.
+    file_map = db.get_files(obs_id)
     one_group = list(file_map.values())[0]  # [('file0', 0, 1000), ('file1', 1000, 2000), ...]
     
     # Figure out how many samples we're loading.
