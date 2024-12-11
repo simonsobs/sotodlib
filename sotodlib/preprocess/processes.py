@@ -1595,33 +1595,6 @@ class FocalplaneNanFlags(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
-class BadSubscanFlags(_Preprocess):
-    """Identifies and flags bad subscans.
-
-      Example config block::
-
-        - name : "bad_subscan_flags"
-          calc: 
-            merge: True
-            overwrite: True
-          save: True
-    
-    .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
-    """
-    name = "bad_subscan_flags"
-    
-    def calc_and_save(self, aman, proc_aman):
-        msk_ss, msk_det = tod_ops.flags.get_badsubscan_flags(aman, **self.calc_cfgs)
-        ss_aman = core.AxisManager(aman.dets, aman.samps)
-        ss_aman.wrap("bad_subscan_flags", msk_ss, [(0, 'dets'), (1, 'samps')])
-        self.save(proc_aman, ss_aman)
-    
-    def save(self, proc_aman, ss_aman): #, ssdet_aman):
-        if self.save_cfgs is None:
-            return
-        if self.save_cfgs:
-            proc_aman.wrap("badsubscan_flags", ss_aman)
-
 class NoiseFlags(_Preprocess):
     """Find detectors with anomalous white noise / fknee.
 
@@ -1718,6 +1691,5 @@ _Preprocess.register(UnionFlags)
 _Preprocess.register(RotateQU) 
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(BadSubscanFlags) 
 _Preprocess.register(NoiseFlags) 
 _Preprocess.register(PointingModel) 
