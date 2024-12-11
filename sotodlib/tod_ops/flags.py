@@ -942,13 +942,9 @@ def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='f
     # Available detectors in focalplane
     xi_nan = np.isnan(aman.focal_plane.xi)
     eta_nan = np.isnan(aman.focal_plane.eta)
+    gamma_nan = np.isnan(aman.focal_plane.gamma)
     x = Ranges(aman.samps.count)
-    msk_invalid_fp = RangesMatrix([
-        Ranges.ones_like(x) if Y else Ranges.zeros_like(x) 
-        for Y in flag_invalid_fp
-    ])
-    flag_valid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) == 0
-    flag_invalid_fp = ~flag_valid_fp
+    flag_invalid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) != 0
     msk_invalid_fp = RangesMatrix([Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in flag_invalid_fp])
     
     if merge:
