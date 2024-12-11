@@ -291,10 +291,9 @@ class DemodSignalMap(DemodSignal):
                 else: rot = None
                 if self.Nsplits == 1:
                     # this is the case with no splits
-                    flagnames = ['glitch_flags']
+                    cuts = obs.glitch_flags
                 else:
-                    flagnames = ['glitch_flags', split_labels[n_split]]
-                cuts = get_flags(obs, flagnames)
+                    cuts = obs.glitch_flags + obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
                     geom = self.rhs.geometry
