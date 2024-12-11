@@ -293,7 +293,8 @@ class DemodSignalMap(DemodSignal):
                     # this is the case with no splits
                     cuts = obs.flags.glitch_flags
                 else:
-                    cuts = obs.flags.glitch_flags + obs.preprocess.split_flags.cuts[split_labels[n_split]]
+                    # remember that the dets or samples you want to keep should be false, hence we negate
+                    cuts = obs.flags.glitch_flags + ~obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
                     geom = self.rhs.geometry
