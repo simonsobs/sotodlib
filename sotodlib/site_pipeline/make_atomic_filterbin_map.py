@@ -225,7 +225,6 @@ class ColoredFormatter(logging.Formatter):
             col = colors.reset
         return col + logging.Formatter.format(self, record) + colors.reset
 
-    
 class LogInfoFilter(logging.Filter):
     def __init__(self, rank=0):
         self.rank = rank

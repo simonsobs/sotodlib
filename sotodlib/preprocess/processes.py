@@ -15,6 +15,7 @@ from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
 
+
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
     All processing configs go to `fft_trim`
@@ -22,7 +23,6 @@ class FFTTrim(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
     name = "fft_trim"
-    
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
@@ -83,6 +83,7 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
             ufm = det.split('_')[2]
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
                                 psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
+
 
 class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
@@ -152,6 +153,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
             plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
+
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
@@ -225,6 +227,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
             plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
+
 class FixJumps(_Preprocess):
     """
     Repairs the jump heights given a set of jump flags and heights.
@@ -250,6 +253,7 @@ class FixJumps(_Preprocess):
         aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
             aman[self.signal], proc_aman[field].jump_flag.mask(),
             inplace=True, heights=proc_aman[field].jump_heights)
+
 
 class Jumps(_FracFlaggedMixIn, _Preprocess):
     """Run generic jump finding and fixing algorithm.
@@ -787,6 +791,7 @@ class Demodulate(_Preprocess):
             aman.restrict('samps', (aman.samps.offset + trim,
                                     aman.samps.offset + aman.samps.count - trim))
 
+
 class EstimateAzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
@@ -1092,6 +1097,7 @@ class HWPAngleModel(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("hwp_angle", hwp_angle_aman)
         
+
 class FourierFilter(_Preprocess):
     """
     Applies a fourier filter (defined in fft_ops) to the data.
@@ -1287,6 +1293,7 @@ class PCARelCal(_Preprocess):
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
