@@ -6,7 +6,6 @@ from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters
 import logging
-import so3g
 
 logger = logging.getLogger(__name__)
 

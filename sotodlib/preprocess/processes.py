@@ -1630,12 +1630,12 @@ class NoiseFlags(_Preprocess):
           save: True
           select: True
     
-    .. autofunction:: sotodlib.tod_ops.flags.whitenoi_fknee_cuts
+    .. autofunction:: sotodlib.tod_ops.flags.noise_fit_flags
     """
     name = "wn_fk_flags"
     
     def calc_and_save(self, aman, proc_aman):
-        mskwn, mskfk = tod_ops.flags.whitenoi_fknee_cuts(aman, **self.calc_cfgs)
+        mskwn, mskfk = tod_ops.flags.noise_fit_flags(aman, **self.calc_cfgs)
         calc_aman = core.AxisManager(aman.dets, aman.samps)
         calc_aman.wrap('wn_flags', mskwn)
         calc_aman.wrap('fknee_flags', mskfk)

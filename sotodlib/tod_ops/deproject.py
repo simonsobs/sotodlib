@@ -1,8 +1,5 @@
 """Module for deprojecting median Q/U from the data"""
 import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
 
 def deprojection(aman, signal):
     """

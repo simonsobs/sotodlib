@@ -1050,7 +1050,7 @@ def get_badsubscan_flags(aman, nstd_threshold=3.0, Tptp_pW_threshold=0.5, kurt_t
     return badsubscan_flags, baddetector_flags
 
 
-def whitenoi_fknee_cuts(aman, low_wn, high_wn, high_fk):
+def noise_fit_flags(aman, low_wn, high_wn, high_fk):
     """
     Evaluate white noise and fknee cuts based on provided boundaries.
 
