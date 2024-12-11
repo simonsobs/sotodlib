@@ -327,36 +327,37 @@ def main(config_file: str) -> None:
 
     # We open the data base for checking if we have maps already,
     # if we do we will not run them again.
-    if os.path.isfile(args.atomic_db) and not args.only_hits:
-        # open the connector, in reading mode only
-        conn = sqlite3.connect('./'+args.atomic_db)
-        cursor = conn.cursor()
-        keys_to_remove = []
-        # Now we have obslists and splits ready, we look through the database
-        # to remove the maps we already have from it
-        for key, value in obslists.items():
-            missing_split = False
-            for split_label in split_labels:
-                query_ = 'SELECT * from atomic where obs_id="%s" and\
-                telescope="%s" and freq_channel="%s" and wafer="%s" and\
-                split_label="%s"' % (
-                    value[0][0], obs_infos[value[0][3]].telescope, key[2],
-                    key[1], split_label)
-                res = cursor.execute(query_)
-                matches = res.fetchall()
-                if len(matches) == 0:
-                    # this means one of the requested splits is missing
-                    # in the data base
-                    missing_split = True
-                    break
-            if missing_split is False:
-                # this means we have all the splits we requested for the
-                # particular obs_id/telescope/freq/wafer
-                keys_to_remove.append(key)
-        for key in keys_to_remove:
-            obskeys.remove(key)
-            del obslists[key]
-        conn.close()  # I close since I only wanted to read
+    if isinstance(args.atomic_db, str):
+        if os.path.isfile(args.atomic_db) and not args.only_hits:
+            # open the connector, in reading mode only
+            conn = sqlite3.connect(args.atomic_db)
+            cursor = conn.cursor()
+            keys_to_remove = []
+            # Now we have obslists and splits ready, we look through the database
+            # to remove the maps we already have from it
+            for key, value in obslists.items():
+                missing_split = False
+                for split_label in split_labels:
+                    query_ = 'SELECT * from atomic where obs_id="%s" and\
+                    telescope="%s" and freq_channel="%s" and wafer="%s" and\
+                    split_label="%s"' % (
+                        value[0][0], obs_infos[value[0][3]].telescope, key[2],
+                        key[1], split_label)
+                    res = cursor.execute(query_)
+                    matches = res.fetchall()
+                    if len(matches) == 0:
+                        # this means one of the requested splits is missing
+                        # in the data base
+                        missing_split = True
+                        break
+                if missing_split is False:
+                    # this means we have all the splits we requested for the
+                    # particular obs_id/telescope/freq/wafer
+                    keys_to_remove.append(key)
+            for key in keys_to_remove:
+                obskeys.remove(key)
+                del obslists[key]
+            conn.close()  # I close since I only wanted to read
 
     obslists_arr = [item for key, item in obslists.items()]
     tod_list = []  # this list will receive the outputs from read_tods
