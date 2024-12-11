@@ -656,7 +656,7 @@ class EstimateHWPSS(_Preprocess):
             plot_4f_2f_counts(aman, filename=filename.replace('{name}', f'{ufm}_4f_2f_counts'))
             plot_hwpss_fit_status(aman, proc_aman[self.calc_cfgs["hwpss_stats_name"]], filename=filename.replace('{name}', f'{ufm}_hwpss_stats'))
 
-    #@classmethod
+    @classmethod
     def gen_metric(cls, meta, proc_aman):
         """ Generate a QA metric for the coefficients of the HWPSS fit.
         Coefficient percentiles and mean are recorded for every mode and detset.
@@ -1260,7 +1260,7 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("pca_aman", pca_aman)
+            proc_aman.wrap(self.run_name, pca_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1313,11 +1313,11 @@ class PTPFlags(_Preprocess):
         ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, ptp_aman)
     
-    def save(self, proc_aman, dark_aman):
+    def save(self, proc_aman, calc_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", dark_aman)
+            proc_aman.wrap("ptp_flags", calc_aman)
     
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1412,7 +1412,7 @@ class SubtractT2P(_Preprocess):
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
     
-    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_leakage
+    .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
     """
     name = "subtract_t2p"
     
@@ -1487,53 +1487,68 @@ class UnionFlags(_Preprocess):
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
-class Deprojection(_Preprocess):
-    """A class to handle the deprojection process: rotating to and from telescope coordinates,
-       calculating the deprojected Q and U components, and saving the processed data.
+class RotateQU(_Preprocess):
+    """Rotate Q and U components to/from telescope coordinates.
 
-     Example config block::
+    Example config block::
 
-        - name : "deprojection"
-          process:
+        - name : "rotate_qu"
+            process:
             sign: 1 
             offset: 0 
-            update_focal_plane: False
-          calc: True
-          save: True
-    
-    Methods
-    -------
-    process(aman, proc_aman)
-        autofunction:: sotodlib.coords.demod.rotate_demodQU
-    calc_and_save(aman, proc_aman)
-        autofunction:: sotodlib.tod_ops.deproject.medQU_correct
+            update_focal_plane: True
+
+    .. autofunction:: sotodlib.coords.demod.rotate_demodQU
     """
-    name = "deprojection"
+    name = "rotate_qu"
     
     def process(self, aman, proc_aman):
         from sotodlib.coords import demod
-        rot_aman = demod.rotate_demodQU(aman, **self.process_cfgs)
-        if self.calc_cfgs is None:
-            # If no calculation configurations are provided, save the rotated data
-            self.save(proc_aman, rot_aman)
-        
+        demod.rotate_demodQU(aman, **self.process_cfgs)
+
+class SubtractQUCommonMode(_Preprocess):
+    """Subtract Q and U common mode.
+
+    Example config block::
+
+        - name : "subtract_qu_common_mode"
+          signal: "demodQ" 
+          wrap_name: "commonmode"
+          calc: True
+          save: True
+          process: True
+
+    .. autofunction:: sotodlib.tod_ops.deproject.medQU_correct
+    """
+    name = "subtract_qu_common_mode"
+
+    def __init__(self, step_cfgs):
+        self.signal_name = step_cfgs.get('signal', 'signal')
+        self.wrap_name = step_cfgs.get('wrap_name', 'commonmode')
+        self.run_name = f'{self.signal_name}_{self.wrap_name}'
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        if self.calc_cfgs is None:
-            self.calc_cfgs = {}
-        if self.calc_cfgs:
-            deproj_aman = core.AxisManager(aman.dets, aman.samps)
-            deproj_demodQ, deproj_demodU = tod_ops.deproject.medQU_correct(aman) #, **self.calc_cfgs)
-            deproj_aman.wrap("deproj_demodQ", deproj_demodQ, [(0, 'dets'), (1, 'samps')])
-            deproj_aman.wrap("deproj_demodU", deproj_demodU, [(0, 'dets'), (1, 'samps')])
-            self.save(proc_aman, deproj_aman)
-        
-    def save(self, proc_aman, deproj_aman):
+        coeffs, med = tod_ops.deproject.deprojection(aman, self.signal_name)
+        coeffs_aman = core.AxisManager(aman.samps)
+        coeffs_aman.wrap('coeffs', coeffs, [(0, 'samps')])
+        med_aman = core.AxisManager(aman.dets)
+        med_aman.wrap('med', med, [(0, 'dets')])
+        self.save(proc_aman, med_aman)
+        self.save(proc_aman, coeffs_aman)
+    
+    def save(self, proc_aman, calc_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("deproj", deproj_aman)
-
-class FocalplaneFlags(_Preprocess):
+            proc_aman.wrap(self.run_name, calc_aman)
+    
+    def process(self, aman, proc_aman):
+        tod_ops.deproject.medQU_correct(aman, self.signal_name, QUcoeffs=proc_aman[self.run_name]['coeffs'], \
+                                        QUmed=proc_aman[self.run_name]['med'])
+        
+class FocalplaneNanFlags(_Preprocess):
     """Find additional detectors which have nans 
        in their focal plane coordinates.
 
@@ -1652,17 +1667,14 @@ class PointingModel(_Preprocess):
 
         - name : "pointing_model"
           process: True
-          calc:
-            on_sign_ambiguous: 'fail'
-          save: True
           
-    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
+    .. autofunction:: sotodlib.coords.pointing_model.apply_pointing_model
     """
     name = "pointing_model"
-    
-    def calc_and_save(self, aman, proc_aman):
+
+    def process(self, aman, proc_aman):
         from sotodlib.coords import pointing_model
-        if self.calc_cfgs:
+        if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
             
 _Preprocess.register(SplitFlags)
@@ -1696,8 +1708,9 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(Deprojection) 
-_Preprocess.register(FocalplaneFlags) 
+_Preprocess.register(RotateQU) 
+_Preprocess.register(SubtractQUCommonMode) 
+_Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(BadSubscanFlags) 
 _Preprocess.register(NoiseFlags) 
 _Preprocess.register(PointingModel) 
