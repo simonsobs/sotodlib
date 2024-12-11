@@ -9,10 +9,11 @@ import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
-                                    sparse_to_ranges_matrix)
+                                   sparse_to_ranges_matrix)
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
+from ..core import AxisManager
 
 
 class FFTTrim(_Preprocess):
@@ -21,7 +22,7 @@ class FFTTrim(_Preprocess):
 
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
-    name = "fft_trim"    
+    name = "fft_trim"
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
@@ -31,7 +32,7 @@ class Detrend(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.detrend_tod
     """
     name = "detrend"
-
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
 
@@ -50,7 +51,7 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
     """
     name = "det_bias_flags"
     _influx_field = "det_bias_flags_frac"
-
+    
     def calc_and_save(self, aman, proc_aman):
         dbc_aman = tod_ops.flags.get_det_bias_flags(aman, merge=False, full_output=True,
                                                     **self.calc_cfgs)
@@ -108,12 +109,12 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
     """
     name = "trends"
     _influx_field = "trend_flags_frac"
-
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-    
+
     def calc_and_save(self, aman, proc_aman):
         _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
@@ -184,7 +185,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """
     name = "glitches"
     _influx_field = "glitch_flags_frac"
-
+    
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
@@ -241,7 +242,7 @@ class FixJumps(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.jumps.jumpfix_subtract_heights
     """
     name = "fix_jumps"
-
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
 
@@ -283,7 +284,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
     name = "jumps"
     _influx_field = "jump_flags_frac"
-
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
 
@@ -493,7 +494,7 @@ class Noise(_Preprocess):
 
     """
     name = "noise"
-
+    
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
@@ -591,12 +592,12 @@ class Calibrate(_Preprocess):
 
     """
     name = "calibrate"
-
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-
+    
     def process(self, aman, proc_aman):
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
@@ -636,7 +637,7 @@ class EstimateHWPSS(_Preprocess):
     name = "estimate_hwpss"
     _influx_field = "hwpss_coeffs"
     _influx_percentiles = [0, 50, 75, 90, 95, 100]
-
+    
     def calc_and_save(self, aman, proc_aman):
         hwpss_stats = hwp.get_hwpss(aman, **self.calc_cfgs)
         self.save(proc_aman, hwpss_stats)
@@ -745,7 +746,7 @@ class SubtractHWPSS(_Preprocess):
     .. autofunction:: sotodlib.hwp.hwp.subtract_hwpss
     """
     name = "subtract_hwpss"
-
+    
     def __init__(self, step_cfgs):
         self.hwpss_stats = step_cfgs.get('hwpss_stats', 'hwpss_stats')
 
@@ -770,7 +771,7 @@ class Apodize(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.apodize.apodize_cosine
     """
     name = "apodize"
-
+    
     def process(self, aman, proc_aman):
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
 
@@ -780,7 +781,7 @@ class Demodulate(_Preprocess):
     .. autofunction:: sotodlib.hwp.hwp.demod_tod
     """
     name = "demodulate"
-
+    
     def process(self, aman, proc_aman):
         hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
         if self.process_cfgs.get("trim_samps"):
@@ -812,7 +813,7 @@ class EstimateAzSS(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"
-
+    
     def calc_and_save(self, aman, proc_aman):
         calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, calc_aman)
@@ -842,7 +843,7 @@ class GlitchFill(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
     name = "glitchfill"
-
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.flag_aman = step_cfgs.get('flag_aman', 'glitches')
@@ -895,7 +896,7 @@ class FlagTurnarounds(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
-
+    
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         
@@ -917,7 +918,7 @@ class SSOFootprint(_Preprocess):
     .. autofunction:: sotodlib.obs_ops.sources.get_sso
     """
     name = 'sso_footprint'
-
+    
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs.get("source_list", None):
             ssos = self.calc_cfgs["source_list"]
@@ -974,7 +975,7 @@ class DarkDets(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
     """
     name = "dark_dets"
-
+    
     def calc_and_save(self, aman, proc_aman):
         mskdarks = tod_ops.flags.get_dark_dets(aman, merge=False)
         
@@ -1076,7 +1077,7 @@ class HWPAngleModel(_Preprocess):
     .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
     """
     name = "hwp_angle_model"
-
+    
     def process(self, aman, proc_aman):
         if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
             aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
@@ -1126,6 +1127,7 @@ class FourierFilter(_Preprocess):
     See :ref:`fourier-filters` documentation for more details.
     """
     name = 'fourier_filter'
+    
     def __init__(self, step_cfgs):
         self.signal_name = step_cfgs.get('signal_name', 'signal')
         # By default signal is overwritted by the filtered signal
@@ -1196,6 +1198,7 @@ class PCARelCal(_Preprocess):
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
+    
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.run = step_cfgs.get('pca_run', 'run1')
@@ -1309,7 +1312,7 @@ class PTPFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_ptp_flags
     """
     name = "ptp_flags"
-
+    
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
         
@@ -1317,11 +1320,11 @@ class PTPFlags(_Preprocess):
         ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, ptp_aman)
     
-    def save(self, proc_aman, dark_aman):
+    def save(self, proc_aman, calc_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", dark_aman)
+            proc_aman.wrap("ptp_flags", calc_aman)
     
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1349,7 +1352,7 @@ class InvVarFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_inv_var_flags
     """
     name = "inv_var_flags"
-
+    
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
         
@@ -1395,7 +1398,7 @@ class EstimateT2P(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
     """
     name = "estimate_t2p"
-
+    
     def calc_and_save(self, aman, proc_aman):
         t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
         self.save(proc_aman, t2p_aman)
@@ -1419,10 +1422,11 @@ class SubtractT2P(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
     """
     name = "subtract_t2p"
-
+    
     def process(self, aman, proc_aman):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
+
 class SplitFlags(_Preprocess):
     """Get flags used for map splitting/bundling.
 
@@ -1490,6 +1494,177 @@ class UnionFlags(_Preprocess):
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
+class RotateQU(_Preprocess):
+    """Rotate Q and U components to/from telescope coordinates.
+
+    Example config block::
+
+        - name : "rotate_qu"
+            process:
+            sign: 1 
+            offset: 0 
+            update_focal_plane: True
+
+    .. autofunction:: sotodlib.coords.demod.rotate_demodQU
+    """
+    name = "rotate_qu"
+    
+    def process(self, aman, proc_aman):
+        from sotodlib.coords import demod
+        demod.rotate_demodQU(aman, **self.process_cfgs)
+
+class SubtractQUCommonMode(_Preprocess):
+    """Subtract Q and U common mode.
+
+    Example config block::
+
+        - name : "subtract_qu_common_mode"
+          signal: "demodQ" 
+          wrap_name: "commonmode"
+          calc: True
+          save: True
+          process: True
+
+    .. autofunction:: sotodlib.tod_ops.deproject.medQU_correct
+    """
+    name = "subtract_qu_common_mode"
+
+    def __init__(self, step_cfgs):
+        self.signal_name = step_cfgs.get('signal', 'signal')
+        self.wrap_name = step_cfgs.get('wrap_name', 'commonmode')
+        self.run_name = f'{self.signal_name}_{self.wrap_name}'
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        coeffs, med = tod_ops.deproject.deprojection(aman, self.signal_name)
+        coeffs_aman = core.AxisManager(aman.samps)
+        coeffs_aman.wrap('coeffs', coeffs, [(0, 'samps')])
+        med_aman = core.AxisManager(aman.dets)
+        med_aman.wrap('med', med, [(0, 'dets')])
+        self.save(proc_aman, med_aman)
+        self.save(proc_aman, coeffs_aman)
+    
+    def save(self, proc_aman, calc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.run_name, calc_aman)
+    
+    def process(self, aman, proc_aman):
+        tod_ops.deproject.medQU_correct(aman, self.signal_name, QUcoeffs=proc_aman[self.run_name]['coeffs'], \
+                                        QUmed=proc_aman[self.run_name]['med'])
+        
+class FocalplaneNanFlags(_Preprocess):
+    """Find additional detectors which have nans 
+       in their focal plane coordinates.
+
+    Saves results in proc_aman under the "fp_flags" field. 
+
+     Example config block::
+
+        - name : "fp_flags"
+          signal: "signal" # optional
+          calc: True
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_focalplane_flags
+    """
+    name = "fp_flags"
+    
+    def calc_and_save(self, aman, proc_aman):
+        mskfp = tod_ops.flags.get_focalplane_flags(aman, merge=False)
+        
+        fp_aman = core.AxisManager(aman.dets, aman.samps)
+        fp_aman.wrap('darks', mskfp, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, fp_aman)
+    
+    def save(self, proc_aman, fp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("fp_flags", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.fp_flags.fp_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
+class BadSubscanFlags(_Preprocess):
+    """Identifies and flags bad subscans.
+
+      Example config block::
+
+        - name : "bad_subscan_flags"
+          calc: 
+            merge: True
+            overwrite: True
+          save: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
+    """
+    name = "bad_subscan_flags"
+    
+    def calc_and_save(self, aman, proc_aman):
+        msk_ss, msk_det = tod_ops.flags.get_badsubscan_flags(aman, **self.calc_cfgs)
+        ss_aman = core.AxisManager(aman.dets, aman.samps)
+        ss_aman.wrap("bad_subscan_flags", msk_ss, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, ss_aman)
+    
+    def save(self, proc_aman, ss_aman): #, ssdet_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("badsubscan_flags", ss_aman)
+
+class NoiseFlags(_Preprocess):
+    """Find detectors with anomalous white noise / fknee.
+
+    Saves results in proc_aman under the "wn_flags" field. 
+
+     Example config block::
+
+        - name: "wn_fk_flags"
+          calc:
+            low_wn: 5
+            high_wn: 60
+            high_fk: 6
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.noise_fit_flags
+    """
+    name = "wn_fk_flags"
+    
+    def calc_and_save(self, aman, proc_aman):
+        mskwn, mskfk = tod_ops.flags.noise_fit_flags(aman, **self.calc_cfgs)
+        calc_aman = core.AxisManager(aman.dets, aman.samps)
+        calc_aman.wrap('wn_flags', mskwn)
+        calc_aman.wrap('fknee_flags', mskfk)
+        self.save(proc_aman, calc_aman)
+    
+    def save(self, proc_aman, calc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("noise_flags", calc_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if "wn_flags" in proc_aman:
+            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.wn_flags])
+        if "fknee_flags" in proc_aman:
+            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.fknee_flags])
+        return meta
+    
 class PointingModel(_Preprocess):
     """Apply pointing model to the TOD.
 
@@ -1540,4 +1715,9 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(PointingModel)
+_Preprocess.register(RotateQU) 
+_Preprocess.register(SubtractQUCommonMode) 
+_Preprocess.register(FocalplaneNanFlags) 
+_Preprocess.register(BadSubscanFlags) 
+_Preprocess.register(NoiseFlags) 
+_Preprocess.register(PointingModel) 
