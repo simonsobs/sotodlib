@@ -13,7 +13,7 @@ import so3g.proj
 from .. import core
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional, get_flags
+from .utilities import import_optional
 from .noise_model import NmatWhite
 
 hp = import_optional('healpy')
