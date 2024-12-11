@@ -865,7 +865,7 @@ class FlagTurnarounds(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
     name = 'flag_turnarounds'
-    
+
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
@@ -879,7 +879,7 @@ class FlagTurnarounds(_Preprocess):
             calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
             calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
             calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
-            
+
         if self.calc_cfgs['method'] == 'az':
             ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
             calc_aman = core.AxisManager(aman.dets, aman.samps)
@@ -898,7 +898,7 @@ class FlagTurnarounds(_Preprocess):
 
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
-        
+
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
         All process configs go to `sotodlib.tod_ops.sub_polyf`.
@@ -1095,7 +1095,7 @@ class HWPAngleModel(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("hwp_angle", hwp_angle_aman)
-        
+
 
 class FourierFilter(_Preprocess):
     """
@@ -1275,7 +1275,7 @@ class PCARelCal(_Preprocess):
         keep = ~proc_aman[self.run_name]['pca_det_mask']
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
-    
+
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
@@ -1364,7 +1364,7 @@ class InvVarFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("inv_var_flags", dark_aman)
-    
+
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
@@ -1373,7 +1373,7 @@ class InvVarFlags(_Preprocess):
         keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
-    
+
 class EstimateT2P(_Preprocess):
     """Estimate T to P leakage coefficients.
 
@@ -1571,7 +1571,7 @@ class FocalplaneNanFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_focalplane_flags
     """
     name = "fp_flags"
-    
+
     def calc_and_save(self, aman, proc_aman):
         mskfp = tod_ops.flags.get_focalplane_flags(aman, merge=False)
         
