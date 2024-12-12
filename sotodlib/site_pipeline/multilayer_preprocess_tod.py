@@ -277,6 +277,15 @@ def main(configs_init: str,
                                    planet_obs=planet_obs)
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
+
+    # clean up lingering files from previous incomplete runs
+    for obs in obs_list:
+        obs_id = obs['obs_id']
+        pp_util.save_group_and_cleanup(obs_id, configs_init, context_init,
+                                       subdir='temp', remove=overwrite)
+        pp_util.save_group_and_cleanup(obs_id, configs_proc, context_proc,
+                                       subdir='temp_proc', remove=overwrite)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
@@ -365,11 +374,11 @@ def main(configs_init: str,
                 logger.info(f'Processing future result db_dataset: {db_datasets_init}')
                 if db_datasets_init:
                     for db_dataset in db_datasets_init:
-                        pp_util.cleanup_mandb(err, db_dataset, configs_init, logger)
+                        pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
 
                 logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
                 for db_dataset in db_datasets_proc:
-                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger)
+                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)

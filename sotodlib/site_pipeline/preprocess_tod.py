@@ -131,7 +131,7 @@ def preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         dets = {gb:gg for gb, gg in zip(group_by, group)}
         try:
-            aman = context.get_obs(obs_id, dets={gb:g for gb, g in zip(group_by, group)})
+            aman = context.get_obs(obs_id, dets=dets)
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             proc_aman, success = pipe.run(aman)
@@ -222,7 +222,8 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     """
     configs, context = pp_util.get_preprocess_context(configs, context)
     meta = pp_util.load_preprocess_det_select(obs_id, configs=configs,
-                                              context=context, dets=dets, meta=meta)
+                                              context=context, dets=dets,
+                                              meta=meta)
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -239,6 +240,7 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         demod_mm.from_map(aman, sim_map, wrap=True, modulated=modulated)
         pipe.run(aman, aman.preprocess, sim=True)
         return aman
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -321,14 +323,23 @@ def main(
     obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
                                    planet_obs=planet_obs)
+
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
+
+    # clean up lingering files from previous incomplete runs
+    for obs in obs_list:
+        obs_id = obs['obs_id']
+        pp_util.save_group_and_cleanup(obs_id, configs, context,
+                                       subdir='temp', remove=overwrite)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
-        run_list = [ (o,None) for o in obs_list]
-        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+        for obs in obs_list:
+            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
+            run_list.append( (obs, groups) )# = [ (o, groups) for o in obs_list]
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
