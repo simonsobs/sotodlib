@@ -390,6 +390,44 @@ def plot_trending_flags(aman, trend_aman, filename='./trending_flags.png'):
     os.makedirs(head_tail[0], exist_ok=True)
     plt.savefig(filename)
 
+def plot_signal(aman, signal=None, xx=None, signal_name="signal", x_name="timestamps", plot_ds_factor=50, plot_ds_factor_dets=None, xlim=None, alpha=0.2, yscale='linear', y_unit=None, filename="./signal.png"):
+    from operator import attrgetter
+    if plot_ds_factor_dets is None:
+        plot_ds_factor_dets = plot_ds_factor
+    if signal is None:
+        signal = attrgetter(signal_name)(aman)
+    if xx is None:
+        xx = attrgetter(x_name)(aman)
+    yy = signal[::plot_ds_factor_dets, 1::plot_ds_factor].copy() # (dets, samps); (dets, nusamps); (dets, nusamps, subscans)
+    xx = xx[1::plot_ds_factor].copy() # (samps); (nusamps)
+    if x_name == "timestamps":
+        xx -= xx[0]
+    if yy.ndim > 2: # Flatten subscan axis into dets
+        yy = yy.swapaxes(1,2).reshape(-1, yy.shape[1])
+
+    if xlim is not None:
+        xinds = np.logical_and(xx >= xlim[0], xx <= xlim[1])
+        xx = xx[xinds]
+        yy = yy[:,xinds]
+
+    fig, ax = plt.subplots(1, 1, figsize=(6.4, 4.8))
+    ax.plot(xx, yy.T, color='k', alpha=0.2)
+    ax.set_yscale(yscale)
+    if "freqs" in x_name:
+        ax.set_xlabel("freq [Hz]")
+    else:
+        ax.set_xlabel(f"{x_name} [s]")
+    y_unit = "" if y_unit is None else f" [{y_unit}]"
+    ax.set_ylabel(f"{signal_name.replace('.Pxx', '')}{y_unit}")
+    plt.suptitle(f"{aman.obs_info.obs_id}, dT = {np.ptp(aman.timestamps)/60:.1f} min")
+    plt.tight_layout()
+    head_tail = os.path.split(filename)
+    os.makedirs(head_tail[0], exist_ok=True)
+    plt.savefig(filename)
+
+def plot_psd(aman, signal=None, xx=None, signal_name="psd.Pxx", x_name="psd.freqs", plot_ds_factor=4, plot_ds_factor_dets=20, xlim=None, alpha=0.2, yscale='log', y_unit=None, filename="./psd.png"):
+    return plot_signal(aman, signal, xx, signal_name, x_name, plot_ds_factor, plot_ds_factor_dets, xlim, alpha, yscale, y_unit, filename)
+
 def plot_signal_diff(aman, flag_aman, flag_type="glitches", flag_threshold=10, plot_ds_factor=50, filename="./glitch_signal_diff.png"):
     """
     Function for plotting the difference in signal before and after cuts from either glitches or jumps.
