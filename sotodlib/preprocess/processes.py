@@ -1214,8 +1214,6 @@ class PCARelCal(_Preprocess):
 
             if self.calc_cfgs.get("trim_samps") is not None:
                 trim = self.calc_cfgs["trim_samps"]
-                aman.restrict('samps', (aman.samps.offset + trim,
-                                        aman.samps.offset + aman.samps.count - trim))
                 proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                              proc_aman.samps.offset + proc_aman.samps.count - trim))
                 filt_aman.restrict('samps', (filt_aman.samps.offset + trim,
@@ -1225,7 +1223,8 @@ class PCARelCal(_Preprocess):
 
         bands = np.unique(aman.det_info.wafer.bandpass)
         bands = bands[bands != 'NC']
-        rc_aman = core.AxisManager(aman.dets, aman.samps)
+        # align samps w/ proc_aman to include samps restriction when loading back from db.
+        rc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
         pca_det_mask = np.full(aman.dets.count, False, dtype=bool)
         relcal = np.zeros(aman.dets.count)
         pca_weight0 = np.zeros(aman.dets.count)
