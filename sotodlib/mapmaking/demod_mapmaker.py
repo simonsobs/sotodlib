@@ -13,7 +13,7 @@ import so3g.proj
 from .. import core
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional, get_flags
+from .utilities import import_optional
 from .noise_model import NmatWhite
 
 hp = import_optional('healpy')
@@ -291,10 +291,10 @@ class DemodSignalMap(DemodSignal):
                 else: rot = None
                 if self.Nsplits == 1:
                     # this is the case with no splits
-                    flagnames = ['glitch_flags']
+                    cuts = obs.flags.glitch_flags
                 else:
-                    flagnames = ['glitch_flags', split_labels[n_split]]
-                cuts = get_flags(obs, flagnames)
+                    # remember that the dets or samples you want to keep should be false, hence we negate
+                    cuts = obs.flags.glitch_flags + ~obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
                     geom = self.rhs.geometry
