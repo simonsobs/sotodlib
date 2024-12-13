@@ -87,7 +87,7 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
         Other fields conatain info for obs-level splits.
     '''
     # Set default set of splits
-    default_cfg = {'high_gain': 0.115, 'high_noise': 3.5e-5, 'high_tau': 1.5e-3,
+    default_cfg = {'high_gain': 0.115, 'high_tau': 1.5e-3,
                    'det_A': 'A', 'pol_angle': 35, 'det_top': 'B', 'right_focal_plane': 0,
                    'top_focal_plane': 0, 'central_pixels': 0.071 }
     if split_cfg is None:
@@ -104,10 +104,6 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
     fm.wrap_dets('high_gain', aman.det_cal.phase_to_pW > split_cfg['high_gain'])
     fm.wrap_dets('low_gain', aman.det_cal.phase_to_pW <= split_cfg['high_gain'])
     split_aman.wrap('gain_avg', np.nanmean(aman.det_cal.phase_to_pW))
-    # Noise split
-    fm.wrap_dets('high_noise', proc_aman.noiseQ_fit.fit[:,1] > split_cfg['high_noise'])
-    fm.wrap_dets('low_noise', proc_aman.noiseQ_fit.fit[:,1] <= split_cfg['high_noise'])
-    split_aman.wrap('noise_avg', np.nanmean(proc_aman.noiseQ_fit.fit[:,1]))
     # Time constant split
     fm.wrap_dets('high_tau', aman.det_cal.tau_eff > split_cfg['high_tau'])
     fm.wrap_dets('low_tau', aman.det_cal.tau_eff <= split_cfg['high_tau'])
@@ -142,6 +138,15 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
                 split_aman.wrap(f'{k}_threshold', split_cfg[k])
             split_aman.wrap('cuts', fm)
             return split_aman
+
+    # This one is a bit funky to be forcing it to be noiseQ_fit, and units matter!
+    if 'noiseQ_fit' in proc_aman:
+        # Noise split
+        if not 'high_noise' in split_cfg:
+            split_cfg['high_noise'] = 3.5e-5
+        fm.wrap_dets('high_noise', proc_aman.noiseQ_fit.fit[:,1] > split_cfg['high_noise'])
+        fm.wrap_dets('low_noise', proc_aman.noiseQ_fit.fit[:,1] <= split_cfg['high_noise'])
+        split_aman.wrap('noise_avg', np.nanmean(proc_aman.noiseQ_fit.fit[:,1]))
 
     if 't2p' in proc_aman:
         # T2P Leakage split
