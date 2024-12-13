@@ -447,8 +447,9 @@ def make_demod_map(context, obslist, noise_model, info,
         Noise model to pass to DemodMapmaker.
     info : list
         Information for the database, will be written as a .hdf file.
-    preprocess_config : dict
-        Dictionary with the config yaml file for the preprocess database.
+    preprocess_config : list of dict
+        List of dictionaries with the config yaml file for the preprocess database.
+        If two, then a multilayer preprocessing is to be used.
     prefix : str
         Prefix for the output files
     shape : tuple, optional
@@ -508,14 +509,24 @@ def make_demod_map(context, obslist, noise_model, info,
     errors = [] ; outputs = []; # PENDING: do an allreduce of these.
                                 # not needed for atomic maps, but needed for
                                 # depth-1 maps
+    if len(preprocess_config)==1:
+        preproc_init = preprocess_config[0]
+        preproc_proc = None
+    else:
+        preproc_init = preprocess_config[0]
+        preproc_proc = preprocess_config[1]
+
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
-        error, output, obs = preprocess_util.preproc_or_load_group(obs_id,
-                            configs=preprocess_config,
-                            dets={'wafer_slot':detset, 'wafer.bandpass':band}, 
-                            logger=L, context=context, overwrite=False)
-        errors.append(error) ; outputs.append(output) ;
+        error, output_init, output_proc, obs = preprocess_util.preproc_or_load_group(obs_id,
+                                                configs_init=preproc_init,
+                                                configs_proc=preproc_proc,
+                                                dets={'wafer_slot':detset, 'wafer.bandpass':band},
+                                                logger=L,
+                                                context_init=context, context_proc=context,
+                                                overwrite=False)
+        errors.append(error) ; outputs.append((output_init, output_proc)) ;
         if error not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
             continue

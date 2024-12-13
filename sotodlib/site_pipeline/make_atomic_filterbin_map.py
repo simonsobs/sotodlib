@@ -30,7 +30,9 @@ class Cfg:
     context: str
         Path to context file
     preprocess_config: str
-        Path to config file to run the preprocessing pipeline
+        Path to config file(s) to run the preprocessing pipeline.
+        If 2 files, representing 2 layers of preprocessing, they
+        should be separated by a comma.
     area: str
         WCS kernel for rectangular pixels
     nside: int
@@ -286,9 +288,13 @@ def main(config_file: str) -> None:
     recenter = None
     if args.center_at:
         recenter = mapmaking.parse_recentering(args.center_at)
-    preprocess_config = yaml.safe_load(open(args.preprocess_config, 'r'))
-    errlog = os.path.join(os.path.dirname(
-        preprocess_config['archive']['index']), 'errlog.txt')
+    preprocess_config_str = [s.strip() for s in args.preprocess_config.split(",")]
+    preprocess_config = [] ; errlog = []
+    for preproc_cf in preprocess_config_str:
+        preproc_local = yaml.safe_load(open(preproc_cf, 'r'))
+        preprocess_config.append( preproc_local )
+        errlog.append( os.path.join(os.path.dirname(
+            preproc_local['archive']['index']), 'errlog.txt') )
 
     multiprocessing.set_start_method('spawn')
     if (args.update_delay is not None):
@@ -373,7 +379,8 @@ def main(config_file: str) -> None:
             try:
                 tod_list.append(future.result())
             except Exception as e:
-                future_write_to_log(e, errlog)
+                # if read_tods fails for some reason we log into the first preproc DB
+                future_write_to_log(e, errlog[0])
                 continue
             futures.remove(future)
     # flatten the list of lists
@@ -458,8 +465,9 @@ def main(config_file: str) -> None:
                 continue
             futures.remove(future)
             for ii in range(len(errors)):
-                preprocess_util.cleanup_mandb(errors[ii], outputs[ii],
-                                              preprocess_config, L)
+                for idx_prepoc in range(len(preprocess_config)):
+                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc],
+                                              preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
 
