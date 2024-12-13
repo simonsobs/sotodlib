@@ -270,7 +270,6 @@ def main(config_file: str) -> None:
     ch.addFilter(LogInfoFilter())
     L.addHandler(ch)
 
-    warnings.simplefilter('ignore')
     comm = mpi.FAKE_WORLD  # Fake communicator since we won't use MPI
     verbose = args.verbose - args.quiet
     if args.area is not None:
@@ -300,6 +299,10 @@ def main(config_file: str) -> None:
     if (args.update_delay is not None):
         min_ctime = int(time.time()) - args.update_delay*86400
         args.query += f" and timestamp>={min_ctime}"
+
+    # Check for map data type
+    if args.dtype_map == 'float32' or args.dtype_map == 'single':
+        warnings.warn("You are using single precision for maps, we advice to use double precision")
 
     context_obj = Context(args.context)
     # obslists is a dict, obskeys is a list, periods is an array, only rank 0
