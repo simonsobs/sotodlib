@@ -457,7 +457,7 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         dbix = {'obs:obs_id':obs_id}
         for gb, g in zip(group_by, cur_groups[0]):
             dbix[f'dets:{gb}'] = g
-        logger.info(dbix)
+        logger.info(f'find_db found: {dbix}')
         if len(db.inspect(dbix)) == 0:
             dbexist = False
     else:
@@ -544,6 +544,9 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
         Optional. Subdirectory to save the output files into.  If it does not exist, it is created.
     logger: PythonLogger
         Optional. Logger object or None will generate a new one.
+    remove: bool
+        Optional. Default is False. Whether to remove a file if found.
+        Used when ``overwrite`` is True in driving functions.
     """
 
     if logger is None:
