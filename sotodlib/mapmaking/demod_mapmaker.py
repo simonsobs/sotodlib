@@ -493,7 +493,7 @@ def make_demod_map(context, obslist, noise_model, info,
         List of outputs from preprocess database. To be used in cleanup_mandb.
     """
     from ..preprocess import preprocess_util
-    context = core.Context(context)
+    #context = core.Context(context)
     if L is None:
         L = preprocess_util.init_logger("Demod filterbin mapmaking")
     pre = "" if tag is None else tag + " "
@@ -524,7 +524,6 @@ def make_demod_map(context, obslist, noise_model, info,
                                                 configs_proc=preproc_proc,
                                                 dets={'wafer_slot':detset, 'wafer.bandpass':band},
                                                 logger=L,
-                                                context_init=context, context_proc=context,
                                                 overwrite=False)
         errors.append(error) ; outputs.append((output_init, output_proc)) ;
         if error not in [None,'load_success']:

@@ -56,6 +56,8 @@ class Cfg:
         Map without demodulation (e.g. with a static HWP)
     only_hits: bool
         Only create a hits map
+    all_splits: bool
+        If True, map all implemented splits
     det_in_out: bool
         Make focal plane split: inner vs outer detector
     det_left_right: bool
@@ -102,6 +104,7 @@ class Cfg:
         comps: str = 'TQU',
         singlestream: bool = False,
         only_hits: bool = False,
+        all_splits: bool = False,
         det_in_out: bool = False,
         det_left_right: bool = False,
         det_upper_lower: bool = False,
@@ -135,6 +138,7 @@ class Cfg:
         self.comps = comps
         self.singlestream = singlestream
         self.only_hits = only_hits
+        self.all_splits = all_splits
         self.det_in_out = det_in_out
         self.det_left_right = det_left_right
         self.det_upper_lower = det_upper_lower
@@ -319,6 +323,8 @@ def main(config_file: str) -> None:
     cwd = os.getcwd()
 
     split_labels = []
+    if args.all_splits:
+        raise ValueError('all_splits not implemented yet')
     if args.det_in_out:
         split_labels.append('det_in')
         split_labels.append('det_out')
@@ -400,6 +406,14 @@ def main(config_file: str) -> None:
                 subshape = shape
                 subwcs = wcs
                 subgeoms.append((subshape, subwcs))
+
+    # clean up lingering files from previous incomplete runs
+    for obs in obslists_arr:
+        obs_id = obs[0][0]
+        for preproc_cfg in preprocess_config:
+            preprocess_util.save_group_and_cleanup(obs_id, preproc_cfg,
+                                       subdir='temp', remove=False)
+
     run_list = []
     for oi in range(len(my_tods)):
         # tod_list[oi].obslist[0] is the old obslist
