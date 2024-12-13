@@ -156,12 +156,9 @@ def preprocess_tod(obs_id,
             continue
 
         outputs_grp = pp_util.save_group(obs_id, configs, dets, context, subdir='temp')
-        if overwrite or not os.path.exists(outputs_grp['temp_file']):
-            # try to allow for individual group files to already exist
-            logger.info(f"Saving data to {outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']}")
-            proc_aman.save(outputs_grp['temp_file'], outputs_grp['db_data']['dataset'], overwrite)
-        else:
-            logger.info(f"{outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']} already exists.")
+        logger.info(f"Saving data to {outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']}")
+        proc_aman.save(outputs_grp['temp_file'], outputs_grp['db_data']['dataset'], overwrite)
+
         if run_parallel:
             outputs.append(outputs_grp)
         else:

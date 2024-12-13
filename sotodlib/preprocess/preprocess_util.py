@@ -401,7 +401,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
         aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'], logger=logger):
+        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
+                           logger=logger):
             aman = context_init.get_obs(meta_proc, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
@@ -409,6 +410,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=meta_proc)
+
             aman.preprocess.merge(proc_aman.preprocess)
 
             pipe_proc.run(aman, aman.preprocess)
@@ -709,13 +711,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
                 return error, [errmsg, tb], [errmsg, tb], None
+
             if configs_proc is None:
                 error = 'load_success'
                 return error, [obs_id, dets], [obs_id, dets], aman
             else:
                 try:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
-
+                    init_fields = aman.preprocess._fields.copy()
                     logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                     # pipeline for init config
                     pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
@@ -730,10 +733,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                     aman.wrap('tags', tags_proc)
 
                     proc_aman, success = pipe_proc.run(aman)
-                    proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
 
-                    logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                    proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                    # remove fields found in aman.preprocess from proc_aman
+                    for fld_init in init_fields:
+                        if fld_init in proc_aman:
+                            proc_aman.move(fld_init, None)
+
+                    proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
 
                 except Exception as e:
                     error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
@@ -745,7 +751,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                     # If a single group fails we don't log anywhere just mis an entry in the db.
                     return success, [obs_id, dets], [obs_id, dets], None
 
-                return success, [obs_id, dets], outputs_proc, aman
+                logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
+                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+
+                return error, [obs_id, dets], outputs_proc, aman
     else:
         # pipeline for init config
         logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
@@ -775,6 +784,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
         else:
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+                init_fields = aman.preprocess._fields.copy()
                 logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                 # pipeline for processing config
                 pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
@@ -786,8 +796,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 aman.wrap('tags', tags_proc)
 
                 proc_aman, success = pipe_proc.run(aman)
+
+                # remove fields found in aman.preprocess from proc_aman
+                for fld_init in init_fields:
+                    if fld_init in proc_aman:
+                        proc_aman.move(fld_init, None)
+
                 proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
-                aman.preprocess.merge(proc_aman)
 
             except Exception as e:
                 error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
@@ -795,11 +810,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
                 return error, [errmsg, tb], [errmsg, tb], None
+            if success != 'end':
+                # If a single group fails we don't log anywhere just mis an entry in the db.
+                return success, [obs_id, dets], [obs_id, dets], None
 
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
             proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-            return success, outputs_init, outputs_proc, aman
+            return error, outputs_init, outputs_proc, aman
 
 
 def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):

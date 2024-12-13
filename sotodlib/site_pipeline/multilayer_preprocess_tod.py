@@ -128,6 +128,11 @@ def multilayer_preprocess_tod(obs_id,
             if error is None:
                 outputs_init.append(outputs_grp_init)
 
+            init_fields = aman.preprocess._fields.copy()
+
+            outputs_grp_proc = pp_util.save_group(obs_id, configs_proc, dets,
+                                      context_proc, subdir='temp_proc')
+
             # tags from context proc
             tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             if "tags" in aman._fields:
@@ -138,6 +143,11 @@ def multilayer_preprocess_tod(obs_id,
             logger.info(f"Beginning processing pipeline for {obs_id}:{group}")
             proc_aman, success = pipe_proc.run(aman)
             proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_init))
+
+            # remove fields found in aman.preprocess from proc_aman
+            for fld_init in init_fields:
+                if fld_init in proc_aman:
+                    proc_aman.move(fld_init, None)
 
         except Exception as e:
             errmsg = f'{type(e)}: {e}'
@@ -151,16 +161,8 @@ def multilayer_preprocess_tod(obs_id,
             n_fail += 1
             continue
 
-        outputs_grp_proc = pp_util.save_group(obs_id, configs_proc, dets,
-                                              context_proc, subdir='temp_proc')
-        logger.info(f"Saved data to {outputs_grp_proc['temp_file']}:{outputs_grp_proc['db_data']['dataset']}")
-
-        if overwrite or not os.path.exists(outputs_grp_proc['temp_file']):
-            # try to allow for individual group files to already exist
-            logger.info(f"Saving data to {outputs_grp_proc['temp_file']}:{outputs_grp_proc['db_data']['dataset']}")
-            proc_aman.save(outputs_grp_proc['temp_file'], outputs_grp_proc['db_data']['dataset'], overwrite)
-        else:
-            logger.info(f"{outputs_grp_proc['temp_file']}:{outputs_grp_proc['db_data']['dataset']} already exists.")
+        logger.info(f"Saving data to {outputs_grp_proc['temp_file']}:{outputs_grp_proc['db_data']['dataset']}")
+        proc_aman.save(outputs_grp_proc['temp_file'], outputs_grp_proc['db_data']['dataset'], overwrite)
 
         if run_parallel:
             outputs_proc.append(outputs_grp_proc)
