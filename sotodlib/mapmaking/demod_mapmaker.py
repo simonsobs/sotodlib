@@ -13,7 +13,7 @@ import so3g.proj
 from .. import core
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional, get_flags
+from .utilities import import_optional
 from .noise_model import NmatWhite
 
 hp = import_optional('healpy')
@@ -289,12 +289,12 @@ class DemodSignalMap(DemodSignal):
                 if self.recenter:
                     rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
                 else: rot = None
-                if split_labels is None:
+                if self.Nsplits == 1:
                     # this is the case with no splits
-                    flagnames = ['glitch_flags']
+                    cuts = obs.flags.glitch_flags
                 else:
-                    flagnames = ['glitch_flags', split_labels[n_split]]
-                cuts = get_flags(obs, flagnames)
+                    # remember that the dets or samples you want to keep should be false, hence we negate
+                    cuts = obs.flags.glitch_flags + ~obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
                     geom = self.rhs.geometry
@@ -387,39 +387,19 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
     a DemodMapmmaker object
     """
     if shape is not None and wcs is not None:
-        if split_labels==None:
-            # this is the case where we did not request any splits at all
-            signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                                  dtype=dtype_map, tiled=False,
-                                                  ofmt="", singlestream=singlestream,
-                                                  recenter=recenter )
-        else:
-            # this is the case where we asked for at least 2 splits (1 split set).
-            # We count how many split we'll make, we need to define the Nsplits
-            # maps inside the DemodSignalMap
-            Nsplits = len(split_labels)
-            signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                                  dtype=dtype_map, tiled=False,
-                                                  ofmt="", Nsplits=Nsplits,
-                                                  singlestream=singlestream,
-                                                  recenter=recenter)
+        Nsplits = len(split_labels)
+        signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
+                                              dtype=dtype_map, tiled=False,
+                                              ofmt="", Nsplits=Nsplits,
+                                              singlestream=singlestream,
+                                              recenter=recenter)
     elif nside is not None:
-        if split_labels==None:
-            # this is the case where we did not request any splits at all
-            signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
-                                        comps=comps, dtype=dtype_map,
-                                        ofmt="", singlestream=singlestream,
-                                        ext="fits.gz")
-        else:
-            # this is the case where we asked for at least 2 splits (1 split set).
-            # We count how many split we'll make, we need to define the Nsplits
-            # maps inside the DemodSignalMap
-            Nsplits = len(split_labels)
-            signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
-                                        comps=comps, dtype=dtype_map,
-                                        ofmt="", Nsplits=Nsplits,
-                                        singlestream=singlestream,
-                                        ext="fits.gz")
+        Nsplits = len(split_labels)
+        signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
+                                    comps=comps, dtype=dtype_map,
+                                    ofmt="", Nsplits=Nsplits,
+                                    singlestream=singlestream,
+                                    ext="fits.gz")
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=noise_model,
                                          dtype=dtype_tod,
@@ -431,31 +411,20 @@ def write_demod_maps(prefix, data, split_labels=None):
     """
     Write maps from data into files
     """
-    if split_labels==None:
-        # we have no splits, so we save index 0 of the lists
-        data.signal.write(prefix, "full_wmap", data.wmap[0])
-        data.signal.write(prefix, "full_weights", data.weights[0])
-        data.signal.write(prefix, "full_hits", data.signal.hits)
-    else:
-        # we have splits
-        Nsplits = len(split_labels)
-        for n_split in range(Nsplits):
-            data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
-                              data.wmap[n_split])
-            data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                              data.weights[n_split])
-            data.signal.write(prefix, "%s_hits"%split_labels[n_split],
-                              data.signal.hits[n_split])
+    Nsplits = len(split_labels)
+    for n_split in range(Nsplits):
+        data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
+                          data.wmap[n_split])
+        data.signal.write(prefix, "%s_weights"%split_labels[n_split],
+                          data.weights[n_split])
+        data.signal.write(prefix, "%s_hits"%split_labels[n_split],
+                          data.signal.hits[n_split])
 
 def write_demod_info(oname, info, split_labels=None):
     putils.mkdir(os.path.dirname(oname))
-    if split_labels==None:
-        bunch.write(oname+'_full_info.hdf', info[0])
-    else:
-        # we have splits
-        Nsplits = len(split_labels)
-        for n_split in range(Nsplits):
-            bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
+    Nsplits = len(split_labels)
+    for n_split in range(Nsplits):
+        bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
@@ -552,8 +521,6 @@ def make_demod_map(context, obslist, noise_model, info,
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds 
-                       + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
         mapmaker.add_obs(name, obs, split_labels=split_labels)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
@@ -574,10 +541,32 @@ def make_demod_map(context, obslist, noise_model, info,
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
     mapdata = bunch.Bunch(wmap=wmap, weights=weights, signal=mapmaker.signals[0], t0=t0)
+
+    info = add_weights_to_info(info, weights, split_labels)
+
     # output to files
     write_demod_maps(prefix, mapdata, split_labels=split_labels, )
     write_demod_info(prefix, info, split_labels=split_labels )
     return errors, outputs
+
+def add_weights_to_info(info, weights, split_labels):
+    Nsplits = len(split_labels)
+    for isplit in range(Nsplits):
+        sub_info = info[isplit]
+        sub_weights = weights[isplit]
+        # Assuming weights are TT, QQ, UU
+        if sub_weights.shape[0] != 3:
+            raise ValueError(f"sub_weights has unexpected shape {sub_weights.shape}. First axis should be (3,) for TT, QQ, UU")
+        mean_qu = np.mean(sub_weights[1:], axis=0)
+        positive = np.where(mean_qu > 0)
+        sumweights = np.sum(mean_qu[positive])
+        meanweights = np.mean(mean_qu[positive])
+        medianweights = np.median(mean_qu[positive])
+        sub_info['total_weight_qu'] = sumweights
+        sub_info['mean_weight_qu'] = meanweights
+        sub_info['median_weight_qu'] = medianweights
+        info[isplit] = sub_info
+    return info
 
 def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weightsQU, wrapper=lambda x:x):
     """
