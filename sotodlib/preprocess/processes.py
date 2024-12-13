@@ -1572,24 +1572,23 @@ class FocalplaneNanFlags(_Preprocess):
     name = "fp_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        mskfp = tod_ops.flags.get_focalplane_flags(aman, merge=False)
-        
+        mskfp = tod_ops.flags.get_focalplane_flags(aman, **self.calc_cfgs)
         fp_aman = core.AxisManager(aman.dets, aman.samps)
-        fp_aman.wrap('darks', mskfp, [(0, 'dets'), (1, 'samps')])
+        fp_aman.wrap('fp_nans', mskfp, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, fp_aman)
     
     def save(self, proc_aman, fp_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("fp_flags", dark_aman)
+            proc_aman.wrap("fp_flags", fp_aman)
     
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~has_all_cut(proc_aman.fp_flags.fp_flags)
+        keep = ~has_all_cut(proc_aman.fp_flags.fp_nans)
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
