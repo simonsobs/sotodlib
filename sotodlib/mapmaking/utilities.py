@@ -383,6 +383,11 @@ def astr_tok(astr, sep, i):
         astr = np.char.partition(astr,sep)[:,2]
     return np.char.partition(astr,sep)[:,0]
 
+def split_subids(subids):
+	ids, _, rest   = np.char.partition(subids, ":").T
+	wafs, _, bands = np.char.partition(rest, ":").T
+	return ids, wafs, bands
+
 def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
 def parse_recentering(desc):
