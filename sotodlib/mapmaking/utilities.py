@@ -336,7 +336,7 @@ def expand_ids(obs_ids, context=None, bands=None):
         actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
         inds   = utils.find(info["obs_id"], actual_obs_ids)
         flavors= info["tube_flavor"][inds]
-        flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280")}
+        flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280"), None:("f000",)}
     elif bands is not None:
         flavors    = ["a"]*len(obs_ids)
         flavor_map = {"a": bands}
