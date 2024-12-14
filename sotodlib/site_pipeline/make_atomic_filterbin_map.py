@@ -410,9 +410,14 @@ def main(config_file: str) -> None:
     # clean up lingering files from previous incomplete runs
     for obs in obslists_arr:
         obs_id = obs[0][0]
-        for preproc_cfg in preprocess_config:
-            preprocess_util.save_group_and_cleanup(obs_id, preproc_cfg,
+        if len(preprocess_config)==1:
+            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
                                        subdir='temp', remove=False)
+        else:
+            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
+                                       subdir='temp', remove=False)
+            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[1],
+                                       subdir='temp_proc', remove=False)
 
     run_list = []
     for oi in range(len(my_tods)):
