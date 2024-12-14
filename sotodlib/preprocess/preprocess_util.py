@@ -760,6 +760,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
         logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
         try:
             pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
+            pck_aman = get_pcfg_check_aman(pipe_init)
             outputs_init = save_group(obs_id, configs_init, dets, context_init, subdir='temp')
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
@@ -802,7 +803,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                     if fld_init in proc_aman:
                         proc_aman.move(fld_init, None)
 
-                proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
+                proc_aman.wrap('pcfg_ref', pck_aman)
 
             except Exception as e:
                 error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
