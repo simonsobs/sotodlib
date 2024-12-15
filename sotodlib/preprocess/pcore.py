@@ -443,8 +443,12 @@ class Pipeline(list):
         
         """
         if proc_aman is None:
-            proc_aman = core.AxisManager( aman.dets, aman.samps)
-            full = core.AxisManager( aman.dets, aman.samps)
+            if 'preprocess' in aman:
+                proc_aman = aman.preprocess
+                full = aman.preprocess
+            else:
+                proc_aman = core.AxisManager(aman.dets, aman.samps)
+                full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
             update_plot = False
         else:
