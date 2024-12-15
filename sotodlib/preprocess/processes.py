@@ -551,15 +551,28 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        self.select_cfgs['name'] = self.select_cfgs.get('name','noise')
+        if 'wrap_name' in self.save_cfgs:
+            self.select_cfgs['name'] = self.select_cfgs.get('name', self.save_cfgs['wrap_name'])
+        else:
+            self.select_cfgs['name'] = self.select_cfgs.get('name', 'noise')
 
         if self.fit:
             wn = proc_aman[self.select_cfgs['name']].fit[:,1]
+            fk = proc_aman[self.select_cfgs['name']].fit[:,0]
         else:
             wn = proc_aman[self.select_cfgs['name']].white_noise
+            fk = None 
         if self.subscan:
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
-        keep = wn <= np.float64(self.select_cfgs["max_noise"])
+            if fk is not None:
+                fk = np.nanmean(fk, axis=-1) # Mean over subscans
+        keep = np.ones_like(wn, dtype=bool)
+        if "max_noise" in self.select_cfgs.keys():
+            keep = (wn <= np.float64(self.select_cfgs["max_noise"]))
+        if "min_noise" in self.select_cfgs.keys():
+            keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+        if fk is not None and "max_fknee" in self.select_cfgs.keys():
+            keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -1468,7 +1481,7 @@ class UnionFlags(_Preprocess):
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
-     Example config block::
+     Example config block:
 
         - name : "union_flags"
           process:
@@ -1517,41 +1530,42 @@ class SubtractQUCommonMode(_Preprocess):
     Example config block::
 
         - name : "subtract_qu_common_mode"
-          signal: "demodQ" 
           wrap_name: "commonmode"
           calc: True
           save: True
-          process: True
 
     .. autofunction:: sotodlib.tod_ops.deproject.medQU_correct
     """
     name = "subtract_qu_common_mode"
 
     def __init__(self, step_cfgs):
-        self.signal_name = step_cfgs.get('signal', 'signal')
+        self.signal_name_Q = step_cfgs.get('signal_Q', 'demodQ')
+        self.signal_name_U = step_cfgs.get('signal_U', 'demodU')
         self.wrap_name = step_cfgs.get('wrap_name', 'commonmode')
-        self.run_name = f'{self.signal_name}_{self.wrap_name}'
-
+        self.run_name_Q = f'{self.signal_name_Q}_{self.wrap_name}'
+        self.run_name_U = f'{self.signal_name_U}_{self.wrap_name}'
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        coeffs, med = tod_ops.deproject.deprojection(aman, self.signal_name)
-        coeffs_aman = core.AxisManager(aman.samps)
-        coeffs_aman.wrap('coeffs', coeffs, [(0, 'samps')])
-        med_aman = core.AxisManager(aman.dets)
-        med_aman.wrap('med', med, [(0, 'dets')])
-        self.save(proc_aman, med_aman)
-        self.save(proc_aman, coeffs_aman)
+        for signal_name, run_name in [(self.signal_name_Q, self.run_name_Q), \
+            (self.signal_name_U, self.run_name_U)]:
+            coeffs_aman, med_aman = self._calc_and_save_signal(aman, proc_aman, signal_name, run_name)
+            self.save(proc_aman, med_aman, f'{run_name}_med')
+            self.save(proc_aman, coeffs_aman, f'{run_name}_coeffs')
 
-    def save(self, proc_aman, calc_aman):
+    def _calc_and_save_signal(self, aman, proc_aman, signal_name, run_name):
+        coeffs, med = tod_ops.deproject.deprojection(aman, signal_name, **self.calc_cfgs)
+        coeffs_aman = core.AxisManager(aman.dets)
+        coeffs_aman.wrap('coeffs', coeffs)
+        med_aman = core.AxisManager(aman.samps)
+        med_aman.wrap('med', med, [(0, 'samps')])
+        return coeffs_aman, med_aman
+
+    def save(self, proc_aman, calc_aman, run_name):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.run_name, calc_aman)
-
-    def process(self, aman, proc_aman):
-        tod_ops.deproject.medQU_correct(aman, self.signal_name, QUcoeffs=proc_aman[self.run_name]['coeffs'], \
-                                        QUmed=proc_aman[self.run_name]['med'])
+            proc_aman.wrap(run_name, calc_aman)
 
 class FocalplaneNanFlags(_Preprocess):
     """Find additional detectors which have nans 
