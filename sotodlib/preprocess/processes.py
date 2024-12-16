@@ -827,14 +827,32 @@ class EstimateAzSS(_Preprocess):
     name = "estimate_azss"
 
     def calc_and_save(self, aman, proc_aman):
-        calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        self.save(proc_aman, calc_aman)
+        if self.calc_cfgs["subscan"]:
+            calc_aman_left, calc_aman_right, model_aman_right, model_aman_right = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            self.save(proc_aman, calc_aman_left, self.calc_cfgs["azss_stats_name"]+"_left")
+            self.save(proc_aman, calc_aman_left, self.calc_cfgs["azss_stats_name"]+"_right")
+            # TODO: to have subtract azss in separate process the following needs to be stored in proc_aman 
+            #self.save(proc_aman, model_aman_right, self.calc_cfgs["azss_model_name"]+"_left")
+            #self.save(proc_aman, model_aman_right, self.calc_cfgs["azss_model_name"]+"_right")
+        else:
+            calc_aman, model_aman = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            self.save(proc_aman, calc_aman, self.calc_cfgs["azss_stats_name"])
+            #self.save(proc_aman, model_aman, self.calc_cfgs["azss_model_name"])
     
-    def save(self, proc_aman, azss_stats):
+    def save(self, proc_aman, azss_stats, azss_name):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+            proc_aman.wrap(azss_name, azss_stats)
+
+#class SubtractAzSSsubscan(_Preprocess):
+#    """
+#    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss
+#    """
+#    name = "subtract_azss"
+#    
+#    def process(self, aman, proc_aman):
+#        tod_ops.azss.subtract_azss_lr(aman, **self.process_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
@@ -1668,6 +1686,61 @@ class PointingModel(_Preprocess):
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
 
+class BadSubscanFlags(_Preprocess):
+    """Identifies and flags bad subscans.
+
+      Example config block::
+
+        - name : "noisy_subscan_flags"
+          calc: 
+            merge: True
+            overwrite: True
+          save: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
+    """
+    name = "noisy_subscan_flags"
+
+    def __init__(self, step_cfgs):
+        self.stats_name = step_cfgs.get('stats_name', 'tod_stats')
+        super().__init__(step_cfgs)
+    
+    def calc_and_save(self, aman, proc_aman):
+        if 'flags' not in proc_aman._fields:
+            from sotodlib.core import FlagManager
+            proc_aman.wrap('flags', FlagManager.for_tod(proc_aman))
+        proc_aman.flags.wrap("left_scan", aman.flags.left_scan)
+        proc_aman.flags.wrap("right_scan", aman.flags.right_scan)
+
+        subscan_stats_T = proc_aman[self.stats_name+"_T"]
+        subscan_stats_Q = proc_aman[self.stats_name+"_Q"]
+        subscan_stats_U = proc_aman[self.stats_name+"_U"]
+
+        msk_ss, msk_det = tod_ops.flags.get_noisy_subscan_flags(
+            aman, subscan_stats_T = subscan_stats_T,
+            subscan_stats_Q = subscan_stats_Q, 
+            subscan_stats_U = subscan_stats_U, **self.calc_cfgs)
+        ss_aman = core.AxisManager(aman.dets, aman.samps)
+        ss_aman.wrap("noisy_subscan", msk_ss, [(0, 'dets'), (1, 'samps')])
+        det_aman = core.AxisManager(aman.dets)
+        det_aman.wrap("noisy_dets", msk_det)
+        self.save(proc_aman, ss_aman, "noisy_subscan_flags")
+        self.save(proc_aman, det_aman, "noisy_dets_flags")
+
+    def save(self, proc_aman, calc_aman, name): 
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(name, calc_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        meta.restrict('dets', proc_aman.dets.vals[~proc_aman.noisy_dets_flags.noisy_dets])
+        return meta
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1704,3 +1777,4 @@ _Preprocess.register(SubtractQUCommonMode)
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(NoiseFlags) 
 _Preprocess.register(PointingModel) 
+_Preprocess.register(BadSubscanFlags)
