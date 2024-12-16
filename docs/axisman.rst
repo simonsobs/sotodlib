@@ -144,8 +144,17 @@ The output of the ``wrap`` cal should be::
 Note the boresight entry is marked with a ``*``, indicating that it's
 an AxisManager rather than a numpy array.
 
-To access data in an AxisManager, use a path-like syntax where 
-attribute names are separated by dots::
+Data access under an AxisManager is done based on field names. For example:
+    >>> n, ofs = 1000, 0
+    >>> dets = ["det0", "det1", "det2"]
+    >>> aman = core.AxisManager(core.LabelAxis("dets", dets), core.OffsetAxis("samps", n, ofs))
+    >>> child = core.AxisManager(core.LabelAxis("dets", dets + ["det3"]),core.OffsetAxis("samps", n, ofs - n // 2),)
+    >>> aman.wrap("child", child)
+    >>> print(aman.child.dets)
+    LabelAxis(3:'det0','det1','det2')
+
+Advanced data access is possible by a path like syntax. This is especially useful when
+data access is dynamic and the field name is not known in advance. For example:
 
     >>> n, ofs = 1000, 0
     >>> dets = ["det0", "det1", "det2"]
