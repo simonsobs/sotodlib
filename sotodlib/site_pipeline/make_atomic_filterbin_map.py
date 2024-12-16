@@ -215,11 +215,11 @@ def read_tods(context, obslist,
 
 
 class ColoredFormatter(logging.Formatter):
-    def __init__(self, msg, colors={'DEBUG': colors.reset,
-                                    'INFO': colors.lgreen,
-                                    'WARNING': colors.lbrown,
-                                    'ERROR': colors.lred,
-                                    'CRITICAL': colors.lpurple}):
+    def __init__(self, msg, colors={'DEBUG':colors.reset,
+                                    'INFO':colors.lgreen,
+                                    'WARNING':colors.lbrown,
+                                    'ERROR':colors.lred,
+                                    'CRITICAL':colors.lpurple}):
         logging.Formatter.__init__(self, msg)
         self.colors = colors
 
@@ -229,7 +229,6 @@ class ColoredFormatter(logging.Formatter):
         except KeyError:
             col = colors.reset
         return col + logging.Formatter.format(self, record) + colors.reset
-
 
 class LogInfoFilter(logging.Filter):
     def __init__(self, rank=0):

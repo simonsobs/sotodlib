@@ -9,10 +9,11 @@ import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
-                                    sparse_to_ranges_matrix)
+                                   sparse_to_ranges_matrix)
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
+from ..core import AxisManager
 
 
 class FFTTrim(_Preprocess):
@@ -21,7 +22,7 @@ class FFTTrim(_Preprocess):
 
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
-    name = "fft_trim"    
+    name = "fft_trim"
     def process(self, aman, proc_aman):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
@@ -113,7 +114,6 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         self.signal = step_cfgs.get('signal', 'signal')
 
         super().__init__(step_cfgs)
-    
     def calc_and_save(self, aman, proc_aman):
         _, trend_aman = tod_ops.flags.get_trending_flags(
             aman, merge=False, full_output=True,
@@ -551,15 +551,28 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        self.select_cfgs['name'] = self.select_cfgs.get('name','noise')
+        if 'wrap_name' in self.save_cfgs:
+            self.select_cfgs['name'] = self.select_cfgs.get('name', self.save_cfgs['wrap_name'])
+        else:
+            self.select_cfgs['name'] = self.select_cfgs.get('name', 'noise')
 
         if self.fit:
             wn = proc_aman[self.select_cfgs['name']].fit[:,1]
+            fk = proc_aman[self.select_cfgs['name']].fit[:,0]
         else:
             wn = proc_aman[self.select_cfgs['name']].white_noise
+            fk = None 
         if self.subscan:
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
-        keep = wn <= np.float64(self.select_cfgs["max_noise"])
+            if fk is not None:
+                fk = np.nanmean(fk, axis=-1) # Mean over subscans
+        keep = np.ones_like(wn, dtype=bool)
+        if "max_noise" in self.select_cfgs.keys():
+            keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
+        if "min_noise" in self.select_cfgs.keys():
+            keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
+        if fk is not None and "max_fknee" in self.select_cfgs.keys():
+            keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
     
@@ -865,7 +878,7 @@ class FlagTurnarounds(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_turnaround_flags
     """
     name = 'flag_turnarounds'
-    
+
     def calc_and_save(self, aman, proc_aman):
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
@@ -879,7 +892,7 @@ class FlagTurnarounds(_Preprocess):
             calc_aman.wrap('turnarounds', ta, [(0, 'dets'), (1, 'samps')])
             calc_aman.wrap('left_scan', left, [(0, 'dets'), (1, 'samps')])
             calc_aman.wrap('right_scan', right, [(0, 'dets'), (1, 'samps')])
-            
+
         if self.calc_cfgs['method'] == 'az':
             ta = tod_ops.flags.get_turnaround_flags(aman, **self.calc_cfgs)
             calc_aman = core.AxisManager(aman.dets, aman.samps)
@@ -898,7 +911,7 @@ class FlagTurnarounds(_Preprocess):
 
     def process(self, aman, proc_aman):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
-        
+
 class SubPolyf(_Preprocess):
     """Fit TOD in each subscan with polynominal of given order and subtract it.
         All process configs go to `sotodlib.tod_ops.sub_polyf`.
@@ -1095,7 +1108,7 @@ class HWPAngleModel(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("hwp_angle", hwp_angle_aman)
-        
+
 
 class FourierFilter(_Preprocess):
     """
@@ -1126,6 +1139,7 @@ class FourierFilter(_Preprocess):
     See :ref:`fourier-filters` documentation for more details.
     """
     name = 'fourier_filter'
+
     def __init__(self, step_cfgs):
         self.signal_name = step_cfgs.get('signal_name', 'signal')
         # By default signal is overwritted by the filtered signal
@@ -1196,6 +1210,7 @@ class PCARelCal(_Preprocess):
     See :ref:`pca-background` for more details on the method.
     """
     name = 'pca_relcal'
+
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.run = step_cfgs.get('pca_run', 'run1')
@@ -1272,7 +1287,7 @@ class PCARelCal(_Preprocess):
         keep = ~proc_aman[self.run_name]['pca_det_mask']
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
-    
+
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
@@ -1315,13 +1330,13 @@ class PTPFlags(_Preprocess):
         ptp_aman = core.AxisManager(aman.dets, aman.samps)
         ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, ptp_aman)
-    
-    def save(self, proc_aman, dark_aman):
+
+    def save(self, proc_aman, calc_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", dark_aman)
-    
+            proc_aman.wrap("ptp_flags", calc_aman)
+
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
@@ -1355,13 +1370,13 @@ class InvVarFlags(_Preprocess):
         ptp_aman = core.AxisManager(aman.dets, aman.samps)
         ptp_aman.wrap('inv_var_flags', mskptps, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, ptp_aman)
-    
+
     def save(self, proc_aman, dark_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap("inv_var_flags", dark_aman)
-    
+
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
@@ -1370,7 +1385,7 @@ class InvVarFlags(_Preprocess):
         keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
-    
+
 class EstimateT2P(_Preprocess):
     """Estimate T to P leakage coefficients.
 
@@ -1398,7 +1413,7 @@ class EstimateT2P(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
         self.save(proc_aman, t2p_aman)
-    
+
     def save(self, proc_aman, t2p_aman):
         if self.save_cfgs is None:
             return
@@ -1422,6 +1437,7 @@ class SubtractT2P(_Preprocess):
     def process(self, aman, proc_aman):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
+
 class SplitFlags(_Preprocess):
     """Get flags used for map splitting/bundling.
 
@@ -1489,6 +1505,103 @@ class UnionFlags(_Preprocess):
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
+class RotateQU(_Preprocess):
+    """Rotate Q and U components to/from telescope coordinates.
+
+    Example config block::
+
+        - name : "rotate_qu"
+          process:
+            sign: 1 
+            offset: 0 
+            update_focal_plane: True
+
+    .. autofunction:: sotodlib.coords.demod.rotate_demodQU
+    """
+    name = "rotate_qu"
+
+    def process(self, aman, proc_aman):
+        from sotodlib.coords import demod
+        demod.rotate_demodQU(aman, **self.process_cfgs)
+
+class SubtractQUCommonMode(_Preprocess):
+    """Subtract Q and U common mode.
+
+    Example config block::
+
+        - name : 'subtract_qu_common_mode'
+          signal_name_Q: 'demodQ'
+          signal_name_U: 'demodU'
+          process: True
+          calc: True
+          save: True
+
+    .. autofunction:: sotodlib.tod_ops.deproject.subtract_qu_common_mode
+    """
+    name = "subtract_qu_common_mode"
+
+    def __init__(self, step_cfgs):
+        self.signal_name_Q = step_cfgs.get('signal_Q', 'demodQ')
+        self.signal_name_U = step_cfgs.get('signal_U', 'demodU')
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        self.save(proc_aman, aman)
+
+    def save(self, proc_aman, aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
+
+    def process(self, aman, proc_aman):
+        if 'qu_common_mode_coeffs' in proc_aman:
+            tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q, self.signal_name_U,
+                                                      coeff_aman=proc_aman['qu_common_mode_coeffs'], 
+                                                      merge=False)
+        else:
+            tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q,
+                                                      self.signal_name_U, merge=True)
+
+class FocalplaneNanFlags(_Preprocess):
+    """Find additional detectors which have nans 
+       in their focal plane coordinates.
+
+    Saves results in proc_aman under the "fp_flags" field. 
+
+     Example config block::
+
+        - name : "fp_flags"
+          signal: "signal" # optional
+          calc: True
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_focalplane_flags
+    """
+    name = "fp_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskfp = tod_ops.flags.get_focalplane_flags(aman, **self.calc_cfgs)
+        fp_aman = core.AxisManager(aman.dets, aman.samps)
+        fp_aman.wrap('fp_nans', mskfp, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, fp_aman)
+    
+    def save(self, proc_aman, fp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("fp_flags", fp_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.fp_flags.fp_nans)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
 class PointingModel(_Preprocess):
     """Apply pointing model to the TOD.
 
@@ -1507,7 +1620,7 @@ class PointingModel(_Preprocess):
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
-            
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1539,4 +1652,7 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(PointingModel)
+_Preprocess.register(RotateQU) 
+_Preprocess.register(SubtractQUCommonMode) 
+_Preprocess.register(FocalplaneNanFlags) 
+_Preprocess.register(PointingModel) 

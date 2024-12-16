@@ -14,6 +14,7 @@ from .. import core
 from .. import coords
 from . import filters
 from . import fourier_filter 
+from . import sub_polyf
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_nan=False,
@@ -543,6 +544,30 @@ def get_trending_flags(aman,
     return cut
 
 def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
+    """
+    Identify and flag dark detectors in the given aman object.
+
+    Parameters:
+    ----------
+    aman : AxisManager
+        The tod.
+    merge : bool, optional
+        If True, merge the dark detector flags into the aman.flags. Default is True.
+    overwrite : bool, optional
+        If True, overwrite existing flags with the same name. Default is True.
+    dark_flags_name : str, optional
+        The name to use for the dark detector flags in aman.flags. Default is 'darks'.
+    
+    Returns:
+    -------
+    mskdarks: RangesMatrix
+        A matrix of ranges indicating the dark detectors.
+
+    Raises:
+    -------
+    ValueError
+        If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
+    """
     darks = np.array(aman.det_info.wafer.type != 'OPTC')
     x = Ranges(aman.samps.count)
     mskdarks = RangesMatrix([Ranges.ones_like(x) if Y
@@ -897,3 +922,79 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
 
     info_aman = wrap_stats(aman, name, stats_arr, stat_names, merge)
     return info_aman
+
+def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='fp_flags'):
+    """
+    Generate flags for invalid detectors in the focal plane.
+        The tod.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    invalid_flags_name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    msk_invalid_fp : RangesMatrix
+        RangesMatrix of invalid detectors in the focal plane.
+    """
+    # Available detectors in focalplane
+    xi_nan = np.isnan(aman.focal_plane.xi)
+    eta_nan = np.isnan(aman.focal_plane.eta)
+    gamma_nan = np.isnan(aman.focal_plane.gamma)
+    x = Ranges(aman.samps.count)
+    flag_invalid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) != 0
+    msk_invalid_fp = RangesMatrix([Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in flag_invalid_fp])
+    
+    if merge:
+        if invalid_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {invalid_flags_name} already exists in aman.flags")
+        if invalid_flags_name in aman.flags:
+            aman.flags[invalid_flags_name] = msk_invalid_fp
+        else:
+            aman.flags.wrap(invalid_flags_name, msk_invalid_fp, [(0, 'dets'), (1, 'samps')])
+
+    return msk_invalid_fp
+
+def noise_fit_flags(aman, low_wn, high_wn, high_fk):
+    """
+    Evaluate white noise and fknee cuts based on provided boundaries.
+
+    Parameters:
+    aman : object
+        An object containing noise fit statistics and noise model coefficients.
+    low_wn : float or None
+        The lower boundary for white noise. If None, white noise flagging is skipped.
+    high_wn : float or None
+        The upper boundary for white noise. If None, white noise flagging is skipped.
+    high_fk : float or None
+        The upper boundary for fknee. If None, fknee flagging is skipped.
+
+    Returns:
+    tuple or None
+        A tuple containing flags for valid white noise and fknee if both boundaries are provided.
+        If only one boundary is provided, returns the corresponding flag.
+        If no boundaries are provided, returns None.
+    """
+    noise = aman.noise_fit_stats_signal.fit
+    fk = noise[:, 0]
+    wn = noise[:, 1]
+    if low_wn is None:
+        print(f"white noise boundaries are not defined, skipping.")
+        flag_valid_wn = None
+    else:
+        flag_valid_wn = (low_wn < wn * 1e6) & (wn * 1e6 < high_wn)
+    if high_fk is None:
+        print(f"fknee boundaries are not defined, skipping.")
+        flag_valid_fk = None
+    else:
+        flag_valid_fk = fk < high_fk
+    if low_wn is not None and high_fk is not None:
+        return flag_valid_wn, flag_valid_fk
+    elif low_wn is not None:
+        return flag_valid_wn
+    elif high_fk is not None:
+        return flag_valid_fk
+    else:
+        return None
