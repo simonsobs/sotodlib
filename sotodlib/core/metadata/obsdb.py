@@ -104,11 +104,26 @@ def _generate_query_components_from_subdb(filepath,
     
     if query_list is not None and isinstance(query_list, list):
         query = []
+        operators = [' < ', ' > ', ' <= ', ' >= ']
         for _query_component in query_list:
             if ' in ' in _query_component:
                 _query_component = _query_component.split(' in ')
                 _query_component = _query_component[1]+' LIKE '+'"%'+_query_component[0]+'%"'
                 query.append(f'{alias}.{table_name}.{_query_component}')
+            elif any(op in _query_component for op in operators):
+                for op in operators:
+                    if op in _query_component:
+                        _query_component = _query_component.split(op)
+                        source_name = _query_component[0]
+                        distance = float(_query_component[1])
+                        _query_component = f'{alias}.{table_name}.source_distance'
+                        query.append(f"INSTR({_query_component}, '{source_name}:') > 0"
+                                     f" AND CAST(SUBSTR({_query_component}, "
+                                     f"INSTR({_query_component}, '{source_name}:') + LENGTH('{source_name}:'), "
+                                     f"IFNULL(NULLIF(INSTR(SUBSTR({_query_component}, "
+                                     f"INSTR({_query_component}, '{source_name}:') + LENGTH('{source_name}:')), ','), 0), "
+                                     f" LENGTH({_query_component})) - 1) AS REAL) {op} {distance}")
+                        break
             else:
                 query.append(f'{alias}.{table_name}.{_query_component}')
         query = ''.join([' and '+_q for _q in query])
