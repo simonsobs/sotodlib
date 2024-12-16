@@ -349,13 +349,8 @@ def _get_azss_lr(aman, signal='signal', bins=100,
         aman.wrap(azss_model_name+"_right", azss_model_right, [(0, 'dets'), (1, 'samps')])
 
     if subtract_in_place:
-        # TODO: to modify, currently returns index error
-        #subtract_azss_lr(aman, signal=signal, merge_stats=merge_stats, merge_model=merge_model,
-        #                 azss_stats_name=azss_stats_name, azss_model_name=azss_model_name)
-        #aman[signal][:, mask_for_valid_left_scans] -= azss_model_left[:, mask_for_valid_left_scans]
-        #aman[signal][:, mask_for_valid_right_scans] -= azss_model_right[:, mask_for_valid_right_scans]
-        aman[signal][:, aman.flags.left_scan] -= azss_model_left #[:, aman.flags.left_scan]
-        aman[signal][:, aman.flags.right_scan] -= azss_model_right #[:, aman.flags.right_scan]
+        aman[signal][:, mask_for_valid_left_scans.mask()] -= azss_model_left[:, mask_for_valid_left_scans.mask()]
+        aman[signal][:, mask_for_valid_right_scans.mask()] -= azss_model_right[:, mask_for_valid_right_scans.mask()]
     return azss_stats_left, azss_stats_right, azss_model_left, azss_model_right
 
 def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, 
@@ -365,11 +360,14 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
              merge_stats=True, azss_stats_name='azss_stats',
              merge_model=True, azss_model_name='azss_model',
              subscan=False):
+
+    apodize_edges_sec = int(apodize_edges_samps * np.median(np.diff(aman.timestamps)))
+    apodize_flags_sec = int(apodize_flags_samps * np.median(np.diff(aman.timestamps)))
     if subscan:
         azss_stats_left, azss_stats_right, azss_model_left, azss_model_right = _get_azss_lr(
             aman, signal=signal, bins=bins, 
-            apodize_edges_sec=apodize_edges_samps, 
-            apodize_flags_sec=apodize_flags_samps,
+            apodize_edges_sec=apodize_edges_sec,
+            apodize_flags_sec=apodize_flags_sec,
             method=method, max_mode=max_mode, range=range,
             subtract_in_place=subtract_in_place, merge_stats=merge_stats,)
         return azss_stats_left, azss_stats_right, azss_model_left, azss_model_right
