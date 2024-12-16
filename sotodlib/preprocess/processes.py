@@ -568,7 +568,7 @@ class Noise(_Preprocess):
                 fk = np.nanmean(fk, axis=-1) # Mean over subscans
         keep = np.ones_like(wn, dtype=bool)
         if "max_noise" in self.select_cfgs.keys():
-            keep = (wn <= np.float64(self.select_cfgs["max_noise"]))
+            keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
         if "min_noise" in self.select_cfgs.keys():
             keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
@@ -1481,7 +1481,7 @@ class UnionFlags(_Preprocess):
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
-     Example config block:
+     Example config block::
 
         - name : "union_flags"
           process:
@@ -1511,7 +1511,7 @@ class RotateQU(_Preprocess):
     Example config block::
 
         - name : "rotate_qu"
-            process:
+          process:
             sign: 1 
             offset: 0 
             update_focal_plane: True
@@ -1529,43 +1529,39 @@ class SubtractQUCommonMode(_Preprocess):
 
     Example config block::
 
-        - name : "subtract_qu_common_mode"
-          wrap_name: "commonmode"
+        - name : 'subtract_qu_common_mode'
+          signal_name_Q: 'demodQ'
+          signal_name_U: 'demodU'
+          process: True
           calc: True
           save: True
 
-    .. autofunction:: sotodlib.tod_ops.deproject.medQU_correct
+    .. autofunction:: sotodlib.tod_ops.deproject.subtract_qu_common_mode
     """
     name = "subtract_qu_common_mode"
 
     def __init__(self, step_cfgs):
         self.signal_name_Q = step_cfgs.get('signal_Q', 'demodQ')
         self.signal_name_U = step_cfgs.get('signal_U', 'demodU')
-        self.wrap_name = step_cfgs.get('wrap_name', 'commonmode')
-        self.run_name_Q = f'{self.signal_name_Q}_{self.wrap_name}'
-        self.run_name_U = f'{self.signal_name_U}_{self.wrap_name}'
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        for signal_name, run_name in [(self.signal_name_Q, self.run_name_Q), \
-            (self.signal_name_U, self.run_name_U)]:
-            coeffs_aman, med_aman = self._calc_and_save_signal(aman, proc_aman, signal_name, run_name)
-            self.save(proc_aman, med_aman, f'{run_name}_med')
-            self.save(proc_aman, coeffs_aman, f'{run_name}_coeffs')
+        self.save(proc_aman, aman)
 
-    def _calc_and_save_signal(self, aman, proc_aman, signal_name, run_name):
-        coeffs, med = tod_ops.deproject.deprojection(aman, signal_name, **self.calc_cfgs)
-        coeffs_aman = core.AxisManager(aman.dets)
-        coeffs_aman.wrap('coeffs', coeffs)
-        med_aman = core.AxisManager(aman.samps)
-        med_aman.wrap('med', med, [(0, 'samps')])
-        return coeffs_aman, med_aman
-
-    def save(self, proc_aman, calc_aman, run_name):
+    def save(self, proc_aman, aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(run_name, calc_aman)
+            proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
+
+    def process(self, aman, proc_aman):
+        if 'qu_common_mode_coeffs' in proc_aman:
+            tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q, self.signal_name_U,
+                                                      coeff_aman=proc_aman['qu_common_mode_coeffs'], 
+                                                      merge=False)
+        else:
+            tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q,
+                                                      self.signal_name_U, merge=True)
 
 class FocalplaneNanFlags(_Preprocess):
     """Find additional detectors which have nans 
