@@ -1602,49 +1602,6 @@ class FocalplaneNanFlags(_Preprocess):
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
-class NoiseFlags(_Preprocess):
-    """Find detectors with anomalous white noise / fknee.
-
-    Saves results in proc_aman under the "wn_flags" field. 
-
-     Example config block::
-
-        - name: "wn_fk_flags"
-          calc:
-            low_wn: 5
-            high_wn: 60
-            high_fk: 6
-          save: True
-          select: True
-    
-    .. autofunction:: sotodlib.tod_ops.flags.noise_fit_flags
-    """
-    name = "wn_fk_flags"
-
-    def calc_and_save(self, aman, proc_aman):
-        mskwn, mskfk = tod_ops.flags.noise_fit_flags(aman, **self.calc_cfgs)
-        calc_aman = core.AxisManager(aman.dets, aman.samps)
-        calc_aman.wrap('wn_flags', mskwn)
-        calc_aman.wrap('fknee_flags', mskfk)
-        self.save(proc_aman, calc_aman)
-
-    def save(self, proc_aman, calc_aman):
-        if self.save_cfgs is None:
-            return
-        if self.save_cfgs:
-            proc_aman.wrap("noise_flags", calc_aman)
-
-    def select(self, meta, proc_aman=None):
-        if self.select_cfgs is None:
-            return meta
-        if proc_aman is None:
-            proc_aman = meta.preprocess
-        if "wn_flags" in proc_aman:
-            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.wn_flags])
-        if "fknee_flags" in proc_aman:
-            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.fknee_flags])
-        return meta
-
 class PointingModel(_Preprocess):
     """Apply pointing model to the TOD.
 
@@ -1698,5 +1655,4 @@ _Preprocess.register(UnionFlags)
 _Preprocess.register(RotateQU) 
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(NoiseFlags) 
 _Preprocess.register(PointingModel) 
