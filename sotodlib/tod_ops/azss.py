@@ -272,8 +272,8 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
     
     if left_right:
         if "valid_right_scans" not in turnaround_info: 
-            left_mask = turnaround_info.right_scan
-            right_mask = turnaround_info.left_scan
+            left_mask = turnaround_info.left_scan
+            right_mask = turnaround_info.right_scan
         else:
             left_mask = turnaround_info.valid_left_scans
             right_mask = turnaround_info.valid_right_scans
@@ -298,23 +298,32 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
         aman.wrap(azss_stats_name, azss_stats)
         model_sig_tod = None
 
-    if merge_model or subtract_in place:
+    if merge_model or subtract_in_place:
         if left_right:
             azss_stats, model_left, model_right = get_model_sig_tod(aman, azss_stats, az)
             if merge_model:
                 aman.wrap(azss_model_name+'_left', model_left, [(0, 'dets'), (1, 'samps')])
                 aman.wrap(azss_model_name+'_right', model_right, [(0, 'dets'), (1, 'samps')])
             if subtract_in_place:
-                # Need to work on this
-                subtract_azss(signal, model_left, model_right)
+                if signal_name is None:
+                    lmask = left_mask.mask()
+                    signal[:,lmask] -= model_left[:,lmask].astype(signal.dtype)
+                    rmask = right_mask.mask()
+                    signal[:,rmask] -= model_right[:,rmask].astype(signal.dtype)
+                else:
+                    lmask = left_mask.mask()
+                    aman[signal_name][:,lmask] -= model_left[:,lmask].astype(aman[signal_name].dtype)
+                    lmask = left_mask.mask()
+                    aman[signal_name][:,rmask] -= model_right[:,rmask].astype(aman[signal_name].dtype)
         else:
             azss_stats, model = get_model_sig_tod(aman, azss_stats, az)
             if merge_model:
                 aman.wrap(azss_model_name, model, [(0, 'dets'), (1, 'samps')])
             if subtract_in_place:
-                # Need to work on this
-                subtract_azss(signal, model)
-                aman[signal_name] = np.subtract(signal, model, dtype='float32')
+                if signal_name is None:
+                    signal -= model.astype(signal.dtype)
+                else:
+                    aman[signal_name] -= model.astype(aman[signal_name].dtype)
     
     return azss_stats, model_sig_tod
 
