@@ -998,3 +998,70 @@ def noise_fit_flags(aman, low_wn, high_wn, high_fk):
         return flag_valid_fk
     else:
         return None
+
+def get_noisy_subscan_flags(aman, subscan_stats_T, subscan_stats_Q, subscan_stats_U,
+                         nstd_lim, ptp_lim, kurt_lim, 
+                         skew_lim, merge=False, overwrite=False, name="bad_subscan",
+                         cut_bad=False):
+    """
+    Identify and flag bad subscans based on various statistical thresholds.
+        The tod.
+    nstd_lim : float
+        Threshold for standard deviation.
+    ptp_lim : float
+        Threshold for peak-to-peak values in pW.
+    kurt_lim : float
+        Threshold for kurtosis.
+    skew_lim : float
+        Threshold for skewness.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    noisy_subscan_flags : RangesMatrix
+        RangesMatrix of bad subscans.
+    """
+    if 'flags' not in aman:
+        overwrite = False
+        merge = False
+    if overwrite and name in aman.flags:
+        aman.flags.move(name, None)
+
+    subscan_indices_l = sub_polyf._get_subscan_range_index(aman.flags["left_scan"].mask())
+    subscan_indices_r = sub_polyf._get_subscan_range_index(aman.flags["right_scan"].mask())
+    subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
+    subscan_indices = subscan_indices[np.argsort(subscan_indices[:, 0])]
+    
+    median_Qstd = np.median(subscan_stats_Q["std"], axis=1)[:, np.newaxis]
+    median_Ustd = np.median(subscan_stats_U["std"], axis=1)[:, np.newaxis]
+
+    noisy_subscan_indicator = (
+        (subscan_stats_T['ptp'] > ptp_lim) |
+        (subscan_stats_Q['std'] > median_Qstd * nstd_lim) |
+        (subscan_stats_U['std'] > median_Ustd * nstd_lim) |
+        (np.abs(subscan_stats_Q['kurtosis']) > kurt_lim) |
+        (np.abs(subscan_stats_U['kurtosis']) > kurt_lim) |
+        (np.abs(subscan_stats_Q['skew']) > skew_lim) |
+        (np.abs(subscan_stats_U['skew']) > skew_lim)
+    )
+
+    noisy_subscan_flags = np.zeros((aman.dets.count, aman.samps.count), dtype=bool)
+    for subscan_i, subscan in enumerate(subscan_indices):
+        noisy_subscan_flags[:, subscan[0]:subscan[1] + 1] = noisy_subscan_indicator[:, subscan_i, np.newaxis]
+    
+    # Detectors which are too noisy for > 50% of the the subscan duration
+    noisy_detector_flags = np.mean(noisy_subscan_flags, axis=1) > 0.5
+
+    noisy_subscan_flags = RangesMatrix.from_mask(noisy_subscan_flags)
+
+    if merge:
+        if name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {name} already exists in aman.flags")
+        aman.flags.wrap(name, noisy_subscan_flags)
+
+    return noisy_subscan_flags, noisy_detector_flags
