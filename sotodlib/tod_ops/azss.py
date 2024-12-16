@@ -9,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None, 
+def bin_by_az(aman, signal=None, az=None, frange=None, bins=100, flags=None, 
               apodize_edges=True, apodize_edges_samps=1600, 
               apodize_flags=True, apodize_flags_samps=200):
     """
@@ -23,13 +23,13 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         numpy array of signal to be binned. If None, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az attribute.
-    range: array-like, optional
+    frange: array-like, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to None.
         If None, [min(az), max(az)] will be used for binning.
     bins: int or sequence of scalars
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
-        If ``bins`` is a sequence, ``bins`` overwrite ``range``.
+        If ``bins`` is a sequence, ``bins`` overwrite ``frange``.
     flags: RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
@@ -80,7 +80,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         else:
             weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
-                               range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
+                              frange=frange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
 
 def fit_azss(az, azss_stats, max_mode, fit_range=None):
@@ -142,7 +142,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     return azss_stats, L.legval(x_legendre, coeffs.T)
     
     
-def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
+def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
             apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
@@ -160,13 +160,13 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
         A numpy array representing the signal to be used for azss extraction. If not provided, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az.
-    range: list, optional
+    frange: list, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
     bins: int or sequence of scalars
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
-        If `bins` is a sequence, `bins` overwrite `range`.
+        If `bins` is a sequence, `bins` overwrite `frange`.
     flags : RangesMatrix, optinal
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
@@ -237,7 +237,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
         az = aman.boresight.az
         
     # do binning
-    binning_dict = bin_by_az(aman, signal=signal, az=az, range=range, bins=bins, flags=flags,
+    binning_dict = bin_by_az(aman, signal=signal, az=az, frange=frange, bins=bins, flags=flags,
                             apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
                             apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
     bin_centers = binning_dict['bin_centers']
@@ -252,15 +252,11 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
     azss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
+    azss_stats.wrap('method', method)
+    azss_stats.wrap('frange', frange)
+    azss_stats.wrap('max_mode', max_mode)
     
-    if method == 'fit':
-        if type(max_mode) is not int:
-            raise ValueError('max_mode is not provided as integer')
-        azss_stats, model_sig_tod = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
-        
-    if method == 'interpolate':
-        f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
-        model_sig_tod = f_template(aman.boresight.az)
+    azss_stats, model_sig_tod = get_model_sig_tod(aman, azss_stats, az)
     
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -268,6 +264,24 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
         aman[signal_name] = np.subtract(signal, model_sig_tod, dtype='float32')
+    return azss_stats, model_sig_tod
+
+def get_model_sig_tod(aman, azss_stats, az=None):
+    """
+    Function to return the azss template for subtraction given the azss_stats AxisManager
+    """
+    if az is None:
+        az = aman.boresight.az
+
+    if azss_stats.method == 'fit':
+        if type(azss_stats.max_mode) is not int:
+            raise ValueError('max_mode is not provided as integer')
+        azss_stats, model_sig_tod = fit_azss(az=az, azss_stats=azss_stats,
+                                             max_mode=azss_stats.max_mode, fit_range=azss_stats.frange)
+
+    if azss_stats.method == 'interpolate':
+        f_template = interp1d(azss_stats.binned_az, azss_stats.binned_signal, fill_value='extrapolate')
+        model_sig_tod = f_template(az)
     return azss_stats, model_sig_tod
 
 def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
