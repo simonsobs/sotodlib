@@ -14,8 +14,6 @@ from .. import core
 from .. import coords
 from . import filters
 from . import fourier_filter 
-from . import sub_polyf
-from . import sub_polyf
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_nan=False,
@@ -1056,11 +1054,6 @@ def get_noisy_subscan_flags(aman, subscan_stats_T, subscan_stats_Q, subscan_stat
         merge = False
     if overwrite and name in aman.flags:
         aman.flags.move(name, None)
-
-    subscan_indices_l = sub_polyf._get_subscan_range_index(aman.flags["left_scan"].mask())
-    subscan_indices_r = sub_polyf._get_subscan_range_index(aman.flags["right_scan"].mask())
-    subscan_indices = np.vstack([subscan_indices_l, subscan_indices_r])
-    subscan_indices = subscan_indices[np.argsort(subscan_indices[:, 0])]
     
     median_Qstd = np.median(subscan_stats_Q["std"], axis=1)[:, np.newaxis]
     median_Ustd = np.median(subscan_stats_U["std"], axis=1)[:, np.newaxis]
@@ -1075,14 +1068,15 @@ def get_noisy_subscan_flags(aman, subscan_stats_T, subscan_stats_Q, subscan_stat
         (np.abs(subscan_stats_U['skew']) > skew_lim)
     )
 
-    noisy_subscan_flags = np.zeros((aman.dets.count, aman.samps.count), dtype=bool)
-    for subscan_i, subscan in enumerate(subscan_indices):
-        noisy_subscan_flags[:, subscan[0]:subscan[1] + 1] = noisy_subscan_indicator[:, subscan_i, np.newaxis]
-    
-    # Detectors which are too noisy for > 50% of the the subscan duration
-    noisy_detector_flags = np.mean(noisy_subscan_flags, axis=1) > 0.5
+    ss_info = aman.subscan_info if 'subscan_info' in aman else get_subscans(aman, merge=False)
+    ssf = ss_info.subscan_flags
+    zeros=RangesMatrix.zeros((1, aman.samps.count)) # Needed when no subcsans are True
 
-    noisy_subscan_flags = RangesMatrix.from_mask(noisy_subscan_flags)
+    # For each det, select flagged subscans and merge their Ranges
+    noisy_subscan_flags = RangesMatrix([np.sum(RangesMatrix.concatenate([ssf[noisy_subscan_indicator[idet]], zeros]), axis=0) for idet in range(aman.dets.count)])
+
+    # Detectors which are too noisy for > 50% of the the subscan duration
+    noisy_detector_flags = np.array([np.sum(np.diff(rng.ranges(), axis=1)) / aman.samps.count for rng in noisy_subscan_flags.ranges]) > 0.5
 
     if merge:
         if name in aman.flags and not overwrite:
