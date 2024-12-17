@@ -568,7 +568,7 @@ class Noise(_Preprocess):
                 fk = np.nanmean(fk, axis=-1) # Mean over subscans
         keep = np.ones_like(wn, dtype=bool)
         if "max_noise" in self.select_cfgs.keys():
-            keep = (wn <= np.float64(self.select_cfgs["max_noise"]))
+            keep &= (wn <= np.float64(self.select_cfgs["max_noise"]))
         if "min_noise" in self.select_cfgs.keys():
             keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
@@ -804,7 +804,7 @@ class Demodulate(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
 
 
-class EstimateAzSS(_Preprocess):
+class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
@@ -812,47 +812,66 @@ class EstimateAzSS(_Preprocess):
 
     Example configuration block::
 
-      - name: "estimate_azss"
+      - name: "azss"
+        azss_stats_name: 'azss_statsQ'
+        proc_aman_turnaround_info: 'turnaround_flags'
         calc:
           signal: 'demodQ'
-          azss_stats_name: 'azss_statsQ'
-          range: [-1.57079, 7.85398]
+          frange: [-1.57079, 7.85398]
           bins: 1080
-          merge_stats: False
-          merge_model: False
+          left_right: True
         save: True
+        process:
+            subtract: True
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
-    name = "estimate_azss"
+    name = "azss"
+    def __init__(self, step_cfgs):
+        self.azss_stats_name = step_cfgs.get('azss_stats_name', 'azss_stats')
+        self.proc_aman_turnaround_info = step_cfgs.get('proc_aman_turnaround_info', None)
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.calc_cfgs["subscan"]:
-            calc_aman_left, calc_aman_right, model_aman_right, model_aman_right = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-            self.save(proc_aman, calc_aman_left, self.calc_cfgs["azss_stats_name"]+"_left")
-            self.save(proc_aman, calc_aman_left, self.calc_cfgs["azss_stats_name"]+"_right")
-            # TODO: to have subtract azss in separate process the following needs to be stored in proc_aman 
-            #self.save(proc_aman, model_aman_right, self.calc_cfgs["azss_model_name"]+"_left")
-            #self.save(proc_aman, model_aman_right, self.calc_cfgs["azss_model_name"]+"_right")
+        # If process is run then just wrap info from process step
+        if self.process_cfgs:
+            self.save(proc_aman, aman[self.azss_stats_name])
         else:
-            calc_aman, model_aman = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-            self.save(proc_aman, calc_aman, self.calc_cfgs["azss_stats_name"])
-            #self.save(proc_aman, model_aman, self.calc_cfgs["azss_model_name"])
+            if self.proc_aman_turnaround_info:
+                _f = attergetter(self.proc_aman_turnaround_info)
+                turnaround_info = _f(proc_aman)
+            else:
+                turnaround_info = None
+            azss_stats, _ = tod_ops.azss.get_azss(aman, turnaround_info=turnaround_info,
+                                                  azss_stats_name=self.azss_stats_name,
+                                                  merge_stats = False, merge_model=False,
+                                                  **self.calc_cfgs)
+            self.save(proc_aman, azss_stats)
     
-    def save(self, proc_aman, azss_stats, azss_name):
+    def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(azss_name, azss_stats)
+            proc_aman.wrap(self.azss_stats_name, azss_stats)
 
-#class SubtractAzSSsubscan(_Preprocess):
-#    """
-#    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss
-#    """
-#    name = "subtract_azss"
-#    
-#    def process(self, aman, proc_aman):
-#        tod_ops.azss.subtract_azss_lr(aman, **self.process_cfgs)
+    def process(self, aman, proc_aman):
+        subtract = self.process_cfgs.get('subtract', False)
+        if self.proc_aman_turnaround_info:
+            _f = attergetter(self.proc_aman_turnaround_info)
+            turnaround_info = _f(proc_aman)
+        else:
+            turnaround_info = None
+        if self.azss_stats_name in proc_aman:
+            if subtract:
+                tod_ops.azss.subtract_azss(aman, proc_aman[self.azss_stats_name],
+                                           signal = self.calc_cfgs.get('signal'),
+                                           in_place=True)
+        else:
+            tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                  turnaround_info=turnaround_info,
+                                  merge_stats = True, merge_model=False,
+                                  subtract_in_place=subtract, **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
@@ -1529,7 +1548,7 @@ class RotateQU(_Preprocess):
     Example config block::
 
         - name : "rotate_qu"
-            process:
+          process:
             sign: 1 
             offset: 0 
             update_focal_plane: True
@@ -1547,43 +1566,39 @@ class SubtractQUCommonMode(_Preprocess):
 
     Example config block::
 
-        - name : "subtract_qu_common_mode"
-          wrap_name: "commonmode"
+        - name : 'subtract_qu_common_mode'
+          signal_name_Q: 'demodQ'
+          signal_name_U: 'demodU'
+          process: True
           calc: True
           save: True
 
-    .. autofunction:: sotodlib.tod_ops.deproject.medQU_correct
+    .. autofunction:: sotodlib.tod_ops.deproject.subtract_qu_common_mode
     """
     name = "subtract_qu_common_mode"
 
     def __init__(self, step_cfgs):
         self.signal_name_Q = step_cfgs.get('signal_Q', 'demodQ')
         self.signal_name_U = step_cfgs.get('signal_U', 'demodU')
-        self.wrap_name = step_cfgs.get('wrap_name', 'commonmode')
-        self.run_name_Q = f'{self.signal_name_Q}_{self.wrap_name}'
-        self.run_name_U = f'{self.signal_name_U}_{self.wrap_name}'
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        for signal_name, run_name in [(self.signal_name_Q, self.run_name_Q), \
-            (self.signal_name_U, self.run_name_U)]:
-            coeffs_aman, med_aman = self._calc_and_save_signal(aman, proc_aman, signal_name, run_name)
-            self.save(proc_aman, med_aman, f'{run_name}_med')
-            self.save(proc_aman, coeffs_aman, f'{run_name}_coeffs')
+        self.save(proc_aman, aman)
 
-    def _calc_and_save_signal(self, aman, proc_aman, signal_name, run_name):
-        coeffs, med = tod_ops.deproject.deprojection(aman, signal_name, **self.calc_cfgs)
-        coeffs_aman = core.AxisManager(aman.dets)
-        coeffs_aman.wrap('coeffs', coeffs)
-        med_aman = core.AxisManager(aman.samps)
-        med_aman.wrap('med', med, [(0, 'samps')])
-        return coeffs_aman, med_aman
-
-    def save(self, proc_aman, calc_aman, run_name):
+    def save(self, proc_aman, aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(run_name, calc_aman)
+            proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
+
+    def process(self, aman, proc_aman):
+        if 'qu_common_mode_coeffs' in proc_aman:
+            tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q, self.signal_name_U,
+                                                      coeff_aman=proc_aman['qu_common_mode_coeffs'], 
+                                                      merge=False)
+        else:
+            tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q,
+                                                      self.signal_name_U, merge=True)
 
 class FocalplaneNanFlags(_Preprocess):
     """Find additional detectors which have nans 
@@ -1622,49 +1637,6 @@ class FocalplaneNanFlags(_Preprocess):
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.fp_flags.fp_nans)
         meta.restrict("dets", meta.dets.vals[keep])
-        return meta
-
-class NoiseFlags(_Preprocess):
-    """Find detectors with anomalous white noise / fknee.
-
-    Saves results in proc_aman under the "wn_flags" field. 
-
-     Example config block::
-
-        - name: "wn_fk_flags"
-          calc:
-            low_wn: 5
-            high_wn: 60
-            high_fk: 6
-          save: True
-          select: True
-    
-    .. autofunction:: sotodlib.tod_ops.flags.noise_fit_flags
-    """
-    name = "wn_fk_flags"
-
-    def calc_and_save(self, aman, proc_aman):
-        mskwn, mskfk = tod_ops.flags.noise_fit_flags(aman, **self.calc_cfgs)
-        calc_aman = core.AxisManager(aman.dets, aman.samps)
-        calc_aman.wrap('wn_flags', mskwn)
-        calc_aman.wrap('fknee_flags', mskfk)
-        self.save(proc_aman, calc_aman)
-
-    def save(self, proc_aman, calc_aman):
-        if self.save_cfgs is None:
-            return
-        if self.save_cfgs:
-            proc_aman.wrap("noise_flags", calc_aman)
-
-    def select(self, meta, proc_aman=None):
-        if self.select_cfgs is None:
-            return meta
-        if proc_aman is None:
-            proc_aman = meta.preprocess
-        if "wn_flags" in proc_aman:
-            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.wn_flags])
-        if "fknee_flags" in proc_aman:
-            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.fknee_flags])
         return meta
 
 class PointingModel(_Preprocess):
@@ -1761,7 +1733,7 @@ _Preprocess.register(EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
-_Preprocess.register(EstimateAzSS)
+_Preprocess.register(AzSS)
 _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
@@ -1775,6 +1747,6 @@ _Preprocess.register(UnionFlags)
 _Preprocess.register(RotateQU) 
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(NoiseFlags) 
-_Preprocess.register(PointingModel) 
+_Preprocess.register(RotateQU) 
+_Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)

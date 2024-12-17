@@ -15,6 +15,7 @@ from .. import coords
 from . import filters
 from . import fourier_filter 
 from . import sub_polyf
+from . import sub_polyf
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_nan=False,
@@ -544,6 +545,30 @@ def get_trending_flags(aman,
     return cut
 
 def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
+    """
+    Identify and flag dark detectors in the given aman object.
+
+    Parameters:
+    ----------
+    aman : AxisManager
+        The tod.
+    merge : bool, optional
+        If True, merge the dark detector flags into the aman.flags. Default is True.
+    overwrite : bool, optional
+        If True, overwrite existing flags with the same name. Default is True.
+    dark_flags_name : str, optional
+        The name to use for the dark detector flags in aman.flags. Default is 'darks'.
+    
+    Returns:
+    -------
+    mskdarks: RangesMatrix
+        A matrix of ranges indicating the dark detectors.
+
+    Raises:
+    -------
+    ValueError
+        If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
+    """
     """
     Identify and flag dark detectors in the given aman object.
 
