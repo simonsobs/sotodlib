@@ -1023,19 +1023,19 @@ def noise_fit_flags(aman, low_wn, high_wn, high_fk):
         return None
 
 def get_noisy_subscan_flags(aman, subscan_stats_T, subscan_stats_Q, subscan_stats_U,
-                         nstd_lim, ptp_lim, kurt_lim, 
-                         skew_lim, merge=False, overwrite=False, name="bad_subscan",
-                         cut_bad=False):
+                         nstd_lim=None, ptp_lim=None, kurt_lim=None, 
+                         skew_lim=None, merge=False, overwrite=False, 
+                         name="bad_subscan", cut_bad=False):
     """
     Identify and flag bad subscans based on various statistical thresholds.
         The tod.
-    nstd_lim : float
+    nstd_lim : float [optional]
         Threshold for standard deviation.
-    ptp_lim : float
+    ptp_lim : float [optional]
         Threshold for peak-to-peak values in pW.
-    kurt_lim : float
+    kurt_lim : float [optional]
         Threshold for kurtosis.
-    skew_lim : float
+    skew_lim : float [optional]
         Threshold for skewness.
     merge : bool
         If true, merges the generated flag into aman.
@@ -1058,15 +1058,22 @@ def get_noisy_subscan_flags(aman, subscan_stats_T, subscan_stats_Q, subscan_stat
     median_Qstd = np.median(subscan_stats_Q["std"], axis=1)[:, np.newaxis]
     median_Ustd = np.median(subscan_stats_U["std"], axis=1)[:, np.newaxis]
 
-    noisy_subscan_indicator = (
-        (subscan_stats_T['ptp'] > ptp_lim) |
-        (subscan_stats_Q['std'] > median_Qstd * nstd_lim) |
-        (subscan_stats_U['std'] > median_Ustd * nstd_lim) |
-        (np.abs(subscan_stats_Q['kurtosis']) > kurt_lim) |
-        (np.abs(subscan_stats_U['kurtosis']) > kurt_lim) |
-        (np.abs(subscan_stats_Q['skew']) > skew_lim) |
-        (np.abs(subscan_stats_U['skew']) > skew_lim)
-    )
+    noisy_subscan_indicator = np.zeros_like(subscan_stats_Q["std"], dtype=bool)
+    
+    if ptp_lim is not None:
+        noisy_subscan_indicator |= (subscan_stats_T['ptp'] > ptp_lim)
+    
+    if nstd_lim is not None:
+        noisy_subscan_indicator |= (subscan_stats_Q['std'] > median_Qstd * nstd_lim)
+        noisy_subscan_indicator |= (subscan_stats_U['std'] > median_Ustd * nstd_lim)
+    
+    if kurt_lim is not None:
+        noisy_subscan_indicator |= (np.abs(subscan_stats_Q['kurtosis']) > kurt_lim)
+        noisy_subscan_indicator |= (np.abs(subscan_stats_U['kurtosis']) > kurt_lim)
+    
+    if skew_lim is not None:
+        noisy_subscan_indicator |= (np.abs(subscan_stats_Q['skew']) > skew_lim)
+        noisy_subscan_indicator |= (np.abs(subscan_stats_U['skew']) > skew_lim)
 
     ss_info = aman.subscan_info if 'subscan_info' in aman else get_subscans(aman, merge=False)
     ssf = ss_info.subscan_flags

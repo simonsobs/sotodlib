@@ -1664,10 +1664,12 @@ class BadSubscanFlags(_Preprocess):
       Example config block::
 
         - name : "noisy_subscan_flags"
-          calc: 
-            merge: True
-            overwrite: True
-          save: True
+            stats_name: tod_stats # optional
+            calc: 
+                nstd_lim: 5.0 
+                merge: False
+            save: True
+            select: True
     
     .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
     """
