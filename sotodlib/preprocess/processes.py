@@ -814,6 +814,7 @@ class AzSS(_Preprocess):
 
       - name: "azss"
         azss_stats_name: 'azss_statsQ'
+        proc_aman_turnaround_info: 'turnaround_flags'
         calc:
           signal: 'demodQ'
           frange: [-1.57079, 7.85398]
@@ -828,6 +829,7 @@ class AzSS(_Preprocess):
     name = "azss"
     def __init__(self, step_cfgs):
         self.azss_stats_name = step_cfgs.get('azss_stats_name', 'azss_stats')
+        self.proc_aman_turnaround_info = step_cfgs.get('proc_aman_turnaround_info', None)
 
         super().__init__(step_cfgs)
 
@@ -836,7 +838,12 @@ class AzSS(_Preprocess):
         if self.process_cfgs:
             self.save(proc_aman, aman[self.azss_stats_name])
         else:
-            azss_stats, _ = tod_ops.azss.get_azss(aman,
+            if self.proc_aman_turnaround_info:
+                _f = attergetter(self.proc_aman_turnaround_info)
+                turnaround_info = _f(proc_aman)
+            else:
+                turnaround_info = None
+            azss_stats, _ = tod_ops.azss.get_azss(aman, turnaround_info=turnaround_info,
                                                   azss_stats_name=self.azss_stats_name,
                                                   merge_stats = False, merge_model=False,
                                                   **self.calc_cfgs)
@@ -850,12 +857,19 @@ class AzSS(_Preprocess):
 
     def process(self, aman, proc_aman):
         subtract = self.process_cfgs.get('subtract', False)
+        if self.proc_aman_turnaround_info:
+            _f = attergetter(self.proc_aman_turnaround_info)
+            turnaround_info = _f(proc_aman)
+        else:
+            turnaround_info = None
         if self.azss_stats_name in proc_aman:
             if subtract:
-                tod_ops.azss.get_azss(aman, subtract_in_place=True,
-                                      merge_stats = False, merge_model=False)
+                tod_ops.azss.subtract_azss(aman, proc_aman[self.azss_stats_name],
+                                           signal = self.calc_cfgs.get('signal'),
+                                           in_place=True)
         else:
             tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                  turnaround_info=turnaround_info,
                                   merge_stats = True, merge_model=False,
                                   subtract_in_place=subtract, **self.calc_cfgs)
 

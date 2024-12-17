@@ -5,6 +5,7 @@ from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters
+from so3g.proj import Ranges
 import logging
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ def bin_by_az(aman, signal=None, az=None, frange=None, bins=100, flags=None,
         else:
             weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
-                              frange=frange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
+                              range=frange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
 
 def fit_azss(az, azss_stats, max_mode, fit_range=None):
@@ -141,7 +142,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     
     return azss_stats, L.legval(x_legendre, coeffs.T)
     
-def _prepare_azss_stats(aman, signal, az, frange=None, bins=100, flags=None,
+def _prepare_azss_stats(aman, signal, az, frange=None, bins=100, flags=None, 
                         apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True,
                         apodize_flags_samps=200, method='interpolate', max_mode=None):
     """
@@ -164,15 +165,17 @@ def _prepare_azss_stats(aman, signal, az, frange=None, bins=100, flags=None,
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     azss_stats.wrap('method', method)
-    azss_stats.wrap('frange', frange)
-    azss_stats.wrap('max_mode', max_mode)
+    azss_stats.wrap('frange_min', frange[0])
+    azss_stats.wrap('frange_max', frange[1])
+    if max_mode:
+        azss_stats.wrap('max_mode', max_mode)
     return azss_stats
 
 def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
-            apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
+            apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
-            merge_stats=True, azss_stats_name='azss_stats', turnaround_flags=None,
+            merge_stats=True, azss_stats_name='azss_stats', turnaround_info=None,
             merge_model=True, azss_model_name='azss_model', left_right=False):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
@@ -193,7 +196,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
         If `bins` is a sequence, `bins` overwrite `frange`.
-    flags : RangesMatrix, optinal
+    flags : RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
     apodize_edges : bool, optional
@@ -268,8 +271,15 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
         az = aman.boresight.az
 
     if turnaround_info is None:
-        turaround_info = aman.flags
-    
+        turnaround_info = aman.flags
+    if isinstance(turnaround_info, str):
+        _f = attrgetter(turnaround_info)
+        turnaround_info = _f(aman)
+    if (not isinstance(turnaround_info, (core.AxisManager, core.FlagManager))) and left_right:
+        raise TypeError('turnaround_info must be AxisManager or FlagManager')
+    if flags is None:
+        flags = Ranges.from_mask(np.zeros(aman.samps.count).astype(bool))
+
     if left_right:
         if "valid_right_scans" not in turnaround_info: 
             left_mask = turnaround_info.left_scan
@@ -281,9 +291,13 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
         azss_left = _prepare_azss_stats(aman, signal, az, frange, bins, flags+left_mask, apodize_edges,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
+        azss_left.add_axis(aman.samps)
+        azss_left.wrap('mask', left_mask, [(0, 'samps')])
         azss_right = _prepare_azss_stats(aman, signal, az, frange, bins, flags+right_mask, apodize_edges,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
+        azss_right.add_axis(aman.samps)
+        azss_right.wrap('mask', right_mask, [(0, 'samps')])
         azss_stats = core.AxisManager(aman.dets)
         azss_stats.wrap('azss_stats_left', azss_left)
         azss_stats.wrap('azss_stats_right', azss_right)
@@ -313,7 +327,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
                 else:
                     lmask = left_mask.mask()
                     aman[signal_name][:,lmask] -= model_left[:,lmask].astype(aman[signal_name].dtype)
-                    lmask = left_mask.mask()
+                    rmask = right_mask.mask()
                     aman[signal_name][:,rmask] -= model_right[:,rmask].astype(aman[signal_name].dtype)
         else:
             azss_stats, model = get_model_sig_tod(aman, azss_stats, az)
@@ -336,36 +350,38 @@ def get_model_sig_tod(aman, azss_stats, az=None):
         az = aman.boresight.az
 
     if azss_stats.left_right:
-        if azss_stats.method == 'fit':
-            if type(azss_stats.max_mode) is not int:
-                raise ValueError('max_mode is not provided as integer')
-            azss_stats_left, model_left = fit_azss(az=az, azss_stats=azss_stats.azss_stats_left,
-                                                           max_mode=azss_stats.max_mode, fit_range=azss_stats.frange)
-            azss_stats_right, model_right = fit_azss(az=az, azss_stats=azss_stats.azss_stats_right,
-                                                           max_mode=azss_stats.max_mode, fit_range=azss_stats.frange)
-            azss_stats.wrap('azss_stats_left', azss_stats_left, overwrite=True)
-            azss_stats.wrap('azss_stats_right', azss_stats_right, overwrite=True)
+        model = []
+        for fld in ['azss_stats_left', 'azss_stats_right']:
+            _azss_stats = azss_stats[fld]
+            if _azss_stats.method == 'fit':
+                if type(_azss_stats.max_mode) is not int:
+                    raise ValueError('max_mode is not provided as integer')
+                _azss_stats, _model = fit_azss(az=az, azss_stats=_azss_stats,
+                                                   max_mode=_azss_stats.max_mode,
+                                                   fit_range=[_azss_stats.frange_min, _azss_stats.frange_max])
+                azss_stats.wrap(fld, _azss_stats, overwrite=True)
+                model.append(_model)
 
-        if azss_stats.method == 'interpolate':
-            f_template = interp1d(azss_stats.azss_stats_left.binned_az,
-                                  azss_stats.azss_stats_left.binned_signal, fill_value='extrapolate')
-            model_left = f_template(az)
-            f_template = interp1d(azss_stats.azss_stats_right.binned_az,                                                                                    azss_stats.azss_stats_right.binned_signal, fill_value='extrapolate')
-            model_right = f_template(az)
-        return azss_stats, model_left, model_right
+            if _azss_stats.method == 'interpolate':
+                f_template = interp1d(_azss_stats.binned_az,
+                                      _azss_stats.binned_signal, fill_value='extrapolate')
+                _model = f_template(az)
+                model.append(_model)
+        return azss_stats, model[0], model[1]
 
     else:
         if type(azss_stats.max_mode) is not int:
                 raise ValueError('max_mode is not provided as integer')
-            azss_stats, model = fit_azss(az=az, azss_stats=azss_stats,
-                                                 max_mode=azss_stats.max_mode, fit_range=azss_stats.frange)
+        azss_stats, model = fit_azss(az=az, azss_stats=azss_stats,
+                                     max_mode=azss_stats.max_mode,
+                                     fit_range=[azss_stats.frange_min, azss_stats.frange_max])
         if azss_stats.method == 'interpolate':
             f_template = interp1d(azss_stats.binned_az, azss_stats.binned_signal, fill_value='extrapolate')
             model = f_template(az)
-        return azss_stats, model
+        return azss_stats, model, None
 
-def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
-                  subtract_name='azss_remove', in_place=False, remove_template=True):
+def subtract_azss(aman, azss_stats, signal='signal', subtract_name='azss_remove',
+                  in_place=False):
     """
     Subtract the scan synchronous signal (azss) template from the
     signal in the given axis manager.
@@ -374,21 +390,17 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
     ----------
     aman : AxisManager
         The axis manager containing the signal and the azss template.
+    azss_stats: AxisManager
+        Contains AxisManager from get_azss.
     signal : str, optional
         The name of the field in the axis manager containing the signal to be processed.
         Defaults to 'signal'.
-    azss_template_name : str, optional
-        The name of the field in the axis manager containing the azss template.
-        Defaults to 'azss_model'.
     subtract_name : str, optional
         The name of the field in the axis manager that will store the azss-subtracted signal.
         Only used if in_place is False. Defaults to 'azss_remove'.
     in_place : bool, optional
         If True, the subtraction is done in place, modifying the original signal in the axis manager.
         If False, the result is stored in a new field specified by subtract_name. Defaults to False.
-    remove_template : bool, optional
-        If True, the azss template field is removed from the axis manager after subtraction.
-        Defaults to True.
 
     Returns
     -------
@@ -407,15 +419,31 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
+    azss_stats, model_left, model_right = get_model_sig_tod(aman, azss_stats, az=None)
+
     if in_place:
         if signal_name is None:
-            signal -= aman[azss_template_name].astype(signal.dtype)
+            if azss_stats.left_right:
+                for model, azss_fld in zip([model_left, model_right], ['azss_stats_left', 'azss_stats_right']):
+                    mask = azss_stats[azss_fld]['mask'].mask()
+                    signal[:, mask] -= model[:, mask].astype(signal.dtype)
+            else:
+                signal -= model_left.astype(signal.dtype)
         else:
-            aman[signal_name] -= aman[azss_template_name].astype(aman[signal_name].dtype)
+            if azss_stats.left_right:
+                for model, azss_fld in zip([model_left, model_right], ['azss_stats_left', 'azss_stats_right']):
+                    mask = azss_stats[azss_fld]['mask'].mask()
+                    aman[signal_name][:, mask] -= model[:, mask].astype(aman[signal_name].dtype)
+            else:
+                aman[signal_name] -= model_left.astype(aman[signal_name].dtype)
     else:
-        aman.wrap(subtract_name, 
-                  np.subtract(aman[signal_name], aman[azss_template_name], dtype='float32'),
-                  [(0, 'dets'), (1, 'samps')])
-        
-    if remove_template:
-        aman.move(azss_template_name, None)
+        if azss_stats.left_right:
+            wrap_sig = np.copy(signal)
+            for model, azss_fld in zip([model_left, model_right], ['azss_stats_left', 'azss_stats_right']):
+                mask = azss_stats[azss_fld]['mask'].mask()
+                wrap_sig[:, mask] -= model[:, mask].astype(signal.dtype)
+            aman.wrap(subtract_name, wrap_sig, [(0, 'dets'), (1, 'samps')])
+        else:
+            aman.wrap(subtract_name, 
+                      np.subtract(aman[signal_name], model_left, dtype='float32'),
+                      [(0, 'dets'), (1, 'samps')])
