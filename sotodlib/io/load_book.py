@@ -838,29 +838,12 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None)
     SOTODLIB_TOD_CACHE and that will be used as the temp_dir.
 
     """
-<<<<<<< HEAD
-    if use_temp_dir is None:
-        cache_dir = os.getenv('SOTODLIB_TOD_CACHE')
-        if cache_dir:
-            # Just return things from _frames_iterator, but within a
-            # tempdir context that will clean up after last iteration.
-            with tempfile.TemporaryDirectory(dir=cache_dir) as temp_dir:
-                for item in _frames_iterator(files, prefix, samples, smurf_proc, temp_dir):
-                    yield item
-            return
-
-    offset = 0
-    for f, i0, i1 in files:
-        if i0 is None:
-            i0 = offset
-=======
     tmpdir_root = os.getenv(TMPDIR_VAR)
     if tmpdir_root:
         cmgr = tempfile.TemporaryDirectory(dir=tmpdir_root)
     else:
         # This yields None
         cmgr = contextlib.nullcontext()
->>>>>>> origin/master
 
     with cmgr as tmpdir:
         offset = 0
@@ -874,21 +857,6 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None)
                 if samples[1] is not None and i0 >= samples[1]:
                     break
 
-<<<<<<< HEAD
-        if use_temp_dir:
-            filename, orig_filename = os.path.join(use_temp_dir, 'framefile'), filename
-            shutil.copyfile(orig_filename, filename)
-
-        for frame in spt3g_core.G3File(filename):
-            if smurf_proc is not None and smurf_proc.process(frame):
-                # We found a dump frame, so stop looking.
-                smurf_proc = None
-            if frame.type is not spt3g_core.G3FrameType.Scan:
-                continue
-            yield frame, offset
-            offset += len(frame['ancil'].times)
-            # Alternately, use frame['sample_range']
-=======
             filename = os.path.join(prefix, f)
             offset = i0
 
@@ -906,7 +874,6 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None)
                 yield frame, offset
                 offset += len(frame['ancil'].times)
                 # Alternately, use frame['sample_range']
->>>>>>> origin/master
 
 
 def get_cal_obsids(ctx, obs_id, cal_type):
