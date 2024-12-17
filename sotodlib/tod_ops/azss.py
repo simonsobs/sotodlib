@@ -165,8 +165,9 @@ def _prepare_azss_stats(aman, signal, az, frange=None, bins=100, flags=None,
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
     azss_stats.wrap('method', method)
-    azss_stats.wrap('frange_min', frange[0])
-    azss_stats.wrap('frange_max', frange[1])
+    if not frange is None:
+        azss_stats.wrap('frange_min', frange[0])
+        azss_stats.wrap('frange_max', frange[1])
     if max_mode:
         azss_stats.wrap('max_mode', max_mode)
     return azss_stats
@@ -270,17 +271,18 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
     if az is None:
         az = aman.boresight.az
 
-    if turnaround_info is None:
-        turnaround_info = aman.flags
-    if isinstance(turnaround_info, str):
-        _f = attrgetter(turnaround_info)
-        turnaround_info = _f(aman)
-    if (not isinstance(turnaround_info, (core.AxisManager, core.FlagManager))) and left_right:
-        raise TypeError('turnaround_info must be AxisManager or FlagManager')
     if flags is None:
         flags = Ranges.from_mask(np.zeros(aman.samps.count).astype(bool))
 
     if left_right:
+        if turnaround_info is None:
+            turnaround_info = aman.flags
+        if isinstance(turnaround_info, str):
+            _f = attrgetter(turnaround_info)
+            turnaround_info = _f(aman)
+        if not isinstance(turnaround_info, (core.AxisManager, core.FlagManager)):
+            raise TypeError('turnaround_info must be AxisManager or FlagManager')
+
         if "valid_right_scans" not in turnaround_info: 
             left_mask = turnaround_info.left_scan
             right_mask = turnaround_info.right_scan
@@ -307,11 +309,8 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
         azss_stats.wrap('left_right', left_right)
-    
-    if merge_stats:
-        aman.wrap(azss_stats_name, azss_stats)
-        model_sig_tod = None
 
+    model_left, model_right, model = None, None, None
     if merge_model or subtract_in_place:
         if left_right:
             azss_stats, model_left, model_right = get_model_sig_tod(aman, azss_stats, az)
@@ -330,7 +329,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
                     rmask = right_mask.mask()
                     aman[signal_name][:,rmask] -= model_right[:,rmask].astype(aman[signal_name].dtype)
         else:
-            azss_stats, model = get_model_sig_tod(aman, azss_stats, az)
+            azss_stats, model, _ = get_model_sig_tod(aman, azss_stats, az)
             if merge_model:
                 aman.wrap(azss_model_name, model, [(0, 'dets'), (1, 'samps')])
             if subtract_in_place:
@@ -338,14 +337,19 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
                     signal -= model.astype(signal.dtype)
                 else:
                     aman[signal_name] -= model.astype(aman[signal_name].dtype)
-    
-    return azss_stats, model_sig_tod
+
+    if merge_stats:
+        aman.wrap(azss_stats_name, azss_stats)
+
+    if left_right:
+        return azss_stats, model_left, model_right
+    else:
+        return azss_stats, model
 
 def get_model_sig_tod(aman, azss_stats, az=None):
     """
     Function to return the azss template for subtraction given the azss_stats AxisManager
     """
-    # Need to handle left_right field in here.
     if az is None:
         az = aman.boresight.az
 
@@ -353,12 +357,17 @@ def get_model_sig_tod(aman, azss_stats, az=None):
         model = []
         for fld in ['azss_stats_left', 'azss_stats_right']:
             _azss_stats = azss_stats[fld]
+            if 'frange_min' in _azss_stats:
+                frange = (_azss_stats.frange_min, _azss_stats.frange_max)
+            else:
+                frange = None
             if _azss_stats.method == 'fit':
                 if type(_azss_stats.max_mode) is not int:
                     raise ValueError('max_mode is not provided as integer')
+
                 _azss_stats, _model = fit_azss(az=az, azss_stats=_azss_stats,
                                                    max_mode=_azss_stats.max_mode,
-                                                   fit_range=[_azss_stats.frange_min, _azss_stats.frange_max])
+                                                   fit_range=frange)
                 azss_stats.wrap(fld, _azss_stats, overwrite=True)
                 model.append(_model)
 
@@ -370,11 +379,16 @@ def get_model_sig_tod(aman, azss_stats, az=None):
         return azss_stats, model[0], model[1]
 
     else:
-        if type(azss_stats.max_mode) is not int:
-                raise ValueError('max_mode is not provided as integer')
-        azss_stats, model = fit_azss(az=az, azss_stats=azss_stats,
-                                     max_mode=azss_stats.max_mode,
-                                     fit_range=[azss_stats.frange_min, azss_stats.frange_max])
+        if azss_stats.method == 'fit':
+            if type(azss_stats.max_mode) is not int:
+                    raise ValueError('max_mode is not provided as integer')
+            if 'frange_min' in azss_stats:
+                frange = (azss_stats.frange_min, azss_stats.frange_max)
+            else:
+                frange = None
+            azss_stats, model = fit_azss(az=az, azss_stats=azss_stats,
+                                         max_mode=azss_stats.max_mode,
+                                         fit_range=frange)
         if azss_stats.method == 'interpolate':
             f_template = interp1d(azss_stats.binned_az, azss_stats.binned_signal, fill_value='extrapolate')
             model = f_template(az)
