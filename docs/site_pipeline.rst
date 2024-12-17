@@ -940,16 +940,13 @@ and binned. Every atomic map consist of a ``weights``, ``wmap`` (weighted map),
 and ``hits`` map, as well as an information file that is used for adding the map
 to an atomic map database.
 
-Command line arguments
-``````````````````````
+Configuration yaml file
+````````````````````````
 
-.. argparse::
-   :module: sotodlib.site_pipeline.make_atomic_filterbin_map
-   :func: get_parser
-   :prog: make-atomic-filterbin-map
+The mapmaker is configured by supplying a yaml file with ``--config_file``.
 
-Config file format
-``````````````````
+.. autoclass:: sotodlib.site_pipeline.make_atomic_filterbin_map.Cfg
+  :members:
 
 The only mandatory parameters are ``context`` for a context file and ``preprocess_config``,
 a preprocess database configuration file that will tell the script how to process the
