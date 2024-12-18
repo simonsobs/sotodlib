@@ -381,7 +381,6 @@ def main(config_file: str) -> None:
 
     run_list = []
     for oi, ol in enumerate(obslists_arr):
-        # tod_list[oi].obslist[0] is the old obslist
         pid = ol[0][3]
         detset = ol[0][1]
         band = ol[0][2]
@@ -390,8 +389,6 @@ def main(config_file: str) -> None:
         t5 = ("%05d" % t)[:5]
         prefix = "%s/%s/atomic_%010d_%s_%s" % (
             args.odir, t5, t, detset, band)
-        # if args.area is not None:
-        #    subshape, subwcs = subgeoms[oi]
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))

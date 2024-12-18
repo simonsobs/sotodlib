@@ -419,7 +419,7 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
     Setup the classes for demod mapmaking and return
     a DemodMapmmaker object
     """
-    if shape is not None and wcs is not None:
+    if wcs is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
                                               dtype=dtype_map, tiled=False,
