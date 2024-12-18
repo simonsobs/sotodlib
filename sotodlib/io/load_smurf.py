@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 from .. import core
 from . import load as io_load
-from .datapkg_utils import load_configs
+from .datapkg_utils import load_configs, walk_files, just_suprsync
 from .g3thk_db import G3tHk, HKFiles, HKAgents, HKFields
 from .g3thk_utils import pysmurf_monitor_control_list
 
@@ -194,6 +194,7 @@ class G3tSmurf:
         self.meta_path = meta_path
         self.db_path = db_path
         self.hk_db_path = hk_db_path
+        self.HK = None
         self.finalize = finalize
 
         if os.path.exists(self.db_path):
@@ -606,13 +607,13 @@ class G3tSmurf:
             my_logger = logger
 
         db_frames = db_file.frames
-        my_logger.info(f"Deleting frame entries for {db_file.name}")
+        my_logger.debug(f"Deleting frame entries for {db_file.name}")
         if not dry_run:
             [session.delete(frame) for frame in db_frames]
 
         if not os.path.exists(db_file.name):
             my_logger.warning(
-                f"Database file {db_file.name} appears already" " deleted on disk"
+                f"Database file {db_file.name} appears already deleted on disk"
             )
         else:
             my_logger.info(f"Deleting file {db_file.name}")
@@ -1155,7 +1156,9 @@ class G3tSmurf:
             logger.debug(f"Setting {obs.obs_id} stop time to {obs.stop}")
         session.commit()
 
-    def delete_observation_files(self, obs, session, dry_run=False, my_logger=None):
+    def delete_observation_files(
+        self, obs, session, dry_run=False, my_logger=None
+    ):
         """WARNING: Deletes files from the file system
 
         Args
@@ -1394,20 +1397,33 @@ class G3tSmurf:
                 session.add(tcf)
                 session.commit()
 
+    def get_HK(self):
+        if self.hk_db_path is None:
+            raise ValueError("HK database path required")
+
+        if self.HK is None:
+            iids = []
+            for server in self.finalize.get("servers", []):
+                for key in server.keys():
+                    # Append the value (iid) to the iids list
+                    iids.append(server[key])
+
+            self.HK = G3tHk(
+                os.path.join(os.path.split(self.archive_path)[0], "hk"),
+                iids = iids,
+                db_path = self.hk_db_path,
+            )
+        return self.HK
+
     def update_finalization(self, update_time, session=None):
         """Update the finalization time rows in the database"""
-        if self.hk_db_path is None:
-            raise ValueError("HK database path required to update finalization" " time")
-
+        
         if session is None:
             session = self.Session()
         # look for new rows to add to table
         self._start_finalization(session)
 
-        HK = G3tHk(
-            os.path.join(os.path.split(self.archive_path)[0], "hk"),
-            self.hk_db_path,
-        )
+        HK = self.get_HK()
 
         agent_list = session.query(Finalize).all()
         for agent in agent_list:
@@ -1449,15 +1465,19 @@ class G3tSmurf:
         session.commit()
 
     def get_final_time(
-        self, stream_ids, start=None, stop=None, check_control=True, session=None
+        self, stream_ids, start=None, stop=None, check_control=True,
+        session=None
     ):
-        """Return the ctime to which database is finalized for a set of stream_ids
-        between ctimes start and stop. If check_control is True it will use the
-        pysmurf-monitor entries in the HK database to determine which
-        pysmurf-monitors were in control of which stream_ids between start and stop.
+        """Return the ctime to which database is finalized for a set of 
+        stream_ids between ctimes start and stop. If check_control is True it 
+        will use the pysmurf-monitor entries in the HK database to determine 
+        which pysmurf-monitors were in control of which stream_ids between 
+        start and stop.
         """
         if check_control and self.hk_db_path is None:
-            raise ValueError("HK database path required to update finalization" " time")
+            raise ValueError(
+                "HK database path required to update finalization time"
+            )
         if check_control and ((start is None) or (stop is None)):
             raise ValueError(
                 "start and stop ctimes are required to check which"
@@ -1465,10 +1485,8 @@ class G3tSmurf:
             )
         if session is None:
             session = self.Session()
-        HK = G3tHk(
-            os.path.join(os.path.split(self.archive_path)[0], "hk"),
-            self.hk_db_path,
-        )
+        
+        HK = self.get_HK()
 
         agent_list = []
         if "servers" not in self.finalize:
@@ -1730,6 +1748,51 @@ class G3tSmurf:
         if new_session:
             session.close()
 
+    def find_missing_files(self, timecode, session=None):
+        """create a list of files in the timecode folder that are not in the
+        g3tsmurf database
+        
+        Arguments
+        ----------
+        timecode (int): a level 2 timestreams timecode
+
+        Returns
+        --------
+        missing (list): list of file paths that are not in the g3tsmurf database
+        """
+        if session is None:
+            session = self.Session()
+        path = os.path.join(self.archive_path, str(timecode))
+
+        q = session.query(Files).filter(Files.name.like(f"{path}%"))
+        db_list = [f.name for f in q.all()]
+        sys_list = walk_files(path)
+        missing = []
+        for f in sys_list:
+            if f not in db_list:
+                missing.append(f)
+
+        return missing
+
+    def find_missing_files_from_obs(self, timecode, session=None):
+        """create a list of files in the g3tsmurf database that do not have an
+        assigned level 2 observation ID
+        
+        Arguments
+        ----------
+        timecode (int): a level 2 timestreams timecode
+
+        Returns
+        --------
+        missing (list): list of file paths that do not have level 2 observation IDs
+        """
+        if session is None:
+            session = self.Session()
+        path = os.path.join(self.archive_path, str(timecode))
+        q = session.query(Files).filter(Files.name.like(f"{path}%"))
+        db_list = q.all()
+        return [f.name for f in db_list if f.obs_id is None]
+        
     def lookup_file(self, filename, fail_ok=False):
         """Lookup a file's observations details in database. Meant to look
         and act like core.metadata.obsfiledb.lookup_file.
@@ -1914,7 +1977,6 @@ class G3tSmurf:
         """
         return SmurfStatus.from_time(time, self, stream_id=stream_id, show_pb=show_pb)
 
-
 def dump_DetDb(archive, detdb_file):
     """
     Take a G3tSmurf archive and create a a DetDb of the type used with Context
@@ -1950,7 +2012,6 @@ def dump_DetDb(archive, detdb_file):
         )
     session.close()
     return my_db
-
 
 def make_DetDb_single_obs(obsfiledb, obs_id):
     # find relevant files to get status
@@ -2016,17 +2077,14 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
     detdb.conn.commit()
     return detdb
 
-
 def obs_detdb_context_hook(ctx, obs_id, *args, **kwargs):
     ddb = make_DetDb_single_obs(ctx.obsfiledb, obs_id)
     ctx.obs_detdb = ddb
     return ddb
 
-
 core.Context.hook_sets["obs_detdb_load"] = {
     "before-use-detdb": obs_detdb_context_hook,
 }
-
 
 class SmurfStatus:
     """
@@ -2385,7 +2443,6 @@ class SmurfStatus:
         """
         return self.mask_inv[band, chan]
 
-
 def get_channel_mask(
     ch_list, status, archive=None, obsfiledb=None, ignore_missing=True
 ):
@@ -2568,7 +2625,6 @@ def _get_tuneset_channel_names(status, ch_map, archive):
     session.close()
     return ruids
 
-
 def _get_detset_channel_names(status, ch_map, obsfiledb):
     """Update channel maps with name from obsfiledb"""
     # tune file in status
@@ -2639,7 +2695,6 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
 
     return ruids
 
-
 def _get_channel_mapping(status, ch_map):
     """Generate baseline channel map from status object"""
     for i, ch in enumerate(ch_map["idx"]):
@@ -2655,7 +2710,6 @@ def _get_channel_mapping(status, ch_map):
             ch_map[i]["band"] = -1
             ch_map[i]["channel"] = -1
     return ch_map
-
 
 def get_channel_info(
     status,
@@ -2740,7 +2794,6 @@ def get_channel_info(
 
     return ch_info
 
-
 def _get_sample_info(filenames):
     """Scan through a list of files and count samples. Starts counting
     from the first file in the list. Used in load_file for sample restiction
@@ -2780,7 +2833,6 @@ def _get_sample_info(filenames):
         start += samps
     return out
 
-
 def split_ts_bits(c):
     """Split up 64 bit to 2x32 bit"""
     NUM_BITS_PER_INT = 32
@@ -2788,7 +2840,6 @@ def split_ts_bits(c):
     a = (c >> NUM_BITS_PER_INT) & MAXINT
     b = c & MAXINT
     return a, b
-
 
 def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     """Calculate the timestamp field for loaded data
@@ -2840,7 +2891,6 @@ def _get_timestamps(streams, load_type=None, linearize_timestamps=True):
     if load_type == TimingParadigm.G3Timestream:
         return io_load.hstack_into(None, streams["time"])
     logger.error("Timing System could not be determined")
-
 
 def load_file(
     filename,
@@ -3098,7 +3148,6 @@ def load_file(
     aman.wrap("flags", core.FlagManager.for_tod(aman, det_axis, "samps"))
 
     return aman
-
 
 def load_g3tsmurf_obs(db, obs_id, dets=None, samples=None, no_signal=None, **kwargs):
     """Obsloader function for g3tsmurf data archives.
