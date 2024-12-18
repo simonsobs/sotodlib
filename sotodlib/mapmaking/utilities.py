@@ -546,7 +546,7 @@ class AtomicInfo(Base):
     freq_channel: Mapped[str] = mapped_column(primary_key=True)
     wafer: Mapped[str] = mapped_column(primary_key=True)
     ctime: Mapped[int] = mapped_column(primary_key=True)
-    split_label: mapped_column(primary_key=True)
+    split_label: Mapped[str] = mapped_column(primary_key=True)
     split_detail: Mapped[Optional[str]]
     prefix_path: Mapped[Optional[str]]
     elevation: Mapped[Optional[float]]
