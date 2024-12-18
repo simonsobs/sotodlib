@@ -1695,9 +1695,9 @@ class BadSubscanFlags(_Preprocess):
             subscan_stats_Q = subscan_stats_Q, 
             subscan_stats_U = subscan_stats_U, **self.calc_cfgs)
         ss_aman = core.AxisManager(aman.dets, aman.samps)
-        ss_aman.wrap("noisy_subscan", msk_ss, [(0, 'dets'), (1, 'samps')])
+        ss_aman.wrap("valid_subscan", ~msk_ss, [(0, 'dets'), (1, 'samps')])
         det_aman = core.AxisManager(aman.dets)
-        det_aman.wrap("noisy_dets", msk_det)
+        det_aman.wrap("valid_dets", ~msk_det)
         self.save(proc_aman, ss_aman, "noisy_subscan_flags")
         self.save(proc_aman, det_aman, "noisy_dets_flags")
 
@@ -1712,7 +1712,7 @@ class BadSubscanFlags(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        meta.restrict('dets', proc_aman.dets.vals[~proc_aman.noisy_dets_flags.noisy_dets])
+        meta.restrict('dets', proc_aman.dets.vals[proc_aman.noisy_dets_flags.valid_dets])
         return meta
 
 _Preprocess.register(SplitFlags)

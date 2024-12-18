@@ -234,7 +234,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
     left_right: bool
         Default False. If True estimate (and subtract) the AzSS template for left and right subscans
         separately.
-    turnaround_flags: FlagManager or AxisManager
+    turnaround_info: FlagManager or AxisManager
         Optional, default is aman.flags.
 
     Returns
@@ -273,7 +273,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
 
     if flags is None:
         flags = Ranges.from_mask(np.zeros(aman.samps.count).astype(bool))
-
+    
     if left_right:
         if turnaround_info is None:
             turnaround_info = aman.flags
@@ -287,6 +287,8 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
             left_mask = turnaround_info.left_scan
             right_mask = turnaround_info.right_scan
         else:
+            print("")
+            print("HEREEEEEEE")
             left_mask = turnaround_info.valid_left_scans
             right_mask = turnaround_info.valid_right_scans
 
