@@ -8,7 +8,10 @@ import logging
 import yaml
 import multiprocessing
 import traceback
-import sqlite3
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
 import numpy as np
 import so3g
 import sotodlib.site_pipeline.util as util
@@ -162,7 +165,6 @@ class Cfg:
         with open(path, "r") as f:
             d = yaml.safe_load(f)
             return cls(**d)
-
 
 class DataMissing(Exception):
     pass
@@ -318,7 +320,7 @@ def main(config_file: str) -> None:
     except mapmaking.NoTODFound as err:
         L.exception(err)
         exit(1)
-    L.info(f'Done with build_obslists, running {len(obslists)} maps')
+    L.info(f'Running {len(obslists)} maps after build_obslists')
     cwd = os.getcwd()
 
     split_labels = []
@@ -343,22 +345,23 @@ def main(config_file: str) -> None:
     # if we do we will not run them again.
     if isinstance(args.atomic_db, str):
         if os.path.isfile(args.atomic_db) and not args.only_hits:
-            # open the connector, in reading mode only
-            conn = sqlite3.connect(args.atomic_db)
-            cursor = conn.cursor()
+            engine = create_engine("sqlite:///%s" % args.atomic_db, echo=False)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+
             keys_to_remove = []
             # Now we have obslists and splits ready, we look through the database
             # to remove the maps we already have from it
             for key, value in obslists.items():
                 missing_split = False
                 for split_label in split_labels:
-                    query_ = 'SELECT * from atomic where obs_id="%s" and\
-                    telescope="%s" and freq_channel="%s" and wafer="%s" and\
-                    split_label="%s"' % (
-                        value[0][0], obs_infos[value[0][3]].telescope, key[2],
-                        key[1], split_label)
-                    res = cursor.execute(query_)
-                    matches = res.fetchall()
+                    query_ = select(mapmaking.AtomicInfo).filter_by(
+                        obs_id=value[0][0],
+                        telescope=obs_infos[value[0][3]].telescope,
+                        freq_channel=key[2],
+                        wafer=key[1],
+                        split_label=split_label)
+                    matches = session.execute(query_).scalars().all()
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
@@ -371,11 +374,11 @@ def main(config_file: str) -> None:
             for key in keys_to_remove:
                 obskeys.remove(key)
                 del obslists[key]
-            conn.close()  # I close since I only wanted to read
+            engine.dispose()
 
     obslists_arr = [item for key, item in obslists.items()]
     tod_list = []  # this list will receive the outputs from read_tods
-    L.info('Starting with read_tods')
+    L.info(f'Running {len(obslists_arr)} maps after removing duplicate maps')
 
     with ProcessPoolExecutor(args.nproc) as exe:
         futures = [exe.submit(
@@ -440,28 +443,26 @@ def main(config_file: str) -> None:
         # another script will loop over those files
         # and write into sqlite data base
         if not args.only_hits:
-            info = []
+            info_list = []
             for split_label in split_labels:
-                info.append(bunch.Bunch(
-                    pid=pid,
-                    obs_id=obslist[0][0].encode(),
-                    telescope=obs_infos[obslist[0][3]].telescope.encode(),
-                    freq_channel=band.encode(),
-                    wafer=detset.encode(),
-                    ctime=int(t),
-                    split_label=split_label.encode(),
-                    split_detail=''.encode(),
-                    prefix_path=str(cwd + '/' + prefix + '_%s' %
-                                    split_label).encode(),
-                    elevation=obs_infos[obslist[0][3]].el_center,
-                    azimuth=obs_infos[obslist[0][3]].az_center,
-                    pwv=float(pwv_atomic)))
+                info = mapmaking.AtomicInfo(
+                    obslist[0][0],
+                    obs_infos[obslist[0][3]].telescope,
+                    band,
+                    detset,
+                    int(t))
+                info.split_label = split_label
+                info.split_detail = ''
+                info.prefix_path = str(cwd + '/' + prefix + '_%s' % split_label)
+                info.elevation = obs_infos[obslist[0][3]].el_center
+                info.azimuth =obs_infos[obslist[0][3]].az_center
+                info.pwv = float(pwv_atomic)
+                info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
-            run_list.append([obslist, subshape, subwcs, info, prefix, t])
+            run_list.append([obslist, subshape, subwcs, info_list, prefix, t])
         elif args.nside is not None:
-            run_list.append([obslist, None, None, info, prefix, t])
-    # Done with creating run_list
+            run_list.append([obslist, None, None, info_list, prefix, t])
 
     with ProcessPoolExecutor(args.nproc) as exe:
         futures = [exe.submit(
@@ -476,7 +477,8 @@ def main(config_file: str) -> None:
             verbose=verbose,
             split_labels=split_labels,
             singlestream=args.singlestream,
-            site=args.site) for r in run_list]
+            site=args.site,
+            atomic_db=args.atomic_db) for r in run_list]
         for future in as_completed(futures):
             L.info('New future as_completed result')
             try:

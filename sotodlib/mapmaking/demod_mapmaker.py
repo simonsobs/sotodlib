@@ -9,11 +9,13 @@ __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
 import numpy as np, os
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
 import so3g.proj
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from .. import core
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional
+from .utilities import import_optional, Base
 from .noise_model import NmatWhite
 
 hp = import_optional('healpy')
@@ -420,18 +422,24 @@ def write_demod_maps(prefix, data, split_labels=None):
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split])
 
-def write_demod_info(oname, info, split_labels=None):
-    putils.mkdir(os.path.dirname(oname))
+def write_demod_info(oname, info, split_labels=None, atomic_db=None):
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
-        bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
+        if atomic_db is not None:
+            engine = create_engine("sqlite:///%s" % atomic_db, echo=True)
+            Base.metadata.create_all(bind=engine)
+            Session = sessionmaker(bind=engine)
+            with Session() as session:
+                session.add(info[n_split])
+                session.commit()
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
                     nside=None, comm=mpi.COMM_WORLD, comps="TQU", t0=0,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
-                    site='so_sat3', recenter=None, singlestream=False):
+                    site='so_sat3', recenter=None, singlestream=False,
+                    atomic_db=None):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -484,6 +492,8 @@ def make_demod_map(context, obslist, noise_model, info,
         If True, do not perform demodulated filter+bin mapmaking but
         rather regular filter+bin mapmaking, i.e. map from obs.signal
         rather than from obs.dsT, obs.demodQ, obs.demodU.
+    atomic_db : str, optional
+        Path to the atomic map data base. Maps created will be added to it.
 
     Returns
     -------
@@ -551,12 +561,12 @@ def make_demod_map(context, obslist, noise_model, info,
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
     mapdata = bunch.Bunch(wmap=wmap, weights=weights, signal=mapmaker.signals[0], t0=t0)
-
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
     write_demod_maps(prefix, mapdata, split_labels=split_labels, )
-    write_demod_info(prefix, info, split_labels=split_labels )
+    write_demod_info(prefix, info, split_labels=split_labels, atomic_db=atomic_db )
+
     return errors, outputs
 
 def add_weights_to_info(info, weights, split_labels):
@@ -572,9 +582,9 @@ def add_weights_to_info(info, weights, split_labels):
         sumweights = np.sum(mean_qu[positive])
         meanweights = np.mean(mean_qu[positive])
         medianweights = np.median(mean_qu[positive])
-        sub_info['total_weight_qu'] = sumweights
-        sub_info['mean_weight_qu'] = meanweights
-        sub_info['median_weight_qu'] = medianweights
+        sub_info.total_weight_qu = sumweights
+        sub_info.mean_weight_qu = meanweights
+        sub_info.median_weight_qu = medianweights
         info[isplit] = sub_info
     return info
 
