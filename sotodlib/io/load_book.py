@@ -16,11 +16,6 @@ The two access points in this submodule are:
     This can be used to load single G3 files (or a set of
     sample-contiguous G3 files) from a book, by filename.
 
-Reading from g3 files can be slow on some filesystems.  Use
-SOTODLIB_TOD_CACHE envvar to point to a directory where tempfiles can
-be safely made, for faster acccess, such as a scratch, local, or RAM
-disk.
-
 """
 
 import so3g
@@ -824,18 +819,12 @@ class Accumulator2d(Accumulator):
         return self.data
 
 
-def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None):
+def _frames_iterator(files, prefix, samples, smurf_proc=None):
     """Iterates over frames in files.  yields only frames that might be of
     interest for timestream unpacking.
 
     Yields each (frame, offset).  The offset is the global offset
     associated with the start of the frame.
-
-    If use_temp_dir is a string, data files are copied to that dir
-    before reading from them.  If use_temp_dir is None, and
-    SOTODLIB_TOD_CACHE envvar is defined, then a TemporaryDirectory
-    (which can clean up after itself) will be created inside
-    SOTODLIB_TOD_CACHE and that will be used as the temp_dir.
 
     """
     tmpdir_root = os.getenv(TMPDIR_VAR)
