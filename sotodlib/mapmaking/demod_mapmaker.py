@@ -159,14 +159,17 @@ class DemodSignalMap(DemodSignal):
         self.sys   = sys
         self.recenter = recenter
         self.dtype = dtype
+        self.tile_shape = tile_shape        
         self.tiled = tiled
         self.data  = {}
         self.Nsplits = Nsplits
         self.singlestream = singlestream
         self.wrapper = lambda x : x
+        self.wcs = wcs
+
         ncomp      = len(comps)
 
-        self.pix_scheme = "rectpix" if (shape is not None) else "healpix"
+        self.pix_scheme = "rectpix" if (wcs is not None) else "healpix"
         if self.pix_scheme == "healpix":
             self.tiled = (nside_tile is not None)
             self.hp_geom = coords.healpix_utils.get_geometry(nside, nside_tile, ordering='NEST')
@@ -178,16 +181,13 @@ class DemodSignalMap(DemodSignal):
             if self.tiled:
                 self.wrapper = coords.healpix_utils.tiled_to_full
         else:
-            shape = tuple(shape[-2:])
-            if tiled:
-                geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
-                self.rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=dtype)
-                self.div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=dtype)
-                self.hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=dtype)
+            if shape is None:
+                # We will set shape, wcs from wcs_kernel on loading the first obs                
+                self.rhs = None
+                self.div = None
+                self.hits = None
             else:
-                self.rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=dtype)
-                self.div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
-                self.hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
+                self.init_maps_rectpix(shape, wcs)
 
     @classmethod
     def for_rectpix(cls, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
@@ -200,9 +200,9 @@ class DemodSignalMap(DemodSignal):
         Arguments
         ---------
         shape : numpy.ndarray
-            Shape of the output map geometry
+            Shape of the output map geometry. If None, computed from coords.get_footprint on first add_obs.
         wcs : wcs
-            WCS of the output map geometry
+            WCS of the output map geometry (or wcs kernel).
         comm : MPI.comm
             MPI communicator
         comps : str, optional
@@ -299,13 +299,24 @@ class DemodSignalMap(DemodSignal):
                     cuts = obs.flags.glitch_flags + ~obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
-                    geom = self.rhs.geometry
+                    if self.rhs is None: # Still need to initialize the geometry
+                        geom = None
+                        wcs_kernel = self.wcs
+                    else:
+                        geom = self.rhs.geometry
+                        wcs_kernel = None
                 else:
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
+                    wcs_kernel = None
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
             else:
                 pmap_local = pmap
+
+            if self.rhs is None: # Set the geometry now from the pmat
+                shape, wcs = pmap_local.geom
+                self.init_maps_rectpix(shape, wcs)
+                self.wcs = wcs
 
             if not(self.singlestream):
                 obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT, signalQ=obs.demodQ, signalU=obs.demodU,
@@ -379,6 +390,26 @@ class DemodSignalMap(DemodSignal):
                 raise ValueError(f"Unknown extension {self.ext}")
 
         return oname
+
+    def init_maps_rectpix(self, shape, wcs):
+        """ Initialize tilemaps or enmaps rhs, div, hits for given shape and wcs"""
+        shape = tuple(shape[-2:])
+        Nsplits, ncomp, dtype = self.Nsplits, self.ncomp, self.dtype
+        
+        if self.tiled:
+            geo = tilemap.geometry(shape, wcs, tile_shape=self.tile_shape)
+            rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=dtype)
+            div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=dtype)
+            hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=dtype)
+        else:
+            rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=dtype)
+            div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
+            hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
+        self.rhs = rhs
+        self.div = div
+        self.hits = hits
+        return rhs, div, hits
+    
 
 def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                     comm=mpi.COMM_WORLD, comps='TQU', split_labels=None,

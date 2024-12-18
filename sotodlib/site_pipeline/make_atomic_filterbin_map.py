@@ -13,13 +13,12 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 import numpy as np
-import so3g
 import sotodlib.site_pipeline.util as util
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
-from pixell import enmap, utils as putils, bunch
+from pixell import enmap, utils as putils
 from pixell import wcsutils, colors, memory, mpi
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -37,7 +36,8 @@ class Cfg:
         If 2 files, representing 2 layers of preprocessing, they
         should be separated by a comma.
     area: str
-        WCS kernel for rectangular pixels
+        WCS kernel for rectangular pixels. Filename to map/geometry
+        or valid string for coords.get_wcs_kernel.
     nside: int
         Nside for HEALPIX pixels
     query: str
@@ -170,10 +170,10 @@ class DataMissing(Exception):
     pass
 
 
-def get_pwv(obs, data_dir):
+def get_pwv(start_time, stop_time, data_dir):
     try:
-        pwv_info = hk_utils.get_detcosamp_hkaman(
-            obs, alias=['pwv'],
+        pwv_info = hk_utils.get_hkaman(
+            start_time, stop_time, alias=['pwv'],
             fields=['site.env-radiometer-class.feeds.pwvs.pwv'],
             data_dir=data_dir)
         pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
@@ -181,40 +181,6 @@ def get_pwv(obs, data_dir):
     except (KeyError, ValueError):
         pwv = 0.0
     return pwv
-
-
-def read_tods(context, obslist,
-              dtype_tod=np.float32, only_hits=False, site='so_sat3',
-              l2_data=None):
-    context = Context(context)
-    # this function will run on multiprocessing and can be returned in any
-    # random order we will also return the obslist to keep track of the order
-    my_tods = []
-    pwvs = []
-    ind = 0
-    obs_id, detset, band, obs_ind = obslist[ind]
-    meta = context.get_meta(
-        obs_id, dets={"wafer_slot": detset, "wafer.bandpass": band})
-    tod = context.get_obs(meta, no_signal=True)
-    to_remove = []
-    for field in tod._fields:
-        if field not in ['obs_info', 'flags', 'signal', 'focal_plane', 'timestamps', 'boresight']:
-            to_remove.append(field)
-    for field in to_remove:
-        tod.move(field, None)
-    tod.flags.wrap(
-        'glitch_flags', so3g.proj.RangesMatrix.zeros(tod.shape[:2]),
-        [(0, 'dets'), (1, 'samps')])
-    my_tods.append(tod)
-
-    tod_temp = tod.restrict('dets', meta.dets.vals[:1], in_place=False)
-    if l2_data is not None:
-        pwvs.append(get_pwv(tod_temp, data_dir=l2_data))
-    else:
-        pwvs.append(np.nan)
-    del tod_temp
-    return bunch.Bunch(obslist=obslist, my_tods=my_tods, pwvs=pwvs)
-
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,
@@ -277,9 +243,33 @@ def main(config_file: str) -> None:
 
     comm = mpi.FAKE_WORLD  # Fake communicator since we won't use MPI
     verbose = args.verbose - args.quiet
-    if args.area is not None:
-        shape, wcs = enmap.read_map_geometry(args.area)
-        wcs = wcsutils.WCS(wcs.to_header())
+
+    recenter = None
+    if args.center_at:
+        recenter = mapmaking.parse_recentering(args.center_at)
+
+    if args.area is not None: # Set shape, wcs for rectpix
+        try:
+            # Load shape, wcs from a map or geometry
+            shape, wcs = enmap.read_map_geometry(args.area)
+            wcs = wcsutils.WCS(wcs.to_header())
+        except FileNotFoundError:
+            # See if area is a wcs_kernel string
+            try:
+                shape = None
+                wcs = coords.get_wcs_kernel(args.area)
+            except ValueError:
+                L.error("'area' not a valid filename or wcs_kernel string")
+                exit(1)
+        if recenter is not None:
+            # wcs_kernel string not allowed for recenter=True
+            if shape is None:
+                L.error("'area' must be a map geometry file, not wcs_kernel string, to use recenter")
+                exit(1)
+        else:
+            # If not recenter, we set shape=None so get_footprint will be called
+            shape = None
+
     elif args.nside is not None:
         pass  # here I will map in healpix
     else:
@@ -289,9 +279,6 @@ def main(config_file: str) -> None:
     noise_model = mapmaking.NmatWhite()
     putils.mkdir(args.odir)
 
-    recenter = None
-    if args.center_at:
-        recenter = mapmaking.parse_recentering(args.center_at)
     preprocess_config_str = [s.strip() for s in args.preprocess_config.split(",")]
     preprocess_config = [] ; errlog = []
     for preproc_cf in preprocess_config_str:
@@ -377,37 +364,8 @@ def main(config_file: str) -> None:
             engine.dispose()
 
     obslists_arr = [item for key, item in obslists.items()]
-    tod_list = []  # this list will receive the outputs from read_tods
+
     L.info(f'Running {len(obslists_arr)} maps after removing duplicate maps')
-
-    with ProcessPoolExecutor(args.nproc) as exe:
-        futures = [exe.submit(
-            read_tods, args.context, obslist, dtype_tod=args.dtype_tod,
-            only_hits=args.only_hits, l2_data=args.hk_data_path,
-            site=args.site)
-                   for obslist in obslists_arr]
-        for future in as_completed(futures):
-            try:
-                tod_list.append(future.result())
-            except Exception as e:
-                # if read_tods fails for some reason we log into the first preproc DB
-                future_write_to_log(e, errlog[0])
-                continue
-            futures.remove(future)
-    # flatten the list of lists
-    L.info('Done with read_tods')
-
-    my_tods = [bb.my_tods for bb in tod_list]
-    if args.area is not None:
-        subgeoms = []
-        for obs in my_tods:
-            if recenter is None:
-                subshape, subwcs = coords.get_footprint(obs[0], wcs)
-                subgeoms.append((subshape, subwcs))
-            else:
-                subshape = shape
-                subwcs = wcs
-                subgeoms.append((subshape, subwcs))
 
     # clean up lingering files from previous incomplete runs
     for obs in obslists_arr:
@@ -422,22 +380,23 @@ def main(config_file: str) -> None:
                                        subdir='temp_proc', remove=False)
 
     run_list = []
-    for oi in range(len(my_tods)):
+    for oi, ol in enumerate(obslists_arr):
         # tod_list[oi].obslist[0] is the old obslist
-        pid = tod_list[oi].obslist[0][3]
-        detset = tod_list[oi].obslist[0][1]
-        band = tod_list[oi].obslist[0][2]
-        obslist = tod_list[oi].obslist
+        pid = ol[0][3]
+        detset = ol[0][1]
+        band = ol[0][2]
+        obslist = ol
         t = putils.floor(periods[pid, 0])
         t5 = ("%05d" % t)[:5]
         prefix = "%s/%s/atomic_%010d_%s_%s" % (
             args.odir, t5, t, detset, band)
-        if args.area is not None:
-            subshape, subwcs = subgeoms[oi]
+        # if args.area is not None:
+        #    subshape, subwcs = subgeoms[oi]
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        pwv_atomic = tod_list[oi].pwvs[0]
+        pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
+
         # Save file for data base of atomic maps.
         # We will write an individual file,
         # another script will loop over those files
@@ -460,7 +419,7 @@ def main(config_file: str) -> None:
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
-            run_list.append([obslist, subshape, subwcs, info_list, prefix, t])
+            run_list.append([obslist, shape, wcs, info_list, prefix, t])
         elif args.nside is not None:
             run_list.append([obslist, None, None, info_list, prefix, t])
 
