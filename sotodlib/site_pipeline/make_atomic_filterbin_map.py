@@ -173,7 +173,7 @@ class DataMissing(Exception):
 def get_pwv(start_time, stop_time, data_dir):
     try:
         pwv_info = hk_utils.get_hkaman(
-            start_time, stop_time, alias=['pwv'],
+            float(start_time), float(stop_time), alias=['pwv'],
             fields=['site.env-radiometer-class.feeds.pwvs.pwv'],
             data_dir=data_dir)
         pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
@@ -297,8 +297,7 @@ def main(config_file: str) -> None:
         warnings.warn("You are using single precision for maps, we advice to use double precision")
 
     context_obj = Context(args.context)
-    # obslists is a dict, obskeys is a list, periods is an array, only rank 0
-    # will do this and broadcast to others.
+    # obslists is a dict, obskeys is a list, periods is an array
     try:
         obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
             context_obj, args.query, nset=args.nset, wafer=args.wafer,
