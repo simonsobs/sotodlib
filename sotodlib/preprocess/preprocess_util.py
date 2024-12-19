@@ -579,10 +579,10 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                     cleanup_mandb(None, outputs_grp, configs, logger)
                 else:
                     # if we're overwriting, remove file so it will re-run
-                    os.remove(output_grp['temp_file'])
+                    os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
-                os.remove(output_grp['temp_file'])
+                os.remove(outputs_grp['temp_file'])
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=None,
