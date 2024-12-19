@@ -1,12 +1,21 @@
 import numpy as np
-from pixell import enmap, utils, tilemap, bunch
+import h5py
+import so3g
+from typing import Optional
+from pixell import bunch, enmap, tilemap
+from pixell import utils as putils
 
 from .. import coords
-from .utilities import *
-from .pointing_matrix import *
+from .pointing_matrix import PmatCut
+from .utilities import (MultiZipper, get_flags_from_path, recentering_to_quat_lonlat,
+                        evaluate_recentering, TileMapZipper, MapZipper,
+                        safe_invert_div, unarr, ArrayZipper)
+from .noise_model import NmatUncorr
+
 
 class MLMapmaker:
-    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
+    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False,
+                 glitch_flags:str = "flags.glitch_flags"):
         """Initialize a Maximum Likelihood Mapmaker.
         Arguments:
         * signals: List of Signal-objects representing the models that will be solved
@@ -26,6 +35,7 @@ class MLMapmaker:
         self.data         = []
         self.dof          = MultiZipper()
         self.ready        = False
+        self.glitch_flags_path = glitch_flags
 
     def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None):
         # Prepare our tod
@@ -36,7 +46,7 @@ class MLMapmaker:
         # the noise model, if available
         if signal_estimate is not None: tod -= signal_estimate
         if deslope:
-            utils.deslope(tod, w=5, inplace=True)
+            putils.deslope(tod, w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
@@ -55,12 +65,12 @@ class MLMapmaker:
             # The signal estimate might not be desloped, so
             # adding it back can reintroduce a slope. Fix that here.
             if deslope:
-                utils.deslope(tod, w=5, inplace=True)
+                putils.deslope(tod, w=5, inplace=True)
         # And apply it to the tod
         tod    = nmat.apply(tod)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod)
+            signal.add_obs(id, obs, nmat, tod, glitch_flags=self.glitch_flags_path)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime),
             dets=obs.dets.vals, nmat=nmat))
@@ -119,7 +129,7 @@ class MLMapmaker:
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         if x0 is not None: x0 = self.dof.zip(*x0)
-        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
+        solver = putils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
         while solver.i < maxiter and solver.err > maxerr:
             solver.step()
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x))
@@ -146,7 +156,7 @@ class MLMapmaker:
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
-    def __init__(self, name, ofmt, output, ext):
+    def __init__(self, name, ofmt, output, ext, **kwargs):
         """Initialize a Signal. It probably doesn't make sense to construct a generic signal
         directly, though. Use one of the subclasses.
         Arguments:
@@ -154,6 +164,7 @@ class Signal:
         * ofmt: The format used when constructing output file prefix
         * output: Whether this signal should be part of the output or not.
         * ext: The extension used for the files.
+        * **kwargs: additional keyword based parameters, accessible as class parameters
         """
         self.name   = name
         self.ofmt   = ofmt
@@ -161,7 +172,9 @@ class Signal:
         self.ext    = ext
         self.dof    = None
         self.ready  = False
-    def add_obs(self, id, obs, nmat, Nd): pass
+        self.__dict__.update(kwargs)
+
+    def add_obs(self, id, obs, nmat, Nd, **kwargs): pass
     def prepare(self): self.ready = True
     def forward (self, id, tod, x): pass
     def backward(self, id, tod, x): pass
@@ -176,12 +189,12 @@ class SignalMap(Signal):
     """Signal describing a non-distributed sky map."""
     def __init__(self, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
             ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False,
-            interpol=None):
+            interpol=None, glitch_flags: str = "flags.glitch_flags"):
         """Signal describing a sky map in the coordinate system given by "sys", which defaults
         to equatorial coordinates. If tiled==True, then this will be a distributed map with
         the given tile_shape, otherwise it will be a plain enmap. interpol controls the
         pointing matrix interpolation mode. See so3g's Projectionist docstring for details."""
-        Signal.__init__(self, name, ofmt, output, ext)
+        Signal.__init__(self, name, ofmt, output, ext, glitch_flags=glitch_flags)
         self.comm  = comm
         self.comps = comps
         self.sys   = sys
@@ -192,6 +205,7 @@ class SignalMap(Signal):
         self.data  = {}
         ncomp      = len(comps)
         shape      = tuple(shape[-2:])
+
         if tiled:
             geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
             self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
@@ -202,7 +216,7 @@ class SignalMap(Signal):
             self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
             self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, glitch_flags: Optional[str] = None):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -210,7 +224,8 @@ class SignalMap(Signal):
         """
         Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
-        pcut   = PmatCut(obs.flags.glitch_flags) # could pass this in, but fast to construct
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        pcut   = PmatCut(get_flags_from_path(obs, gflags)) # could pass this in, but fast to construct
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
@@ -261,9 +276,9 @@ class SignalMap(Signal):
             self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
         else:
             if self.comm is not None:
-                self.rhs  = utils.allreduce(self.rhs, self.comm)
-                self.div  = utils.allreduce(self.div, self.comm)
-                self.hits = utils.allreduce(self.hits, self.comm)
+                self.rhs  = putils.allreduce(self.rhs, self.comm)
+                self.div  = putils.allreduce(self.div, self.comm)
+                self.hits = putils.allreduce(self.hits, self.comm)
             self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
         self.idiv  = safe_invert_div(self.div)
         self.ready = True
@@ -292,15 +307,18 @@ class SignalMap(Signal):
         else: return enmap.map_mul(self.idiv, map)
 
     def to_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
-        else: return map.copy()
+
+        if self.tiled: 
+            return tilemap.redistribute(map, self.comm, self.geo_work.active)
+        else: 
+            return map.copy()
 
     def from_work(self, map):
         if self.tiled:
             return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else:
             if self.comm is None: return map
-            else: return utils.allreduce(map, self.comm)
+            else: return putils.allreduce(map, self.comm)
 
     def write(self, prefix, tag, m):
         if not self.output: return
@@ -347,6 +365,7 @@ class SignalMap(Signal):
         # Currently we don't support any actual translation, but could handle
         # resolution changes in the future (probably not useful though)
         self._checkcompat(other)
+        ctime = obs.timestamps
         # Build the local geometry and pointing matrix for this observation
         if self.recenter:
             rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
@@ -356,14 +375,18 @@ class SignalMap(Signal):
             rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
             interpol=self.interpol)
         # Build the RHS for this observation
-        pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+        # These lines are not activated during the first pass of mapmaking.
+        if self.tiled:
+            self.geo_work = other.geo_work
+            map_work = self.to_work(map)
+        pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
         return tod
 
 class SignalCut(Signal):
     def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
-            output=False, cut_type=None):
+            output=False, cut_type=None, glitch_flags: str = "flags.glitch_flags"):
         """Signal for handling the ML solution for the values of the cut samples."""
-        Signal.__init__(self, name, ofmt, output, ext="hdf")
+        Signal.__init__(self, name, ofmt, output, ext="hdf", glitch_flags=glitch_flags)
         self.comm  = comm
         self.data  = {}
         self.dtype = dtype
@@ -372,12 +395,13 @@ class SignalCut(Signal):
         self.rhs   = []
         self.div   = []
 
-    def add_obs(self, id, obs, nmat, Nd):
+    def add_obs(self, id, obs, nmat, Nd, glitch_flags: Optional[str] = None):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data."""
         Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-        pcut    = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        pcut    = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
         # Build our RHS
         obs_rhs = np.zeros(pcut.njunk, self.dtype)
         pcut.backward(Nd, obs_rhs)
@@ -441,7 +465,7 @@ class SignalCut(Signal):
             so3g.translate_cuts(odata.pcut.cuts, sdata.pcut.cuts, sdata.pcut.model, sdata.pcut.params, junk[odata.i1:odata.i2], res[sdata.i1:sdata.i2])
         return res
 
-    def transeval(self, id, obs, other, junk, tod):
+    def transeval(self, id, obs, other, junk, tod, glitch_flags: Optional[str] = None):
         """Translate data junk from SignalCut other to the current SignalCut,
         and then evaluate it for the given observation, returning a tod.
         This is used when building a signal-free tod for the noise model
@@ -449,7 +473,8 @@ class SignalCut(Signal):
         self._checkcompat(other)
         # We have to make a pointing matrix from scratch because add_obs
         # won't have been called yet at this point
-        spcut = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        spcut = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
         # We do have one for other though, since that will be the output
         # from the previous round of multiplass mapmaking.
         odata = other.data[id]
