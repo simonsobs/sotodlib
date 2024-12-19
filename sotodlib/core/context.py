@@ -11,6 +11,7 @@ from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
 
+
 class Context(odict):
     # Sets of special handlers may be registered in this class variable, then
     # requested by name in the context.yaml key "context_hooks".
@@ -326,7 +327,8 @@ class Context(odict):
                  check=False,
                  ignore_missing=False,
                  on_missing=None,
-                 det_info_scan=False):
+                 det_info_scan=False
+    ):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
 
