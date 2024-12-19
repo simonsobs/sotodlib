@@ -187,7 +187,7 @@ class MLMapmaker(Operator):
 
     maxiter = List(
         [500],
-        help="Maximum number of CG iterations. Use commas to control each pass separately.",
+        help="List of maximum number of CG iterations for each pass.",
     )
 
     maxerr = Float(1e-6, help="Maximum error in the CG solver")
