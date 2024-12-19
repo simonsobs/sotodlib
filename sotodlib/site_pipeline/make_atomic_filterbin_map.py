@@ -308,7 +308,6 @@ def main(config_file: str) -> None:
         L.exception(err)
         exit(1)
     L.info(f'Running {len(obslists)} maps after build_obslists')
-    cwd = os.getcwd()
 
     split_labels = []
     if args.all_splits:
@@ -409,7 +408,7 @@ def main(config_file: str) -> None:
                     int(t))
                 info.split_label = split_label
                 info.split_detail = ''
-                info.prefix_path = str(cwd + '/' + prefix + '_%s' % split_label)
+                info.prefix_path = str(prefix + '_%s' % split_label)
                 info.elevation = obs_infos[obslist[0][3]].el_center
                 info.azimuth =obs_infos[obslist[0][3]].az_center
                 info.pwv = float(pwv_atomic)
