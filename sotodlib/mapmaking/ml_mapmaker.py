@@ -307,8 +307,11 @@ class SignalMap(Signal):
         else: return enmap.map_mul(self.idiv, map)
 
     def to_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
-        else: return map.copy()
+
+        if self.tiled: 
+            return tilemap.redistribute(map, self.comm, self.geo_work.active)
+        else: 
+            return map.copy()
 
     def from_work(self, map):
         if self.tiled:
@@ -372,7 +375,11 @@ class SignalMap(Signal):
             rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
             interpol=self.interpol)
         # Build the RHS for this observation
-        pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+        # These lines are not activated during the first pass of mapmaking.
+        if self.tiled:
+            self.geo_work = other.geo_work
+            map_work = self.to_work(map)
+        pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
         return tod
 
 class SignalCut(Signal):
