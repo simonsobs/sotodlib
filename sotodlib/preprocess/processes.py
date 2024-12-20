@@ -1026,6 +1026,7 @@ class SourceFlags(_Preprocess):
             center_on: 'jupiter'
             res: 0.005817764173314432 # np.radians(20/60)
             max_pix: 4e6
+            distance: 0 #deg
           save: True
           select: True # optional
     
@@ -1034,42 +1035,46 @@ class SourceFlags(_Preprocess):
     name = "source_flags"
     
     def calc_and_save(self, aman, proc_aman):
-        center_on = self.calc_cfgs.get('center_on', 'planet')
-        # Get source from tags
-        if center_on == 'planet':
-            from sotodlib.coords.planets import SOURCE_LIST
-            matches = [x for x in aman.tags if x in SOURCE_LIST]
-            if len(matches) != 0:
-                source = matches[0]
-            else:
-                raise ValueError("No tags match source list")
-        else:
-            source = center_on
-        source_flags = tod_ops.flags.get_source_flags(aman, 
-                                                      merge=self.calc_cfgs.get('merge', False),
-                                                      overwrite=self.calc_cfgs.get('overwrite', True),
-                                                      source_flags_name=self.calc_cfgs.get('source_flags_name', 'source_flags'),
-                                                      mask=self.calc_cfgs.get('mask', None),
-                                                      center_on=source,
-                                                      res=self.calc_cfgs.get('res', None),
-                                                      max_pix=self.calc_cfgs.get('max_pix', None))
-
+        center_on_list = self.calc_cfgs.get('center_on', 'planet')
         source_aman = core.AxisManager(aman.dets, aman.samps)
-        source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
+        for center_on in center_on_list:
+            # Get source from tags
+            if center_on == 'planet':
+                from sotodlib.coords.planets import SOURCE_LIST
+                matches = [x for x in aman.tags if x in SOURCE_LIST]
+                if len(matches) != 0:
+                    sources = matches[0]
+                else:
+                    raise ValueError("No tags match source list")
+            else:
+                source = center_on
+
+            source_flags = tod_ops.flags.get_source_flags(aman,
+                                                          merge=self.calc_cfgs.get('merge', False),
+                                                          overwrite=self.calc_cfgs.get('overwrite', True),
+                                                          source_flags_name=source,
+                                                          mask=self.calc_cfgs.get('mask', None),
+                                                          center_on=source,
+                                                          res=self.calc_cfgs.get('res', None),
+                                                          max_pix=self.calc_cfgs.get('max_pix', None),
+                                                          distance=self.calc_cfgs.get('distance', None))
+
+            source_aman.wrap(source, source_flags, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, source_aman)
-    
+
     def save(self, proc_aman, source_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("sources", source_aman)
+            proc_aman.wrap("source_flags", source_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~has_any_cuts(proc_aman.sources.source_flags)
+        for field in proc_aman.source_flags._fields:
+            keep = ~has_any_cuts(proc_aman.source_flags[field])
         meta.restrict("dets", meta.dets.vals[keep])
         return meta
 
@@ -1573,7 +1578,8 @@ class FocalplaneNanFlags(_Preprocess):
 
         - name : "fp_flags"
           signal: "signal" # optional
-          calc: True
+          calc:
+              merge: False
           save: True
           select: True
     

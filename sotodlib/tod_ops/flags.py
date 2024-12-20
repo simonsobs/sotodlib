@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
@@ -584,15 +585,24 @@ def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
     return mskdarks
 
 def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source_flags',
-                     mask=None, center_on=None, res=None, max_pix=None):
+                     mask=None, center_on=None, res=None, max_pix=None, distance=None):
     if merge:
         wrap = source_flags_name
     else:
         wrap = None
     if res:
-        res = np.radians(res/60)
-    source_flags = coords.planets.compute_source_flags(tod=aman, wrap=wrap, mask=mask, center_on=center_on, res=res, max_pix=max_pix)
-    
+        res = np.radians(res/60) # config input in arcminutes
+    if not distance:
+        distance = 0
+
+    # find if source is within footprint + distance
+    positions = coords.planets.get_nearby_sources(tod=aman, source_list=[center_on], distance=distance)
+
+    if positions:
+        source_flags = coords.planets.compute_source_flags(tod=aman, wrap=wrap, mask=mask, center_on=center_on, res=res, max_pix=max_pix)
+    else:
+        source_flags = RangesMatrix.zeros([aman.dets.count, aman.samps.count])
+
     if merge:
         if source_flags_name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {source_flags_name} already exists in aman.flags")
