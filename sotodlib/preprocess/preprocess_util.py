@@ -189,12 +189,12 @@ def get_groups(obs_id, configs, context):
         det_info = context.get_det_info(obs_id)
         rs = det_info.subset(keys=group_by).distinct()
         groups = [[b for a,b in r.items()] for r in rs]
-        return groups, group_by, None
+        return group_by, groups, None
     except Exception as e:
         error = f'Failed get groups for: {obs_id}'
         errmsg = f'{type(e)}: {e}'
         tb = ''.join(traceback.format_tb(e.__traceback__))
-        return [], [], [error, errmsg, tb]
+        return {}, [], [error, errmsg, tb]
 
 
 def get_preprocess_db(configs, group_by, logger=None):
