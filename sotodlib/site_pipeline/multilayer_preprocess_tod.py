@@ -305,8 +305,9 @@ def main(configs_init: str,
             group_by_init, groups_init, _ = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
             group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
 
-            if (group_by_init != group_by_proc).any():
-                raise ValueError('init and proc groups do not match')
+            if len(groups_init) > 0 and len(groups_proc) > 0:
+                if (group_by_init != group_by_proc).any():
+                    raise ValueError('init and proc groups do not match')
 
             all_groups_proc = groups_proc.copy()
             for g in all_groups_proc:
@@ -321,8 +322,9 @@ def main(configs_init: str,
             group_by_init, groups_init, _ = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
             group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
 
-            if (group_by_init != group_by_proc).any():
-                raise ValueError('init and proc groups do not match')
+            if len(groups_init) > 0 and len(groups_proc) > 0:
+                if (group_by_init != group_by_proc).any():
+                    raise ValueError('init and proc groups do not match')
 
             all_groups_proc = groups_proc.copy()
             for g in all_groups_proc:
