@@ -25,11 +25,8 @@ except ImportError as e:
 
 if toast_available:
     import healpy as hp
-
-try:
-    from . import _helpers as helpers
-except ImportError:
-    import _helpers as helpers
+    
+from . import _helpers as helpers
 
 
 class MapmakerPointingTest(unittest.TestCase):
