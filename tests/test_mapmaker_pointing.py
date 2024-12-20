@@ -25,7 +25,7 @@ except ImportError as e:
 
 if toast_available:
     import healpy as hp
-    
+
 from . import _helpers as helpers
 
 
