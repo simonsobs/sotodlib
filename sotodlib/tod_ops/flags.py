@@ -1,4 +1,3 @@
-import time
 import numpy as np
 import scipy.stats as stats
 from scipy.signal import find_peaks
