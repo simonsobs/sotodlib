@@ -83,7 +83,7 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, _ = pp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -339,13 +339,13 @@ def main(
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
         for obs in obs_list:
-            group_by, groups, error = pp_util.get_groups(obs["obs_id"], configs, context)
+            group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
             run_list.append( (obs, groups) )# = [ (o, groups) for o in obs_list]
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups, error = pp_util.get_groups(obs["obs_id"], configs, context)
+            group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):
@@ -389,8 +389,8 @@ def main(
                 continue
             futures.remove(future)
 
-            logger.info(f'Processing future result db_dataset: {db_datasets}')
             if err is None and db_datasets:
+                logger.info(f'Processing future result db_dataset: {db_datasets}')
                 for db_dataset in db_datasets:
                     pp_util.cleanup_mandb(err, db_dataset, configs, logger)
 

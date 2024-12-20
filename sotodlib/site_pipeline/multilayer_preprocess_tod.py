@@ -66,7 +66,7 @@ def multilayer_preprocess_tod(obs_id,
         configs_proc = yaml.safe_load(open(configs_proc, "r"))
     context_proc = core.Context(configs_proc["context_file"])
 
-    group_by_proc, groups_proc = pp_util.get_groups(obs_id, configs_proc, context_proc)
+    group_by_proc, groups_proc, _ = pp_util.get_groups(obs_id, configs_proc, context_proc)
 
     all_groups_proc = groups_proc.copy()
     for g in all_groups_proc:
@@ -302,8 +302,8 @@ def main(configs_init: str,
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
         # run on all if database doesn't exist
         for obs in obs_list:
-            group_by_init, groups_init = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
-            group_by_proc, groups_proc = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
+            group_by_init, groups_init, _ = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
+            group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
 
             if (group_by_init != group_by_proc).any():
                 raise ValueError('init and proc groups do not match')
@@ -318,8 +318,8 @@ def main(configs_init: str,
         db = core.metadata.ManifestDb(configs_proc['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by_init, groups_init = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
-            group_by_proc, groups_proc = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
+            group_by_init, groups_init, _ = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
+            group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
 
             if (group_by_init != group_by_proc).any():
                 raise ValueError('init and proc groups do not match')

@@ -394,8 +394,14 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc, context_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
-    group_by_init, groups_init, error = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc, error = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, error_init = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, error_proc = get_groups(obs_id, configs_proc, context_proc)
+
+    if error_init is not None:
+        raise ValueError(f"{error_init[0]}\n{error_init[1]}\n{error_init[2]}")
+
+    if error_proc is not None:
+        raise ValueError(f"{error_proc[0]}\n{error_proc[1]}\n{error_proc[2]}")
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
