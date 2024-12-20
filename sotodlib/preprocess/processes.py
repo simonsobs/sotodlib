@@ -1072,10 +1072,14 @@ class SourceFlags(_Preprocess):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
-            proc_aman = meta.preprocess
-        for field in proc_aman.source_flags._fields:
-            keep = ~has_any_cuts(proc_aman.source_flags[field])
-        meta.restrict("dets", meta.dets.vals[keep])
+            source_flags = meta.preprocess.source_flags
+        else:
+            source_flags = proc_aman.source_flags
+
+        for field in source_flags._fields:
+            keep = ~has_any_cuts(source_flags[field])
+            meta.restrict("dets", meta.dets.vals[keep])
+            source_flags.restrict("dets", source_flags.dets.vals[keep])
         return meta
 
 class HWPAngleModel(_Preprocess):
