@@ -189,7 +189,7 @@ def get_groups(obs_id, configs, context):
         det_info = context.get_det_info(obs_id)
         rs = det_info.subset(keys=group_by).distinct()
         groups = [[b for a,b in r.items()] for r in rs]
-        return groups, groups_by, None
+        return groups, group_by, None
     except Exception as e:
         error = f'Failed get groups for: {obs_id}'
         errmsg = f'{type(e)}: {e}'
