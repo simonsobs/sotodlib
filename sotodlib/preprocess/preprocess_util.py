@@ -194,7 +194,7 @@ def get_groups(obs_id, configs, context):
         error = f'Failed get groups for: {obs_id}'
         errmsg = f'{type(e)}: {e}'
         tb = ''.join(traceback.format_tb(e.__traceback__))
-        return {}, [], [error, errmsg, tb]
+        return [], [], [error, errmsg, tb]
 
 
 def get_preprocess_db(configs, group_by, logger=None):
