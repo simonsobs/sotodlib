@@ -1043,7 +1043,7 @@ class SourceFlags(_Preprocess):
                 from sotodlib.coords.planets import SOURCE_LIST
                 matches = [x for x in aman.tags if x in SOURCE_LIST]
                 if len(matches) != 0:
-                    sources = matches[0]
+                    source = matches[0]
                 else:
                     raise ValueError("No tags match source list")
             else:
