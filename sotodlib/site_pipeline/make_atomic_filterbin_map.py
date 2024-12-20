@@ -400,12 +400,13 @@ def main(config_file: str) -> None:
             info_list = []
             for split_label in split_labels:
                 info = mapmaking.AtomicInfo(
-                    obslist[0][0],
-                    obs_infos[obslist[0][3]].telescope,
-                    band,
-                    detset,
-                    int(t))
-                info.split_label = split_label
+                    obs_id=obslist[0][0],
+                    telescope=obs_infos[obslist[0][3]].telescope,
+                    freq_channel=band,
+                    wafer=detset,
+                    ctime=int(t),
+                    split_label=split_label
+                )
                 info.split_detail = ''
                 info.prefix_path = str(prefix + '_%s' % split_label)
                 info.elevation = obs_infos[obslist[0][3]].el_center

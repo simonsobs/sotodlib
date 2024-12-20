@@ -562,12 +562,13 @@ class AtomicInfo(Base):
     tau_avg: Mapped[Optional[float]]
 
 
-    def __init__(self, obs_id, telescope, freq_channel, wafer, ctime):
+    def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
         self.telescope = telescope
         self.freq_channel = freq_channel
         self.wafer = wafer
         self.ctime = ctime
+        self.split_label = split_label
 
     def __repr__(self):
-        return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime})"
+        return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
