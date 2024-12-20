@@ -29,7 +29,7 @@ def dummy_preproc(obs_id, group_list, logger,
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
-    group_by, groups = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -83,7 +83,7 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -327,21 +327,25 @@ def main(
     # clean up lingering files from previous incomplete runs
     for obs in obs_list:
         obs_id = obs['obs_id']
-        pp_util.save_group_and_cleanup(obs_id, configs, context,
-                                       subdir='temp', remove=overwrite)
+        error = pp_util.save_group_and_cleanup(obs_id, configs, context,
+                                               subdir='temp', remove=overwrite)
+        if error is not None:
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+            f.close()
 
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
         for obs in obs_list:
-            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
+            group_by, groups, error = pp_util.get_groups(obs["obs_id"], configs, context)
             run_list.append( (obs, groups) )# = [ (o, groups) for o in obs_list]
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
+            group_by, groups, error = pp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
             elif len(x) != len(groups):

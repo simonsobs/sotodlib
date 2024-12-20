@@ -283,10 +283,19 @@ def main(configs_init: str,
     # clean up lingering files from previous incomplete runs
     for obs in obs_list:
         obs_id = obs['obs_id']
-        pp_util.save_group_and_cleanup(obs_id, configs_init, context_init,
-                                       subdir='temp', remove=overwrite)
-        pp_util.save_group_and_cleanup(obs_id, configs_proc, context_proc,
-                                       subdir='temp_proc', remove=overwrite)
+        error = pp_util.save_group_and_cleanup(obs_id, configs_init, context_init,
+                                               subdir='temp', remove=overwrite)
+        if error is not None:
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, init cleanup error\n{error[0]}\n{error[2]}\n')
+            f.close()
+
+        error = pp_util.save_group_and_cleanup(obs_id, configs_proc, context_proc,
+                                               subdir='temp_proc', remove=overwrite)
+        if error is not None:
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, dependent cleanup error\n{error[0]}\n{error[2]}\n')
+            f.close()
 
     run_list = []
 

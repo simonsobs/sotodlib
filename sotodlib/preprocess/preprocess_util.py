@@ -176,19 +176,25 @@ def get_groups(obs_id, configs, context):
     groups : list of list of int
         The list of groups of detectors.
     """
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    for i, gb in enumerate(group_by):
-        if gb.startswith('dets:'):
-            group_by[i] = gb.split(':',1)[1]
+    try:
+        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+        for i, gb in enumerate(group_by):
+            if gb.startswith('dets:'):
+                group_by[i] = gb.split(':',1)[1]
 
-        if (gb == 'detset') and (len(group_by) == 1):
-            groups = context.obsfiledb.get_detsets(obs_id)
-            return group_by, [[g] for g in groups]
+            if (gb == 'detset') and (len(group_by) == 1):
+                groups = context.obsfiledb.get_detsets(obs_id)
+                return group_by, [[g] for g in groups]
 
-    det_info = context.get_det_info(obs_id)
-    rs = det_info.subset(keys=group_by).distinct()
-    groups = [[b for a,b in r.items()] for r in rs]
-    return group_by, groups
+        det_info = context.get_det_info(obs_id)
+        rs = det_info.subset(keys=group_by).distinct()
+        groups = [[b for a,b in r.items()] for r in rs]
+        return groups, groups_by, None
+    except Exception as e:
+        error = f'Failed get groups for: {obs_id}'
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+        return [], [], [error, errmsg, tb]
 
 
 def get_preprocess_db(configs, group_by, logger=None):
@@ -388,8 +394,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc, context_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
-    group_by_init, groups_init = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, error = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, error = get_groups(obs_id, configs_proc, context_proc)
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
@@ -451,7 +457,7 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         configs = yaml.safe_load(open(configs, "r"))
     if context is None:
         context = core.Context(configs["context_file"])
-    group_by, _ = get_groups(obs_id, configs, context)
+    group_by, _, _ = get_groups(obs_id, configs, context)
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
     dbexist = True
     if os.path.exists(configs['archive']['index']):
@@ -560,7 +566,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     if context is None:
         context = core.Context(configs["context_file"])
 
-    group_by, groups = get_groups(obs_id, configs, context)
+    group_by, groups, error = get_groups(obs_id, configs, context)
 
     all_groups = groups.copy()
     for g in all_groups:
@@ -583,6 +589,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             except OSError as e:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
+    return error
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=None,
@@ -657,9 +664,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
         if context_proc is None:
             context_proc = core.Context(configs_proc["context_file"])
 
-        group_by, groups = get_groups(obs_id, configs_proc, context_proc)
+        group_by, groups, error = get_groups(obs_id, configs_proc, context_proc)
     else:
-        group_by, groups = get_groups(obs_id, configs_init, context_init)
+        group_by, groups, error = get_groups(obs_id, configs_init, context_init)
+
+    if error is not None:
+        return error[0], [error[1], error[2]], [error[1], error[2]], None
 
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
