@@ -98,6 +98,13 @@ def setup_simulate_observing(parser, operators):
         help="Realization index",
         type=int,
     )
+    parser.add_argument(
+        "--pwv_limit",
+        required=False,
+        type=float,
+        help="If set, discard observations with simulated PWV "
+        "higher than the limit [mm]",
+    )
 
     operators.append(
         toast.ops.SimGround(
@@ -229,6 +236,34 @@ def simulate_observing(job, otherargs, runargs, comm):
 
     job_ops.mem_count.prefix = "After Scan Simulation"
     job_ops.mem_count.apply(data)
+
+    if otherargs.pwv_limit is not None:
+        iobs = 0
+        ngood = 0
+        nbad = 0
+        while iobs < len(data.obs):
+            pwv = data.obs[iobs].telescope.site.weather.pwv.to_value(u.mm)
+            if pwv <= otherargs.pwv_limit:
+                ngood += 1
+                iobs += 1
+            else:
+                nbad += 1
+                del data.obs[iobs]
+                if len(data.obs) == 0:
+                    msg = (
+                        f"PWV limit = {otherargs.pwv_limit} mm rejected all "
+                        f"{nbad} observations assigned to this process"
+                    )
+                    raise RuntimeError(msg)
+        if toast_comm.comm_group_rank is not None:
+            nbad = toast_comm.comm_group_rank.allreduce(nbad)
+            ngood = toast_comm.comm_group_rank.allreduce(ngood)
+        log.info_rank(
+            f"  Discarded {nbad} / {ngood + nbad} observations "
+            f"with PWV > {otherargs.pwv_limit} mm in",
+            comm=comm,
+            timer=timer,
+        )
 
     # Apply LAT co-rotation
     if job_ops.corotate_lat.enabled:
