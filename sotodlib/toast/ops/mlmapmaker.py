@@ -462,6 +462,21 @@ class MLMapmaker(Operator):
         return axobs
 
     @function_timer
+    def _add_obs(self, mapmaker, name, axobs, nmat, signal_estimate):
+        """ Add data to the mapmaker
+
+        Singled out for more granular timing
+        """
+        mapmaker.add_obs(
+            name,
+            axobs,
+            deslope=self.deslope,
+            noise_model=nmat,
+            signal_estimate=signal_estimate,
+        )
+        return
+
+    @function_timer
     def _init_mapmaker(
             self, mapmaker, signal_map, mapmaker_prev, eval_prev, comm, gcomm, prefix,
     ):
@@ -690,13 +705,8 @@ class MLMapmaker(Operator):
                 else:
                     signal_estimate = None
 
-                mapmaker.add_obs(
-                    ob.name,
-                    axobs,
-                    deslope=self.deslope,
-                    noise_model=nmat,
-                    signal_estimate=signal_estimate,
-                )
+                self._add_obs(mapmaker, ob.name, axobs, nmat, signal_estimate)
+
                 del axobs
                 del signal_estimate
 
