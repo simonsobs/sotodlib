@@ -1556,9 +1556,7 @@ class G3tHWP():
         if len(dead_rots) > 0:
             logger.warning(f'Could not remove glitches from {len(dead_rots)} rotations')
         self._encd_clk = self._encd_clk[total_mask]
-        for ind, value in enumerate(total_mask):
-            if not value:
-                self._encd_cnt[ind:] -= 1
+        self._encd_cnt -= np.cumsum(np.logical_not(total_mask).astype(int))
         self._encd_cnt = self._encd_cnt[total_mask]
         self._ref_indexes = np.delete(self._ref_indexes, dead_rots)
 
