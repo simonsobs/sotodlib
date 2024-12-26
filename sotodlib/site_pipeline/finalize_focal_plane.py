@@ -582,6 +582,8 @@ def main():
                     )
                 # ~1 sigma cut
                 weights[weights < 0.61] = np.nan
+                if np.sum(np.isfinite(weights)) < min_points/2:
+                    logger.error("\t\tToo few points! Skipping...")
 
                 # Store weighted values
                 focal_plane.add_fp(i, fp, weights, template_msk)
