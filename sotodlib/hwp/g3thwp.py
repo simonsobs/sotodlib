@@ -1553,18 +1553,25 @@ class G3tHWP():
         self._num_glitches = int(sum(~total_mask))
         if self._num_glitches > 0:
             logger.warning(f'{self._num_glitches} glitches are removed')
+        if len(dead_rots) > 0:
+            logger.warning(f'Could not remove glitches from {len(dead_rots)} rotations')
         self._encd_clk = self._encd_clk[total_mask]
         for ind, value in enumerate(total_mask):
             if not value:
                 self._encd_cnt[ind:] -= 1
         self._encd_cnt = self._encd_cnt[total_mask]
         self._ref_indexes = np.delete(self._ref_indexes, dead_rots)
+
+        self._glitches = np.ediff1d(self._ref_indexes, to_end=self._num_edges) - self._num_edges
+        self._bad_ref = np.where(self._glitches != 0)[0]
+
         self._generate_sub_data()
 
         return True
 
     def _find_high_low_values(self, arr):
         """ Finds the two peaks of an array with a bimodal distribution """
+        # This function leads to warning of empty array when arr is very short
         med = np.median(arr[arr > 0.75*np.median(arr)])
         high = np.median(arr[arr > med])
         low = np.median(arr[np.logical_and(arr < med, arr > 0.75*med)])
@@ -1610,7 +1617,6 @@ class G3tHWP():
         if np.sum(return_mask) == self._num_edges:
             return True, return_mask
         else:
-            logger.warning('Warning: Could not remove glitches from rotation')
             return False, None
 
     def _fix_value_glitches(self):
@@ -1624,7 +1630,7 @@ class G3tHWP():
 
         # Handle the first and last rotations
         cut_start = self._num_edges - len(diff_matrix[0])
-        cut_end = len(diff_matrix[-1]) - self._num_edges
+        cut_end = len(diff_matrix[-1]) - self._num_edges if len(diff_matrix[-1]) != self._num_edges else None
         expectation = expectation[cut_start:cut_end]
 
         # Find which encd values differ from expectation in a way that
