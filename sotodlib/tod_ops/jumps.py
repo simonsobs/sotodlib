@@ -4,14 +4,18 @@ import numpy as np
 import scipy.ndimage as simg
 import scipy.stats as ss
 from numpy.typing import NDArray
-from pixell.utils import block_expand, block_reduce, moveaxis
+from pixell.utils import moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
 from so3g import (
-    matched_jumps,
-    matched_jumps64,
+    block_minmax,
+    block_minmax64,
     find_quantized_jumps,
     find_quantized_jumps64,
+    matched_jumps,
+    matched_jumps64,
+    subtract_jump_heights,
+    subtract_jump_heights64,
 )
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
@@ -182,33 +186,39 @@ def jumpfix_subtract_heights(
         x_fixed: x with jumps removed.
                  If inplace is True this is just a reference to x.
     """
-
-    def _fix(jump_ranges, heights, x_fixed):
-        for j, jump_range in enumerate(jump_ranges):
-            for start, end in jump_range.ranges():
-                _heights = heights[j, start:end]
-                height = _heights[np.argmax(np.abs(_heights))]
-                x_fixed[j, int((start + end) / 2) :] -= height
-
+    orig_shape = x.shape
+    x = np.atleast_2d(x)
+    x = np.ascontiguousarray(x)
     x_fixed = x
     if not inplace:
         x_fixed = x.copy()
-    orig_shape = x.shape
-    x_fixed = np.atleast_2d(x_fixed)
+        x_fixed = np.ascontiguousarray(x_fixed)
     if isinstance(jumps, np.ndarray):
         jumps = RangesMatrix.from_mask(np.atleast_2d(jumps))
     elif isinstance(jumps, Ranges):
         jumps = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
     if not isinstance(jumps, RangesMatrix):
         raise TypeError("jumps not RangesMatrix or convertable to RangesMatrix")
+    jumps = cast(RangesMatrix, jumps)
 
     if heights is None:
         heights = estimate_heights(x_fixed, jumps.mask(), **kwargs)
     elif isinstance(heights, csr_array):
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
+    heights = heights.astype(x.dtype)
+    heights = np.ascontiguousarray(heights)
 
-    _fix(jumps.ranges, heights, x_fixed)
+    dtype = x.dtype.name
+    if len(x.shape) > 2:
+        raise ValueError("x may not have more than 2 dimensions")
+    if dtype == "float32":
+        fix = subtract_jump_heights
+    elif dtype == "float64":
+        fix = subtract_jump_heights64
+    else:
+        raise TypeError("x must be float32 or float64")
+    fix(x, x_fixed, heights, jumps)
 
     return x_fixed.reshape(orig_shape)
 
@@ -562,13 +572,25 @@ def slow_jumps(
         raise TypeError("Signal is not an array")
 
     _signal = _filter(signal, **filter_pars)
+    _signal = np.atleast_2d(_signal)
+    _signal = np.ascontiguousarray(_signal)
 
     # Block ptp
-    bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
+    dtype = _signal.dtype.name
+    if len(_signal.shape) > 2:
+        raise ValueError("signal may not have more than 2 dimensions")
+    if dtype == "float32":
+        get_ptp = block_minmax
+    elif dtype == "float64":
+        get_ptp = block_minmax64
+    else:
+        raise TypeError("signal must be float32 or float64")
+    bptp = np.zeros_like(_signal)
+    bptp = np.ascontiguousarray(bptp)
+    get_ptp(_signal, bptp, win_size, 2, 0)
 
     if not abs_thresh:
         thresh = float(np.quantile(bptp.ravel(), thresh))
-    bptp = block_expand(bptp, win_size, _signal.shape[-1], inclusive=True)
     jumps = bptp > thresh
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
