@@ -66,11 +66,31 @@ def multilayer_preprocess_tod(obs_id,
         configs_proc = yaml.safe_load(open(configs_proc, "r"))
     context_proc = core.Context(configs_proc["context_file"])
 
-    group_by_proc, groups_proc, _ = pp_util.get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, error_init = pp_util.get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, error_proc = pp_util.get_groups(obs_id, configs_proc, context_proc)
+
+    if error_init is not None:
+        if run_parallel:
+            return error_init[0], [None, None], [None, None]
+        else:
+            return
+
+    if error_proc is not None:
+        if run_parallel:
+            return error_proc[0], [None, None], [None, None]
+        else:
+            return
+
+    if len(groups_init) > 0 and len(groups_proc) > 0:
+        if (group_by_init != group_by_proc).any():
+            raise ValueError('init and proc groups do not match')
 
     all_groups_proc = groups_proc.copy()
     for g in all_groups_proc:
         if group_list is not None:
+            if g not in groups_init:
+                groups_proc.remove(g)
+                continue
             if g not in group_list:
                 groups_proc.remove(g)
                 continue
@@ -281,86 +301,61 @@ def main(configs_init: str,
         logger.warning(f"No observations returned from query: {query}")
 
     # clean up lingering files from previous incomplete runs
+    policy_dir_init = os.path.dirname(configs_init['archive']['policy']['filename']) + '/temp/'
+    policy_dir_proc = os.path.dirname(configs_proc['archive']['policy']['filename']) + '/temp_proc/'
     for obs in obs_list:
         obs_id = obs['obs_id']
-        error = pp_util.save_group_and_cleanup(obs_id, configs_init, context_init,
-                                               subdir='temp', remove=overwrite)
-        if error is not None:
-            f = open(errlog, 'a')
-            f.write(f'\n{time.time()}, init cleanup error\n{error[0]}\n{error[2]}\n')
-            f.close()
+        if os.path.exists(policy_dir_init):
+            found = False
+            for f in os.listdir(policy_dir_init):
+                if obs_id in f:
+                    found = True
+                    break
 
-        error = pp_util.save_group_and_cleanup(obs_id, configs_proc, context_proc,
-                                               subdir='temp_proc', remove=overwrite)
-        if error is not None:
-            f = open(errlog, 'a')
-            f.write(f'\n{time.time()}, dependent cleanup error\n{error[0]}\n{error[2]}\n')
-            f.close()
+            if found:
+                error = pp_util.save_group_and_cleanup(obs_id, configs_init, context_init,
+                                                       subdir='temp', remove=overwrite)
+                if error is not None:
+                    f = open(errlog, 'a')
+                    f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+                    f.close()
+
+        if os.path.exists(policy_dir_proc):
+            found = False
+            for f in os.listdir(policy_dir_proc):
+                if obs_id in f:
+                    found = True
+                    break
+
+            if found:
+                error = pp_util.save_group_and_cleanup(obs_id, configs_proc, context_proc,
+                                                       subdir='temp_proc', remove=overwrite)
+                if error is not None:
+                    f = open(errlog, 'a')
+                    f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+                    f.close()
 
     run_list = []
 
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
         # run on all if database doesn't exist
         for obs in obs_list:
-            group_by_init, groups_init, _ = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
-            group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
-
-            if len(groups_init) > 0 and len(groups_proc) > 0:
-                if (group_by_init != group_by_proc).any():
-                    raise ValueError('init and proc groups do not match')
-
-            all_groups_proc = groups_proc.copy()
-            for g in all_groups_proc:
-                if g not in groups_init:
-                    groups_proc.remove(g)
-
-            run_list.append( (obs, groups_proc) )
+            #run on all if database doesn't exist
+            run_list = [ (o,None) for o in obs_list]
+            group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs_proc['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by_init, groups_init, _ = pp_util.get_groups(obs["obs_id"], configs_init, context_init)
-            group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
-
-            if len(groups_init) > 0 and len(groups_proc) > 0:
-                if (group_by_init != group_by_proc).any():
-                    raise ValueError('init and proc groups do not match')
-
-            all_groups_proc = groups_proc.copy()
-            for g in all_groups_proc:
-                if g not in groups_init:
-                    groups_proc.remove(g)
-
             if x is None or len(x) == 0:
-                run_list.append( (obs, groups_proc) )
-            elif len(x) != len(groups_proc):
-                [groups_proc.remove([a[f'dets:{gb}'] for gb in group_by_proc]) for a in x]
-                run_list.append( (obs, groups_proc) )
+                run_list.append( (obs, None) )
+            else:
+                group_by_proc, groups_proc, _ = pp_util.get_groups(obs["obs_id"], configs_proc, context_proc)
+                if len(x) != len(groups_proc):
+                    [groups_proc.remove([a[f'dets:{gb}'] for gb in group_by_proc]) for a in x]
+                    run_list.append( (obs, groups_proc) )
 
     logger.info(f'Run list created with {len(run_list)} obsids')
-
-    # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-    # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
-    # whenever the file size exceeds 10 GB.
-    nfile_init = 0
-    folder_init = os.path.dirname(configs_init['archive']['policy']['filename'])
-    basename_init = os.path.splitext(configs_init['archive']['policy']['filename'])[0]
-    dest_file_init = basename_init + '_' + str(nfile_init).zfill(3) + '.h5'
-    if not(os.path.exists(folder_init)):
-        os.makedirs(folder_init)
-    while os.path.exists(dest_file_init) and os.path.getsize(dest_file_init) > 10e9:
-        nfile_init += 1
-        dest_file_init = basename_init + '_' + str(nfile_init).zfill(3) + '.h5'
-
-    nfile_proc = 0
-    folder_proc = os.path.dirname(configs_proc['archive']['policy']['filename'])
-    basename_proc = os.path.splitext(configs_proc['archive']['policy']['filename'])[0]
-    dest_file_proc = basename_proc + '_' + str(nfile_proc).zfill(3) + '.h5'
-    if not(os.path.exists(folder_proc)):
-        os.makedirs(folder_proc)
-    while os.path.exists(dest_file_proc) and os.path.getsize(dest_file_proc) > 10e9:
-        nfile_proc += 1
-        dest_file_proc = basename_proc + '_' + str(nfile_proc).zfill(3) + '.h5'
 
     # run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
@@ -383,12 +378,12 @@ def main(configs_init: str,
                 continue
             futures.remove(future)
 
-            if err is None:
+            if db_datasets_init:
                 logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                if db_datasets_init:
-                    for db_dataset in db_datasets_init:
-                        pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+                for db_dataset in db_datasets_init:
+                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
 
+            if db_datasets_proc:
                 logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
                 for db_dataset in db_datasets_proc:
                     pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
