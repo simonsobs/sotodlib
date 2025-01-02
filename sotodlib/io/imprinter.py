@@ -803,6 +803,7 @@ class Imprinter:
                 allow_bad_timing=allow_bad_timing,
                 require_acu=require_acu,
                 require_hwp=require_hwp,
+                require_monotonic_times=require_monotonic_times,
             )
             binder.bind(pbar=pbar)
             
