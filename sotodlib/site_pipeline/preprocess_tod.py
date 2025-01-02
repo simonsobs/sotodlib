@@ -333,21 +333,22 @@ def main(
 
     # clean up lingering files from previous incomplete runs
     policy_dir = os.path.dirname(configs['archive']['policy']['filename']) + '/temp/'
-    for obs in obs_list:
-        obs_id = obs['obs_id']
-        found = False
-        for f in os.listdir(policy_dir):
-            if obs_id in f:
-                found = True
-                break
+    if os.path.exists(policy_dir):
+        for obs in obs_list:
+            obs_id = obs['obs_id']
+            found = False
+            for f in os.listdir(policy_dir):
+                if obs_id in f:
+                    found = True
+                    break
 
-        if found:
-            error = pp_util.save_group_and_cleanup(obs_id, configs, context,
-                                                   subdir='temp', remove=overwrite)
-            if error is not None:
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
-                f.close()
+            if found:
+                error = pp_util.save_group_and_cleanup(obs_id, configs, context,
+                                                       subdir='temp', remove=overwrite)
+                if error is not None:
+                    f = open(errlog, 'a')
+                    f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+                    f.close()
 
     run_list = []
 
