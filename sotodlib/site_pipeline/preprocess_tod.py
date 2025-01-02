@@ -86,7 +86,10 @@ def preprocess_tod(obs_id,
     group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
 
     if error is not None:
-        return error[0], [None, None]
+        if run_parallel:
+            return error[0], [None, None]
+        else:
+            return
 
     all_groups = groups.copy()
     for g in all_groups:
@@ -330,7 +333,6 @@ def main(
 
     # clean up lingering files from previous incomplete runs
     policy_dir = os.path.dirname(configs['archive']['policy']['filename']) + '/temp/'
-    print(policy_dir)
     for obs in obs_list:
         obs_id = obs['obs_id']
         found = False
@@ -361,7 +363,6 @@ def main(
                 run_list.append( (obs, None) )
             else:
                 group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
-
                 if len(x) != len(groups):
                     [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
                     run_list.append( (obs, groups) )
@@ -403,7 +404,7 @@ def main(
                 continue
             futures.remove(future)
 
-            if db_datasets:
+            if err is None and db_datasets:
                 logger.info(f'Processing future result db_dataset: {db_datasets}')
                 for db_dataset in db_datasets:
                     pp_util.cleanup_mandb(err, db_dataset, configs, logger)

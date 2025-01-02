@@ -184,7 +184,7 @@ def get_groups(obs_id, configs, context):
 
             if (gb == 'detset') and (len(group_by) == 1):
                 groups = context.obsfiledb.get_detsets(obs_id)
-                return group_by, [[g] for g in groups]
+                return group_by, [[g] for g in groups], None
 
         det_info = context.get_det_info(obs_id)
         rs = det_info.subset(keys=group_by).distinct()
