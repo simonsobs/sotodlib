@@ -658,6 +658,7 @@ class Imprinter:
         allow_bad_timing=False,
         require_hwp=True,
         require_acu=True,
+        require_monotonic_times=True,
     ):
         """get the appropriate bookbinder for the book based on its type"""
 
@@ -683,6 +684,7 @@ class Imprinter:
                 allow_bad_timing=allow_bad_timing,
                 require_hwp=require_hwp,
                 require_acu=require_acu,
+                require_monotonic_times=require_monotonic_times,
             )
             return bookbinder
 
@@ -742,6 +744,7 @@ class Imprinter:
         allow_bad_timing=False,
         require_hwp=True,
         require_acu=True,
+        require_monotonic_times=True,
         check_configs={}
     ):
         """Bind book using bookbinder

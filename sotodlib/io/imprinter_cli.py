@@ -80,11 +80,15 @@ def fix_single_book(imprint:Imprinter, book:Books):
         )
         require_acu = set_tag_and_validate("Require ACU data? ([y]/n)")
         require_hwp = set_tag_and_validate("Require HWP data? ([y]/n)")
+        require_monotonic_times = set_tag_and_validate(
+            "Require Monotonic Housekeeping times? [y]/n"
+        )
         imprint.bind_book(
             book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates,
             allow_bad_timing=allow_bad_timing,
             require_acu=require_acu,
             require_hwp=require_hwp,
+            require_monotonic_times=require_monotonic_times,
         )
     elif resp == 4:
         utils.set_book_wont_bind(imprint, book)
@@ -144,7 +148,7 @@ def autofix_failed_books(
                     utils.set_book_rebind(imprint, book)
                     imprint.bind_book(book)
             except Exception as e :
-                print(f"Book {book.bid} failed again!")
+                print(f"Book {book.bid} failed again!")            
         elif "DuplicateAncillaryData" in book.message:
             print(f"Binding {book.bid} while fixing Duplicate Ancil Data")
             try:
@@ -178,10 +182,29 @@ def autofix_failed_books(
                 if not test_mode:
                     utils.set_book_rebind(imprint, book)
                     imprint.bind_book(book, allow_bad_timing=True,)
-            except Exception as e:
+            except Exception:
                 print(f"Book {book.bid} failed again!")
                 book.message = book.message + \
                     ' SECOND-FAIL. Tried with `allow_bad_timing=True`'
+                imprint.get_session().commit()
+        elif (
+            "NoMountData" in book.message
+        ):
+            ## ACU data was messed up somehow. this is ok for oper books
+            if book.type == 'obs':
+                print("Not autofixing obs books with bad mount data")
+                continue
+            elif book.type != 'oper':
+                raise ValueError(f"What book got me here? {book.bid}")
+            print(f"Binding {book.bid} without complete ACU data")
+            try:
+                if not test_mode:
+                    utils.set_book_rebind(imprint, book)
+                    imprint.bind_book(book, require_acu=False,)
+            except:
+                print(f"Book {book.bid} failed again!")
+                book.message = book.message + \
+                    ' SECOND-FAIL. Tried with `require_acu=False`'
                 imprint.get_session().commit()
         elif 'MissingReadoutIDError' in book.message:
             print(f"Book {book.bid} does not have readout ids, not binding")
