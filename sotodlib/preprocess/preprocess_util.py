@@ -690,11 +690,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
             error = 'no_group_overlap'
             return error, [obs_id, dets], [obs_id, dets], None
 
-    db_init_exist = find_db(obs_id, configs_init, dets, context_init)
+    db_init_exist = find_db(obs_id, configs_init, dets, context_init,
+                            logger=logger)
 
     db_proc_exist = False
     if configs_proc is not None:
-        db_proc_exist = find_db(obs_id, configs_proc, dets, context_proc)
+        db_proc_exist = find_db(obs_id, configs_proc, dets, context_proc,
+                                logger=logger)
 
     if (not db_init_exist) and db_proc_exist and (not overwrite):
         logger.info('dependent db requires initial db if not overwriting')
