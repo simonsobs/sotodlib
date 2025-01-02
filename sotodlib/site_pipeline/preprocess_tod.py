@@ -83,7 +83,11 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups, _ = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
+
+    if error is not None:
+        return error[0], [None, None]
+
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -325,32 +329,42 @@ def main(
         logger.warning(f"No observations returned from query: {query}")
 
     # clean up lingering files from previous incomplete runs
+    policy_dir = os.path.dirname(configs['archive']['policy']['filename']) + '/temp/'
+    print(policy_dir)
     for obs in obs_list:
         obs_id = obs['obs_id']
-        error = pp_util.save_group_and_cleanup(obs_id, configs, context,
-                                               subdir='temp', remove=overwrite)
-        if error is not None:
-            f = open(errlog, 'a')
-            f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
-            f.close()
+        found = False
+        for f in os.listdir(policy_dir):
+            if obs_id in f:
+                found = True
+                break
+
+        if found:
+            error = pp_util.save_group_and_cleanup(obs_id, configs, context,
+                                                   subdir='temp', remove=overwrite)
+            if error is not None:
+                f = open(errlog, 'a')
+                f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+                f.close()
 
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
-        for obs in obs_list:
-            group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
-            run_list.append( (obs, groups) )# = [ (o, groups) for o in obs_list]
+        run_list = [ (o,None) for o in obs_list]
+        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
-            elif len(x) != len(groups):
-                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-                run_list.append( (obs, groups) )
+            else:
+                group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
+
+                if len(x) != len(groups):
+                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    run_list.append( (obs, groups) )
 
     logger.info(f'Run list created with {len(run_list)} obsids')
 
@@ -389,7 +403,7 @@ def main(
                 continue
             futures.remove(future)
 
-            if err is None and db_datasets:
+            if db_datasets:
                 logger.info(f'Processing future result db_dataset: {db_datasets}')
                 for db_dataset in db_datasets:
                     pp_util.cleanup_mandb(err, db_dataset, configs, logger)
