@@ -81,7 +81,7 @@ def fix_single_book(imprint:Imprinter, book:Books):
         require_acu = set_tag_and_validate("Require ACU data? ([y]/n)")
         require_hwp = set_tag_and_validate("Require HWP data? ([y]/n)")
         require_monotonic_times = set_tag_and_validate(
-            "Require Monotonic Housekeeping times? [y]/n"
+            "Require Monotonic Housekeeping times? ([y]/n)"
         )
         imprint.bind_book(
             book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates,
