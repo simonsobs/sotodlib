@@ -404,7 +404,7 @@ def main(
                 continue
             futures.remove(future)
 
-            if err is None and db_datasets:
+            if db_datasets:
                 logger.info(f'Processing future result db_dataset: {db_datasets}')
                 for db_dataset in db_datasets:
                     pp_util.cleanup_mandb(err, db_dataset, configs, logger)

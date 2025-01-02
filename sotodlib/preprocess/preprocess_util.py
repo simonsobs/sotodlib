@@ -898,7 +898,8 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         errlog = os.path.join(folder, 'errlog.txt')
         f = open(errlog, 'a')
         f.write(f'{time.time()}, {error}\n')
-        f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
+        if outputs is not None:
+            f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
 
 
