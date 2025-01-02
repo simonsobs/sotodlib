@@ -87,10 +87,10 @@ def multilayer_preprocess_tod(obs_id,
 
     all_groups_proc = groups_proc.copy()
     for g in all_groups_proc:
+        if g not in groups_init:
+            groups_proc.remove(g)
+            continue
         if group_list is not None:
-            if g not in groups_init:
-                groups_proc.remove(g)
-                continue
             if g not in group_list:
                 groups_proc.remove(g)
                 continue
