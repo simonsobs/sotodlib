@@ -49,6 +49,10 @@ class DuplicateAncillaryData(Exception):
     """Exception raised when we find the HK data has copies of the same timestamps"""
     pass
 
+class NonMonotonicAncillaryTimes(Exception):
+    """Exception raised when we find the HK data has timestamps that are not strictly increasing monotonically"""
+    pass
+
 class BookDirHasFiles(Exception):
     """Exception raised when files already exist in a book directory"""
     pass
@@ -157,7 +161,7 @@ class HkDataField:
             self.times.append(np.array(block.times) / core.G3Units.s)
             self.data.append(block[self.field])
 
-    def finalize(self, drop_duplicates=False):
+    def finalize(self, drop_duplicates=False, require_monotonic_times=True):
         """Finalize data, and store in numpy array"""
         self.times = np.hstack(self.times, dtype=np.float64)
         self.data = np.hstack(self.data)
@@ -177,8 +181,14 @@ class HkDataField:
                 )
             self.times = self.times[idxs]
             self.data = self.data[idxs]
-        assert np.all(np.diff(self.times)>0), \
-               f"Times from {self.addr} are not increasing"
+        if not np.all(np.diff(self.times)>0):
+            bad = np.sum( np.diff(self.times) <= 0)
+            msg = f"Times from {self.addr} have {bad} samples that are " \
+                "not increasing"
+            if require_monotonic_times:
+                raise NonMonotonicAncillaryTimes(msg)
+            else:
+                log.warning(msg)
         
 @dataclass
 class HkData:
@@ -215,12 +225,15 @@ class HkData:
             if isinstance(f, HkDataField):
                 f.process_frame(frame)
 
-    def finalize(self, drop_duplicates=True):
+    def finalize(self, drop_duplicates=True, require_monotonic_times=True):
         """Finalizes HkDatafields"""
         for fld in fields(self):
             f = getattr(self, fld.name)
             if isinstance(f, HkDataField):
-                f.finalize(drop_duplicates=drop_duplicates)
+                f.finalize(
+                    drop_duplicates=drop_duplicates,
+                    require_monotonic_times=require_monotonic_times,
+                )
 
 class AncilProcessor:
     """
@@ -258,7 +271,8 @@ class AncilProcessor:
     """
     def __init__(self, files, book_id, hk_fields: Dict, 
                  drop_duplicates=False, require_hwp=True, 
-                 require_acu=True, log=None
+                 require_acu=True, require_monotonic_times=True, 
+                 log=None
                  ):
         self.hkdata: HkData = HkData.from_dict(hk_fields)
 
@@ -270,7 +284,7 @@ class AncilProcessor:
         self.drop_duplicates = drop_duplicates
         self.require_hwp = require_hwp
         self.require_acu = require_acu
-
+        self.require_monotonic_times = require_monotonic_times
         if log is None:
             self.log = logging.getLogger('bookbinder')
         else:
@@ -335,7 +349,10 @@ class AncilProcessor:
                 )
                 self.hkdata.hwp_freq = None
         
-        self.hkdata.finalize(drop_duplicates=self.drop_duplicates)
+        self.hkdata.finalize(
+            drop_duplicates=self.drop_duplicates,
+            require_monotonic_times=self.require_monotonic_times,
+        )
         self.preprocessed = True
 
     def bind(self, outdir, times, frame_idxs, file_idxs):
@@ -808,6 +825,8 @@ class BookBinder:
         multiple copies of the same data
     require_acu: bool, optional
         if true, will throw error if we do not find Mount data
+    require_monotonic_times: bool, optional
+        if true, will throw error if we ever see timestamps not increasing or going backwards
     require_hwp: bool, optional
         if true, will throw error if we do not find HWP data
     allow_bad_time: bool, optional
@@ -826,10 +845,11 @@ class BookBinder:
     file_idxs : np.ndarray
         Array of output file indices for all output frames in the book
     """
-    def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir, hk_fields,
-                 max_samps_per_frame=50_000, max_file_size=1e9, 
+    def __init__(self, book, obsdb, filedb, data_root, readout_ids, 
+                outdir, hk_fields, max_samps_per_frame=50_000, max_file_size=1e9, 
                 ignore_tags=False, ancil_drop_duplicates=False, 
                 require_hwp=True, require_acu=True,
+                require_monotonic_times=True,
                 allow_bad_timing=False):
         self.filedb = filedb
         self.book = book
@@ -893,6 +913,7 @@ class BookBinder:
             drop_duplicates=ancil_drop_duplicates,
             require_hwp=require_hwp,
             require_acu=require_acu,
+            require_monotonic_times=require_monotonic_times,
         )
         self.streams = {}
         for obs_id, files in filedb.items():
