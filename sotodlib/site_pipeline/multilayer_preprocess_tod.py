@@ -302,7 +302,7 @@ def main(configs_init: str,
 
     # clean up lingering files from previous incomplete runs
     policy_dir_init = os.path.join(os.path.dirname(configs_init['archive']['policy']['filename']), 'temp')
-    policy_dir_proc = os.path.join(os.path.dirname(configs_init['archive']['policy']['filename']), 'temp_proc')
+    policy_dir_proc = os.path.join(os.path.dirname(configs_proc['archive']['policy']['filename']), 'temp_proc')
     for obs in obs_list:
         obs_id = obs['obs_id']
         pp_util.cleanup_obs(obs_id, policy_dir_init, errlog, configs_init, context_init,
