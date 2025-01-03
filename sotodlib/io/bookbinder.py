@@ -33,6 +33,11 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
+class BadTimeSamples(Exception):
+    """Exception raised when there are glitches in the time samples in the 
+    UFM timestreams"""
+    pass
+
 class NoHKFiles(Exception):
     """Exception raised when we cannot find any HK data around the book time"""
     pass
@@ -528,7 +533,7 @@ class SmurfStreamProcessor:
         self.readout_ids = readout_ids
         self.out_files = []
         self.book_id = book_id
-        self.allow_bad_timing = allow_bad_timing
+        self.allow_bad_timing = allow_bad_timing,
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -582,6 +587,16 @@ class SmurfStreamProcessor:
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
+
+        dts = np.diff(self.times)
+        if np.any( dts < 0):
+            raise BadTimeSamples(
+                f"{self.obs_id} has time samples not increasing"
+            )
+        if np.any( dts > 100*np.median(dts) ):
+            raise BadTimeSamples(
+                f"{self.obs_id} has more than 100 time samples missing"
+            )
 
         timing = timing and (not self.timing_paradigm=='Low Precision')
         
