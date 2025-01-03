@@ -1021,7 +1021,6 @@ class SourceFlags(_Preprocess):
      Example config block::
 
         - name : "source_flags"
-          signal: "signal" # optional
           calc:
             mask: {'shape': 'circle',
                    'xyr': [0, 0, 1.]}
@@ -1057,11 +1056,12 @@ class SourceFlags(_Preprocess):
         # find if source is within footprint + distance
         positions = planets.get_nearby_sources(tod=aman, source_list=source_list,
                                                distance=self.calc_cfgs.get('distance', 0))
+
         for p in positions:
             source_flags = tod_ops.flags.get_source_flags(aman,
                                                           merge=self.calc_cfgs.get('merge', False),
                                                           overwrite=self.calc_cfgs.get('overwrite', True),
-                                                          source_flags_name=p[0],
+                                                          source_flags_name=self.calc_cfgs.get('source_flags_name', None),
                                                           mask=self.calc_cfgs.get('mask', None),
                                                           center_on=p[0],
                                                           res=self.calc_cfgs.get('res', None),
