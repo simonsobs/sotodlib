@@ -176,19 +176,25 @@ def get_groups(obs_id, configs, context):
     groups : list of list of int
         The list of groups of detectors.
     """
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-    for i, gb in enumerate(group_by):
-        if gb.startswith('dets:'):
-            group_by[i] = gb.split(':',1)[1]
+    try:
+        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+        for i, gb in enumerate(group_by):
+            if gb.startswith('dets:'):
+                group_by[i] = gb.split(':',1)[1]
 
-        if (gb == 'detset') and (len(group_by) == 1):
-            groups = context.obsfiledb.get_detsets(obs_id)
-            return group_by, [[g] for g in groups]
+            if (gb == 'detset') and (len(group_by) == 1):
+                groups = context.obsfiledb.get_detsets(obs_id)
+                return group_by, [[g] for g in groups], None
 
-    det_info = context.get_det_info(obs_id)
-    rs = det_info.subset(keys=group_by).distinct()
-    groups = [[b for a,b in r.items()] for r in rs]
-    return group_by, groups
+        det_info = context.get_det_info(obs_id)
+        rs = det_info.subset(keys=group_by).distinct()
+        groups = [[b for a,b in r.items()] for r in rs]
+        return group_by, groups, None
+    except Exception as e:
+        error = f'Failed get groups for: {obs_id}'
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+        return [], [], [error, errmsg, tb]
 
 
 def get_preprocess_db(configs, group_by, logger=None):
@@ -388,8 +394,14 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc, context_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
-    group_by_init, groups_init = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, error_init = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, error_proc = get_groups(obs_id, configs_proc, context_proc)
+
+    if error_init is not None:
+        raise ValueError(f"{error_init[0]}\n{error_init[1]}\n{error_init[2]}")
+
+    if error_proc is not None:
+        raise ValueError(f"{error_proc[0]}\n{error_proc[1]}\n{error_proc[2]}")
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
@@ -451,7 +463,7 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         configs = yaml.safe_load(open(configs, "r"))
     if context is None:
         context = core.Context(configs["context_file"])
-    group_by, _ = get_groups(obs_id, configs, context)
+    group_by, _, _ = get_groups(obs_id, configs, context)
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
     dbexist = True
     if os.path.exists(configs['archive']['index']):
@@ -560,7 +572,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     if context is None:
         context = core.Context(configs["context_file"])
 
-    group_by, groups = get_groups(obs_id, configs, context)
+    group_by, groups, error = get_groups(obs_id, configs, context)
 
     all_groups = groups.copy()
     for g in all_groups:
@@ -579,10 +591,53 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                     cleanup_mandb(None, outputs_grp, configs, logger)
                 else:
                     # if we're overwriting, remove file so it will re-run
-                    os.remove(output_grp['temp_file'])
+                    os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
-                os.remove(output_grp['temp_file'])
+                os.remove(outputs_grp['temp_file'])
+    return error
+
+
+def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
+                subdir='temp', remove=False):
+    """
+    For a given obs id, this function will search the policy_dir directory
+    if it exists for any files with that obsnum in their filename. If any are
+    found, it will run save_group_and_cleanup for that obs id.
+
+     Arguments
+    ---------
+    obs_id: str
+        Obs id to check and clean up
+    policy_dir: str
+        Directory to temp per-group output files
+    errlog: fpath
+        Filepath to error logging file.
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    context: core.Context
+        Optional. Context object used for data loading/querying.
+    subdir: str
+        Optional. Subdirectory to save the output files into.
+    remove: bool
+        Optional. Default is False. Whether to remove a file if found.
+        Used when ``overwrite`` is True in driving functions.
+    """
+
+    if os.path.exists(policy_dir):
+        found = False
+        for f in os.listdir(policy_dir):
+            if obs_id in f:
+                found = True
+                break
+
+        if found:
+            error = save_group_and_cleanup(obs_id, configs, context,
+                                           subdir=subdir, remove=remove)
+            if error is not None:
+                f = open(errlog, 'a')
+                f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+                f.close()
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=None,
@@ -657,9 +712,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
         if context_proc is None:
             context_proc = core.Context(configs_proc["context_file"])
 
-        group_by, groups = get_groups(obs_id, configs_proc, context_proc)
+        group_by, groups, error = get_groups(obs_id, configs_proc, context_proc)
     else:
-        group_by, groups = get_groups(obs_id, configs_init, context_init)
+        group_by, groups, error = get_groups(obs_id, configs_init, context_init)
+
+    if error is not None:
+        return error[0], [error[1], error[2]], [error[1], error[2]], None
 
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
@@ -674,11 +732,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
             error = 'no_group_overlap'
             return error, [obs_id, dets], [obs_id, dets], None
 
-    db_init_exist = find_db(obs_id, configs_init, dets, context_init)
+    db_init_exist = find_db(obs_id, configs_init, dets, context_init,
+                            logger=logger)
 
     db_proc_exist = False
     if configs_proc is not None:
-        db_proc_exist = find_db(obs_id, configs_proc, dets, context_proc)
+        db_proc_exist = find_db(obs_id, configs_proc, dets, context_proc,
+                                logger=logger)
 
     if (not db_init_exist) and db_proc_exist and (not overwrite):
         logger.info('dependent db requires initial db if not overwriting')
@@ -882,7 +942,8 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         errlog = os.path.join(folder, 'errlog.txt')
         f = open(errlog, 'a')
         f.write(f'{time.time()}, {error}\n')
-        f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
+        if outputs is not None:
+            f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
         f.close()
 
 
