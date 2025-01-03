@@ -1072,8 +1072,8 @@ class SourceFlags(_Preprocess):
         # add sources that were not nearby from source list
         for source in source_list:
             if source not in source_aman._fields:
-                source_flags = RangesMatrix.zeros([aman.dets.count, aman.samps.count])
-                source_aman.wrap(source, source_flags, [(0, 'dets'), (1, 'samps')])
+                source_aman.wrap(source, RangesMatrix.zeros([aman.dets.count, aman.samps.count]),
+                                 [(0, 'dets'), (1, 'samps')])
 
         self.save(proc_aman, source_aman)
 

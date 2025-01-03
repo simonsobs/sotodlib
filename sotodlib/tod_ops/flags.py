@@ -589,8 +589,8 @@ def get_source_flags(aman, merge=True, overwrite=True, source_flags_name=None,
     if res:
         res = np.radians(res/60) # config input in arcminutes
 
-    source_flags = coords.planets.compute_source_flags(tod=aman, wrap=None,
-                                                       mask=mask, center_on=center_on,
+    source_flags = coords.planets.compute_source_flags(tod=aman, mask=mask,
+                                                       center_on=center_on,
                                                        res=res, max_pix=max_pix)
 
     if merge:
