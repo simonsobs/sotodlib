@@ -610,9 +610,9 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
     obs_id: str
         Obs id to check and clean up
     policy_dir: str
-        Directory to manifestDB from config file for temp per group files
-    errlog: str
-        Path to error logging file.
+        Directory to temp per-group output files
+    errlog: fpath
+        Filepath to error logging file.
     configs: fpath or dict
         Filepath or dictionary containing the preprocess configuration file.
     context: core.Context
