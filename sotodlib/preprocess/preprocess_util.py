@@ -155,6 +155,7 @@ def get_preprocess_context(configs, context=None):
         )
     return configs, context
 
+
 def get_groups(obs_id, configs, context):
     """Get subobs group method and groups. To be used in
     ``preprocess_*.py`` site pipeline scripts.
