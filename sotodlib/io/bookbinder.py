@@ -831,6 +831,10 @@ class BookBinder:
         if true, will throw error if we do not find HWP data
     allow_bad_time: bool, optional
         if not true, books will not be bound if the timing systems signals are not found. 
+    min_ctime: float, optional
+        if not None, will cut book to this minimum ctime
+    max_ctime: float optional
+        if not None, will cut book to this maximum ctime
     
     Attributes
     -----------
@@ -846,11 +850,11 @@ class BookBinder:
         Array of output file indices for all output frames in the book
     """
     def __init__(self, book, obsdb, filedb, data_root, readout_ids, 
-                outdir, hk_fields, max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False, ancil_drop_duplicates=False, 
+                outdir, hk_fields, max_samps_per_frame=50_000, max_file_size=1e9, ignore_tags=False, ancil_drop_duplicates=False, 
                 require_hwp=True, require_acu=True,
                 require_monotonic_times=True,
-                allow_bad_timing=False):
+                allow_bad_timing=False,
+                min_ctime=None, max_ctime=None):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -929,6 +933,8 @@ class BookBinder:
                 allow_bad_timing=self.allow_bad_timing,
             )
 
+        self.min_ctime = min_ctime
+        self.max_ctime = max_ctime
         self.times = None
         self.frame_idxs = None
         self.file_idxs = None
@@ -947,7 +953,26 @@ class BookBinder:
             stream.preprocess()
 
         t0 = np.max([s.times[0] for s in self.streams.values()])
+        if self.min_ctime is not None:
+            assert self.min_ctime >= t0, \
+                f"{self.min_ctime} is less than the first time found in"\
+                f" the detector data {t0}"
+            self.log.warning(
+                f"Over-riding minimum ctime from {t0} to {self.min_ctime}"
+            )
+            t0 = self.min_ctime
+        else:
+            self.min_ctime = t0
         t1 = np.min([s.times[-1] for s in self.streams.values()])
+        if self.max_ctime is not None:
+            assert self.max_ctime <= t1, \
+                f"{self.max_ctime} is greater than the last time found in"\
+                f" the detector data {t1}"
+            self.log.warning(
+                f"Over-riding maximum ctime from {t1} to {self.max_ctime}"
+            )
+        else:
+            self.max_ctime = t1
         # prioritizes the last stream
         # implicitly assumes co-sampled (this is where we could throw errors
         # after looking for co-sampled data)

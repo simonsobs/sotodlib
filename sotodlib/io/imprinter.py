@@ -659,6 +659,8 @@ class Imprinter:
         require_hwp=True,
         require_acu=True,
         require_monotonic_times=True,
+        min_ctime=None, 
+        max_ctime=None,
     ):
         """get the appropriate bookbinder for the book based on its type"""
 
@@ -685,6 +687,7 @@ class Imprinter:
                 require_hwp=require_hwp,
                 require_acu=require_acu,
                 require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime,
             )
             return bookbinder
 
@@ -745,6 +748,7 @@ class Imprinter:
         require_hwp=True,
         require_acu=True,
         require_monotonic_times=True,
+        min_ctime=None, max_ctime=None,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -768,6 +772,20 @@ class Imprinter:
             expected to be turned on by hand.
         allow_bad_timing: if true, will bind books even if the timing is low 
             precision
+        require_hwp: bool, optional
+            if True, requires that we find HWP data before binding the book. 
+            hard-coded to False if self.daq_node is lat
+        require_acu: bool, optional
+            if True, requires that we have ACU data and that it has no dropouts 
+            longer than 10s
+        require_monotonic_times: bool, optional
+            if True, requires that all HK data is monotonically increasing, 
+            should never be set to False for obs books but less important for 
+            oper books if there were ACU aggregation issues
+        min_ctime: float, optional
+            if not None, cuts the book down to have this minimum ctime
+        max_ctime: float, optional
+            if not None, cuts the book down to have this maximum ctime
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -804,6 +822,7 @@ class Imprinter:
                 require_acu=require_acu,
                 require_hwp=require_hwp,
                 require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime
             )
             binder.bind(pbar=pbar)
             
