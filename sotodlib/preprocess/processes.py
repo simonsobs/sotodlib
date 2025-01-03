@@ -1,6 +1,8 @@
 import numpy as np
 from operator import attrgetter
 
+from so3g.proj import Ranges, RangesMatrix
+
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 import sotodlib.obs_ops as obs_ops
@@ -1022,21 +1024,22 @@ class SourceFlags(_Preprocess):
           signal: "signal" # optional
           calc:
             mask: {'shape': 'circle',
-                   'xyr': (0, 0, 1.)}
+                   'xyr': [0, 0, 1.]}
             center_on: 'jupiter'
-            res: 0.005817764173314432 # np.radians(20/60)
-            max_pix: 4e6
-            distance: 0 #deg
+            res: 20 # arcmin
+            max_pix: 4000000
+            distance: 0 # deg
           save: True
           select: True # optional
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-    
+
     def calc_and_save(self, aman, proc_aman):
         center_on_list = self.calc_cfgs.get('center_on', 'planet')
         source_aman = core.AxisManager(aman.dets, aman.samps)
+        source_list = []
         for center_on in center_on_list:
             # Get source from tags
             if center_on == 'planet':
@@ -1049,17 +1052,29 @@ class SourceFlags(_Preprocess):
             else:
                 source = center_on
 
+            source_list.append(source)
+
+        # find if source is within footprint + distance
+        positions = planets.get_nearby_sources(tod=aman, source_list=source_list,
+                                               distance=self.calc_cfgs.get('distance', 0))
+        for p in positions:
             source_flags = tod_ops.flags.get_source_flags(aman,
                                                           merge=self.calc_cfgs.get('merge', False),
                                                           overwrite=self.calc_cfgs.get('overwrite', True),
-                                                          source_flags_name=source,
+                                                          source_flags_name=p[0],
                                                           mask=self.calc_cfgs.get('mask', None),
-                                                          center_on=source,
+                                                          center_on=p[0],
                                                           res=self.calc_cfgs.get('res', None),
-                                                          max_pix=self.calc_cfgs.get('max_pix', None),
-                                                          distance=self.calc_cfgs.get('distance', None))
+                                                          max_pix=self.calc_cfgs.get('max_pix', None))
 
-            source_aman.wrap(source, source_flags, [(0, 'dets'), (1, 'samps')])
+            source_aman.wrap(p[0], source_flags, [(0, 'dets'), (1, 'samps')])
+
+        # add sources that were not nearby from source list
+        for source in source_list:
+            if source not in source_aman._fields:
+                source_flags = RangesMatrix.zeros([aman.dets.count, aman.samps.count])
+                source_aman.wrap(source, source_flags, [(0, 'dets'), (1, 'samps')])
+
         self.save(proc_aman, source_aman)
 
     def save(self, proc_aman, source_aman):
@@ -1076,8 +1091,8 @@ class SourceFlags(_Preprocess):
         else:
             source_flags = proc_aman.source_flags
 
-        for field in source_flags._fields:
-            keep = ~has_any_cuts(source_flags[field])
+        for source in source_flags._fields:
+            keep = ~has_all_cut(source_flags[source])
             meta.restrict("dets", meta.dets.vals[keep])
             source_flags.restrict("dets", source_flags.dets.vals[keep])
         return meta
