@@ -301,39 +301,14 @@ def main(configs_init: str,
         logger.warning(f"No observations returned from query: {query}")
 
     # clean up lingering files from previous incomplete runs
-    policy_dir_init = os.path.dirname(configs_init['archive']['policy']['filename']) + '/temp/'
-    policy_dir_proc = os.path.dirname(configs_proc['archive']['policy']['filename']) + '/temp_proc/'
+    policy_dir_init = os.path.join(os.path.dirname(configs_init['archive']['policy']['filename']), 'temp')
+    policy_dir_proc = os.path.join(os.path.dirname(configs_init['archive']['policy']['filename']), 'temp_proc')
     for obs in obs_list:
         obs_id = obs['obs_id']
-        if os.path.exists(policy_dir_init):
-            found = False
-            for f in os.listdir(policy_dir_init):
-                if obs_id in f:
-                    found = True
-                    break
-
-            if found:
-                error = pp_util.save_group_and_cleanup(obs_id, configs_init, context_init,
-                                                       subdir='temp', remove=overwrite)
-                if error is not None:
-                    f = open(errlog, 'a')
-                    f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
-                    f.close()
-
-        if os.path.exists(policy_dir_proc):
-            found = False
-            for f in os.listdir(policy_dir_proc):
-                if obs_id in f:
-                    found = True
-                    break
-
-            if found:
-                error = pp_util.save_group_and_cleanup(obs_id, configs_proc, context_proc,
-                                                       subdir='temp_proc', remove=overwrite)
-                if error is not None:
-                    f = open(errlog, 'a')
-                    f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
-                    f.close()
+        pp_util.cleanup_obs(obs_id, policy_dir_init, errlog, configs_init, context_init,
+                            subdir='temp', remove=overwrite)
+        pp_util.cleanup_obs(obs_id, policy_dir_proc, errlog, configs_proc, context_proc,
+                            subdir='temp_proc', remove=overwrite)
 
     run_list = []
 

@@ -155,7 +155,6 @@ def get_preprocess_context(configs, context=None):
         )
     return configs, context
 
-
 def get_groups(obs_id, configs, context):
     """Get subobs group method and groups. To be used in
     ``preprocess_*.py`` site pipeline scripts.
@@ -596,6 +595,48 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
     return error
+
+
+def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
+                subdir='temp', remove=False):
+    """
+    For a given obs id, this function will search the policy_dir directory
+    if it exists for any files with that obsnum in their filename. If any are
+    found, it will run save_group_and_cleanup for that obs id.
+
+     Arguments
+    ---------
+    obs_id: str
+        Obs id to check and clean up
+    policy_dir: str
+        Directory to manifestDB from config file for temp per group files
+    errlog: str
+        Path to error logging file.
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    context: core.Context
+        Optional. Context object used for data loading/querying.
+    subdir: str
+        Optional. Subdirectory to save the output files into.
+    remove: bool
+        Optional. Default is False. Whether to remove a file if found.
+        Used when ``overwrite`` is True in driving functions.
+    """
+
+    if os.path.exists(policy_dir):
+        found = False
+        for f in os.listdir(policy_dir):
+            if obs_id in f:
+                found = True
+                break
+
+        if found:
+            error = save_group_and_cleanup(obs_id, configs, context,
+                                           subdir=subdir, remove=remove)
+            if error is not None:
+                f = open(errlog, 'a')
+                f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
+                f.close()
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=None,

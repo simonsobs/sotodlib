@@ -332,23 +332,11 @@ def main(
         logger.warning(f"No observations returned from query: {query}")
 
     # clean up lingering files from previous incomplete runs
-    policy_dir = os.path.dirname(configs['archive']['policy']['filename']) + '/temp/'
-    if os.path.exists(policy_dir):
-        for obs in obs_list:
-            obs_id = obs['obs_id']
-            found = False
-            for f in os.listdir(policy_dir):
-                if obs_id in f:
-                    found = True
-                    break
-
-            if found:
-                error = pp_util.save_group_and_cleanup(obs_id, configs, context,
-                                                       subdir='temp', remove=overwrite)
-                if error is not None:
-                    f = open(errlog, 'a')
-                    f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
-                    f.close()
+    policy_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), 'temp')
+    for obs in obs_list:
+        obs_id = obs['obs_id']
+        pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
+                            subdir='temp', remove=overwrite)
 
     run_list = []
 
@@ -369,21 +357,6 @@ def main(
                     run_list.append( (obs, groups) )
 
     logger.info(f'Run list created with {len(run_list)} obsids')
-
-    # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-    # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
-    # whenever the file size exceeds 10 GB.
-    nfile = 0
-    folder = os.path.dirname(configs['archive']['policy']['filename'])
-    basename = os.path.splitext(configs['archive']['policy']['filename'])[0]
-    dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-    if not(os.path.exists(folder)):
-            os.makedirs(folder)
-    while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
-        nfile += 1
-        dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-
-    logger.info(f'Starting dest_file set to {dest_file}')
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
