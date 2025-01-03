@@ -366,17 +366,18 @@ def main(config_file: str) -> None:
     L.info(f'Running {len(obslists_arr)} maps after removing duplicate maps')
 
     # clean up lingering files from previous incomplete runs
+    if len(preprocess_config)==1:
+        policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+    else:
+        policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp_proc')
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
-            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
-                                       subdir='temp', remove=False)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
         else:
-            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
-                                       subdir='temp', remove=False)
-            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[1],
-                                       subdir='temp_proc', remove=False)
-
+            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False)
     run_list = []
     for oi, ol in enumerate(obslists_arr):
         pid = ol[0][3]
