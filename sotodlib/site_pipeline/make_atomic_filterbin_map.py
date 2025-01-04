@@ -411,8 +411,9 @@ def main(config_file: str) -> None:
                 info.split_detail = ''
                 info.prefix_path = str(prefix + '_%s' % split_label)
                 info.elevation = obs_infos[obslist[0][3]].el_center
-                info.azimuth =obs_infos[obslist[0][3]].az_center
+                info.azimuth = obs_infos[obslist[0][3]].az_center
                 info.pwv = float(pwv_atomic)
+                info.roll_angle = obs_infos[obslist[0][3]].roll_center
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:

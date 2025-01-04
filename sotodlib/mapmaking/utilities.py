@@ -560,7 +560,9 @@ class AtomicInfo(Base):
     ampl_2f_avg: Mapped[Optional[float]]
     gain_avg: Mapped[Optional[float]]
     tau_avg: Mapped[Optional[float]]
-
+    f_hwp: Mapped[Optional[float]]
+    roll_angle: Mapped[Optional[float]]
+    scan_speed: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
