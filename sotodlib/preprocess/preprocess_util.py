@@ -814,6 +814,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
                 proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
+                aman.preprocess.merge(proc_aman)
+
                 return error, [obs_id, dets], outputs_proc, aman
     else:
         # pipeline for init config
@@ -857,6 +859,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 aman.wrap('tags', tags_proc)
 
                 proc_aman, success = pipe_proc.run(aman)
+                aman.wrap('preprocess', proc_aman)
 
                 # remove fields found in aman.preprocess from proc_aman
                 for fld_init in init_fields:
