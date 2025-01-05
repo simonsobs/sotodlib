@@ -15,7 +15,7 @@ import sys
 import shutil
 import yaml
 import datetime as dt
-from zipfile import ZipFile
+from zipfile import ZipFile, ZIP_DEFLATED
 import sotodlib
 from sotodlib.site_pipeline.util import init_logger
 from .datapkg_utils import walk_files
@@ -1297,7 +1297,7 @@ class TimeCodeBinder:
             with ZipFile(self.outdir, mode='x') as zf:
                 for f in self.file_list:
                     relpath = os.path.relpath(f, self.indir)
-                    zf.write(f, arcname=relpath)
+                    zf.write(f, arcname=relpath, compress_type=ZIP_DEFLATED)
         elif self.file_list is None:
             shutil.copytree(
                 self.indir,
