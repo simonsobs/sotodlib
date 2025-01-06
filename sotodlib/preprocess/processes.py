@@ -1024,10 +1024,10 @@ class SourceFlags(_Preprocess):
           calc:
             mask: {'shape': 'circle',
                    'xyr': [0, 0, 1.]}
-            center_on: 'jupiter'
+            center_on: ['jupiter', 'moon'] # list of str
             res: 20 # arcmin
-            max_pix: 4000000
-            distance: 0 # deg
+            max_pix: 4000000 # max number of allowed pixels in map
+            distance: 0 # max distance of footprint from source in degrees
           save: True
           select: True # optional
 
@@ -1036,27 +1036,18 @@ class SourceFlags(_Preprocess):
     name = "source_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        center_on_list = self.calc_cfgs.get('center_on', 'planet')
-        source_aman = core.AxisManager(aman.dets, aman.samps)
-        source_list = []
-        for center_on in center_on_list:
-            # Get source from tags
-            if center_on == 'planet':
-                from sotodlib.coords.planets import SOURCE_LIST
-                matches = [x for x in aman.tags if x in SOURCE_LIST]
-                if len(matches) != 0:
-                    source = matches[0]
-                else:
-                    raise ValueError("No tags match source list")
-            else:
-                source = center_on
-
-            source_list.append(source)
+        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+        if source_list == ['planet']:
+            from sotodlib.coords.planets import SOURCE_LIST
+            source_list = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(source_list) == 0:
+                raise ValueError("No tags match source list")
 
         # find if source is within footprint + distance
         positions = planets.get_nearby_sources(tod=aman, source_list=source_list,
                                                distance=self.calc_cfgs.get('distance', 0))
 
+        source_aman = core.AxisManager(aman.dets, aman.samps)
         for p in positions:
             source_flags = tod_ops.flags.get_source_flags(aman,
                                                           merge=self.calc_cfgs.get('merge', False),
