@@ -444,8 +444,8 @@ class Pipeline(list):
         """
         if proc_aman is None:
             if 'preprocess' in aman:
-                proc_aman = aman.preprocess
-                full = aman.preprocess
+                proc_aman = aman.preprocess.copy()
+                full = aman.preprocess.copy()
             else:
                 proc_aman = core.AxisManager(aman.dets, aman.samps)
                 full = core.AxisManager( aman.dets, aman.samps)

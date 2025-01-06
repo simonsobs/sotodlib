@@ -782,6 +782,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                     logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                     # pipeline for init config
                     pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
+                    aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
                     # pipeline for processing config
                     pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
 
@@ -792,14 +793,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                         aman.move("tags", None)
                     aman.wrap('tags', tags_proc)
 
+                    aman.preprocess.wrap('pcfg_ref', aman_cfgs_ref)
+
                     proc_aman, success = pipe_proc.run(aman)
 
                     # remove fields found in aman.preprocess from proc_aman
                     for fld_init in init_fields:
                         if fld_init in proc_aman:
                             proc_aman.move(fld_init, None)
-
-                    proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
 
                 except Exception as e:
                     error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
@@ -859,13 +860,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None, logger=
                 aman.wrap('tags', tags_proc)
 
                 proc_aman, success = pipe_proc.run(aman)
-                aman.wrap('preprocess', proc_aman)
 
                 # remove fields found in aman.preprocess from proc_aman
                 for fld_init in init_fields:
                     if fld_init in proc_aman:
                         proc_aman.move(fld_init, None)
 
+                aman.preprocess.merge(proc_aman)
                 proc_aman.wrap('pcfg_ref', pck_aman)
 
             except Exception as e:
