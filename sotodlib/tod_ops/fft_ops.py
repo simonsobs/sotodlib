@@ -4,6 +4,7 @@ import sys
 import numdifftools as ndt
 import numpy as np
 import pyfftw
+import logging
 import so3g
 from scipy.optimize import minimize
 from scipy.signal import welch
@@ -11,6 +12,8 @@ from sotodlib import core
 
 from . import detrend_tod
 
+
+logger = logging.getLogger(__name__)
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -356,6 +359,18 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     if pxx is None:
         pxx = aman.Pxx
 
+    # limit upper frequency cutoffs to hwp freq
+    if 'hwp_angle' in aman._fields:
+        hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                     (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+        hwp_freq_limit = 0.95 * hwp_freq
+        if high_f > hwp_freq_limit and hwp_freq > 0:
+            logger.warning(f"high frequency cutoff={high_f} > hwp_freq={hwp_freq_limit}. Limiting to hwp_freq.")
+            high_f = hwp_freq_limit
+            # make sure low_f < high_f
+            if low_f >= hwp_freq_limit:
+                raise ValueError(f"lower frequency cutoff={low_f} >= hwp_freq={hwp_freq_limit}")
+
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0)
     if pxx.ndim == 1:
         wn2 = np.median(pxx[fmsk])
@@ -459,12 +474,28 @@ def fit_noise_model(
             subscan=subscan,
             **psdargs,
         )
+
+    # limit upper frequency cutoffs to hwp freq
+    if 'hwp_angle' in aman._fields:
+        hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                     (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+        if hwp_freq > 0:
+            hwp_freq_limit = 0.95 * hwp_freq
+            if f_max > hwp_freq_limit:
+                logger.warning(f"f_max={f_max} > hwp_freq={hwp_freq_limit}. Limiting to hwp_freq.")
+                f_max = hwp_freq_limit
+            if fwhite[1] > hwp_freq_limit:
+                logger.warning(f"upper white noise freq={fwhite[1]} > hwp_freq={hwp_freq_limit}. Limiting to hwp_freq.")
+                fwhite[1] = hwp_freq_limit
+                # make sure fwhite[0] < fwhite[1]
+                if fwhite[0] >= hwp_freq_limit:
+                    raise ValueError(f"lower white noise freq={fwhite[0]} >= hwp_freq={hwp_freq_limit}")
     if subscan:
-       fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, psdargs=psdargs,
+        fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, psdargs=psdargs,
                                                   fwhite=fwhite, lowf=lowf, f_max=f_max,
                                                   freq_spacing=freq_spacing)
-       axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
-       axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
+        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
+        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
     else:
         eix = np.argmin(np.abs(f - f_max))
         f = f[1:eix]
@@ -479,7 +510,7 @@ def fit_noise_model(
             pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
             fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
             p0 = [f[fidx], wnest, -pfit[0]]
-            bounds = [(0, None), (sys.float_info.min, None), (None, None)]
+            bounds = [(sys.float_info.min, None), (sys.float_info.min, None), (None, None)]
             res = minimize(neglnlike, p0, args=(f, p), bounds=bounds, method="Nelder-Mead")
             try:
                 Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
