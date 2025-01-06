@@ -610,7 +610,8 @@ class DataPackaging:
         if len(missed_files) == 0 and len(extra_files) == 0:
             self.logger.info(f"Timecode {timecode} has complete coverage")
         if len(missed_files)>0:
-            msg = f"Files on disk but not in database {len(missed_files)}:\n"
+            msg = f"Files on disk but not marked as uploaded in database"
+            msg += f" {len(missed_files)}:\n"
             for f in missed_files:
                 msg += f"\t{f}\n"
             self.logger.warning(msg)
