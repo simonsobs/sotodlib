@@ -49,7 +49,7 @@ def get_qu_common_mode_coeffs(aman, Q_signal=None, U_signal=None, merge=False):
     return output_aman
 
 def subtract_qu_common_mode(aman, Q_signal=None, U_signal=None, coeff_aman=None,
-                            merge=False):
+                            merge=False, subtract=True):
     """
     Subtracts the median signal (template) from each detector scaled by the a 
     coupling coefficient per detector.

@@ -1,11 +1,12 @@
 """Module for estimating Azimuth Synchronous Signal (azss)"""
 import numpy as np
+from operator import attrgetter
 from numpy.polynomial import legendre as L
 from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters
-from so3g.proj import Ranges
+from so3g.proj import Ranges, RangesMatrix
 import logging
 
 logger = logging.getLogger(__name__)
@@ -219,7 +220,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
         In 'interpolate', binned signal is used directly.
         In 'fit', fitting is applied to the binned signal.
         Defaults to 'interpolate'.
-    max_mode: integer, optinal
+    max_mode: integer, optional
         The number of Legendre modes to use for azss when method is 'fit'. Required when method is 'fit'.
     subtract_in_place: bool
         If True, it subtract the modeled tod from original signal. The aman.signal will be modified.
@@ -273,7 +274,9 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
 
     if flags is None:
         flags = Ranges.from_mask(np.zeros(aman.samps.count).astype(bool))
-    
+    else: 
+        flags = aman.flags.reduce(flags=flags, method='union', wrap=False)
+
     if left_right:
         if turnaround_info is None:
             turnaround_info = aman.flags
@@ -287,8 +290,6 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
             left_mask = turnaround_info.left_scan
             right_mask = turnaround_info.right_scan
         else:
-            print("")
-            print("HEREEEEEEE")
             left_mask = turnaround_info.valid_left_scans
             right_mask = turnaround_info.valid_right_scans
 
@@ -296,12 +297,15 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
         azss_left.add_axis(aman.samps)
-        azss_left.wrap('mask', left_mask, [(0, 'samps')])
+        azss_left.add_axis(aman.dets)
+        azss_left.wrap('mask', left_mask, [(0, 'dets'), (1, 'samps')])
         azss_right = _prepare_azss_stats(aman, signal, az, frange, bins, flags+right_mask, apodize_edges,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
         azss_right.add_axis(aman.samps)
-        azss_right.wrap('mask', right_mask, [(0, 'samps')])
+        azss_right.add_axis(aman.dets)
+        azss_right.wrap('mask', right_mask, [(0, 'dets'), (1, 'samps')])
+        
         azss_stats = core.AxisManager(aman.dets)
         azss_stats.wrap('azss_stats_left', azss_left)
         azss_stats.wrap('azss_stats_right', azss_right)
@@ -322,14 +326,14 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
             if subtract_in_place:
                 if signal_name is None:
                     lmask = left_mask.mask()
-                    signal[:,lmask] -= model_left[:,lmask].astype(signal.dtype)
+                    signal[lmask] -= model_left[lmask].astype(signal.dtype)
                     rmask = right_mask.mask()
-                    signal[:,rmask] -= model_right[:,rmask].astype(signal.dtype)
+                    signal[rmask] -= model_right[rmask].astype(signal.dtype)
                 else:
                     lmask = left_mask.mask()
-                    aman[signal_name][:,lmask] -= model_left[:,lmask].astype(aman[signal_name].dtype)
+                    aman[signal_name][lmask] -= model_left[lmask].astype(aman[signal_name].dtype)
                     rmask = right_mask.mask()
-                    aman[signal_name][:,rmask] -= model_right[:,rmask].astype(aman[signal_name].dtype)
+                    aman[signal_name][rmask] -= model_right[rmask].astype(aman[signal_name].dtype)
         else:
             azss_stats, model, _ = get_model_sig_tod(aman, azss_stats, az)
             if merge_model:
@@ -449,7 +453,7 @@ def subtract_azss(aman, azss_stats, signal='signal', subtract_name='azss_remove'
             if azss_stats.left_right:
                 for model, azss_fld in zip([model_left, model_right], ['azss_stats_left', 'azss_stats_right']):
                     mask = azss_stats[azss_fld]['mask'].mask()
-                    aman[signal_name][:, mask] -= model[:, mask].astype(aman[signal_name].dtype)
+                    aman[signal_name][mask] -= model[mask].astype(aman[signal_name].dtype)
             else:
                 aman[signal_name] -= model_left.astype(aman[signal_name].dtype)
     else:
