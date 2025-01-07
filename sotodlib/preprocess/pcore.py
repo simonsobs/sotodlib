@@ -1,5 +1,6 @@
 """Base Class and PIPELINE register for the preprocessing pipeline scripts."""
 import os
+import copy
 import logging
 import numpy as np
 from .. import core
@@ -369,7 +370,7 @@ class Pipeline(list):
         self.logger = logger
         self.plot_dir = plot_dir
         self.wrap_valid = wrap_valid
-        super().__init__( [self._check_item(item) for item in modules])
+        super().__init__( [self._check_item(item) for item in copy.deepcopy(modules)])
     
     def _check_item(self, item):
         if isinstance(item, _Preprocess):
