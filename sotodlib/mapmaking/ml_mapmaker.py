@@ -376,8 +376,7 @@ class SignalMap(Signal):
             interpol=self.interpol)
         # Build the RHS for this observation
         # These lines are not activated during the first pass of mapmaking.
-        if self.tiled:
-            map_work = self.to_work(map)
+        map_work = self.to_work(map)
         try:
             pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
         except RuntimeError as e:
