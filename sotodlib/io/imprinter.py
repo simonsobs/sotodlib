@@ -1649,9 +1649,14 @@ class Imprinter:
                 self.logger.info(f"received response from librarian {resp}")
                 if n_tries > 1:
                     if book.type == 'smurf':
-                        time.sleep(30)
+                        wait=30
                     else: 
-                        time.sleep(5)
+                        wait=5
+                    self.logger.warning(
+                        f"Waiting {wait} seconds and trying book {book.bid} "
+                        "with the librarian again"
+                    )
+                    time.sleep(wait)
                     return self.check_book_in_librarian(
                         book, n_copies=n_copies, 
                         n_tries=n_tries-1, 

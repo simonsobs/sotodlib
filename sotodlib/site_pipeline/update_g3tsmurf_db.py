@@ -107,6 +107,10 @@ def main(config: Optional[str] = None, update_delay: float = 2,
             raise_list_readout_ids.append(obs.obs_id)
 
     if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
+        logger.info(
+            f"Found observations with bad timing or missing readout ids "
+            "checking to see if they've been manually cleared"
+        )
         if checked_file is None or not os.path.exists(checked_file):
             logger.warning(
                 f"File {checked_file} does not exist so cannot check if "
