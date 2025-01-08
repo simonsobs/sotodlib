@@ -7,6 +7,7 @@ import shutil
 import logging
 from pathlib import Path
 from glob import glob
+import time
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -1627,7 +1628,13 @@ class Imprinter:
                 return False, e
         return True, None
             
-    def check_book_in_librarian(self, book, n_copies=1, raise_on_error=True):
+    def check_book_in_librarian(
+        self, 
+        book, 
+        n_copies=1, 
+        n_tries=1,
+        raise_on_error=True
+    ):
         """have the librarian validate the books is stored offsite. returns true
         if at least n_copies are storied offsite.
         """
@@ -1640,6 +1647,15 @@ class Imprinter:
             ) >= n_copies
             if not in_lib:
                 self.logger.info(f"received response from librarian {resp}")
+                if n_tries > 1:
+                    if book.type == 'smurf':
+                        time.sleep(30)
+                    else: 
+                        time.sleep(5)
+                    return self.check_book_in_librarian(
+                        self, book, n_copies=n_copies, 
+                        n_tries=n_tries-1, raise_on_error=raise_on_error
+                    )
         except Exception as e:
             if raise_on_error:
                 raise e
@@ -1652,7 +1668,7 @@ class Imprinter:
         return in_lib
         
     def delete_level2_files(self, book, verify_with_librarian=True,        
-        n_copies_in_lib=2, dry_run=True):
+        n_copies_in_lib=2, n_tries=1, dry_run=True):
         """Delete level 2 data from already bound books
 
         Parameters
@@ -1673,7 +1689,8 @@ class Imprinter:
             return 1
         if verify_with_librarian:
             in_lib = self.check_book_in_librarian(
-                book, n_copies=n_copies_in_lib, raise_on_error=False
+                book, n_copies=n_copies_in_lib, n_tries=n_tries,
+                raise_on_error=False
             )
             if not in_lib:
                 self.logger.warning(
