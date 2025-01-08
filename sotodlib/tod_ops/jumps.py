@@ -264,6 +264,7 @@ def estimate_heights(
     twopi: bool = False,
     make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
+    clean: float = 80,
 ) -> NDArray[np.floating]:
     """
     Simple jump estimation routine.
@@ -283,6 +284,9 @@ def estimate_heights(
         diff_buffed: Difference between signal and a signal shifted by win_size.
                      If None will be computed.
 
+        clean: Make each jump range a constant height set by this percentile.
+               If this is 0 then it is ignored.
+
     Returns:
 
         heights: Array of jump heights.
@@ -299,6 +303,17 @@ def estimate_heights(
 
     heights = np.zeros_like(jumps, dtype=float)
     heights[jumps] = diff_buffed[jumps]
+
+    if clean > 0:
+        ranges = RangesMatrix.from_mask(jumps)
+        for i, det in enumerate(ranges.ranges):
+            for r in det.ranges():
+                sign = (
+                    np.sign(np.mean(np.sign(heights[i, r[0] : r[1]]))) - 1
+                ) / 2  # 0 pos, -1 neg
+                heights[i, r[0] : r[1]] = np.percentile(
+                    heights[i, r[0] : r[1]], abs(clean + 100 * sign)
+                )
 
     return heights
 
@@ -486,6 +501,7 @@ def slow_jumps(
     merge=...,
     overwrite=...,
     name=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
@@ -503,6 +519,7 @@ def slow_jumps(
     merge=...,
     overwrite=...,
     name=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array]:
     ...
@@ -519,6 +536,7 @@ def slow_jumps(
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps_slow",
+    clean: float = 80,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -553,6 +571,8 @@ def slow_jumps(
         overwrite: If True will overwrite existing content of ``aman.flags.<name>``
 
         name: String used to populate field in flagmanager if merge is True.
+
+        clean: Cleaning value to pass to ``estimate_heights``. See that function for details.
 
         **filter_pars: Parameters to pass to _filter
 
@@ -595,7 +615,7 @@ def slow_jumps(
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     heights = estimate_heights(
-        _signal, jump_ranges.mask(), win_size=win_size, make_step=True
+        _signal, jump_ranges.mask(), win_size=win_size, make_step=True, clean=clean
     )
 
     if merge:
@@ -622,6 +642,7 @@ def find_jumps(
     overwrite=...,
     name=...,
     ds=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array]:
     ...
@@ -641,6 +662,7 @@ def find_jumps(
     overwrite=...,
     name=...,
     ds=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
@@ -659,6 +681,7 @@ def find_jumps(
     overwrite: bool = False,
     name: str = "jumps",
     ds: int = 10,
+    clean: float = 80,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -701,6 +724,8 @@ def find_jumps(
         name: String used to populate field in flagmanager if merge is True.
 
         ds: Downsample factor used when computing noise level, the actual factor used is `ds*win_size`.
+
+        clean: Cleaning value to pass to ``estimate_heights``. See that function for details.
 
         **filter_pars: Parameters to pass to _filter
 
@@ -746,7 +771,7 @@ def find_jumps(
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
-    heights = estimate_heights(signal, jumps, win_size=win_size)
+    heights = estimate_heights(signal, jumps, win_size=win_size, clean=clean)
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
