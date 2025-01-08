@@ -26,7 +26,7 @@ def deslope_el(tod, el, srate, inplace=False):
 class ArrayZipper:
     def __init__(self, shape, dtype, comm=None):
         self.shape = shape
-        self.ndof  = int(np.product(shape))
+        self.ndof  = int(np.prod(shape))
         self.dtype = dtype
         self.comm  = comm
 
@@ -40,7 +40,7 @@ class ArrayZipper:
 class MapZipper:
     def __init__(self, shape, wcs, dtype, comm=None):
         self.shape, self.wcs = shape, wcs
-        self.ndof  = int(np.product(shape))
+        self.ndof  = int(np.prod(shape))
         self.dtype = dtype
         self.comm  = comm
 
@@ -598,29 +598,6 @@ def downsample_obs(obs, down):
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
-
-def get_flags(obs, flagnames):
-    """Parse detector-set splits"""
-    cuts_out = None
-    if flagnames is None:
-        return so3g.proj.RangesMatrix.zeros(obs.shape)
-    det_splits = ['det_left','det_right','det_in','det_out','det_upper','det_lower']
-    for flagname in flagnames:
-        if flagname in det_splits:
-            cuts = obs.det_flags[flagname]
-        elif flagname == 'scan_left':
-            cuts = obs.flags.left_scan
-        elif flagname == 'scan_right':
-            cuts = obs.flags.right_scan
-        else:
-            cuts = getattr(obs.flags, flagname) # obs.flags.flagname
-
-        ## Add to the output matrix
-        if cuts_out is None:
-            cuts_out = cuts
-        else:
-            cuts_out += cuts
-    return cuts_out
 
 def import_optional(module_name):
     try:
