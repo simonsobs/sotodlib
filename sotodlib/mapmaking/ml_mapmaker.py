@@ -186,6 +186,7 @@ class SignalMap(Signal):
         self.comm  = comm
         self.comps = comps
         self.sys   = sys
+        if recenter is not None: raise NotImplementedError("Somehow recenter has been replaced by rot. Need to figure out why and what that means")
         self.recenter = recenter
         self.dtype = dtype
         self.tiled = tiled
@@ -215,7 +216,7 @@ class SignalMap(Signal):
         if pmap is None:
             pmap = get_pmap(obs, comps=self.comps, geom=self.rhs.geometry,
                 threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
-                interpol=self.interpol, recenter=self.recenter)
+                interpol=self.interpol)
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
@@ -346,9 +347,13 @@ class SignalMap(Signal):
         # Build the local geometry and pointing matrix for this observation
         pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
             threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
-            interpol=self.interpol, recenter=self.recenter)
+            interpol=self.interpol)
         # Build the RHS for this observation
-        pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
+        work = other.to_work(map)
+        try:
+            pmap.from_map(dest=tod, signal_map=work, comps=self.comps)
+        except RuntimeError as e:
+            raise RuntimeError("%s.\nPossibly caused by the assumption that exactly the same tiles will be hit each pass, which can in rare cases break when downsampling by different amounts in different passes when a tile is just barely hit by a single sample. This can be fixed by adding support for constructing coords.pmat.P which treats hits to a missing tile as zero instead of as an error. This also requires minor changes to so3g Projection.cxx. TODO." % str(e))
         return tod
 
 class SignalCut(Signal):
