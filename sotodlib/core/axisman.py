@@ -397,7 +397,10 @@ class AxisManager:
         if isinstance(val, AxisManager) and isinstance(tmp_item, AxisManager):
             raise ValueError("Cannot assign AxisManager to AxisManager. Please use wrap method.")
 
-        tmp_item.__setattr__(val_key, val)
+        if val_key in tmp_item._fields:
+            tmp_item._fields[val_key] = val
+        else:
+            raise KeyError(val_key)
 
     def __setattr__(self, name, value):
         # Assignment to members update those members
