@@ -1805,6 +1805,7 @@ class Imprinter:
         except Exception as e:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
+            return 4
         book.status = DONE
         self.session.commit()
         return 0
