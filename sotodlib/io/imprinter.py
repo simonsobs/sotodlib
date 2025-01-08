@@ -1653,8 +1653,9 @@ class Imprinter:
                     else: 
                         time.sleep(5)
                     return self.check_book_in_librarian(
-                        self, book, n_copies=n_copies, 
-                        n_tries=n_tries-1, raise_on_error=raise_on_error
+                        book, n_copies=n_copies, 
+                        n_tries=n_tries-1, 
+                        raise_on_error=raise_on_error
                     )
         except Exception as e:
             if raise_on_error:
