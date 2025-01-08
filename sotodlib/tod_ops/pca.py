@@ -364,4 +364,5 @@ def get_common_mode(
         raise ValueError("method flag must be median or average")
     if wrap is not None:
         tod.wrap(wrap, common_mode, [(0, 'samps')])
+
     return common_mode
