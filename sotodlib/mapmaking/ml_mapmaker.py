@@ -407,14 +407,12 @@ class SignalMap(Signal):
         try:
             pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
         except RuntimeError as e:
-            raise RuntimeError(f"{e}.\nPossibly caused by the assumption that exactly 
-                               the same tiles will be hit each pass, which can in rare 
-                               cases break when downsampling by different amounts in 
-                               different passes when a tile is just barely hit by a 
-                               single sample. This can be fixed by adding support for 
-                               constructing coords.pmat.P which treats hits to a 
-                               missing tile as zero instead of as an error. This also 
-                               requires minor changes to so3g Projection.cxx. TODO.")
+            raise RuntimeError(f"""{e}.
+            Possibly caused by the assumption that exactly the same tiles will be hit each pass, 
+            which can in rare cases break when downsampling by different amounts in different passes 
+            when a tile is just barely hit by a single sample. This can be fixed by adding support 
+            for constructing coords.pmat.P which treats hits to a missing tile as zero instead of 
+            as an error. This also requires minor changes to so3g Projection.cxx. TODO.""")
 
         return tod
 
