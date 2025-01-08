@@ -309,8 +309,8 @@ class DataPackaging:
         )
         if incomplete.count() > 0:
             ic_list = incomplete.all()
-            """Check if these are actually incomplete, imprinter incomplete checker
-            includes making sure the stop isn't beyond max ctime. 
+            """Check if these are actually incomplete, imprinter incomplete 
+            checker includes making sure the stop isn't beyond max ctime. 
             """
             obs_list = []
             for obs in ic_list:
@@ -636,7 +636,7 @@ class DataPackaging:
         for book in book_list:
             stat = self.imprint.delete_level2_files(
                 book, verify_with_librarian=verify_with_librarian,
-                n_copies_in_lib=2, dry_run=dry_run
+                n_copies_in_lib=2, dry_run=dry_run, n_tries=2
             )
             if stat > 0:
                 books_not_deleted.append(book)    
