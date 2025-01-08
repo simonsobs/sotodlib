@@ -13,7 +13,7 @@ import so3g.proj
 from .. import core
 from .. import coords
 from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional, get_flags
+from .utilities import import_optional
 from .noise_model import NmatWhite
 
 hp = import_optional('healpy')
@@ -291,10 +291,10 @@ class DemodSignalMap(DemodSignal):
                 else: rot = None
                 if self.Nsplits == 1:
                     # this is the case with no splits
-                    flagnames = ['glitch_flags']
+                    cuts = obs.flags.glitch_flags
                 else:
-                    flagnames = ['glitch_flags', split_labels[n_split]]
-                cuts = get_flags(obs, flagnames)
+                    # remember that the dets or samples you want to keep should be false, hence we negate
+                    cuts = obs.flags.glitch_flags + ~obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
                     geom = self.rhs.geometry
@@ -447,8 +447,9 @@ def make_demod_map(context, obslist, noise_model, info,
         Noise model to pass to DemodMapmaker.
     info : list
         Information for the database, will be written as a .hdf file.
-    preprocess_config : dict
-        Dictionary with the config yaml file for the preprocess database.
+    preprocess_config : list of dict
+        List of dictionaries with the config yaml file for the preprocess database.
+        If two, then a multilayer preprocessing is to be used.
     prefix : str
         Prefix for the output files
     shape : tuple, optional
@@ -492,7 +493,7 @@ def make_demod_map(context, obslist, noise_model, info,
         List of outputs from preprocess database. To be used in cleanup_mandb.
     """
     from ..preprocess import preprocess_util
-    context = core.Context(context)
+    #context = core.Context(context)
     if L is None:
         L = preprocess_util.init_logger("Demod filterbin mapmaking")
     pre = "" if tag is None else tag + " "
@@ -508,21 +509,28 @@ def make_demod_map(context, obslist, noise_model, info,
     errors = [] ; outputs = []; # PENDING: do an allreduce of these.
                                 # not needed for atomic maps, but needed for
                                 # depth-1 maps
+    if len(preprocess_config)==1:
+        preproc_init = preprocess_config[0]
+        preproc_proc = None
+    else:
+        preproc_init = preprocess_config[0]
+        preproc_proc = preprocess_config[1]
+
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
-        error, output, obs = preprocess_util.preproc_or_load_group(obs_id,
-                            configs=preprocess_config,
-                            dets={'wafer_slot':detset, 'wafer.bandpass':band}, 
-                            logger=L, context=context, overwrite=False)
-        errors.append(error) ; outputs.append(output) ;
+        error, output_init, output_proc, obs = preprocess_util.preproc_or_load_group(obs_id,
+                                                configs_init=preproc_init,
+                                                configs_proc=preproc_proc,
+                                                dets={'wafer_slot':detset, 'wafer.bandpass':band},
+                                                logger=L,
+                                                overwrite=False)
+        errors.append(error) ; outputs.append((output_init, output_proc)) ;
         if error not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds 
-                       + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
         mapmaker.add_obs(name, obs, split_labels=split_labels)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1

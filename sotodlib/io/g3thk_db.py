@@ -13,6 +13,7 @@ from so3g import hk
 import logging
 from .datapkg_utils import load_configs
 
+
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
@@ -126,7 +127,7 @@ class HKFields(Base):
 
 
 class G3tHk:
-    def __init__(self, hkarchive_path, db_path=None, echo=False):
+    def __init__(self, hkarchive_path, iids, db_path=None, echo=False):
         """
         Class to manage a housekeeping data archive
 
@@ -134,6 +135,8 @@ class G3tHk:
         ____
         hkarchive_path : path
             Path to the data directory
+        iids : list
+            List of agent instance ids
         db_path : path, optional
             Path to the sqlite file
         echo : bool, optional
@@ -144,13 +147,15 @@ class G3tHk:
 
         self.hkarchive_path = hkarchive_path
         self.db_path = db_path
+        self.iids = iids
         self.engine = db.create_engine(f"sqlite:///{db_path}", echo=echo)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.session = Session()
         Base.metadata.create_all(self.engine)
 
-    def load_fields(self, hk_path):
+
+    def load_fields(self, hk_path, iids):
         """
         Load fields from .g3 file and start and end time for each field.
 
@@ -167,14 +172,15 @@ class G3tHk:
         # enact HKArchiveScanner
         hkas = hk.HKArchiveScanner()
         hkas.process_file(hk_path)
-
+        
         arc = hkas.finalize()
 
         # get fields from .g3 file
         fields, timelines = arc.get_fields()
         hkfs = []
         for key in fields.keys():
-            hkfs.append(key)
+            if any(iid in key for iid in iids):
+                hkfs.append(key)
 
         starts = []
         stops = []
@@ -346,14 +352,14 @@ class G3tHk:
             .one()
         )
 
-        db_agents = db_file.agents
+        # line below may not be needed; is redundant
+        db_agents = [a for a in db_file.agents if a.instance_id in self.iids]
         db_fields = db_file.fields
 
-        agents = []
-
-        out = self.load_fields(db_file.path)
+        out = self.load_fields(db_file.path, self.iids)
         fields, starts, stops, medians, means, min_vals, max_vals, stds = out
 
+        agents = []
         for field in fields:
             agent = field.split(".")[1]
             agents.append(agent)
@@ -531,10 +537,12 @@ class G3tHk:
             .order_by(db.desc(HKFiles.global_start_time))
             .first()
         )
+        if len(last_file.agents) == 0:
+            return last_file.global_start_time
         return max([a.stop for a in last_file.agents])
 
     @classmethod
-    def from_configs(cls, configs):
+    def from_configs(cls, configs, iids=None):
         """
         Create a G3tHK instance from a configs dictionary
 
@@ -545,12 +553,34 @@ class G3tHk:
         if type(configs) == str:
             configs = load_configs(configs)
 
+        if iids is None:
+            iids = []
+            if "finalization" in configs:
+                servers = configs["finalization"].get("servers", {})
+                for server in servers:
+                    for key in server.keys():
+                        # Append the value (iid) to the iids list
+                        iids.append(server[key])
+            else:
+                logger.debug(
+                    "No finalization information in configuration, agents and "
+                    "fields will not be added."
+                )
+
         return cls(
-            os.path.join(configs["data_prefix"], "hk"), 
-            configs["g3thk_db"]
+            hkarchive_path = os.path.join(configs["data_prefix"], "hk"), 
+            db_path = configs["g3thk_db"],
+            iids = iids
         )
 
-    def delete_file(self, hkfile, dry_run=False, my_logger=None):
+    def batch_delete_files(self, file_list, dry_run=False, my_logger=None):
+        for f in file_list:
+            self.delete_file(
+                f, dry_run=dry_run, my_logger=my_logger, commit=False
+            )
+        self.session.commit()
+
+    def delete_file(self, hkfile, dry_run=False, my_logger=None, commit=True):
         """WARNING: Removes actual files from file system.
 
         Delete an hkfile instance, its on-disk file, and all associated agents
@@ -565,13 +595,13 @@ class G3tHk:
             my_logger = logger
 
         # remove field info
-        my_logger.info(f"removing field entries for {hkfile.path} from database")
+        my_logger.debug(f"removing field entries for {hkfile.path} from database")
         if not dry_run:
             for f in hkfile.fields:
                 self.session.delete(f)
 
         # remove agent info
-        my_logger.info(f"removing agent entries for {hkfile.path} from database")
+        my_logger.debug(f"removing agent entries for {hkfile.path} from database")
         if not dry_run:
             for a in hkfile.agents:
                 self.session.delete(a)
@@ -590,4 +620,5 @@ class G3tHk:
         my_logger.info(f"remove {hkfile.path} from database")
         if not dry_run:
             self.session.delete(hkfile)
-            self.session.commit()
+            if commit:
+                self.session.commit()

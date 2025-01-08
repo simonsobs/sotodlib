@@ -11,3 +11,4 @@ from .binning import bin_signal
 from .sub_polyf import subscan_polyfilter
 from .azss import get_azss
 from .t2pleakage import get_t2p_coeffs, subtract_t2p
+from . import deproject

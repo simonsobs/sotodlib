@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """Check that pointing expanded with TOAST is compatible with the MLMapmaker
@@ -26,7 +26,7 @@ except ImportError as e:
 if toast_available:
     import healpy as hp
 
-from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
+from . import _helpers as helpers
 
 
 class MapmakerPointingTest(unittest.TestCase):
@@ -44,7 +44,7 @@ class MapmakerPointingTest(unittest.TestCase):
         testdir = tempfile.TemporaryDirectory()
 
         comm, procs, rank = toast.get_world()
-        data = simulation_test_data(
+        data = helpers.simulation_test_data(
             comm,
             telescope_name=None,
             wafer_slot="w00",
@@ -134,7 +134,7 @@ class MapmakerPointingTest(unittest.TestCase):
             out_dir=testdir.name,
             comps="TQU",
             nmat_type="Nmat",
-            maxiter=3,
+            maxiter=[3],
             truncate_tod=False,
             write_hits=True,
             write_rhs=False,
@@ -240,7 +240,7 @@ class MapmakerPointingTest(unittest.TestCase):
             if np.abs(means[2]) > tol:
                 raise RuntimeError("Found non-zero U")
 
-        close_data_and_comm(data)
+        helpers.close_data_and_comm(data)
 
 if __name__ == '__main__':
     unittest.main()

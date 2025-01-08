@@ -60,7 +60,7 @@ class ToastWorkflowTest(TestCase):
             operators=operators,
             opts={
                 "sim_atmosphere.enable": True,
-                "sim_atmosphere.xstep": "10.0 m",
+                "sim_atmosphere.xstep": "Quantity('10.0 m')",
             },
         )
 

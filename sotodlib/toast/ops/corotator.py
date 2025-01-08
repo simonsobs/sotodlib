@@ -116,7 +116,7 @@ class CoRotator(Operator):
                     msg = f"LAT Co-rotation:  obs {obs.name} at scan El = "
                     msg += f"{scan_el_deg:0.2f} degrees, rotating by "
                     msg += f"{np.mean(corot_deg):0.2f} average degrees"
-                    log.info(msg)
+                    log.debug(msg)
                 obs.shared[self.corotator_angle].set(
                     corot,
                     offset=(0,),
@@ -126,7 +126,7 @@ class CoRotator(Operator):
                 # We are not co-rotating.  Set the angle to zero.
                 if obs.comm_col_rank == 0:
                     msg = f"LAT Co-rotation:  obs {obs.name} disabled"
-                    log.info(msg)
+                    log.debug(msg)
                     corot = np.zeros(obs.n_local_samples)
                 obs.shared[self.corotator_angle].set(
                     corot,

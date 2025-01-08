@@ -231,16 +231,13 @@ class P:
         """
         if super_shape is None:
             super_shape = (self._comp_count(comps), )
+        proj, _ = self._get_proj_tiles()
         if self.pix_scheme == 'healpix':
-            proj, _ = self._get_proj_threads()
             return proj.zeros(super_shape)
         elif self.pix_scheme == 'rectpix':
             if self.tiled:
-                # Need to fully resolve tiling to get occupied tiles.
-                proj, _ = self._get_proj_threads()
                 return tilemap.from_tiles(proj.zeros(super_shape), self.geom)
             else:
-                proj = self._get_proj()
                 return enmap.ndmap(proj.zeros(super_shape), wcs=self.geom.wcs)
 
     def to_map(self, tod=None, dest=None, comps=None, signal=None,
@@ -330,22 +327,20 @@ class P:
             weights_map = self.to_weights(
                 tod=tod, comps=comps, signal=signal, det_weights=det_weights, cuts=cuts)
 
-        if self.pix_scheme == "healpix":
-            tile_list = self._get_hp_tile_list(weights_map)
-            if tile_list is not None:
-                weights_map = hp_utils.tiled_to_compressed(weights_map, -1)
-            if dest is None:
-                dest = np.zeros_like(weights_map)
-        elif (self.pix_scheme == "rectpix") and (dest is None):
-            dest = self._enmapify(np.zeros_like(weights_map),
-                                  wcs=_confirm_wcs(weights_map))
+        weights_map, uf_info = self._flatten_map(weights_map)
 
-        logger.info('to_inverse_weights: calling _invert_weights_map')
-        dest[:] = helpers._invert_weights_map(
-            weights_map, eigentol=eigentol, UPLO='U')
+        if dest is not None:
+            dest, uf_info = self._flatten_map(dest, uf_info)
 
-        if self.pix_scheme == "healpix" and tile_list is not None:
-            dest = hp_utils.compressed_to_tiled(dest, tile_list, -1)
+        _dest = helpers._invert_weights_map(
+                weights_map, eigentol=eigentol, UPLO='U')
+        if dest is not None:
+            dest[:] = _dest
+        else:
+            dest = _dest
+        del _dest
+
+        dest = self._unflatten_map(dest, uf_info)
         return dest
 
     def remove_weights(self, signal_map=None, weights_map=None, inverse_weights_map=None,
@@ -368,7 +363,8 @@ class P:
           weights_map: the matrix W.  Shape should be (n_comp, n_comp,
             n_row, n_col), but only the upper diagonal in the first
             two dimensions needs to be populated.  If this is None,
-            then W will be computed by a call to
+            then W will be computed and inverted via
+            ``self.to_inverse_weights``.
 
         """
         if inverse_weights_map is None:
@@ -376,25 +372,15 @@ class P:
         if signal_map is None:
             signal_map = self.to_map(**kwargs)
 
-        if self.pix_scheme == "healpix":
-            tile_list = self._get_hp_tile_list(signal_map)
-            if tile_list is not None:
-                signal_map = hp_utils.tiled_to_compressed(signal_map, -1)
-                inverse_weights_map = hp_utils.tiled_to_compressed(inverse_weights_map, -1)
-            if dest is None:
-                dest = np.zeros_like(signal_map)
-        elif self.pix_scheme == "rectpix":
-            if dest is None:
-                wcs_to_use = _confirm_wcs(inverse_weights_map, signal_map)
-                dest = self._enmapify(np.empty(signal_map.shape, signal_map.dtype),
-                                      wcs=wcs_to_use)
-            else:
-                _confirm_wcs(inverse_weights_map, signal_map, dest)
+        # Get flat numpy-compatible forms for the maps.
+        signal_map, uf_info = self._flatten_map(signal_map)
+        inverse_weights_map, uf_info = self._flatten_map(inverse_weights_map, uf_info)
 
-        dest[:] = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map)
+        if dest is not None:
+            dest, uf_info = self._flatten_map(dest, uf_info)
 
-        if self.pix_scheme == "healpix" and tile_list is not None:
-            dest = hp_utils.compressed_to_tiled(dest, tile_list, -1)
+        dest = helpers._apply_inverse_weights_map(inverse_weights_map, signal_map, out=dest)
+        dest = self._unflatten_map(dest, uf_info)
         return dest
 
 
@@ -428,11 +414,9 @@ class P:
         """
         assert cuts is None  # whoops, not implemented.
 
-        # _get_proj doesn't set up the tiling info, so
-        # must call get_proj_threads. This is ugly, since from_map
-        # doesn't need the threading structures. Can we find a better design?
-        if self.tiled: proj, _ = self._get_proj_threads()
-        else:          proj    = self._get_proj()
+        # This is not free but it is pretty fast, doesn't do thread
+        # assignments.
+        proj, _ = self._get_proj_tiles()
 
         if comps is None:
             comps = self.comps
@@ -440,7 +424,13 @@ class P:
         if dest is None:
             dest = np.zeros(tod_shape, np.float32)
         assert(dest.shape == tod_shape)  # P.fp/P.sight and dest argument disagree
-        proj.from_map(self._prepare_map(signal_map), self._get_asm(), signal=dest, comps=comps)
+
+        if self.tiled and self.pix_scheme == 'rectpix':
+            # so3g <= 0.1.15 has a dims check on signal_map that fails on the tiled map format.
+            so3g.proj.wcs._ProjectionistBase.from_map(
+                proj, self._prepare_map(signal_map), self._get_asm(), signal=dest, comps=comps)
+        else:
+            proj.from_map(self._prepare_map(signal_map), self._get_asm(), signal=dest, comps=comps)
 
         if wrap is not None:
             if wrap in tod:
@@ -484,6 +474,28 @@ class P:
                 return so3g.proj.Projectionist.for_geom(self.geom.shape,
                     self.geom.wcs, **interpol_kw)
 
+    def _get_proj_tiles(self, assign=False):
+        # Get Projectionist and compute self.active_tiles if it's not
+        # already known.  Return Projectionist with active_tiles set,
+        # which is suitable for from_map and zeros (though not for
+        # threaded to_map etc).
+        proj = self._get_proj()
+        if not self.tiled or (self.active_tiles is not None and not assign):
+            return proj, {}
+        tile_info = proj.get_active_tiles(self._get_asm(), assign=assign)
+        self.active_tiles = tile_info['active_tiles']
+
+        if self.pix_scheme == "healpix":
+            self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
+            self.geom.ntile = 12*proj.nside_tile**2
+        elif self.pix_scheme == 'rectpix':
+            # Promote geometry to one with the active tiles marked.
+            self.geom = tilemap.geometry(
+                self.geom.shape, self.geom.wcs, self.geom.tile_shape,
+                active=self.active_tiles)
+
+        return self._get_proj(), tile_info
+
     def _get_proj_threads(self, cuts=None):
         """Return the Projectionist and sample-thread assignment for the
         present geometry.  If the thread assignment has not been
@@ -510,19 +522,12 @@ class P:
             elif self.pix_scheme == "healpix":
                 self.threads = 'tiles' if (self.geom.nside_tile is not None) else 'simple'
 
-        if self.tiled and self.active_tiles is None:
-            logger.info('_get_proj_threads: get_active_tiles')
-            if isinstance(self.threads, str) and self.threads == 'tiles':
-                logger.info('_get_proj_threads: assigning using "tiles"')
-                tile_info = proj.get_active_tiles(self._get_asm(), assign=True)
-                _tile_threads = wrap_ranges(tile_info['group_ranges'])
-            else:
-                tile_info = proj.get_active_tiles(self._get_asm())
-            self.active_tiles = tile_info['active_tiles']
-            if self.pix_scheme == "healpix":
-                self.geom.nside_tile = proj.nside_tile # Update nside_tile if it was 'auto'
-                self.geom.ntile = 12*proj.nside_tile**2
-            proj = self._get_proj() # Add active_tiles to proj
+        need_tiles = (self.active_tiles is None)
+        need_assign = (self.threads in ['tiles'])
+        if need_tiles or need_assign:
+            proj, tile_info = self._get_proj_tiles(need_assign)
+        if need_assign:
+            _tile_threads = wrap_ranges(tile_info['group_ranges'])
 
         if self.threads is False:
             return proj, ~cuts
@@ -549,34 +554,88 @@ class P:
         return so3g.proj.Assembly.attach(self.sight, self.fp)
 
     def _prepare_map(self, map):
+        """Gently reformat a map in order to send it to so3g."""
         if self.tiled and self.pix_scheme == "rectpix":
-            return map.tiles
+            return list(map.tiles)
         else:
             return map
 
-    def _enmapify(self, data, wcs=None):
-        """Promote a numpy.ndarray to an enmap.ndmap by attaching a wcs.  In
-        sensible cases (e.g. data is an ndarray or ndmap) this will
-        not cause a copy of the underlying data array.
+    def _flatten_map(self, map, uf_base=None):
+        """Get a version of the map that is a numpy array, for passing
+        to per-pixel math operations.  Relies on (self.pix_scheme,
+        self.tiled) to interpret map.
 
-        If a wcs is not passed in, then wcs=self.geom[1] is used.
+        This also tries to extract wcs info (if rectpix) from the map,
+        for inline consistency checking (e.g. so we're not happily
+        projecting into a map we loaded from disk that has the same
+        shape but is off by a few pixels from what pmat thinks is the
+        right footprint).  It also looks at active_tiles / tile_list,
+        and stores that for downstream compatibility checking with
+        other flattened maps.
+
+        If uf_base is passed in, it should be an unflatten_info dict
+        (likely from a previous call to _flatten_map).  The analysis
+        here will be checked against it for compatibility and any
+        missing values (ahem wcs) will be used to augment the
+        unflatten_info that is returned.
+
+        Returns:
+          array: The map, reformatted as an array (could simply be the
+            input arg map, or a view of that, or a copy if necessary).
+          unflatten_info: dict with misc compatibility info.
 
         """
-        if wcs is None:
-            wcs = self.geom[1]
-        return enmap.ndmap(data, wcs=wcs)
+        ufinfo = {'pix_scheme': self.pix_scheme,
+                  'tiled': self.tiled}
+        wcs = None
+        crit_dims = 1
+        if self.pix_scheme == 'healpix':
+            if self.tiled:
+                ufinfo['tile_list'] = [_m is not None for _m in map]
+                map = hp_utils.tiled_to_compressed(map, -1)
+                crit_dims = 2
+            else:
+                pass
+        elif self.pix_scheme == 'rectpix':
+            if self.tiled:
+                if isinstance(map, tilemap.TileMap):
+                    wcs = map.geometry.wcs
+                    ufinfo['active_tiles'] = list(map.active)
+                    ufinfo['tile_geom'] = map.geometry.copy(pre=())
+            else:
+                if isinstance(map, enmap.ndmap):
+                    wcs = map.wcs
+                crit_dims = 2
+        ufinfo.update({'wcs': wcs,
+                       'crit_dims': crit_dims,
+                       'shape': map.shape})
+        if uf_base is not None:
+            ufinfo['wcs'] = _check_compat(uf_base, ufinfo)
+        return map, ufinfo
 
-    def _get_hp_tile_list(self, tiled_arr=None):
-        """For healpix maps, get len(nTile) bool array of whether tiles are active. None if un-tiled.
-        If tiled_arr is not None, get tiling from there. Else get from self.geom"""
-        if isinstance(tiled_arr, list): # Assume we are tiled iff tiled_arr is a list instead of ndarr
-            tile_list = hp_utils.get_active_tile_list(tiled_arr)
-        elif self.tiled:
-            tile_list = np.zeros(12*self.geom.nside_tile**2, dtype='bool')
-            tile_list[self.active_tiles] = True # The tiling must be initiated already
-        else:
-            tile_list = None # Un-tiled
-        return tile_list
+    def _unflatten_map(self, map, uf_info):
+        """Restore a map to full format, assuming it's currently an
+        ndarray.  Intended as the inverse op to _flatten_map.
+        Minimize the use of cached self.* here ... rely instead on
+        uf_info.
+
+        """
+        if uf_info['pix_scheme'] == 'healpix':
+            if uf_info['tiled']:
+                map = hp_utils.compressed_to_tiled(map, uf_info['tile_list'], -1)
+            else:
+                pass
+        elif uf_info['pix_scheme'] == 'rectpix':
+            if uf_info['tiled']:
+                if not isinstance(map, tilemap.TileMap):
+                    g = uf_info['tile_geom']
+                    g = tilemap.geometry(map.shape[:-1] + g.shape, g.wcs, g.tile_shape,
+                                         active=uf_info['active_tiles'])
+                    map = tilemap.TileMap(map, g)
+            else:
+                if not isinstance(map, enmap.ndmap) and uf_info['wcs']:
+                    map = enmap.ndmap(map, uf_info['wcs'])
+        return map
 
 
 class P_PrecompDebug:
@@ -661,3 +720,27 @@ def _infer_pix_scheme(geom):
     else:
         raise fail_err
     return pix_scheme
+
+def _check_compat(*uf_infos):
+    # Given one or more "uf_info" dicts, as returned by _flatten_map,
+    # check that the flattened arrays are pixel-correspondent,
+    # including (for rectpix cases) the wcs.
+    #
+    # Raises an error if any of that doesn't pan out.  On success,
+    # returns the agreed-upon wcs (which could be None).
+    ref_uf = uf_infos[0]
+    for uf in uf_infos[1:]:
+        for k in ['pix_scheme', 'tiled', 'active_tiles']:
+            if ref_uf.get(k) != uf.get(k):
+                raise ValueError(f"Inconsistent map structures: {uf_infos}")
+        # Not sure how to handle broadcasting of lefter dims, so focus
+        # on the pixel dim(s).
+        dims_to_check = ref_uf['crit_dims']
+        if ref_uf['shape'][-dims_to_check:] != uf['shape'][-dims_to_check:]:
+            raise ValueError(f"Non-broadcastable map shapes: {uf_infos}")
+
+    # And the wcs.
+    wcss = [uf.get('wcs') for uf in uf_infos]
+    wcs_to_use = _confirm_wcs(*wcss)
+
+    return wcs_to_use

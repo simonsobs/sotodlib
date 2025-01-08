@@ -63,3 +63,35 @@ def get_imprinter_config( platform, env_file=None, env_var="DATAPKG_ENV"):
         raise ValueError(f"configs not found in tags {tags}")
 
     return os.path.join( tags['configs'], platform, 'imprinter.yaml')
+
+def walk_files(path, include_suprsync=False):
+    """get a list of the files in a timecode folder, optional flag to ignore
+    suprsync files
+    
+    Arguments
+    ----------
+    path: path to a level 2 timecode folder, either smurf or timestreams
+    include_suprsync: optional, bool
+        if true, includes the suprsync files in the returned list
+
+    Returns
+    --------
+    files (list): list of the absolute paths to all files in a timecode folder
+    """
+    if not os.path.exists(path):
+        return []
+    flist = []
+    for root, _, files in os.walk(path):
+        if not include_suprsync and 'suprsync' in root:
+            continue
+        for f in files:
+            flist.append( os.path.join(path, root, f))
+    return flist
+
+def just_suprsync(path):
+    """check if timecode folder only has suprsync folder in it
+    """
+    flist = os.listdir( path )
+    if len(flist) == 1 and flist[0] == "suprsync":
+        return True
+    return False
