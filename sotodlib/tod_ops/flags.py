@@ -583,17 +583,19 @@ def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
 
     return mskdarks
 
-def get_source_flags(aman, merge=True, overwrite=True, source_flags_name='source_flags',
+def get_source_flags(aman, merge=True, overwrite=True, source_flags_name=None,
                      mask=None, center_on=None, res=None, max_pix=None):
-    if merge:
-        wrap = source_flags_name
-    else:
-        wrap = None
+
     if res:
-        res = np.radians(res/60)
-    source_flags = coords.planets.compute_source_flags(tod=aman, wrap=wrap, mask=mask, center_on=center_on, res=res, max_pix=max_pix)
-    
+        res = np.radians(res/60) # config input in arcminutes
+
+    source_flags = coords.planets.compute_source_flags(tod=aman, mask=mask,
+                                                       center_on=center_on,
+                                                       res=res, max_pix=max_pix)
+
     if merge:
+        if source_flags_name is None:
+            source_flags_name = center_on
         if source_flags_name in aman.flags and not overwrite:
             raise ValueError(f"Flag name {source_flags_name} already exists in aman.flags")
         if source_flags_name in aman.flags:
