@@ -377,9 +377,19 @@ class SignalMap(Signal):
         # Build the RHS for this observation
         # These lines are not activated during the first pass of mapmaking.
         if self.tiled:
-            self.geo_work = other.geo_work
             map_work = self.to_work(map)
-        pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
+        try:
+            pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
+        except RuntimeError as e:
+            raise RuntimeError(f"{e}.\nPossibly caused by the assumption that exactly 
+                               the same tiles will be hit each pass, which can in rare 
+                               cases break when downsampling by different amounts in 
+                               different passes when a tile is just barely hit by a 
+                               single sample. This can be fixed by adding support for 
+                               constructing coords.pmat.P which treats hits to a 
+                               missing tile as zero instead of as an error. This also 
+                               requires minor changes to so3g Projection.cxx. TODO.")
+
         return tod
 
 class SignalCut(Signal):
