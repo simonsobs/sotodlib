@@ -30,7 +30,9 @@ class Cfg:
     context: str
         Path to context file
     preprocess_config: str
-        Path to config file to run the preprocessing pipeline
+        Path to config file(s) to run the preprocessing pipeline.
+        If 2 files, representing 2 layers of preprocessing, they
+        should be separated by a comma.
     area: str
         WCS kernel for rectangular pixels
     nside: int
@@ -54,6 +56,8 @@ class Cfg:
         Map without demodulation (e.g. with a static HWP)
     only_hits: bool
         Only create a hits map
+    all_splits: bool
+        If True, map all implemented splits
     det_in_out: bool
         Make focal plane split: inner vs outer detector
     det_left_right: bool
@@ -100,6 +104,7 @@ class Cfg:
         comps: str = 'TQU',
         singlestream: bool = False,
         only_hits: bool = False,
+        all_splits: bool = False,
         det_in_out: bool = False,
         det_left_right: bool = False,
         det_upper_lower: bool = False,
@@ -133,6 +138,7 @@ class Cfg:
         self.comps = comps
         self.singlestream = singlestream
         self.only_hits = only_hits
+        self.all_splits = all_splits
         self.det_in_out = det_in_out
         self.det_left_right = det_left_right
         self.det_upper_lower = det_upper_lower
@@ -209,11 +215,11 @@ def read_tods(context, obslist,
 
 
 class ColoredFormatter(logging.Formatter):
-    def __init__(self, msg, colors={'DEBUG': colors.reset,
-                                    'INFO': colors.lgreen,
-                                    'WARNING': colors.lbrown,
-                                    'ERROR': colors.lred,
-                                    'CRITICAL': colors.lpurple}):
+    def __init__(self, msg, colors={'DEBUG':colors.reset,
+                                    'INFO':colors.lgreen,
+                                    'WARNING':colors.lbrown,
+                                    'ERROR':colors.lred,
+                                    'CRITICAL':colors.lpurple}):
         logging.Formatter.__init__(self, msg)
         self.colors = colors
 
@@ -223,7 +229,6 @@ class ColoredFormatter(logging.Formatter):
         except KeyError:
             col = colors.reset
         return col + logging.Formatter.format(self, record) + colors.reset
-
 
 class LogInfoFilter(logging.Filter):
     def __init__(self, rank=0):
@@ -268,7 +273,6 @@ def main(config_file: str) -> None:
     ch.addFilter(LogInfoFilter())
     L.addHandler(ch)
 
-    warnings.simplefilter('ignore')
     comm = mpi.FAKE_WORLD  # Fake communicator since we won't use MPI
     verbose = args.verbose - args.quiet
     if args.area is not None:
@@ -286,14 +290,22 @@ def main(config_file: str) -> None:
     recenter = None
     if args.center_at:
         recenter = mapmaking.parse_recentering(args.center_at)
-    preprocess_config = yaml.safe_load(open(args.preprocess_config, 'r'))
-    errlog = os.path.join(os.path.dirname(
-        preprocess_config['archive']['index']), 'errlog.txt')
+    preprocess_config_str = [s.strip() for s in args.preprocess_config.split(",")]
+    preprocess_config = [] ; errlog = []
+    for preproc_cf in preprocess_config_str:
+        preproc_local = yaml.safe_load(open(preproc_cf, 'r'))
+        preprocess_config.append( preproc_local )
+        errlog.append( os.path.join(os.path.dirname(
+            preproc_local['archive']['index']), 'errlog.txt') )
 
     multiprocessing.set_start_method('spawn')
     if (args.update_delay is not None):
         min_ctime = int(time.time()) - args.update_delay*86400
         args.query += f" and timestamp>={min_ctime}"
+
+    # Check for map data type
+    if args.dtype_map == 'float32' or args.dtype_map == 'single':
+        warnings.warn("You are using single precision for maps, we advice to use double precision")
 
     context_obj = Context(args.context)
     # obslists is a dict, obskeys is a list, periods is an array, only rank 0
@@ -310,6 +322,8 @@ def main(config_file: str) -> None:
     cwd = os.getcwd()
 
     split_labels = []
+    if args.all_splits:
+        raise ValueError('all_splits not implemented yet')
     if args.det_in_out:
         split_labels.append('det_in')
         split_labels.append('det_out')
@@ -373,7 +387,8 @@ def main(config_file: str) -> None:
             try:
                 tod_list.append(future.result())
             except Exception as e:
-                future_write_to_log(e, errlog)
+                # if read_tods fails for some reason we log into the first preproc DB
+                future_write_to_log(e, errlog[0])
                 continue
             futures.remove(future)
     # flatten the list of lists
@@ -390,6 +405,19 @@ def main(config_file: str) -> None:
                 subshape = shape
                 subwcs = wcs
                 subgeoms.append((subshape, subwcs))
+
+    # clean up lingering files from previous incomplete runs
+    for obs in obslists_arr:
+        obs_id = obs[0][0]
+        if len(preprocess_config)==1:
+            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
+                                       subdir='temp', remove=False)
+        else:
+            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
+                                       subdir='temp', remove=False)
+            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[1],
+                                       subdir='temp_proc', remove=False)
+
     run_list = []
     for oi in range(len(my_tods)):
         # tod_list[oi].obslist[0] is the old obslist
@@ -458,8 +486,9 @@ def main(config_file: str) -> None:
                 continue
             futures.remove(future)
             for ii in range(len(errors)):
-                preprocess_util.cleanup_mandb(errors[ii], outputs[ii],
-                                              preprocess_config, L)
+                for idx_prepoc in range(len(preprocess_config)):
+                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc],
+                                              preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
 

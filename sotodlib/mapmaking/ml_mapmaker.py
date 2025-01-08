@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import h5py
 import so3g
@@ -125,13 +127,38 @@ class MLMapmaker:
         #t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
         return result
 
-    def solve(self, maxiter=500, maxerr=1e-6, x0=None):
+    def solve(self, maxiter=500, maxerr=1e-6, x0=None, fname_checkpoint=None, checkpoint_interval=1):
         self.prepare()
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         if x0 is not None: x0 = self.dof.zip(*x0)
-        solver = putils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
-        while solver.i < maxiter and solver.err > maxerr:
-            solver.step()
+
+        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
+        # If there exists a checkpoint, restore solver state
+        if fname_checkpoint is None:
+            checkpoint = False
+            restart = False
+        else:
+            checkpoint = True
+            outdir = os.path.dirname(fname_checkpoint)
+            if len(outdir) != 0:
+                os.makedirs(outdir, exist_ok=True)
+            if os.path.isfile(fname_checkpoint):
+                solver.load(fname_checkpoint)
+                restart = True
+            else:
+                restart = False
+        while restart or (solver.i < maxiter and solver.err > maxerr):
+            if restart:
+                # When restarting, do not step
+                restart = False
+            else:
+                solver.step()
+                if checkpoint and solver.i % checkpoint_interval == 0:
+                    # Avoid checkpoint corruption by making a copy of the previous checkpoint
+                    if os.path.isfile(fname_checkpoint):
+                        os.replace(fname_checkpoint, fname_checkpoint + ".old")
+                    # Write a checkpoint
+                    solver.save(fname_checkpoint)
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x))
 
     def translate(self, other, x):
