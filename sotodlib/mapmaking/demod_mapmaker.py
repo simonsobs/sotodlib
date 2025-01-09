@@ -440,22 +440,20 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def write_demod_maps(prefix, data, split_labels=None):
+def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     """
     Write maps from data into files
     """
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
+        if np.all(data.wmap[n_split] == 0.0):
+            continue
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split])
         data.signal.write(prefix, "%s_weights"%split_labels[n_split],
                           data.weights[n_split])
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split])
-
-def write_demod_info(oname, info, split_labels=None, atomic_db=None):
-    Nsplits = len(split_labels)
-    for n_split in range(Nsplits):
         if atomic_db is not None:
             engine = create_engine("sqlite:///%s" % atomic_db, echo=True)
             Base.metadata.create_all(bind=engine)
@@ -595,8 +593,7 @@ def make_demod_map(context, obslist, noise_model, info,
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    write_demod_maps(prefix, mapdata, split_labels=split_labels, )
-    write_demod_info(prefix, info, split_labels=split_labels, atomic_db=atomic_db )
+    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db)
 
     return errors, outputs
 
