@@ -592,7 +592,8 @@ def downsample_obs(obs, down):
     res = res.wrap('flags', core.FlagManager.for_tod(res))
 
     for key in cut_keys:
-        res.flags.wrap(key, downsample_cut(get_flags_from_path(obs, key), down),
+        new_key = key.split(".")[-1]
+        res.flags.wrap(new_key, downsample_cut(get_flags_from_path(obs, key), down),
                        [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it

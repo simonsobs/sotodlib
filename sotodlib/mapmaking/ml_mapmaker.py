@@ -132,7 +132,7 @@ class MLMapmaker:
         rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
         if x0 is not None: x0 = self.dof.zip(*x0)
 
-        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
+        solver = putils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
         # If there exists a checkpoint, restore solver state
         if fname_checkpoint is None:
             checkpoint = False
@@ -403,7 +403,10 @@ class SignalMap(Signal):
             interpol=self.interpol)
         # Build the RHS for this observation
         # These lines are not activated during the first pass of mapmaking.
+        # if self.tiled:
         map_work = self.to_work(map)
+        # else:
+            # map_work = map
         try:
             pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
         except RuntimeError as e:
