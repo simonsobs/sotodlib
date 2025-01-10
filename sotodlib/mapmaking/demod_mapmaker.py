@@ -9,7 +9,7 @@ __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
 import numpy as np, os
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
 import so3g.proj
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, exc
 from sqlalchemy.orm import sessionmaker
 
 from .. import core
@@ -446,7 +446,10 @@ def atomic_db_aux(atomic_db, info, valid = True):
     Session = sessionmaker(bind=engine)
     with Session() as session:
         session.add(info)
-        session.commit()
+        try:
+            session.commit()
+        except exc.IntegrityError:
+            session.rollback()
 
 def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     """
