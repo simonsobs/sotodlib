@@ -348,9 +348,9 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         focal_plane=fp0, count=16)
     fp1 = so3g.proj.FocalPlane.from_xieta(xieta1[0], xieta1[1])
 
-    asm = so3g.proj.Assembly.attach(sight, fp1)
-    output = np.zeros((xieta1.shape[1], n_samp, 4))
-    proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
+    asm    = so3g.proj.Assembly.attach(sight, fp1)
+    planar = np.zeros((xieta1.shape[1], n_samp, 4))
+    proj   = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     if rot:
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
