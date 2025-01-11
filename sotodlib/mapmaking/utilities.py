@@ -564,6 +564,7 @@ class AtomicInfo(Base):
     f_hwp: Mapped[Optional[float]]
     roll_angle: Mapped[Optional[float]]
     scan_speed: Mapped[Optional[float]]
+    sun_distance: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id

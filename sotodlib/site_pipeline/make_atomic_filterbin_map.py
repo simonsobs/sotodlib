@@ -2,12 +2,14 @@ from argparse import ArgumentParser
 from typing import Optional
 from dataclasses import dataclass
 import time
+import datetime as dt
 import warnings
 import os
 import logging
 import yaml
 import multiprocessing
 import traceback
+import ephem
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -18,6 +20,7 @@ from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
+from so3g.proj import coords as so3g_coords
 from pixell import enmap, utils as putils
 from pixell import wcsutils, colors, memory, mpi
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -180,6 +183,13 @@ def get_pwv(start_time, stop_time, data_dir):
     except (KeyError, ValueError):
         pwv = 0.0
     return pwv
+
+def get_sun_distance(site, ctime, az, el):
+    site_ = so3g_coords.SITES[site].ephem_observer()
+    dtime = dt.datetime.fromtimestamp(ctime, dt.timezone.utc)
+    site_.date = ephem.Date(dtime)
+    sun = ephem.Sun(site_)
+    return np.degrees(ephem.separation((sun.az, sun.alt), (np.radians(az), np.radians(el))))
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,
@@ -413,6 +423,7 @@ def main(config_file: str) -> None:
                 info.azimuth = obs_infos[obslist[0][3]].az_center
                 info.pwv = float(pwv_atomic)
                 info.roll_angle = obs_infos[obslist[0][3]].roll_center
+                info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
