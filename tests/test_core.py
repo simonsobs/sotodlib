@@ -1,7 +1,6 @@
 import unittest
 import tempfile
 import os
-import shutil
 
 import numpy as np
 import astropy.units as u
@@ -66,7 +65,7 @@ class TestAxisManager(unittest.TestCase):
 
         # This should return a separate thing.
         rman = aman.restrict('samps', (10, 30), in_place=False)
-        #self.assertNotEqual(aman.a1[0], 0.)
+        # self.assertNotEqual(aman.a1[0], 0.)
         self.assertEqual(len(aman.a1), 100)
         self.assertEqual(len(rman.a1), 20)
         self.assertNotEqual(aman.a1[10], 0.)
@@ -190,23 +189,23 @@ class TestAxisManager(unittest.TestCase):
 
         # ... other_fields="exact"
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         ## add scalars
         amanA.wrap("ans", 42)
         amanB.wrap("ans", 42)
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="exact"
         amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="exact" and arrays of different shapes
         amanB.move("azimuth", None)
         amanB.wrap("azimuth", np.array([43,5,2,3]))
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-        
+
         # ... other_fields="fail"
         amanB.move("azimuth",None)
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
@@ -268,6 +267,64 @@ class TestAxisManager(unittest.TestCase):
                   overwrite=True)
         self.assertNotEqual(aman.a1[2,11], 0)
         self.assertNotEqual(aman.a1[1,10], 1.)
+
+    def test_190_get_set(self):
+        dets = ["det0", "det1", "det2"]
+        n, ofs = 1000, 0
+        aman = core.AxisManager(
+            core.LabelAxis("dets", dets), core.OffsetAxis("samps", n, ofs)
+        )
+        child = core.AxisManager(
+            core.LabelAxis("dets", dets + ["det3"]),
+            core.OffsetAxis("samps", n, ofs - n // 2),
+        )
+
+        child2 = core.AxisManager(
+            core.LabelAxis("dets2", ["det4", "det5"]),
+            core.OffsetAxis("samps", n, ofs - n // 2),
+        )
+        child2.wrap("tod", np.zeros((2, 1000)))
+        aman.wrap("child", child)
+        aman["child"].wrap("child2", child2)
+        self.assertEqual(aman["child.child2.dets2"].count, 2)
+        self.assertEqual(aman["child.dets"].name, "dets")
+        np.testing.assert_array_equal(
+            aman["child.child2.dets2"].vals, np.array(["det4", "det5"])
+        )
+        self.assertEqual(aman["child.child2.samps"].count, n // 2)
+        self.assertEqual(aman["child.child2.samps"].offset, 0)
+        self.assertEqual(
+            aman["child.child2.samps"].count, aman.child.child2.samps.count
+        )
+        self.assertEqual(
+            aman["child.child2.samps"].offset, aman.child.child2.samps.offset
+        )
+
+        np.testing.assert_array_equal(aman["child.child2.tod"], np.zeros((2, 1000)))
+
+        with self.assertRaises(KeyError):
+            aman["child2"]
+
+        with self.assertRaises(AttributeError):
+            aman["child.dets.an_extra_layer"]
+
+        self.assertIn("child.dets", aman)
+        self.assertIn("child.dets2", aman)  # I am not sure why this is true
+        self.assertNotIn("child.child2.someentry", aman)
+        self.assertNotIn("child.child2.someentry.someotherentry", aman)
+
+        with self.assertRaises(ValueError):
+            aman["child"] = child2
+
+        new_tods = np.ones((2, 500))
+        aman.child.child2.tod = new_tods
+        np.testing.assert_array_equal(aman["child.child2.tod"], np.ones((2, 500)))
+        np.testing.assert_array_equal(aman.child.child2.tod, np.ones((2, 500)))
+
+        new_tods = np.ones((2, 1500))
+        aman["child.child2.tod"] = new_tods
+        np.testing.assert_array_equal(aman["child.child2.tod"], np.ones((2, 1500)))
+        np.testing.assert_array_equal(aman.child.child2.tod, np.ones((2, 1500)))
 
     # Multi-dimensional restrictions.
 
