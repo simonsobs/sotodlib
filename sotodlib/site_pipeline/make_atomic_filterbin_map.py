@@ -379,7 +379,7 @@ def main(config_file: str) -> None:
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
     else:
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
-        policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp_proc')
+        policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[1]['archive']['policy']['filename']), 'temp_proc')
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
