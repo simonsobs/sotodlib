@@ -1,5 +1,6 @@
 """FFTs and related operations
 """
+import sys
 import numdifftools as ndt
 import numpy as np
 import pyfftw
@@ -151,6 +152,7 @@ def build_rfft_object(n_det, n, direction="FFTW_FORWARD", **kwargs):
 
     a = pyfftw.empty_aligned((n_det, n), dtype="float32")
     b = pyfftw.empty_aligned((n_det, (n + 2) // 2), dtype="complex64")
+    
     if direction == "FFTW_FORWARD":
         t_fun = pyfftw.FFTW(a, b, direction=direction, **fftargs)
     elif direction == "FFTW_BACKWARD":
@@ -213,6 +215,7 @@ def calc_psd(
     merge=False, 
     merge_suffix=None,
     overwrite=True, 
+    subscan=False,
     **kwargs
 ):
     """Calculates the power spectrum density of an input signal using signal.welch().
@@ -234,6 +237,7 @@ def calc_psd(
         merge (bool): if True merge results into axismanager.
         merge_suffix (str, optional): Suffix to append to the Pxx field name in aman. Defaults to None (merged as Pxx).
         overwrite (bool): if true will overwrite f, Pxx axes.
+        subscan (bool): if True, compute psd on subscans.
         **kwargs: keyword args to be passed to signal.welch().
 
     Returns:
@@ -242,34 +246,40 @@ def calc_psd(
     """
     if signal is None:
         signal = aman.signal
-    if timestamps is None:
-        timestamps = aman.timestamps
-
-    n_samps = signal.shape[-1]
-    if n_samps <= max_samples:
-        start = 0
-        stop = n_samps
+    if subscan:
+        freqs, Pxx = _calc_psd_subscan(aman, signal=signal, freq_spacing=freq_spacing, **kwargs)
+        axis_map_pxx = [(0, "dets"), (1, "nusamps"), (2, "subscans")]
     else:
-        offset = n_samps - max_samples
-        if prefer == "left":
-            offset = 0
-        elif prefer == "center":
-            offset //= 2
-        elif prefer == "right":
-            pass
-        else:
-            raise ValueError(f"Invalid choise prefer='{prefer}'")
-        start = offset
-        stop = offset + max_samples
-    fs = 1 / np.nanmedian(np.diff(timestamps[start:stop]))
-    if "nperseg" not in kwargs:
-        if freq_spacing is not None:
-            nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
-        else:
-            nperseg = int(2 ** (np.around(np.log2((stop - start) / 50.0))))
-        kwargs["nperseg"] = nperseg
+        if timestamps is None:
+            timestamps = aman.timestamps
 
-    freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
+        n_samps = signal.shape[-1]
+        if n_samps <= max_samples:
+            start = 0
+            stop = n_samps
+        else:
+            offset = n_samps - max_samples
+            if prefer == "left":
+                offset = 0
+            elif prefer == "center":
+                offset //= 2
+            elif prefer == "right":
+                pass
+            else:
+                raise ValueError(f"Invalid choice prefer='{prefer}'")
+            start = offset
+            stop = offset + max_samples
+        fs = 1 / np.nanmedian(np.diff(timestamps[start:stop]))
+        if "nperseg" not in kwargs:
+            if freq_spacing is not None:
+                nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
+            else:
+                nperseg = int(2 ** (np.around(np.log2((stop - start) / 50.0))))
+            kwargs["nperseg"] = nperseg
+
+        freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
+        axis_map_pxx = [(0, aman.dets), (1, "nusamps")]
+
     if merge:
         if 'nusamps' not in list(aman._axes.keys()):
             aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
@@ -286,10 +296,43 @@ def calc_psd(
         
         if overwrite:
             if Pxx_name in aman._fields:
-                aman.move(Pxx_name, None)
-        aman.wrap(Pxx_name, Pxx, [(0,"dets"), (1,"nusamps")])
+                aman.move("Pxx", None)
+        aman.wrap(Pxx_name, Pxx, axis_map_pxx)
     return freqs, Pxx
 
+def _calc_psd_subscan(aman, signal=None, freq_spacing=None, **kwargs):
+    """
+    Calculate the power spectrum density of subscans using signal.welch().
+    Data defaults to aman.signal. aman.timestamps is used for times.
+    aman.subscan_info is used to identify subscans.
+    See calc_psd for arguments.
+    """
+    from .flags import get_subscan_signal
+    if signal is None:
+        signal = aman.signal
+
+    fs = 1 / np.nanmedian(np.diff(aman.timestamps))
+    if "nperseg" not in kwargs:
+        if freq_spacing is not None:
+            nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
+        else:
+            duration_samps = np.asarray([np.ptp(x.ranges()) if x.ranges().size > 0 else 0 for x in aman.subscan_info.subscan_flags])
+            duration_samps = duration_samps[duration_samps > 0]
+            nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
+        kwargs["nperseg"] = nperseg
+
+    Pxx = []
+    for iss in range(aman.subscan_info.subscans.count):
+        signal_ss = get_subscan_signal(aman, signal, iss)
+        axis = -1 if "axis" not in kwargs else kwargs["axis"]
+        if signal_ss.shape[axis] >= kwargs["nperseg"]:
+            freqs, pxx_sub = welch(signal_ss, fs, **kwargs)
+            Pxx.append(pxx_sub)
+        else:
+            Pxx.append(np.full((signal.shape[0], kwargs["nperseg"]//2+1), np.nan)) # Add nans if subscan is too short
+    Pxx = np.array(Pxx)
+    Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
+    return freqs, Pxx
 
 def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     """
@@ -511,7 +554,7 @@ def fit_noise_model(
     signal=None,
     f=None,
     pxx=None,
-    psdargs=None,
+    psdargs={},
     fknee_est=1,
     wn_est=4E-5,
     alpha_est=3.4,
@@ -525,6 +568,8 @@ def fit_noise_model(
     binning=False,
     unbinned_mode=3,
     base=1.05,
+    freq_spacing=None,
+    subscan=False
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -577,7 +622,10 @@ def fit_noise_model(
         First Fourier modes up to this number are left un-binned.
     base : float (> 1)
         Base of the logspace bins.
- 
+    freq_spacing : float
+        The approximate desired frequency spacing of the PSD. Passed to calc_psd.
+    subscan : bool
+        If True, fit noise on subscans.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -589,18 +637,15 @@ def fit_noise_model(
         signal = aman.signal
 
     if f is None or pxx is None:
-        if psdargs is None:
-            f, pxx = calc_psd(
-                aman, signal=signal, timestamps=aman.timestamps, merge=merge_psd
-            )
-        else:
-            f, pxx = calc_psd(
-                aman,
-                signal=signal,
-                timestamps=aman.timestamps,
-                merge=merge_psd,
-                **psdargs,
-            )
+        f, pxx = calc_psd(
+            aman,
+            signal=signal,
+            timestamps=aman.timestamps,
+            freq_spacing=freq_spacing,
+            merge=merge_psd,
+            subscan=subscan,
+            **psdargs,
+        )
     if mask:
         if 'psd_mask' in aman:
             mask = ~aman.psd_mask.mask()
@@ -609,82 +654,93 @@ def fit_noise_model(
         else:
             print('"psd_mask" is not in aman. Masking is skipped.')
 
-    eix = np.argmin(np.abs(f - f_max))
-    if f_min is None:
-        six = 1
+    if subscan:
+        fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
+                                  "f_min": f_min, "f_max": f_max, "mask": mask, "fixed_param": fixed_param,
+                                  "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
+                                  "freq_spacing": freq_spacing}
+        fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
+        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
+        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
     else:
-        six = np.argmin(np.abs(f - f_min))
-    f = f[six:eix]
-    pxx = pxx[:, six:eix]
-    bin_size = 1
-    # binning
-    if binning == True:
-        f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
-                                          base=base, merge=False)
-    fitout = np.zeros((aman.dets.count, 3))
-    # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-    covout = np.zeros((aman.dets.count, 3, 3))
-    if isinstance(wn_est, (int, float)):
-        wn_est = np.full(aman.dets.count, wn_est)
-    elif len(wn_est)!=aman.dets.count:
-        print('Size of wn_est must be equal to aman.dets.count or a single value.')
-        return
-    if isinstance(fknee_est, (int, float)):
-        fknee_est = np.full(aman.dets.count, fknee_est)
-    elif len(fknee_est)!=aman.dets.count:
-        print('Size of fknee_est must be equal to aman.dets.count or a single value.')
-        return
-    if isinstance(alpha_est, (int, float)):
-        alpha_est = np.full(aman.dets.count, alpha_est)
-    elif len(alpha_est)!=aman.dets.count:
-        print('Size of alpha_est must be equal to aman.dets.count or a single value.')
-        return
-    if fixed_param == None:
-        initial_params = np.array([wn_est, fknee_est, alpha_est])
-    if fixed_param == "wn":
-        initial_params = np.array([fknee_est, alpha_est])
-        fixed = wn_est
-    if fixed_param == "alpha":
-        initial_params = np.array([wn_est, fknee_est])
-        fixed = alpha_est
-
-    for i in range(len(pxx)):
-        p = pxx[i]
-        p0 = initial_params.T[i]
-        _fixed = {}
-        if fixed_param != None:
-            _fixed = {fixed_param: fixed[i]}            
-        res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), 
-               p0, method="Nelder-Mead")
-        try:
-            Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
-            hessian_ndt, _ = Hfun(res["x"])
-            # Inverse of the hessian is an estimator of the covariance matrix
-            # sqrt of the diagonals gives you the standard errors.
-            covout_i = np.linalg.inv(hessian_ndt)            
-        except np.linalg.LinAlgError:
-            print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
-            )
-            covout_i = np.full((len(p0), len(p0)), np.nan)
-        except IndexError:
-            print(
-                f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
-            )
-            covout_i = np.full((len(p0), len(p0)), np.nan)
-        fitout_i = res.x
+        eix = np.argmin(np.abs(f - f_max))
+        if f_min is None:
+            six = 1
+        else:
+            six = np.argmin(np.abs(f - f_min))
+        f = f[six:eix]
+        pxx = pxx[:, six:eix]
+        bin_size = 1
+        # binning
+        if binning == True:
+            f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
+                                              base=base, merge=False)
+        fitout = np.zeros((aman.dets.count, 3))
+        # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
+        covout = np.zeros((aman.dets.count, 3, 3))
+        if isinstance(wn_est, (int, float)):
+            wn_est = np.full(aman.dets.count, wn_est)
+        elif len(wn_est)!=aman.dets.count:
+            print('Size of wn_est must be equal to aman.dets.count or a single value.')
+            return
+        if isinstance(fknee_est, (int, float)):
+            fknee_est = np.full(aman.dets.count, fknee_est)
+        elif len(fknee_est)!=aman.dets.count:
+            print('Size of fknee_est must be equal to aman.dets.count or a single value.')
+            return
+        if isinstance(alpha_est, (int, float)):
+            alpha_est = np.full(aman.dets.count, alpha_est)
+        elif len(alpha_est)!=aman.dets.count:
+            print('Size of alpha_est must be equal to aman.dets.count or a single value.')
+            return
+        if fixed_param == None:
+            initial_params = np.array([wn_est, fknee_est, alpha_est])
         if fixed_param == "wn":
-            covout_i = np.insert(covout_i, 0, 0, axis=0)
-            covout_i = np.insert(covout_i, 0, 0, axis=1)
-            covout_i[0][0] = np.nan
-            fitout_i = np.insert(fitout_i, 0, wn_est[i])
-        elif fixed_param == "alpha":
-            covout_i = np.insert(covout_i, 2, 0, axis=0)
-            covout_i = np.insert(covout_i, 2, 0, axis=1)
-            covout_i[2][2] = np.nan
-            fitout_i = np.insert(fitout_i, 2, alpha_est[i])
-        covout[i] = covout_i
-        fitout[i] = fitout_i
+            initial_params = np.array([fknee_est, alpha_est])
+            fixed = wn_est
+        if fixed_param == "alpha":
+            initial_params = np.array([wn_est, fknee_est])
+            fixed = alpha_est
+
+        for i in range(len(pxx)):
+            p = pxx[i]
+            p0 = initial_params.T[i]
+            _fixed = {}
+            if fixed_param != None:
+                _fixed = {fixed_param: fixed[i]}            
+            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), 
+                   p0, method="Nelder-Mead")
+            try:
+                Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
+                hessian_ndt, _ = Hfun(res["x"])
+                # Inverse of the hessian is an estimator of the covariance matrix
+                # sqrt of the diagonals gives you the standard errors.
+                covout_i = np.linalg.inv(hessian_ndt)            
+            except np.linalg.LinAlgError:
+                print(
+                    f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
+                )
+                covout_i = np.full((len(p0), len(p0)), np.nan)
+            except IndexError:
+                print(
+                    f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
+                )
+                covout_i = np.full((len(p0), len(p0)), np.nan)
+            fitout_i = res.x
+            if fixed_param == "wn":
+                covout_i = np.insert(covout_i, 0, 0, axis=0)
+                covout_i = np.insert(covout_i, 0, 0, axis=1)
+                covout_i[0][0] = np.nan
+                fitout_i = np.insert(fitout_i, 0, wn_est[i])
+            elif fixed_param == "alpha":
+                covout_i = np.insert(covout_i, 2, 0, axis=0)
+                covout_i = np.insert(covout_i, 2, 0, axis=1)
+                covout_i[2][2] = np.nan
+                fitout_i = np.insert(fitout_i, 2, alpha_est[i])
+            covout[i] = covout_i
+            fitout[i] = fitout_i
+        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs")]
+        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
 
     noise_model_coeffs = ["white_noise", "fknee", "alpha"]
 
@@ -694,12 +750,8 @@ def fit_noise_model(
             name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
         ),
     )
-    noise_fit_stats.wrap("fit", fitout, [(0, "dets"), (1, "noise_model_coeffs")])
-    noise_fit_stats.wrap(
-        "cov",
-        covout,
-        [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")],
-    )
+    noise_fit_stats.wrap("fit", fitout, axis_map_fit)
+    noise_fit_stats.wrap("cov", covout, axis_map_cov)
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
@@ -876,6 +928,33 @@ def log_binning(psd, unbinned_mode=3, base=1.05, mask=None,
     if return_bin_size:
         return binned_psd, bin_size
     return binned_psd
+
+
+def _fit_noise_model_subscan(
+    aman,
+    signal,
+    f,
+    pxx,
+    fit_noise_model_kwargs,
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of signal subscans.
+    Args are as for fit_noise_model.
+    """
+    fitout = np.empty((aman.dets.count, 3, aman.subscan_info.subscans.count))
+    covout = np.empty((aman.dets.count, 3, 3, aman.subscan_info.subscans.count))
+
+    for isub in range(aman.subscan_info.subscans.count):
+        if np.all(np.isnan(pxx[...,isub])): # Subscan has been fully cut
+            fitout[..., isub] = np.full((aman.dets.count, 3), np.nan)
+            covout[..., isub] = np.full((aman.dets.count, 3, 3), np.nan)
+        else:
+            noise_model = fit_noise_model(aman, f=f, pxx=pxx[...,isub], merge_fit=False, merge_psd=False, subscan=False, **fit_noise_model_kwargs)
+
+            fitout[..., isub] = noise_model.fit
+            covout[..., isub] = noise_model.cov
+
+    return fitout, covout
 
 
 def build_hpf_params_dict(

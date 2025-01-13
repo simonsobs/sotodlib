@@ -1,6 +1,7 @@
 import numpy as np
 from pixell import enmap, utils, fft, tilemap, resample
 import so3g
+import importlib
 
 from .. import core
 from .. import tod_ops
@@ -23,7 +24,7 @@ def deslope_el(tod, el, srate, inplace=False):
 class ArrayZipper:
     def __init__(self, shape, dtype, comm=None):
         self.shape = shape
-        self.ndof  = int(np.product(shape))
+        self.ndof  = int(np.prod(shape))
         self.dtype = dtype
         self.comm  = comm
 
@@ -37,7 +38,7 @@ class ArrayZipper:
 class MapZipper:
     def __init__(self, shape, wcs, dtype, comm=None):
         self.shape, self.wcs = shape, wcs
-        self.ndof  = int(np.product(shape))
+        self.ndof  = int(np.prod(shape))
         self.dtype = dtype
         self.comm  = comm
 
@@ -525,3 +526,10 @@ def downsample_obs(obs, down):
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
+
+def import_optional(module_name):
+    try:
+        module = importlib.import_module(module_name)
+        return module
+    except:
+        return None

@@ -144,7 +144,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     
 def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
             apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
-             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
+            apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
             merge_stats=True, azss_stats_name='azss_stats',
             merge_model=True, azss_model_name='azss_model'):
@@ -307,7 +307,7 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
         signal_name = signal
         signal = aman[signal_name]
     elif isinstance(signal, np.ndarray):
-        if np.shape(np.ndarray) != (aman.dets.count, aman.samps.count):
+        if np.shape(signal) != (aman.dets.count, aman.samps.count):
             raise ValueError("When passing signal as ndarray shape must match (n_dets x n_samps).")
         signal_name = None
     else:

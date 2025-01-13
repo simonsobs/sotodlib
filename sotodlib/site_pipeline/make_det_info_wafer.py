@@ -104,7 +104,7 @@ def main(config_file=None, target=None, overwrite=False, debug=False, log_file=N
         if not array_name in existing:
             db_data = {'dets:stream_id': stream_id,
                        'dataset': stream_id}
-            db.add_entry(db_data, h5_rel)
+            db.add_entry(db_data, h5_rel, replace=overwrite)
 
 
 def replace_none(val, replace_val=np.nan):

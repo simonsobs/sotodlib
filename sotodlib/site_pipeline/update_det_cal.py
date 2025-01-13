@@ -14,7 +14,7 @@ from dataclasses import dataclass, astuple, fields
 import numpy as np
 from tqdm.auto import tqdm
 import logging
-from typing import Optional, Union, Dict, List, Any, Tuple
+from typing import Optional, Union, Dict, List, Any, Tuple, Literal
 from queue import Queue
 import argparse
 
@@ -31,6 +31,7 @@ from sodetlib.operations.bias_steps import BiasStepAnalysis
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
+TES_BIAS_COUNT = 12  # per detset / primary file group
 
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
@@ -96,6 +97,8 @@ class DetCalCfg:
         will run on all available observations.
     log_level: str
         Logging level for the logger.
+    multiprocess_start_method: str
+        Method to use to start child processes. Can be "spawn" or "fork".
     """
 
     def __init__(
@@ -117,6 +120,7 @@ class DetCalCfg:
         nprocs_result_set: int = 10,
         num_obs: Optional[int] = None,
         log_level: str = "DEBUG",
+        multiprocess_start_method: Literal["spawn", "fork"] = "spawn"
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
@@ -136,6 +140,7 @@ class DetCalCfg:
         self.nprocs_result_set = nprocs_result_set
         self.num_obs = num_obs
         self.log_level = log_level
+        self.multiprocess_start_method = multiprocess_start_method
 
         self.root_dir = os.path.expandvars(self.root_dir)
         if not os.path.exists(self.root_dir):
@@ -505,7 +510,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
 
             for bg, vb_bsa in enumerate(bsa.Vbias):
                 bl_label = f"{bsa.meta['stream_id']}_b{bg:0>2}"
-                if np.isnan(vb_bsa):
+                # Usually we can count on bias voltages of bias lines >= 12 to be
+                # Nan, however we have seen cases where they're not, so we also
+                # restrict by count.
+                if np.isnan(vb_bsa) or bg >= TES_BIAS_COUNT:
                     bias_line_is_valid[bl_label] = False
                     continue
 
@@ -676,7 +684,7 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
-    logger.debug(f"Adding obs_id {obs_id} to dataset")
+    logger.info(f"Adding obs_id {obs_id} to dataset")
     rset = ResultSet.from_friend(result.result_set)
     write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
@@ -708,7 +716,8 @@ def run_update_site(cfg: DetCalCfg) -> None:
 
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
-    with mp.get_context("fork").Pool(cfg.nprocs_result_set) as pool:
+    mp.set_start_method(cfg.multiprocess_start_method)
+    with mp.Pool(cfg.nprocs_result_set) as pool:
         for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
             res = get_obs_info(cfg, oid)
             if not res.success:
@@ -760,8 +769,9 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     # We split into multiple pools because:
     # - we don't want to overload sqlite files with too much concurrent access
     # - we want to be able to continue getting the next obs_info data while ressets are being computed
-    pool1 = mp.get_context("fork").Pool(cfg.nprocs_obs_info)
-    pool2 = mp.get_context("fork").Pool(cfg.nprocs_result_set)
+    mp.set_start_method(cfg.multiprocess_start_method)
+    pool1 = mp.Pool(cfg.nprocs_obs_info)
+    pool2 = mp.Pool(cfg.nprocs_result_set)
 
     resset_async_results: Queue = Queue()
     obsinfo_async_results: Queue = Queue()

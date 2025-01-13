@@ -1,6 +1,7 @@
 import so3g.proj
 import numpy as np
 from pixell import enmap, wcsutils, utils
+from . import healpix_utils as hp_utils
 
 import time
 import re
@@ -285,7 +286,16 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
+    If wcs_kernel is a string in the format "NSIDE=1024", returns a healpix geometry object
+    for an un-tiled Healpix map at given NSIDE with default ordering.
+
     """
+    if isinstance(wcs_kernel, str) and "nside" in wcs_kernel.lower():
+        wcs_kernel = wcs_kernel.lower().strip().replace(' ', '')
+        # Assume we are in the format "nside=1024"
+        nside = int(wcs_kernel[6:])
+        return hp_utils.get_geometry(nside)
+
     if isinstance(wcs_kernel, str):
         wcs_kernel = get_wcs_kernel(wcs_kernel)
 
@@ -311,38 +321,39 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
 
     asm = so3g.proj.Assembly.attach(sight, fp1)
-    output = np.zeros((len(fake_dets), n_samp, 4))
+    planar = np.zeros((len(fake_dets), n_samp, 4))
     proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     if rot:
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
-    proj.get_planar(asm, output=output)
-
-    output2 = output*0
-    proj.get_coords(asm, output=output2)
+    proj.get_planar(asm, output=planar)
 
     # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
     delts  = wcs_kernel.wcs.cdelt * DEG
-    planar = output[:,:,:2]
-    ranges = utils.minmax(planar/delts,(0,1))
-    # These are in units of pixel *offsets* from crval. crval
-    # might not correspond to a pixel center, though. So the
-    # thing that should be integer-valued to preserve pixel compatibility
-    # is crpix + ranges, not just ranges. Let's add crpix to transform this
-    # into offsets from the bottom-left pixel to make it easier to reason
-    # about integers
-    ranges += wcs_kernel.wcs.crpix
-    del output
+    ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    del planar
 
-    # Start a new WCS and set the lower left corner.
+    # These planar ranges are in units of pixels away from the
+    # reference point.  The reference point is not necessarily on a
+    # pixel center -- that depends on whether crpix is an integer.  So
+    # transform ranges by +(crpix - 1), making them relative to the
+    # bottom left pixel of wcs_kernel.  Note the -1 here accounts for
+    # FITS numbering of pixels starting at (1, 1).
+    ranges += (wcs_kernel.wcs.crpix - 1)
+
+    # Round ranges, which in pixel offset units, to nearest integer.
+    corners = utils.nint(ranges)
+
+    # Start a new WCS. Adjust crpix to put our footprint in the
+    # bottom-left pixel.
     w = wcs_kernel.deepcopy()
-    corners      = utils.nint(ranges)
     w.wcs.crpix -= corners[0]
-    shape        = tuple(corners[1]-corners[0]+1)[::-1]
+    shape = tuple(corners[1] - corners[0] + 1)[::-1]
     return (shape, w)
 
+
 def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
-                          xieta=None):
+                          xieta=None, det_weights=None):
     """Process a bunch of detector positions into a center and radius such
     that a circle with that center and radius contains all the
     detectors.  Also return detector positions, arranged approximately
@@ -355,6 +366,9 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         not passed in
       xieta (array): (2, n) array (or similar) of xi and eta
         detector positions.
+      det_weights (array): If provided, must be same length as the xi
+        and eta vectors. Only dets with non-zero value for det_weights
+        will be included in the evaluation of the cover.
 
     Returns:
       xieta0: array[2] with array center, (xi0, eta0).
@@ -363,8 +377,21 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         coords of the circular convex hull.
 
     Notes:
-      If count=0, an empty list is returned for xietas.  Otherwise,
+      If count=0, an empty list is returned for xietas. Otherwise,
       count must be at least 3 so that the shape is not degenerate.
+
+      Any xi, eta that are not finite (e.g. nan or inf) are excluded
+      from the computation. If no detectors remain after the combined
+      finiteness and det_weights cuts, a ValueError is raised.
+
+      Note that ``det_weights`` can be int, float, or bool
+      type. Sometimes you might want to only include optical dets in
+      the result; e.g.::
+
+          ..., det_weights=(aman.det_info.wafer.type=="OPTC"), ...
+
+      In degenerate cases (all dets are in exactly the same place), a
+      radius of zero may be returned.
 
     """
     if xieta is None:
@@ -374,6 +401,17 @@ def get_focal_plane_cover(tod=None, count=0, focal_plane=None,
         eta = focal_plane.eta
     else:
         xi, eta = xieta[:2]
+    mask = np.isfinite(xi) * np.isfinite(eta)
+    if det_weights is not None:
+        mask *= det_weights.astype(bool)
+
+    if not np.any(mask):
+        raise ValueError('All provided (xi, eta) coords are excluded; '
+                         'cannot estimate a focal plane cover.')
+
+    # Restrict to only dets under consideration.
+    xi, eta = xi[mask], eta[mask]
+
     qs = so3g.proj.quat.rotation_xieta(xi, eta)
 
     # Starting guess for center
@@ -410,11 +448,21 @@ def get_supergeom(*geoms, tol=1e-3):
     wcs1), ...], return a geometry (shape, wcs) that includes all of
     them as a subset.
 
+    Each argument can be a geometry (shape, wcs) or an ndmap.
+
     """
-    s0, w0 = geoms[0]
+    def as_geom(item):
+        if isinstance(item, enmap.ndmap):
+            shape, wcs = item.geometry
+        else:
+            shape, wcs = item
+        return (shape[-2:], wcs)
+
+    s0, w0 = as_geom(geoms[0])
     w0 = w0.deepcopy()
 
-    for s, w in geoms[1:]:
+    for item in geoms[1:]:
+        s, w = as_geom(item)
         # is_compatible is necessary but not sufficient.
         if not wcsutils.is_compatible(w0, w):
             raise ValueError('Incompatible wcs: %s <- %s' % (w0, w))
@@ -455,6 +503,25 @@ def get_supergeom(*geoms, tol=1e-3):
         w0.wcs.crpix -= corner_a[::-1]
         s0 = corner_b - corner_a
     return tuple(map(int, s0)), w0
+
+def _confirm_wcs(*wcss):
+    """Insist that all arguments are either the same wcs, or None.
+
+    Raises a ValueError if more than one argument is a wcs, and not
+    all wcs agree.  Returns either the first valid wcs, or None if
+    there aren't any.
+
+    """
+    wcs_to_use = None
+    for i, wcs in enumerate(wcss):
+        if wcs is None:
+            continue
+        if wcs_to_use is None:
+            wcs_to_use = wcs
+        elif not wcsutils.equal(wcs_to_use, wcs):
+            raise ValueError(
+                f'The wcs from {i}th item ({wcs}) is discordant with prior ones ({wcs_to_use})')
+    return wcs_to_use
 
 def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
                         UPLO='U'):
@@ -525,23 +592,23 @@ def _invert_weights_map(weights, eigentol=1e-6, kill_partials=True,
     # Reshape the output to match what was passed in.
     return iw.transpose(1,2,0).reshape(weights.shape)
 
-def _apply_inverse_weights_map(inverse_weights, target):
+def _apply_inverse_weights_map(inverse_weights, target, out=None):
     """Apply a map of matrices to a map of vectors.
 
     Assumes inverse_weights.shape = (a, b, ...) and target.shape =
     (b, ...); the result has shape (a, ...).
 
     """
-    # master had:
-    #iw = inverse_weights.transpose((2,3,0,1))
-    #m = target.transpose((1,2,0)).reshape(
-    #    target.shape[1], target.shape[2], target.shape[0], 1)
-    #m1 = np.matmul(iw, m)
-    #return m1.transpose(2,3,0,1).reshape(target.shape)
+    if out is None:
+        out = np.empty(inverse_weights.shape[1:],
+                       dtype=target.dtype)
+    # Recall matmul(a, b) operates on the last two axes of (a, b). So
+    # move axes, and create a second one in target; re-order at end.
     iw = np.moveaxis(inverse_weights, (0,1), (-2,-1))
     t  = np.moveaxis(target[:,None],  (0,1), (-2,-1))
-    m  = np.matmul(iw, t)
-    return np.moveaxis(m, (-2,-1), (0,1))[:,0]
+    out_moved = np.moveaxis(out[:,None], (0,1), (-2,-1))
+    np.matmul(iw, t, out=out_moved)
+    return out
 
 class ScalarLastQuat(np.ndarray):
     """Wrapper class for numpy arrays carrying quaternions with the ijk1

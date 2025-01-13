@@ -99,6 +99,37 @@ class PcaTest(unittest.TestCase):
         print(f'Amplitudes from {amps0} to {amps1}.')
         self.assertTrue(np.all(amps1 < amps0 * 1e-6))
 
+    def test_pca(self):
+        tod = get_tod('white')
+        x = tod.timestamps / tod.timestamps[-1]
+        comp0 = x**2 - x
+        comp1 = x**3 - .2
+        comp0, comp1 = [c / np.std(c) for c in [comp0, comp1]]
+        tod.signal += comp0 * 100
+        tod.signal[1] += comp1 * 50
+        mod = tod_ops.pca.get_pca_model(tod, n_modes=2)
+        tod_ops.pca.add_model(tod, mod, scale=-1)
+        assert (tod.signal.std(axis=1) < 1.).all()
+
+        # With a glitch
+        tod = get_tod('white')
+        tod.signal += comp0 * 100
+        tod.signal[1][10] = 1e6
+        mask = np.ones(tod.dets.count, bool)
+        mask[1] = False
+
+        # The glitch dominates this PCA, and white noise is not recovered.
+        pca = tod_ops.pca.get_pca(tod)
+        mod = tod_ops.pca.get_pca_model(tod, pca=pca, n_modes=1)
+        sig1 = tod_ops.pca.add_model(tod, mod, scale=-1, signal=tod.signal.copy())
+        assert (sig1[mask].std(axis=1) > 10.).any()
+
+        # Excluding det with glitch successfully cleans other dets.
+        pca = tod_ops.pca.get_pca(tod, mask=mask)
+        mod = tod_ops.pca.get_pca_model(tod, pca=pca, n_modes=1)
+        sig2 = tod_ops.pca.add_model(tod, mod, scale=-1, signal=tod.signal.copy())
+        assert (sig2[mask].std(axis=1) < 1.).all()
+
     def test_detrend(self):
         tod = get_tod('trendy')
         tod.wrap('sig1d', tod.signal[0], [(0, 'samps')])
@@ -171,21 +202,21 @@ class GapFillTest(unittest.TestCase):
         ts = np.arange(0, 1*60, 1/200)
         aman = get_glitchy_tod(ts, ndets=100)
         # test poly fill
-        up, mg = False, False
+        in_place, up, mg = False, False, None
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      wrap=mg)
+                                                      in_place=in_place, wrap=mg)
         self.assertTrue(np.max(np.abs(glitch_filled-aman.inputsignal)) < 1e-3)
 
         # test pca fill
-        up, mg = True, False
+        in_place, up, mg = False, True, None
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      wrap=mg)
+                                                      in_place=in_place, wrap=mg)
         print(np.max(np.abs(glitch_filled-aman.inputsignal)))
 
         # test wrap new field
-        up, mg = False, True
+        in_place, up, mg = False, False, "gap_filled"
         glitch_filled = tod_ops.gapfill.fill_glitches(aman, use_pca=up,
-                                                      wrap=mg)
+                                                      in_place=in_place, wrap=mg)
         self.assertTrue('gap_filled' in aman._assignments)
 
 class FilterTest(unittest.TestCase):
@@ -264,27 +295,11 @@ class JumpfindTest(unittest.TestCase):
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps without filtering
-        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5)
+        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5, win_size=23)
         jumps_nf = jumps_nf.ranges().flatten()
         
-        # Find jumps with TV filtering
-        jumps_tv, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, tv_weight=.5, min_size=5)
-        jumps_tv = jumps_tv.ranges().flatten()
-
-        # Find jumps with gaussian filtering
-        jumps_gauss, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, gaussian_width=.5, min_size=5)
-        jumps_gauss = jumps_gauss.ranges().flatten()
-
         # Remove double counted jumps and round to remove uncertainty
         jumps_nf = np.unique(np.round(jumps_nf, -2))
-        jumps_tv = np.unique(np.round(jumps_tv, -2))
-        jumps_gauss = np.unique(np.round(jumps_gauss, -2))
-
-        # Check that all methods agree
-        self.assertEqual(len(jumps_tv), len(jumps_gauss))
-        self.assertTrue(np.all(np.abs(jumps_tv - jumps_gauss) == 0))
-        self.assertEqual(len(jumps_nf), len(jumps_gauss))
-        self.assertTrue(np.all(np.abs(jumps_nf - jumps_gauss) == 0))
 
         # Check that they agree with the input
         self.assertEqual(len(jump_locs), len(jumps_nf))

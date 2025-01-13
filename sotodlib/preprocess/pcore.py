@@ -5,6 +5,7 @@ import numpy as np
 from .. import core
 from so3g.proj import Ranges, RangesMatrix
 from scipy.sparse import csr_array
+from matplotlib import pyplot as plt
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -270,7 +271,7 @@ def _expand(new, full, wrap_valid=True):
                 continue
             out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
             oidx=[]; nidx=[]
-            for a in new._assignments[k]:
+            for ii, a in enumerate(new._assignments[k]):
                 if a == 'dets':
                     oidx.append(fs_dets)
                     nidx.append(ns_dets)
@@ -278,8 +279,19 @@ def _expand(new, full, wrap_valid=True):
                     oidx.append(fs_samps)
                     nidx.append(ns_samps)
                 else:
-                    oidx.append(slice(None))
-                    nidx.append(slice(None))
+                    if (ii == 0) and isinstance(out[k], RangesMatrix): # Treat like dets
+                        # _ranges_matrix_match expects oidx[0] and nidx[0] to be list(inds), not slice.
+                        # Unknown axes treated as dets if first entry, else like samps. Added to support (subscans, samps) RangesMatrix.
+                        if a in full._axes:
+                            _, fs, ns = full[a].intersection(new[a], return_slices=True)
+                        else:
+                            fs = range(new[a].count)
+                            ns = range(new[a].count)
+                        oidx.append(fs)
+                        nidx.append(ns)
+                    else: # Treat like samps
+                        oidx.append(slice(None))
+                        nidx.append(slice(None))
             oidx = tuple(oidx)
             nidx = tuple(nidx)
             if isinstance(out[k], RangesMatrix):
@@ -386,7 +398,7 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, select=True, sim=False):
+    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -417,6 +429,11 @@ class Pipeline(list):
         sim: boolean (Optional)
             if running on sim (``sim=True``), proccesses with the flag
             ``skip_on_sim`` will be skipped.
+        update_plot: boolean (Optional)
+            if True, re-runs plotting (along with processes and selects)
+            given ``proc_aman`` is ``aman.preprocess``. This assumes
+            ``process.calc_and_save()`` has been run on this aman before and
+            has injested flags and other information into ``proc_aman``.
 
         Returns
         -------
@@ -426,9 +443,14 @@ class Pipeline(list):
         
         """
         if proc_aman is None:
-            proc_aman = core.AxisManager( aman.dets, aman.samps)
-            full = core.AxisManager( aman.dets, aman.samps)
+            if 'preprocess' in aman:
+                proc_aman = aman.preprocess
+                full = aman.preprocess
+            else:
+                proc_aman = core.AxisManager(aman.dets, aman.samps)
+                full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
+            update_plot = False
         else:
             if aman.dets.count != proc_aman.dets.count or not np.all(aman.dets.vals == proc_aman.dets.vals):
                 self.logger.warning("proc_aman has different detectors than aman. Cutting aman to match")
@@ -448,6 +470,9 @@ class Pipeline(list):
                 process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full, self.wrap_valid)
+            if update_plot:
+                process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
+            plt.close()
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)

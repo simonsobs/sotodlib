@@ -1,4 +1,6 @@
 import argparse as ap
+import datetime as dt
+import logging
 import os
 from copy import deepcopy
 from typing import List, Optional
@@ -11,9 +13,17 @@ import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
 from sotodlib.coords import optics as op
-from sotodlib.coords.fp_containers import (FocalPlane, OpticsTube, Receiver,
-                                           Template, Transform, plot_by_gamma,
-                                           plot_ot, plot_receiver, plot_ufm)
+from sotodlib.coords.fp_containers import (
+    FocalPlane,
+    OpticsTube,
+    Receiver,
+    Template,
+    Transform,
+    plot_by_gamma,
+    plot_ot,
+    plot_receiver,
+    plot_ufm,
+)
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
@@ -21,12 +31,15 @@ from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 
-def _create_db(filename, per_obs, obs_id):
-    base = {}
+def _create_db(filename, per_obs, obs_id, start_time, stop_time):
     if per_obs:
         base = {"obs:obs_id": obs_id}
+        group = obs_id
+    else:
+        base = {"obs:timestamp": (start_time, stop_time)}
+        group = str(start_time)
     if os.path.isfile(filename):
-        return metadata.ManifestDb(filename), base
+        return metadata.ManifestDb(filename), base, group
     if not os.path.isdir(os.path.dirname(filename)):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
@@ -34,10 +47,12 @@ def _create_db(filename, per_obs, obs_id):
     scheme.add_exact_match("dets:stream_id")
     if per_obs:
         scheme.add_exact_match("obs:obs_id")
+    else:
+        scheme.add_range_match("obs:timestamp")
     scheme.add_data_field("dataset")
 
     metadata.ManifestDb(scheme=scheme).to_file(filename)
-    return metadata.ManifestDb(filename), base
+    return metadata.ManifestDb(filename), base, group
 
 
 def _avg_focalplane(full_fp, tot_weight):
@@ -123,23 +138,55 @@ def _load_template(template_path, ufm, pointing_cfg):
     )
 
 
+def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], tags=[]):
+    query_all = query
+    query_obs = []
+    if query is None:
+        query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
+    all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
+    dbs = [
+        metadata.ManifestDb(md["db"])
+        for md in ctx["metadata"]
+        if md.get("name", "") in metalist or md.get("label", "") in metalist
+    ]
+    with_meta = np.unique(
+        np.hstack(
+            [np.array([entry["obs:obs_id"] for entry in db.inspect()]) for db in dbs]
+        )
+    )
+    all_obs = np.intersect1d(all_obs, with_meta)
+
+    if query is not None:
+        query_obs = ctx.obsdb.query(query)["obs_id"]
+    obs_ids += query_obs
+
+    if len(obs_ids) == 0 and query is None:
+        return all_obs
+    return np.intersect1d(obs_ids, all_obs)
+
+
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
     dm_name = config["context"].get("detmap", "detmap")
     roll_range = config.get("roll_range", [-1 * np.inf, np.inf])
-    query = []
-    if "query" in config["context"]:
-        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
-    obs_ids = np.append(config["context"].get("obs_ids", []), query)
-    obs_ids = np.unique(obs_ids)
+    obs_ids = _get_obs_ids(
+        ctx,
+        [tod_pointing_name, map_pointing_name, pol_name],
+        config["start_time"],
+        config["stop_time"],
+        config["context"].get("query", None),
+        config["context"].get("obs_ids", []),
+        config["context"].get("tags", ["timing_issues=0"]),
+    )
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
-    _config = config.copy()
-    if "query" in _config["context"]:
-        del _config["context"]["query"]
     amans = []
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
@@ -356,6 +403,40 @@ def main():
     per_obs = config.get("per_obs", args.per_obs)
     include_cm = config.get("include_cm", args.include_cm)
 
+    # Build output path
+    append = config.get("append", "")
+    dbroot = f"db{bool(append)*'_'}{append}"
+    froot = f"focal_plane{bool(append)*'_'}{append}"
+    subdir = config.get("subdir", "")
+    subdir = subdir + (subdir == "") * (
+        per_obs * "per_obs" + (not per_obs) * "combined"
+    )
+    outdir = os.path.join(config["outdir"], subdir)
+    outpath = os.path.abspath(os.path.join(outdir, f"{froot}.h5"))
+    dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
+    logpath = os.path.join(outdir, f"{froot}.log")
+    os.makedirs(outdir, exist_ok=True)
+    plot_dir_base = config.get("plot_dir", None)
+    if plot_dir_base is not None:
+        plot_dir_base = os.path.join(
+            plot_dir_base, subdir + bool(append) * "_" + append
+        )
+        plot_dir_base = os.path.abspath(plot_dir_base)
+        os.makedirs(plot_dir_base, exist_ok=True)
+
+    # Log file
+    logfile = logging.FileHandler(logpath)
+    logger.addHandler(logfile)
+
+    # Time range
+    config["start_time"] = config.get("start_time", 0)
+    config["stop_time"] = config.get("stop_time", 2**32)
+    logger.info(
+        "Running on time range %s to %s",
+        dt.datetime.fromtimestamp(config["start_time"]),
+        dt.datetime.fromtimestamp(config["stop_time"]),
+    )
+
     # Load data
     if "context" in config:
         amans, obs_ids, stream_ids = _load_ctx(config)
@@ -363,22 +444,6 @@ def main():
         amans, obs_ids, stream_ids = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
-
-    # Build output path
-    append = config.get("append", "")
-    dbroot = f"db{bool(append)*'_'}{append}"
-    subdir = config.get("subdir", "")
-    subdir = subdir + (subdir == "") * (
-        per_obs * "per_obs" + (not per_obs) * "combined"
-    )
-    outdir = os.path.join(config["outdir"], subdir)
-    dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
-    os.makedirs(outdir, exist_ok=True)
-    plot_dir_base = config.get("plot_dir", None)
-    if plot_dir_base is not None:
-        plot_dir_base = os.path.join(plot_dir_base, subdir + bool(append)*'_' + append)
-        plot_dir_base = os.path.abspath(plot_dir_base)
-        os.makedirs(plot_dir_base, exist_ok=True)
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
@@ -401,10 +466,9 @@ def main():
         plot_dir = plot_dir_base
         if per_obs:
             plot_dir = os.path.join(plot_dir_base, obs_ids[0])
-            os.makedirs(plot_dir, exist_ok=True)
-        froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
-        outpath = os.path.join(outdir, f"{froot}.h5")
-        outpath = os.path.abspath(outpath)
+        else:
+            plot_dir = os.path.join(plot_dir_base, str(config["start_time"]))
+        os.makedirs(plot_dir, exist_ok=True)
         logger.info("Working on batch containing: %s", str(obs_ids))
         ots = {}
         for stream_id in stream_ids:
@@ -457,8 +521,6 @@ def main():
                     template,
                     is_optical,
                     pointing_cfg,
-                    winfo_path,
-                    stream_id,
                 )
             elif have_template:
                 logger.info("\tLoading template from %s", template_path)
@@ -537,25 +599,6 @@ def main():
                 logger.error("\tToo few points! Skipping...")
                 continue
 
-            # Compute transformation between the two nominal and measured pointing
-            focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
-            if focal_plane.have_gamma:
-                gamma_scale, gamma_shift = gamma_fit(
-                    focal_plane.template.fp[:, 2], focal_plane.avg_fp[:, 2]
-                )
-                focal_plane.transformed[:, 2] = (
-                    focal_plane.template.fp[:, 2] * gamma_scale + gamma_shift
-                )
-                focal_plane.center_transformed[:, 2] = (
-                    gamma_scale * focal_plane.template.center[:, 2] + gamma_shift
-                )
-            else:
-                logger.warning(
-                    "\tNo polarization data availible, gammas will be filled with the nominal values."
-                )
-                gamma_scale = 1.0
-                gamma_shift = 0.0
-
             try:
                 affine, shift = mt.get_affine_two_stage(
                     focal_plane.template.fp[:, :2],
@@ -573,8 +616,37 @@ def main():
                 focal_plane.template.center[:, :2], affine, shift
             )
 
+            # Compute transformation between the two nominal and measured pointing
+            focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
+            if focal_plane.have_gamma:
+                gamma_scale, gamma_shift = gamma_fit(
+                    focal_plane.template.fp[:, 2], focal_plane.avg_fp[:, 2]
+                )
+            else:
+                logger.warning(
+                    "\tNo polarization data availible, gammas will be based on the nominal values."
+                )
+                logger.warning(
+                    "\tSetting gamma shift to the xi-eta rotation and scale to 1.0"
+                )
+                transform = Transform.from_split(np.array((*shift, 0.0)), affine, 1.0)
+                gamma_scale = 1.0
+                gamma_shift = transform.rot
+            focal_plane.transformed[:, 2] = (
+                focal_plane.template.fp[:, 2] * gamma_scale + gamma_shift
+            )
+            focal_plane.center_transformed[:, 2] = (
+                focal_plane.template.center[:, 2] * gamma_scale + gamma_shift
+            )
+
             rms = np.sqrt(
-                np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2)
+                np.nanmean(
+                    (
+                        focal_plane.avg_fp[:, : (2 + focal_plane.have_gamma)]
+                        - focal_plane.transformed[:, : (2 + focal_plane.have_gamma)]
+                    )
+                    ** 2
+                )
             )
             logger.info("\tRMS after transformation is %f", rms)
 
@@ -721,9 +793,18 @@ def main():
         # Make final outputs and save
         logger.info("Saving data to %s", outpath)
         logger.info("Writing to database at %s", dbpath)
-        db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
-        with h5py.File(outpath, "w") as f:
-            receiver.save(f, (db, base))
+        db, base, group = _create_db(
+            dbpath,
+            per_obs=per_obs,
+            obs_id=obs_ids[0],
+            start_time=config["start_time"],
+            stop_time=config["stop_time"],
+        )
+        with h5py.File(outpath, "a") as f:
+            if group in f:
+                del f[group]
+            f.create_group(group)
+            receiver.save(f, (db, base), group)
 
 
 if __name__ == "__main__":
