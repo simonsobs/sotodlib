@@ -443,68 +443,8 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-
-def parameter_in_path(obj: Any, rpath: str, sep: str = ".") -> bool:
-    """This function checks if a parameter path exists in an object.
-
-    Parameters
-    ----------
-    obj : Any
-        A python object. It needs to have a `__dict__` or a `_fields` parameter.
-    rpath : str
-        a string with a recursive path to verify if it exist. The path is separated
-        via a sep. For example 'flags.glitch_flags'.
-    sep : str, optional
-        A string separator, by default "."
-
-    Returns
-    -------
-    bool
-        Whether the rpath exists despite its value.
-    """
-    checker = obj.__dict__
-    if isinstance(obj, core.AxisManager):
-        checker = obj._fields
-
-    rpath = rpath.split(sep=sep)
-
-    if rpath[0] in checker and len(rpath)>1:
-        return parameter_in_path(checker[rpath[0]], sep.join(rpath[1:]), sep=sep)
-    elif rpath[0] in checker:
-        return True
-    else:
-        return False
-
-
-def get_flags_from_path(
-    aman: core.AxisManager, rpath: str, sep: str = "."
-) -> Union[so3g.proj.RangesMatrix, Any]:
-    """This function allows to pull data from an AxisManager based on a path.
-
-    Parameters
-    ----------
-    aman : core.AxisManager
-        An Axis Manager object
-    rpath : str
-        a string with a recursive path to extract data. The path is separated via a sep.
-                For example 'flags.glitch_flags'
-    sep : str, optional
-        a string separator, by default "."
-
-    Returns
-    -------
-    Union[so3g.proj.RangesMatrix, Any]
-        The flags that are in the rpath
-    """
-
-    for path in rpath.split(sep=sep):
-        aman = aman[path]
-
-    return aman
-
-
 def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
-    ncut  = rangemat_sum(get_flags_from_path(obs, glitch_flags))
+    ncut  = rangemat_sum(obs[glitch_flags])
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -578,14 +518,14 @@ def downsample_obs(obs, down):
     # # obs.flags will contain all types of flags. We should query it for glitch_flags
     # # and source_flags
     cut_keys = []
-    if parameter_in_path(obs, "glitch_flags"):
+    if "glitch_flags"  in obs:
         cut_keys.append("glitch_flags")
-    elif parameter_in_path(obs, "flags.glitch_flags"):
+    elif "flags.glitch_flags" in obs:
         cut_keys.append("flags.glitch_flags")
 
-    if parameter_in_path(obs, "source_flags"):
+    if "source_flags" in obs:
         cut_keys.append("source_flags")
-    elif parameter_in_path(obs, "flags.source_flags"):
+    elif "flags.source_flags" in obs:
         cut_keys.append("flags.source_flags")
 
     # We need to add a res.flags FlagManager to res
@@ -593,7 +533,7 @@ def downsample_obs(obs, down):
 
     for key in cut_keys:
         new_key = key.split(".")[-1]
-        res.flags.wrap(new_key, downsample_cut(get_flags_from_path(obs, key), down),
+        res.flags.wrap(new_key, downsample_cut(obs[key], down),
                        [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it

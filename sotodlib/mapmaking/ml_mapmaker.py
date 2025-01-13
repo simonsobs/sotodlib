@@ -9,7 +9,7 @@ from pixell import utils as putils
 
 from .. import coords
 from .pointing_matrix import PmatCut
-from .utilities import (MultiZipper, get_flags_from_path, recentering_to_quat_lonlat,
+from .utilities import (MultiZipper, recentering_to_quat_lonlat,
                         evaluate_recentering, TileMapZipper, MapZipper,
                         safe_invert_div, unarr, ArrayZipper)
 from .noise_model import NmatUncorr
@@ -252,7 +252,7 @@ class SignalMap(Signal):
         Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
         ctime  = obs.timestamps
         gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
-        pcut   = PmatCut(get_flags_from_path(obs, gflags)) # could pass this in, but fast to construct
+        pcut   = PmatCut(obs[gflags]) # could pass this in, but fast to construct
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
@@ -438,7 +438,7 @@ class SignalCut(Signal):
         and Nd the result of applying the noise model to the detector time-ordered data."""
         Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
         gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
-        pcut    = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
+        pcut    = PmatCut(obs[gflags], model=self.cut_type)
         # Build our RHS
         obs_rhs = np.zeros(pcut.njunk, self.dtype)
         pcut.backward(Nd, obs_rhs)
@@ -511,7 +511,7 @@ class SignalCut(Signal):
         # We have to make a pointing matrix from scratch because add_obs
         # won't have been called yet at this point
         gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
-        spcut = PmatCut(get_flags_from_path(obs, gflags), model=self.cut_type)
+        spcut = PmatCut(obs[gflags], model=self.cut_type)
         # We do have one for other though, since that will be the output
         # from the previous round of multiplass mapmaking.
         odata = other.data[id]
