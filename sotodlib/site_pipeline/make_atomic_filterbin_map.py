@@ -2,21 +2,26 @@ from argparse import ArgumentParser
 from typing import Optional
 from dataclasses import dataclass
 import time
+import datetime as dt
 import warnings
 import os
 import logging
 import yaml
 import multiprocessing
 import traceback
-import sqlite3
+import ephem
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
 import numpy as np
-import so3g
 import sotodlib.site_pipeline.util as util
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
-from pixell import enmap, utils as putils, bunch
+from so3g.proj import coords as so3g_coords
+from pixell import enmap, utils as putils
 from pixell import wcsutils, colors, memory, mpi
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -34,7 +39,8 @@ class Cfg:
         If 2 files, representing 2 layers of preprocessing, they
         should be separated by a comma.
     area: str
-        WCS kernel for rectangular pixels
+        WCS kernel for rectangular pixels. Filename to map/geometry
+        or valid string for coords.get_wcs_kernel.
     nside: int
         Nside for HEALPIX pixels
     query: str
@@ -163,15 +169,13 @@ class Cfg:
             d = yaml.safe_load(f)
             return cls(**d)
 
-
 class DataMissing(Exception):
     pass
 
-
-def get_pwv(obs, data_dir):
+def get_pwv(start_time, stop_time, data_dir):
     try:
-        pwv_info = hk_utils.get_detcosamp_hkaman(
-            obs, alias=['pwv'],
+        pwv_info = hk_utils.get_hkaman(
+            float(start_time), float(stop_time), alias=['pwv'],
             fields=['site.env-radiometer-class.feeds.pwvs.pwv'],
             data_dir=data_dir)
         pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
@@ -180,39 +184,12 @@ def get_pwv(obs, data_dir):
         pwv = 0.0
     return pwv
 
-
-def read_tods(context, obslist,
-              dtype_tod=np.float32, only_hits=False, site='so_sat3',
-              l2_data=None):
-    context = Context(context)
-    # this function will run on multiprocessing and can be returned in any
-    # random order we will also return the obslist to keep track of the order
-    my_tods = []
-    pwvs = []
-    ind = 0
-    obs_id, detset, band, obs_ind = obslist[ind]
-    meta = context.get_meta(
-        obs_id, dets={"wafer_slot": detset, "wafer.bandpass": band})
-    tod = context.get_obs(meta, no_signal=True)
-    to_remove = []
-    for field in tod._fields:
-        if field not in ['obs_info', 'flags', 'signal', 'focal_plane', 'timestamps', 'boresight']:
-            to_remove.append(field)
-    for field in to_remove:
-        tod.move(field, None)
-    tod.flags.wrap(
-        'glitch_flags', so3g.proj.RangesMatrix.zeros(tod.shape[:2]),
-        [(0, 'dets'), (1, 'samps')])
-    my_tods.append(tod)
-
-    tod_temp = tod.restrict('dets', meta.dets.vals[:1], in_place=False)
-    if l2_data is not None:
-        pwvs.append(get_pwv(tod_temp, data_dir=l2_data))
-    else:
-        pwvs.append(np.nan)
-    del tod_temp
-    return bunch.Bunch(obslist=obslist, my_tods=my_tods, pwvs=pwvs)
-
+def get_sun_distance(site, ctime, az, el):
+    site_ = so3g_coords.SITES[site].ephem_observer()
+    dtime = dt.datetime.fromtimestamp(ctime, dt.timezone.utc)
+    site_.date = ephem.Date(dtime)
+    sun = ephem.Sun(site_)
+    return np.degrees(ephem.separation((sun.az, sun.alt), (np.radians(az), np.radians(el))))
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, colors={'DEBUG':colors.reset,
@@ -275,9 +252,33 @@ def main(config_file: str) -> None:
 
     comm = mpi.FAKE_WORLD  # Fake communicator since we won't use MPI
     verbose = args.verbose - args.quiet
-    if args.area is not None:
-        shape, wcs = enmap.read_map_geometry(args.area)
-        wcs = wcsutils.WCS(wcs.to_header())
+
+    recenter = None
+    if args.center_at:
+        recenter = mapmaking.parse_recentering(args.center_at)
+
+    if args.area is not None: # Set shape, wcs for rectpix
+        try:
+            # Load shape, wcs from a map or geometry
+            shape, wcs = enmap.read_map_geometry(args.area)
+            wcs = wcsutils.WCS(wcs.to_header())
+        except FileNotFoundError:
+            # See if area is a wcs_kernel string
+            try:
+                shape = None
+                wcs = coords.get_wcs_kernel(args.area)
+            except ValueError:
+                L.error("'area' not a valid filename or wcs_kernel string")
+                exit(1)
+        if recenter is not None:
+            # wcs_kernel string not allowed for recenter=True
+            if shape is None:
+                L.error("'area' must be a map geometry file, not wcs_kernel string, to use recenter")
+                exit(1)
+        else:
+            # If not recenter, we set shape=None so get_footprint will be called
+            shape = None
+
     elif args.nside is not None:
         pass  # here I will map in healpix
     else:
@@ -287,9 +288,6 @@ def main(config_file: str) -> None:
     noise_model = mapmaking.NmatWhite()
     putils.mkdir(args.odir)
 
-    recenter = None
-    if args.center_at:
-        recenter = mapmaking.parse_recentering(args.center_at)
     preprocess_config_str = [s.strip() for s in args.preprocess_config.split(",")]
     preprocess_config = [] ; errlog = []
     for preproc_cf in preprocess_config_str:
@@ -308,8 +306,7 @@ def main(config_file: str) -> None:
         warnings.warn("You are using single precision for maps, we advice to use double precision")
 
     context_obj = Context(args.context)
-    # obslists is a dict, obskeys is a list, periods is an array, only rank 0
-    # will do this and broadcast to others.
+    # obslists is a dict, obskeys is a list, periods is an array
     try:
         obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
             context_obj, args.query, nset=args.nset, wafer=args.wafer,
@@ -318,8 +315,7 @@ def main(config_file: str) -> None:
     except mapmaking.NoTODFound as err:
         L.exception(err)
         exit(1)
-    L.info(f'Done with build_obslists, running {len(obslists)} maps')
-    cwd = os.getcwd()
+    L.info(f'Running {len(obslists)} maps after build_obslists')
 
     split_labels = []
     if args.all_splits:
@@ -343,22 +339,23 @@ def main(config_file: str) -> None:
     # if we do we will not run them again.
     if isinstance(args.atomic_db, str):
         if os.path.isfile(args.atomic_db) and not args.only_hits:
-            # open the connector, in reading mode only
-            conn = sqlite3.connect(args.atomic_db)
-            cursor = conn.cursor()
+            engine = create_engine("sqlite:///%s" % args.atomic_db, echo=False)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+
             keys_to_remove = []
             # Now we have obslists and splits ready, we look through the database
             # to remove the maps we already have from it
             for key, value in obslists.items():
                 missing_split = False
                 for split_label in split_labels:
-                    query_ = 'SELECT * from atomic where obs_id="%s" and\
-                    telescope="%s" and freq_channel="%s" and wafer="%s" and\
-                    split_label="%s"' % (
-                        value[0][0], obs_infos[value[0][3]].telescope, key[2],
-                        key[1], split_label)
-                    res = cursor.execute(query_)
-                    matches = res.fetchall()
+                    query_ = select(mapmaking.AtomicInfo).filter_by(
+                        obs_id=value[0][0],
+                        telescope=obs_infos[value[0][3]].telescope,
+                        freq_channel=key[2],
+                        wafer=key[1],
+                        split_label=split_label)
+                    matches = session.execute(query_).scalars().all()
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
@@ -371,97 +368,68 @@ def main(config_file: str) -> None:
             for key in keys_to_remove:
                 obskeys.remove(key)
                 del obslists[key]
-            conn.close()  # I close since I only wanted to read
+            engine.dispose()
 
     obslists_arr = [item for key, item in obslists.items()]
-    tod_list = []  # this list will receive the outputs from read_tods
-    L.info('Starting with read_tods')
 
-    with ProcessPoolExecutor(args.nproc) as exe:
-        futures = [exe.submit(
-            read_tods, args.context, obslist, dtype_tod=args.dtype_tod,
-            only_hits=args.only_hits, l2_data=args.hk_data_path,
-            site=args.site)
-                   for obslist in obslists_arr]
-        for future in as_completed(futures):
-            try:
-                tod_list.append(future.result())
-            except Exception as e:
-                # if read_tods fails for some reason we log into the first preproc DB
-                future_write_to_log(e, errlog[0])
-                continue
-            futures.remove(future)
-    # flatten the list of lists
-    L.info('Done with read_tods')
-
-    my_tods = [bb.my_tods for bb in tod_list]
-    if args.area is not None:
-        subgeoms = []
-        for obs in my_tods:
-            if recenter is None:
-                subshape, subwcs = coords.get_footprint(obs[0], wcs)
-                subgeoms.append((subshape, subwcs))
-            else:
-                subshape = shape
-                subwcs = wcs
-                subgeoms.append((subshape, subwcs))
+    L.info(f'Running {len(obslists_arr)} maps after removing duplicate maps')
 
     # clean up lingering files from previous incomplete runs
+    if len(preprocess_config)==1:
+        policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+    else:
+        policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp_proc')
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
-            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
-                                       subdir='temp', remove=False)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
         else:
-            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[0],
-                                       subdir='temp', remove=False)
-            preprocess_util.save_group_and_cleanup(obs_id, preprocess_config[1],
-                                       subdir='temp_proc', remove=False)
-
+            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False)
     run_list = []
-    for oi in range(len(my_tods)):
-        # tod_list[oi].obslist[0] is the old obslist
-        pid = tod_list[oi].obslist[0][3]
-        detset = tod_list[oi].obslist[0][1]
-        band = tod_list[oi].obslist[0][2]
-        obslist = tod_list[oi].obslist
+    for oi, ol in enumerate(obslists_arr):
+        pid = ol[0][3]
+        detset = ol[0][1]
+        band = ol[0][2]
+        obslist = ol
         t = putils.floor(periods[pid, 0])
         t5 = ("%05d" % t)[:5]
         prefix = "%s/%s/atomic_%010d_%s_%s" % (
             args.odir, t5, t, detset, band)
-        if args.area is not None:
-            subshape, subwcs = subgeoms[oi]
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        pwv_atomic = tod_list[oi].pwvs[0]
+        pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
+
         # Save file for data base of atomic maps.
         # We will write an individual file,
         # another script will loop over those files
         # and write into sqlite data base
         if not args.only_hits:
-            info = []
+            info_list = []
             for split_label in split_labels:
-                info.append(bunch.Bunch(
-                    pid=pid,
-                    obs_id=obslist[0][0].encode(),
-                    telescope=obs_infos[obslist[0][3]].telescope.encode(),
-                    freq_channel=band.encode(),
-                    wafer=detset.encode(),
+                info = mapmaking.AtomicInfo(
+                    obs_id=obslist[0][0],
+                    telescope=obs_infos[obslist[0][3]].telescope,
+                    freq_channel=band,
+                    wafer=detset,
                     ctime=int(t),
-                    split_label=split_label.encode(),
-                    split_detail=''.encode(),
-                    prefix_path=str(cwd + '/' + prefix + '_%s' %
-                                    split_label).encode(),
-                    elevation=obs_infos[obslist[0][3]].el_center,
-                    azimuth=obs_infos[obslist[0][3]].az_center,
-                    pwv=float(pwv_atomic)))
+                    split_label=split_label
+                )
+                info.split_detail = ''
+                info.prefix_path = str(prefix + '_%s' % split_label)
+                info.elevation = obs_infos[obslist[0][3]].el_center
+                info.azimuth = obs_infos[obslist[0][3]].az_center
+                info.pwv = float(pwv_atomic)
+                info.roll_angle = obs_infos[obslist[0][3]].roll_center
+                info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
+                info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
-            run_list.append([obslist, subshape, subwcs, info, prefix, t])
+            run_list.append([obslist, shape, wcs, info_list, prefix, t])
         elif args.nside is not None:
-            run_list.append([obslist, None, None, info, prefix, t])
-    # Done with creating run_list
+            run_list.append([obslist, None, None, info_list, prefix, t])
 
     with ProcessPoolExecutor(args.nproc) as exe:
         futures = [exe.submit(
@@ -476,7 +444,8 @@ def main(config_file: str) -> None:
             verbose=verbose,
             split_labels=split_labels,
             singlestream=args.singlestream,
-            site=args.site) for r in run_list]
+            site=args.site,
+            atomic_db=args.atomic_db) for r in run_list]
         for future in as_completed(futures):
             L.info('New future as_completed result')
             try:

@@ -1,3 +1,5 @@
+from typing import Optional
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column
 import numpy as np
 from pixell import enmap, utils, fft, tilemap, resample
 import so3g
@@ -533,3 +535,44 @@ def import_optional(module_name):
         return module
     except:
         return None
+
+Base = declarative_base()
+
+class AtomicInfo(Base):
+    __tablename__ = "atomic"
+
+    obs_id: Mapped[str] = mapped_column(primary_key=True)
+    telescope: Mapped[str] = mapped_column(primary_key=True)
+    freq_channel: Mapped[str] = mapped_column(primary_key=True)
+    wafer: Mapped[str] = mapped_column(primary_key=True)
+    ctime: Mapped[int] = mapped_column(primary_key=True)
+    split_label: Mapped[str] = mapped_column(primary_key=True)
+    valid: Mapped[Optional[bool]]
+    split_detail: Mapped[Optional[str]]
+    prefix_path: Mapped[Optional[str]]
+    elevation: Mapped[Optional[float]]
+    azimuth: Mapped[Optional[float]]
+    pwv: Mapped[Optional[float]]
+    total_weight_qu: Mapped[Optional[float]]
+    mean_weight_qu: Mapped[Optional[float]]
+    median_weight_qu: Mapped[Optional[float]]
+    leakage_avg: Mapped[Optional[float]]
+    noise_avg: Mapped[Optional[float]]
+    ampl_2f_avg: Mapped[Optional[float]]
+    gain_avg: Mapped[Optional[float]]
+    tau_avg: Mapped[Optional[float]]
+    f_hwp: Mapped[Optional[float]]
+    roll_angle: Mapped[Optional[float]]
+    scan_speed: Mapped[Optional[float]]
+    sun_distance: Mapped[Optional[float]]
+
+    def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
+        self.obs_id = obs_id
+        self.telescope = telescope
+        self.freq_channel = freq_channel
+        self.wafer = wafer
+        self.ctime = ctime
+        self.split_label = split_label
+
+    def __repr__(self):
+        return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
