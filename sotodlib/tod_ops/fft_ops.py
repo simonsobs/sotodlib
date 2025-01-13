@@ -376,7 +376,6 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
-
 def noise_model(f, params, **fixed_param):
     """
     Noise model for power spectrum with white noise, and 1/f noise.
@@ -390,25 +389,20 @@ def noise_model(f, params, **fixed_param):
             fknee, alpha = params[0], params[1]
         else:
             raise ValueError('The number of fit parameters are invalid.')
-            return
     elif 'alpha' in fixed_param.keys():
         if len(params)==2:
             alpha = fixed_param['alpha']
             wn, fknee = params[0], params[1]
         else:
             raise ValueError('The number of fit parameters are invalid.')
-            return
     elif len(fixed_param)==0:
         if len(params)==3:
             wn, fknee, alpha = params[0], params[1], params[2]
         else:
             raise ValueError('The number of fit parameters are invalid.')
-            return
     else:
         raise ValueError('"alpha" or "wn" can be a fixed parameter.')
-        return
     return wn**2 * (1 + (fknee / f) ** alpha)
-
 
 def neglnlike(params, x, y, bin_size=1, **fixed_param):
     model = noise_model(x, params, **fixed_param)
@@ -417,7 +411,7 @@ def neglnlike(params, x, y, bin_size=1, **fixed_param):
         return 1.0e30
     return output
 
-def get_psd_mask(aman, psd_mask=None, f=None, pxx=None,
+def get_psd_mask(aman, psd_mask=None, f=None,
                 mask_hwpss=True, hwp_freq=None, max_hwpss_mode=10, hwpss_width=((-0.4, 0.6), (-0.2, 0.2)),
                 mask_peak=False, peak_freq=None, peak_width=(-0.002, +0.002),
                 merge=True, overwrite=True
@@ -433,8 +427,6 @@ def get_psd_mask(aman, psd_mask=None, f=None, pxx=None,
             Existing psd_mask to be updated. If None, a new mask is created.
         f : nparray
             Frequency of PSD of signal. If None, aman.freqs are used.
-        pxx : nparray
-            PSD of signal. If None, aman.Pxx are used.
         mask_hwpss : bool
             If True, hwpss are masked. Defaults to True.
         hwp_freq : float
@@ -469,14 +461,13 @@ def get_psd_mask(aman, psd_mask=None, f=None, pxx=None,
     -------
         psd_mask (nusamps): Ranges array. If merge == True, "psd_mask" is added to the aman.  
     """
-    if psd_mask is None:
-        psd_mask = np.zeros(aman.nusamps.count, dtype=bool)
-    elif isinstance(psd_mask, so3g.RangesInt32):
-        psd_mask = psd_mask.mask()
     if f is None:
         f = aman.freqs
-    if pxx is None:
-        pxx = aman.Pxx
+    if psd_mask is None:
+        psd_mask = np.zeros(f.shape, dtype=bool)
+    elif isinstance(psd_mask, so3g.RangesInt32):
+        psd_mask = psd_mask.mask()
+
     if mask_hwpss:
         hwp_freq = hwp.get_hwp_freq(aman.timestamps, aman.hwp_solution.hwp_angle)
         psd_mask = psd_mask | get_mask_for_hwpss(f, hwp_freq, max_mode=max_hwpss_mode, width=hwpss_width)
@@ -488,6 +479,8 @@ def get_psd_mask(aman, psd_mask=None, f=None, pxx=None,
         if overwrite:
             if "psd_mask" in aman:
                 aman.move("psd_mask", None)
+        if 'nusamps' not in list(aman._axes.keys()):
+            aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(f))))
         aman.wrap("psd_mask", psd_mask, [(0,"nusamps")])
     return psd_mask
 
@@ -544,8 +537,12 @@ def get_binned_psd(
             if "bin_size" in aman._fields:
                 aman.move("bin_size", None)
         aman.wrap("freqs_bin", f_bin, [(0,"nusamps_bin")])
-        aman.wrap("Pxx_bin", pxx_bin, [(0,"dets"),(1,"nusamps_bin")])
-        aman.wrap("bin_size", bin_size, [(0,"dets"),(1,"nusamps_bin")])
+        aman.wrap("bin_size", bin_size, [(0,"nusamps_bin")])
+        if pxx_bin.ndim > 2 and 'subscans' in aman and pxx_bin.shape[-1] == aman.subscans.count:
+            aman.wrap("Pxx_bin", pxx_bin, [(0, "dets"), (1, "nusamps_bin"), (2, "subscans")])
+        else:
+            aman.wrap("Pxx_bin", pxx_bin, [(0,"dets"),(1,"nusamps_bin")])
+
     return f_bin, pxx_bin, bin_size
 
 
@@ -614,10 +611,16 @@ def fit_noise_model(
     merge_psd : bool
         If ``merge_psd`` is True then adds fres and Pxx to the axis manager.
     mask : bool
-        If ``mask`` is True then PSD is masked with ``aman.psd_mask``.
+        If True, (nusamps,) mask is taken from aman.psd_mask, or calculated on the fly.
+        Can also be a 1d (nusamps,) bool array True for good samples to keep.
+        Can also be a Ranges in which case it will be inverted before application.
+
     fixed_param : str
         This accepts 'wn' or 'alpha' or None. If 'wn' ('alpha') is given, 
         white noise level (alpha) is fixed to the wn_est (alpha_est).
+    binning : bool
+        True to bin the psd before fitting.
+        The binning is determined by the 'unbinned_mode' and 'base' params.
     unbinned_mode : int
         First Fourier modes up to this number are left un-binned.
     base : float (> 1)
@@ -646,17 +649,24 @@ def fit_noise_model(
             subscan=subscan,
             **psdargs,
         )
-    if mask:
-        if 'psd_mask' in aman:
-            mask = ~aman.psd_mask.mask()
-            f = f[mask]
-            pxx = pxx[:, mask]
+    if np.any(mask):
+        if isinstance(mask, np.ndarray):
+            pass
+        elif isinstance(mask, Ranges):
+            mask = ~mask.mask()
+        elif mask == True:
+            if 'psd_mask' in aman:
+                mask = ~aman.psd_mask.mask()
+            else: # Calculate on the fly
+                mask = ~(get_psd_mask(aman, f=f, merge=False).mask())
         else:
-            print('"psd_mask" is not in aman. Masking is skipped.')
+            raise ValueError("mask should be an ndarray or True")
+        f = f[mask]
+        pxx = pxx[:, mask]
 
     if subscan:
         fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
-                                  "f_min": f_min, "f_max": f_max, "mask": mask, "fixed_param": fixed_param,
+                                  "f_min": f_min, "f_max": f_max, "fixed_param": fixed_param,
                                   "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
                                   "freq_spacing": freq_spacing}
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
@@ -880,17 +890,19 @@ def log_binning(psd, unbinned_mode=3, base=1.05, mask=None,
 
     # Ensure psd is at least 2D for consistent processing
     psd = np.atleast_2d(psd)
-    num_signals, num_samples = psd.shape
+    num_signals, num_samples = psd.shape[:2]
     
     if mask is not None:
         # Ensure mask is at least 2D and has the same shape as psd
         mask = np.atleast_2d(mask)
         if mask.shape[1] != num_samples:
             raise ValueError("Mask must have the same number of columns as psd")
-        psd = np.ma.masked_array(psd, mask=np.tile(mask, (num_signals, 1)))
+        mask = np.tile(mask, (num_signals,) + psd.shape[2:] + (1,))
+        mask = np.moveaxis(mask, -1, 1)
+        psd = np.ma.masked_array(psd, mask=mask)
     
     # Initialize the binned PSD and optionally the bin sizes
-    binned_psd = np.zeros((num_signals, unbinned_mode + 1))
+    binned_psd = np.zeros((num_signals, unbinned_mode + 1) + psd.shape[2:])
     binned_psd[:, :unbinned_mode + 1] = psd[:, :unbinned_mode + 1]
     bin_size = np.ones((num_signals, unbinned_mode + 1)) if return_bin_size else None
 
@@ -908,7 +920,8 @@ def log_binning(psd, unbinned_mode=3, base=1.05, mask=None,
             new_bin_size.append(end - start)
     
     # Convert lists to numpy arrays and concatenate with initial values
-    new_binned_psd = np.array(new_binned_psd).T  # Transpose to match dimensions
+    new_binned_psd = np.array(new_binned_psd)
+    new_binned_psd = np.moveaxis(new_binned_psd, 0, 1)# Transpose to match dimensions
     binned_psd = np.hstack([binned_psd, new_binned_psd])
     if return_bin_size:
         new_bin_size = np.array(new_bin_size)
@@ -944,12 +957,22 @@ def _fit_noise_model_subscan(
     fitout = np.empty((aman.dets.count, 3, aman.subscan_info.subscans.count))
     covout = np.empty((aman.dets.count, 3, 3, aman.subscan_info.subscans.count))
 
+    per_subscan = {}
+    for entry in ["fknee_est", "wn_est", "alpha_est"]:
+        if (entry in fit_noise_model_kwargs):
+            val = fit_noise_model_kwargs[entry]
+            if isinstance(val, np.ndarray) and val.ndim > 1 and val.shape[-1] == aman.subscan_info.subscans.count:
+                per_subscan[entry] = fit_noise_model_kwargs.pop(entry)
+
+    kwargs = fit_noise_model_kwargs.copy() if len(per_subscan) > 0 else fit_noise_model_kwargs
     for isub in range(aman.subscan_info.subscans.count):
         if np.all(np.isnan(pxx[...,isub])): # Subscan has been fully cut
             fitout[..., isub] = np.full((aman.dets.count, 3), np.nan)
             covout[..., isub] = np.full((aman.dets.count, 3, 3), np.nan)
         else:
-            noise_model = fit_noise_model(aman, f=f, pxx=pxx[...,isub], merge_fit=False, merge_psd=False, subscan=False, **fit_noise_model_kwargs)
+            for entry in list(per_subscan.keys()):
+                kwargs[entry] = per_subscan[entry][..., isub]
+            noise_model = fit_noise_model(aman, f=f, pxx=pxx[...,isub], merge_fit=False, merge_psd=False, subscan=False, **kwargs)
 
             fitout[..., isub] = noise_model.fit
             covout[..., isub] = noise_model.cov
