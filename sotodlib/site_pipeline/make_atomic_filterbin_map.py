@@ -456,8 +456,8 @@ def main(config_file: str) -> None:
             futures.remove(future)
             for ii in range(len(errors)):
                 for idx_prepoc in range(len(preprocess_config)):
-                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc],
-                                              preprocess_config[idx_prepoc], L)
+                    if isinstance(outputs[ii][idx_prepoc], dict):
+                        preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
 
