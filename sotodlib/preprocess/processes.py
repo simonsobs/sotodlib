@@ -1121,10 +1121,18 @@ class SourceFlags(_Preprocess):
         else:
             source_flags = proc_aman.source_flags
 
-        for source in source_flags._fields:
-            keep = ~has_all_cut(source_flags[source])
-            meta.restrict("dets", meta.dets.vals[keep])
-            source_flags.restrict("dets", source_flags.dets.vals[keep])
+        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+        if source_list == ['planet']:
+            from sotodlib.coords.planets import SOURCE_LIST
+            source_list = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(source_list) == 0:
+                raise ValueError("No tags match source list")
+
+        for source in source_list:
+            if source in source_flags._fields:
+                keep = ~has_all_cut(source_flags[source])
+                meta.restrict("dets", meta.dets.vals[keep])
+                source_flags.restrict("dets", source_flags.dets.vals[keep])
         return meta
 
 class HWPAngleModel(_Preprocess):
