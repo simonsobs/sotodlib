@@ -3,20 +3,11 @@ from typing import Literal, Optional, Tuple, Union, cast, overload
 import numpy as np
 import scipy.ndimage as simg
 import scipy.stats as ss
+import so3g
 from numpy.typing import NDArray
 from pixell.utils import moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import (
-    block_minmax,
-    block_minmax64,
-    find_quantized_jumps,
-    find_quantized_jumps64,
-    matched_jumps,
-    matched_jumps64,
-    subtract_jump_heights,
-    subtract_jump_heights64,
-)
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -112,9 +103,9 @@ def _jumpfinder(
     if len(x.shape) > 2:
         raise ValueError("x may not have more than 2 dimensions")
     if dtype == "float32":
-        matched_filt = matched_jumps
+        matched_filt = so3g.matched_jumps
     elif dtype == "float64":
-        matched_filt = matched_jumps64
+        matched_filt = so3g.matched_jumps64
     else:
         raise TypeError("x must be float32 or float64")
 
@@ -213,9 +204,9 @@ def jumpfix_subtract_heights(
     if len(x.shape) > 2:
         raise ValueError("x may not have more than 2 dimensions")
     if dtype == "float32":
-        fix = subtract_jump_heights
+        fix = so3g.subtract_jump_heights
     elif dtype == "float64":
-        fix = subtract_jump_heights64
+        fix = so3g.subtract_jump_heights64
     else:
         raise TypeError("x must be float32 or float64")
     fix(x, x_fixed, heights, jumps)
@@ -467,9 +458,9 @@ def twopi_jumps(
     heights = np.empty_like(_signal)
     atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
     if _signal.dtype.name == "float32":
-        find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+        so3g.find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
     elif _signal.dtype.name == "float64":
-        find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+        so3g.find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
     else:
         raise TypeError("signal must be float32 or float64")
 
@@ -600,9 +591,9 @@ def slow_jumps(
     if len(_signal.shape) > 2:
         raise ValueError("signal may not have more than 2 dimensions")
     if dtype == "float32":
-        get_ptp = block_minmax
+        get_ptp = so3g.block_minmax
     elif dtype == "float64":
-        get_ptp = block_minmax64
+        get_ptp = so3g.block_minmax64
     else:
         raise TypeError("signal must be float32 or float64")
     bptp = np.zeros_like(_signal)
