@@ -8,9 +8,9 @@ system objects, and catalogs of point sources.
 """
 
 import numpy as np
-from astropy import units as u
 import toast
 import toast.ops
+from astropy import units as u
 
 from .. import ops as so_ops
 from .job import workflow_timer
@@ -51,11 +51,6 @@ def simulate_source_signal(job, otherargs, runargs, data):
 
     if job_ops.sim_source.enabled:
         job_ops.sim_source.detector_pointing = job_ops.det_pointing_azel_sim
-        # FIXME: this is not right- the field of view calculation in the
-        # SimSource operator should loop over all observations and get the
-        # maximum extent.
-        # job_ops.sim_source.focalplane = telescope.focalplane
-        raise NotImplementedError("SimSource disabled until FoV fixed.")
         if job_ops.sim_source.polarization_fraction != 0:
             job_ops.sim_source.detector_weights = job_ops.weights_azel
         job_ops.sim_source.apply(data)
