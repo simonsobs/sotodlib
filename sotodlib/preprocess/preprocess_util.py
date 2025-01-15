@@ -901,8 +901,8 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         folder = os.path.dirname(configs['archive']['policy']['filename'])
         basename = os.path.splitext(configs['archive']['policy']['filename'])[0]
         dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-        if not(os.path.exists(folder)):
-                os.makedirs(folder)
+        if os.path.isabs(folder) and not(os.path.exists(folder)):
+            os.makedirs(folder)
         while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
