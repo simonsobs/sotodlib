@@ -1,13 +1,13 @@
-from typing import Optional
-from sqlalchemy.orm import declarative_base, Mapped, mapped_column
-import numpy as np
-from pixell import enmap, utils, fft, tilemap, resample
-import so3g
+from typing import Any, Union
+
 import importlib
 
-from .. import core
-from .. import tod_ops
-from .. import coords
+import numpy as np
+import so3g
+from pixell import enmap, fft, resample, tilemap, utils
+
+from .. import coords, core, tod_ops
+
 
 def deslope_el(tod, el, srate, inplace=False):
     if not inplace: tod = tod.copy()
@@ -105,14 +105,14 @@ def inject_map(obs, map, recenter=None, interpol=None):
         rot    = recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime=ctime[len(ctime)//2], geom=(map.shape, map.wcs), site=unarr(obs.site)))
     else: rot = None
     # Set up our pointing matrix for the map
-    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir", interpol=self.interpol)
+    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir", interpol=interpol)
     # And perform the actual injection
-    pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
+    pmat.from_map(map.extract(map.shape, map.wcs), dest=obs.signal)
 
 def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
     try:
         # try setting up a context manager that limits the number of threads
-        from threadpoolctl import threadpool_limitse
+        from threadpoolctl import threadpool_limits
         cm = threadpool_limits(limits=1, user_api="blas")
     except:
         # threadpoolctl not available, need a dummy context manager
@@ -137,7 +137,6 @@ def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
         idiv = div*0
         idiv[:,:,hit] = work.T
     return idiv
-
 
 
 def measure_cov(d, nmax=10000):
@@ -342,6 +341,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
     """Evaluate the quaternion that performs the coordinate recentering specified in
     info, which can be obtained from parse_recentering."""
     import ephem
+
     # Get the coordinates of the from, to and up points. This was a bit involved...
     def to_cel(lonlat, sys, ctime=None, site=None, weather=None):
         # Convert lonlat from sys to celestial coorinates. Maybe polish and put elswhere
@@ -373,6 +373,7 @@ def recentering_to_quat_lonlat(p1, p2, pu):
     """Return the quaternion that represents the rotation that takes point p1
     to p2, with the up direction pointing towards the point pu, all given as lonlat pairs"""
     from so3g.proj import quat
+
     # 1. First rotate our point to the north pole: Ry(-(90-dec1))Rz(-ra1)
     # 2. Apply the same rotation to the up point.
     # 3. We want the up point to be upwards, so rotate it to ra = 180°: Rz(pi-rau2)
@@ -442,8 +443,8 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1):
-    ncut  = rangemat_sum(obs.flags.glitch_flags)
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
+    ncut  = rangemat_sum(obs[glitch_flags])
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -502,7 +503,7 @@ def downsample_obs(obs, down):
             if isinstance(val, core.AxisManager):
                 res.wrap(key, val)
             else:
-                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+                axdesc = [(k, v) for k, v in enumerate(axes) if v is not None]
                 res.wrap(key, val, axdesc)
     # The normal sample stuff
     res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
@@ -510,20 +511,30 @@ def downsample_obs(obs, down):
     for key in ["az", "el", "roll"]:
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
-    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp),
+             [(0,"dets"),(1,"samps")])
 
-    # The cuts
-    # obs.flags will contain all types of flags. We should query it for glitch_flags and source_flags
-    cut_keys = ["glitch_flags"]
+    # # The cuts
+    # # obs.flags will contain all types of flags. We should query it for glitch_flags
+    # # and source_flags
+    cut_keys = []
+    if "glitch_flags"  in obs:
+        cut_keys.append("glitch_flags")
+    elif "flags.glitch_flags" in obs:
+        cut_keys.append("flags.glitch_flags")
 
-    if "source_flags" in obs.flags:
+    if "source_flags" in obs:
         cut_keys.append("source_flags")
+    elif "flags.source_flags" in obs:
+        cut_keys.append("flags.source_flags")
 
     # We need to add a res.flags FlagManager to res
     res = res.wrap('flags', core.FlagManager.for_tod(res))
 
     for key in cut_keys:
-        res.flags.wrap(key, downsample_cut(getattr(obs.flags, key), down), [(0,"dets"),(1,"samps")])
+        new_key = key.split(".")[-1]
+        res.flags.wrap(new_key, downsample_cut(obs[key], down),
+                       [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway

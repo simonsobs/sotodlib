@@ -356,12 +356,17 @@ class LoadSpec:
         End time to load
     downsample_factor: int
         Downsample factor for data
+    hkdb: Optional[HkDb]
+        HkDb instance to use. If not specified, will create a new one from the
+        cfg. This should be set manually if you are calling ``load_hk`` in a loop
+        to prevent connection build-up.
     """
     cfg: HkConfig
     fields: List[str]
     start: float
     end: float
     downsample_factor: int = 1
+    hkdb: Optional[HkDb] = None
 
     def __post_init__(self):
         fs = []
@@ -418,7 +423,11 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
     if isinstance(load_spec, dict):
         load_spec = LoadSpec(**load_spec)
 
-    hkdb = HkDb(load_spec.cfg)
+    if load_spec.hkdb is not None:
+        hkdb: HkDb = load_spec.hkdb
+    else:
+        hkdb = HkDb(load_spec.cfg)
+
     agent_set = list(set(f.agent for f in load_spec.fields))
 
     file_spec = {}  # {path: [offsets]}
