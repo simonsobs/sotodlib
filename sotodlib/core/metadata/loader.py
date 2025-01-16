@@ -638,8 +638,7 @@ def merge_det_info(det_info, new_info, multi=True, on_missing='trim'):
 
     if len(det_info) != len(i1) and on_missing != 'trim':
         raise IncompleteMetadataError(
-            f"Mismatching detector count: "
-            f"ObsFileDb({len(det_info)}) -> Manifest({len(i1)})"
+            f"det_info had n_dets={len(det_info)}; After merge it has n_dets={len(i1)}"
         )
 
     logger.debug(f' ... updating det_info (row count '
