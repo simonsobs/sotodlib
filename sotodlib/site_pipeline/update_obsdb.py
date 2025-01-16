@@ -168,7 +168,7 @@ def main(config: str,
         abv_codes = np.arange(abv_tback, abv_tnow+1)
         #Build the combinations base_dir/booktype/\d{5}
         base_dir = [f"{os.path.join(x[0], x[1], str(x[2]))}" for x in product(base_dir, accept_type, abv_codes)]
-        logger.debug(f"Looking in the following directories only: {str(base_dir)}")
+        logger.info(f"Looking in the following directories only: {str(base_dir)}")
 
     for bd in base_dir:
         #Find folders that are book-like and recent
