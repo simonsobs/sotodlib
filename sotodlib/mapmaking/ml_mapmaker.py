@@ -496,7 +496,8 @@ class SignalMap(Signal):
         """Translate map from SignalMap other to the current SignalMap,
         and then evaluate it for the given observation, returning a tod.
         This is used when building a signal-free tod for the noise model
-        in multipass mapmaking."""
+        in multipass mapmaking. This function is not used during the first pass
+        of the ML mapmaker. It is a bridge logic between passes."""
         # Currently we don't support any actual translation, but could handle
         # resolution changes in the future (probably not useful though)
         self._checkcompat(other)
