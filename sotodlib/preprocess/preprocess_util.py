@@ -988,7 +988,7 @@ def check_cfg_match(ref, loaded, logger=None):
                 return False
             else:
                 if type(ref[ri]) is core.AxisManager:
-                    check_cfg_match(ref[ri], loaded[li])
+                    check_cfg_match(ref[ri], loaded[li], logger)
                 elif ref[ri] == loaded[li]:
                     continue
                 else:
