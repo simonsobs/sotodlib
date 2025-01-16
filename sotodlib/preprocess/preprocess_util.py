@@ -416,7 +416,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
-            proc_aman = context_proc.get_meta(obs_id, meta=meta_proc)
+            proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
             aman.preprocess.merge(proc_aman.preprocess)
 
