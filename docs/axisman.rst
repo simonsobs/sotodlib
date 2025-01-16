@@ -144,6 +144,17 @@ The output of the ``wrap`` cal should be::
 Note the boresight entry is marked with a ``*``, indicating that it's
 an AxisManager rather than a numpy array.
 
+Data access under an AxisManager is done based on field names. For example::
+
+    >>> print(dset.boresight.az)
+    [0. 0. 0. ... 0. 0. 0.]
+
+Advanced data access is possible by a path like syntax. This is especially useful when
+data access is dynamic and the field name is not known in advance. For example::
+
+    >>> print(dset["boresight.az"])
+    [0. 0. 0. ... 0. 0. 0.]
+
 To slice this object, use the restrict() method.  First, let's
 restrict in the 'dets' axis.  Since it's an Axis of type LabelAxis,
 the restriction selector must be a list of strings::

@@ -42,6 +42,7 @@ import argparse
 import logging
 from sotodlib.site_pipeline import util
 from typing import Optional
+from itertools import product
 
 logger = util.init_logger('update_obsdb', 'update-obsdb: ')
 
@@ -86,7 +87,8 @@ def main(config: str,
         recency: float = None, 
         booktype: Optional[str] = "both",
         verbosity: Optional[int] = 2,
-        overwrite: Optional[bool] = False):
+        overwrite: Optional[bool] = False,
+        fastwalk: Optional[bool] = False):
 
     """
     Create or update an obsdb for observation or operations data.
@@ -104,6 +106,10 @@ def main(config: str,
         Output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug
     overwrite : bool
         if False, do not re-check existing entries
+    fastwalk : bool
+        if True, assume the directories have a structure /base_dir/obs|oper/\d{5}/...
+        Then replace base_dir with only the directories where \d{5} is greater or 
+        equal to recency.
     """
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
@@ -156,6 +162,14 @@ def main(config: str,
     #Check if there are one or multiple base_dir specified
     if isinstance(base_dir,str):
         base_dir = [base_dir]
+    if fastwalk:
+        abv_tback = int(f"{int(tback):05}"[:5]) #Make sure we have at least five chars
+        abv_tnow = int(f"{int(tnow):05}"[:5])
+        abv_codes = np.arange(abv_tback, abv_tnow+1)
+        #Build the combinations base_dir/booktype/\d{5}
+        base_dir = [f"{os.path.join(x[0], x[1], str(x[2]))}" for x in product(base_dir, accept_type, abv_codes)]
+        logger.info(f"Looking in the following directories only: {str(base_dir)}")
+
     for bd in base_dir:
         #Find folders that are book-like and recent
         for dirpath, _, _ in os.walk(bd):
@@ -173,10 +187,11 @@ def main(config: str,
     for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
             t1 = time.time()
+            logger.info(f"Examining book at {bookpath}")
             try:
                 #obsfiledb creation
                 checkbook(bookpath, config, add=True, overwrite=True)
-                logger.info(f"Ran check_book for {bookpath} in {time.time()-t1} s")
+                logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
                     logger.warning(f"failed to add {bookpath}")
@@ -295,7 +310,7 @@ def main(config: str,
             tags = [t.strip() for t in tags if t.strip() != '']
 
             bookcartobsdb.update_obs(obs_id, very_clean, tags=tags)
-            logger.info(f"Added {obs_id} in {time.time()-t1} s")
+            logger.info(f"Finished {obs_id} in {time.time()-t1} s")
         else:
             bookcart.remove(bookpath)
 
@@ -305,7 +320,7 @@ def get_parser(parser=None):
         parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="ObsDb, ObsfileDb configuration file", 
         type=str, required=True)
-    parser.add_argument('--recency', default=None, type=float,
+    parser.add_argument("--recency", default=None, type=float,
         help="Days to subtract from now to set as minimum ctime. If None, no minimum")
     parser.add_argument("--verbosity", default=2, type=int,
         help="Increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug")
@@ -313,6 +328,8 @@ def get_parser(parser=None):
         help="Select book type to look for: obs, oper, both(default)")
     parser.add_argument("--overwrite", action="store_true",
         help="If true, writes over existing entries")
+    parser.add_argument("--fastwalk", action="store_true",
+        help="Assume known directory tree shape and speed up walkthrough")
     return parser
 
 

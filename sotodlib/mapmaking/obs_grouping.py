@@ -220,11 +220,11 @@ def build_period_obslists(obs_info, periods, context, nset=None,
         if freq is not None:
             band_list = [freq]
         else:
-            if row.tube_flavor == 'mf':
+            if row.tube_flavor in ['mf','MF']:
                 band_list = ['f090', 'f150']
-            elif row.tube_flavor == 'uhf':
+            elif row.tube_flavor in ['uhf','UHF']:
                 band_list = ['f230', 'f280']
-            elif row.tube_flavor == 'lf':
+            elif row.tube_flavor in ['lf','LF']:
                 raise ValueError('Band list for lf not implemented yet.')
         for detset in wafer_list[:nset]:
             for band in band_list:
