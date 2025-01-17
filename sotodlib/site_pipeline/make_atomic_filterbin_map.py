@@ -1,5 +1,6 @@
+from __future__ import annotations
 from argparse import ArgumentParser
-from typing import Optional
+from typing import Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass
 import time
 import datetime as dt
@@ -7,7 +8,6 @@ import warnings
 import os
 import logging
 import yaml
-import multiprocessing
 import traceback
 import ephem
 
@@ -20,10 +20,12 @@ from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
+from sotodlib.utils.procs_pool import as_completed, get_exec_env
 from so3g.proj import coords as so3g_coords
 from pixell import enmap, utils as putils
-from pixell import wcsutils, colors, memory, mpi
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from pixell import wcsutils, colors, memory
+from pixell.fake_communicator import FakeCommunicator
+
 
 @dataclass
 class Cfg:
@@ -237,7 +239,7 @@ def future_write_to_log(e, errlog):
     f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
     f.close()
 
-def main(config_file: str) -> None:
+def main(config_file: str, executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"]) -> None:
     args = Cfg.from_yaml(config_file)
 
     # Set up logging.
@@ -250,7 +252,6 @@ def main(config_file: str) -> None:
     ch.addFilter(LogInfoFilter())
     L.addHandler(ch)
 
-    comm = mpi.FAKE_WORLD  # Fake communicator since we won't use MPI
     verbose = args.verbose - args.quiet
 
     recenter = None
@@ -296,7 +297,7 @@ def main(config_file: str) -> None:
         errlog.append( os.path.join(os.path.dirname(
             preproc_local['archive']['index']), 'errlog.txt') )
 
-    multiprocessing.set_start_method('spawn')
+
     if (args.update_delay is not None):
         min_ctime = int(time.time()) - args.update_delay*86400
         args.query += f" and timestamp>={min_ctime}"
@@ -431,12 +432,12 @@ def main(config_file: str) -> None:
         elif args.nside is not None:
             run_list.append([obslist, None, None, info_list, prefix, t])
 
-    with ProcessPoolExecutor(args.nproc) as exe:
-        futures = [exe.submit(
+    
+    futures = [executor.submit(
             mapmaking.make_demod_map, args.context, r[0],
             noise_model, r[3], preprocess_config, r[4],
             shape=r[1], wcs=r[2], nside=args.nside,
-            comm=comm, t0=r[5], tag=tag,
+            comm=FakeCommunicator(), t0=r[5], tag=tag,
             recenter=recenter,
             dtype_map=args.dtype_map,
             dtype_tod=args.dtype_tod,
@@ -446,18 +447,18 @@ def main(config_file: str) -> None:
             singlestream=args.singlestream,
             site=args.site,
             atomic_db=args.atomic_db) for r in run_list]
-        for future in as_completed(futures):
-            L.info('New future as_completed result')
-            try:
-                errors, outputs = future.result()
-            except Exception as e:
-                future_write_to_log(e, errlog)
-                continue
-            futures.remove(future)
-            for ii in range(len(errors)):
-                for idx_prepoc in range(len(preprocess_config)):
-                    if isinstance(outputs[ii][idx_prepoc], dict):
-                        preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
+    for future in as_completed(futures):
+        L.info('New future as_completed result')
+        try:
+            errors, outputs = future.result()
+        except Exception as e:
+            future_write_to_log(e, errlog)
+            continue
+        futures.remove(future)
+        for ii in range(len(errors)):
+            for idx_prepoc in range(len(preprocess_config)):
+                if isinstance(outputs[ii][idx_prepoc], dict):
+                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
 
@@ -470,7 +471,13 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     p.add_argument(
         "--config_file", type=str, help="yaml file with configuration."
     )
+    p.add_argument(
+        "--nprocs", type=int, help="Number of processors to use."
+        )
     return p
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    args = get_parser().parse_args()
+    rank, executor = get_exec_env(args.nprocs)
+    if rank == 0:
+        main(args.config_file, executor)
