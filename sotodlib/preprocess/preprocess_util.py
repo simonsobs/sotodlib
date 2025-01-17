@@ -410,13 +410,15 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
-            aman = context_init.get_obs(meta_proc, no_signal=no_signal)
+
+            meta_init.restrict('dets', meta_proc.dets.vals)
+            aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
-            proc_aman = context_proc.get_meta(obs_id, meta=meta_proc)
+            proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
             aman.preprocess.merge(proc_aman.preprocess)
 
