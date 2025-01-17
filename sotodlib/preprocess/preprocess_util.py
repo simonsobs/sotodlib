@@ -410,7 +410,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
-            aman = context_init.get_obs(meta_proc, no_signal=no_signal)
+
+            meta_init.restrict('dets', meta_proc.dets.vals)
+            aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
 
@@ -988,7 +990,7 @@ def check_cfg_match(ref, loaded, logger=None):
                 return False
             else:
                 if type(ref[ri]) is core.AxisManager:
-                    check_cfg_match(ref[ri], loaded[li])
+                    check_cfg_match(ref[ri], loaded[li], logger)
                 elif ref[ri] == loaded[li]:
                     continue
                 else:
