@@ -20,6 +20,9 @@ The config file could be of the form:
     lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
+    known_bad_books: 
+    - oper_1736874485_satp3_0000100
+    - obs_9999999999_satp0_1111111
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -150,6 +153,8 @@ def main(config: str,
         bookcartobsdb.add_obs_columns(col_list)
     if "skip_bad_books" not in config_dict:
         config_dict["skip_bad_books"] = False
+    if "known_bad_books" not in config_dict:
+        config_dict["known_bad_books"] = []
         
     #How far back we should look
     tnow = time.time()
@@ -176,6 +181,9 @@ def main(config: str,
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
                 _, book_id = os.path.split(dirpath)
                 if book_id in existing and not overwrite:
+                    continue
+                if book_id in config_dict["known_bad_books"]:
+                    logger.debug(f"{book_id} known to be bad, skipping it")
                     continue
                 found_timestamp = re.search(r"\d{10}", book_id)#Find the rough timestamp
                 if found_timestamp and int(found_timestamp.group())>tback:
