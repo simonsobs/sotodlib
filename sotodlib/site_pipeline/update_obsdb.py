@@ -33,7 +33,7 @@ The config file could be of the form:
 
 from sotodlib.core.metadata import ObsDb
 from sotodlib.core import Context 
-from sotodlib.site_pipeline.check_book import main as checkbook
+from sotodlib.site_pipeline import check_book
 from sotodlib.io import load_book
 import os
 import glob
@@ -198,7 +198,12 @@ def main(config: str,
             logger.info(f"Examining book at {bookpath}")
             try:
                 #obsfiledb creation
-                checkbook(bookpath, config, add=True, overwrite=True)
+                ok, obsfiledb_info = check_book.scan_book_dir(
+                    bookpath, logger, config_dict, prep_obsfiledb=True)
+                if not ok:
+                    raise RuntimeError("check_book found fatal errors, not adding.")
+                check_book.add_to_obsfiledb(
+                    obsfiledb_info, logger, config_dict, overwrite=True)
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
