@@ -183,11 +183,11 @@ def t2p_joint_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demod
         yU = aman[U_sig_name][di][mask[di]][::ds_factor]
 
         try:
-            model = LmfitModel(leakage_model, independent_vars=['dT'], 
-                          weights=np.ones_like(x)/sigma_demod[di])
+            model = LmfitModel(leakage_model, independent_vars=['dT'])
             params = model.make_params(AQ=np.median(yQ), AU=np.median(yU), 
                                        lamQ=0., lamU=0.)
-            result = model.fit(yQ + 1j * yU, params, dT=x)
+            result = model.fit(yQ + 1j * yU, params, dT=x,
+                               weights=np.ones_like(x)/sigma_demod[di])
             A_Q_array[di] = result.params['AQ'].value
             A_U_array[di] = result.params['AU'].value
             lambda_Q_array[di] = result.params['lamQ'].value
@@ -215,7 +215,6 @@ def t2p_joint_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demod
     out_aman.wrap('AU', A_U_array, [(0, 'dets')])
     out_aman.wrap('lamQ', lambda_Q_array, [(0, 'dets')])
     out_aman.wrap('lamU', lambda_U_array, [(0, 'dets')])
-
     out_aman.wrap('AQ_error', A_Q_error, [(0, 'dets')])
     out_aman.wrap('AU_error', A_U_error, [(0, 'dets')])
     out_aman.wrap('lamQ_error', lambda_Q_error, [(0, 'dets')])
@@ -315,7 +314,6 @@ def subtract_t2p(aman, t2p_aman, T_signal=None):
         Temperature signal to scale and subtract from Q/U.
         Default is ``aman['dsT']``.
     """
-
     if T_signal is None:
         T_signal = aman['dsT']
 

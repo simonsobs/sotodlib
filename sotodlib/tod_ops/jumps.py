@@ -1,26 +1,28 @@
-import concurrent.futures
-import os
 from typing import Literal, Optional, Tuple, Union, cast, overload
 
 import numpy as np
 import scipy.ndimage as simg
-import scipy.signal as sig
 import scipy.stats as ss
 from numpy.typing import NDArray
-from pixell.utils import block_expand, block_reduce
+from pixell.utils import block_expand, block_reduce, moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
+from so3g import (
+    matched_jumps,
+    matched_jumps64,
+    find_quantized_jumps,
+    find_quantized_jumps64,
+)
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
 from ..flag_utils import _merge
 
-NFUTURE = int(os.environ.get("NUM_FUTURES", min(32, int(os.cpu_count() or 0) + 4)))
-
 
 def std_est(
     x: NDArray[np.floating],
     ds: int = 1,
+    win_size: int = 20,
     axis: int = -1,
     method: str = "median_unbiased",
 ) -> NDArray[np.floating]:
@@ -32,7 +34,9 @@ def std_est(
 
         x: Data to compute standard deviation of.
 
-        ds: Downsample factor to use, does a naive slicing.
+        ds: Downsample factor to use, does a naive slicing in blocks of ``win_size``.
+
+        win_size: Window size to downsample by.
 
         axis: The axis to compute along.
 
@@ -44,12 +48,22 @@ def std_est(
     """
     if ds > 2 * x.shape[axis]:
         ds = 1
-    sl = [slice(None)] * len(x.shape)
     if ds > 1:
-        sl[axis] = slice(None, None, ds)
+        x = np.moveaxis(x, axis, -1)
+        x = x[..., : -1 * (x.shape[-1] % win_size)]
+        shape = list(x.shape) + [win_size]
+        shape[-2] = -1
+        x = x.reshape(tuple(shape))
+        x = np.moveaxis(x, -2, 0)
+        diff = np.diff(x[::ds], axis=-1)
+        diff = moveaxis(diff, 0, -2)
+        diff = diff.reshape(shape[:-1])
+        diff = np.moveaxis(diff, -1, axis)
+    else:
+        diff = np.diff(x, axis=axis)
     # Find ~1 sigma limits of differenced data
     lims = np.quantile(
-        np.diff(x, axis=axis)[tuple(sl)],
+        diff,
         np.array([0.159, 0.841]),
         axis=axis,
         method=method,
@@ -62,7 +76,7 @@ def _jumpfinder(
     x: NDArray[np.floating],
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
-    nsigma: float = 25,
+    exact: bool = False,
 ) -> NDArray[np.bool_]:
     """
     Matched filter jump finder.
@@ -73,9 +87,10 @@ def _jumpfinder(
 
         min_size: The smallest jump size counted as a jump.
 
-        win_size: Size of window used by SG filter when peak finding.
+        win_size: Size of window used when peak finding.
 
-        nsigma: Number of sigma above the mean for something to be a peak.
+        exact: Flag only the jump locations if True.
+               If False flag the whole window (cheaper).
 
     Returns:
 
@@ -89,80 +104,49 @@ def _jumpfinder(
     # and in the case of 2d data we find jumps along rows
     orig_shape = x.shape
     x = np.atleast_2d(x)
+    dtype = x.dtype.name
+    if len(x.shape) > 2:
+        raise ValueError("x may not have more than 2 dimensions")
+    if dtype == "float32":
+        matched_filt = matched_jumps
+    elif dtype == "float64":
+        matched_filt = matched_jumps64
+    else:
+        raise TypeError("x must be float32 or float64")
 
-    jumps = np.zeros(x.shape, dtype=bool)
+    jumps = np.zeros(x.shape, dtype=bool, order="C")
     if x.shape[-1] < win_size:
         return jumps.reshape(orig_shape)
 
-    size_msk = (np.max(x, axis=-1) - np.min(x, axis=-1)) < min_size
-    if np.all(size_msk):
-        return jumps.reshape(orig_shape)
-
-    # If std is basically 0 no need to check for jumps
-    std = np.std(x, axis=-1)
-    std_msk = np.isclose(std, 0.0) + np.isclose(std_est(x, ds=win_size, axis=-1), std)
-
-    msk = ~(size_msk + std_msk)
+    msk = np.ptp(x, axis=-1) > min_size
     if not np.any(msk):
         return jumps.reshape(orig_shape)
 
-    # Take cumulative sum, this is equivalent to convolving with a step
-    x_step = np.cumsum(x[msk], axis=-1)
-
-    # Smooth and take the second derivative
-    sg_x_step = np.abs(sig.savgol_filter(x_step, win_size, 2, deriv=2, axis=-1))
-
-    # Peaks should be jumps
-    # Doing the simple thing and looking for things much larger than the median
-    peaks = (
-        sg_x_step
-        > (
-            np.median(sg_x_step, axis=-1)
-            + nsigma * std_est(sg_x_step, ds=win_size, axis=-1)
-        )[..., None]
-    )
-    if not np.any(peaks):
-        return jumps.reshape(orig_shape)
-
-    # The peak may have multiple points above this criteria
-    peak_idx = np.where(peaks)
-    peak_idx_padded = peak_idx[1] + (x.shape[-1] + win_size) * peak_idx[0]
-    gaps = np.diff(peak_idx_padded) >= win_size
-    begins = np.insert(peak_idx_padded[1:][gaps], 0, peak_idx_padded[0])
-    ends = np.append(peak_idx_padded[:-1][gaps], peak_idx_padded[-1])
-    jump_idx = ((begins + ends) / 2).astype(int) + 1
-    jump_rows = jump_idx // (x.shape[1] + win_size)
-    jump_cols = jump_idx % (x.shape[1] + win_size)
-
-    # Estimate jump heights and get better positions
-    # TODO: Pad things to avoid np.diff annoyance
-    half_win = int(win_size / 2)
-    win_rows = np.repeat(jump_rows, 2 * half_win)
-    win_cols = np.repeat(jump_cols, 2 * half_win) + np.tile(
-        np.arange(-1 * half_win, half_win, dtype=int), len(jump_cols)
-    )
-    win_cols = np.clip(win_cols, 0, x.shape[-1] - 3)
-    d2x_step = np.abs(np.diff(x_step, n=2, axis=-1))[win_rows, win_cols].reshape(
-        (len(jump_idx), 2 * half_win)
-    )
-    jump_sizes = np.amax(d2x_step, axis=-1)
-    jump_cols = (
-        win_cols.reshape(d2x_step.shape)[
-            np.arange(len(jump_idx)), np.argmax(d2x_step, axis=-1)
-        ]
-        + 2
-    )
-
-    # Make a jump size cut
+    # Flag with a matched filter
+    win_size += win_size % 2  # Odd win size adds a wierd phasing issue
+    _x = np.ascontiguousarray(x[msk])
+    _jumps = np.ascontiguousarray(np.empty_like(_x), "int32")
     if isinstance(min_size, np.ndarray):
-        _min_size = min_size[jump_rows]
+        _min_size = min_size[msk].astype(_x.dtype)
+    elif min_size is None:
+        raise TypeError("min_size is None")
     else:
-        _min_size = min_size
-    size_cut = jump_sizes > _min_size
-    jump_rows = jump_rows[size_cut]
-    jump_cols = jump_cols[size_cut]
+        _min_size = (min_size * np.ones(len(_x))).astype(_x.dtype)
+    matched_filt(_x, _jumps, _min_size, win_size)
+    jumps[msk] = _jumps > 0
 
-    jumps[np.flatnonzero(msk)[jump_rows], jump_cols] = True
+    if exact:
+        structure = np.array([[0, 0, 0], [1, 1, 1], [0, 0, 0]])
+        labels, _ = simg.label(jumps, structure)
+        peak_idx = np.array(
+            simg.maximum_position(
+                np.diff(_x, axis=-1, prepend=np.zeros(len(_x))), labels
+            )
+        )
+        jump_rows = [peak_idx[:, 0]]
+        jump_cols = peak_idx[:, 1]
+        jumps[:] = False
+        jumps[np.flatnonzero(msk)[jump_rows], jump_cols] = True
 
     return jumps.reshape(orig_shape)
 
@@ -199,12 +183,12 @@ def jumpfix_subtract_heights(
                  If inplace is True this is just a reference to x.
     """
 
-    def _fix(i, jump_ranges, heights, x_fixed):
+    def _fix(jump_ranges, heights, x_fixed):
         for j, jump_range in enumerate(jump_ranges):
             for start, end in jump_range.ranges():
-                _heights = heights[i + j, start:end]
+                _heights = heights[j, start:end]
                 height = _heights[np.argmax(np.abs(_heights))]
-                x_fixed[i + j, int((start + end) / 2):] -= height
+                x_fixed[j, int((start + end) / 2) :] -= height
 
     x_fixed = x
     if not inplace:
@@ -215,6 +199,8 @@ def jumpfix_subtract_heights(
         jumps = RangesMatrix.from_mask(np.atleast_2d(jumps))
     elif isinstance(jumps, Ranges):
         jumps = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
+    if not isinstance(jumps, RangesMatrix):
+        raise TypeError("jumps not RangesMatrix or convertable to RangesMatrix")
 
     if heights is None:
         heights = estimate_heights(x_fixed, jumps.mask(), **kwargs)
@@ -222,14 +208,7 @@ def jumpfix_subtract_heights(
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
 
-    nfuture = min(len(x_fixed), NFUTURE)
-    slices = [slice(i * nfuture, (i + 1) * nfuture) for i in range(nfuture)]
-    slices[-1] = slice(slices[-1].start, len(x_fixed))
-    with concurrent.futures.ThreadPoolExecutor() as e:
-        _ = [
-            e.submit(_fix, i, jumps.ranges[s], heights[s], x_fixed[s])
-            for i, s in enumerate(slices)
-        ]
+    _fix(jumps.ranges, heights, x_fixed)
 
     return x_fixed.reshape(orig_shape)
 
@@ -254,14 +233,16 @@ def _diff_buffed(
     win_size: int,
     make_step: bool,
 ) -> NDArray[np.floating]:
-    win_size = int(win_size)
-    pad = np.zeros((len(signal.shape), 2), dtype=int)
-    half_win = int(win_size / 2)
-    pad[-1, :] = half_win
+    win_size = int(win_size + win_size % 2)
     if jumps is not None and make_step:
         signal = _make_step(signal, jumps)
-    padded = np.pad(signal, pad, mode="edge")
-    diff_buffed = padded[..., win_size:] - padded[..., : (-1 * win_size)]
+    diff_buffed = np.empty_like(signal)
+    diff_buffed[..., :win_size] = 0
+    diff_buffed[..., win_size:] = np.subtract(
+        signal[..., win_size:],
+        signal[..., : (-1 * win_size)],
+        out=diff_buffed[..., win_size:],
+    )
 
     return diff_buffed
 
@@ -342,11 +323,13 @@ def twopi_jumps(
     win_size=...,
     nsigma=...,
     atol=...,
+    max_tol=...,
     fix: Literal[True] = True,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
+    ds=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
@@ -359,11 +342,13 @@ def twopi_jumps(
     win_size=...,
     nsigma=...,
     atol=...,
+    max_tol=...,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
+    ds=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array]:
     ...
@@ -375,11 +360,13 @@ def twopi_jumps(
     win_size: int = 20,
     nsigma: float = 5.0,
     atol: Optional[Union[float, NDArray[np.floating]]] = None,
+    max_tol: float = 0.0314,
     fix: bool = True,
     inplace: bool = False,
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps_2pi",
+    ds: int = 10,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -405,6 +392,9 @@ def twopi_jumps(
               If set to None, then nsigma times the WN level of the TOD is used.
               Note that in general this is faster than nsigma.
 
+        max_tol: Upper bound of the nsigma based thresh.
+                 atol ignores this.
+
         fix: If True the jumps will be fixed by adding N*2*pi at the jump locations.
 
         inplace: If True jumps will be fixed inplace.
@@ -414,6 +404,8 @@ def twopi_jumps(
         overwrite: If True will overwrite existing content of ``aman.flags.<name>``
 
         name: String used to populate field in flagmanager if merge is True.
+
+        ds: Downsample factor used when computing noise level, the actual factor used is `ds*win_size`.
 
         **filter_pars: Parameters to pass to _filter
 
@@ -432,34 +424,36 @@ def twopi_jumps(
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
     if atol is None:
-        atol = nsigma * std_est(signal.astype(float), ds=win_size)
-        np.clip(atol, 1e-8, 1e-2)
+        atol = nsigma * std_est(
+            signal.astype(float), ds=win_size * ds, win_size=win_size
+        )
+        np.clip(atol, 1e-8, max_tol)
 
     _signal = _filter(signal, **filter_pars)
-    diff_buffed = _diff_buffed(_signal, None, win_size, False)
-
-    if isinstance(atol, int):
-        atol = float(atol)
-    if isinstance(atol, float):
-        ratio = np.abs(diff_buffed) / (2 * np.pi)
-        jumps = (np.abs(ratio - np.round(ratio, 0)) <= atol) & (ratio >= 0.5)
-        jumps[..., :win_size] = False
-    elif isinstance(atol, np.ndarray):
-        jumps = np.atleast_2d(np.zeros_like(signal, dtype=bool))
-        diff_buffed = np.atleast_2d(diff_buffed)
-        if len(atol) != len(jumps):
-            raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
-        ratio = np.abs(diff_buffed / (2 * np.pi))
-        jumps = (np.abs(ratio - np.round(ratio, 0)) <= atol[..., None]) & (ratio >= 0.5)
-        jumps.reshape(signal.shape)
-    else:
+    _signal = np.atleast_2d(_signal)
+    if isinstance(atol, int) or isinstance(atol, float):
+        atol = np.ones(len(_signal), float) * float(atol)
+    elif np.isscalar(atol):
         raise TypeError(f"Invalid atol type: {type(atol)}")
+    if len(atol) != len(signal):
+        raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
 
+    _signal = np.ascontiguousarray(_signal)
+    heights = np.empty_like(_signal)
+    atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
+    if _signal.dtype.name == "float32":
+        find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+    elif _signal.dtype.name == "float64":
+        find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+    else:
+        raise TypeError("signal must be float32 or float64")
+
+    # Shift things by half the window
+    heights = np.roll(heights, -1 * int(win_size / 2), -1)
+    heights[:, (-1 * int(win_size / 2)) :] = 0
+
+    jumps = heights != 0
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
-    jumps = jump_ranges.mask()
-    heights = estimate_heights(
-        signal, jumps, win_size=win_size, twopi=True, diff_buffed=diff_buffed
-    )
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
@@ -596,16 +590,16 @@ def slow_jumps(
 def find_jumps(
     aman,
     signal=...,
-    max_iters=...,
     min_sigma=...,
     min_size=...,
     win_size=...,
-    nsigma=...,
+    exact=...,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
+    ds=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array]:
     ...
@@ -615,16 +609,16 @@ def find_jumps(
 def find_jumps(
     aman,
     signal=...,
-    max_iters=...,
     min_sigma=...,
     min_size=...,
     win_size=...,
-    nsigma=...,
+    exact=...,
     fix: Literal[True] = True,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
+    ds=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
@@ -633,16 +627,16 @@ def find_jumps(
 def find_jumps(
     aman: AxisManager,
     signal: Optional[NDArray[np.floating]] = None,
-    max_iters: int = 1,
     min_sigma: Optional[float] = None,
     min_size: Optional[Union[float, NDArray[np.floating]]] = None,
     win_size: int = 20,
-    nsigma: float = 25,
+    exact: bool = False,
     fix: bool = False,
     inplace: bool = False,
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps",
+    ds: int = 10,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -668,10 +662,11 @@ def find_jumps(
                   if set this will override min_sigma.
                   If both min_sigma and min_size are None then the IQR is used as min_size.
 
-        win_size: Size of window used by SG filter when peak finding.
+        win_size: Size of window used when peak finding.
                   Also used for height estimation, should be of order jump width.
 
-        nsigma: Number of sigma above the mean for something to be a peak.
+        exact: If True search for the exact jump location.
+               If False flag allow some undertainty within the window (cheaper).
 
         fix: Set to True to fix.
 
@@ -682,6 +677,8 @@ def find_jumps(
         overwrite: If True will overwrite existing content of ``aman.flags.<name>``
 
         name: String used to populate field in flagmanager if merge is True.
+
+        ds: Downsample factor used when computing noise level, the actual factor used is `ds*win_size`.
 
         **filter_pars: Parameters to pass to _filter
 
@@ -702,35 +699,28 @@ def find_jumps(
         raise TypeError("Signal is not an array")
 
     orig_shape = signal.shape
+    _signal = _filter(signal, **filter_pars)
+    _signal = np.atleast_2d(_signal)
+
     if len(orig_shape) > 2:
         raise ValueError("Jumpfinder only works on 1D or 2D data")
 
     if min_size is None and min_sigma is not None:
-        min_size = min_sigma * std_est(signal, ds=win_size, axis=-1)
+        min_size = min_sigma * std_est(
+            signal, ds=win_size * ds, win_size=win_size, axis=-1
+        )
     if min_size is None:
         raise ValueError("min_size is somehow still None")
     if isinstance(min_size, np.ndarray) and np.ndim(min_size) > 1:  # type: ignore
         raise ValueError("min_size must be 1d or a scalar")
     elif isinstance(min_size, (float, int)):
-        min_size = float(min_size) * np.ones(len(signal))
+        min_size = float(min_size) * np.ones(len(_signal))
 
-    _signal = _filter(signal, **filter_pars)
-    if max_iters > 1:
-        _signal = signal.copy()
-    _signal = np.atleast_2d(_signal)
-    # Median subtract, if we don't do this then when we cumsum we get floats
+    # Mean subtract, if we don't do this then when we cumsum we get floats
     # that are too big and lack the precicion to find jumps well
-    _signal -= np.median(_signal, axis=-1)[..., None]
+    _signal -= np.mean(_signal, axis=-1)[..., None]
 
-    nfuture = min(len(_signal), NFUTURE)
-    slices = [slice(i * nfuture, (i + 1) * nfuture) for i in range(nfuture)]
-    slices[-1] = slice(slices[-1].start, len(_signal))
-    with concurrent.futures.ThreadPoolExecutor() as e:
-        jump_futures = [
-            e.submit(_jumpfinder, _signal[s], min_size[s], win_size, nsigma)
-            for s in slices
-        ]
-    jumps = np.vstack([j.result() for j in jump_futures]).reshape(orig_shape)
+    jumps = _jumpfinder(_signal, min_size, win_size, exact).reshape(orig_shape)
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()

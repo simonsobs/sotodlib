@@ -1,10 +1,12 @@
 """Base Class and PIPELINE register for the preprocessing pipeline scripts."""
 import os
+import copy
 import logging
 import numpy as np
 from .. import core
 from so3g.proj import Ranges, RangesMatrix
 from scipy.sparse import csr_array
+from matplotlib import pyplot as plt
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -270,7 +272,7 @@ def _expand(new, full, wrap_valid=True):
                 continue
             out.wrap_new( k, new._assignments[k], cls=_zeros_cls(v))
             oidx=[]; nidx=[]
-            for a in new._assignments[k]:
+            for ii, a in enumerate(new._assignments[k]):
                 if a == 'dets':
                     oidx.append(fs_dets)
                     nidx.append(ns_dets)
@@ -278,8 +280,19 @@ def _expand(new, full, wrap_valid=True):
                     oidx.append(fs_samps)
                     nidx.append(ns_samps)
                 else:
-                    oidx.append(slice(None))
-                    nidx.append(slice(None))
+                    if (ii == 0) and isinstance(out[k], RangesMatrix): # Treat like dets
+                        # _ranges_matrix_match expects oidx[0] and nidx[0] to be list(inds), not slice.
+                        # Unknown axes treated as dets if first entry, else like samps. Added to support (subscans, samps) RangesMatrix.
+                        if a in full._axes:
+                            _, fs, ns = full[a].intersection(new[a], return_slices=True)
+                        else:
+                            fs = range(new[a].count)
+                            ns = range(new[a].count)
+                        oidx.append(fs)
+                        nidx.append(ns)
+                    else: # Treat like samps
+                        oidx.append(slice(None))
+                        nidx.append(slice(None))
             oidx = tuple(oidx)
             nidx = tuple(nidx)
             if isinstance(out[k], RangesMatrix):
@@ -357,7 +370,7 @@ class Pipeline(list):
         self.logger = logger
         self.plot_dir = plot_dir
         self.wrap_valid = wrap_valid
-        super().__init__( [self._check_item(item) for item in modules])
+        super().__init__( [self._check_item(item) for item in copy.deepcopy(modules)])
     
     def _check_item(self, item):
         if isinstance(item, _Preprocess):
@@ -431,8 +444,12 @@ class Pipeline(list):
         
         """
         if proc_aman is None:
-            proc_aman = core.AxisManager( aman.dets, aman.samps)
-            full = core.AxisManager( aman.dets, aman.samps)
+            if 'preprocess' in aman:
+                proc_aman = aman.preprocess.copy()
+                full = aman.preprocess.copy()
+            else:
+                proc_aman = core.AxisManager(aman.dets, aman.samps)
+                full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
             update_plot = False
         else:
@@ -456,6 +473,7 @@ class Pipeline(list):
                 update_full_aman( proc_aman, full, self.wrap_valid)
             if update_plot:
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
+            plt.close()
             if select:
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
