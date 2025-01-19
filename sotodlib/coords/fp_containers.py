@@ -178,9 +178,9 @@ class FocalPlane:
         if template is None:
             raise TypeError("template must be an instance of Template, not None")
         full_fp = np.full(template.fp.shape + (n_aman,), np.nan)
-        tot_weight = np.zeros(len(template.det_ids))
+        tot_weight = np.zeros((len(template.det_ids), 2))
         avg_fp = np.full_like(template.fp, np.nan)
-        weight = np.zeros(len(template.det_ids))
+        weight = np.zeros((len(template.det_ids), 2))
         transformed = template.fp.copy()
         center = template.center.copy()
         center_transformed = template.center.copy()
@@ -219,6 +219,7 @@ class FocalPlane:
         srt = np.argsort(aman.det_info.det_id[msk])
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
+        r2 = aman.pointing.R2[msk][srt][mapping]
         if "polarization" in aman:
             # name of field just a placeholder for now
             gamma = aman.polarization.polang[msk][srt][mapping]
@@ -227,12 +228,13 @@ class FocalPlane:
         else:
             gamma = np.full(len(xi), np.nan)
         fp = np.column_stack((xi, eta, gamma))
-        return fp, template_msk
+        return fp, r2, template_msk
 
     def add_fp(self, i, fp, weights, template_msk):
         if self.full_fp is None or self.tot_weight is None:
             raise ValueError("full_fp or tot_weight not initialized")
-        self.full_fp[template_msk, :, i] = fp * weights[..., None]
+        self.full_fp[template_msk, :, i] = fp * weights[:, 0][..., None]
+        weights = np.nan_to_num(weights)
         self.tot_weight[template_msk] += weights
 
     def save(self, f, db_info, group):
@@ -269,6 +271,7 @@ class FocalPlane:
             ("eta_m", np.float32),
             ("gamma_m", np.float32),
             ("weights", np.float32),
+            ("r2", np.float32),
             ("n_point", np.int8),
             ("n_gamma", np.int8),
         ]
@@ -277,7 +280,7 @@ class FocalPlane:
                 self.det_ids,
                 *(self.transformed.T),
                 *(self.avg_fp.T),
-                self.weights,
+                *(self.weights.T),
                 self.n_point,
                 self.n_gamma,
             ),
@@ -305,6 +308,8 @@ class FocalPlane:
     def load(cls, group):
         stream_id = group.name.split("/")[-1]
         fp_full = read_dataset(group.file, f"{group.name}/focal_plane_full")
+        if fp_full.keys is None:
+            raise ValueError("fp_full somehow has no keys")
         det_ids = fp_full["dets:det_id"]
         avg_fp = np.column_stack(
             (
@@ -313,7 +318,10 @@ class FocalPlane:
                 np.array(fp_full["gamma_m"]),
             )
         )
-        weights = fp_full["weights"]
+        # For backwards compatibility
+        weights = np.array(fp_full["weights"])
+        if "r2" in fp_full.keys:
+            weights = np.column_stack((weights, np.array(fp_full["r2"])))
         transformed = np.column_stack(
             (
                 np.array(fp_full["xi_t"]),

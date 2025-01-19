@@ -60,9 +60,9 @@ def _avg_focalplane(full_fp, tot_weight):
     msk = np.isfinite(full_fp)
     n_obs = np.sum(np.any(msk, axis=1), axis=-1)
     n_point, _, n_gamma = tuple(np.sum(msk, axis=-1).T)
-    tot_weight[tot_weight == 0] = np.nan
-    avg_fp = np.nansum(full_fp, axis=-1) / tot_weight[..., None]
-    avg_weight = tot_weight / n_obs
+    tot_weight[tot_weight[:, 0] == 0] = np.nan
+    avg_fp = np.nansum(full_fp, axis=-1) / tot_weight[:, 0][..., None]
+    avg_weight = tot_weight / n_obs[..., None]
 
     # nansum all all nans is 0, addressing that case here
     all_nan = ~np.any(
@@ -334,7 +334,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
 def _restrict_inliers(aman, focal_plane):
     # TODO: Use gamma as well
     # Map to template
-    fp, template_msk = focal_plane.map_by_det_id(aman)
+    fp, _, template_msk = focal_plane.map_by_det_id(aman)
     fp = fp[:, :2]
     inliers = np.ones(len(fp), dtype=bool)
 
@@ -553,7 +553,7 @@ def main():
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
-                fp, template_msk = focal_plane.map_by_det_id(aman)
+                fp, r2, template_msk = focal_plane.map_by_det_id(aman)
                 focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
@@ -582,10 +582,11 @@ def main():
                     )
                 # ~1 sigma cut
                 weights[weights < 0.61] = np.nan
-                if np.sum(np.isfinite(weights)) < min_points/2:
+                if np.sum(np.isfinite(weights)) < min_points / 2:
                     logger.error("\t\tToo few points! Skipping...")
 
                 # Store weighted values
+                weights = np.column_stack((weights, r2))
                 focal_plane.add_fp(i, fp, weights, template_msk)
 
             # Compute the average focal plane with weights
@@ -605,7 +606,7 @@ def main():
                 affine, shift = mt.get_affine_two_stage(
                     focal_plane.template.fp[:, :2],
                     focal_plane.avg_fp[:, :2],
-                    focal_plane.weights,
+                    focal_plane.weights[:, 0],
                 )
             except ValueError as e:
                 logger.error("\t%s", e)
