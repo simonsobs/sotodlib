@@ -212,7 +212,7 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
     try:
         obs.signal
         has_signal = True
-    except KeyError:
+    except AttributeError:
         has_signal = False
     
     #if obs.signal is not None:
