@@ -26,6 +26,9 @@ class HkConfig:
     """
     Configuration object for indexing and loading from an HK archive.
 
+    If instantiating from a nested dictionary, the ``from_dict`` class method
+    can be used to convert fields to their proper data types.
+
     Args
     ------------
     hk_root: str
@@ -72,6 +75,11 @@ class HkConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "HkConfig":
+        """
+        Generates an HkConfig object from a dictionary whose keys are fields of
+        the HkConfig dataclass. This will preprocess some specific fields, such
+        as ``db_url``, transforming them into the correct type.
+        """
         _db_url = data.get('db_url')
         if isinstance(_db_url, dict):
             url_dict = data['db_url']
