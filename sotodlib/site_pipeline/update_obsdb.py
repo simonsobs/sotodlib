@@ -185,9 +185,9 @@ def main(config: str,
                 if book_id in config_dict["known_bad_books"]:
                     logger.debug(f"{book_id} known to be bad, skipping it")
                     continue
-                found_timestamp = re.search(r"\d{10}", book_id)#Find the rough timestamp
-                if found_timestamp and int(found_timestamp.group())>tback:
-                    #Looks like a book folder and young enough
+                edit_time = os.path.getmtime(dirpath)
+                if edit_time > tback:
+                    #Looks like a book folder and edited recently enough
                     bookcart.append(dirpath)
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
