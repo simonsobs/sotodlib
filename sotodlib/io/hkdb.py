@@ -77,8 +77,13 @@ class HkConfig:
     def from_dict(cls, data: Dict[str, Any]) -> "HkConfig":
         """
         Generates an HkConfig object from a dictionary whose keys are fields of
-        the HkConfig dataclass. This will preprocess some specific fields, such
-        as ``db_url``, transforming them into the correct type.
+        the HkConfig dataclass.
+
+        If the ``db_url`` is specified, it can be set as a string, a
+        dictionary, or a sqlalchemy URL object. If it is of type dict, it
+        will be converted to a URL object by passing it through to the keyword
+        arguments of sqlalchemy's URL.create function. Environment variables
+        will be expanded in both the string and dict representations.
         """
         _db_url = data.get('db_url')
         if isinstance(_db_url, dict):
