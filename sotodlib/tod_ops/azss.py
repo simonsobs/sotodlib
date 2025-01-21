@@ -293,13 +293,13 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
             left_mask = turnaround_info.valid_left_scans
             right_mask = turnaround_info.valid_right_scans
 
-        azss_left = _prepare_azss_stats(aman, signal, az, frange, bins, flags+left_mask, apodize_edges,
+        azss_left = _prepare_azss_stats(aman, signal, az, frange, bins, flags+~left_mask, apodize_edges,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
         azss_left.add_axis(aman.samps)
         azss_left.add_axis(aman.dets)
         azss_left.wrap('mask', left_mask, [(0, 'dets'), (1, 'samps')])
-        azss_right = _prepare_azss_stats(aman, signal, az, frange, bins, flags+right_mask, apodize_edges,
+        azss_right = _prepare_azss_stats(aman, signal, az, frange, bins, flags+~right_mask, apodize_edges,
                                         apodize_edges_samps, apodize_flags, apodize_flags_samps,
                                         method=method, max_mode=max_mode)
         azss_right.add_axis(aman.samps)
@@ -383,6 +383,8 @@ def get_model_sig_tod(aman, azss_stats, az=None):
                                       _azss_stats.binned_signal[:, good_az], fill_value='extrapolate')
                 _model = f_template(az)
                 model.append(_model)
+        for ii in range(len(model)):
+            model[ii][~np.isfinite(model[ii])] = 0
         return azss_stats, model[0], model[1]
 
     else:
@@ -400,6 +402,7 @@ def get_model_sig_tod(aman, azss_stats, az=None):
             good_az = np.logical_and(azss_stats.binned_az >= np.min(az), azss_stats.binned_az <= np.max(az))
             f_template = interp1d(azss_stats.binned_az[good_az], azss_stats.binned_signal[:, good_az], fill_value='extrapolate')
             model = f_template(az)
+            model[~np.isfinite(model[ii])] = 0
         return azss_stats, model, None
 
 def subtract_azss(aman, azss_stats, signal='signal', subtract_name='azss_remove',
