@@ -79,7 +79,6 @@ def simulate_data(job, otherargs, runargs, data):
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After simulating data:  {mem}", comm)
-
     wrk.save_data_hdf5(job, otherargs, runargs, data)
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
@@ -88,6 +87,7 @@ def simulate_data(job, otherargs, runargs, data):
 
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
+    comm = data.comm.comm_world
 
     wrk.preprocess(job, otherargs, runargs, data)
 
