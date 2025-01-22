@@ -100,7 +100,7 @@ class LogInfoFilter(logging.Filter):
         record.memmax= memory.max()/1024.**3
         return record
 
-def handle_empty(prefix, tag, comm, e):
+def handle_empty(prefix, tag, comm, e, L):
     # This happens if we ended up with no valid tods for some reason
     if comm.rank == 0:
         L.info("%s Skipped: %s" % (tag, str(e)))
@@ -176,6 +176,8 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     wcs.wcs.crpix -= union_pixbox[0,::-1]
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
+
+class DataMissing(Exception): pass
 
 def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, site='so'):
     my_tods = []
@@ -439,7 +441,7 @@ def main(config_file=None, defaults=defaults, **args):
                 write_depth1_info(prefix + "_info.hdf", d1info)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
-            handle_empty(prefix, tag, comm_intra, e)
+            handle_empty(prefix, tag, comm_intra, e, L)
             continue
         # 4. redistribute the valid tasks. Tasks with nothing to do don't continue
         # past here.
