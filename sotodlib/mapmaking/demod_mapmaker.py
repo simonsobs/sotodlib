@@ -148,7 +148,7 @@ class DemodSignal:
 
 class DemodSignalMap(DemodSignal):
     def __init__(self, shape=None, wcs=None, comm=None, comps="TQU", name="sky", ofmt="{name}", output=True,
-                 ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False,
+                 ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False,
                  nside=None, nside_tile=None):
         """
         Parent constructor; use for_rectpix or for_healpix instead. Args described there.
@@ -158,7 +158,8 @@ class DemodSignalMap(DemodSignal):
         self.comps = comps
         self.sys   = sys
         self.recenter = recenter
-        self.dtype = dtype
+        self.dtype_map = dtype_map
+        self.dtype_tod = dtype_tod
         self.tile_shape = tile_shape        
         self.tiled = tiled
         self.data  = {}
@@ -173,9 +174,9 @@ class DemodSignalMap(DemodSignal):
             self.tiled = (nside_tile is not None)
             self.hp_geom = coords.healpix_utils.get_geometry(nside, nside_tile, ordering='NEST')
             npix = 12 * nside**2
-            self.rhs = np.zeros((Nsplits, ncomp, npix), dtype=dtype)
-            self.div = np.zeros((Nsplits, ncomp, ncomp, npix), dtype=dtype)
-            self.hits = np.zeros((Nsplits, npix), dtype=dtype)
+            self.rhs = np.zeros((Nsplits, ncomp, npix), dtype=dtype_map)
+            self.div = np.zeros((Nsplits, ncomp, ncomp, npix), dtype=dtype_map)
+            self.hits = np.zeros((Nsplits, npix), dtype=dtype_map)
 
             if self.tiled:
                 self.wrapper = coords.healpix_utils.tiled_to_full
@@ -190,7 +191,7 @@ class DemodSignalMap(DemodSignal):
 
     @classmethod
     def for_rectpix(cls, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
+            ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
         """
         Signal describing a non-distributed sky map. Signal describing a sky map in the coordinate 
         system given by "sys", which defaults to equatorial coordinates. If tiled==True, then this 
@@ -235,12 +236,12 @@ class DemodSignalMap(DemodSignal):
         
         """
         return cls(shape=shape, wcs=wcs, comm=comm, comps=comps, name=name, ofmt=ofmt, output=output,
-                   ext=ext, dtype=dtype, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
+                   ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
                    Nsplits=Nsplits, singlestream=singlestream, nside=None, nside_tile=None)
 
     @classmethod
     def for_healpix(cls, nside, nside_tile=None, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits.gz", dtype=np.float32, Nsplits=1, singlestream=False):
+            ext="fits.gz", dtype_map=np.float64, dtype_tod=np.float32, Nsplits=1, singlestream=False):
         """
         Signal describing a sky map in healpix pixelization, NEST ordering.
 
@@ -263,7 +264,7 @@ class DemodSignalMap(DemodSignal):
             The extension used for the files.
             May be 'fits', 'fits.gz', 'h5', 'h5py', or 'npy'.
         dtype : numpy.dtype
-            The data type to use for the time-ordered data.
+            The data type to use for the maps.
         Nsplits : int, optional
             Number of splits that you will map simultaneously. By default is 1 when no
             splits are requested.
@@ -273,7 +274,7 @@ class DemodSignalMap(DemodSignal):
             obs.demodQ, obs.demodU
         """
         return cls(shape=None, wcs=None, comm=None, comps=comps, name=name, ofmt=ofmt, output=output,
-                   ext=ext, dtype=dtype, sys=None, recenter=None, tile_shape=None, tiled=False,
+                   ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
     def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
@@ -318,7 +319,7 @@ class DemodSignalMap(DemodSignal):
                 self.wcs = wcs
 
             if not(self.singlestream):
-                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT, signalQ=obs.demodQ, signalU=obs.demodU,
+                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT.astype(self.dtype_tod), signalQ=obs.demodQ.astype(self.dtype_tod), signalU=obs.demodU.astype(self.dtype_tod),
                                                                det_weightsT=2*nmat.ivar, det_weightsQU=nmat.ivar, ncomp=self.ncomp, wrapper=self.wrapper)
             else:
                 obs_rhs, obs_div, obs_hits = project_all_single(pmap=pmap_local, Nd=Nd, det_weights=nmat.ivar, comps='TQU', wrapper=self.wrapper)
@@ -375,14 +376,14 @@ class DemodSignalMap(DemodSignal):
                     raise ImportError("Cannot save healpix map as fits; healpy could not be imported. Install healpy or save as npy or h5")
                 if m.ndim > 2:
                     m = np.reshape(m, (np.prod(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
-                hp.write_map(oname, m.view(self.dtype), nest=(self.hp_geom.ordering=='NEST'), overwrite=True)
+                hp.write_map(oname, m.view(self.dtype_map), nest=(self.hp_geom.ordering=='NEST'), overwrite=True)
             elif self.ext == "npy":
-                np.save(oname, {'nside': self.hp_geom.nside, 'ordering':self.hp_geom.ordering, 'data':m.view(self.dtype)}, allow_pickle=True)
+                np.save(oname, {'nside': self.hp_geom.nside, 'ordering':self.hp_geom.ordering, 'data':m.view(self.dtype_map)}, allow_pickle=True)
             elif self.ext in ['h5', 'hdf5']:
                 if h5py is None:
                     raise ValueError("Cannot save healpix map as hdf5; h5py could not be imported. Install h5py or save as npy or fits")
                 with h5py.File(oname, 'w') as f:
-                    dset = f.create_dataset("data", m.shape, dtype=self.dtype, data=m)
+                    dset = f.create_dataset("data", m.shape, dtype=self.dtype_map, data=m)
                     dset.attrs['ordering'] = self.hp_geom.ordering
                     dset.attrs['nside'] = self.hp_geom.nside
             else:
@@ -393,17 +394,17 @@ class DemodSignalMap(DemodSignal):
     def init_maps_rectpix(self, shape, wcs):
         """ Initialize tilemaps or enmaps rhs, div, hits for given shape and wcs"""
         shape = tuple(shape[-2:])
-        Nsplits, ncomp, dtype = self.Nsplits, self.ncomp, self.dtype
+        Nsplits, ncomp, dtype = self.Nsplits, self.ncomp, self.dtype_map
         
         if self.tiled:
             geo = tilemap.geometry(shape, wcs, tile_shape=self.tile_shape)
-            rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=dtype)
-            div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=dtype)
-            hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=dtype)
+            rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=self.dtype_map)
+            div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=self.dtype_map)
+            hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=self.dtype_map)
         else:
-            rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=dtype)
-            div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
-            hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
+            rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=self.dtype_map)
+            div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=self.dtype_map)
+            hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=self.dtype_map)
         self.rhs = rhs
         self.div = div
         self.hits = hits
@@ -413,7 +414,7 @@ class DemodSignalMap(DemodSignal):
 def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                     comm=mpi.COMM_WORLD, comps='TQU', split_labels=None,
                     singlestream=False, dtype_tod=np.float32,
-                    dtype_map=np.float32, recenter=None, verbose=0):
+                    dtype_map=np.float64, recenter=None, verbose=0):
     """
     Setup the classes for demod mapmaking and return
     a DemodMapmmaker object
@@ -421,14 +422,14 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
     if wcs is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                              dtype=dtype_map, tiled=False,
+                                              dtype_map=dtype_map, dtype_tod=dtype_tod, tiled=False,
                                               ofmt="", Nsplits=Nsplits,
                                               singlestream=singlestream,
                                               recenter=recenter)
     elif nside is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
-                                    comps=comps, dtype=dtype_map,
+                                    comps=comps, dtype_map=dtype_map, dtype_tod=dtype_tod,
                                     ofmt="", Nsplits=Nsplits,
                                     singlestream=singlestream,
                                     ext="fits.gz")
@@ -441,7 +442,7 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
 
 def atomic_db_aux(atomic_db, info, valid = True):
     info.valid = valid
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=True)
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
