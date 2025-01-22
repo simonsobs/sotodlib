@@ -143,8 +143,7 @@ def multilayer_preprocess_tod(obs_id,
         dets = {gb:gg for gb, gg in zip(group_by_proc, group)}
         try:
             error, outputs_grp_init, _, aman = pp_util.preproc_or_load_group(obs_id, configs_init,
-                                                                             dets=dets, logger=logger,
-                                                                             context_init=context_init)
+                                                                             dets=dets, logger=logger)
             if error is None:
                 outputs_init.append(outputs_grp_init)
 
