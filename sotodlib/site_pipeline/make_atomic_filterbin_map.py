@@ -1,6 +1,6 @@
 from __future__ import annotations
 from argparse import ArgumentParser
-from typing import Optional, Union, TYPE_CHECKING
+from typing import Optional, Union, Callable
 from dataclasses import dataclass
 import time
 import datetime as dt
@@ -20,11 +20,11 @@ from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
-from sotodlib.utils.procs_pool import as_completed, get_exec_env
+from sotodlib.utils.procs_pool import get_exec_env
 from so3g.proj import coords as so3g_coords
-from pixell import enmap, utils as putils
-from pixell import wcsutils, colors, memory
-from pixell.fake_communicator import FakeCommunicator
+from pixell import enmap, wcsutils, colors, memory
+from pixell import utils as putils
+from pixell.mpiutils import FakeCommunicator
 
 
 @dataclass
@@ -239,7 +239,10 @@ def future_write_to_log(e, errlog):
     f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
     f.close()
 
-def main(config_file: str, executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"]) -> None:
+def main(
+    config_file: str,
+    executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"],
+    as_completed_callable: Callable) -> None:
     args = Cfg.from_yaml(config_file)
 
     # Set up logging.
@@ -447,7 +450,7 @@ def main(config_file: str, executor: Union["MPIPoolExecutor", "ProcessPoolExecut
             singlestream=args.singlestream,
             site=args.site,
             atomic_db=args.atomic_db) for r in run_list]
-    for future in as_completed(futures):
+    for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:
             errors, outputs = future.result()
@@ -478,6 +481,6 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
-    rank, executor = get_exec_env(args.nprocs)
+    rank, executor, as_completed_callable = get_exec_env(args.nprocs)
     if rank == 0:
-        main(args.config_file, executor)
+        main(args.config_file, executor, as_completed_callable)
