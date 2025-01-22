@@ -354,14 +354,20 @@ def main(configs_init: str,
             futures.remove(future)
 
             if db_datasets_init:
-                logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                for db_dataset in db_datasets_init:
-                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+                if err is None:
+                    for db_dataset in db_datasets_init:
+                        logger.info(f'Processing future result db_dataset: {db_datasets_init}')
+                        pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+                else:
+                    pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
 
             if db_datasets_proc:
-                logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
-                for db_dataset in db_datasets_proc:
-                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+                if err is None:
+                    logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
+                    for db_dataset in db_datasets_proc:
+                        pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+                else:
+                    pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)
