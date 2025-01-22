@@ -2,21 +2,36 @@ from __future__ import annotations
 from typing import Tuple, Union, List, Callable, Optional
 
 
-def _get_mpi_comm() -> Tuple[bool, int, Optional["MPICommExecutor"], Optional[Callable]]:
+def _get_mpi_comm() -> (
+    Tuple[bool, int, Optional["MPICommExecutor"], Optional[Callable]]
+):
+    """This private function tries to create an MPICommExecutor object and returns it if successful.
+
+    Returns
+    -------
+    bool
+        Whether an MPICommExecutor object was created successfully. This is important as only rank 0 creates the executor and all other ranks return None as an executor.
+    int
+        The global rank of the master process.
+    Optional["MPICommExecutor"]
+        If the executor was created successfully, this is the MPICommExecutor object. Otherwise, it is None.
+    Optional[Callable]
+        If the executor was created successfully, this is the as_completed function. Otherwise, it is None.
+    """
     try:
         from mpi4py.futures import MPICommExecutor
         from mpi4py.futures import as_completed
         from mpi4py import MPI
 
         comm = MPI.COMM_WORLD
-    
+
         rank = comm.Get_rank()
         max_workers = comm.Get_size() - 1
-        
+
         return (
             True,
             rank,
-             MPICommExecutor(comm, root=0, max_workers=max_workers).__enter__(),
+            MPICommExecutor(comm, root=0, max_workers=max_workers).__enter__(),
             as_completed,
         )
     except (NameError, ImportError):
@@ -25,7 +40,20 @@ def _get_mpi_comm() -> Tuple[bool, int, Optional["MPICommExecutor"], Optional[Ca
 
 def _get_concurrent_comm(
     nprocs: Optional[int] = None,
-) -> Tuple[bool, int, "ProcessPoolExecutor", Callable]:
+) -> Tuple[int, "ProcessPoolExecutor", Callable]:
+    """This private function tries to create an ProcessPoolExecutor object and returns it if successful.
+
+    Returns
+    -------
+    bool
+        Whether an ProcessPoolExecutor object was created successfully. This is important as only rank 0 creates the executor and all other ranks return None as an executor.
+    int
+        The global rank of the master process.
+    Optional["ProcessPoolExecutor"]
+        If the executor was created successfully, this is the ProcessPoolExecutor object. Otherwise, it is None.
+    Optional[Callable]
+        If the executor was created successfully, this is the as_completed function. Otherwise, it is None.
+    """
 
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures import as_completed
@@ -62,7 +90,7 @@ def get_exec_env(
 
     Utilizing different executors requires to change the main function as follows:
     >>> def main_func(executor, as_completed_callable):
-    >>>      futures = []
+    >>>     futures = []
     >>>     for i in range(10):
     >>>         futures.append(executor.submit(some_func, i))
     >>>     for future in as_completed_callable(futures):
@@ -82,8 +110,6 @@ def get_exec_env(
 
     Returns
     -------
-    bool
-        Whether the executor was created successfully or not. This is important under MPI as the executor is only returned in rank 0. All other ranks have None as an executor.
     int
         The rank of the process that is the master process for this type of execution
 
@@ -103,9 +129,13 @@ def get_exec_env(
         executor_mode = priority.pop(0)
         match executor_mode:
             case "mpi":
-                executor_created, rank, executor, as_completed_callable = _get_mpi_comm()
+                executor_created, rank, executor, as_completed_callable = (
+                    _get_mpi_comm()
+                )
             case "process_pool":
-                executor_created, rank, executor, as_completed_callable = _get_concurrent_comm(nprocs)
+                executor_created, rank, executor, as_completed_callable = (
+                    _get_concurrent_comm(nprocs)
+                )
             case _:
                 raise ValueError("No executor available")
 
