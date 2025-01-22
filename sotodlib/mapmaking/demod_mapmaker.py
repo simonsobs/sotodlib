@@ -191,7 +191,7 @@ class DemodSignalMap(DemodSignal):
 
     @classmethod
     def for_rectpix(cls, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype=np.float64, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
+            ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
         """
         Signal describing a non-distributed sky map. Signal describing a sky map in the coordinate 
         system given by "sys", which defaults to equatorial coordinates. If tiled==True, then this 
@@ -236,12 +236,12 @@ class DemodSignalMap(DemodSignal):
         
         """
         return cls(shape=shape, wcs=wcs, comm=comm, comps=comps, name=name, ofmt=ofmt, output=output,
-                   ext=ext, dtype=dtype, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
+                   ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
                    Nsplits=Nsplits, singlestream=singlestream, nside=None, nside_tile=None)
 
     @classmethod
     def for_healpix(cls, nside, nside_tile=None, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits.gz", dtype=np.float64, Nsplits=1, singlestream=False):
+            ext="fits.gz", dtype_map=np.float64, dtype_tod=np.float32, Nsplits=1, singlestream=False):
         """
         Signal describing a sky map in healpix pixelization, NEST ordering.
 
@@ -274,7 +274,7 @@ class DemodSignalMap(DemodSignal):
             obs.demodQ, obs.demodU
         """
         return cls(shape=None, wcs=None, comm=None, comps=comps, name=name, ofmt=ofmt, output=output,
-                   ext=ext, dtype=dtype, sys=None, recenter=None, tile_shape=None, tiled=False,
+                   ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
     def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
@@ -398,13 +398,13 @@ class DemodSignalMap(DemodSignal):
         
         if self.tiled:
             geo = tilemap.geometry(shape, wcs, tile_shape=self.tile_shape)
-            rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=dtype_map)
-            div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=dtype_map)
-            hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=dtype_map)
+            rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=self.dtype_map)
+            div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=self.dtype_map)
+            hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=self.dtype_map)
         else:
-            rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=dtype_map)
-            div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype_map)
-            hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype_map)
+            rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=self.dtype_map)
+            div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=self.dtype_map)
+            hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=self.dtype_map)
         self.rhs = rhs
         self.div = div
         self.hits = hits
@@ -422,14 +422,14 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
     if wcs is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                              dtype=dtype_map, tiled=False,
+                                              dtype_map=dtype_map, dtype_tod=dtype_tod, tiled=False,
                                               ofmt="", Nsplits=Nsplits,
                                               singlestream=singlestream,
                                               recenter=recenter)
     elif nside is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
-                                    comps=comps, dtype=dtype_map,
+                                    comps=comps, dtype_map=dtype_map, dtype_tod=dtype_tod,
                                     ofmt="", Nsplits=Nsplits,
                                     singlestream=singlestream,
                                     ext="fits.gz")
@@ -442,7 +442,7 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
 
 def atomic_db_aux(atomic_db, info, valid = True):
     info.valid = valid
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=True)
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
