@@ -625,6 +625,7 @@ class Calibrate(_Preprocess):
                 cal_arr = _f(proc_aman)
             else:
                 cal_arr = _f(aman)
+            cal_arr = cal_arr.astype(np.float32)
             if self.process_cfgs.get("divide", False):
                 aman[self.signal] = np.divide(aman[self.signal].T, cal_arr).T
             else:
