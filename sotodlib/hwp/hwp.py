@@ -667,6 +667,7 @@ def get_hwpss_subscan(
     Arguments: same as `get_hwpss`
     '''
 
+<<<<<<< HEAD
     get_hwpss(
         aman=aman,
         flags=flags,
@@ -692,6 +693,41 @@ def get_hwpss_subscan(
         i = subscan_flag.ranges()[0]
         sub_aman = aman.restrict('samps', (i[0] + aman.samps.offset, i[1] + aman.samps.offset), in_place=False)
         sub_aman.move(hwpss_model_name, None)
+=======
+    #first round glitch finding
+    tod_ops.flags.get_glitch_flags(aman, signal_name='signal', merge=True, name='hwpss_glitches_1',overwrite=True)
+
+    logger.info('subtracting hwpss from full tod for better glitch detection')
+    get_hwpss(aman, flags=aman.flags.hwpss_glitches_1, merge_stats=False)
+    subtract_hwpss(aman, in_place=False,remove_template=True)
+
+    logger.info('glitch finding post full tod hwpss subtraction')
+    tod_ops.flags.get_glitch_flags(aman, signal_name='hwpss_remove', merge=True, name='hwpss_glitches_2',overwrite=True)
+
+    #delete hwpss_remove
+    aman.move('hwpss_remove',None)
+
+    aman.flags.reduce(flags=['hwpss_glitches_1', 'hwpss_glitches_2'], method='union', wrap=True,
+                      new_flag='hwpss_glitches', remove_reduced=True)
+    
+    #subtract HWPSS by subscan
+    #define hwpss_avoid flags for mask to avoid in hwpss estimation
+    if 'hwpss_avoid' in aman.flags._assignments.keys():
+        aman.flags.move('hwpss_avoid',None)
+
+    aman.flags.reduce(flags=['hwpss_glitches', 'turnarounds'], method='union', wrap=True,
+                      new_flag='hwpss_avoid', remove_reduced=False)   
+
+    #prepare arrays for subscan subtracted signal and model
+    num_subscans = aman.subscan_info.subscan_flags.shape[0]
+    subtracted_sig = np.zeros_like(aman.signal)
+    hwpssmodel = np.zeros_like(aman.signal)
+
+    for j in range(num_subscans):
+        i = aman.subscan_info.subscan_flags[j].ranges()[0]
+
+        sub_aman = aman.restrict('samps',(i[0]+aman.samps.offset, i[1]+aman.samps.offset),in_place=False)
+>>>>>>> 6ad87d7b (updates to subscan subtraction function in hwp.py)
         if flags is None:
             sub_flag = RangesMatrix.from_mask(np.zeros(aman.samps.count, dtype=int)[i[0]:i[1]])
         else:
