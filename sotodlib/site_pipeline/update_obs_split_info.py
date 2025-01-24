@@ -65,7 +65,7 @@ def rolling_mean(arr, window_size):
     return np.mean(view, axis=1)
 
 def get_hk_and_pwv_data(obs, apex_data, platform, cfg_site,
-                        cfg_plat, axiv_path, ctx_fpath):
+                        cfg_plat, axiv_path, ctx_fpath, frame_offsets_site, frame_offsets_plat):
     """
     Get housekeeping and PWV data from the site and platform HK databases.
 
@@ -109,22 +109,18 @@ def get_hk_and_pwv_data(obs, apex_data, platform, cfg_site,
         t0 = obs['start_time']
         t1 = obs['start_time']+obs['duration']
         
-        hkdb_site = hkdb.HkDb(cfg_site)
-        hkdb_plat = hkdb.HkDb(cfg_plat)
 
         cfg_site = hkdb.HkConfig.from_yaml(cfg_site)
         lspec_site = hkdb.LoadSpec(start=t0, end=t1, cfg=cfg_site,
-                                fields=['pwv', 'ambient_temp', 'uv'], hkdb=hkdb_site)
+                                fields=['pwv', 'ambient_temp', 'uv'],
+                                frame_offsets=frame_offsets_site)
         result_site = hkdb.load_hk(lspec_site, show_pb=False)
         
         cfg_plat = hkdb.HkConfig.from_yaml(cfg_plat)
         lspec_plat = hkdb.LoadSpec(start=t0, end=t1, cfg=cfg_plat,
                                    fields=['hwp_rate2', 'hwp_rate2', 'hwp_direction', 'az_pos'],
-                                   hkdb=hkdb_plat)
+                                   frame_offsets=frame_offsets_plat)
         result_plat = hkdb.load_hk(lspec_plat, show_pb=False)
-        
-        hkdb_site.engine.dispose()
-        hkdb_plat.engine.dispose()
 
         try:
             ts = result_site.data['env-radiometer-class.pwvs.pwv'][0]
@@ -259,6 +255,7 @@ def main(config: str,
         all_obs = np.array([o['obs_id'] for o in obslist])
         excluded_obs = np.setxor1d(db_obs, all_obs)
         obslist = [o for o in obslist if o['obs_id'] in excluded_obs]
+    
     apex_data = np.load(cfg['apex_arxiv'], allow_pickle=True).item()
     basedir = os.path.dirname(cfg['mandb_fpath'])
 
