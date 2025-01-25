@@ -1736,8 +1736,9 @@ class BadSubscanFlags(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = proc_aman.noisy_dets_flags.valid_dets
-        meta.restrict('dets', proc_aman.dets.vals[keep])
+        if hasattr(proc_aman.noisy_dets_flags, "valid_dets"):
+            keep = proc_aman.noisy_dets_flags.valid_dets
+            meta.restrict('dets', proc_aman.dets.vals[keep])
         return meta
 
 _Preprocess.register(SplitFlags)
