@@ -411,8 +411,11 @@ def export_obs_data(
 
         # Fill the data
         for iob, ob in enumerate(wafer_obs):
-            dts_temp[wafer_indices[iob], :] = ob.detdata[det_data][:, slc] * uscale
-            fts_temp[wafer_indices[iob], :] = ob.detdata[det_flags][:, slc]
+            for idet, det in enumerate(det_names):
+                dts_temp[wafer_indices[iob][idet], :] = ob.detdata[det_data][
+                    det, slc
+                ] * uscale
+                fts_temp[wafer_indices[iob][idet], :] = ob.detdata[det_flags][det, slc]
 
         dts.data = dts_temp
         # dts.options(enable=1)
