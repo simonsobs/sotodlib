@@ -3,7 +3,7 @@ from unittest.mock import create_autospec
 import tempfile
 import yaml
 import os
-from datetime import datetime
+import datetime
 
 from sotodlib.io.imprinter import *
 from sotodlib.io.g3tsmurf_db import Files
@@ -34,8 +34,8 @@ def delete_imprinter_db(imprinter):
 def obsset():
     t0 = 1674090159
     t1 = 1674090259
-    dt_t0 = datetime.utcfromtimestamp(t0)
-    dt_t1 = datetime.utcfromtimestamp(t1)
+    dt_t0 = datetime.datetime.fromtimestamp(t0, tz=datetime.timezone.utc)
+    dt_t1 = datetime.datetime.fromtimestamp(t1, tz=datetime.timezone.utc)
 
     file = create_autospec(Files)
     file.start = dt_t0
@@ -68,8 +68,12 @@ def test_register_book(imprinter, obsset):
     assert book.obs[1].obs_id == "oper_slot2_1674090159"
     assert book.tel_tube == "lat"
     assert book.type == "oper"
-    assert book.start == datetime.utcfromtimestamp(1674090159)
-    assert book.stop == datetime.utcfromtimestamp(1674090259)
+    assert book.start == datetime.datetime.fromtimestamp(
+        1674090159, tz=datetime.timezone.utc
+    )
+    assert book.stop == datetime.datetime.fromtimestamp(
+        1674090259, tz=datetime.timezone.utc
+    )
     assert book.max_channels == 10
     assert book.message == ""
     assert book.slots == "slot1,slot2"
