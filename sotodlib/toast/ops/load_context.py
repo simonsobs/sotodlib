@@ -954,6 +954,8 @@ class LoadContext(Operator):
         # all the metadata information.
         #
         temp_shared = None
+        restricted_samps = None
+        ax_shift = None
         if ob.comm.group_rank == 0:
             first_wafer = list(axwafers.keys())[0]
             self._parse_data(
@@ -972,6 +974,13 @@ class LoadContext(Operator):
             )
             temp_shared = {x: None for x, y in shared_data.items()}
 
+            # Does the axis manager have a truncated number of samples?
+            restricted_samps = axwafers[first_wafer][self.axis_sample].count
+            if restricted_samps != ob.n_local_samples:
+                ax_shift = axwafers[first_wafer][self.axis_sample].offset
+            else:
+                ax_shift = 0
+
         if gcomm is not None:
             extra_meta = gcomm.bcast(extra_meta, root=0)
             temp_shared = gcomm.bcast(temp_shared, root=0)
@@ -979,6 +988,8 @@ class LoadContext(Operator):
                 shared_data = temp_shared
             det_data = gcomm.bcast(det_data, root=0)
             interval_data = gcomm.bcast(interval_data, root=0)
+            restricted_samps = gcomm.bcast(restricted_samps, root=0)
+            ax_shift = gcomm.bcast(ax_shift, root=0)
 
         # Add extra metadata that was discovered.
         ob.update(extra_meta)
@@ -996,9 +1007,27 @@ class LoadContext(Operator):
             )
 
         # Collectively store shared data.  All readers have a full copy of
-        # this data, but we only set this from rank zero.
+        # this data, but we only set this from rank zero.  If there are
+        # cut samples at the beginning and end, ensure that timestamps are
+        # always valid.
         for shr_obs_name, shrbuf in shared_data.items():
-            ob.shared[shr_obs_name].set(shrbuf, fromrank=0)
+            bf = shrbuf
+            if shr_obs_name == self.times and restricted_samps != ob.n_local_samples:
+                if rank == 0:
+                    msg = f"Axman samples {restricted_samps} != {ob.n_local_samples}"
+                    msg += ", extrapolating timestamps"
+                    log.debug(msg)
+                    bf = np.zeros(ob.n_local_samples, dtype=np.float64)
+                    (rate, dt, _, _, _) = toast.utils.rate_from_times(shrbuf)
+                    bf[ax_shift:ax_shift+restricted_samps] = shrbuf
+                    bf[0:ax_shift] = shrbuf[0] + dt * np.arange(
+                        -ax_shift, 0, 1, dtype=np.float64
+                    )
+                    end_gap = ob.n_local_samples - restricted_samps - ax_shift
+                    bf[ax_shift + restricted_samps:] = shrbuf[-1] + dt * np.arange(
+                        1, end_gap + 1, 1, dtype=np.float64
+                    )
+            ob.shared[shr_obs_name].set(bf, fromrank=0)
 
         log.debug_rank(
             f"LoadContext {ob.name} Shared data copy took",
