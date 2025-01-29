@@ -1721,7 +1721,7 @@ class BadSubscanFlags(_Preprocess):
         ss_aman = core.AxisManager(aman.dets, aman.samps)
         ss_aman.wrap("valid_subscans", msk_ss, [(0, 'dets'), (1, 'samps')])
         det_aman = core.AxisManager(aman.dets)
-        det_aman.wrap("valid_dets", msk_det)
+        det_aman.wrap("valid_dets", msk_det, [(0, 'dets')])
         self.save(proc_aman, ss_aman, "noisy_subscan_flags")
         self.save(proc_aman, det_aman, "noisy_dets_flags")
 
