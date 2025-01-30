@@ -7,6 +7,7 @@ import shutil
 import logging
 from pathlib import Path
 from glob import glob
+import time
 
 import sqlalchemy as db
 from sqlalchemy import or_, and_, not_
@@ -658,6 +659,9 @@ class Imprinter:
         allow_bad_timing=False,
         require_hwp=True,
         require_acu=True,
+        require_monotonic_times=True,
+        min_ctime=None, 
+        max_ctime=None,
     ):
         """get the appropriate bookbinder for the book based on its type"""
 
@@ -683,6 +687,8 @@ class Imprinter:
                 allow_bad_timing=allow_bad_timing,
                 require_hwp=require_hwp,
                 require_acu=require_acu,
+                require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime,
             )
             return bookbinder
 
@@ -742,6 +748,8 @@ class Imprinter:
         allow_bad_timing=False,
         require_hwp=True,
         require_acu=True,
+        require_monotonic_times=True,
+        min_ctime=None, max_ctime=None,
         check_configs={}
     ):
         """Bind book using bookbinder
@@ -765,6 +773,20 @@ class Imprinter:
             expected to be turned on by hand.
         allow_bad_timing: if true, will bind books even if the timing is low 
             precision
+        require_hwp: bool, optional
+            if True, requires that we find HWP data before binding the book. 
+            hard-coded to False if self.daq_node is lat
+        require_acu: bool, optional
+            if True, requires that we have ACU data and that it has no dropouts 
+            longer than 10s
+        require_monotonic_times: bool, optional
+            if True, requires that all HK data is monotonically increasing, 
+            should never be set to False for obs books but less important for 
+            oper books if there were ACU aggregation issues
+        min_ctime: float, optional
+            if not None, cuts the book down to have this minimum ctime
+        max_ctime: float, optional
+            if not None, cuts the book down to have this maximum ctime
         check_configs: dict
             additional non-default configurations to send to check book
         """
@@ -800,6 +822,8 @@ class Imprinter:
                 allow_bad_timing=allow_bad_timing,
                 require_acu=require_acu,
                 require_hwp=require_hwp,
+                require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime
             )
             binder.bind(pbar=pbar)
             
@@ -1604,7 +1628,13 @@ class Imprinter:
                 return False, e
         return True, None
             
-    def check_book_in_librarian(self, book, n_copies=1, raise_on_error=True):
+    def check_book_in_librarian(
+        self, 
+        book, 
+        n_copies=1, 
+        n_tries=1,
+        raise_on_error=True
+    ):
         """have the librarian validate the books is stored offsite. returns true
         if at least n_copies are storied offsite.
         """
@@ -1617,6 +1647,21 @@ class Imprinter:
             ) >= n_copies
             if not in_lib:
                 self.logger.info(f"received response from librarian {resp}")
+                if n_tries > 1:
+                    if book.type == 'smurf':
+                        wait=30
+                    else: 
+                        wait=5
+                    self.logger.warning(
+                        f"Waiting {wait} seconds and trying book {book.bid} "
+                        "with the librarian again"
+                    )
+                    time.sleep(wait)
+                    return self.check_book_in_librarian(
+                        book, n_copies=n_copies, 
+                        n_tries=n_tries-1, 
+                        raise_on_error=raise_on_error
+                    )
         except Exception as e:
             if raise_on_error:
                 raise e
@@ -1629,7 +1674,7 @@ class Imprinter:
         return in_lib
         
     def delete_level2_files(self, book, verify_with_librarian=True,        
-        n_copies_in_lib=2, dry_run=True):
+        n_copies_in_lib=2, n_tries=1, dry_run=True):
         """Delete level 2 data from already bound books
 
         Parameters
@@ -1650,7 +1695,8 @@ class Imprinter:
             return 1
         if verify_with_librarian:
             in_lib = self.check_book_in_librarian(
-                book, n_copies=n_copies_in_lib, raise_on_error=False
+                book, n_copies=n_copies_in_lib, n_tries=n_tries,
+                raise_on_error=False
             )
             if not in_lib:
                 self.logger.warning(
@@ -1759,6 +1805,7 @@ class Imprinter:
         except Exception as e:
             self.logger.warning(f"Failed to remove {book_path}: {e}")
             self.logger.error(traceback.format_exc())
+            return 4
         book.status = DONE
         self.session.commit()
         return 0
