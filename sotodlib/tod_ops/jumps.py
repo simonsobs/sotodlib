@@ -3,16 +3,11 @@ from typing import Literal, Optional, Tuple, Union, cast, overload
 import numpy as np
 import scipy.ndimage as simg
 import scipy.stats as ss
+import so3g
 from numpy.typing import NDArray
-from pixell.utils import block_expand, block_reduce, moveaxis
+from pixell.utils import moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import (
-    matched_jumps,
-    matched_jumps64,
-    find_quantized_jumps,
-    find_quantized_jumps64,
-)
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -108,9 +103,9 @@ def _jumpfinder(
     if len(x.shape) > 2:
         raise ValueError("x may not have more than 2 dimensions")
     if dtype == "float32":
-        matched_filt = matched_jumps
+        matched_filt = so3g.matched_jumps
     elif dtype == "float64":
-        matched_filt = matched_jumps64
+        matched_filt = so3g.matched_jumps64
     else:
         raise TypeError("x must be float32 or float64")
 
@@ -182,33 +177,39 @@ def jumpfix_subtract_heights(
         x_fixed: x with jumps removed.
                  If inplace is True this is just a reference to x.
     """
-
-    def _fix(jump_ranges, heights, x_fixed):
-        for j, jump_range in enumerate(jump_ranges):
-            for start, end in jump_range.ranges():
-                _heights = heights[j, start:end]
-                height = _heights[np.argmax(np.abs(_heights))]
-                x_fixed[j, int((start + end) / 2) :] -= height
-
+    orig_shape = x.shape
+    x = np.atleast_2d(x)
+    x = np.ascontiguousarray(x)
     x_fixed = x
     if not inplace:
         x_fixed = x.copy()
-    orig_shape = x.shape
-    x_fixed = np.atleast_2d(x_fixed)
+        x_fixed = np.ascontiguousarray(x_fixed)
     if isinstance(jumps, np.ndarray):
         jumps = RangesMatrix.from_mask(np.atleast_2d(jumps))
     elif isinstance(jumps, Ranges):
         jumps = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
     if not isinstance(jumps, RangesMatrix):
         raise TypeError("jumps not RangesMatrix or convertable to RangesMatrix")
+    jumps = cast(RangesMatrix, jumps)
 
     if heights is None:
         heights = estimate_heights(x_fixed, jumps.mask(), **kwargs)
     elif isinstance(heights, csr_array):
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
+    heights = heights.astype(x.dtype)
+    heights = np.ascontiguousarray(heights)
 
-    _fix(jumps.ranges, heights, x_fixed)
+    dtype = x.dtype.name
+    if len(x.shape) > 2:
+        raise ValueError("x may not have more than 2 dimensions")
+    if dtype == "float32":
+        fix = so3g.subtract_jump_heights
+    elif dtype == "float64":
+        fix = so3g.subtract_jump_heights64
+    else:
+        raise TypeError("x must be float32 or float64")
+    fix(x, x_fixed, heights, jumps)
 
     return x_fixed.reshape(orig_shape)
 
@@ -254,6 +255,7 @@ def estimate_heights(
     twopi: bool = False,
     make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
+    clean: float = 80,
 ) -> NDArray[np.floating]:
     """
     Simple jump estimation routine.
@@ -273,6 +275,9 @@ def estimate_heights(
         diff_buffed: Difference between signal and a signal shifted by win_size.
                      If None will be computed.
 
+        clean: Make each jump range a constant height set by this percentile.
+               If this is 0 then it is ignored.
+
     Returns:
 
         heights: Array of jump heights.
@@ -289,6 +294,17 @@ def estimate_heights(
 
     heights = np.zeros_like(jumps, dtype=float)
     heights[jumps] = diff_buffed[jumps]
+
+    if clean > 0:
+        ranges = RangesMatrix.from_mask(jumps)
+        for i, det in enumerate(ranges.ranges):
+            for r in det.ranges():
+                sign = (
+                    np.sign(np.mean(np.sign(heights[i, r[0] : r[1]]))) - 1
+                ) / 2  # 0 pos, -1 neg
+                heights[i, r[0] : r[1]] = np.percentile(
+                    heights[i, r[0] : r[1]], abs(clean + 100 * sign)
+                )
 
     return heights
 
@@ -442,9 +458,9 @@ def twopi_jumps(
     heights = np.empty_like(_signal)
     atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
     if _signal.dtype.name == "float32":
-        find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+        so3g.find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
     elif _signal.dtype.name == "float64":
-        find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+        so3g.find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
     else:
         raise TypeError("signal must be float32 or float64")
 
@@ -476,6 +492,7 @@ def slow_jumps(
     merge=...,
     overwrite=...,
     name=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
@@ -493,6 +510,7 @@ def slow_jumps(
     merge=...,
     overwrite=...,
     name=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array]:
     ...
@@ -509,6 +527,7 @@ def slow_jumps(
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps_slow",
+    clean: float = 80,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -544,6 +563,8 @@ def slow_jumps(
 
         name: String used to populate field in flagmanager if merge is True.
 
+        clean: Cleaning value to pass to ``estimate_heights``. See that function for details.
+
         **filter_pars: Parameters to pass to _filter
 
     Returns:
@@ -562,18 +583,30 @@ def slow_jumps(
         raise TypeError("Signal is not an array")
 
     _signal = _filter(signal, **filter_pars)
+    _signal = np.atleast_2d(_signal)
+    _signal = np.ascontiguousarray(_signal)
 
     # Block ptp
-    bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
+    dtype = _signal.dtype.name
+    if len(_signal.shape) > 2:
+        raise ValueError("signal may not have more than 2 dimensions")
+    if dtype == "float32":
+        get_ptp = so3g.block_minmax
+    elif dtype == "float64":
+        get_ptp = so3g.block_minmax64
+    else:
+        raise TypeError("signal must be float32 or float64")
+    bptp = np.zeros_like(_signal)
+    bptp = np.ascontiguousarray(bptp)
+    get_ptp(_signal, bptp, win_size, 2, 0)
 
     if not abs_thresh:
         thresh = float(np.quantile(bptp.ravel(), thresh))
-    bptp = block_expand(bptp, win_size, _signal.shape[-1], inclusive=True)
     jumps = bptp > thresh
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     heights = estimate_heights(
-        _signal, jump_ranges.mask(), win_size=win_size, make_step=True
+        _signal, jump_ranges.mask(), win_size=win_size, make_step=True, clean=clean
     )
 
     if merge:
@@ -600,6 +633,7 @@ def find_jumps(
     overwrite=...,
     name=...,
     ds=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array]:
     ...
@@ -619,6 +653,7 @@ def find_jumps(
     overwrite=...,
     name=...,
     ds=...,
+    clean=...,
     **filter_pars,
 ) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
     ...
@@ -637,6 +672,7 @@ def find_jumps(
     overwrite: bool = False,
     name: str = "jumps",
     ds: int = 10,
+    clean: float = 80,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -679,6 +715,8 @@ def find_jumps(
         name: String used to populate field in flagmanager if merge is True.
 
         ds: Downsample factor used when computing noise level, the actual factor used is `ds*win_size`.
+
+        clean: Cleaning value to pass to ``estimate_heights``. See that function for details.
 
         **filter_pars: Parameters to pass to _filter
 
@@ -724,7 +762,7 @@ def find_jumps(
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
-    heights = estimate_heights(signal, jumps, win_size=win_size)
+    heights = estimate_heights(signal, jumps, win_size=win_size, clean=clean)
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
