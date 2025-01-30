@@ -473,7 +473,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
     pb = tqdm(total=nframes, disable=(not show_pb))
     for path, offsets in file_spec.items():
         reader = so3g.G3IndexedReader(path)
-        for offset in sorted(np.unique(offsets)):
+        for offset in sorted(np.unique(offsets).tolist()):
             reader.Seek(offset)
             frame = reader.Process(None)[0]
             addr = frame['address']
