@@ -9,7 +9,7 @@ import numpy as np
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from typing import Union, List, Optional, Dict
+from typing import Union, List, Optional, Dict, Any
 import so3g
 from spt3g import core as spt3g_core
 from tqdm.auto import tqdm
@@ -41,6 +41,8 @@ class HkConfig:
         Time [sec] to look back when scanning for new files to index
     show_index_pb: bool
         If true, shows progress bar when indexing
+    engine_kwargs: Optional[Dict[str, Any]]
+        Any additional kwargs to use when creating the SQLAlchemy engine.
     aliases: Dict[str, str]
         Aliases for hk fields. In this dict, the key is the alias name, and the
         value is the field descriptor, in the format of ``agent.feed.field``.
@@ -61,6 +63,7 @@ class HkConfig:
     file_idx_lookback_time: Optional[float] = None
     show_index_pb: bool = True
     aliases: Dict[str, str] = field(default_factory=dict)
+    engine_kwargs: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.db_file is None and self.db_url is None:
@@ -155,10 +158,17 @@ class HkDb:
     """
     def __init__(self, cfg: Union[HkConfig, str]):
         if isinstance(cfg, str):
-            cfg = HkConfig.from_yaml(cfg)
-        self.cfg = cfg
+            self.cfg = HkConfig.from_yaml(cfg)
+        else:
+            self.cfg = cfg
 
-        self.engine = db.create_engine(cfg.db_url, echo=cfg.echo_db)
+        if self.cfg.engine_kwargs is None:
+            _engine_kwargs: Dict[str, Any] = {}
+        else:
+            _engine_kwargs = self.cfg.engine_kwargs
+
+        self.engine = db.create_engine(
+            self.cfg.db_url, echo=self.cfg.echo_db, **_engine_kwargs)
         Session.configure(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
@@ -359,6 +369,11 @@ class LoadSpec:
     hkdb: Optional[HkDb]
         HkDb instance to use. If not specified, will create a new one from the
         cfg.
+    frame_offsets: Optional[Dict[str, List[int]]]
+        Pre-computed dict where key=path, value=<list of byte offsets> to use
+        when loading data. If this is set, load_hk will not need to query the
+        hkdb when loading results. If this is None, load_hk will connect to the
+        database to create it.
 """
     cfg: HkConfig
     fields: List[str]
@@ -366,6 +381,7 @@ class LoadSpec:
     end: float
     downsample_factor: int = 1
     hkdb: Optional[HkDb] = None
+    frame_offsets: Optional[Dict[str, List[int]]] = None
 
     def __post_init__(self):
         fs = []
@@ -408,6 +424,46 @@ class HkResult:
         return cls(data, aliases=aliases)
 
 
+def get_frame_offsets(
+    hkcfg: HkConfig,
+    start: float,
+    end: float,
+    fields: Union[List[str], List[Field]],
+    hkdb: Optional[HkDb] = None,
+) -> Dict[str, List[int]]:
+
+    _fields: List[Field] = []
+    for f in fields:
+        if isinstance(f, str):
+            _fields.append(Field.from_str(f))
+        else:
+            _fields.append(f)
+
+    if hkdb is None:
+        hkdb = HkDb(hkcfg)
+
+    agent_set = list(set(f.agent for f in _fields))
+
+    frame_offsets: Dict[str, List[int]] = {}  # {path: [offsets]}
+    with hkdb.Session.begin() as sess:
+        query = sess.query(HkFrame).filter(
+            HkFrame.start_time <= end,
+            HkFrame.end_time >= start,
+            HkFrame.agent.in_(agent_set)
+        ).order_by(HkFrame.start_time)
+        for frame in query:
+            if frame.file.path not in frame_offsets:
+                frame_offsets[frame.file.path] = []
+            frame_offsets[frame.file.path].append(frame.byte_offset)
+
+    frame_offsets = {
+        os.path.join(hkcfg.hk_root, path): offsets
+        for path, offsets in frame_offsets.items()
+    }
+
+    return frame_offsets
+
+
 def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
     """
     Loads hk data
@@ -422,31 +478,13 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
     if isinstance(load_spec, dict):
         load_spec = LoadSpec(**load_spec)
 
-    if load_spec.hkdb is not None:
-        hkdb: HkDb = load_spec.hkdb
+    if load_spec.frame_offsets is None:
+        frame_offsets = get_frame_offsets(
+            load_spec.cfg, load_spec.start, load_spec.end, load_spec.fields,
+            load_spec.hkdb
+        )
     else:
-        hkdb = HkDb(load_spec.cfg)
-
-    agent_set = list(set(f.agent for f in load_spec.fields))
-
-    file_spec = {}  # {path: [offsets]}
-    with hkdb.Session.begin() as sess:
-        query = sess.query(HkFrame).filter(
-            HkFrame.start_time <= load_spec.end,
-            HkFrame.end_time >= load_spec.start,
-            HkFrame.agent.in_(agent_set)
-        ).order_by(HkFrame.start_time)
-        for frame in query:
-            if frame.file.path not in file_spec:
-                file_spec[frame.file.path] = []
-            file_spec[frame.file.path].append(frame.byte_offset)
-
-    # Convert all paths to absolute paths based on cfg.hk_root
-    def create_abs_path(path):
-        if os.path.isabs(path):
-            return path
-        return os.path.join(load_spec.cfg.hk_root, path)
-    file_spec = {create_abs_path(k): v for k, v in file_spec.items()}
+        frame_offsets = load_spec.frame_offsets
 
     result = {}  # {field: [timestamps, data]}
     field_misses = set()
@@ -469,9 +507,9 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
         return None
     ds_factor = load_spec.downsample_factor
 
-    nframes = np.sum([len(offsets) for offsets in file_spec.values()])
+    nframes = np.sum([len(offsets) for offsets in frame_offsets.values()])
     pb = tqdm(total=nframes, disable=(not show_pb))
-    for path, offsets in file_spec.items():
+    for path, offsets in frame_offsets.items():
         reader = so3g.G3IndexedReader(path)
         for offset in sorted(np.unique(offsets).tolist()):
             reader.Seek(offset)
