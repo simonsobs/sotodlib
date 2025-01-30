@@ -64,8 +64,8 @@ def rolling_mean(arr, window_size):
     view = np.lib.stride_tricks.sliding_window_view(arr, window_size)
     return np.mean(view, axis=1)
 
-def get_hk_and_pwv_data(obs, apex_data, platform, cfg_site,
-                        cfg_plat, axiv_path, ctx_fpath, frame_offsets_site, frame_offsets_plat):
+def get_hk_and_pwv_data(obs, apex_data, cfg_site, cfg_plat,
+                        frame_offsets_site, frame_offsets_plat):
     """
     Get housekeeping and PWV data from the site and platform HK databases.
 
@@ -112,7 +112,7 @@ def get_hk_and_pwv_data(obs, apex_data, platform, cfg_site,
 
         cfg_site = hkdb.HkConfig.from_yaml(cfg_site)
         lspec_site = hkdb.LoadSpec(start=t0, end=t1, cfg=cfg_site,
-                                fields=['pwv', 'ambient_temp', 'uv'],
+                                fields=['pwv', 'ambient_temp', 'uv', 'wind_spd', 'wind_dir'],
                                 frame_offsets=frame_offsets_site)
         result_site = hkdb.load_hk(lspec_site, show_pb=False)
         
@@ -129,25 +129,37 @@ def get_hk_and_pwv_data(obs, apex_data, platform, cfg_site,
             pwvs_class = result_site.data['env-radiometer-class.pwvs.pwv'][1]
             if ((np.all(np.isnan(pwvs_class))) & (not np.all(np.isnan(pwvs_apex)))):
                 pwv = np.nanmedian(pwvs_apex)
+                pwv_start = pwvs_apex[0]
+                pwv_end = pwvs_apex[-1]
                 dpwv = np.ptp(pwvs_apex[~np.isnan(pwvs_apex)])
             elif ((not np.all(np.isnan(pwvs_class))) & (not np.all(np.isnan(pwvs_apex)))):
                 pwvs_corr = np.asarray([pwva if (pwvc < 0.3) | (pwvc > 3) else pwvc for pwvc, pwva in zip(pwvs_class, pwvs_apex)])
                 pwv = np.nanmedian(pwvs_corr)
+                pwv_start = pwvs_corr[0]
+                pwv_end = pwvs_corr[-1]
                 dpwv = np.ptp(pwvs_corr[~np.isnan(pwvs_corr)])
             else:
                 pwv = 5500
+                pwv_start = 5500
+                pwv_end = 5500
                 dpwv = 5500
         except:
             pwv = 5500
+            pwv_start = 5500
+            pwv_end = 5500
             dpwv = 5500
 
         try:
             ambient_temp = np.nanmedian(result_site.data['env-vantage.weather_data.temp_outside'][1])
-            uv = np.nanmedian(result_site.data['env-vantage.weather_data.UV'][1])
+            uv = np.nanmedian(result_site.data['env-vantage.weather_data.UV'][1])/10
+            wind_spd = np.nanmedian(result_site.data['env-vantage.weather_data.wind_speed'][1]*1.609)
+            wind_dir = np.nanmedian(result_site.data['env-vantage.weather_data.wind_dir'][1])
         except Exception as e:
             print(e)
             ambient_temp = 5500
             uv = 5500
+            wind_spd = 5500
+            wind_dir = 5500
             
         try:
             _hwp_rate = np.array([])
@@ -180,9 +192,11 @@ def get_hk_and_pwv_data(obs, apex_data, platform, cfg_site,
             avg_acc = 5500
             avg_vel = 5500
 
-        entry_dict = {'obs:obs_id': oid, 'pwv': pwv, 'dpwv': dpwv, 'ambient_temp': ambient_temp,
-                      'uv': uv, 'hwp_rate': hwp_rate, 'dhwp_rate': dhwp_rate, 'az_acc': avg_acc,
-                      'az_vel': avg_vel, 'hwp_direction': hwp_direction}
+        entry_dict = {'obs:obs_id': oid, 'pwv': pwv, 'dpwv': dpwv, 'pwv_start': pwv_start,
+                      'pwv_end': pwv_end, 'wind_spd': wind_spd, 'wind_dir': wind_dir,
+                      'ambient_temp': ambient_temp, 'uv': uv, 'hwp_rate': hwp_rate, 
+                      'dhwp_rate': dhwp_rate, 'az_acc': avg_acc, 'az_vel': avg_vel, 
+                      'hwp_direction': hwp_direction}
         return None, entry_dict
     except Exception as e:
         errmsg = f'{type(e)}: {e}'
@@ -213,7 +227,11 @@ def get_man_db(configs):
         scheme.add_data_field('dpwv')
         scheme.add_data_field('ambient_temp')
         scheme.add_data_field('uv')
+        scheme.add_data_field('wind_spd')
+        scheme.add_data_field('wind_dir')
         scheme.add_data_field('hwp_rate')
+        scheme.add_data_field('pwv_start')
+        scheme.add_data_field('pwv_end')        
         scheme.add_data_field('dhwp_rate')
         scheme.add_data_field('hwp_direction')
         scheme.add_data_field('az_acc')
@@ -244,9 +262,10 @@ def get_parser(parser=None):
 def main(config: str,
          query: Optional[str] = None,
          nproc: Optional[int] = 4):
-    logger = sp_util.init_logger("split_info")
+    logger = sp_util.init_logger("split_info", verbosity=3)
     cfg = yaml.safe_load(open(config, 'r'))
     ctx = core.Context(cfg['context_file'])
+    logger.info('Constructing obslist and getting database...')
     obslist = ctx.obsdb.query(query)
     db = get_man_db(cfg)
     entries = db.inspect()
@@ -255,6 +274,26 @@ def main(config: str,
         all_obs = np.array([o['obs_id'] for o in obslist])
         excluded_obs = np.setxor1d(db_obs, all_obs)
         obslist = [o for o in obslist if o['obs_id'] in excluded_obs]
+
+    logger.info('Collecting site frame offsets...')
+    cfg_site = hkdb.HkConfig.from_yaml(cfg['site_hkdb_cfg'])
+    hkdb_site = hkdb.HkDb(cfg_site)
+    site_fields = ['pwv', 'ambient_temp', 'uv', 'wind_spd', 'wind_dir']
+    frame_offsets_site = [hkdb.get_frame_offsets(cfg_site, o['start_time'],
+                                                 o['duration'], site_fields,
+                                                 hkdb_site) for o in obslist]
+
+    logger.info('Collecting platform frame offsets...')
+    cfg_plat = hkdb.HkConfig.from_yaml(cfg['plat_hkdb_cfg'])
+    hkdb_plat = hkdb.HkDb(cfg_plat)
+    plat_fields = ['hwp_rate2', 'hwp_rate2', 'hwp_direction', 'az_pos']
+    frame_offsets_plat = [hkdb.get_frame_offsets(cfg_plat, o['start_time'],
+                                                 o['duration'], plat_fields,
+                                                 hkdb_plat) for o in obslist]
+
+    logger.info('Finished collecting offsets, disposing database connections...')
+    hkdb_site.engine.dispose()
+    hkdb_plat.engine.dispose()
     
     apex_data = np.load(cfg['apex_arxiv'], allow_pickle=True).item()
     basedir = os.path.dirname(cfg['mandb_fpath'])
@@ -267,11 +306,13 @@ def main(config: str,
     man_db = get_man_db(cfg)
     i = 0
     tot_num = len(obslist)
+    logger.info('Launching multiproc pool...')
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(get_hk_and_pwv_data, obs=o, apex_data=apex_data,
                               cfg_site=cfg['site_hkdb_cfg'], cfg_plat=cfg['plat_hkdb_cfg'],
                               platform=cfg['platform'], ctx_fpath=cfg['context_file'],
-                              axiv_path=basedir) for o in obslist]
+                              axiv_path=basedir, frame_offsets_site=sf, 
+                              frame_offsets_plat=pf) for o, sf, pf in zip(obslist, frame_offsets_site, frame_offsets_plat)]
         for future in as_completed(futures):
             logger.info(f'New future as_completed result {i}/{tot_num}')
             try:
