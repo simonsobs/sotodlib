@@ -263,6 +263,8 @@ class NmatWhite(Nmat):
     def build(self, tod, srate, **kwargs):
         #ndet, nsamps = tod.shape
         nwin  = utils.nint(self.window*srate)
+        if np.any(np.logical_not(np.isfinite(tod))):
+            raise ValueError(f"There is a nan when calculating the white noise !!!")
         ivar = 1.0/np.var(tod, 1)
         return NmatWhite(ivar=ivar, window=self.window, nwin=nwin)
     def apply(self, tod, inplace=True):

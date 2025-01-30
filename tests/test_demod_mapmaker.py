@@ -32,6 +32,10 @@ class DemodMapmakerTest(unittest.TestCase):
         imap = make_map(obs, shape=shape, wcs=wcs)
         check_map(imap, Q_stream, U_stream, TOL=1e-9)
 
+        # Try calling get_footprint
+        imap = make_map(obs, shape=None, wcs=wcs)
+        check_map(imap, Q_stream, U_stream, TOL=1e-9)
+
 
 def make_map(obs, nside=None, nside_tile=None, shape=None, wcs=None, comps='TQU'):
     if nside is not None:
