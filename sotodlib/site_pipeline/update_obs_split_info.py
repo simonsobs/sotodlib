@@ -254,25 +254,24 @@ def gather_frame_offsets(cfg, obs_list, logger=None):
     site_fields = ['pwv', 'ambient_temp', 'uv', 'wind_spd', 'wind_dir']
     plat_fields = ['hwp_rate2', 'hwp_rate2', 'hwp_direction', 'az_pos']
     plat_fields = [ 'hwp_direction']
-    site_offsets = []
-    plat_offsets = []
+    site_offsets = {}
+    plat_offsets = {}
 
     for obs in tqdm(obs_list):
         start, stop = obs['start_time'], obs['stop_time']
-        site_offset = hkdb.get_frame_offsets(
+        site_offsets[obs['obs_id']] = hkdb.get_frame_offsets(
             hkcfg_site,
             start, stop,
             site_fields,
             db_site
         )
-        site_offsets.append(site_offset)
-        plat_offset = hkdb.get_frame_offsets(
+        plat_offsets[obs['obs_id']] = hkdb.get_frame_offsets(
             hkcfg_plat,
             start, stop,
             plat_fields,
             db_plat
         )
-        plat_offsets.append(plat_offset)
+
     return site_offsets, plat_offsets
 
 def get_parser(parser=None):
