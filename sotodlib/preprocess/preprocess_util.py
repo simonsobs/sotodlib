@@ -423,6 +423,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
+            proc_aman.preprocess.noisy_dets_flags.move("valid_dets", None)
             aman.preprocess.merge(proc_aman.preprocess)
 
             pipe_proc.run(aman, aman.preprocess)
@@ -503,7 +504,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             demod_mm.from_map(aman, sim_map, wrap=True, modulated=True)
 
             logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess)
+            pipe_init.run(aman, aman.preprocess, sim=True)
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
