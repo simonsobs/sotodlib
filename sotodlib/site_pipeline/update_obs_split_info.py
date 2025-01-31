@@ -4,10 +4,10 @@ import sotodlib.site_pipeline.util as sp_util
 
 import argparse
 import time
-import h5py
 import yaml
 import os
 import traceback
+from tqdm import tqdm
 from typing import Optional
 import datetime as dt
 import requests
@@ -240,6 +240,41 @@ def get_man_db(configs):
                                       scheme=scheme)
     return db
 
+def gather_frame_offsets(cfg, obs_list, logger=None):
+    if logger is None:
+        logger = sp_util.init_logger("split_info")
+
+    logger.info('Frame offset file missing, gathering frame offsets...')
+    hkcfg_site = hkdb.HkConfig.from_yaml(cfg['site_hkdb_cfg'])
+    hkcfg_plat = hkdb.HkConfig.from_yaml(cfg['plat_hkdb_cfg'])
+
+    db_plat = hkdb.HkDb(hkcfg_plat)
+    db_site = hkdb.HkDb(hkcfg_site)
+
+    site_fields = ['pwv', 'ambient_temp', 'uv', 'wind_spd', 'wind_dir']
+    plat_fields = ['hwp_rate2', 'hwp_rate2', 'hwp_direction', 'az_pos']
+    plat_fields = [ 'hwp_direction']
+    site_offsets = []
+    plat_offsets = []
+
+    for obs in tqdm(obs_list):
+        start, stop = obs['start_time'], obs['stop_time']
+        site_offset = hkdb.get_frame_offsets(
+            hkcfg_site,
+            start, stop,
+            site_fields,
+            db_site
+        )
+        site_offsets.append(site_offset)
+        plat_offset = hkdb.get_frame_offsets(
+            hkcfg_plat,
+            start, stop,
+            plat_fields,
+            db_plat
+        )
+        plat_offsets.append(plat_offset)
+    return site_offsets, plat_offsets
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -267,52 +302,43 @@ def main(config: str,
     ctx = core.Context(cfg['context_file'])
     logger.info('Constructing obslist and getting database...')
     obslist = ctx.obsdb.query(query)
-    db = get_man_db(cfg)
-    entries = db.inspect()
+    man_db = get_man_db(cfg)
+    entries = man_db.inspect()
     if len(entries) != 0:
         db_obs = [entry['obs:obs_id'] for entry in entries]
         all_obs = np.array([o['obs_id'] for o in obslist])
         excluded_obs = np.setxor1d(db_obs, all_obs)
         obslist = [o for o in obslist if o['obs_id'] in excluded_obs]
 
-    logger.info('Collecting site frame offsets...')
-    cfg_site = hkdb.HkConfig.from_yaml(cfg['site_hkdb_cfg'])
-    hkdb_site = hkdb.HkDb(cfg_site)
-    site_fields = ['pwv', 'ambient_temp', 'uv', 'wind_spd', 'wind_dir']
-    frame_offsets_site = [hkdb.get_frame_offsets(cfg_site, o['start_time'],
-                                                 o['duration'], site_fields,
-                                                 hkdb_site) for o in obslist]
+    logger.info('Collecting frame offsets...')
+    if os.path.exists(cfg['frame_offset_path']):
+        logger.info('Frame offset file exists, loading from file...')
+        frame_offsets = yaml.safe_load(open(cfg['frame_offset_path'], 'r'))
+        frame_offsets_site = frame_offsets['site']
+        frame_offsets_plat = frame_offsets['plat']
+    else:
+        frame_offsets_site, frame_offsets_plat = gather_frame_offsets(cfg, obslist)
+        yaml.dump({'site': frame_offsets_site, 'plat': frame_offsets_plat},
+                  open(cfg['frame_offset_path'], 'w'))
 
-    logger.info('Collecting platform frame offsets...')
-    cfg_plat = hkdb.HkConfig.from_yaml(cfg['plat_hkdb_cfg'])
-    hkdb_plat = hkdb.HkDb(cfg_plat)
-    plat_fields = ['hwp_rate2', 'hwp_rate2', 'hwp_direction', 'az_pos']
-    frame_offsets_plat = [hkdb.get_frame_offsets(cfg_plat, o['start_time'],
-                                                 o['duration'], plat_fields,
-                                                 hkdb_plat) for o in obslist]
-
-    logger.info('Finished collecting offsets, disposing database connections...')
-    hkdb_site.engine.dispose()
-    hkdb_plat.engine.dispose()
+    logger.info('Finished collecting offsets...')
     
     apex_data = np.load(cfg['apex_arxiv'], allow_pickle=True).item()
-    basedir = os.path.dirname(cfg['mandb_fpath'])
 
     errlog = os.path.join(os.path.dirname(cfg['mandb_fpath']),
                           'errlog.txt')
 
     multiprocessing.set_start_method('spawn')
 
-    man_db = get_man_db(cfg)
     i = 0
     tot_num = len(obslist)
     logger.info('Launching multiproc pool...')
     with ProcessPoolExecutor(nproc) as exe:
         futures = [exe.submit(get_hk_and_pwv_data, obs=o, apex_data=apex_data,
-                              cfg_site=cfg['site_hkdb_cfg'], cfg_plat=cfg['plat_hkdb_cfg'],
-                              platform=cfg['platform'], ctx_fpath=cfg['context_file'],
-                              axiv_path=basedir, frame_offsets_site=sf, 
-                              frame_offsets_plat=pf) for o, sf, pf in zip(obslist, frame_offsets_site, frame_offsets_plat)]
+                              cfg_site=cfg['site_hkdb_cfg'], 
+                              cfg_plat=cfg['plat_hkdb_cfg'],
+                              frame_offsets_site=frame_offsets_site[o['obs_id']], 
+                              frame_offsets_plat=frame_offsets_plat[o['obs_id']]) for o in obslist]
         for future in as_completed(futures):
             logger.info(f'New future as_completed result {i}/{tot_num}')
             try:

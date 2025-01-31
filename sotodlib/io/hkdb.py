@@ -435,7 +435,7 @@ def get_frame_offsets(
     _fields: List[Field] = []
     for f in fields:
         if f in hkcfg.aliases:
-                _fields.append(Field.from_str(hkcfg.aliases[f]))
+            _fields.append(Field.from_str(hkcfg.aliases[f]))
         else:
             if isinstance(f, str):
                 _fields.append(Field.from_str(f))
@@ -510,7 +510,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
         return None
     ds_factor = load_spec.downsample_factor
 
-    nframes = np.sum([len(np.unique(offsets.values())) for offsets in frame_offsets])
+    nframes = np.sum([len(np.unique(offsets)) for offsets in frame_offsets.values()])
     pb = tqdm(total=nframes, disable=(not show_pb))
     for path, offsets in frame_offsets.items():
         reader = so3g.G3IndexedReader(path)
