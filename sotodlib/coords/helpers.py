@@ -155,8 +155,8 @@ def get_fplane(tod, dets=None, focal_plane=None, hwp=False):
     dets   = _valid_arg(dets, tod.dets.vals, src=tod)
     fp     = _valid_arg(focal_plane, 'focal_plane', src=tod)
     fp     = fp.restrict("dets", dets)
-    args   = {key:getattr(fp,key) for key in ["xi","eta","gamma","T","P","Q","U"] if key in fp}
-    fplane = so3g.proj.FocalPlane.from_xieta(**args, hwp=hwp)
+    kwargs = {key:getattr(fp,key) for key in ["gamma","T","P","Q","U"] if key in fp}
+    fplane = so3g.proj.FocalPlane.from_xieta(fp.xi, fp.eta, **kwargs, hwp=hwp)
     return fplane
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,

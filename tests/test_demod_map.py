@@ -27,7 +27,7 @@ class DemodMapmakingTest(unittest.TestCase):
             tod.wrap_new(k, shape=('dets', 'samps'), dtype='float32')
 
         for i, qdet in enumerate(tod.dets.vals):
-            q_total = csl.Q * so3g.proj.quat.quat(*fp.quats[i])
+            q_total = csl.Q * fp.quats[i]
             ra, dec, alpha = so3g.proj.quat.decompose_lonlat(q_total)
             GAMMA = alpha - 2 * tod.focal_plane.gamma[i]
             tod.demodQ[i] = Q_stream * np.cos(2 * GAMMA) + U_stream * np.sin(2 * GAMMA)
@@ -59,7 +59,7 @@ class DemodMapmakingTest(unittest.TestCase):
 
         c_4chi, s_4chi = np.cos(tod.hwp_angle * 4), np.sin(tod.hwp_angle * 4)
         for i, det in enumerate(tod.dets.vals):
-            q_total = csl.Q * so3g.proj.quat.quat(*fp.quats[i])
+            q_total = csl.Q * fp.quats[i]
             ra, dec, alpha = so3g.proj.quat.decompose_lonlat(q_total)
             GAMMA = alpha - 2 * tod.focal_plane.gamma[i]
             c, s = np.cos(2*GAMMA), np.sin(2*GAMMA)
