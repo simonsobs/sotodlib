@@ -630,6 +630,8 @@ def _apply_inverse_weights_map(inverse_weights, target, out=None):
     if out is None:
         out = np.empty(inverse_weights.shape[1:],
                        dtype=target.dtype)
+        if isinstance(target, enmap.ndmap):
+            out = enmap.ndmap(out, target.wcs)
     # Recall matmul(a, b) operates on the last two axes of (a, b). So
     # move axes, and create a second one in target; re-order at end.
     iw = np.moveaxis(inverse_weights, (0,1), (-2,-1))

@@ -1,15 +1,35 @@
 import os
 
 import numpy as np
-from pixell import enmap, utils, tilemap, bunch
+import h5py
+import so3g
+from typing import Optional
+from pixell import bunch, enmap, tilemap
+from pixell import utils as putils
 
 from .. import coords
-from .utilities import *
-from .pointing_matrix import *
-import so3g.proj
+from .pointing_matrix import PmatCut
+from .utilities import (
+    MultiZipper,
+    recentering_to_quat_lonlat,
+    evaluate_recentering,
+    TileMapZipper,
+    MapZipper,
+    safe_invert_div,
+    unarr,
+    ArrayZipper,
+)
+from .noise_model import NmatUncorr
 
 class MLMapmaker:
-    def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False):
+    def __init__(
+        self,
+        signals=[],
+        noise_model=None,
+        dtype=np.float32,
+        verbose=False,
+        glitch_flags: str = "flags.glitch_flags",
+    ):
         """Initialize a Maximum Likelihood Mapmaker.
         Arguments:
         * signals: List of Signal-objects representing the models that will be solved
@@ -22,26 +42,29 @@ class MLMapmaker:
         * verbose: Whether to print progress messages. Not implemented"""
         if noise_model is None:
             noise_model = NmatUncorr()
-        self.signals      = signals
-        self.dtype        = dtype
-        self.verbose      = verbose
-        self.noise_model  = noise_model
-        self.data         = []
-        self.dof          = MultiZipper()
-        self.ready        = False
+        self.signals = signals
+        self.dtype = dtype
+        self.verbose = verbose
+        self.noise_model = noise_model
+        self.data = []
+        self.dof = MultiZipper()
+        self.ready = False
+        self.glitch_flags_path = glitch_flags
 
     def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None):
         # Prepare our tod
-        ctime  = obs.timestamps
-        srate  = (len(ctime)-1)/(ctime[-1]-ctime[0])
-        tod    = obs.signal.astype(self.dtype, copy=False)
+        ctime = obs.timestamps
+        srate = (len(ctime) - 1) / (ctime[-1] - ctime[0])
+        tod = obs.signal.astype(self.dtype, copy=False)
         # Subtract an existing estimate of the signal before estimating
         # the noise model, if available
-        if signal_estimate is not None: tod -= signal_estimate
+        if signal_estimate is not None:
+            tod -= signal_estimate
         if deslope:
-            utils.deslope(tod, w=5, inplace=True)
+            putils.deslope(tod, w=5, inplace=True)
         # Allow the user to override the noise model on a per-obs level
-        if noise_model is None: noise_model = self.noise_model
+        if noise_model is None:
+            noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
         if noise_model.ready:
@@ -58,18 +81,26 @@ class MLMapmaker:
             # The signal estimate might not be desloped, so
             # adding it back can reintroduce a slope. Fix that here.
             if deslope:
-                utils.deslope(tod, w=5, inplace=True)
+                putils.deslope(tod, w=5, inplace=True)
         # And apply it to the tod
-        tod    = nmat.apply(tod)
+        tod = nmat.apply(tod)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod)
+            signal.add_obs(id, obs, nmat, tod, glitch_flags=self.glitch_flags_path)
         # Save what we need about this observation
-        self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime),
-            dets=obs.dets.vals, nmat=nmat))
+        self.data.append(
+            bunch.Bunch(
+                id=id,
+                ndet=obs.dets.count,
+                nsamp=len(ctime),
+                dets=obs.dets.vals,
+                nmat=nmat,
+            )
+        )
 
     def prepare(self):
-        if self.ready: return
+        if self.ready:
+            return
         for signal in self.signals:
             signal.prepare()
             self.dof.add(signal.dof)
@@ -78,51 +109,66 @@ class MLMapmaker:
     def A(self, x):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
-        #t0 = time()
-        #t1 = time()
-        iwork = [signal.to_work(m) for signal,m in zip(self.signals,self.dof.unzip(x))]
-        #t2 = time(); print(f" A    iwork : {t2-t1:8.3f}s", flush=True)
-        owork = [w*0 for w in iwork]
-        #t1 = time(); print(f" A    owork : {t1-t2:8.3f}s", flush=True)
-        #t_forward = 0
-        #t_apply = 0
-        #t_backward = 0
+        # t0 = time()
+        # t1 = time()
+        iwork = [
+            signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x))
+        ]
+        # t2 = time(); print(f" A    iwork : {t2-t1:8.3f}s", flush=True)
+        owork = [w * 0 for w in iwork]
+        # t1 = time(); print(f" A    owork : {t1-t2:8.3f}s", flush=True)
+        # t_forward = 0
+        # t_apply = 0
+        # t_backward = 0
         for di, data in enumerate(self.data):
             tod = np.zeros([data.ndet, data.nsamp], self.dtype)
-            #t1 = time()
+            # t1 = time()
             for si, signal in reversed(list(enumerate(self.signals))):
                 signal.forward(data.id, tod, iwork[si])
-            #t2 = time()
-            #t_forward += t2 - t1
+            # t2 = time()
+            # t_forward += t2 - t1
             data.nmat.apply(tod)
-            #t1 = time()
-            #t_apply += t1 - t2
+            # t1 = time()
+            # t_apply += t1 - t2
             for si, signal in enumerate(self.signals):
                 signal.backward(data.id, tod, owork[si])
-            #t2 = time()
-            #t_backward += t2 - t1
-        #print(f" A  forward : {t_forward:8.3f}s", flush=True)
-        #print(f" A    apply : {t_apply:8.3f}s", flush=True)
-        #print(f" A backward : {t_backward:8.3f}s", flush=True)
-        #t1 = time()
-        result = self.dof.zip(*[signal.from_work(w) for signal,w in zip(self.signals,owork)])
-        #t2 = time(); print(f" A      zip : {t2-t1:8.3f}s", flush=True)
-        #print(f" A    TOTAL : {t2-t0:8.3f}s", flush=True)
+            # t2 = time()
+            # t_backward += t2 - t1
+        # print(f" A  forward : {t_forward:8.3f}s", flush=True)
+        # print(f" A    apply : {t_apply:8.3f}s", flush=True)
+        # print(f" A backward : {t_backward:8.3f}s", flush=True)
+        # t1 = time()
+        result = self.dof.zip(
+            *[signal.from_work(w) for signal, w in zip(self.signals, owork)]
+        )
+        # t2 = time(); print(f" A      zip : {t2-t1:8.3f}s", flush=True)
+        # print(f" A    TOTAL : {t2-t0:8.3f}s", flush=True)
         return result
 
     def M(self, x):
-        #t1 = time()
+        # t1 = time()
         iwork = self.dof.unzip(x)
-        #t2 = time(); print(f" M    iwork : {t2-t1:8.3f}s", flush=True)
-        result = self.dof.zip(*[signal.precon(w) for signal, w in zip(self.signals, iwork)])
-        #t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
+        # t2 = time(); print(f" M    iwork : {t2-t1:8.3f}s", flush=True)
+        result = self.dof.zip(
+            *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
+        )
+        # t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
         return result
 
-    def solve(self, maxiter=500, maxerr=1e-6, x0=None, fname_checkpoint=None, checkpoint_interval=1):
+    def solve(
+        self,
+        maxiter=500,
+        maxerr=1e-6,
+        x0=None,
+        fname_checkpoint=None,
+        checkpoint_interval=1,
+    ):
         self.prepare()
-        rhs    = self.dof.zip(*[signal.rhs for signal in self.signals])
-        if x0 is not None: x0 = self.dof.zip(*x0)
-        solver = utils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
+        rhs = self.dof.zip(*[signal.rhs for signal in self.signals])
+        if x0 is not None:
+            x0 = self.dof.zip(*x0)
+
+        solver = putils.CG(self.A, rhs, M=self.M, dot=self.dof.dot, x0=x0)
         # If there exists a checkpoint, restore solver state
         if fname_checkpoint is None:
             checkpoint = False
@@ -165,15 +211,20 @@ class MLMapmaker:
         """Evaluate degrees of freedom x for the given tod after translating
         it from those used by another, similar mapmaker. This will have the same
         signals, but possibly with different sample rates etc."""
-        if tod is None: tod = np.zeros([obs.dets.count, obs.samps.count], self.dtype)
-        for si, (ssig, osig, oval), in reversed(list(enumerate(zip(self.signals,other.signals,x)))):
+        if tod is None:
+            tod = np.zeros([obs.dets.count, obs.samps.count], self.dtype)
+        for (
+            si,
+            (ssig, osig, oval),
+        ) in reversed(list(enumerate(zip(self.signals, other.signals, x)))):
             ssig.transeval(id, obs, osig, oval, tod=tod)
         return tod
 
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
-    def __init__(self, name, ofmt, output, ext):
+
+    def __init__(self, name, ofmt, output, ext, **kwargs):
         """Initialize a Signal. It probably doesn't make sense to construct a generic signal
         directly, though. Use one of the subclasses.
         Arguments:
@@ -181,82 +232,142 @@ class Signal:
         * ofmt: The format used when constructing output file prefix
         * output: Whether this signal should be part of the output or not.
         * ext: The extension used for the files.
+        * **kwargs: additional keyword based parameters, accessible as class parameters
         """
-        self.name   = name
-        self.ofmt   = ofmt
+        self.name = name
+        self.ofmt = ofmt
         self.output = output
-        self.ext    = ext
-        self.dof    = None
-        self.ready  = False
-    def add_obs(self, id, obs, nmat, Nd): pass
-    def prepare(self): self.ready = True
-    def forward (self, id, tod, x): pass
-    def backward(self, id, tod, x): pass
-    def precon(self, x): return x
-    def to_work  (self, x): return x.copy()
-    def from_work(self, x): return x
-    def write   (self, prefix, tag, x): pass
-    def translate(self, other, x): return x
-    def transeval(self, id, obs, other, x, tod): pass
+        self.ext = ext
+        self.dof = None
+        self.ready = False
+        self.__dict__.update(kwargs)
+
+    def add_obs(self, id, obs, nmat, Nd, **kwargs):
+        pass
+
+    def prepare(self):
+        self.ready = True
+
+    def forward(self, id, tod, x):
+        pass
+
+    def backward(self, id, tod, x):
+        pass
+
+    def precon(self, x):
+        return x
+
+    def to_work(self, x):
+        return x.copy()
+
+    def from_work(self, x):
+        return x
+
+    def write(self, prefix, tag, x):
+        pass
+
+    def translate(self, other, x):
+        return x
+
+    def transeval(self, id, obs, other, x, tod):
+        pass
+
 
 class SignalMap(Signal):
     """Signal describing a non-distributed sky map."""
-    def __init__(self, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False,
-            interpol=None):
+
+    def __init__(
+        self,
+        shape,
+        wcs,
+        comm,
+        comps="TQU",
+        name="sky",
+        ofmt="{name}",
+        output=True,
+        ext="fits",
+        dtype=np.float32,
+        sys=None,
+        recenter=None,
+        tile_shape=(500, 500),
+        tiled=False,
+        interpol=None,
+        glitch_flags: str = "flags.glitch_flags",
+    ):
         """Signal describing a sky map in the coordinate system given by "sys", which defaults
         to equatorial coordinates. If tiled==True, then this will be a distributed map with
         the given tile_shape, otherwise it will be a plain enmap. interpol controls the
-        pointing matrix interpolation mode. See so3g's Projectionist docstring for details."""
-        Signal.__init__(self, name, ofmt, output, ext)
-        self.comm  = comm
+        pointing matrix interpolation mode. See so3g's Projectionist docstring for details.
+        """
+        Signal.__init__(self, name, ofmt, output, ext, glitch_flags=glitch_flags)
+        self.comm = comm
         self.comps = comps
-        self.sys   = sys
-        if recenter is not None: raise NotImplementedError("Somehow recenter has been replaced by rot. Need to figure out why and what that means")
+        self.sys = sys
         self.recenter = recenter
         self.dtype = dtype
         self.tiled = tiled
         self.interpol = interpol
-        self.data  = {}
-        ncomp      = len(comps)
-        shape      = tuple(shape[-2:])
+        self.data = {}
+        ncomp = len(comps)
+        shape = tuple(shape[-2:])
+
         if tiled:
             geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
-            self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)),      dtype=dtype)
-            self.div = tilemap.zeros(geo.copy(pre=(ncomp,ncomp)), dtype=dtype)
-            self.hits= tilemap.zeros(geo.copy(pre=()),            dtype=dtype)
+            self.rhs = tilemap.zeros(geo.copy(pre=(ncomp,)), dtype=dtype)
+            self.div = tilemap.zeros(geo.copy(pre=(ncomp, ncomp)), dtype=dtype)
+            self.hits = tilemap.zeros(geo.copy(pre=()), dtype=dtype)
         else:
-            self.rhs = enmap.zeros((ncomp,)     +shape, wcs, dtype=dtype)
-            self.div = enmap.zeros((ncomp,ncomp)+shape, wcs, dtype=dtype)
-            self.hits= enmap.zeros(              shape, wcs, dtype=dtype)
+            self.rhs = enmap.zeros((ncomp,) + shape, wcs, dtype=dtype)
+            self.div = enmap.zeros((ncomp, ncomp) + shape, wcs, dtype=dtype)
+            self.hits = enmap.zeros(shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, glitch_flags: Optional[str] = None):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data.
         """
-        Nd     = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-        ctime  = obs.timestamps
-        pcut   = PmatCut(obs.flags.glitch_flags) # could pass this in, but fast to construct
+        Nd = Nd.copy()  # This copy can be avoided if build_obs is split into two parts
+        ctime = obs.timestamps
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        pcut = PmatCut(obs[gflags])  # could pass this in, but fast to construct
         if pmap is None:
-            pmap = get_pmap(obs, comps=self.comps, geom=self.rhs.geometry,
-                threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
-                interpol=self.interpol)
+            # Build the local geometry and pointing matrix for this observation
+            if self.recenter:
+                rot = recentering_to_quat_lonlat(
+                    *evaluate_recentering(
+                        self.recenter,
+                        ctime=ctime[len(ctime) // 2],
+                        geom=(self.rhs.shape, self.rhs.wcs),
+                        site=unarr(obs.site),
+                    )
+                )
+            else:
+                rot = None
+            pmap = coords.pmat.P.for_tod(
+                obs,
+                comps=self.comps,
+                geom=self.rhs.geometry,
+                rot=rot,
+                threads="domdir",
+                weather=unarr(obs.weather),
+                site=unarr(obs.site),
+                interpol=self.interpol,
+            )
         # Build the RHS for this observation
         pcut.clear(Nd)
         obs_rhs = pmap.zeros()
         pmap.to_map(dest=obs_rhs, signal=Nd)
         # Build the per-pixel inverse covmat for this observation
-        obs_div    = pmap.zeros(super_shape=(self.ncomp,self.ncomp))
+        obs_div = pmap.zeros(super_shape=(self.ncomp, self.ncomp))
         for i in range(self.ncomp):
-            obs_div[i]   = 0
-            obs_div[i,i] = 1
-            Nd[:]        = 0
+            obs_div[i] = 0
+            obs_div[i, i] = 1
+            Nd[:] = 0
             pmap.from_map(obs_div[i], dest=Nd)
             pcut.clear(Nd)
             Nd = nmat.white(Nd)
-            obs_div[i]   = 0
+            obs_div[i] = 0
             pmap.to_map(signal=Nd, dest=obs_div[i])
         # Build hitcount
         Nd[:] = 1
@@ -267,7 +378,7 @@ class SignalMap(Signal):
         # Update our full rhs and div. This works for both plain and distributed maps
         self.rhs = self.rhs.insert(obs_rhs, op=np.ndarray.__iadd__)
         self.div = self.div.insert(obs_div, op=np.ndarray.__iadd__)
-        self.hits= self.hits.insert(obs_hits[0],op=np.ndarray.__iadd__)
+        self.hits = self.hits.insert(obs_hits[0], op=np.ndarray.__iadd__)
         # Save the per-obs things we need. Just the pointing matrix in our case.
         # Nmat and other non-Signal-specific things are handled in the mapmaker itself.
         self.data[id] = bunch.Bunch(pmap=pmap, obs_geo=obs_rhs.geometry)
@@ -275,58 +386,76 @@ class SignalMap(Signal):
     def prepare(self):
         """Called when we're done adding everything. Sets up the map distribution,
         degrees of freedom and preconditioner."""
-        if self.ready: return
+        if self.ready:
+            return
         if self.tiled:
             self.geo_work = self.rhs.geometry
-            self.rhs  = tilemap.redistribute(self.rhs, self.comm)
-            self.div  = tilemap.redistribute(self.div, self.comm)
-            self.hits = tilemap.redistribute(self.hits,self.comm)
-            self.dof  = TileMapZipper(self.rhs.geometry, dtype=self.dtype, comm=self.comm)
+            self.rhs = tilemap.redistribute(self.rhs, self.comm)
+            self.div = tilemap.redistribute(self.div, self.comm)
+            self.hits = tilemap.redistribute(self.hits, self.comm)
+            self.dof = TileMapZipper(
+                self.rhs.geometry, dtype=self.dtype, comm=self.comm
+            )
         else:
             if self.comm is not None:
-                self.rhs  = utils.allreduce(self.rhs, self.comm)
-                self.div  = utils.allreduce(self.div, self.comm)
-                self.hits = utils.allreduce(self.hits, self.comm)
-            self.dof  = MapZipper(*self.rhs.geometry, dtype=self.dtype)
-        self.idiv  = safe_invert_div(self.div)
+                self.rhs = putils.allreduce(self.rhs, self.comm)
+                self.div = putils.allreduce(self.div, self.comm)
+                self.hits = putils.allreduce(self.hits, self.comm)
+            self.dof = MapZipper(*self.rhs.geometry, dtype=self.dtype)
+        self.idiv = safe_invert_div(self.div)
         self.ready = True
 
     @property
-    def ncomp(self): return len(self.comps)
+    def ncomp(self):
+        return len(self.comps)
 
     def forward(self, id, tod, map, tmul=1, mmul=1):
         """map2tod operation. For tiled maps, the map should be in work distribution,
         as returned by unzip. Adds into tod."""
-        if id not in self.data: return # Should this really skip silently like this?
-        if tmul != 1: tod *= tmul
-        if mmul != 1: map = map*mmul
+        if id not in self.data:
+            return  # Should this really skip silently like this?
+        if tmul != 1:
+            tod *= tmul
+        if mmul != 1:
+            map = map * mmul
         self.data[id].pmap.from_map(dest=tod, signal_map=map, comps=self.comps)
 
     def backward(self, id, tod, map, tmul=1, mmul=1):
         """tod2map operation. For tiled maps, the map should be in work distribution,
         as returned by unzip. Adds into map"""
-        if id not in self.data: return
-        if tmul != 1: tod  = tod*tmul
-        if mmul != 1: map *= mmul
+        if id not in self.data:
+            return
+        if tmul != 1:
+            tod = tod * tmul
+        if mmul != 1:
+            map *= mmul
         self.data[id].pmap.to_map(signal=tod, dest=map, comps=self.comps)
 
     def precon(self, map):
-        if self.tiled: return tilemap.map_mul(self.idiv, map)
-        else: return enmap.map_mul(self.idiv, map)
+        if self.tiled:
+            return tilemap.map_mul(self.idiv, map)
+        else:
+            return enmap.map_mul(self.idiv, map)
 
     def to_work(self, map):
-        if self.tiled: return tilemap.redistribute(map, self.comm, self.geo_work.active)
-        else: return map.copy()
+
+        if self.tiled:
+            return tilemap.redistribute(map, self.comm, self.geo_work.active)
+        else:
+            return map.copy()
 
     def from_work(self, map):
         if self.tiled:
             return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else:
-            if self.comm is None: return map
-            else: return utils.allreduce(map, self.comm)
+            if self.comm is None:
+                return map
+            else:
+                return putils.allreduce(map, self.comm)
 
     def write(self, prefix, tag, m):
-        if not self.output: return
+        if not self.output:
+            return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.tiled:
@@ -348,7 +477,7 @@ class SignalMap(Signal):
                 raise ValueError("Geometry mismatch")
             # Tiling is not set up yet by the time transeval is called.
             # Transeval doesn't need the tiling to match, though
-            #if other.rhs.ntile != self.rhs.ntile or other.rhs.nactive != self.rhs.nactive:
+            # if other.rhs.ntile != self.rhs.ntile or other.rhs.nactive != self.rhs.nactive:
             #    raise ValueError("Tiling mismatch")
         else:
             if other.rhs.shape != self.rhs.shape:
@@ -366,51 +495,90 @@ class SignalMap(Signal):
         """Translate map from SignalMap other to the current SignalMap,
         and then evaluate it for the given observation, returning a tod.
         This is used when building a signal-free tod for the noise model
-        in multipass mapmaking."""
+        in multipass mapmaking. This function is not used during the first pass
+        of the ML mapmaker. It is a bridge logic between passes."""
         # Currently we don't support any actual translation, but could handle
         # resolution changes in the future (probably not useful though)
         self._checkcompat(other)
+        ctime = obs.timestamps
         # Build the local geometry and pointing matrix for this observation
-        pmap = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry,
-            threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site),
-            interpol=self.interpol)
+        if self.recenter:
+            rot = recentering_to_quat_lonlat(
+                *evaluate_recentering(
+                    self.recenter,
+                    ctime=ctime[len(ctime) // 2],
+                    geom=(self.rhs.shape, self.rhs.wcs),
+                    site=unarr(obs.site),
+                )
+            )
+        else:
+            rot = None
+        pmap = coords.pmat.P.for_tod(
+            obs,
+            comps=self.comps,
+            geom=self.rhs.geometry,
+            rot=rot,
+            threads="domdir",
+            weather=unarr(obs.weather),
+            site=unarr(obs.site),
+            interpol=self.interpol,
+        )
         # Build the RHS for this observation
-        work = other.to_work(map)
+        # These lines are not activated during the first pass of mapmaking.
+        map_work = self.to_work(map)
         try:
-            pmap.from_map(dest=tod, signal_map=work, comps=self.comps)
+            pmap.from_map(dest=tod, signal_map=map_work, comps=self.comps)
         except RuntimeError as e:
-            raise RuntimeError("%s.\nPossibly caused by the assumption that exactly the same tiles will be hit each pass, which can in rare cases break when downsampling by different amounts in different passes when a tile is just barely hit by a single sample. This can be fixed by adding support for constructing coords.pmat.P which treats hits to a missing tile as zero instead of as an error. This also requires minor changes to so3g Projection.cxx. TODO." % str(e))
+            raise RuntimeError(
+                f"""{e}.
+            Possibly caused by the assumption that exactly the same tiles will be hit each pass, 
+            which can in rare cases break when downsampling by different amounts in different passes 
+            when a tile is just barely hit by a single sample. This can be fixed by adding support 
+            for constructing coords.pmat.P which treats hits to a missing tile as zero instead of 
+            as an error. This also requires minor changes to so3g Projection.cxx. TODO."""
+            )
         return tod
 
+
 class SignalCut(Signal):
-    def __init__(self, comm, name="cut", ofmt="{name}_{rank:02}", dtype=np.float32,
-            output=False, cut_type=None):
+    def __init__(
+        self,
+        comm,
+        name="cut",
+        ofmt="{name}_{rank:02}",
+        dtype=np.float32,
+        output=False,
+        cut_type=None,
+        glitch_flags: str = "flags.glitch_flags",
+    ):
         """Signal for handling the ML solution for the values of the cut samples."""
-        Signal.__init__(self, name, ofmt, output, ext="hdf")
-        self.comm  = comm
-        self.data  = {}
+        Signal.__init__(self, name, ofmt, output, ext="hdf", glitch_flags=glitch_flags)
+        self.comm = comm
+        self.data = {}
         self.dtype = dtype
         self.cut_type = cut_type
-        self.off   = 0
-        self.rhs   = []
-        self.div   = []
+        self.off = 0
+        self.rhs = []
+        self.div = []
 
-    def add_obs(self, id, obs, nmat, Nd):
+    def add_obs(self, id, obs, nmat, Nd, glitch_flags: Optional[str] = None):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
-        and Nd the result of applying the noise model to the detector time-ordered data."""
-        Nd      = Nd.copy() # This copy can be avoided if build_obs is split into two parts
-        pcut    = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
+        and Nd the result of applying the noise model to the detector time-ordered data.
+        """
+        Nd = Nd.copy()  # This copy can be avoided if build_obs is split into two parts
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        pcut = PmatCut(obs[gflags], model=self.cut_type)
         # Build our RHS
         obs_rhs = np.zeros(pcut.njunk, self.dtype)
         pcut.backward(Nd, obs_rhs)
         # Build our per-pixel inverse covmat
         obs_div = np.ones(pcut.njunk, self.dtype)
-        Nd[:]     = 0
+        Nd[:] = 0
         pcut.forward(Nd, obs_div)
-        Nd       *= nmat.ivar[:,None]
+        Nd *= nmat.ivar[:, None]
         pcut.backward(Nd, obs_div)
-        self.data[id] = bunch.Bunch(pcut=pcut, i1=self.off, i2=self.off+pcut.njunk)
+        self.data[id] = bunch.Bunch(pcut=pcut, i1=self.off, i2=self.off + pcut.njunk)
         self.off += pcut.njunk
         self.rhs.append(obs_rhs)
         self.div.append(obs_div)
@@ -418,27 +586,31 @@ class SignalCut(Signal):
     def prepare(self):
         """Process the added observations, determining our degrees of freedom etc.
         Should be done before calling forward and backward."""
-        if self.ready: return
+        if self.ready:
+            return
         self.rhs = np.concatenate(self.rhs)
         self.div = np.concatenate(self.div)
         self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
 
     def forward(self, id, tod, junk):
-        if id not in self.data: return
+        if id not in self.data:
+            return
         d = self.data[id]
-        d.pcut.forward(tod, junk[d.i1:d.i2])
+        d.pcut.forward(tod, junk[d.i1 : d.i2])
 
     def precon(self, junk):
-        return junk/self.div
+        return junk / self.div
 
     def backward(self, id, tod, junk):
-        if id not in self.data: return
+        if id not in self.data:
+            return
         d = self.data[id]
-        d.pcut.backward(tod, junk[d.i1:d.i2])
+        d.pcut.backward(tod, junk[d.i1 : d.i2])
 
     def write(self, prefix, tag, m):
-        if not self.output: return
+        if not self.output:
+            return
         if self.comm is None:
             rank = 0
         else:
@@ -459,12 +631,19 @@ class SignalCut(Signal):
         self._checkcompat(other)
         res = np.full(self.off, -1e10, self.dtype)
         for id in self.data:
-            sdata = self .data[id]
+            sdata = self.data[id]
             odata = other.data[id]
-            so3g.translate_cuts(odata.pcut.cuts, sdata.pcut.cuts, sdata.pcut.model, sdata.pcut.params, junk[odata.i1:odata.i2], res[sdata.i1:sdata.i2])
+            so3g.translate_cuts(
+                odata.pcut.cuts,
+                sdata.pcut.cuts,
+                sdata.pcut.model,
+                sdata.pcut.params,
+                junk[odata.i1 : odata.i2],
+                res[sdata.i1 : sdata.i2],
+            )
         return res
 
-    def transeval(self, id, obs, other, junk, tod):
+    def transeval(self, id, obs, other, junk, tod, glitch_flags: Optional[str] = None):
         """Translate data junk from SignalCut other to the current SignalCut,
         and then evaluate it for the given observation, returning a tod.
         This is used when building a signal-free tod for the noise model
@@ -472,14 +651,22 @@ class SignalCut(Signal):
         self._checkcompat(other)
         # We have to make a pointing matrix from scratch because add_obs
         # won't have been called yet at this point
-        spcut = PmatCut(obs.flags.glitch_flags, model=self.cut_type)
+        gflags = glitch_flags if glitch_flags is not None else self.glitch_flags
+        spcut = PmatCut(obs[gflags], model=self.cut_type)
         # We do have one for other though, since that will be the output
         # from the previous round of multiplass mapmaking.
         odata = other.data[id]
         sjunk = np.zeros(spcut.njunk, junk.dtype)
         # Translate the cut degrees of freedom. The sample rate could have
         # changed, for example.
-        so3g.translate_cuts(odata.pcut.cuts, spcut.cuts, spcut.model, spcut.params, junk[odata.i1:odata.i2], sjunk)
+        so3g.translate_cuts(
+            odata.pcut.cuts,
+            spcut.cuts,
+            spcut.model,
+            spcut.params,
+            junk[odata.i1 : odata.i2],
+            sjunk,
+        )
         # And project onto the tod
         spcut.forward(tod, sjunk)
         return tod

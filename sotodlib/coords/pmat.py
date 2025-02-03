@@ -1,6 +1,5 @@
 import so3g.proj
 import numpy as np
-import scipy
 from pixell import enmap, tilemap
 
 from .helpers import _get_csl, _valid_arg, _not_both, _confirm_wcs
