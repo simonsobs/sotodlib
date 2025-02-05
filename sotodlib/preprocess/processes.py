@@ -25,7 +25,7 @@ class FFTTrim(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
     name = "fft_trim"
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.fft_trim(aman, **self.process_cfgs)
 
 class Detrend(_Preprocess):
@@ -40,7 +40,7 @@ class Detrend(_Preprocess):
 
         super().__init__(step_cfgs)
     
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
 
@@ -249,7 +249,7 @@ class FixJumps(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         field = self.process_cfgs['jumps_aman']
         aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
             aman[self.signal], proc_aman[field].jump_flag.mask(),
@@ -612,7 +612,7 @@ class Calibrate(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
                 aman[self.signal] /= self.process_cfgs["val"]
@@ -767,11 +767,16 @@ class SubtractHWPSS(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         if not(proc_aman[self.hwpss_stats] is None):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
-            template = hwp.harms_func(aman.hwp_angle, modes,
-                                  proc_aman[self.hwpss_stats].coeffs)
+            if sim:
+                hwpss_stats = hwp.get_hwpss(aman, merge_stats=False, merge_model=False,
+                                            modes=modes)
+                template = hwp.harms_func(aman.hwp_angle, modes, hwpss_stats.coeffs)
+            else:
+                template = hwp.harms_func(aman.hwp_angle, modes,
+                                          proc_aman[self.hwpss_stats].coeffs)
             if 'hwpss_model' in aman._fields:
                 aman.move('hwpss_model', None)
             aman.wrap('hwpss_model', template, [(0, 'dets'), (1, 'samps')])
@@ -787,7 +792,7 @@ class Apodize(_Preprocess):
     """
     name = "apodize"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
 
 class Demodulate(_Preprocess):
@@ -797,7 +802,7 @@ class Demodulate(_Preprocess):
     """
     name = "demodulate"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
@@ -860,7 +865,7 @@ class AzSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.azss_stats_name, azss_stats)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         if self.proc_aman_turnaround_info:
             _f = attrgetter(self.proc_aman_turnaround_info)
             turnaround_info = _f(proc_aman)
@@ -868,15 +873,22 @@ class AzSS(_Preprocess):
             turnaround_info = None
         if self.azss_stats_name in proc_aman:
             if self.process_cfgs["subtract"]:
-                tod_ops.azss.subtract_azss(aman, proc_aman[self.azss_stats_name],
-                                           signal = self.calc_cfgs.get('signal'),
-                                           in_place=True)
+                    if sim:
+                        _ = tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                                  turnaround_info=turnaround_info,
+                                                  merge_stats=False, merge_model=False,
+                                                  subtract_in_place=self.process_cfgs["subtract"], 
+                                                  **self.calc_cfgs)
+                    else:
+                        tod_ops.azss.subtract_azss(aman, proc_aman[self.azss_stats_name],
+                                                signal = self.calc_cfgs.get('signal'),
+                                                in_place=True)
         else:
-            tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
-                                  turnaround_info=turnaround_info,
-                                  merge_stats=True, merge_model=False,
-                                  subtract_in_place=self.process_cfgs["subtract"], 
-                                  **self.calc_cfgs)
+                tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                      turnaround_info=turnaround_info,
+                                      merge_stats=True, merge_model=False,
+                                      subtract_in_place=self.process_cfgs["subtract"], 
+                                      **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
@@ -905,7 +917,7 @@ class GlitchFill(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.gapfill.fill_glitches(
             aman, signal=aman[self.signal],
             glitch_flags=proc_aman[self.flag_aman][self.flag],
@@ -951,7 +963,7 @@ class FlagTurnarounds(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
 
 class SubPolyf(_Preprocess):
@@ -962,7 +974,7 @@ class SubPolyf(_Preprocess):
     """
     name = 'sub_polyf'
     
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
 
 class SSOFootprint(_Preprocess):
@@ -1153,7 +1165,7 @@ class HWPAngleModel(_Preprocess):
     """
     name = "hwp_angle_model"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
             aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
                       [(0, 'samps')])
@@ -1210,7 +1222,7 @@ class FourierFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         filt_function = self.process_cfgs.get(
             "filt_function",
             "high_pass_butter4"
@@ -1497,7 +1509,7 @@ class SubtractT2P(_Preprocess):
     """
     name = "subtract_t2p"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
 
@@ -1554,7 +1566,7 @@ class UnionFlags(_Preprocess):
     """
     name = "union_flags"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         from so3g.proj import RangesMatrix
         total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for label in self.process_cfgs['flag_labels']:
@@ -1583,7 +1595,7 @@ class RotateQU(_Preprocess):
     """
     name = "rotate_qu"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         from sotodlib.coords import demod
         demod.rotate_demodQU(aman, **self.process_cfgs)
 
@@ -1618,7 +1630,7 @@ class SubtractQUCommonMode(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         if 'qu_common_mode_coeffs' in proc_aman:
             tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q, self.signal_name_U,
                                                       coeff_aman=proc_aman['qu_common_mode_coeffs'], 
@@ -1681,7 +1693,7 @@ class PointingModel(_Preprocess):
     """
     name = "pointing_model"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
