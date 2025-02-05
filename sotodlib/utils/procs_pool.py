@@ -124,19 +124,19 @@ def get_exec_env(
     ValueError
         When a valid executor is not available based on the execution priority list.
     """
+    user_priority = list(priority)
     executor_created = False
     while not executor_created:
-        executor_mode = priority.pop(0)
-        match executor_mode:
-            case "mpi":
-                executor_created, rank, executor, as_completed_callable = (
-                    _get_mpi_comm()
-                )
-            case "process_pool":
-                executor_created, rank, executor, as_completed_callable = (
-                    _get_concurrent_comm(nprocs)
-                )
-            case _:
-                raise ValueError("No executor available")
+        executor_mode = user_priority.pop(0)
+        if executor_mode == "mpi":
+            executor_created, rank, executor, as_completed_callable = (
+                _get_mpi_comm()
+            )
+        elif executor_mode == "process_pool":
+            executor_created, rank, executor, as_completed_callable = (
+                _get_concurrent_comm(nprocs)
+            )
+        else:
+            raise ValueError("No executor available")
 
     return rank, executor, as_completed_callable
