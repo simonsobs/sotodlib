@@ -56,17 +56,19 @@ jobs:
           python3 -m pip install -vvv .[tests]
 
       - name: Run Serial Tests
+        working-directory: ./tests
         run: |
           export OMP_NUM_THREADS=2
           export OPENBLAS_NUM_THREADS=2
           export MPI_DISABLE=1
-          python3 -m unittest discover
+          python3 -m pytest
 
       - name: Run MPI Tests
+        working-directory: ./tests
         run: |
           export OMP_NUM_THREADS=1
           export OPENBLAS_NUM_THREADS=1
-          mpirun -n 2 python3 -m unittest discover
+          mpirun -n 2 python3 -m pytest
 
   # FIXME:  Re-enable after testing this procedure on a local
   # apple machine.
