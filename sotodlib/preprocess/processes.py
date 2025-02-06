@@ -884,11 +884,11 @@ class AzSS(_Preprocess):
                                                 signal = self.calc_cfgs.get('signal'),
                                                 in_place=True)
         else:
-                tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
-                                      turnaround_info=turnaround_info,
-                                      merge_stats=True, merge_model=False,
-                                      subtract_in_place=self.process_cfgs["subtract"], 
-                                      **self.calc_cfgs)
+            tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                    turnaround_info=turnaround_info,
+                                    merge_stats=True, merge_model=False,
+                                    subtract_in_place=self.process_cfgs["subtract"], 
+                                    **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
