@@ -30,6 +30,8 @@ defaults = {"query": "1",
             "freq": None,
             "tasks_per_group":1,
             "cont":False,
+            "rhs": False,
+            "bin": False,
            }
 
 def get_parser(parser=None):
@@ -63,6 +65,8 @@ def get_parser(parser=None):
     parser.add_argument("-W", "--wafer"  ,   type=str, nargs='+', help="Detector wafer subset to map with")
     parser.add_argument(      "--freq" ,  type=str, nargs='+', help="Frequency band to map with")
     parser.add_argument("-g", "--tasks-per-group", type=int, help="number of tasks per group. By default it is 1, but can be higher if you want more than one MPI job working on a depth-1 map, e.g. if you don't have enough memory for so many MPI jobs")
+    parser.add_argument("--rhs", action="store_true", default=False, help="Save the rhs maps")
+    parser.add_argument("--bin", action="store_true", default=False, help="Save the bin maps")
     return parser
 
 def _get_config(config_file):
@@ -289,12 +293,14 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t
     with utils.nowarn(): tmap = utils.remove_nan(time_rhs / ivar)
     return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, bin=bin)
 
-def write_depth1_map(prefix, data, dtype = np.float32 ):
+def write_depth1_map(prefix, data, dtype = np.float32, binned=False, rhs=False):
     data.signal.write(prefix, "map",  data.map.astype(dtype))
     data.signal.write(prefix, "ivar", data.ivar.astype(dtype))
     data.signal.write(prefix, "time", data.tmap.astype(dtype))
-    data.signal.write(prefix, "rhs", data.signal.rhs.astype(dtype))
-    data.signal.write(prefix, "bin", data.bin.astype(dtype))
+    if binned:
+        data.signal.write(prefix, "bin", data.bin.astype(dtype))
+    if rhs:
+        data.signal.write(prefix, "rhs", data.signal.rhs.astype(dtype))
 
 def write_depth1_info(oname, info):
     utils.mkdir(os.path.dirname(oname))
@@ -326,7 +332,7 @@ def main(config_file=None, defaults=defaults, **args):
     comm       = mpi.COMM_WORLD
     comm_intra = comm.Split(comm.rank // args['tasks_per_group'])
     comm_inter = comm.Split(comm.rank  % args['tasks_per_group'])
-    
+
     SITE    = args['site']
     verbose = args['verbose'] - args['quiet']
     shape, wcs = enmap.read_map_geometry(args['area'])
@@ -416,7 +422,7 @@ def main(config_file=None, defaults=defaults, **args):
                     subshape, subwcs, noise_model, L, comps=comps, t0=t, comm=comm_good, tag=tag,
                     niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0, verbose=verbose>0, downsample=args['downsample'] )
             # 6. write them
-            write_depth1_map(prefix, mapdata, dtype=dtype_tod)
+            write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'])
         except DataMissing as e:
             handle_empty(prefix, tag, comm_good, e)
     return True
