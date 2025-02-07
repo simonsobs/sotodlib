@@ -13,8 +13,7 @@ RESOURCE_DEFAULTS = {
 
 
 def get_local_file(filename: str, cache: bool = True, download: bool = True) -> str:
-    """
-    This function utilizes RESOURCE_DEFAULTS or SOTODLIB_RESOURCES environment
+    """This function utilizes RESOURCE_DEFAULTS or SOTODLIB_RESOURCES environment
     variable to manage resource files such as a planet catalog from NASA.
 
     RESOURCE_DEFAULTS and SOTODLIB_RESOURCES are dictionaries with key a filename
@@ -46,6 +45,8 @@ def get_local_file(filename: str, cache: bool = True, download: bool = True) -> 
       filename: The name of the file to grab
       cache: A boolean indicating that downloaded files should be cached in user
               home folder (~/.sotodlib/filecache/).
+      download: If False, the file will not be downloaded even if
+        config specifies a URL and the local cache does not have the file.
 
     Returns:
       The absolute path of the file.
@@ -54,6 +55,7 @@ def get_local_file(filename: str, cache: bool = True, download: bool = True) -> 
         RuntimeError: when the requested resource file does not exist as a key
                       in SOTODLIB_RESOURCES env variable or RESOURCE_DEFAULTS.
         RuntimeErorr: When the value of a key is not an ftp or file path.
+
     """
 
     # Local cache. This is per user, however we may want to try and right in
