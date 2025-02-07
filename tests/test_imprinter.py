@@ -11,9 +11,19 @@ from sotodlib.io.g3tsmurf_db import Files
 @pytest.fixture(scope="session", autouse=True)
 def imprinter():
     with tempfile.NamedTemporaryFile(mode='w') as f:
+        g3tsmurf_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+        g3tsmurf_config = {
+            "data_prefix": "/data",
+            "db_path": "test_g3tsmurf.db"
+        }
+        yaml.dump(g3tsmurf_config, g3tsmurf_file)
+        g3tsmurf_file.close()
+        
         im_config = {
             'db_path': '_pytest_imprinter.db',
-            'sources': {
+            'g3tsmurf': g3tsmurf_file.name,
+            'output_root': 'test_output',
+            'tel_tubes': {
                 'lat': {
                     'slots': ['slot1', 'slot2']
                 },
@@ -21,14 +31,17 @@ def imprinter():
         }
         yaml.dump(im_config, f)
         f.flush()
-        im = Imprinter(f.name)
+        im = Imprinter(f.name, make_db=True)
     return im
 
 # use this to clean up db file afterwards
 @pytest.fixture(scope="session", autouse=True)
 def delete_imprinter_db(imprinter):
     yield
-    os.remove(imprinter.db_path)
+    if os.path.exists(imprinter.db_path):
+        os.remove(imprinter.db_path)
+    if os.path.exists('test_g3tsmurf.db'):
+        os.remove('test_g3tsmurf.db')
 
 @pytest.fixture
 def obsset():
@@ -41,12 +54,15 @@ def obsset():
     file.start = dt_t0
     file.stop = dt_t1
     file.n_channels = 10
-    obs1 = create_autospec(G3tObservations)
-    obs1.obs_id = f"oper_slot1_{t0}"
-    obs1.files = [file]*2
-    obs2 = create_autospec(G3tObservations)
+    
+    obs1 = create_autospec(spec=G3tObservations, instance=True)
+    obs1.obs_id = f"oper_slot1_{t0}" 
+    obs1.files = [file] * 2
+    obs1.timing = True
+    obs2 = create_autospec(spec=G3tObservations, instance=True)
     obs2.obs_id = f"oper_slot2_{t0}"
-    obs2.files = [file]*2
+    obs2.files = [file] * 2
+    obs2.timing = True
     obsset = ObsSet([obs1, obs2], mode="oper", slots=["slot1", "slot2", "slot3"], tel_tube="lat")
     return obsset
 
@@ -68,12 +84,16 @@ def test_register_book(imprinter, obsset):
     assert book.obs[1].obs_id == "oper_slot2_1674090159"
     assert book.tel_tube == "lat"
     assert book.type == "oper"
-    assert book.start == datetime.datetime.fromtimestamp(
-        1674090159, tz=datetime.timezone.utc
+    expected_start = (
+        datetime.datetime.fromtimestamp(1674090159, tz=datetime.timezone.utc)
+        .replace(tzinfo=None)
     )
-    assert book.stop == datetime.datetime.fromtimestamp(
-        1674090259, tz=datetime.timezone.utc
+    expected_stop = (
+        datetime.datetime.fromtimestamp(1674090259, tz=datetime.timezone.utc)
+        .replace(tzinfo=None)
     )
+    assert book.start == expected_start
+    assert book.stop == expected_stop
     assert book.max_channels == 10
     assert book.message == ""
     assert book.slots == "slot1,slot2"
