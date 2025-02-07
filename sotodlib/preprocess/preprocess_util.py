@@ -10,6 +10,8 @@ import traceback
 import inspect
 from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
+from sotodlib.tod_ops import t2pleakage
+
 
 
 from .. import core
@@ -352,7 +354,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
-                                   logger=None):
+                                   logger=None, init_only=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -381,6 +383,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         the (large) TOD blob.  Not all loaders may support this.
     logger: PythonLogger
         Optional. Logger object or None will generate a new one.
+    init_only: bool
+        Optional. Whether or not to run the dependent pipeline.
     """
 
     if logger is None:
@@ -418,12 +422,13 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
+            if init_only:
+                return aman
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
-            proc_aman.preprocess.noisy_dets_flags.move("valid_dets", None)
             aman.preprocess.merge(proc_aman.preprocess)
 
             pipe_proc.run(aman, aman.preprocess)
@@ -435,7 +440,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
-                                       logger=None):
+                                       logger=None, init_only=False,
+                                       t2ptemplate_aman=None):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -465,6 +471,11 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         the (large) TOD blob.  Not all loaders may support this.
     logger: PythonLogger
         Optional. Logger object or None will generate a new one.
+    init_only: bool
+        Optional. Whether or not to run the dependent pipeline.
+    t2ptemplate_aman: AxisManager
+        Optional. AxisManager to use as a template for t2p leakage
+        deprojection.
     """
     if logger is None:
         logger = init_logger("preprocess")
@@ -505,6 +516,24 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, sim=True)
+
+            if init_only:
+                return aman
+            
+            if t2ptemplate_aman is not None:
+                # Replace Q,U with simulated timestreams
+                t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
+                t2ptemplate_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
+
+                t2p_aman = t2pleakage.get_t2p_coeffs(
+                    t2ptemplate_aman,
+                    merge_stats=False
+                )
+                t2pleakage.subtract_t2p(
+                    aman,
+                    t2p_aman,
+                    T_signal=t2ptemplate_aman.dsT
+                )
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
