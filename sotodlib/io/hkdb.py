@@ -434,13 +434,13 @@ def get_frame_offsets(
 
     _fields: List[Field] = []
     for f in fields:
-        if f in hkcfg.aliases:
-            _fields.append(Field.from_str(hkcfg.aliases[f]))
-        else:
-            if isinstance(f, str):
-                _fields.append(Field.from_str(f))
+        if isinstance(f, str):
+            if f in hkcfg.aliases:
+                _fields.append(Field.from_str(hkcfg.aliases[f]))
             else:
-                _fields.append(f)
+                _fields.append(Field.from_str(f))
+        else:
+            _fields.append(f)
 
     if hkdb is None:
         hkdb = HkDb(hkcfg)
