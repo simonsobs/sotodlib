@@ -170,12 +170,10 @@ def main(config_file=None, defaults=defaults, **args):
             # Cut out detector wafers we're not interested in, if args.wafer is specified
             if args['wafer'] is not None:
                 wafer_list = args['wafer']
-                dets_dict = {'wafer_slot':wafer_list}
+                dets_dict = {'dets:wafer_slot':wafer_list}
             else: dets_dict ={}
 
-            dets_dict['detset'] = detset
             dets_dict['band'] = args['freq']
-
             # Get the resolved list of detectors, to keep it below args.max_dets.
             meta = context.get_meta(obs_id=obs_id, dets=dets_dict)
             dets = meta['dets'].vals
