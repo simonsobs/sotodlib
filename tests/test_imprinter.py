@@ -8,6 +8,14 @@ import datetime
 from sotodlib.io.imprinter import *
 from sotodlib.io.g3tsmurf_db import Files
 
+from ._helpers import mpi_multi
+
+
+# These tests are serial-only.
+if mpi_multi():
+    pytest.skip(allow_module_level=True)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def imprinter():
     with tempfile.NamedTemporaryFile(mode='w') as f:
