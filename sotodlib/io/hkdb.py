@@ -9,7 +9,7 @@ import numpy as np
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from typing import Union, List, Optional, Dict
+from typing import Union, List, Optional, Dict, Any
 import so3g
 from spt3g import core as spt3g_core
 from tqdm.auto import tqdm
@@ -25,6 +25,9 @@ log = init_logger('hkdb')
 class HkConfig:
     """
     Configuration object for indexing and loading from an HK archive.
+
+    If instantiating from a nested dictionary, the ``from_dict`` class method
+    can be used to convert fields to their proper data types.
 
     Args
     ------------
@@ -71,18 +74,31 @@ class HkConfig:
             self.db_url = f"sqlite:///{self.db_file}"
 
     @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HkConfig":
+        """
+        Generates an HkConfig object from a dictionary whose keys are fields of
+        the HkConfig dataclass.
+
+        If the ``db_url`` is specified, it can be set as a string, a
+        dictionary, or a sqlalchemy URL object. If it is of type dict, it
+        will be converted to a URL object by passing it through to the keyword
+        arguments of sqlalchemy's URL.create function. Environment variables
+        will be expanded in both the string and dict representations.
+        """
+        _db_url = data.get('db_url')
+        if isinstance(_db_url, dict):
+            url_dict = data['db_url']
+            for k, v in url_dict.items():
+                url_dict[k] = os.path.expandvars(v)
+            data['db_url'] = db.URL.create(**url_dict)
+        elif isinstance(_db_url, str):
+            data['db_url'] = os.path.expandvars(data['db_url'])
+        return cls(**data)
+
+    @classmethod
     def from_yaml(cls, path):
         with open(path, 'r') as f:
-            data = yaml.safe_load(f)
-            _db_url = data.get('db_url')
-            if isinstance(_db_url, dict):
-                url_dict = data['db_url']
-                for k, v in url_dict.items():
-                    url_dict[k] = os.path.expandvars(v)
-                data['db_url'] = db.URL.create(**url_dict)
-            elif isinstance(_db_url, str):
-                data['db_url'] = os.path.expandvars(data['db_url'])
-            return cls(**data)
+            return cls.from_dict(yaml.safe_load(f))
 
 
 class HkFile(Base):
