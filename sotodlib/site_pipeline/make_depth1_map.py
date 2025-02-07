@@ -68,38 +68,6 @@ def get_parser(parser=None):
 def _get_config(config_file):
     return yaml.safe_load(open(config_file,'r'))
 
-class ColoredFormatter(logging.Formatter):
-    def __init__(self, msg, colors={'DEBUG':colors.reset,'INFO':colors.lgreen,'WARNING':colors.lbrown,'ERROR':colors.lred, 'CRITICAL':colors.lpurple}):
-        logging.Formatter.__init__(self, msg)
-        self.colors = colors
-    def format(self, record):
-        try:
-            col = self.colors[record.levelname]
-        except KeyError:
-            col = colors.reset
-        return col + logging.Formatter.format(self, record) + colors.reset
-
-class LogInfoFilter(logging.Filter):
-    def __init__(self, rank=0):
-        self.rank = rank
-        try:
-            # Try to get actual time since task start if possible
-            import os, psutil
-            p = psutil.Process(os.getpid())
-            self.t0 = p.create_time()
-        except ImportError:
-            # Otherwise measure from creation of this filter
-            self.t0 = time.time()
-    def filter(self, record):
-        record.rank  = self.rank
-        record.wtime = time.time()-self.t0
-        record.wmins = record.wtime/60.
-        record.whours= record.wmins/60.
-        record.mem   = memory.current()/1024.**3
-        record.resmem= memory.resident()/1024.**3
-        record.memmax= memory.max()/1024.**3
-        return record
-
 def handle_empty(prefix, tag, comm, e, L):
     # This happens if we ended up with no valid tods for some reason
     if comm.rank == 0:
@@ -378,13 +346,7 @@ def main(config_file=None, defaults=defaults, **args):
     utils.mkdir(args['odir'])
 
     # Set up logging.
-    L   = logging.getLogger(__name__)
-    L.setLevel(logging.INFO)
-    ch  = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(ColoredFormatter( "%(rank)3d " + "%3d %3d" % (comm_inter.rank, comm.rank) + " %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s"))
-    ch.addFilter(LogInfoFilter(comm_intra.rank))
-    L.addHandler(ch)
+    L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
 
     recenter = None
     if args['center_at']:
