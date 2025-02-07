@@ -129,6 +129,9 @@ class IndexAxis(AxisInterface):
         assert stop <= self.count
         return IndexAxis(self.name, stop - start), sl
 
+    def __eq__(self, other):
+        return self.count == other.count
+
     def intersection(self, friend, return_slices=False):
         count_out = min(self.count, friend.count)
         ax = IndexAxis(self.name, count_out)
@@ -190,6 +193,11 @@ class OffsetAxis(AxisInterface):
         assert stop <= self.offset + self.count
         return (OffsetAxis(self.name, stop - start, start, self.origin_tag),
                 slice(start - self.offset, stop - self.offset, stride))
+
+    def __eq__(self, other):
+        return (self.count == other.count and
+                self.offset == other.offset and
+                self.origin_tag == other.origin_tag)
 
     def intersection(self, friend, return_slices=False):
         offset = max(self.offset, friend.offset)
@@ -267,6 +275,10 @@ class LabelAxis(AxisInterface):
         _, i0, i1 = get_coindices(selector, self.vals)
         assert len(i0) == len(selector)  # not a strict subset!
         return LabelAxis(self.name, selector), i1
+
+    def __eq__(self, other):
+        return (self.count == other.count and
+                np.all(self.vals == other.vals))
 
     def intersection(self, friend, return_slices=False):
         _vals, i0, i1 = get_coindices(self.vals, friend.vals)
@@ -595,7 +607,7 @@ class AxisManager:
     # Add and remove data while maintaining internal consistency.
 
     def wrap(self, name, data, axis_map=None,
-             overwrite=False):
+             overwrite=False, restrict_in_place=False):
         """Add data into the AxisManager.
 
         Arguments:
@@ -616,6 +628,11 @@ class AxisManager:
             
           overwrite (bool): If True then will write over existing data
             in field ``name`` if present.
+
+          restrict_in_place (bool): If True, then a wrapped
+            AxisManager may be modified and added, without a copy
+            first.  This can be much faster, if there's no need to
+            preserve the wrapped item.
 
         """
         if overwrite and (name in self._fields):
@@ -659,7 +676,7 @@ class AxisManager:
                 assign[index] = axis.name
         helper._fields[name] = data
         helper._assignments[name] = assign
-        return self.merge(helper)
+        return self.merge(helper, restrict_in_place=restrict_in_place)
 
     def wrap_new(self, name, shape=None, cls=None, **kwargs):
         """Create a new object and wrap it, with axes mapped.  The shape can
@@ -736,6 +753,8 @@ class AxisManager:
         # If simple list/tuple of Axes is passed in, convert to dict
         if not isinstance(axes, dict):
             axes = {ax.name: ax for ax in axes}
+        axes = {k: v for k, v in axes.items()
+                if k in dest._axes and dest._axes[k] != v}
         for name, ax in axes.items():
             if name not in dest._axes:
                 continue
@@ -747,7 +766,10 @@ class AxisManager:
             dest._axes[ax.name] = ax
         for k, v in self._fields.items():
             if isinstance(v, AxisManager):
-                dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
+                if len(axes) == 0 and in_place:
+                    dest._fields[k] = v
+                else:
+                    dest._fields[k] = v.restrict_axes(axes, in_place=in_place)
             elif np.isscalar(v) or v is None:
                 dest._fields[k] = v
             else:
@@ -849,14 +871,19 @@ class AxisManager:
                     continue
                 if ax.name not in axes_out:
                     axes_out[ax.name] = ax.copy()
-                else:
+                elif axes_out[ax.name] != ax:
                     axes_out[ax.name] = axes_out[ax.name].intersection(
                         ax, False)
         return axes_out
 
-    def merge(self, *amans):
+    def merge(self, *amans, restrict_in_place=False):
         """Merge the data from other AxisMangers into this one.  Axes with the
         same name will be intersected.
+
+        If restrict_in_place=True, then the amans may be modified as
+        they are added to the output objcet.  When that arg is False,
+        the incoming amans are all copied, even if no modifications
+        are needed.
 
         """
         # Before messing with anything, check for key interference.
@@ -875,7 +902,7 @@ class AxisManager:
         self.restrict_axes(axes_out)
         # Import the other ones.
         for aman in amans:
-            aman = aman.restrict_axes(axes_out, in_place=False)
+            aman = aman.restrict_axes(axes_out, in_place=restrict_in_place)
             for k, v in aman._axes.items():
                 if k not in self._axes:
                     self._axes[k] = v
