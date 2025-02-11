@@ -368,6 +368,17 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('child', child)
         self.assertEqual(aman.shape, (3, n//2))
         self.assertEqual(aman._axes['samps'].offset, ofs)
+        # See that aman.child and child are different...
+        self.assertEqual(aman.child.dets.count, 3)
+        self.assertEqual(child.dets.count, 4)
+
+        # But you can tell it it's ok.
+        child2 = core.AxisManager(
+            core.LabelAxis('dets', dets + ['det3']),
+            core.OffsetAxis('samps', n, ofs - n//2))
+        aman.wrap('child2', child2, restrict_in_place=True)
+        self.assertEqual(aman.child2.dets.count, 3)
+        self.assertEqual(child2.dets.count, 3)
 
     def test_401_restrict(self):
         # Test AxisManager.restrict when it has AxisManager members.
@@ -426,17 +437,30 @@ class TestAxisManager(unittest.TestCase):
     def test_410_merge(self):
         dets = ['det0', 'det1', 'det2']
         n, ofs = 1000, 0
-        aman = core.AxisManager(
-            core.LabelAxis('dets', dets),
-            core.OffsetAxis('samps', n, ofs))
-        coparent = core.AxisManager(
-            core.LabelAxis('dets', dets + ['det3']),
-            core.OffsetAxis('samps', n, ofs - n//2))\
-            .wrap('x', np.arange(n), [(0, 'samps')])
-        aman.merge(coparent)
-        self.assertEqual(aman.shape, (3, n//2))
-        self.assertEqual(aman._axes['samps'].offset, ofs)
-        self.assertEqual(aman.x[0], n//2)
+        for in_place in [False, True]:
+            aman = core.AxisManager(
+                core.LabelAxis('dets', dets),
+                core.OffsetAxis('samps', n, ofs))
+            coparent = core.AxisManager(
+                core.LabelAxis('dets', dets + ['det3']),
+                core.OffsetAxis('samps', n, ofs - n//2))\
+                .wrap('x', np.arange(n), [(0, 'samps')])
+            if in_place:
+                kw = {'restrict_in_place': True}
+            else:
+                kw = {}
+            aman.merge(coparent, **kw)
+            self.assertEqual(aman.shape, (3, n//2))
+            self.assertEqual(aman._axes['samps'].offset, ofs)
+            self.assertEqual(aman.x[0], n//2)
+
+            if in_place:
+                # Check coparent was modified
+                self.assertEqual(coparent.shape, aman.shape)
+            else:
+                # Check coparent was not modified in place
+                self.assertEqual(coparent.shape, (4, n))
+
 
     def test_500_io(self):
         # Test save/load HDF5
