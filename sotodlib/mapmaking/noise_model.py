@@ -169,14 +169,12 @@ class NmatDetvecs(Nmat):
         if np.any(np.diff(mode_bins) < 0):
             raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
         # Then use these to get our set of basis vectors
-        print("mode_bins", mode_bins)
         vecs = find_modes_jon(ftod, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, verbose=self.verbose)
         nmode= vecs.shape[1]
         if vecs.size == 0: raise errors.ModelError("Could not find any noise modes")
         # Cut bins that extend beyond our max frequency
         bin_edges = self.bin_edges[self.bin_edges < srate/2 * 0.99]
         bins      = makebins(bin_edges, srate, nfreq, nmin=5, rfun=np.round)
-        print("bins", bins[:4], "nmode", nmode)
         nbin      = len(bins)
         # Now measure the power of each basis vector in each bin. The residual
         # noise will be modeled as uncorrelated

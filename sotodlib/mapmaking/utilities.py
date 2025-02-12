@@ -3,7 +3,7 @@ import importlib
 
 import numpy as np
 import so3g
-from pixell import enmap, fft, resample, tilemap, utils
+from pixell import enmap, fft, resample, tilemap, utils, bunch
 
 from .. import coords, core, tod_ops
 
@@ -336,6 +336,7 @@ def expand_ids(obs_ids, context=None, bands=None):
         actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
         inds   = utils.find(info["obs_id"], actual_obs_ids)
         flavors= info["tube_flavor"][inds]
+        flavors= [flavor.lower() for flavor in flavors]
         flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280"), None:("f000",)}
     elif bands is not None:
         flavors    = ["a"]*len(obs_ids)
@@ -354,7 +355,9 @@ def expand_ids(obs_ids, context=None, bands=None):
             raise ValueError("Invalid obs_id '%s'" % (str(obs_id)))
         else:
             toks = obs_id.split("_")
-            wafer_mask = toks[3]
+            # SAT format: obs_1719902396_satp1_1111111
+            # LAT format: 1696118940_i3_100 (why no obs in front?)
+            wafer_mask = toks[-1]
             # Loop through wafer slots
             for si, status in enumerate(wafer_mask):
                 if status == "1":
@@ -681,3 +684,31 @@ def import_optional(module_name):
         return module
     except:
         return None
+
+def setup_passes(downsample="1", maxiter="500", interpol="nearest", npass=None):
+    """Set up information multipass mapmaking. Supports arguments
+    of the form num or num,num,.... Infers the number of passes
+    from the maximum length of these (or npass if explicitly given),
+    and makes sure they all have this length by duplicating the item
+    as necessary.
+
+    Example:
+     setup_passes(downsample="4,4,1", maxiter="300,300,50", interpol="linear")
+     returns bunch.Bunch(downsample=[4,4,1], maxiter=[300,300,50],
+      interpol=["linear","linear","linear"])"""
+    tmp            = bunch.Bunch()
+    tmp.downsample = utils.parse_ints(downsample)
+    tmp.maxiter    = utils.parse_ints(maxiter)
+    tmp.interpol   = interpol.split(",")
+    # The entries may have different lengths. We use the max
+    # and then pad the others by repeating the last element.
+    # The final output will be a list of bunches
+    if npass is None:
+        npass = max([len(tmp[key]) for key in tmp])
+    passes    = []
+    for i in range(npass):
+        entry = bunch.Bunch()
+        for key in tmp:
+            entry[key] = tmp[key][min(i,len(tmp[key])-1)]
+        passes.append(entry)
+    return passes
