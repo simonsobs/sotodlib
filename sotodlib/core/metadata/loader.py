@@ -637,7 +637,9 @@ def merge_det_info(det_info, new_info, multi=True, on_missing='trim'):
                 f'in the det_id, maybe add {k} to the match_keys?')
 
     if len(det_info) != len(i1) and on_missing != 'trim':
-        raise IncompleteMetadataError('{len(det_info)} -> {len(i1)})')
+        raise IncompleteMetadataError(
+            f"det_info had n_dets={len(det_info)}; After merge it has n_dets={len(i1)}"
+        )
 
     logger.debug(f' ... updating det_info (row count '
                  f'{len(det_info)} -> {len(i1)})')
