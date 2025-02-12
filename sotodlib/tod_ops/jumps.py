@@ -1,11 +1,11 @@
 from typing import Literal, Optional, Tuple, Union, cast, overload
+from warnings import warn
 
 import numpy as np
 import scipy.ndimage as simg
 import scipy.stats as ss
 import so3g
 from numpy.typing import NDArray
-from pixell.utils import moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
 from so3g.proj import Ranges, RangesMatrix
@@ -51,7 +51,7 @@ def std_est(
         x = x.reshape(tuple(shape))
         x = np.moveaxis(x, -2, 0)
         diff = np.diff(x[::ds], axis=-1)
-        diff = moveaxis(diff, 0, -2)
+        diff = np.moveaxis(diff, 0, -2)
         diff = diff.reshape(shape[:-1])
         diff = np.moveaxis(diff, -1, axis)
     else:
@@ -119,8 +119,8 @@ def _jumpfinder(
 
     # Flag with a matched filter
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
-    _x = np.ascontiguousarray(x[msk])
-    _jumps = np.ascontiguousarray(np.empty_like(_x), "int32")
+    _x = np.asarray(x[msk], dtype=x.dtype, order="C")
+    _jumps = np.empty_like(_x, dtype="int32", order="C")
     if isinstance(min_size, np.ndarray):
         _min_size = min_size[msk].astype(_x.dtype)
     elif min_size is None:
@@ -178,27 +178,31 @@ def jumpfix_subtract_heights(
                  If inplace is True this is just a reference to x.
     """
     orig_shape = x.shape
-    x = np.atleast_2d(x)
-    x = np.ascontiguousarray(x)
-    x_fixed = x
-    if not inplace:
-        x_fixed = x.copy()
-        x_fixed = np.ascontiguousarray(x_fixed)
+    force_copy = not inplace
+    if inplace and not x.flags['C_CONTIGUOUS']:
+        warn("Requested in place jump fixing but signal is not contigious, a copy will be made as a buffer")
+        force_copy = True
+    x_use = np.asarray(np.atleast_2d(x), order="C")  # type: ignore
+    x_fixed = x_use
+    # When we switch to numpy 2.0 asarray can take copy=(False+force_copy if inplace else (True if force_copy else None))
+    if force_copy and np.may_share_memory(x_use, x_fixed):
+        x_fixed = x_fixed.copy()
+
     if isinstance(jumps, np.ndarray):
-        jumps = RangesMatrix.from_mask(np.atleast_2d(jumps))
+        jumps_rm = RangesMatrix.from_mask(np.atleast_2d(jumps))
     elif isinstance(jumps, Ranges):
-        jumps = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
-    if not isinstance(jumps, RangesMatrix):
+        jumps_rm = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
+    elif isinstance(jumps, RangesMatrix):
+        jumps_rm = jumps
+    else:
         raise TypeError("jumps not RangesMatrix or convertable to RangesMatrix")
-    jumps = cast(RangesMatrix, jumps)
 
     if heights is None:
-        heights = estimate_heights(x_fixed, jumps.mask(), **kwargs)
+        heights = estimate_heights(x_fixed, jumps_rm.mask(), **kwargs)
     elif isinstance(heights, csr_array):
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
-    heights = heights.astype(x.dtype)
-    heights = np.ascontiguousarray(heights)
+    heights = np.asarray(heights, dtype=x.dtype, order="C")
 
     dtype = x.dtype.name
     if len(x.shape) > 2:
@@ -209,7 +213,9 @@ def jumpfix_subtract_heights(
         fix = so3g.subtract_jump_heights64
     else:
         raise TypeError("x must be float32 or float64")
-    fix(x, x_fixed, heights, jumps)
+    fix(x_use, x_fixed, heights, jumps_rm)
+    if force_copy and inplace:
+        x[:] = x_fixed[:]
 
     return x_fixed.reshape(orig_shape)
 
@@ -335,30 +341,29 @@ def _filter(
 @overload
 def twopi_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    nsigma=...,
-    atol=...,
-    max_tol=...,
-    fix: Literal[True] = True,
-    inplace=...,
-    merge=...,
-    overwrite=...,
-    name=...,
-    ds=...,
+    signal,
+    win_size,
+    nsigma,
+    atol,
+    max_tol,
+    fix: Literal[True],
+    inplace,
+    merge,
+    overwrite,
+    name,
+    ds,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
-    ...
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]: ...
 
 
 @overload
 def twopi_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    nsigma=...,
-    atol=...,
-    max_tol=...,
+    signal,
+    win_size,
+    nsigma,
+    atol,
+    max_tol,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -366,8 +371,7 @@ def twopi_jumps(
     name=...,
     ds=...,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array]:
-    ...
+) -> Tuple[RangesMatrix, csr_array]: ...
 
 
 def twopi_jumps(
@@ -435,7 +439,7 @@ def twopi_jumps(
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
-    if signal is None:
+    if signal is None and isinstance(aman.signal, np.ndarray):
         signal = aman.signal
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
@@ -454,9 +458,9 @@ def twopi_jumps(
     if len(atol) != len(signal):
         raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
 
-    _signal = np.ascontiguousarray(_signal)
-    heights = np.empty_like(_signal)
-    atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
+    _signal = np.asarray(_signal, dtype=_signal.dtype, order="C")
+    heights = np.empty_like(_signal, order="C")
+    atol = np.asarray(atol, dtype=_signal.dtype, order="C")
     if _signal.dtype.name == "float32":
         so3g.find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
     elif _signal.dtype.name == "float64":
@@ -483,28 +487,27 @@ def twopi_jumps(
 @overload
 def slow_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    thresh=...,
-    abs_thresh=...,
-    fix: Literal[True] = True,
-    inplace=...,
-    merge=...,
-    overwrite=...,
-    name=...,
-    clean=...,
+    signal,
+    win_size,
+    thresh,
+    abs_thresh,
+    fix: Literal[True],
+    inplace,
+    merge,
+    overwrite,
+    name,
+    clean,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
-    ...
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]: ...
 
 
 @overload
 def slow_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    thresh=...,
-    abs_thresh=...,
+    signal,
+    win_size,
+    thresh,
+    abs_thresh,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -512,8 +515,7 @@ def slow_jumps(
     name=...,
     clean=...,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array]:
-    ...
+) -> Tuple[RangesMatrix, csr_array]: ...
 
 
 def slow_jumps(
@@ -577,14 +579,13 @@ def slow_jumps(
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
-    if signal is None:
+    if signal is None and isinstance(aman.signal, np.ndarray):
         signal = aman.signal
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
 
     _signal = _filter(signal, **filter_pars)
-    _signal = np.atleast_2d(_signal)
-    _signal = np.ascontiguousarray(_signal)
+    _signal = np.asarray(np.atleast_2d(_signal), dtype=_signal.dtype, order="C")
 
     # Block ptp
     dtype = _signal.dtype.name
@@ -596,8 +597,7 @@ def slow_jumps(
         get_ptp = so3g.block_minmax64
     else:
         raise TypeError("signal must be float32 or float64")
-    bptp = np.zeros_like(_signal)
-    bptp = np.ascontiguousarray(bptp)
+    bptp = np.zeros_like(_signal, order="C")
     get_ptp(_signal, bptp, win_size, 2, 0)
 
     if not abs_thresh:
@@ -622,11 +622,11 @@ def slow_jumps(
 @overload
 def find_jumps(
     aman,
-    signal=...,
-    min_sigma=...,
-    min_size=...,
-    win_size=...,
-    exact=...,
+    signal,
+    min_sigma,
+    min_size,
+    win_size,
+    exact,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -635,28 +635,26 @@ def find_jumps(
     ds=...,
     clean=...,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array]:
-    ...
+) -> Tuple[RangesMatrix, csr_array]: ...
 
 
 @overload
 def find_jumps(
     aman,
-    signal=...,
-    min_sigma=...,
-    min_size=...,
-    win_size=...,
-    exact=...,
-    fix: Literal[True] = True,
-    inplace=...,
-    merge=...,
-    overwrite=...,
-    name=...,
-    ds=...,
-    clean=...,
+    signal,
+    min_sigma,
+    min_size,
+    win_size,
+    exact,
+    fix: Literal[True],
+    inplace,
+    merge,
+    overwrite,
+    name,
+    ds,
+    clean,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
-    ...
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]: ...
 
 
 def find_jumps(
@@ -731,7 +729,7 @@ def find_jumps(
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
-    if signal is None:
+    if signal is None and isinstance(aman.signal, np.ndarray):
         signal = aman.signal
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
