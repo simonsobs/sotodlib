@@ -316,7 +316,7 @@ def main(**args):
             L.info("Wrote rhs, div, bin")
 
             # Set up initial condition
-            x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x)
+            x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
 
             t1 = time.time()
             for step in mapmaker.solve(maxiter=passinfo.maxiter, x0=x0):
@@ -324,19 +324,19 @@ def main(**args):
                     dump = step.i % 10 == 0
                     L.info("CG step %4d %15.7e %8.3f %s" % (step.i, step.err, t2-t1, "" if not dump else "(write)"))
                     if dump:
-                            for signal, val in zip(signals, step.solution):
+                            for signal, val in zip(signals, step.x):
                                     if signal.output:
                                             signal.write(pass_prefix, "map%04d" % step.i, val)
                     t1 = time.time()
 
             L.info("Done")
-            for signal, val in zip(signals, step.solution):
+            for signal, val in zip(signals, step.x):
                     if signal.output:
                             signal.write(pass_prefix, "map", val)
             comm.Barrier()
 
             mapmaker_prev = mapmaker
-            eval_prev     = mapmaker.evaluator(step.x)
+            eval_prev     = mapmaker.evaluator(step.x_zip)
 
 if __name__ == "__main__":
     main(**vars(args))

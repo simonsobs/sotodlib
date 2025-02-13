@@ -107,19 +107,19 @@ class MLMapmaker:
             self.dof.add(signal.dof)
         self.ready = True
 
-    def evaluator(self, x):
+    def evaluator(self, x_zip):
         """Return a helper object that lets on evaluate the data model
-        Px for the solution x for a TOD"""
-        return MLEvaluator(x, self.signals, self.dof, dtype=self.dtype)
+        Px for the zipped solution x for a TOD"""
+        return MLEvaluator(x_zip, self.signals, self.dof, dtype=self.dtype)
     def accumulator(self):
         """Return a helper object that lets one accumulate P'd for
         for a TOD"""
         return MLAccumulator(self.signals, self.dof)
 
-    def A(self, x):
+    def A(self, x_zip):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
-        evaluator   = self.evaluator(x)
+        evaluator   = self.evaluator(x_zip)
         accumulator = self.accumulator()
         for di, data in enumerate(self.data):
             tod = evaluator.evaluate(data)
@@ -127,8 +127,8 @@ class MLMapmaker:
             accumulator.accumulate(data, tod)
         return accumulator.finish()
 
-    def M(self, x):
-        iwork = self.dof.unzip(x)
+    def M(self, x_zip):
+        iwork = self.dof.unzip(x_zip)
         result = self.dof.zip(
             *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
         )
@@ -172,28 +172,30 @@ class MLMapmaker:
                         os.replace(fname_checkpoint, fname_checkpoint + ".old")
                     # Write a checkpoint
                     solver.save(fname_checkpoint)
-            yield bunch.Bunch(i=solver.i, err=solver.err, solution=self.dof.unzip(solver.x), x=solver.x)
+            # x is the unzipped solution. It's a list of one object per signal we solve for.
+            # x_zip is the raw solution, as a 1d vector.
+            yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x), x_zip=solver.x)
 
-    def translate(self, other, x):
+    def translate(self, other, x_zip):
         """Translate degrees of freedom x from some other mapamaker to the current one.
         The other mapmaker must have the same list of signals, except that they can have
         different sample rate etc. than this one. See the individual Signal-classes
         translate methods for details. This is used in multipass mapmaking.
         """
-        ux     = other.dof.unzip(x)
-        ux_new = []
-        for ssig, osig, oval in zip(self.signals, other.signals, ux):
-            ux_new.append(ssig.translate(osig, oval))
-        return self.dof.zip(*ux_new)
+        x     = other.dof.unzip(x_zip)
+        x_new = []
+        for ssig, osig, oval in zip(self.signals, other.signals, x):
+            x_new.append(ssig.translate(osig, oval))
+        return self.dof.zip(*x_new)
 
 class MLEvaluator:
-    """Helper for MLMapmaker that represents the abstract equation system d = Px+n."""
-    def __init__(self, x, signals, dof, dtype=np.float32):
+    """Helper for MLMapmaker that represents the action of P in the model d = Px+n."""
+    def __init__(self, x_zip, signals, dof, dtype=np.float32):
         self.signals = signals
-        self.x       = x
+        self.x_zip   = x_zip
         self.dof     = dof
         self.dtype   = dtype
-        self.iwork = [signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x))]
+        self.iwork = [signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x_zip))]
     def evaluate(self, data, tod=None):
         """Evaluate Px for one tod"""
         if tod is None: tod = np.zeros([data.ndet, data.nsamp], self.dtype)
@@ -202,7 +204,7 @@ class MLEvaluator:
         return tod
 
 class MLAccumulator:
-    """Helper for MLMapmaker that represents the abstract equation system d = Px+n."""
+    """Helper for MLMapmaker that represents the action of P.T in the model d = Px+n."""
     def __init__(self, signals, dof):
         self.signals = signals
         self.dof     = dof
