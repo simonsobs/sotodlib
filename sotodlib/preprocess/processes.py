@@ -1328,6 +1328,65 @@ class PCARelCal(_Preprocess):
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
+class PCAFilter(_Preprocess):
+    """
+    Applies a pca filter to the data.
+
+    example config file entry::
+
+      - name: "pca_filter"
+        signal: "signal"
+        process:
+          n_modes: 10
+
+    See :ref:`pca-background` for more details on the method.
+    """
+    name = 'pca_filter'
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        n_modes = self.process_cfgs.get('n_modes')
+        signal = aman.get(self.signal)
+        if aman.dets.count < n_modes:
+            raise ValueError(f'The number of pca modes {n_modes} is '
+                             f'larger than the number of detectors {aman.dets.count}.')
+        model = tod_ops.pca.get_pca_model(aman, signal=signal, n_modes=n_modes)
+        _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
+
+class FilterForSources(_Preprocess):
+    """
+    Mask and gap-fill the signal at samples flagged by source_flags.
+    Then PCA the resulting time ordered data.
+
+    example config file entry::
+
+      - name: "filter_for_sources"
+        signal: "signal"
+        process:
+          n_modes: 10
+          source_flags: "source_flags"
+
+    .. autofunction:: sotodlib.coords.planets.filter_for_sources
+    """
+    name = 'filter_for_sources'
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        n_modes = self.process_cfgs.get('n_modes')
+        signal = aman.get(self.signal)
+        flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        if aman.dets.count < n_modes:
+            raise ValueError(f'The number of pca modes {n_modes} is '
+                             f'larger than the number of detectors {aman.dets.count}.')
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes)
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1342,23 +1401,23 @@ class PTPFlags(_Preprocess):
             kurtosis_threshold: 6
           save: True
           select: True
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_ptp_flags
     """
     name = "ptp_flags"
 
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
-        
+
         ptp_aman = core.AxisManager(aman.dets, aman.samps)
         ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, ptp_aman)
 
-    def save(self, proc_aman, calc_aman):
+    def save(self, proc_aman, ptp_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", calc_aman)
+            proc_aman.wrap("ptp_flags", ptp_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1382,23 +1441,23 @@ class InvVarFlags(_Preprocess):
             nsigma: 6
           save: True
           select: True
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_inv_var_flags
     """
     name = "inv_var_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        mskptps = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
-        
-        ptp_aman = core.AxisManager(aman.dets, aman.samps)
-        ptp_aman.wrap('inv_var_flags', mskptps, [(0, 'dets'), (1, 'samps')])
-        self.save(proc_aman, ptp_aman)
+        msk = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
 
-    def save(self, proc_aman, dark_aman):
+        inv_var_aman = core.AxisManager(aman.dets, aman.samps)
+        inv_var_aman.wrap('inv_var_flags', msk, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, inv_var_aman)
+
+    def save(self, proc_aman, inv_var_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("inv_var_flags", dark_aman)
+            proc_aman.wrap("inv_var_flags", inv_var_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1651,6 +1710,8 @@ _Preprocess.register(EstimateT2P)
 _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
+_Preprocess.register(PCAFilter)
+_Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)
