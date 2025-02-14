@@ -522,12 +522,13 @@ def load_wafer_detectors(
     return dets
 
 
-def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=False):
+def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=False, extra_prop_file=None):
     """Update hardware model with simulated or loaded detector positions.
 
     Given a Hardware model, generate all detector properties for the specified
     telescope and optionally a subset of optics tube slots (for the LAT).  The
-    detector dictionary of the hardware model is updated in place.
+    detector dictionary of the hardware model is updated in place. Optionaly,
+    extra properties can be extracted from an ancillary file.
 
     This uses helper functions for focalplane layout from the upstream toast
     package
@@ -538,6 +539,7 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         tube_slots (list, optional): The optional list of tube slots to include.
         det_info (tuple, optional): Detector info database used to load real
             array hardware.
+        extra_prop_file (str, optional): name of file with extra properties for the detectors
     Returns:
         None
 
@@ -762,3 +764,9 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         hw.data["detectors"].update(alldets)
     else:
         hw.data["detectors"] = alldets
+    
+    if extra_prop_file:
+        import yaml
+        extra_det_dict = yaml.safe_load(open(extra_prop_file, "rb"))
+        stripped_extra_det_dict = {det: extra_det_dict[det] for det in hw.data["detectors"] if det in extra_det_dict}
+        hw.data["detectors"].update(stripped_extra_det_dict)

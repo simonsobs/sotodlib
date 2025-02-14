@@ -74,6 +74,12 @@ def setup_simulate_observing(parser, operators):
         "--wafer_slots", default=None, help="Comma-separated list of wafer slots. "
     )
     parser.add_argument(
+        "--extra_prop_file", 
+        required=False, 
+        default=None, 
+        help="pertubation to detector properties",
+    )
+    parser.add_argument(
         "--sample_rate",
         required=False,
         default=10,
@@ -169,6 +175,7 @@ def simulate_observing(job, otherargs, runargs, comm):
         wafer_slots=otherargs.wafer_slots,
         tube_slots=otherargs.tube_slots,
         thinfp=otherargs.thinfp,
+        extra_prop_file=otherargs.extra_prop_file,
         comm=comm,
     )
 

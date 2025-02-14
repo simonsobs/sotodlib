@@ -125,6 +125,7 @@ class SOFocalplane(Focalplane):
         wafer_slots (str):  Comma separated string of wafers to use.
         tube_slots (str):  Comma separated string of tubes to use.
         thinfp (int):  The factor by which to reduce the number of detectors.
+        extra_prop_file (str, optional): name of file with extra properties for the detectors
         creation_time (float):  Optional timestamp to use when building readout_id.
         comm (MPI.Comm):  Optional MPI communicator.
         apply_net_corr (bool):  Degrade NETs according to the correlation factors.
@@ -145,6 +146,7 @@ class SOFocalplane(Focalplane):
         wafer_slots=None,
         tube_slots=None,
         thinfp=None,
+        extra_prop_file=None,
         creation_time=None,
         comm=None,
         apply_net_corr=True,
@@ -171,6 +173,7 @@ class SOFocalplane(Focalplane):
                         meta["telescope"],
                         det_info=(det_info_file, det_info_version),
                         no_darks=det_info_file is not None,
+                        extra_prop_file=extra_prop_file,
                     )
                 else:
                     raise RuntimeError(
@@ -476,6 +479,7 @@ def simulated_telescope(
     wafer_slots=None,
     tube_slots=None,
     thinfp=None,
+    extra_prop_file=None,
     comm=None,
 ):
     if hw is not None and telescope_name is None:
@@ -494,6 +498,7 @@ def simulated_telescope(
         wafer_slots=wafer_slots,
         tube_slots=tube_slots,
         thinfp=thinfp,
+        extra_prop_file=extra_prop_file,
         comm=comm,
     )
     site = SOSite()
