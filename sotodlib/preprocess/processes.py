@@ -806,7 +806,7 @@ class Demodulate(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
 
 
-class EstimateAzSS(_Preprocess):
+class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
@@ -814,29 +814,68 @@ class EstimateAzSS(_Preprocess):
 
     Example configuration block::
 
-      - name: "estimate_azss"
+      - name: "azss"
+        azss_stats_name: 'azss_statsQ'
+        proc_aman_turnaround_info: 'turnaround_flags'
         calc:
           signal: 'demodQ'
-          azss_stats_name: 'azss_statsQ'
-          range: [-1.57079, 7.85398]
+          frange: [-1.57079, 7.85398]
           bins: 1080
-          merge_stats: False
-          merge_model: False
+          left_right: True
         save: True
+        process:
+            subtract: True
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
-    name = "estimate_azss"
+    name = "azss"
+    def __init__(self, step_cfgs):
+        self.azss_stats_name = step_cfgs.get('azss_stats_name', 'azss_stats')
+        self.proc_aman_turnaround_info = step_cfgs.get('proc_aman_turnaround_info', None)
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        self.save(proc_aman, calc_aman)
+        # If process is run then just wrap info from process step
+        if self.process_cfgs:
+            self.save(proc_aman, aman[self.azss_stats_name])
+        else:
+            if self.proc_aman_turnaround_info:
+                _f = attrgetter(self.proc_aman_turnaround_info)
+                turnaround_info = _f(proc_aman)
+            else:
+                turnaround_info = None
+            _azss = tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                  turnaround_info=turnaround_info,
+                                  merge_stats=False, merge_model=False,
+                                  subtract_in_place=self.process_cfgs["subtract"], 
+                                  **self.calc_cfgs)
+            azss_stats = _azss[0]
+            self.save(proc_aman, azss_stats)
     
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+            proc_aman.wrap(self.azss_stats_name, azss_stats)
+
+    def process(self, aman, proc_aman):
+        if self.proc_aman_turnaround_info:
+            _f = attrgetter(self.proc_aman_turnaround_info)
+            turnaround_info = _f(proc_aman)
+        else:
+            turnaround_info = None
+        if self.azss_stats_name in proc_aman:
+            if self.process_cfgs["subtract"]:
+                tod_ops.azss.subtract_azss(aman, proc_aman[self.azss_stats_name],
+                                           signal = self.calc_cfgs.get('signal'),
+                                           in_place=True)
+        else:
+            tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
+                                  turnaround_info=turnaround_info,
+                                  merge_stats=True, merge_model=False,
+                                  subtract_in_place=self.process_cfgs["subtract"], 
+                                  **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
@@ -1628,6 +1667,7 @@ class SubtractQUCommonMode(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
+        coeff_aman = get_qu_common_mode_coeffs(aman, Q_signal, U_signal, merge)
         self.save(proc_aman, aman)
 
     def save(self, proc_aman, aman):
@@ -1675,7 +1715,7 @@ class FocalplaneNanFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("fp_flags", fp_aman)
-    
+
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
@@ -1704,6 +1744,60 @@ class PointingModel(_Preprocess):
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
 
+class BadSubscanFlags(_Preprocess):
+    """Identifies and flags bad subscans.
+
+      Example config block::
+
+        - name : "noisy_subscan_flags"
+            stats_name: tod_stats # optional
+            calc: 
+                nstd_lim: 5.0 
+                merge: False
+            save: True
+            select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_badsubscan_flags
+    """
+    name = "noisy_subscan_flags"
+
+    def __init__(self, step_cfgs):
+        self.stats_name = step_cfgs.get('stats_name', 'tod_stats')
+        super().__init__(step_cfgs)
+    
+    def calc_and_save(self, aman, proc_aman):
+        from so3g.proj import RangesMatrix, Ranges
+        msk_ss = RangesMatrix.zeros((aman.dets.count, aman.samps.count))
+        msk_det = np.ones(aman.dets.count, dtype=bool)
+        signal = self.calc_cfgs["subscan_stats"] if isinstance(self.calc_cfgs["subscan_stats"], list) else [self.calc_cfgs["subscan_stats"]]
+        for sig in signal:
+            self.calc_cfgs["subscan_stats"] = proc_aman[self.stats_name+"_"+sig[-1]]
+            _msk_ss, _msk_det = tod_ops.flags.get_noisy_subscan_flags(
+                aman, **self.calc_cfgs)
+            msk_ss += _msk_ss
+            msk_det &= _msk_det
+        ss_aman = core.AxisManager(aman.dets, aman.samps)
+        ss_aman.wrap("valid_subscans", msk_ss, [(0, 'dets'), (1, 'samps')])
+        det_aman = core.AxisManager(aman.dets)
+        det_aman.wrap("valid_dets", msk_det)
+        self.save(proc_aman, ss_aman, "noisy_subscan_flags")
+        self.save(proc_aman, det_aman, "noisy_dets_flags")
+
+    def save(self, proc_aman, calc_aman, name): 
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(name, calc_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = proc_aman.noisy_dets_flags.valid_dets
+        meta.restrict('dets', proc_aman.dets.vals[keep])
+        return meta
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1726,7 +1820,7 @@ _Preprocess.register(EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
-_Preprocess.register(EstimateAzSS)
+_Preprocess.register(AzSS)
 _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
@@ -1740,4 +1834,5 @@ _Preprocess.register(UnionFlags)
 _Preprocess.register(RotateQU) 
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(PointingModel) 
+_Preprocess.register(PointingModel)  
+_Preprocess.register(BadSubscanFlags)
