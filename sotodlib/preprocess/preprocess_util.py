@@ -295,8 +295,9 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    logger.info(f"Cutting on the last process: {pipe[-1].name}")
-    pipe[-1].select(meta)
+    logger.info("Restricting detectors on all processes")
+    for process in pipe[:]:
+        process.select(meta)
     return meta
 
 
@@ -410,13 +411,15 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
-
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+            logger.info("Restricting detectors on all proc pipeline processes")
+            for process in pipe_proc[:]:
+                process.select(meta_proc)
             meta_init.restrict('dets', meta_proc.dets.vals)
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
 
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
