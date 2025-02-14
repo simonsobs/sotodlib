@@ -559,7 +559,7 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
             aman.wrap(subtract_name, np.subtract(signal,
                       aman[hwpss_template_name], dtype='float32'),
                       [(0, 'dets'), (1, 'samps')])
-    
+
     if remove_template:
         aman.move(hwpss_template_name, None)
 
@@ -652,112 +652,72 @@ def demod_tod(aman, signal=None, demod_mode=4,
         aman, lpf, signal_name='demodU', detrend=None) * 2.
 
 
-def subscan_subtraction(aman, flags=None, merge_model=False, in_place=False):
+def get_hwpss_subscan(
+    aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
+    lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
+    prefilt_cfg=None, prefilt_detrend='linear', flags=None,
+    apodize_edges=True, apodize_edges_samps=1600,
+    apodize_flags=True, apodize_flags_samps=200,
+    hwpss_model_name='hwpss_model'
+):
     '''
-    Function to fit and subtract HWPSS by subscan. 
-    Assumes that turnaround flags and subscan flags have already been calculated and wrapped. 
-    Also note that the bin size for the final subscan subtraction is set to 90, which roughly matches the increment size of the HWP
-    angle per sample at 200 Hz
+    Function to fit and subtract HWPSS by subscan and merge hwpss_model.
+    This assumes that turnaround flags and subscan flags have already been calculated and wrapped.
 
-    Arguments:
-    aman: Axis Manager
-    flags: flags object: flagged samples for the HWPSS fitting function to avoid, e.g. aman.flags.custom_glitch_flag. If None,
-            flagged samples will be a union of turnaround flags and hwpss_glitches, the result of iterative glitch finding done in this function.
-    merge_model: boolean: If True, will merge hwpss subtracted model into aman. Default is False.
-    in_place: boolean: If True, will re-assign the result of the hwpss subscan subtraction into aman.signal. Default is False.
-
-    Returns:
-        None. Either re-assigns aman.signal to the hwpss subscan subtracted signal, or wraps an axis "hwpss_subscan_remove" into aman.
+    Arguments: same as `get_hwpss`
     '''
 
-    #refine glitch finding
-    logger.info('first round glitch finding, then filling')
-    tod_ops.flags.get_glitch_flags(aman, signal_name='signal', merge=True, name='hwpss_glitches_1',overwrite=True)
+    get_hwpss(
+        aman=aman,
+        flags=flags,
+        signal=signal,
+        hwp_angle=hwp_angle,
+        bin_signal=bin_signal,
+        bins=bins,
+        lin_reg=lin_reg,
+        modes=modes,
+        apply_prefilt=apply_prefilt,
+        prefilt_cfg=prefilt_cfg,
+        prefilt_detrend=prefilt_detrend,
+        apodize_edges=apodize_edges,
+        apodize_edges_samps=apodize_edges,
+        apodize_flags=apodize_flags,
+        apodize_flags_samps=apodize_flags,
+        merge_stats=False,
+        merge_model=True,
+        hwpss_model_name=hwpss_model_name,
+    )
 
-    logger.info('subtracting hwpss from full tod for better glitch detection')
-    get_hwpss(aman, flags=aman.flags.hwpss_glitches_1, merge_stats=False)
-    subtract_hwpss(aman, in_place=False,remove_template=True)
-
-    logger.info('glitch finding post full tod hwpss subtraction')
-    tod_ops.flags.get_glitch_flags(aman, signal_name='hwpss_remove', merge=True, name='hwpss_glitches_2',overwrite=True)
-
-    #delete hwpss_remove
-    aman.move('hwpss_remove',None)
-
-    aman.flags.reduce(flags=['hwpss_glitches_1', 'hwpss_glitches_2'], method='union', wrap=True,
-                      new_flag='hwpss_glitches', remove_reduced=True)
-    
-    logger.info('subtract hwpss by subscan')
-    #define hwpss_avoid flags for mask to avoid in hwpss estimation
-    if 'hwpss_avoid' in aman.flags._assignments.keys():
-        aman.flags.move('hwpss_avoid',None)
-
-    aman.flags.reduce(flags=['hwpss_glitches', 'turnarounds'], method='union', wrap=True,
-                      new_flag='hwpss_avoid', remove_reduced=False)   
-
-    #prepare arrays for subscan subtracted signal and model
-    num_subscans = aman.subscan_info.subscan_flags.shape[0]
-    subtracted_sig = np.zeros_like(aman.signal)
-    hwpssmodel = np.zeros_like(aman.signal)
-
-    for j in range(num_subscans):
-        i = aman.subscan_info.subscan_flags[j].ranges()[0]
-
-        sub_aman = aman.restrict('samps',(i[0]+aman.samps.offset, i[1]+aman.samps.offset),in_place=False)
+    for subscan_flag in aman.subscan_info.subscan_flags:
+        i = subscan_flag.ranges()[0]
+        sub_aman = aman.restrict('samps', (i[0] + aman.samps.offset, i[1] + aman.samps.offset), in_place=False)
+        sub_aman.move(hwpss_model_name, None)
         if flags is None:
-            sub_flag = sub_aman.flags.hwpss_avoid
+            sub_flag = RangesMatrix.from_mask(np.zeros(aman.samps.count, dtype=int)[i[0]:i[1]])
         else:
-            sub_flag = RangesMatrix.from_mask(flags.mask()[:,i[0]:i[1],])
-        
-        # clear sub axis manager of hwp axes so can populate new model
-        if 'hwpss_stats' in sub_aman._assignments.keys():
-            sub_aman.move('hwpss_stats',None)
+            sub_flag = RangesMatrix.from_mask(flags.mask()[:, i[0]:i[1]])
 
-        if 'hwpss_model' in sub_aman._assignments.keys():
-            sub_aman.move('hwpss_model',None)
-
-        get_hwpss(sub_aman, signal=None, hwp_angle=None, bin_signal=True, bins=90,
-          lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
-          prefilt_cfg=None, prefilt_detrend='linear', flags=sub_flag,
-          apodize_edges=True, apodize_edges_samps=1600, 
-          apodize_flags=True, apodize_flags_samps=200,
-          merge_stats=True, hwpss_stats_name='hwpss_stats',
-          merge_model=True, hwpss_model_name='hwpss_model')
-
-        #Append sub axis manager signal and model
-        subtract_hwpss(sub_aman,in_place=True,remove_template=False)
-        subtracted_sig[:,i[0]:i[1],] += sub_aman.signal
-        hwpssmodel[:,i[0]:i[1],] += sub_aman.hwpss_model
-
+        get_hwpss(
+            aman=sub_aman,
+            flags=sub_flag,
+            signal=signal,
+            hwp_angle=hwp_angle,
+            bin_signal=bin_signal,
+            bins=bins,
+            lin_reg=lin_reg,
+            modes=modes,
+            apply_prefilt=apply_prefilt,
+            prefilt_cfg=prefilt_cfg,
+            prefilt_detrend=prefilt_detrend,
+            apodize_edges=apodize_edges,
+            apodize_edges_samps=apodize_edges,
+            apodize_flags=apodize_flags,
+            apodize_flags_samps=apodize_flags,
+            merge_stats=False,
+            merge_model=True,
+            hwpss_model_name=hwpss_model_name,
+        )
+        aman.get(hwpss_model_name)[:, i[0]:i[1]] = sub_aman.hwpss_model
         del sub_aman
 
-    #temporarily wrap hwpss subtracted signal into 'hwpss_subscan_remove'
-    aman.wrap('hwpss_subscan_remove', subtracted_sig, [(0, 'dets'), (1, 'samps')])
-    
-    tod_ops.flags.get_glitch_flags(aman, signal_name='hwpss_subscan_remove', merge=True, name='hwpss_glitches_3',overwrite=True)
-
-    #wrap all 3 glitch finding rounds into one flag 'hwpss_glitches'
-    aman.flags.reduce(flags=['hwpss_glitches_3', 'hwpss_glitches'], method='union', wrap=True,
-                      new_flag='hwpss_glitches', remove_reduced=True)
-    
-    gfilled = tod_ops.gapfill.fill_glitches(aman, nbuf=10, use_pca=False, modes=1, signal=aman.hwpss_subscan_remove,
-                                                wrap=False, glitch_flags=aman.flags.hwpss_glitches)
-    aman.move('hwpss_subscan_remove',None)
-
-    if merge_model:
-        if 'hwpss_subscan_model' in sub_aman._assignments.keys():
-            aman.move('hwpss_subscan_model', None)
-        aman.wrap('hwpss_subscan_model', hwpssmodel, [(0, 'dets'), (1, 'samps')])
-
-    if in_place:
-        aman.signal = gfilled
-    else:
-        aman.wrap('hwpss_subscan_remove', gfilled, [(0, 'dets'), (1, 'samps')])
-
-    #remove remaining by-products of the subtraction
-    aman.flags.move('hwpss_avoid',None)
-    del subtracted_sig
-    del hwpssmodel
-    del num_subscans
-
-    return None
+    return
