@@ -860,16 +860,22 @@ class GlitchFill(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
-        self.flag_aman = step_cfgs.get('flag_aman', 'glitches')
-        self.flag = step_cfgs.get('flag', 'glitch_flags')
+        self.flag_aman = step_cfgs.get('flag_aman')
+        self.flag = step_cfgs.get('flag')
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
-        tod_ops.gapfill.fill_glitches(
-            aman, signal=aman[self.signal],
-            glitch_flags=proc_aman[self.flag_aman][self.flag],
-            **self.process_cfgs)
+        if (self.flag_aman is not None) and (self.flag is not None):
+            glitch_flags=proc_aman[self.flag_aman][self.flag]
+            tod_ops.gapfill.fill_glitches(
+                aman, signal=aman[self.signal],
+                glitch_flags=glitch_flags,
+                **self.process_cfgs)
+        else:
+            tod_ops.gapfill.fill_glitches(
+                aman, signal=aman[self.signal],
+                **self.process_cfgs)
 
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
