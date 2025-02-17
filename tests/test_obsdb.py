@@ -1,11 +1,13 @@
 import unittest
+import shutil
+import tempfile
+import numpy as np
 from sotodlib.core import metadata
 
 import os
 import time
 
 from ._helpers import mpi_multi
-
 
 def get_example():
     # Create a new Db and add two columns.
@@ -26,13 +28,68 @@ def get_example():
                                        'drift': 'rising' if i%2 else 'setting'},
                          tags=tags)
     return obsdb
+    
+def make_extdb_pwv(dir_name, file_name):
+    # create a extenal manifestdb for pwv, and return temporal filepath to the database
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('pwv')
+    extdb_pwv = metadata.ManifestDb(map_file=os.path.join(dir_name, file_name),
+                                    scheme=scheme)
+    for i in range(10):
+        if i in [3, 8]:
+            pwv = np.random.uniform(2.1, 3)
+        else:
+            pwv = np.random.uniform(0, 2)
+        entry_dict = {'obs:obs_id': f'myobs{i}', 
+                     'pwv': pwv}
+        extdb_pwv.add_entry(entry_dict)
+    return os.path.join(dir_name, file_name)
 
+def make_extdb_coverage(dir_name, file_name):
+    # create a extenal manifestdb for source coverage, and return temporal filepath to the database
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('coverage')
+    extdb_coverage = metadata.ManifestDb(map_file=os.path.join(dir_name, file_name),
+                                         scheme=scheme)
+    for i in range(10):
+        if i in [3, 8]:
+            coverage = 'jupiter:ws0,jupiter:ws1,saturn:ws0'
+        else:
+            coverage = 'jupiter:ws1,jupiter:ws2,saturn:ws0'
+        entry_dict = {'obs:obs_id': f'myobs{i}', 
+                      'coverage': coverage}
+        extdb_coverage.add_entry(entry_dict)
+    return os.path.join(dir_name, file_name)
 
-@unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
+def make_extdb_distance(dir_name, file_name):
+    # create a extenal manifestdb for source coverage, and return temporal filepath to the database
+    scheme = metadata.ManifestScheme()
+    scheme.add_exact_match('obs:obs_id')
+    scheme.add_data_field('source_distance')
+    extdb_distance = metadata.ManifestDb(map_file=os.path.join(dir_name, file_name),
+                                         scheme=scheme)
+    for i in range(10):
+        if i in [3, 8]:
+            distance = 'saturn:10.1,jupiter:12.4'
+        else:
+            distance = 'saturn:9.5,neptune:13.5'
+        entry_dict = {'obs:obs_id': f'myobs{i}', 
+                      'source_distance': distance}
+        extdb_distance.add_entry(entry_dict)
+    return os.path.join(dir_name, file_name)
+
+# @unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 class TestObsDb(unittest.TestCase):
 
     def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
         pass
+    
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
 
     def test_smoke(self):
         """Basic functionality."""
@@ -49,6 +106,99 @@ class TestObsDb(unittest.TestCase):
         r1 = db.query('drift == "setting"')
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
+        
+    def test_query_extension(self):
+        db = get_example()
+        extdb_path = make_extdb_pwv(dir_name=self.test_dir, file_name='pwv.sqlite')
+        r0 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['pwv<2.0'],
+                                         'params_list': ['pwv']}]
+                   )
+        r1 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['pwv<2.0'],
+                                         'params_list': ['pwv']}]
+                   )
+        r2 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['pwv>=2.0'],
+                                         'params_list': ['pwv']}]
+                   )
+        r3 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['pwv>=2.0'],
+                                         'params_list': ['pwv']}]
+                   )
+        self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
+                         len(db))
+        self.assertTrue('pwv' in r0.keys)
+
+    def test_query_extension_coverage(self):
+        db = get_example()
+        extdb_path = make_extdb_coverage(dir_name=self.test_dir, file_name='coverage.sqlite')
+        r0 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws0 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r1 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws0 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r2 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws2 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r3 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws2 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        r4 = db.query(
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['jupiter:ws1 in coverage'],
+                                         'params_list': ['coverage']}]
+                   )
+        self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
+                         len(db))
+        self.assertEqual(len(r4), len(db))
+        self.assertTrue('coverage' in r0.keys)
+
+    def test_query_extension_distance(self):
+        db = get_example()
+        extdb_path = make_extdb_distance(dir_name=self.test_dir, file_name='distance.sqlite')
+        r0 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['saturn > 10'],
+                                         'params_list': ['source_distance']}]
+                   )
+        r1 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['saturn > 10'],
+                                         'params_list': ['source_distance']}]
+                   )
+        r2 = db.query('drift == "rising"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['neptune >= 12'],
+                                         'params_list': ['source_distance']}]
+                   )
+        r3 = db.query('drift == "setting"', 
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['neptune >= 12'],
+                                         'params_list': ['source_distance']}]
+                   )
+        r4 = db.query(
+                    subdbs_info_list = [{'filepath': extdb_path,
+                                         'query_list': ['saturn < 11'],
+                                         'params_list': ['source_distance']}]
+                   )
+        self.assertEqual(len(r0)+len(r1)+len(r2)+len(r3),
+                         len(db))
+        self.assertEqual(len(r4), len(db))
+        self.assertTrue('source_distance' in r0.keys)
 
     def test_tags(self):
         db = get_example()
