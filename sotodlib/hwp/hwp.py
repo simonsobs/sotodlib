@@ -161,11 +161,10 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
     else:
-        if flags is None:
-            m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
         if isinstance(flags, str):
             flags = aman.flags.get(flags)
-            m = ~flags.mask()
+        if flags is None:
+            m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
         else:
             m = ~flags.mask()
 
