@@ -48,8 +48,9 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     prefilt_detrend: str or None
         Method of detrending when you apply prefilter. Default is `linear`. If data is already detrended or you do not want to detrend,
         set it to `None`.
-    flags : RangesMatrix, optional
+    flags : str or RangesMatrix or Ranges, optional
         Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
     merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
@@ -162,6 +163,9 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     else:
         if flags is None:
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
+            m = ~flags.mask()
         else:
             m = ~flags.mask()
 
@@ -206,8 +210,9 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         The name of the timestream of hwp_angle. Defaults to aman.hwp_angle if not specified.
     bins : int, optional
         The number of HWP angle bins to use. Default is 360.
-    flags : None or RangesMatrix
+    flags : str or RangesMatrix or Ranges. optional
         Flag indicating whether to exclude flagged samples when binning the signal.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
         Default is no mask applied.
     apodize_edges : bool, optional
         If True, applies an apodization window to the edges of the signal. Defaults to True.
@@ -230,9 +235,11 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
-        
+
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
         if (flags is not None) and apodize_flags:
             flags_mask = flags.mask()
             if flags_mask.ndim == 1:
