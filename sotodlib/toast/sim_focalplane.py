@@ -764,9 +764,12 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         hw.data["detectors"].update(alldets)
     else:
         hw.data["detectors"] = alldets
-    
+
     if extra_prop_file:
         import yaml
         extra_det_dict = yaml.safe_load(open(extra_prop_file, "rb"))
         stripped_extra_det_dict = {det: extra_det_dict[det] for det in hw.data["detectors"] if det in extra_det_dict}
-        hw.data["detectors"].update(stripped_extra_det_dict)
+        #This is super ugly I wish I did dictionnary comprehension better
+        for det_key, det_dict in stripped_extra_det_dict.items():
+            for prop_key, prop_value in det_dict.items():
+                hw.data["detectors"][det_key][prop_key] = prop_value

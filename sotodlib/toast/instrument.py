@@ -298,6 +298,9 @@ class SOFocalplane(Focalplane):
             [],
         )
 
+        if extra_prop_file:
+            (cal, dx, dy, dsigma, dp, dc) = ([], [], [], [], [], [])
+
         for det_name, det_data in hw.data["detectors"].items():
             readout_id.append(
                 build_readout_id(
@@ -367,6 +370,13 @@ class SOFocalplane(Focalplane):
             upper = get_par_float(det_data, "high", band_data["high"]) * u.GHz
             bandcenters.append(0.5 * (lower + upper))
             bandwidths.append(upper - lower)
+            if extra_prop_file:
+                cal.append(det_data.get("cal", 1.0))
+                dx.append(det_data.get("dx", 0.0))
+                dy.append(det_data.get("dy", 0.0))
+                dsigma.append(det_data.get("dsigma", 0.0))
+                dp.append(det_data.get("dp", 0.0))
+                dc.append(det_data.get("dc", 0.0))
 
         meta["platescale"] = hw.data["telescopes"][meta["telescope"]]["platescale"] \
                              * u.deg / u.mm
@@ -444,6 +454,9 @@ class SOFocalplane(Focalplane):
             ],
             meta=meta,
         )
+        if extra_prop_file:
+            detdata.add_columns([cal, dx, dy, dsigma, dp, dc], 
+                                names=["cal", "dx", "dy", "dsigma", "dp", "dc"])
 
         super().__init__(
             detector_data=detdata,
