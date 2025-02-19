@@ -441,7 +441,7 @@ class SignalMap(Signal):
     def to_work(self, map):
 
         if self.tiled:
-            return tilemap.redistribute(map, self.comm, self.geo_work.active)
+            return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
         else:
             return map.copy()
 
