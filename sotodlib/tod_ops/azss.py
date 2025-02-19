@@ -30,8 +30,9 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
         If ``bins`` is a sequence, ``bins`` overwrite ``range``.
-    flags: RangesMatrix, optional
+    flags: str or RangesMatrix or Ranges, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
         Default is no mask applied.
     apodize_edges : bool, optional
         If True, applies an apodization window to the edges of the signal. Defaults to True.
@@ -53,6 +54,8 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
     """
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
         if (flags is not None) and apodize_flags:
             flags_mask = flags.mask()
             # check the flags dimension
@@ -65,7 +68,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
                     flags_mask = flags_mask[0]
                 else:
                     flag_is_1d = False
-                    
+
             if flag_is_1d:
                 weight_for_signal = weight_for_signal * apodize.get_apodize_window_from_flags(aman, 
                                                                                               flags=flags,
@@ -80,7 +83,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         else:
             weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
-                               range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
+                              range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
 
 def fit_azss(az, azss_stats, max_mode, fit_range=None):

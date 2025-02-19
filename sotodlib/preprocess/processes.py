@@ -840,18 +840,20 @@ class EstimateAzSS(_Preprocess):
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
+    Notes on flags. If flags are provided as step_cfgs, `proc_aman.get(flags)` is used.
+    If provided as process_cfgs, `aman.get(glitch_flags)` is used instead.
 
     Example configuration block::
 
       - name: "glitchfill"
         signal: "hwpss_remove"
-        flag_aman: "jumps_2pi"
-        flag: "jump_flag"
+        flags: "glitches.glitch_flags" # optional
         process:
           nbuf: 10
           use_pca: False
           modes: 1
           in_place: True
+          glitch_flags: "glitch_flags"
           wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
@@ -860,16 +862,21 @@ class GlitchFill(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
-        self.flag_aman = step_cfgs.get('flag_aman', 'glitches')
-        self.flag = step_cfgs.get('flag', 'glitch_flags')
+        self.flags = step_cfgs.get('flags')
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
-        tod_ops.gapfill.fill_glitches(
-            aman, signal=aman[self.signal],
-            glitch_flags=proc_aman[self.flag_aman][self.flag],
-            **self.process_cfgs)
+        if self.flags is not None:
+            glitch_flags=proc_aman.get(self.flags)
+            tod_ops.gapfill.fill_glitches(
+                aman, signal=aman[self.signal],
+                glitch_flags=glitch_flags,
+                **self.process_cfgs)
+        else:
+            tod_ops.gapfill.fill_glitches(
+                aman, signal=aman[self.signal],
+                **self.process_cfgs)
 
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
