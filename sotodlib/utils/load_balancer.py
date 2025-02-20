@@ -1,8 +1,4 @@
-"""
-Author: Ioannis Paraskevakos
-License: MIT
-Copyright: 2018-2019
-"""
+import sqlite3
 from typing import Dict, List, Tuple, Optional
 
 class ObsToRankBalancer(object):
@@ -79,3 +75,21 @@ class ObsToRankBalancer(object):
         if rank is not None:
             self._plan = [x for x in self._plan if x[1]['name'] == f'rank{rank:04d}']
         return self._plan
+
+
+def balance(obs_ids, comm_size, rank):
+    conn = sqlite3.connect("/scratch/gpfs/ACT/data/metadata/acts19_det_set.sqlite")
+    # Enable dictionary-like row access
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    obs_ids_txt = ', '.join(f"'{obs_id}'" for obs_id in obs_ids)
+    query = f"select obs_id, detectors, nsamples from det_set where obs_id in ({obs_ids_txt})"
+    # Fetch all rows and convert to a list of dictionaries
+    cursor.execute(query)
+    results = [dict(row) for row in cursor.fetchall()]
+    # Close connection
+    conn.close()
+    balancer = ObsToRankBalancer(results, comm_size)
+    plan = balancer.plan(rank)
+    plan = [val[0][0] for val in plan]
+    return plan
