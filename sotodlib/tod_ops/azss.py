@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None, 
-              apodize_edges=True, apodize_edges_samps=1600, 
+              apodize_edges=True, apodize_edges_samps=1600,
               apodize_flags=True, apodize_flags_samps=200):
     """
     Bins a signal by azimuth angle.
@@ -141,11 +141,11 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     azss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_az_samps')])
     azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U10')))])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
-    
+
     return azss_stats, L.legval(x_legendre, coeffs.T)
-    
-    
-def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
+
+
+def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, scan_flags=None,
             apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
@@ -170,9 +170,15 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
         If `bins` is a sequence, `bins` overwrite `range`.
-    flags : RangesMatrix, optinal
+    flags : str or Rannges or RangesMatrix, optinal
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
+    scan_flags : str or Ranges, optional
+        Subtract in the scan/time region specified by flags.
+        Typically `flags.left_scan` or `flags.right_scan` will be used.
+        If we estimate and subtract azss in left going scan only, then
+        `flags` should be a "union of glitch_flags and flags.right_scan (or ~flags.left_scan)", and
+        `scan_flags` should be `flags.left_scan`.
     apodize_edges : bool, optional
         If True, applies an apodization window to the edges of the signal. Defaults to True.
     apodize_edges_samps : int, optional
@@ -219,7 +225,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
     prefilt = filters.get_hpf(prefilt_cfg)
 
     if signal is None:
-        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        # signal_name variable to be deleted when tod_ops.fourier_filter is updated
         signal_name = 'signal'
         signal = aman[signal_name]
     elif isinstance(signal, str):
@@ -230,6 +236,13 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
+    if scan_flags is None:
+        scan_flags = np.ones(aman.samps.count, dtype=bool)
+    elif isinstance(scan_flags, str):
+        scan_flags = aman.flags.get(scan_flags).mask()
+    else:
+        scan_flags = scan_flags.mask()
+
     if apply_prefilt:
         # This requires signal to be a string.
         signal = np.array(tod_ops.fourier_filter(
@@ -238,42 +251,45 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
 
     if az is None:
         az = aman.boresight.az
-        
+
     # do binning
     binning_dict = bin_by_az(aman, signal=signal, az=az, range=range, bins=bins, flags=flags,
-                            apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
-                            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
+                             apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps,
+                             apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
     bin_centers = binning_dict['bin_centers']
     bin_counts = binning_dict['bin_counts']
     binned_signal = binning_dict['binned_signal']
     binned_signal_sigma = binning_dict['binned_signal_sigma']
     uniform_binned_signal_sigma = np.nanmedian(binned_signal_sigma, axis=-1)
-    
+
     azss_stats = core.AxisManager(aman.dets)
     azss_stats.wrap('binned_az', bin_centers, [(0, core.IndexAxis('bin_az_samps', count=bins))])
     azss_stats.wrap('bin_counts', bin_counts, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
-    
+
     if method == 'fit':
         if type(max_mode) is not int:
             raise ValueError('max_mode is not provided as integer')
         azss_stats, model_sig_tod = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
-        
+
     if method == 'interpolate':
         f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
         model_sig_tod = f_template(aman.boresight.az)
-    
+
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
     if merge_model:
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
-        aman[signal_name] = np.subtract(signal, model_sig_tod, dtype='float32')
+        if np.any(np.isnan(model_sig_tod)):
+            logger.warning('azss is not modeled for all az. set zero to nan')
+            model_sig_tod[np.isnan(model_sig_tod)] = 0
+        aman[signal_name][:, scan_flags] = np.subtract(signal, model_sig_tod, dtype='float32')[:, scan_flags]
     return azss_stats, model_sig_tod
 
-def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
+def subtract_azss(aman, signal='signal', azss_template_name='azss_model', scan_flags=None,
                   subtract_name='azss_remove', in_place=False, remove_template=True):
     """
     Subtract the scan synchronous signal (azss) template from the
@@ -289,6 +305,9 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
     azss_template_name : str, optional
         The name of the field in the axis manager containing the azss template.
         Defaults to 'azss_model'.
+    scan_flags: str or Ranges, optional
+        Subtract in the scan/time region specified by flags.
+        Typically `flags.left_scan` or `flags.right_scan` will be used.
     subtract_name : str, optional
         The name of the field in the axis manager that will store the azss-subtracted signal.
         Only used if in_place is False. Defaults to 'azss_remove'.
@@ -316,15 +335,21 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model',
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
+    if scan_flags is None:
+        scan_flags = np.ones(aman.samps.count, dtype=bool)
+    elif isinstance(scan_flags, str):
+        scan_flags = aman.flags.get(scan_flags).mask()
+    else:
+        scan_flags = scan_flags.mask()
+
     if in_place:
         if signal_name is None:
-            signal -= aman[azss_template_name].astype(signal.dtype)
+            signal[:, scan_flags] -= aman[azss_template_name].astype(signal.dtype)[:, scan_flags]
         else:
-            aman[signal_name] -= aman[azss_template_name].astype(aman[signal_name].dtype)
+            aman[signal_name][:, scan_flags] -= aman[azss_template_name].astype(aman[signal_name].dtype)[:, scan_flags]
     else:
-        aman.wrap(subtract_name, 
-                  np.subtract(aman[signal_name], aman[azss_template_name], dtype='float32'),
-                  [(0, 'dets'), (1, 'samps')])
-        
+        subtracted = signal[:, scan_flags] - aman[azss_template_name].astype(signal.dtype)[:, scan_flags]
+        aman.wrap(subtract_name, subtracted, [(0, 'dets'), (1, 'samps')])
+
     if remove_template:
         aman.move(azss_template_name, None)

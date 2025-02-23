@@ -820,8 +820,24 @@ class EstimateAzSS(_Preprocess):
           azss_stats_name: 'azss_statsQ'
           range: [-1.57079, 7.85398]
           bins: 1080
+          flags: 'glitch_flags'
           merge_stats: False
           merge_model: False
+        save: True
+
+    If we estimate and subtract azss in left going scans only
+
+      - name: "estimate_azss"
+        calc:
+          signal: 'demodQ'
+          azss_stats_name: 'azss_statsQ_left'
+          range: [-1.57079, 7.85398]
+          bins: 1080
+          flags: 'union of glitch_flags and right_scan (~left_scan)'
+          scan_flags: 'left_scan'
+          merge_stats: False
+          merge_model: False
+          subtract_in_place: True
         save: True
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
@@ -831,7 +847,7 @@ class EstimateAzSS(_Preprocess):
     def calc_and_save(self, aman, proc_aman):
         calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         self.save(proc_aman, calc_aman)
-    
+
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
             return
