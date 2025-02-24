@@ -260,11 +260,13 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None,
         if type(max_mode) is not int:
             raise ValueError('max_mode is not provided as integer')
         azss_stats, model_sig_tod = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
-        
+
     if method == 'interpolate':
-        f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
+        # mask az bins that has no data and extrapolate
+        mask = ~np.any(np.isnan(binned_signal), axis=0)
+        f_template = interp1d(bin_centers[mask], binned_signal[:, mask], fill_value='extrapolate')
         model_sig_tod = f_template(aman.boresight.az)
-    
+
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
     if merge_model:
