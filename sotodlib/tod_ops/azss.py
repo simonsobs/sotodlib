@@ -275,7 +275,9 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         azss_stats, model_sig_tod = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
 
     if method == 'interpolate':
-        f_template = interp1d(bin_centers, binned_signal, fill_value='extrapolate')
+        # mask az bins that has no data and extrapolate
+        mask = ~np.any(np.isnan(binned_signal), axis=0)
+        f_template = interp1d(bin_centers[mask], binned_signal[:, mask], fill_value='extrapolate')
         model_sig_tod = f_template(aman.boresight.az)
 
     if merge_stats:
@@ -283,9 +285,6 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
     if merge_model:
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
-        if np.any(np.isnan(model_sig_tod)):
-            logger.warning('azss is not modeled for all az. set zero to nan')
-            model_sig_tod[np.isnan(model_sig_tod)] = 0
         aman[signal_name][:, scan_flags] = np.subtract(signal, model_sig_tod, dtype='float32')[:, scan_flags]
     return azss_stats, model_sig_tod
 
