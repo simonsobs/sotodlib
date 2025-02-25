@@ -141,7 +141,11 @@ class ObsFileDb:
         of writing a Db to disk to call copy(map_file=...).
         """
         script = ' '.join(self.conn.iterdump())
-        if map_file is not None and os.path.exists(map_file):
+        if (
+            map_file is not None and 
+            map_file != ":memory:" and
+            os.path.exists(map_file)
+        ):
             if overwrite:
                 os.remove(map_file)
             else:
