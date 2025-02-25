@@ -140,9 +140,7 @@ class Context(odict):
                 db_file = os.path.abspath(db_file)
                 logger.info(f'Loading {key} from {self[key]} -> {db_file}.')
                 try:
-                    db = cls.from_file(
-                        db_file, force_new_db=False, readonly=(not readwrite)
-                    )
+                    db = cls.from_file(db_file, force_new_db=False)
                 except Exception as e:
                     logger.error(f'DB failure when loading {key} from {self[key]} -> {db_file}\n')
                     raise e
