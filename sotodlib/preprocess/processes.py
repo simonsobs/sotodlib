@@ -824,6 +824,8 @@ class EstimateAzSS(_Preprocess):
           merge_stats: False
           merge_model: False
         save: True
+        process:
+          subtract: True
 
     If we estimate and subtract azss in left going scans only
 
@@ -839,20 +841,43 @@ class EstimateAzSS(_Preprocess):
           merge_model: False
           subtract_in_place: True
         save: True
+        process:
+          subtract: True
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"
 
     def calc_and_save(self, aman, proc_aman):
-        calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        self.save(proc_aman, calc_aman)
+        if self.process_cfgs:
+            self.save(proc_aman, aman[self.calc_cfgs['azss_stats_name']])
+        else:
+            calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            self.save(proc_aman, calc_aman)
 
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+
+    def process(self, aman, proc_aman, sim=False):
+        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
+            if sim:
+                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            else:
+                scan_flags = self.calc_cfgs.get('scan_flags')
+                method = self.calc_cfgs.get('method')
+                tod_ops.azss.subtract_azss(
+                    aman,
+                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                    signal = self.calc_cfgs.get('signal'),
+                    scan_flags=scan_flags,
+                    method=method,
+                    in_place=True
+                )
+        else:
+            tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.

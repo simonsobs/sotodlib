@@ -269,16 +269,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
 
-    if method == 'fit':
-        if type(max_mode) is not int:
-            raise ValueError('max_mode is not provided as integer')
-        azss_stats, model_sig_tod = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
-
-    if method == 'interpolate':
-        # mask az bins that has no data and extrapolate
-        mask = ~np.any(np.isnan(binned_signal), axis=0)
-        f_template = interp1d(bin_centers[mask], binned_signal[:, mask], fill_value='extrapolate')
-        model_sig_tod = f_template(aman.boresight.az)
+    model_sig_tod = get_model_sig_tod(aman, azss_stats, az, method)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -288,8 +279,34 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         aman[signal_name][:, scan_flags] = np.subtract(signal, model_sig_tod, dtype='float32')[:, scan_flags]
     return azss_stats, model_sig_tod
 
-def subtract_azss(aman, signal='signal', azss_template_name='azss_model', scan_flags=None,
-                  subtract_name='azss_remove', in_place=False, remove_template=True):
+
+def get_model_sig_tod(aman, azss_stats, az=None, method='interpolate'):
+    """
+    Function to return the azss template for subtraction given the azss_stats AxisManager
+    """
+    if az is None:
+        az = aman.boresight.az
+
+    if method == 'fit':
+        if type(azss_stats.max_mode) is not int:
+            raise ValueError('max_mode is not provided as integer')
+        if 'frange_min' in azss_stats:
+            frange = (azss_stats.frange_min, azss_stats.frange_max)
+        else:
+            frange = None
+        azss_stats, model = fit_azss(az=az, azss_stats=azss_stats,
+                                     max_mode=azss_stats.max_mode,
+                                     fit_range=frange)
+    if method == 'interpolate':
+        # mask az bins that has no data and extrapolate
+        mask = ~np.any(np.isnan(azss_stats.binned_signal), axis=0)
+        f_template = interp1d(azss_stats.binned_az[mask], azss_stats.binned_signal[:, mask], fill_value='extrapolate')
+        model = f_template(az)
+    return model
+
+
+def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', scan_flags=None,
+                  subtract_name='azss_remove', in_place=False, remove_template=False):
     """
     Subtract the scan synchronous signal (azss) template from the
     signal in the given axis manager.
@@ -298,12 +315,13 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model', scan_f
     ----------
     aman : AxisManager
         The axis manager containing the signal and the azss template.
+    azss_stats: AxisManager
+        Contains AxisManager from get_azss.
     signal : str, optional
         The name of the field in the axis manager containing the signal to be processed.
         Defaults to 'signal'.
-    azss_template_name : str, optional
-        The name of the field in the axis manager containing the azss template.
-        Defaults to 'azss_model'.
+    method: str
+        The method to use for azss modeling. Options are 'interpolate' and 'fit'.
     scan_flags: str or Ranges, optional
         Subtract in the scan/time region specified by flags.
         Typically `flags.left_scan` or `flags.right_scan` will be used.
@@ -313,9 +331,6 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model', scan_f
     in_place : bool, optional
         If True, the subtraction is done in place, modifying the original signal in the axis manager.
         If False, the result is stored in a new field specified by subtract_name. Defaults to False.
-    remove_template : bool, optional
-        If True, the azss template field is removed from the axis manager after subtraction.
-        Defaults to True.
 
     Returns
     -------
@@ -334,6 +349,8 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model', scan_f
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
+    model = get_model_sig_tod(aman, azss_stats, method=method)
+
     if scan_flags is None:
         scan_flags = np.ones(aman.samps.count, dtype=bool)
     elif isinstance(scan_flags, str):
@@ -343,12 +360,9 @@ def subtract_azss(aman, signal='signal', azss_template_name='azss_model', scan_f
 
     if in_place:
         if signal_name is None:
-            signal[:, scan_flags] -= aman[azss_template_name].astype(signal.dtype)[:, scan_flags]
+            signal[:, scan_flags] -= model.astype(signal.dtype)[:, scan_flags]
         else:
-            aman[signal_name][:, scan_flags] -= aman[azss_template_name].astype(aman[signal_name].dtype)[:, scan_flags]
+            aman[signal_name][:, scan_flags] -= model.astype(aman[signal_name].dtype)[:, scan_flags]
     else:
-        subtracted = signal[:, scan_flags] - aman[azss_template_name].astype(signal.dtype)[:, scan_flags]
+        subtracted = signal[:, scan_flags] - model.astype(signal.dtype)[:, scan_flags]
         aman.wrap(subtract_name, subtracted, [(0, 'dets'), (1, 'samps')])
-
-    if remove_template:
-        aman.move(azss_template_name, None)
