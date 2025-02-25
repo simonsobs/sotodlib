@@ -71,7 +71,7 @@ class DetDb(object):
         "`time1` integer",
     ]
 
-    def __init__(self, map_file=None, init_db=True, readonly=False):
+    def __init__(self, map_file=":memory:", init_db=True, readonly=False):
         """Instantiate a DetDb.
 
         If map_file is provided, the database will

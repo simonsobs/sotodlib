@@ -21,7 +21,7 @@ def sqlite_connect(filename=None, mode="w"):
         (sqlite3.Connection):  The database connection.
 
     """
-    if filename is None:
+    if filename is None or filename == ":memory:":
         # Memory-backed DB
         if mode == "r":
             raise ValueError("Cannot open memory DB in read-only mode")

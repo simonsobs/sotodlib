@@ -40,7 +40,7 @@ class ObsDb(object):
         "`obs_id` varchar(256)",
     ]
 
-    def __init__(self, map_file=None, init_db=True, readonly=False):
+    def __init__(self, map_file=":memory:", init_db=True, readonly=False):
         """Instantiate an ObsDb.
 
         Args:
