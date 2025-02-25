@@ -827,7 +827,8 @@ class EstimateAzSS(_Preprocess):
         process:
           subtract: True
 
-    If we estimate and subtract azss in left going scans only
+    If we estimate and subtract azss in left going scans only,
+    make union of gltich_flags and scan_flags first then
 
       - name: "estimate_azss"
         calc:
