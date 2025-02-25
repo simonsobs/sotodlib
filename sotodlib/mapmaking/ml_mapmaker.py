@@ -7,7 +7,7 @@ from typing import Optional
 from pixell import bunch, enmap, tilemap
 from pixell import utils as putils
 
-import .utils as smutils
+from . import utils as smutils
 from .. import coords
 from .pointing_matrix import PmatCut
 from .noise_model import NmatUncorr
