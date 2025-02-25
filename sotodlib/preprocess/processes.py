@@ -820,23 +820,70 @@ class EstimateAzSS(_Preprocess):
           azss_stats_name: 'azss_statsQ'
           range: [-1.57079, 7.85398]
           bins: 1080
+          flags: 'glitch_flags'
           merge_stats: False
           merge_model: False
         save: True
+        process:
+          subtract: True
+
+    If we estimate and subtract azss in left going scans only,
+    make union of gltich_flags and scan_flags first
+
+      - name : "union_flags"
+        process:
+          flag_labels: ['glitches.glitch_flags', 'turnaround_flags.right_scan']
+          total_flags_label: 'glitch_flags_left'
+
+      - name: "estimate_azss"
+        calc:
+          signal: 'demodQ'
+          azss_stats_name: 'azss_statsQ_left'
+          range: [-1.57079, 7.85398]
+          bins: 1080
+          flags: 'glitch_flags_left'
+          scan_flags: 'left_scan'
+          merge_stats: False
+          merge_model: False
+          subtract_in_place: True
+        save: True
+        process:
+          subtract: True
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
     name = "estimate_azss"
 
     def calc_and_save(self, aman, proc_aman):
-        calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-        self.save(proc_aman, calc_aman)
-    
+        if self.process_cfgs:
+            self.save(proc_aman, aman[self.calc_cfgs['azss_stats_name']])
+        else:
+            calc_aman, _ = tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            self.save(proc_aman, calc_aman)
+
     def save(self, proc_aman, azss_stats):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+
+    def process(self, aman, proc_aman, sim=False):
+        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
+            if sim:
+                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            else:
+                tod_ops.azss.subtract_azss(
+                    aman,
+                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                    signal=self.calc_cfgs.get('signal'),
+                    scan_flags=self.calc_cfgs.get('scan_flags'),
+                    method=self.calc_cfgs.get('method'),
+                    max_mode=self.calc_cfgs.get('max_mode'),
+                    range=self.calc_cfgs.get('range'),
+                    in_place=True
+                )
+        else:
+            tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
