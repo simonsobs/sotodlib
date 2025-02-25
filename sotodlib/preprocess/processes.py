@@ -828,7 +828,12 @@ class EstimateAzSS(_Preprocess):
           subtract: True
 
     If we estimate and subtract azss in left going scans only,
-    make union of gltich_flags and scan_flags first then
+    make union of gltich_flags and scan_flags first
+
+      - name : "union_flags"
+        process:
+          flag_labels: ['glitches.glitch_flags', 'turnaround_flags.right_scan']
+          total_flags_label: 'glitch_flags_left'
 
       - name: "estimate_azss"
         calc:
@@ -836,7 +841,7 @@ class EstimateAzSS(_Preprocess):
           azss_stats_name: 'azss_statsQ_left'
           range: [-1.57079, 7.85398]
           bins: 1080
-          flags: 'union of glitch_flags and right_scan (~left_scan)'
+          flags: 'glitch_flags_left'
           scan_flags: 'left_scan'
           merge_stats: False
           merge_model: False
