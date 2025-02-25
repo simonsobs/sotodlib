@@ -868,12 +868,14 @@ class EstimateAzSS(_Preprocess):
             else:
                 scan_flags = self.calc_cfgs.get('scan_flags')
                 method = self.calc_cfgs.get('method')
+                method = self.calc_cfgs.get('max_mode')
                 tod_ops.azss.subtract_azss(
                     aman,
                     proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
                     signal = self.calc_cfgs.get('signal'),
                     scan_flags=scan_flags,
                     method=method,
+                    max_mode=max_mode,
                     in_place=True
                 )
         else:
