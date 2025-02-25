@@ -873,6 +873,7 @@ class EstimateAzSS(_Preprocess):
                     scan_flags=self.calc_cfgs.get('scan_flags'),
                     method=self.calc_cfgs.get('method'),
                     max_mode=self.calc_cfgs.get('max_mode'),
+                    range=self.calc_cfgs.get('range'),
                     in_place=True
                 )
         else:
