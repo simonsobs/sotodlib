@@ -99,7 +99,7 @@ class ObsFileDb:
         """
         if prefix is not None:
             return prefix
-        if map_file == ':memory:':
+        if map_file is None or map_file == ':memory:':
             return ''
         return os.path.split(os.path.abspath(map_file))[0] + '/'
 

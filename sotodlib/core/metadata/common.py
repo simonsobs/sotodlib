@@ -41,7 +41,10 @@ def sqlite_connect(filename=None, mode="w"):
     # DB file and is safe to delete manually if one is sure that no processes
     # are accessing the DB.
     # https://www.sqlite.org/pragma.html#pragma_journal_mode
-    journal_mode = "persist"
+    if mode == "r":
+        journal_mode = "off"
+    else:
+        journal_mode = "persist"
 
     # Max size of the journal.  Although it is being overwritten repeatedly,
     # if it gets too large we purge it and recreate.  This should not happen
@@ -54,7 +57,10 @@ def sqlite_connect(filename=None, mode="w"):
     # Using "normal" instead of the default "full" can avoid potentially expensive
     # (on network filesystems) sync operations.
     # https://www.sqlite.org/pragma.html#pragma_synchronous
-    sync_mode = "normal"
+    if mode == "r":
+        sync_mode = "off"
+    else:
+        sync_mode = "normal"
 
     # Memory caching
 
@@ -81,11 +87,7 @@ def sqlite_connect(filename=None, mode="w"):
     conn.execute(f"pragma page_size={page_size}")
     conn.execute(f"pragma cache_size={n_cache_pages}")
 
-    if mode == "r":
-        # Read-only mode, all done.
-        return conn
-
-    # In write mode, set journaling / sync options
+    # Set journaling / sync options
     conn.execute(f"pragma journal_mode={journal_mode}")
     conn.execute(f"pragma journal_size_limit={journal_size}")
     conn.execute(f"pragma synchronous={sync_mode}")
@@ -95,6 +97,9 @@ def sqlite_connect(filename=None, mode="w"):
     # Hold temporary tables in memory.
     # https://www.sqlite.org/pragma.html#pragma_temp_store
     conn.execute("pragma temp_store=memory")
+
+    if mode == "r":
+        conn.execute("pragma query_only=true")
 
     return conn
 
