@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from .. import core
 from .. import coords
-from . import utils as smutils
+import .utils as smutils
 from .noise_model import NmatWhite
 
 hp = smutils.import_optional('healpy')
