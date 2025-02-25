@@ -69,7 +69,7 @@ class ObsFileDb:
     #: starting with /).
     prefix = ''
 
-    def __init__(self, map_file=None, prefix=None, init_db=True, readonly=False):
+    def __init__(self, map_file=":memory:", prefix=None, init_db=True, readonly=False):
         """Instantiate an ObsFileDb.
 
         Arguments:
