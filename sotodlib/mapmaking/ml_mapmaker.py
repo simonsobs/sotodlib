@@ -9,16 +9,7 @@ from pixell import utils as putils
 
 from .. import coords
 from .pointing_matrix import PmatCut
-from .utilities import (
-    MultiZipper,
-    recentering_to_quat_lonlat,
-    evaluate_recentering,
-    TileMapZipper,
-    MapZipper,
-    safe_invert_div,
-    unarr,
-    ArrayZipper,
-)
+import .utils as utils
 from .noise_model import NmatUncorr
 
 
@@ -48,7 +39,7 @@ class MLMapmaker:
         self.verbose = verbose
         self.noise_model = noise_model
         self.data = []
-        self.dof = MultiZipper()
+        self.dof = utils.MultiZipper()
         self.ready = False
         self.glitch_flags_path = glitch_flags
 
@@ -335,12 +326,12 @@ class SignalMap(Signal):
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
-                rot = recentering_to_quat_lonlat(
-                    *evaluate_recentering(
+                rot = utils.recentering_to_quat_lonlat(
+                    *utils.evaluate_recentering(
                         self.recenter,
                         ctime=ctime[len(ctime) // 2],
                         geom=(self.rhs.shape, self.rhs.wcs),
-                        site=unarr(obs.site),
+                        site=utils.unarr(obs.site),
                     )
                 )
             else:
@@ -351,8 +342,8 @@ class SignalMap(Signal):
                 geom=self.rhs.geometry,
                 rot=rot,
                 threads="domdir",
-                weather=unarr(obs.weather),
-                site=unarr(obs.site),
+                weather=utils.unarr(obs.weather),
+                site=utils.unarr(obs.site),
                 interpol=self.interpol,
             )
         # Build the RHS for this observation
@@ -394,7 +385,7 @@ class SignalMap(Signal):
             self.rhs = tilemap.redistribute(self.rhs, self.comm)
             self.div = tilemap.redistribute(self.div, self.comm)
             self.hits = tilemap.redistribute(self.hits, self.comm)
-            self.dof = TileMapZipper(
+            self.dof = utils.TileMapZipper(
                 self.rhs.geometry, dtype=self.dtype, comm=self.comm
             )
         else:
@@ -402,8 +393,8 @@ class SignalMap(Signal):
                 self.rhs = putils.allreduce(self.rhs, self.comm)
                 self.div = putils.allreduce(self.div, self.comm)
                 self.hits = putils.allreduce(self.hits, self.comm)
-            self.dof = MapZipper(*self.rhs.geometry, dtype=self.dtype)
-        self.idiv = safe_invert_div(self.div)
+            self.dof = utils.MapZipper(*self.rhs.geometry, dtype=self.dtype)
+        self.idiv = utils.safe_invert_div(self.div)
         self.ready = True
 
     @property
@@ -504,12 +495,12 @@ class SignalMap(Signal):
         ctime = obs.timestamps
         # Build the local geometry and pointing matrix for this observation
         if self.recenter:
-            rot = recentering_to_quat_lonlat(
-                *evaluate_recentering(
+            rot = utils.recentering_to_quat_lonlat(
+                *utils.evaluate_recentering(
                     self.recenter,
                     ctime=ctime[len(ctime) // 2],
                     geom=(self.rhs.shape, self.rhs.wcs),
-                    site=unarr(obs.site),
+                    site=utils.unarr(obs.site),
                 )
             )
         else:
@@ -520,8 +511,8 @@ class SignalMap(Signal):
             geom=self.rhs.geometry,
             rot=rot,
             threads="domdir",
-            weather=unarr(obs.weather),
-            site=unarr(obs.site),
+            weather=utils.unarr(obs.weather),
+            site=utils.unarr(obs.site),
             interpol=self.interpol,
         )
         # Build the RHS for this observation
@@ -592,7 +583,7 @@ class SignalCut(Signal):
             return
         self.rhs = np.concatenate(self.rhs)
         self.div = np.concatenate(self.div)
-        self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
+        self.dof = utils.ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
 
     def forward(self, id, tod, junk):
