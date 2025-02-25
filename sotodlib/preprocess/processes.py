@@ -823,6 +823,7 @@ class EstimateAzSS(_Preprocess):
           flags: 'glitch_flags'
           merge_stats: False
           merge_model: False
+          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -875,9 +876,9 @@ class EstimateAzSS(_Preprocess):
                 tod_ops.azss.subtract_azss(
                     aman,
                     proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
-                    signal=self.calc_cfgs.get('signal'),
+                    signal=self.calc_cfgs.get('signal', 'signal'),
                     scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method'),
+                    method=self.calc_cfgs.get('method', 'interpolation'),
                     max_mode=self.calc_cfgs.get('max_mode'),
                     range=self.calc_cfgs.get('range'),
                     in_place=True

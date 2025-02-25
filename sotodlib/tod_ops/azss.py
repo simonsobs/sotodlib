@@ -275,7 +275,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
     if merge_model:
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
-        aman[signal_name][:, scan_flags] = np.subtract(signal, model_sig_tod, dtype='float32')[:, scan_flags]
+        aman[signal_name][:, scan_flags] -= model_sig_tod.astype(signal.dtype)[:, scan_flags]
     return azss_stats, model_sig_tod
 
 
@@ -297,6 +297,10 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=Non
         mask = ~np.any(np.isnan(azss_stats.binned_signal), axis=0)
         f_template = interp1d(azss_stats.binned_az[mask], azss_stats.binned_signal[:, mask], fill_value='extrapolate')
         model = f_template(az)
+
+    if np.any(~np.isfinite(model)):
+        logger.warning('azss model has nan. set zero to nan but this may make glitch')
+        model[~np.isfinite(model)] = 0
     return model
 
 
