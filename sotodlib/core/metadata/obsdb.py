@@ -40,7 +40,7 @@ class ObsDb(object):
         "`obs_id` varchar(256)",
     ]
 
-    def __init__(self, map_file=None, init_db=True):
+    def __init__(self, map_file=":memory:", init_db=True, readonly=False):
         """Instantiate an ObsDb.
 
         Args:
@@ -59,12 +59,16 @@ class ObsDb(object):
           this object be written back to the file.
 
         """
+        if init_db and readonly:
+            raise ValueError("Cannot initialize a read-only DB")
+        self._readonly = readonly
         if isinstance(map_file, sqlite3.Connection):
             self.conn = map_file
         else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
+            self.conn = common.sqlite_connect(
+                filename=map_file,
+                mode=("r" if readonly else "w"),
+            )
 
         self.conn.row_factory = sqlite3.Row  # access columns by name
         if init_db:
@@ -117,6 +121,8 @@ class ObsDb(object):
             'timestamp float, drift str'
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot add_obs_columns() on a read-only DB")
         current_cols = self.conn.execute('pragma table_info("obs")').fetchall()
         current_cols = [r[1] for r in current_cols]
         if isinstance(column_defs, str):
@@ -160,6 +166,8 @@ class ObsDb(object):
             self.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot update_obs() on a read-only DB")
         c = self.conn.cursor()
         c.execute('INSERT OR IGNORE INTO obs (obs_id) VALUES (?)',
                   (obs_id,))
@@ -188,13 +196,17 @@ class ObsDb(object):
         of writing a Db to disk to call copy(map_file=...) and then
         simply discard the returned object.
         """
-        if map_file is not None and os.path.exists(map_file):
+        if (
+            map_file is not None and 
+            map_file != ":memory:" and
+            os.path.exists(map_file)
+        ):
             if overwrite:
                 os.remove(map_file)
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = ObsDb(map_file=map_file, init_db=False)
+        new_db = ObsDb(map_file=map_file, init_db=False, readonly=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         return new_db
