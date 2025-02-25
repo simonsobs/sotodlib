@@ -14,11 +14,11 @@ from sqlalchemy.orm import sessionmaker
 
 from .. import core
 from .. import coords
-from . import utils as utils
+from . import utils as smutils
 from .noise_model import NmatWhite
 
-hp = utils.import_optional('healpy')
-h5py = utils.import_optional('h5py')
+hp = smutils.import_optional('healpy')
+h5py = smutils.import_optional('h5py')
 
 class DemodMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, comps='TQU', singlestream=False):
@@ -63,7 +63,7 @@ class DemodMapmaker:
         self.verbose      = verbose
         self.noise_model  = noise_model
         self.data         = []
-        self.dof          = utils.MultiZipper()
+        self.dof          = smutils.MultiZipper()
         self.ready        = False
         self.ncomp        = len(comps)
         self.singlestream = singlestream
@@ -288,7 +288,7 @@ class DemodSignalMap(DemodSignal):
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
                 if self.recenter:
-                    rot = utils.recentering_to_quat_lonlat(*utils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=utils.unarr(obs.site)))
+                    rot = smutils.recentering_to_quat_lonlat(*smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=smutils.unarr(obs.site)))
                 else: rot = None
                 if self.Nsplits == 1:
                     # this is the case with no splits
@@ -308,7 +308,7 @@ class DemodSignalMap(DemodSignal):
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
                     wcs_kernel = None
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=utils.unarr(obs.weather), site=utils.unarr(obs.site), cuts=cuts, hwp=True)
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True)
             else:
                 pmap_local = pmap
 
@@ -442,7 +442,7 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
 def atomic_db_aux(atomic_db, info, valid = True):
     info.valid = valid
     engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
-    utils.Base.metadata.create_all(bind=engine)
+    smutils.Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
         session.add(info)
