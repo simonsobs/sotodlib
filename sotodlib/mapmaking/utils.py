@@ -1,5 +1,6 @@
 from typing import Optional, Any, Union
-from sqlalchemy.orm import declarative_base, Mapped, mapped_column
+from sqlalchemy import create_engine, exc
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
 import so3g
@@ -586,3 +587,15 @@ class AtomicInfo(Base):
 
     def __repr__(self):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
+
+def atomic_db_aux(atomic_db, info, valid = True):
+    info.valid = valid
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        session.add(info)
+        try:
+            session.commit()
+        except exc.IntegrityError:
+            session.rollback()

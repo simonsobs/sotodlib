@@ -6,13 +6,9 @@ you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
 __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
-import numpy as np, os
+import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
-import so3g.proj
-from sqlalchemy import create_engine, exc
-from sqlalchemy.orm import sessionmaker
 
-from .. import core
 from .. import coords
 from . import utils as smutils
 from .noise_model import NmatWhite
@@ -35,15 +31,15 @@ class DemodMapmaker:
             noise model for each observation. Can be overriden in add_obs.
             Noises other than NmatWhite not implemented. If None, a white 
             noise model is used.
-        dtype : numpy.dtype
+        dtype : numpy.dtype, optional
             The data type to use for the time-ordered data. Only tested
             with float32
-        verbose : Bool
+        verbose : Bool, optional
             Whether to print progress messages. Not implemented
-        comps : str
+        comps : str, optional
             String with the components to solve for. Not implemented for 
             anything other than TQU
-        singlestream : Bool
+        singlestream : Bool, optional
             If True, do not perform demodulated filter+bin mapmaking but 
             rather regular filter+bin mapmaking, i.e. map from obs.signal
             rather than from obs.dsT, obs.demodQ, obs.demodU
@@ -214,8 +210,10 @@ class DemodSignalMap(DemodSignal):
             Whether this signal should be part of the output or not.
         ext : str, optional
             The extension used for the files.
-        dtype : numpy.dtype
+        dtype_map : numpy.dtype, optional
             The data type to use for the maps.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time ordered data
         sys : str or None, optional
             The coordinate system to map. Defaults to equatorial
         recenter : str or None
@@ -262,8 +260,10 @@ class DemodSignalMap(DemodSignal):
         ext : str, optional
             The extension used for the files.
             May be 'fits', 'fits.gz', 'h5', 'h5py', or 'npy'.
-        dtype : numpy.dtype
+        dtype_map : numpy.dtype, optional
             The data type to use for the maps.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time ordered data
         Nsplits : int, optional
             Number of splits that you will map simultaneously. By default is 1 when no
             splits are requested.
@@ -438,18 +438,6 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          verbose=verbose>0,
                                          singlestream=singlestream)
     return mapmaker
-
-def atomic_db_aux(atomic_db, info, valid = True):
-    info.valid = valid
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
-    smutils.Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    with Session() as session:
-        session.add(info)
-        try:
-            session.commit()
-        except exc.IntegrityError:
-            session.rollback()
 
 def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     """
