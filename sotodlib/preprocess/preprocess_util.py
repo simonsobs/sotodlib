@@ -410,13 +410,15 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
-            aman = context_init.get_obs(meta_proc, no_signal=no_signal)
+
+            meta_init.restrict('dets', meta_proc.dets.vals)
+            aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
-            proc_aman = context_proc.get_meta(obs_id, meta=meta_proc)
+            proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
             aman.preprocess.merge(proc_aman.preprocess)
 
@@ -911,14 +913,20 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
                                   start=os.path.dirname(configs['archive']['index']))
 
         src_file = outputs['temp_file']
+
+        logger.debug(f"Source file: {src_file}")
+        logger.debug(f"Destination file: {dest_file}")
+
         with h5py.File(dest_file,'a') as f_dest:
             with h5py.File(src_file,'r') as f_src:
                 for dts in f_src.keys():
+                    logger.debug(f"\t{dts}")
                     # If the dataset or group already exists, delete it to overwrite
                     if overwrite and dts in f_dest:
                         del f_dest[dts]
                     f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
                     for member in f_src[dts]:
+                        logger.debug(f"\t{dts}/{member}")
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
         logger.info(f"Saving to database under {outputs['db_data']}")

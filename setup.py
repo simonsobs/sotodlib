@@ -59,6 +59,7 @@ setup_opts["install_requires"] = [
     'skyfield',
     'so3g',
     'pixell',
+    'pytest',
     'scikit-image',
     'pyfftw',
     'numdifftools',

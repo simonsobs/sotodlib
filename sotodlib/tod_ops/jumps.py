@@ -1,18 +1,13 @@
 from typing import Literal, Optional, Tuple, Union, cast, overload
+from warnings import warn
 
 import numpy as np
 import scipy.ndimage as simg
 import scipy.stats as ss
+import so3g
 from numpy.typing import NDArray
-from pixell.utils import block_expand, block_reduce, moveaxis
 from scipy.sparse import csr_array
 from skimage.restoration import denoise_tv_chambolle
-from so3g import (
-    matched_jumps,
-    matched_jumps64,
-    find_quantized_jumps,
-    find_quantized_jumps64,
-)
 from so3g.proj import Ranges, RangesMatrix
 from sotodlib.core import AxisManager
 
@@ -56,7 +51,7 @@ def std_est(
         x = x.reshape(tuple(shape))
         x = np.moveaxis(x, -2, 0)
         diff = np.diff(x[::ds], axis=-1)
-        diff = moveaxis(diff, 0, -2)
+        diff = np.moveaxis(diff, 0, -2)
         diff = diff.reshape(shape[:-1])
         diff = np.moveaxis(diff, -1, axis)
     else:
@@ -108,9 +103,9 @@ def _jumpfinder(
     if len(x.shape) > 2:
         raise ValueError("x may not have more than 2 dimensions")
     if dtype == "float32":
-        matched_filt = matched_jumps
+        matched_filt = so3g.matched_jumps
     elif dtype == "float64":
-        matched_filt = matched_jumps64
+        matched_filt = so3g.matched_jumps64
     else:
         raise TypeError("x must be float32 or float64")
 
@@ -124,8 +119,8 @@ def _jumpfinder(
 
     # Flag with a matched filter
     win_size += win_size % 2  # Odd win size adds a wierd phasing issue
-    _x = np.ascontiguousarray(x[msk])
-    _jumps = np.ascontiguousarray(np.empty_like(_x), "int32")
+    _x = np.asarray(x[msk], dtype=x.dtype, order="C")
+    _jumps = np.empty_like(_x, dtype="int32", order="C")
     if isinstance(min_size, np.ndarray):
         _min_size = min_size[msk].astype(_x.dtype)
     elif min_size is None:
@@ -182,33 +177,45 @@ def jumpfix_subtract_heights(
         x_fixed: x with jumps removed.
                  If inplace is True this is just a reference to x.
     """
-
-    def _fix(jump_ranges, heights, x_fixed):
-        for j, jump_range in enumerate(jump_ranges):
-            for start, end in jump_range.ranges():
-                _heights = heights[j, start:end]
-                height = _heights[np.argmax(np.abs(_heights))]
-                x_fixed[j, int((start + end) / 2) :] -= height
-
-    x_fixed = x
-    if not inplace:
-        x_fixed = x.copy()
     orig_shape = x.shape
-    x_fixed = np.atleast_2d(x_fixed)
+    force_copy = not inplace
+    if inplace and not x.flags['C_CONTIGUOUS']:
+        warn("Requested in place jump fixing but signal is not contigious, a copy will be made as a buffer")
+        force_copy = True
+    x_use = np.asarray(np.atleast_2d(x), order="C")  # type: ignore
+    x_fixed = x_use
+    # When we switch to numpy 2.0 asarray can take copy=(False+force_copy if inplace else (True if force_copy else None))
+    if force_copy and np.may_share_memory(x_use, x_fixed):
+        x_fixed = x_fixed.copy()
+
     if isinstance(jumps, np.ndarray):
-        jumps = RangesMatrix.from_mask(np.atleast_2d(jumps))
+        jumps_rm = RangesMatrix.from_mask(np.atleast_2d(jumps))
     elif isinstance(jumps, Ranges):
-        jumps = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
-    if not isinstance(jumps, RangesMatrix):
+        jumps_rm = RangesMatrix.from_mask(np.atleast_2d(jumps.mask()))
+    elif isinstance(jumps, RangesMatrix):
+        jumps_rm = jumps
+    else:
         raise TypeError("jumps not RangesMatrix or convertable to RangesMatrix")
 
     if heights is None:
-        heights = estimate_heights(x_fixed, jumps.mask(), **kwargs)
+        heights = estimate_heights(x_fixed, jumps_rm.mask(), **kwargs)
     elif isinstance(heights, csr_array):
         heights = heights.toarray()
     heights = cast(NDArray[np.floating], heights)
+    heights = np.asarray(heights, dtype=x.dtype, order="C")
 
-    _fix(jumps.ranges, heights, x_fixed)
+    dtype = x.dtype.name
+    if len(x.shape) > 2:
+        raise ValueError("x may not have more than 2 dimensions")
+    if dtype == "float32":
+        fix = so3g.subtract_jump_heights
+    elif dtype == "float64":
+        fix = so3g.subtract_jump_heights64
+    else:
+        raise TypeError("x must be float32 or float64")
+    fix(x_use, x_fixed, heights, jumps_rm)
+    if force_copy and inplace:
+        x[:] = x_fixed[:]
 
     return x_fixed.reshape(orig_shape)
 
@@ -254,6 +261,7 @@ def estimate_heights(
     twopi: bool = False,
     make_step: bool = False,
     diff_buffed: Optional[NDArray[np.floating]] = None,
+    clean: float = 80,
 ) -> NDArray[np.floating]:
     """
     Simple jump estimation routine.
@@ -273,6 +281,9 @@ def estimate_heights(
         diff_buffed: Difference between signal and a signal shifted by win_size.
                      If None will be computed.
 
+        clean: Make each jump range a constant height set by this percentile.
+               If this is 0 then it is ignored.
+
     Returns:
 
         heights: Array of jump heights.
@@ -289,6 +300,17 @@ def estimate_heights(
 
     heights = np.zeros_like(jumps, dtype=float)
     heights[jumps] = diff_buffed[jumps]
+
+    if clean > 0:
+        ranges = RangesMatrix.from_mask(jumps)
+        for i, det in enumerate(ranges.ranges):
+            for r in det.ranges():
+                sign = (
+                    np.sign(np.mean(np.sign(heights[i, r[0] : r[1]]))) - 1
+                ) / 2  # 0 pos, -1 neg
+                heights[i, r[0] : r[1]] = np.percentile(
+                    heights[i, r[0] : r[1]], abs(clean + 100 * sign)
+                )
 
     return heights
 
@@ -319,30 +341,29 @@ def _filter(
 @overload
 def twopi_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    nsigma=...,
-    atol=...,
-    max_tol=...,
-    fix: Literal[True] = True,
-    inplace=...,
-    merge=...,
-    overwrite=...,
-    name=...,
-    ds=...,
+    signal,
+    win_size,
+    nsigma,
+    atol,
+    max_tol,
+    fix: Literal[True],
+    inplace,
+    merge,
+    overwrite,
+    name,
+    ds,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
-    ...
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]: ...
 
 
 @overload
 def twopi_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    nsigma=...,
-    atol=...,
-    max_tol=...,
+    signal,
+    win_size,
+    nsigma,
+    atol,
+    max_tol,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
@@ -350,8 +371,7 @@ def twopi_jumps(
     name=...,
     ds=...,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array]:
-    ...
+) -> Tuple[RangesMatrix, csr_array]: ...
 
 
 def twopi_jumps(
@@ -419,7 +439,7 @@ def twopi_jumps(
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
-    if signal is None:
+    if signal is None and isinstance(aman.signal, np.ndarray):
         signal = aman.signal
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
@@ -438,13 +458,13 @@ def twopi_jumps(
     if len(atol) != len(signal):
         raise ValueError(f"Non-scalar atol provided with length {len(atol)}")
 
-    _signal = np.ascontiguousarray(_signal)
-    heights = np.empty_like(_signal)
-    atol = np.ascontiguousarray(atol, dtype=_signal.dtype)
+    _signal = np.asarray(_signal, dtype=_signal.dtype, order="C")
+    heights = np.empty_like(_signal, order="C")
+    atol = np.asarray(atol, dtype=_signal.dtype, order="C")
     if _signal.dtype.name == "float32":
-        find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
+        so3g.find_quantized_jumps(_signal, heights, atol, win_size, 2 * np.pi)
     elif _signal.dtype.name == "float64":
-        find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
+        so3g.find_quantized_jumps64(_signal, heights, atol, win_size, 2 * np.pi)
     else:
         raise TypeError("signal must be float32 or float64")
 
@@ -467,35 +487,35 @@ def twopi_jumps(
 @overload
 def slow_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    thresh=...,
-    abs_thresh=...,
-    fix: Literal[True] = True,
-    inplace=...,
-    merge=...,
-    overwrite=...,
-    name=...,
+    signal,
+    win_size,
+    thresh,
+    abs_thresh,
+    fix: Literal[True],
+    inplace,
+    merge,
+    overwrite,
+    name,
+    clean,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
-    ...
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]: ...
 
 
 @overload
 def slow_jumps(
     aman,
-    signal=...,
-    win_size=...,
-    thresh=...,
-    abs_thresh=...,
+    signal,
+    win_size,
+    thresh,
+    abs_thresh,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
+    clean=...,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array]:
-    ...
+) -> Tuple[RangesMatrix, csr_array]: ...
 
 
 def slow_jumps(
@@ -509,6 +529,7 @@ def slow_jumps(
     merge: bool = True,
     overwrite: bool = False,
     name: str = "jumps_slow",
+    clean: float = 80,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -544,6 +565,8 @@ def slow_jumps(
 
         name: String used to populate field in flagmanager if merge is True.
 
+        clean: Cleaning value to pass to ``estimate_heights``. See that function for details.
+
         **filter_pars: Parameters to pass to _filter
 
     Returns:
@@ -556,24 +579,34 @@ def slow_jumps(
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
-    if signal is None:
+    if signal is None and isinstance(aman.signal, np.ndarray):
         signal = aman.signal
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
 
     _signal = _filter(signal, **filter_pars)
+    _signal = np.asarray(np.atleast_2d(_signal), dtype=_signal.dtype, order="C")
 
     # Block ptp
-    bptp = block_reduce(_signal, win_size, op=np.ptp, inclusive=True)
+    dtype = _signal.dtype.name
+    if len(_signal.shape) > 2:
+        raise ValueError("signal may not have more than 2 dimensions")
+    if dtype == "float32":
+        get_ptp = so3g.block_minmax
+    elif dtype == "float64":
+        get_ptp = so3g.block_minmax64
+    else:
+        raise TypeError("signal must be float32 or float64")
+    bptp = np.zeros_like(_signal, order="C")
+    get_ptp(_signal, bptp, win_size, 2, 0)
 
     if not abs_thresh:
         thresh = float(np.quantile(bptp.ravel(), thresh))
-    bptp = block_expand(bptp, win_size, _signal.shape[-1], inclusive=True)
     jumps = bptp > thresh
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     heights = estimate_heights(
-        _signal, jump_ranges.mask(), win_size=win_size, make_step=True
+        _signal, jump_ranges.mask(), win_size=win_size, make_step=True, clean=clean
     )
 
     if merge:
@@ -589,39 +622,39 @@ def slow_jumps(
 @overload
 def find_jumps(
     aman,
-    signal=...,
-    min_sigma=...,
-    min_size=...,
-    win_size=...,
-    exact=...,
+    signal,
+    min_sigma,
+    min_size,
+    win_size,
+    exact,
     fix: Literal[False] = False,
     inplace=...,
     merge=...,
     overwrite=...,
     name=...,
     ds=...,
+    clean=...,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array]:
-    ...
+) -> Tuple[RangesMatrix, csr_array]: ...
 
 
 @overload
 def find_jumps(
     aman,
-    signal=...,
-    min_sigma=...,
-    min_size=...,
-    win_size=...,
-    exact=...,
-    fix: Literal[True] = True,
-    inplace=...,
-    merge=...,
-    overwrite=...,
-    name=...,
-    ds=...,
+    signal,
+    min_sigma,
+    min_size,
+    win_size,
+    exact,
+    fix: Literal[True],
+    inplace,
+    merge,
+    overwrite,
+    name,
+    ds,
+    clean,
     **filter_pars,
-) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]:
-    ...
+) -> Tuple[RangesMatrix, csr_array, NDArray[np.floating]]: ...
 
 
 def find_jumps(
@@ -637,6 +670,7 @@ def find_jumps(
     overwrite: bool = False,
     name: str = "jumps",
     ds: int = 10,
+    clean: float = 80,
     **filter_pars,
 ) -> Union[
     Tuple[RangesMatrix, csr_array], Tuple[RangesMatrix, csr_array, NDArray[np.floating]]
@@ -680,6 +714,8 @@ def find_jumps(
 
         ds: Downsample factor used when computing noise level, the actual factor used is `ds*win_size`.
 
+        clean: Cleaning value to pass to ``estimate_heights``. See that function for details.
+
         **filter_pars: Parameters to pass to _filter
 
     Returns:
@@ -693,7 +729,7 @@ def find_jumps(
 
         fixed: signal with jump fixed. Only returned if fix is set.
     """
-    if signal is None:
+    if signal is None and isinstance(aman.signal, np.ndarray):
         signal = aman.signal
     if not isinstance(signal, np.ndarray):
         raise TypeError("Signal is not an array")
@@ -724,7 +760,7 @@ def find_jumps(
 
     jump_ranges = RangesMatrix.from_mask(jumps).buffer(int(win_size / 2))
     jumps = jump_ranges.mask()
-    heights = estimate_heights(signal, jumps, win_size=win_size)
+    heights = estimate_heights(signal, jumps, win_size=win_size, clean=clean)
 
     if merge:
         _merge(aman, jump_ranges, name, overwrite)
