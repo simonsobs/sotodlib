@@ -887,6 +887,27 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
+class SubtractAzSSTemplate(_Preprocess):
+    """Subtract Azimuth Synchronous Signal (AzSS) common template.
+
+    Example configuration block::
+
+      - name: "subtract_azss_template"
+        process:
+          signal: 'signal'
+          azss: 'azss_stats_left'
+          method: 'interpolate'
+          scan_flags: 'left_scan'
+          pca_modes: 1
+          subtract: True
+
+    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_template
+    """
+    name = "subtract_azss_template"
+
+    def process(self, aman, proc_aman):
+        tod_ops.azss.get_azss(aman, **self.process_cfgs)
+
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
     Notes on flags. If flags are provided as step_cfgs, `proc_aman.get(flags)` is used.
@@ -1783,6 +1804,7 @@ _Preprocess.register(SubtractHWPSS)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
 _Preprocess.register(AzSS)
+_Preprocess.register(SubtractAzSSTemplate)
 _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
