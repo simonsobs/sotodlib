@@ -564,6 +564,7 @@ class AtomicInfo(Base):
     elevation: Mapped[Optional[float]]
     azimuth: Mapped[Optional[float]]
     pwv: Mapped[Optional[float]]
+    dpwv: Mapped[Optional[float]]
     total_weight_qu: Mapped[Optional[float]]
     mean_weight_qu: Mapped[Optional[float]]
     median_weight_qu: Mapped[Optional[float]]
@@ -575,7 +576,12 @@ class AtomicInfo(Base):
     f_hwp: Mapped[Optional[float]]
     roll_angle: Mapped[Optional[float]]
     scan_speed: Mapped[Optional[float]]
+    scan_acc: Mapped[Optional[float]]
     sun_distance: Mapped[Optional[float]]
+    ambient_temperature: Mapped[Optional[float]]
+    uv: Mapped[Optional[float]]
+    ra_center: Mapped[Optional[float]]
+    dec_center: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
