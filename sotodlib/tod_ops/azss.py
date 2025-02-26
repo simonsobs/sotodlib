@@ -106,8 +106,6 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
 
     Returns
     -------
-    azss_stats: AxisManager
-        Returns updated azss_stats with added fit information
     model_sig_tod: array-like
         Model fit for each detector size ndets x n_samps
     """
@@ -141,7 +139,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'azss_modes')])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
-    return azss_stats, L.legval(x_legendre, coeffs.T)
+    return L.legval(x_legendre, coeffs.T)
 
 
 def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, scan_flags=None,
@@ -289,9 +287,8 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=Non
     if method == 'fit':
         if not isinstance(max_mode, int):
             raise ValueError('max_mode is not provided as integer')
-        azss_stats, model = fit_azss(az=az, azss_stats=azss_stats,
-                                     max_mode=max_mode,
-                                     fit_range=range)
+        model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
+
     if method == 'interpolate':
         # mask az bins that has no data and extrapolate
         mask = ~np.any(np.isnan(azss_stats.binned_signal), axis=0)

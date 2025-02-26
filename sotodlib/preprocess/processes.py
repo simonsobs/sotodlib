@@ -806,15 +806,16 @@ class Demodulate(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
 
 
-class EstimateAzSS(_Preprocess):
-    """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
-    All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
+class AzSS(_Preprocess):
+    """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight and subtract.
+    All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
-    fitting will be applied and used as AzSS model.
+    fitting will be applied and used as AzSS model. If `subtract_in_place` is True, subtract AzSS model
+    from signal in place.
 
     Example configuration block::
 
-      - name: "estimate_azss"
+      - name: "azss"
         calc:
           signal: 'demodQ'
           azss_stats_name: 'azss_statsQ'
@@ -836,7 +837,7 @@ class EstimateAzSS(_Preprocess):
           flag_labels: ['glitches.glitch_flags', 'turnaround_flags.right_scan']
           total_flags_label: 'glitch_flags_left'
 
-      - name: "estimate_azss"
+      - name: "azss"
         calc:
           signal: 'demodQ'
           azss_stats_name: 'azss_statsQ_left'
@@ -853,7 +854,7 @@ class EstimateAzSS(_Preprocess):
 
     .. autofunction:: sotodlib.tod_ops.azss.get_azss
     """
-    name = "estimate_azss"
+    name = "azss"
 
     def calc_and_save(self, aman, proc_aman):
         if self.process_cfgs:
@@ -878,7 +879,7 @@ class EstimateAzSS(_Preprocess):
                     proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
                     signal=self.calc_cfgs.get('signal', 'signal'),
                     scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method', 'interpolation'),
+                    method=self.calc_cfgs.get('method', 'interpolate'),
                     max_mode=self.calc_cfgs.get('max_mode'),
                     range=self.calc_cfgs.get('range'),
                     in_place=True
@@ -1781,7 +1782,7 @@ _Preprocess.register(EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
-_Preprocess.register(EstimateAzSS)
+_Preprocess.register(AzSS)
 _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
