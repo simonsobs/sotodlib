@@ -447,7 +447,7 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     for n_split in range(Nsplits):
         if np.all(data.wmap[n_split] == 0.0):
             if atomic_db is not None:
-                atomic_db_aux(atomic_db, info[n_split], valid=False)
+                smutils.atomic_db_aux(atomic_db, info[n_split], valid=False)
             continue
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split])
@@ -456,7 +456,7 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split])
         if atomic_db is not None:
-            atomic_db_aux(atomic_db, info[n_split], valid=True)
+            smutils.atomic_db_aux(atomic_db, info[n_split], valid=True)
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
