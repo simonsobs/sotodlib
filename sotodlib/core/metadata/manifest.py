@@ -320,7 +320,7 @@ class ManifestDb:
     filename.
     """
 
-    def __init__(self, map_file=None, scheme=None):
+    def __init__(self, map_file=None, scheme=None, readonly=False):
         """Instantiate a database.  If map_file is provided, the
         database will be connected to the indicated sqlite file on
         disk, and any changes made to this object be written back to
@@ -331,13 +331,16 @@ class ManifestDb:
         uninitialized.
 
         """
+        if scheme and readonly:
+            raise ValueError("Cannot initialize the schema of a read-only DB")
+        self._readonly = readonly
         if isinstance(map_file, sqlite3.Connection):
             self.conn = map_file
         else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = sqlite3.connect(map_file)
-
+            self.conn = common.sqlite_connect(
+                filename=map_file,
+                mode=("r" if readonly else "w"),
+            )
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
         if scheme is None:
@@ -379,13 +382,17 @@ class ManifestDb:
         of writing a Db to disk to call copy(map_file=...) and then
         simply discard the returned object.
         """
-        if map_file is not None and os.path.exists(map_file):
+        if (
+            map_file is not None and 
+            map_file != ":memory:" and
+            os.path.exists(map_file)
+        ):
             if overwrite:
                 os.remove(map_file)
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
-        new_db = ManifestDb(map_file=map_file, scheme=False)
+        new_db = ManifestDb(map_file=map_file, scheme=False, readonly=False)
         script = ' '.join(self.conn.iterdump())
         new_db.conn.executescript(script)
         new_db.scheme = ManifestScheme.from_database(new_db.conn)
@@ -441,7 +448,7 @@ class ManifestDb:
           ManifestDb.
 
         """
-        conn = sqlite3.connect('file:%s?mode=ro' % filename, uri=True)
+        conn = common.sqlite_connect(filename=filename, mode="r")
         return cls(conn)
 
     def _get_file_id(self, filename, create=False):
@@ -453,6 +460,8 @@ class ManifestDb:
         row_id = c.fetchone()
         if row_id is None:
             if create:
+                if self._readonly:
+                    raise RuntimeError("Cannot add file_id to table in read-only DB")
                 c.execute('insert into files (name) values (?)', (filename,))
                 row_id = c.lastrowid
                 return row_id
@@ -480,7 +489,7 @@ class ManifestDb:
         where_str = ''
         if len(q):
             where_str = 'where %s' % q
-        c.execute('select `%s` ' % ('`,`'.join(cols)) + 
+        c.execute('select `%s` ' % ('`,`'.join(cols)) +
                   'from map join files on map.file_id=files.id %s' % where_str, p)
         rows = c.fetchall()
         rp.insert(0, 'filename')
@@ -563,6 +572,8 @@ class ManifestDb:
           match some single timestamp, are not caught here.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot add_entry() in read-only DB")
         # Validate the input data.
         q, p = self.scheme.get_insertion_query(params)
         file_id = self._get_file_id(filename, create=create)
@@ -594,6 +605,8 @@ class ManifestDb:
           is set.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot update_entry() in read-only DB")
         # Validate the input data.
         q, p = self.scheme.get_update_query(params)
         _id = params.get('_id')
@@ -618,6 +631,8 @@ class ManifestDb:
         be passed directly into this function.
 
         """
+        if self._readonly:
+            raise RuntimeError("Cannot remove_entry() in read-only DB")
         if isinstance(_id, dict):
             _id = _id['_id']
         c = self.conn.cursor()
@@ -640,7 +655,7 @@ class ManifestDb:
         Arguments
         ---------
         fields: list of strings
-            should correspond to columns in map table made through 
+            should correspond to columns in map table made through
             ManifestScheme.add_data_field( field_name )
 
         Returns
@@ -652,7 +667,7 @@ class ManifestDb:
         q = f"select distinct {','.join(fields)} from map"
         c = self.conn.execute(q)
         return resultset.ResultSet.from_cursor(c)
-        
+
     def validate(self):
         """
         Checks that the database is following internal rules.

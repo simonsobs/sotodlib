@@ -123,7 +123,7 @@ class Context(odict):
             else:
                 self[k] = v
 
-    def reload(self, load_list='all'):
+    def reload(self, load_list='all', readwrite=False):
         """Load (or reload) certain databases associated with this dataset.
         (Note we don't load any per-observation metadata here.)
 
