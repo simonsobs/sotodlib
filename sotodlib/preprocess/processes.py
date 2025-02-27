@@ -818,7 +818,8 @@ class AzSS(_Preprocess):
       - name: "azss"
         calc:
           signal: 'demodQ'
-          frange: [-1.57079, 7.85398]
+          azss_stats_name: 'azss_statsQ'
+          range: [-1.57079, 7.85398]
           bins: 1080
           flags: 'glitch_flags'
           merge_stats: False
@@ -866,43 +867,7 @@ class AzSS(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.azss_stats_name, azss_stats)
-
-    def process(self, aman, proc_aman):
-        if self.proc_aman_turnaround_info:
-            _f = attrgetter(self.proc_aman_turnaround_info)
-            turnaround_info = _f(proc_aman)
-        else:
-            turnaround_info = None
-        if self.azss_stats_name in proc_aman:
-            if self.process_cfgs["subtract"]:
-                tod_ops.azss.subtract_azss(aman, proc_aman[self.azss_stats_name],
-                                           signal = self.calc_cfgs.get('signal'),
-                                           in_place=True)
-        else:
-            tod_ops.azss.get_azss(aman, azss_stats_name=self.azss_stats_name,
-                                  turnaround_info=turnaround_info,
-                                  merge_stats=True, merge_model=False,
-                                  subtract_in_place=self.process_cfgs["subtract"], 
-                                  **self.calc_cfgs)
-
-    def process(self, aman, proc_aman, sim=False):
-        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
-            if sim:
-                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
-            else:
-                tod_ops.azss.subtract_azss(
-                    aman,
-                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
-                    signal=self.calc_cfgs.get('signal', 'signal'),
-                    scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method', 'interpolate'),
-                    max_mode=self.calc_cfgs.get('max_mode'),
-                    range=self.calc_cfgs.get('range'),
-                    in_place=True
-                )
-        else:
-            tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
         if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
