@@ -1,6 +1,8 @@
 import numpy as np
 from operator import attrgetter
 
+from so3g.proj import Ranges, RangesMatrix
+
 import sotodlib.core as core
 import sotodlib.tod_ops as tod_ops
 import sotodlib.obs_ops as obs_ops
@@ -902,20 +904,40 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
+    def process(self, aman, proc_aman, sim=False):
+        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
+            if sim:
+                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            else:
+                tod_ops.azss.subtract_azss(
+                    aman,
+                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                    signal=self.calc_cfgs.get('signal', 'signal'),
+                    scan_flags=self.calc_cfgs.get('scan_flags'),
+                    method=self.calc_cfgs.get('method', 'interpolate'),
+                    max_mode=self.calc_cfgs.get('max_mode'),
+                    range=self.calc_cfgs.get('range'),
+                    in_place=True
+                )
+        else:
+            tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
+    Notes on flags. If flags are provided as step_cfgs, `proc_aman.get(flags)` is used.
+    If provided as process_cfgs, `aman.get(glitch_flags)` is used instead.
 
     Example configuration block::
 
       - name: "glitchfill"
         signal: "hwpss_remove"
-        flag_aman: "jumps_2pi"
-        flag: "jump_flag"
+        flags: "glitches.glitch_flags" # optional
         process:
           nbuf: 10
           use_pca: False
           modes: 1
           in_place: True
+          glitch_flags: "glitch_flags"
           wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
@@ -924,16 +946,21 @@ class GlitchFill(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
-        self.flag_aman = step_cfgs.get('flag_aman', 'glitches')
-        self.flag = step_cfgs.get('flag', 'glitch_flags')
+        self.flags = step_cfgs.get('flags')
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
-        tod_ops.gapfill.fill_glitches(
-            aman, signal=aman[self.signal],
-            glitch_flags=proc_aman[self.flag_aman][self.flag],
-            **self.process_cfgs)
+        if self.flags is not None:
+            glitch_flags=proc_aman.get(self.flags)
+            tod_ops.gapfill.fill_glitches(
+                aman, signal=aman[self.signal],
+                glitch_flags=glitch_flags,
+                **self.process_cfgs)
+        else:
+            tod_ops.gapfill.fill_glitches(
+                aman, signal=aman[self.signal],
+                **self.process_cfgs)
 
 class FlagTurnarounds(_Preprocess):
     """From the Azimuth encoder data, flag turnarounds, left-going, and right-going.
@@ -1085,58 +1112,79 @@ class SourceFlags(_Preprocess):
      Example config block::
 
         - name : "source_flags"
-          signal: "signal" # optional
           calc:
             mask: {'shape': 'circle',
-                   'xyr': (0, 0, 1.)}
-            center_on: 'jupiter'
-            res: 0.005817764173314432 # np.radians(20/60)
-            max_pix: 4e6
+                   'xyr': [0, 0, 1.]}
+            center_on: ['jupiter', 'moon'] # list of str
+            res: 20 # arcmin
+            max_pix: 4000000 # max number of allowed pixels in map
+            distance: 0 # max distance of footprint from source in degrees
           save: True
           select: True # optional
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-    
+
     def calc_and_save(self, aman, proc_aman):
-        center_on = self.calc_cfgs.get('center_on', 'planet')
-        # Get source from tags
-        if center_on == 'planet':
+        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+        if source_list == ['planet']:
             from sotodlib.coords.planets import SOURCE_LIST
-            matches = [x for x in aman.tags if x in SOURCE_LIST]
-            if len(matches) != 0:
-                source = matches[0]
-            else:
+            source_list = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(source_list) == 0:
                 raise ValueError("No tags match source list")
-        else:
-            source = center_on
-        source_flags = tod_ops.flags.get_source_flags(aman, 
-                                                      merge=self.calc_cfgs.get('merge', False),
-                                                      overwrite=self.calc_cfgs.get('overwrite', True),
-                                                      source_flags_name=self.calc_cfgs.get('source_flags_name', 'source_flags'),
-                                                      mask=self.calc_cfgs.get('mask', None),
-                                                      center_on=source,
-                                                      res=self.calc_cfgs.get('res', None),
-                                                      max_pix=self.calc_cfgs.get('max_pix', None))
+
+        # find if source is within footprint + distance
+        positions = planets.get_nearby_sources(tod=aman, source_list=source_list,
+                                               distance=self.calc_cfgs.get('distance', 0))
 
         source_aman = core.AxisManager(aman.dets, aman.samps)
-        source_aman.wrap('source_flags', source_flags, [(0, 'dets'), (1, 'samps')])
+        for p in positions:
+            source_flags = tod_ops.flags.get_source_flags(aman,
+                                                          merge=self.calc_cfgs.get('merge', False),
+                                                          overwrite=self.calc_cfgs.get('overwrite', True),
+                                                          source_flags_name=self.calc_cfgs.get('source_flags_name', None),
+                                                          mask=self.calc_cfgs.get('mask', None),
+                                                          center_on=p[0],
+                                                          res=self.calc_cfgs.get('res', None),
+                                                          max_pix=self.calc_cfgs.get('max_pix', None))
+
+            source_aman.wrap(p[0], source_flags, [(0, 'dets'), (1, 'samps')])
+
+        # add sources that were not nearby from source list
+        for source in source_list:
+            if source not in source_aman._fields:
+                source_aman.wrap(source, RangesMatrix.zeros([aman.dets.count, aman.samps.count]),
+                                 [(0, 'dets'), (1, 'samps')])
+
         self.save(proc_aman, source_aman)
-    
+
     def save(self, proc_aman, source_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("sources", source_aman)
+            proc_aman.wrap("source_flags", source_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
-            proc_aman = meta.preprocess
-        keep = ~has_any_cuts(proc_aman.sources.source_flags)
-        meta.restrict("dets", meta.dets.vals[keep])
+            source_flags = meta.preprocess.source_flags
+        else:
+            source_flags = proc_aman.source_flags
+
+        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+        if source_list == ['planet']:
+            from sotodlib.coords.planets import SOURCE_LIST
+            source_list = [x for x in aman.tags if x in SOURCE_LIST]
+            if len(source_list) == 0:
+                raise ValueError("No tags match source list")
+
+        for source in source_list:
+            if source in source_flags._fields:
+                keep = ~has_all_cut(source_flags[source])
+                meta.restrict("dets", meta.dets.vals[keep])
+                source_flags.restrict("dets", source_flags.dets.vals[keep])
         return meta
 
 class HWPAngleModel(_Preprocess):
@@ -1371,6 +1419,65 @@ class PCARelCal(_Preprocess):
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
 
+class PCAFilter(_Preprocess):
+    """
+    Applies a pca filter to the data.
+
+    example config file entry::
+
+      - name: "pca_filter"
+        signal: "signal"
+        process:
+          n_modes: 10
+
+    See :ref:`pca-background` for more details on the method.
+    """
+    name = 'pca_filter'
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        n_modes = self.process_cfgs.get('n_modes')
+        signal = aman.get(self.signal)
+        if aman.dets.count < n_modes:
+            raise ValueError(f'The number of pca modes {n_modes} is '
+                             f'larger than the number of detectors {aman.dets.count}.')
+        model = tod_ops.pca.get_pca_model(aman, signal=signal, n_modes=n_modes)
+        _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
+
+class FilterForSources(_Preprocess):
+    """
+    Mask and gap-fill the signal at samples flagged by source_flags.
+    Then PCA the resulting time ordered data.
+
+    example config file entry::
+
+      - name: "filter_for_sources"
+        signal: "signal"
+        process:
+          n_modes: 10
+          source_flags: "source_flags"
+
+    .. autofunction:: sotodlib.coords.planets.filter_for_sources
+    """
+    name = 'filter_for_sources'
+
+    def __init__(self, step_cfgs):
+        self.signal = step_cfgs.get('signal', 'signal')
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        n_modes = self.process_cfgs.get('n_modes')
+        signal = aman.get(self.signal)
+        flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        if aman.dets.count < n_modes:
+            raise ValueError(f'The number of pca modes {n_modes} is '
+                             f'larger than the number of detectors {aman.dets.count}.')
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes)
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1385,23 +1492,23 @@ class PTPFlags(_Preprocess):
             kurtosis_threshold: 6
           save: True
           select: True
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_ptp_flags
     """
     name = "ptp_flags"
 
     def calc_and_save(self, aman, proc_aman):
         mskptps = tod_ops.flags.get_ptp_flags(aman, **self.calc_cfgs)
-        
+
         ptp_aman = core.AxisManager(aman.dets, aman.samps)
         ptp_aman.wrap('ptp_flags', mskptps, [(0, 'dets'), (1, 'samps')])
         self.save(proc_aman, ptp_aman)
 
-    def save(self, proc_aman, calc_aman):
+    def save(self, proc_aman, ptp_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", calc_aman)
+            proc_aman.wrap("ptp_flags", ptp_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1425,23 +1532,23 @@ class InvVarFlags(_Preprocess):
             nsigma: 6
           save: True
           select: True
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_inv_var_flags
     """
     name = "inv_var_flags"
 
     def calc_and_save(self, aman, proc_aman):
-        mskptps = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
-        
-        ptp_aman = core.AxisManager(aman.dets, aman.samps)
-        ptp_aman.wrap('inv_var_flags', mskptps, [(0, 'dets'), (1, 'samps')])
-        self.save(proc_aman, ptp_aman)
+        msk = tod_ops.flags.get_inv_var_flags(aman, **self.calc_cfgs)
 
-    def save(self, proc_aman, dark_aman):
+        inv_var_aman = core.AxisManager(aman.dets, aman.samps)
+        inv_var_aman.wrap('inv_var_flags', msk, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, inv_var_aman)
+
+    def save(self, proc_aman, inv_var_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("inv_var_flags", dark_aman)
+            proc_aman.wrap("inv_var_flags", inv_var_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1640,7 +1747,8 @@ class FocalplaneNanFlags(_Preprocess):
 
         - name : "fp_flags"
           signal: "signal" # optional
-          calc: True
+          calc:
+              merge: False
           save: True
           select: True
     
@@ -1748,6 +1856,8 @@ _Preprocess.register(EstimateT2P)
 _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
+_Preprocess.register(PCAFilter)
+_Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
 _Preprocess.register(FFTTrim)

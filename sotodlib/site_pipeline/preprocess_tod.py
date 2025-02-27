@@ -29,7 +29,7 @@ def dummy_preproc(obs_id, group_list, logger,
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
-    group_by, groups = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -76,6 +76,7 @@ def preprocess_tod(obs_id,
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
+
     outputs = []
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -83,7 +84,14 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
+
+    if error is not None:
+        if run_parallel:
+            return error[0], [None, None]
+        else:
+            return
+
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -325,45 +333,31 @@ def main(
         logger.warning(f"No observations returned from query: {query}")
 
     # clean up lingering files from previous incomplete runs
+    policy_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), 'temp')
     for obs in obs_list:
         obs_id = obs['obs_id']
-        pp_util.save_group_and_cleanup(obs_id, configs, context,
-                                       subdir='temp', remove=overwrite)
+        pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
+                            subdir='temp', remove=overwrite)
 
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
-        for obs in obs_list:
-            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
-            run_list.append( (obs, groups) )# = [ (o, groups) for o in obs_list]
+        run_list = [ (o,None) for o in obs_list]
+        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
-            elif len(x) != len(groups):
-                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-                run_list.append( (obs, groups) )
+            else:
+                group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
+                if len(x) != len(groups):
+                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    run_list.append( (obs, groups) )
 
     logger.info(f'Run list created with {len(run_list)} obsids')
-
-    # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-    # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
-    # whenever the file size exceeds 10 GB.
-    nfile = 0
-    folder = os.path.dirname(configs['archive']['policy']['filename'])
-    basename = os.path.splitext(configs['archive']['policy']['filename'])[0]
-    dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-    if not(os.path.exists(folder)):
-            os.makedirs(folder)
-    while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
-        nfile += 1
-        dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-
-    logger.info(f'Starting dest_file set to {dest_file}')
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     with ProcessPoolExecutor(nproc) as exe:
@@ -385,10 +379,13 @@ def main(
                 continue
             futures.remove(future)
 
-            logger.info(f'Processing future result db_dataset: {db_datasets}')
-            if err is None and db_datasets:
-                for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+            if db_datasets:
+                if err is None:
+                    logger.info(f'Processing future result db_dataset: {db_datasets}')
+                    for db_dataset in db_datasets:
+                        pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                else:
+                    pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)

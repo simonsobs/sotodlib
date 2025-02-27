@@ -65,7 +65,7 @@ def expand_RangesMatrix(flat_rm):
     if shape[0] == 0:
         return so3g.proj.RangesMatrix([], child_shape=shape[1:])
     # Otherwise non-trivial
-    count = np.product(shape[:-1])
+    count = np.prod(shape[:-1])
     start, stride = 0, count // shape[0]
     for i in range(0, len(ends), stride):
         _e = ends[i:i+stride] - start
@@ -329,7 +329,7 @@ def _load_axisman(src, group=None, cls=None, fields=None):
             x = _load_axisman(src[item['name']], fields=subfields)
             if item['subclass'] == 'FlagManager':
                 x = FlagManager.promote(x, *item['special_axes'])
-            axisman.wrap(item['name'], x)
+            axisman.wrap(item['name'], x, restrict_in_place=True)
         elif item['encoding'] == 'rangesmatrix':
             x = src[item['name']]
             rm_flat = {k: x[k][:] for k in ['shape', 'intervals', 'ends']}

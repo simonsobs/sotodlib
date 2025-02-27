@@ -24,8 +24,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python: "3.8"
-            pyshort: "38"
           - python: "3.9"
             pyshort: "39"
           - python: "3.11"
@@ -58,17 +56,19 @@ jobs:
           python3 -m pip install -vvv .[tests]
 
       - name: Run Serial Tests
+        working-directory: ./tests
         run: |
           export OMP_NUM_THREADS=2
           export OPENBLAS_NUM_THREADS=2
           export MPI_DISABLE=1
-          python3 setup.py test
+          python3 -m pytest -vv
 
       - name: Run MPI Tests
+        working-directory: ./tests
         run: |
           export OMP_NUM_THREADS=1
           export OPENBLAS_NUM_THREADS=1
-          mpirun -np 2 python3 setup.py test
+          mpirun -n 2 python3 -m pytest -vv
 
   # FIXME:  Re-enable after testing this procedure on a local
   # apple machine.
