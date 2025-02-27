@@ -828,7 +828,7 @@ def main(args=None):
         print('   ' + '-' * (len(hdr) - 3))
         for row in schema:
             if row['purpose'] == 'out':
-                count = len(db.conn.execute('select distinct "%s" from map' % row['field']).fetchall())
+                count = len(db.conn.execute('select distinct `%s` from map' % row['field']).fetchall())
                 print(fmt.format(count=count, **row))
         file_count = db.conn.execute('select count(id) from files').fetchone()[0]
         print(fmt.format(
@@ -923,8 +923,8 @@ def main(args=None):
             db = ManifestDb.from_file(args.filename, force_new_db=True)
 
         # Get all files matching this prefix ...
-        c = db.conn.execute('select id, name from files '
-                            'where name like "%s%%"' % (args.old_prefix))
+        c = db.conn.execute("select id, name from files "
+                            "where name like '%s%%'" % (args.old_prefix))
         rows = c.fetchall()
         print('Found %i records matching prefix ...'
                % len(rows))
