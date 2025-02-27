@@ -375,12 +375,11 @@ def subtract_azss_template(
     method='interpolate',
     scan_flags=None,
     pca_modes=None,
-    wrap_name=None,
     subtract=True,
 ):
     """
     Make azss template model that is "common" to all detectors and subtract
-    If pca_modes are specified, make template by pca, otherwise make template by weighter mean.
+    If pca_modes are specified, make template by pca, otherwise make template by weighted mean.
 
     Parameters
     ----------
@@ -397,8 +396,6 @@ def subtract_azss_template(
         Typically `flags.left_scan` or `flags.right_scan` will be used.
     pca_modes: integer, optinal
         Number of pca modes for making azss template
-    wrap_name: str, optional
-        If specified wrap azss_template to azss with this name
     subtract: boolean, optional
         If true subtract azss template from signal
 
@@ -451,8 +448,6 @@ def subtract_azss_template(
         logger.warning('azss model has nan. set zero to nan but this may make glitch')
         model[~np.isfinite(model)] = 0
 
-    if wrap_name is not None:
-        azss.wrap(wrap_name, template, [(0, 'dets'), (1, 'bin_az_samps')])
     if subtract:
         signal[:, scan_flags] -= model[:, scan_flags]
     return model

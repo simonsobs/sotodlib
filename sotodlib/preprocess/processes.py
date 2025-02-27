@@ -889,6 +889,8 @@ class AzSS(_Preprocess):
 
 class SubtractAzSSTemplate(_Preprocess):
     """Subtract Azimuth Synchronous Signal (AzSS) common template.
+    Make common template by weighted mean or pca.
+    This requires to calculate AzSS beforehand.
 
     Example configuration block::
 
@@ -906,7 +908,7 @@ class SubtractAzSSTemplate(_Preprocess):
     name = "subtract_azss_template"
 
     def process(self, aman, proc_aman):
-        tod_ops.azss.get_azss(aman, **self.process_cfgs)
+        tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
