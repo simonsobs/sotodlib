@@ -8,6 +8,8 @@ import numpy as np
 from . import common
 from .resultset import ResultSet
 
+_DB_VERSION = 3
+
 TABLE_DEFS = {
     'detsets': [
         "`name`    varchar(16)",
@@ -32,6 +34,10 @@ TABLE_DEFS = {
     'meta': [
         "`param` varchar(32) UNIQUE",
         "`value` varchar",
+    ],
+    '_indices': [
+        "CREATE INDEX IF NOT EXISTS idx_column_name ON files(obs_id)",
+        "CREATE INDEX IF NOT EXISTS idx_detset ON detsets(name)",
     ],
 }
 
@@ -172,16 +178,20 @@ class ObsFileDb:
         Create the database tables if they do not already exist.
         """
         # Create the tables:
-        table_defs = TABLE_DEFS.items()
         c = self.conn.cursor()
-        for table_name, column_defs in table_defs:
+        for table_name, column_defs in TABLE_DEFS.items():
+            if table_name.startswith('_'):
+                continue
             q = ('create table if not exists `%s` (' % table_name  +
                  ','.join(column_defs) + ')')
             c.execute(q)
 
+        for index in TABLE_DEFS['_indices']:
+            c.execute(index)
+
         if self._get_version(conn=c) is None:
             c.execute('insert or ignore into meta (param,value) values (?,?)',
-                      ('obsfiledb_version', 2))
+                      ('obsfiledb_version', _DB_VERSION))
 
         self.conn.commit()
 
@@ -702,6 +712,19 @@ def main(args=None, parser=None):
                 print(f'Running: {line}')
                 db.conn.execute(line)
             print()
+
+            for index in TABLE_DEFS['_indices']:
+                print('Adding indexes...')
+                db.conn.execute(index)
+
+        elif v == 2:
+            changes = True
+            for index in TABLE_DEFS['_indices']:
+                print('Adding indexes...')
+                db.conn.execute(index)
+            print('Bumping version')
+            db.conn.execute('insert or replace into meta (param,value) values (?,?)',
+                            ('obsfiledb_version', 3))
 
         if changes:
             print('Saving to %s' % args.output_db)
