@@ -36,8 +36,8 @@ TABLE_DEFS = {
         "`value` varchar",
     ],
     '_indices': [
-        "CREATE INDEX IF NOT EXISTS idx_column_name ON files(obs_id)",
-        "CREATE INDEX IF NOT EXISTS idx_detset ON detsets(name)",
+        "CREATE INDEX IF NOT EXISTS idx_obs_id_column ON files(obs_id)",
+        "CREATE INDEX IF NOT EXISTS idx_detset_column ON detsets(name)",
     ],
 }
 
