@@ -1,12 +1,10 @@
 """Module for estimating Azimuth Synchronous Signal (azss)"""
 import numpy as np
-from operator import attrgetter
 from numpy.polynomial import legendre as L
 from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters
-from so3g.proj import Ranges, RangesMatrix
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,7 +23,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         numpy array of signal to be binned. If None, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az attribute.
-    frange: array-like, optional
+    range: array-like, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to None.
         If None, [min(az), max(az)] will be used for binning.
     bins: int or sequence of scalars
@@ -148,8 +146,8 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
             apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
             method='interpolate', max_mode=None, subtract_in_place=False,
-            merge_stats=True, azss_stats_name='azss_stats', turnaround_info=None,
-            merge_model=True, azss_model_name='azss_model', left_right=False):
+            merge_stats=True, azss_stats_name='azss_stats',
+            merge_model=True, azss_model_name='azss_model'):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
     **NOTE:** This function does not modify the ``signal`` unless ``subtract_in_place = True``.
@@ -162,7 +160,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         A numpy array representing the signal to be used for azss extraction. If not provided, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az.
-    frange: list, optional
+    range: list, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
     bins: int or sequence of scalars
@@ -209,11 +207,6 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         Boolean flag indicating whether to merge the azss model with the aman. Defaults to True.
     azss_model_name: string, optional
         The name to assign to the merged azss model. Defaults to 'azss_model'.
-    left_right: bool
-        Default False. If True estimate (and subtract) the AzSS template for left and right subscans
-        separately.
-    turnaround_info: FlagManager or AxisManager
-        Optional, default is aman.flags.
 
     Returns
     -------
