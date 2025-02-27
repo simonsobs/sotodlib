@@ -6,8 +6,7 @@ import re
 
 import unittest
 
-from setuptools import find_packages, setup, Extension
-from setuptools.command.test import test as TestCommand
+from setuptools import find_packages, setup, Extension, Command
 
 import versioneer
 
@@ -43,7 +42,7 @@ setup_opts["author_email"] = "so_software@simonsobservatory.org"
 setup_opts["url"] = "https://github.com/simonsobs/sotodlib"
 setup_opts["packages"] = find_packages(where=".", exclude="tests")
 setup_opts["license"] = "MIT"
-setup_opts["python_requires"] = ">=3.8.0"
+setup_opts["python_requires"] = ">=3.9.0"
 setup_opts["package_data"] = {
     "sotodlib": [
         "toast/ops/data/*"
@@ -60,6 +59,7 @@ setup_opts["install_requires"] = [
     'skyfield',
     'so3g',
     'pixell',
+    'pytest',
     'scikit-image',
     'pyfftw',
     'numdifftools',
@@ -84,16 +84,16 @@ cmdcls = versioneer.get_cmdclass()
 
 # Class to run unit tests
 
-class SOTestCommand(TestCommand):
+class SOTestCommand(Command):
 
     def __init__(self, *args, **kwargs):
         super(SOTestCommand, self).__init__(*args, **kwargs)
 
     def initialize_options(self):
-        TestCommand.initialize_options(self)
+        Command.initialize_options(self)
 
     def finalize_options(self):
-        TestCommand.finalize_options(self)
+        Command.finalize_options(self)
         self.test_suite = True
 
     def mpi_world(self):

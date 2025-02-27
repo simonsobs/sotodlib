@@ -3,15 +3,17 @@ from urllib.request import urlretrieve
 
 from ast import literal_eval
 
+# This is a listing of public URLs from which to grab some useful data
+# files. On shared systems it may be wise to maintain a shared cache of
+# such files -- see get_local_file.
 
 RESOURCE_DEFAULTS = {
     "de421.bsp": "ftp://ssd.jpl.nasa.gov/pub/eph/planets/bsp/de421.bsp",
 }
 
 
-def get_local_file(filename: str, cache: bool = True) -> str:
-    """
-    This function utilizes RESOURCE_DEFAULTS or SOTODLIB_RESOURCES environment
+def get_local_file(filename: str, cache: bool = True, download: bool = True) -> str:
+    """This function utilizes RESOURCE_DEFAULTS or SOTODLIB_RESOURCES environment
     variable to manage resource files such as a planet catalog from NASA.
 
     RESOURCE_DEFAULTS and SOTODLIB_RESOURCES are dictionaries with key a filename
@@ -43,6 +45,8 @@ def get_local_file(filename: str, cache: bool = True) -> str:
       filename: The name of the file to grab
       cache: A boolean indicating that downloaded files should be cached in user
               home folder (~/.sotodlib/filecache/).
+      download: If False, the file will not be downloaded even if
+        config specifies a URL and the local cache does not have the file.
 
     Returns:
       The absolute path of the file.
@@ -51,6 +55,7 @@ def get_local_file(filename: str, cache: bool = True) -> str:
         RuntimeError: when the requested resource file does not exist as a key
                       in SOTODLIB_RESOURCES env variable or RESOURCE_DEFAULTS.
         RuntimeErorr: When the value of a key is not an ftp or file path.
+
     """
 
     # Local cache. This is per user, however we may want to try and right in
@@ -83,7 +88,8 @@ def get_local_file(filename: str, cache: bool = True) -> str:
         target_path = local_cache if cache else "/tmp/"
         os.makedirs(name=target_path, exist_ok=True)
         target_file = os.path.join(target_path, filename)
-        _, headers = urlretrieve(de_url, target_file)
+        if download:
+            _, headers = urlretrieve(de_url, target_file)
     elif de_url.startswith("file://"):
         target_file = de_url[7:]
     else:

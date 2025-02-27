@@ -183,11 +183,11 @@ def t2p_joint_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demod
         yU = aman[U_sig_name][di][mask[di]][::ds_factor]
 
         try:
-            model = LmfitModel(leakage_model, independent_vars=['dT'], 
-                          weights=np.ones_like(x)/sigma_demod[di])
+            model = LmfitModel(leakage_model, independent_vars=['dT'])
             params = model.make_params(AQ=np.median(yQ), AU=np.median(yU), 
                                        lamQ=0., lamU=0.)
-            result = model.fit(yQ + 1j * yU, params, dT=x)
+            result = model.fit(yQ + 1j * yU, params, dT=x,
+                               weights=np.ones_like(x)/sigma_demod[di])
             A_Q_array[di] = result.params['AQ'].value
             A_U_array[di] = result.params['AU'].value
             lambda_Q_array[di] = result.params['lamQ'].value

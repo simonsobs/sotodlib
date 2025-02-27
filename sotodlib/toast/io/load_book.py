@@ -289,19 +289,19 @@ class DataSpreader(object):
                 # print(f"{self.obs.name} detmap = {detmap}")
             # print(f"DBG LOAD frame {off}:{off+n} signal = {frm['signal'].data[:5,:]}")
             # print(f"LOAD frame {off}:{off+n} signal = {frm['signal'].data[detmap,:]}")
-            self.obs.detdata[self.obs_fields["det_data"]][:, off : off + n] = frm[
-                "signal"
-            ].data[detmap, :]
+            for idet in range(len(detmap)):
+                self.obs.detdata[self.obs_fields["det_data"]][
+                    idet, off : off + n
+                ] = frm["signal"].data[detmap[idet], :]
+                self.obs.detdata[self.obs_fields["det_flags"]][
+                    idet, off : off + n
+                ] = np.array(frm["flags"].data[detmap[idet], :], dtype=np.uint8)
             if "signal_units" in frm and frm["signal_units"] is not None:
                 # We have some unit information
                 # print(f"Frame units = {frm['signal_units']}")
                 self.obs.detdata[self.obs_fields["det_data"]].update_units(
                     t3g.from_g3_unit(frm["signal_units"])
                 )
-            self.obs.detdata[self.obs_fields["det_flags"]][:, off : off + n] = np.array(
-                frm["flags"].data[detmap, :], dtype=np.uint8
-            )
-
             off += n
 
 

@@ -404,8 +404,9 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
     signal : ndarray or None
         Array of data to fill glitches in. If None then uses ``aman.signal``.
         Default is None.
-    glitch_flags : RangesMatrix or None
-        RangesMatrix containing flags to use for gap filling. If None then
+    glitch_flags : str or RangesMatrix or None
+        RangesMatrix containing flags to use for gap filling. If provided by
+        a string, ``aman.flags.get(flags)`` is used for the flags. If None then
         uses ``aman.flags.glitches``.
     in_place : bool
         If False it makes a copy of signal before gap filling and returns
@@ -429,9 +430,11 @@ def fill_glitches(aman, nbuf=10, use_pca=False, modes=3, signal=None,
             sig = signal
         else:
             sig = np.copy(signal)
-    
+
     if glitch_flags is None:
         glitch_flags = aman.flags.glitches
+    if isinstance(glitch_flags, str):
+        glitch_flags = aman.flags.get(glitch_flags)
 
     # Polyfill
     gaps = get_gap_fill(aman, nbuf=nbuf, flags=glitch_flags,

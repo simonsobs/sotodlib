@@ -178,7 +178,7 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
     return P, X
 
 
-def get_horizon_P(tod, az, el, **kw):
+def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
     """Get a standard Projection Matrix targeting arbitrary source (for example
     drone) in horizon coordinates.
 
@@ -186,6 +186,10 @@ def get_horizon_P(tod, az, el, **kw):
       tod: AxisManager of the observation
       az: azimuth of the target source (rad)
       el: elevation of the target source (rad)
+      receiver_fixed:
+          If true, rotate the source centered coordinate to be receiver fixed.
+          This should be True for receiver fixed beam measurement.
+          This should be False for pol angle calibration with source on drone.
 
     Return:
       a Projection Matrix
@@ -198,7 +202,11 @@ def get_horizon_P(tod, az, el, **kw):
         tod.boresight.roll
     )
     pq = so3g.proj.quat.rotation_lonlat(-az, el)
-    sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
+    if receiver_fixed:
+        rot = so3g.proj.quat.euler(2, -tod.boresight.roll)
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * rot * ~pq * sight.Q
+    else:
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
     P = coords.P.for_tod(tod, sight, **kw)
     return P
 
