@@ -450,7 +450,6 @@ def main(
             singlestream=args.singlestream,
             site=args.site,
             atomic_db=args.atomic_db) for r in run_list]
-
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:

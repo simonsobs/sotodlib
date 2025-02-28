@@ -5,7 +5,7 @@ import numpy as np
 import so3g
 from pixell import fft, utils, bunch
 
-from .utilities import *
+from .utils import *
 
 
 class Nmat:

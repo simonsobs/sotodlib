@@ -6,20 +6,15 @@ you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
 __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
-import numpy as np, os
+import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
-import so3g.proj
-from sqlalchemy import create_engine, exc
-from sqlalchemy.orm import sessionmaker
 
-from .. import core
 from .. import coords
-from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional, Base
+from . import utils as smutils
 from .noise_model import NmatWhite
 
-hp = import_optional('healpy')
-h5py = import_optional('h5py')
+hp = smutils.import_optional('healpy')
+h5py = smutils.import_optional('h5py')
 
 class DemodMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, comps='TQU', singlestream=False):
@@ -36,15 +31,15 @@ class DemodMapmaker:
             noise model for each observation. Can be overriden in add_obs.
             Noises other than NmatWhite not implemented. If None, a white 
             noise model is used.
-        dtype : numpy.dtype
+        dtype : numpy.dtype, optional
             The data type to use for the time-ordered data. Only tested
             with float32
-        verbose : Bool
+        verbose : Bool, optional
             Whether to print progress messages. Not implemented
-        comps : str
+        comps : str, optional
             String with the components to solve for. Not implemented for 
             anything other than TQU
-        singlestream : Bool
+        singlestream : Bool, optional
             If True, do not perform demodulated filter+bin mapmaking but 
             rather regular filter+bin mapmaking, i.e. map from obs.signal
             rather than from obs.dsT, obs.demodQ, obs.demodU
@@ -64,7 +59,7 @@ class DemodMapmaker:
         self.verbose      = verbose
         self.noise_model  = noise_model
         self.data         = []
-        self.dof          = MultiZipper()
+        self.dof          = smutils.MultiZipper()
         self.ready        = False
         self.ncomp        = len(comps)
         self.singlestream = singlestream
@@ -215,8 +210,10 @@ class DemodSignalMap(DemodSignal):
             Whether this signal should be part of the output or not.
         ext : str, optional
             The extension used for the files.
-        dtype : numpy.dtype
+        dtype_map : numpy.dtype, optional
             The data type to use for the maps.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time ordered data
         sys : str or None, optional
             The coordinate system to map. Defaults to equatorial
         recenter : str or None
@@ -263,8 +260,10 @@ class DemodSignalMap(DemodSignal):
         ext : str, optional
             The extension used for the files.
             May be 'fits', 'fits.gz', 'h5', 'h5py', or 'npy'.
-        dtype : numpy.dtype
+        dtype_map : numpy.dtype, optional
             The data type to use for the maps.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time ordered data
         Nsplits : int, optional
             Number of splits that you will map simultaneously. By default is 1 when no
             splits are requested.
@@ -289,7 +288,7 @@ class DemodSignalMap(DemodSignal):
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
                 if self.recenter:
-                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+                    rot = smutils.recentering_to_quat_lonlat(*smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=smutils.unarr(obs.site)))
                 else: rot = None
                 if self.Nsplits == 1:
                     # this is the case with no splits
@@ -309,7 +308,7 @@ class DemodSignalMap(DemodSignal):
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
                     wcs_kernel = None
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True)
             else:
                 pmap_local = pmap
 
@@ -440,18 +439,6 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def atomic_db_aux(atomic_db, info, valid = True):
-    info.valid = valid
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    with Session() as session:
-        session.add(info)
-        try:
-            session.commit()
-        except exc.IntegrityError:
-            session.rollback()
-
 def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     """
     Write maps from data into files
@@ -460,7 +447,7 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     for n_split in range(Nsplits):
         if np.all(data.wmap[n_split] == 0.0):
             if atomic_db is not None:
-                atomic_db_aux(atomic_db, info[n_split], valid=False)
+                smutils.atomic_db_aux(atomic_db, info[n_split], valid=False)
             continue
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split])
@@ -469,7 +456,7 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split])
         if atomic_db is not None:
-            atomic_db_aux(atomic_db, info[n_split], valid=True)
+            smutils.atomic_db_aux(atomic_db, info[n_split], valid=True)
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
