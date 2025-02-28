@@ -828,7 +828,7 @@ def main(args=None):
         print('   ' + '-' * (len(hdr) - 3))
         for row in schema:
             if row['purpose'] == 'out':
-                count = len(db.conn.execute('select distinct `%s` from map' % row['field']).fetchall())
+                count = len(db.conn.execute("select distinct `%s` from map" % row['field']).fetchall())
                 print(fmt.format(count=count, **row))
         file_count = db.conn.execute('select count(id) from files').fetchone()[0]
         print(fmt.format(
