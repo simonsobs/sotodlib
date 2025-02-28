@@ -27,7 +27,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.NEW_VERSION }}
-          release_name: "Release ${{ env.NEW_VERSION }}"
           body: "Monthly patch release for sotodlib ${{ env.NEW_VERSION }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
