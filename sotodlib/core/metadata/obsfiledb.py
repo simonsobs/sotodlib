@@ -161,8 +161,8 @@ class ObsFileDb:
     def _get_version(self, conn=None):
         if conn is None:
             conn = self.conn
-        rows = conn.execute('select value from meta where '
-                            'param="obsfiledb_version"').fetchall()
+        rows = conn.execute("select value from meta where "
+                            "param='obsfiledb_version'").fetchall()
         if len(rows) == 0:
             return None
         return int(rows[0][0])

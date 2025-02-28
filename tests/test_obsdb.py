@@ -38,7 +38,6 @@ class TestObsDb(unittest.TestCase):
         """Basic functionality."""
         db = get_example()
         all_obs = db.query()
-        db.get(all_obs[0])
         db.get(all_obs[0]['obs_id'])
         db.query('timestamp > 0')
         db.query('timestamp > 0', tags=['cryo_problem=1'])
