@@ -187,6 +187,14 @@ class TestAxisManager(unittest.TestCase):
         amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 1.
 
+        # Include strings, because array_equal is picky on that...
+        amanA.wrap('tersely', 'yo')
+        amanB.wrap('tersely', 'yo')
+        amanA.wrap_new('greetings', shape=('samps',), dtype='S4')[:] = b'hi'
+        amanB.wrap_new('greetings', shape=('samps',), dtype='S4')[:] = b'hi'
+        amanA.wrap_new('free_greetings', shape=(4, ), dtype='U')[:] = 'hello'
+        amanB.wrap_new('free_greetings', shape=(4, ), dtype='U')[:] = 'hello'
+
         # ... other_fields="exact"
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 

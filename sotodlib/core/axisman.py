@@ -489,6 +489,10 @@ class AxisManager:
           target axis).
 
         """
+        def _nan_compat(x):
+            # Check if x can be passed to array_equal with equal_nan True.
+            return np.asarray(x).dtype.char not in 'SU'
+
         assert other_fields in ['exact', 'fail', 'first', 'drop']
         if not isinstance(axis, str):
             axis = list(items[0]._axes.keys())[axis]
@@ -564,23 +568,31 @@ class AxisManager:
                 output.wrap(k, new_data[k], axis_map)
             else:
                 if other_fields == "exact":
-                    ## if every item named k is a scalar
                     err_msg = (f"The field '{k}' does not share axis '{axis}'; " 
                               f"{k} is not identical across all items " 
                               f"pass other_fields='drop' or 'first' or else " 
                               f"remove this field from the targets.")
 
                     if np.any([np.isscalar(i[k]) for i in items]):
+                        # At least one is a scalar...
                         if not np.all([np.isscalar(i[k]) for i in items]):
                             raise ValueError(err_msg)
-                        if not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
+                        if not np.all([
+                                np.array_equal(i[k], items[0][k],
+                                               equal_nan=_nan_compat(items[0][k]))
+                                for i in items]):
                             raise ValueError(err_msg)
                         output.wrap(k, items[0][k], axis_map)
                         continue
 
                     elif not np.all([i[k].shape==items[0][k].shape for i in items]):
+                        # Has shape; shapes differ.
                         raise ValueError(err_msg)
-                    elif not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
+                    elif not np.all([
+                            np.array_equal(i[k], items[0][k],
+                                           equal_nan=_nan_compat(items[0][k]))
+                            for i in items]):
+                        # All have same shape; values not equal.
                         raise ValueError(err_msg)
 
                     output.wrap(k, items[0][k].copy(), axis_map)
