@@ -16,6 +16,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
+from ..tod_ops import glitch as gl
 
 
 class FFTTrim(_Preprocess):
@@ -1760,6 +1761,108 @@ class PointingModel(_Preprocess):
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
 
+
+class GlitchAggregate(_Preprocess):
+    """Collect glitches across detectors and compute relevant stats for
+    understanding the nature of each glitch
+    """
+    name = "glitch_aggregate"
+
+    def process(self, aman, proc_aman):
+        assert "glitches" in aman
+
+        n_thres = self.process_cfgs.get("n_thres", 2)
+        n_buffer = self.process_cfgs.get("n_buffer", 5)
+
+        glitches = aman.glitches
+        flags = glitches.glitch_flags
+
+        # get the number of detectors affected by each glitch
+        n_affected = np.zeros(glitches.shape[1], dtype=int)
+        for r in flags:
+            n_affected += r.mask()
+
+        # get the ranges when >= `n_thres` detectors are affected
+        ranges_affected = gl.ranges_from_n_affected(n_affected, n_thres=n_thres, buffer=n_buffer)
+
+        # compile list of dets in each range
+        dets_affected = gl.dets_in_ranges(flags, ranges_affected)
+
+        # compile slices for each range
+        slices = gl.ranges2slices(ranges_affected, offset=glitches.samps.offset)
+
+        # build snippet layouts each of which is an axis manager containing
+        # restricted axes
+        snippet_layouts = gl.build_snippet_layouts(aman, slices, dets_affected)
+
+        # if we need extract snippets from aman, here's how to do it:
+        snippets = gl.extract_snippets(aman, snippet_layouts)
+
+        # TODO: save them for later in a proper way
+        proc_aman.snippets = snippets
+        proc_aman.snippet_layouts = snippet_layouts
+
+
+
+class GlitchComputeStats(_Preprocess):
+    """Compute the summary statistics required to classify each glitch
+    """
+
+    name = "glitch_compute_stats"
+    
+    def process(self, aman, proc_aman):
+
+        cols_for_stats = self.process_cfgs.get("cols_for_stats",['Number of Detectors', 
+        'Y and X Extent Ratio', 'Mean abs(Correlation)','Mean abs(Time Lag)', 
+        'Y Hist Max and Adjacent/Number of Detectors',
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
+        'Start Index', 'Stop Index', 'Start Ctime', 'Stop Ctime'])
+
+        ##need to figure out a way to save snippet layout too
+
+        #df_stats returns dataframe with summary statistics for glitch classification
+        df_stats = glitch_classification.compute_summary_stats(proc_aman.snippets, cols_for_stats)
+
+        # HOW TO SAVE? temporary solution for now
+
+        outdir = self.process_cfgs.get("outdir", os.getcwd())
+
+        df_name = self.process_cfgs.get("df_name", "df_stats")
+
+        df_stats.to_hdf('{}/{}.h5'.format(outdir, df_name), key='df', mode='a')
+
+
+class GlitchClassification(_Preprocess):
+    """Classify glitches using a random forest. Will return the probability of being each
+    type of glitch: 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other
+    """
+
+    name = "classify_glitches"
+    
+    def process(self, aman, proc_aman):
+
+        outdir = self.process_cfgs.get("outdir", os.getcwd())
+
+        df_name = self.process_cfgs.get("df_name", "df_stats")
+
+        trained_forest_name = self.process_cfgs.get("trained_forest_name", "trained_forest")
+
+        trained_forest = pk.load(open('{}/{}.pkl'.format(outdir, trained_forest_name), 'rb'))
+
+        classifying_cols = self.process_cfgs.get("columns_for_classifying", ['Number of Detectors', 'Y and X Extent Ratio', 
+        'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks'])
+
+        df_stats_t = pd.read_hdf('{}/{}.h5'.format(outdir, df_name))
+
+        df_stats = df_stats_t.dropna()
+
+        df_w_predictions = glitch_classification.classify_data_forest(df_stats, classifying_cols, trained_forest)
+
+        df_w_predictions.to_hdf('{}/{}_w_predictions.h5'.format(outdir, df_name), key='df', mode='w')        
+
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1797,3 +1900,6 @@ _Preprocess.register(RotateQU)
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(PointingModel) 
+_Preprocess.register(GlitchAggregate)
+_Preprocess.register(GlitchComputeStats)
+_Preprocess.register(GlitchClassification)
