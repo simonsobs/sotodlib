@@ -183,38 +183,52 @@ class TestAxisManager(unittest.TestCase):
         aman = core.AxisManager.concatenate([amanAA, amanBB])
         self.assertEqual(aman.dets.count, len(detsA) + len(detsB))
 
-        # Handling of array that does not share the axis?
-        amanA.wrap_new('azimuth', shape=('samps',))[:] = 1.
-        amanB.wrap_new('azimuth', shape=('samps',))[:] = 1.
+        # Handling of arrays++ that do not share the axis?
+        for t in [amanA, amanB]:
+            # Vectors, with nan.
+            t.wrap_new('azimuth', shape=('samps',))[:] = 1.
+            t.azimuth[3] = float('nan')
 
-        # Include strings, because array_equal is picky on that...
-        amanA.wrap('tersely', 'yo')
-        amanB.wrap('tersely', 'yo')
-        amanA.wrap_new('greetings', shape=('samps',), dtype='S4')[:] = b'hi'
-        amanB.wrap_new('greetings', shape=('samps',), dtype='S4')[:] = b'hi'
-        amanA.wrap_new('free_greetings', shape=(4, ), dtype='U')[:] = 'hello'
-        amanB.wrap_new('free_greetings', shape=(4, ), dtype='U')[:] = 'hello'
+            # Scalars
+            t.wrap("ans", 42)
+            t.wrap("nans", float('nan'))
+
+            # Include strings, because array_equal is picky on that...
+            t.wrap('tersely', 'yo')
+            t.wrap_new('greetings', shape=('samps',), dtype='S4')[:] = b'hi'
+            t.wrap_new('free_greetings', shape=(4, ), dtype='U')[:] = 'hello'
+
+            # And RangesMatrix
+            t.wrap('rmat', so3g.proj.RangesMatrix.ones((5, 4)))
+
+
+        amanB_backup, amanB = amanB, None
 
         # ... other_fields="exact"
-        aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
-
-        ## add scalars
-        amanA.wrap("ans", 42)
-        amanB.wrap("ans", 42)
+        amanB = amanB_backup.copy()
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 
         # ... other_fields="exact"
+        amanB = amanB_backup.copy()
         amanB.azimuth[:] = 2.
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 
+        # RangesMatrix fail?
+        amanB = amanB_backup.copy()
+        amanB.rmat = so3g.proj.RangesMatrix.zeros(amanA.rmat.shape)
+        with self.assertRaises(ValueError):
+            aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
+
         # ... other_fields="exact" and arrays of different shapes
+        amanB = amanB_backup.copy()
         amanB.move("azimuth", None)
         amanB.wrap("azimuth", np.array([43,5,2,3]))
         with self.assertRaises(ValueError):
             aman = core.AxisManager.concatenate([amanA, amanB], axis='dets')
 
         # ... other_fields="fail"
+        amanB = amanB_backup.copy()
         amanB.move("azimuth",None)
         amanB.wrap_new('azimuth', shape=('samps',))[:] = 2.
         with self.assertRaises(ValueError):
@@ -226,6 +240,7 @@ class TestAxisManager(unittest.TestCase):
                                                other_fields='fail')
 
         # ... other_fields="drop"
+        amanB = amanB_backup.copy()
         amanB.azimuth[:] = 2.
         aman = core.AxisManager.concatenate([amanA, amanB], axis='dets',
                                             other_fields="drop")
