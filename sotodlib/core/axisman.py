@@ -8,6 +8,8 @@ try:
 except ImportError:
     from scipy.sparse import csr_matrix as csr_array
 
+import so3g
+
 from .util import get_coindices
 
 
@@ -564,23 +566,28 @@ class AxisManager:
                 output.wrap(k, new_data[k], axis_map)
             else:
                 if other_fields == "exact":
-                    ## if every item named k is a scalar
                     err_msg = (f"The field '{k}' does not share axis '{axis}'; " 
                               f"{k} is not identical across all items " 
                               f"pass other_fields='drop' or 'first' or else " 
                               f"remove this field from the targets.")
 
                     if np.any([np.isscalar(i[k]) for i in items]):
+                        # At least one is a scalar...
                         if not np.all([np.isscalar(i[k]) for i in items]):
                             raise ValueError(err_msg)
-                        if not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
+                        if not np.all([_member_equal(i[k], items[0][k])
+                                       for i in items[1:]]):
                             raise ValueError(err_msg)
                         output.wrap(k, items[0][k], axis_map)
                         continue
 
                     elif not np.all([i[k].shape==items[0][k].shape for i in items]):
+                        # Has shape; shapes differ.
                         raise ValueError(err_msg)
-                    elif not np.all([np.array_equal(i[k], items[0][k], equal_nan=True) for i in items]):
+
+                    elif not np.all([_member_equal(i[k], items[0][k])
+                                     for i in items[1:]]):
+                        # All have same shape; values not equal.
                         raise ValueError(err_msg)
 
                     output.wrap(k, items[0][k].copy(), axis_map)
@@ -1005,3 +1012,19 @@ def simplify_slice(sslice, shape):
         # For anything else just pass it through. This includes normal slices
         else: res.append(s)
     return tuple(res)
+
+
+def _member_equal(a, b):
+    """Check equality of two things you might find in an AxisManager.
+
+    """
+    if isinstance(a, np.ndarray) or np.isscalar(a):
+        # Use the array_equal test for scalars because it's nan-smart.
+        equal_nan = (np.asarray(a).dtype.char not in 'SUO')
+        return np.array_equal(a, b, equal_nan=equal_nan)
+    elif isinstance(a, so3g.RangesInt32):
+        return np.array_equal(a.ranges(), b.ranges()) and a.count == b.count
+    elif isinstance(a, so3g.proj.RangesMatrix):
+        return all([_member_equal(_a, _b) for _a, _b in zip(a, b)])
+    else:
+        return a == b
