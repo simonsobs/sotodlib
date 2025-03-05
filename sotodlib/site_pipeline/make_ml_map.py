@@ -30,6 +30,7 @@ defaults = {"query": "1",
             "maxiter": 500,
             "tiled": 1,
             "wafer": None,
+            "unit": "K",
            }
 
 def get_parser(parser=None):
@@ -63,6 +64,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--maxiter",    type=int, help="Maximum number of iterative steps")
     parser.add_argument("-T", "--tiled"  ,    type=int)
     parser.add_argument("-W", "--wafer"  ,   type=str, nargs='+', help="Detector wafer subset to map with")
+    parser.add_argument("-u", "--unit"   ,  type=str, help="Units of data. Default is K")
     return parser
 
 
@@ -288,9 +290,9 @@ def main(config_file=None, defaults=defaults, **args):
 
     L.info("Done preparing")
 
-    signal_map.write(prefix, "rhs", signal_map.rhs)
-    signal_map.write(prefix, "div", signal_map.div)
-    signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs))
+    signal_map.write(prefix, "rhs", signal_map.rhs, unit=args['unit']+'^-1')
+    signal_map.write(prefix, "div", signal_map.div, unit=args['unit']+'^-2')
+    signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args['unit'])
 
     L.info("Wrote rhs, div, bin")
 
@@ -302,13 +304,13 @@ def main(config_file=None, defaults=defaults, **args):
         if dump:
             for signal, val in zip(signals, step.x):
                 if signal.output:
-                    signal.write(prefix, "map%04d" % step.i, val)
+                    signal.write(prefix, "map%04d" % step.i, val, unit=args['unit'])
         t1 = time.time()
 
     L.info("Done")
     for signal, val in zip(signals, step.x):
         if signal.output:
-            signal.write(prefix, "map", val)
+            signal.write(prefix, "map", val, unit=args['unit'])
     comm.Barrier()
 
 

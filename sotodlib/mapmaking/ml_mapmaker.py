@@ -445,16 +445,16 @@ class SignalMap(Signal):
             else:
                 return putils.allreduce(map, self.comm)
 
-    def write(self, prefix, tag, m):
+    def write(self, prefix, tag, m, unit='K'):
         if not self.output:
             return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.tiled:
-            tilemap.write_map(oname, m, self.comm)
+            tilemap.write_map(oname, m, self.comm, extra={'BUNIT':unit})
         else:
             if self.comm is None or self.comm.rank == 0:
-                enmap.write_map(oname, m)
+                enmap.write_map(oname, m, extra={'BUNIT':unit})
         return oname
 
     def _checkcompat(self, other):
