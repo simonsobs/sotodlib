@@ -78,6 +78,9 @@ class G3tHWP():
         # Reference slit edgen width
         self._ref_edges = self.configs.get('ref_edges', 2)
 
+        # Number of encoder slits per HWP revolution pre-process
+        self._edges_per_rev = self._num_edges - self._ref_edges
+
         # Reference slit angle
         self._delta_angle = 2 * np.pi / self._num_edges
 
@@ -1534,10 +1537,31 @@ class G3tHWP():
 
                 # Generate a glitch mask for this rotation
                 result, mask = self._glitch_mask(diff, high, low, start_high)
-                # If the mask could not be generated, remove the rotation
+                # If the mask could not be generated, check if it was because of a packet drop or remove the rotation
                 if not result:
-                    mask = np.full(len(diff), False)
-                    dead_rots.append(i)
+                    start_clk = self._encd_clk[self._ref_indexes[i]]
+                    end_clk = self._encd_clk[self._ref_indexes[i+1]]
+                    # If the rotation had a packet drop
+                    if np.any([start_clk < edges[0] and end_clk > edges[1] for edges in self._edges_dropped_pkts]):
+                        # Fill the rotation with data from an adjacent rotation
+                        if i:
+                            gap_clk = self._encd_clk[self._ref_indexes[i-1]:self._ref_indexes[i]] \
+                                    - self._encd_clk[self._ref_indexes[i-1]] + self._encd_clk[data._ref_indexes[i]]
+                        else:
+                            gap_clk = self._encd_clk[self._ref_indexes[i+1]:self._ref_indexes[i+2]] \
+                                    - self._encd_clk[self._ref_indexes[i+1]] + self._encd_clk[self._ref_indexes[i]]
+
+                        corr_factor = (self._encd_clk[self._ref_indexes[i+1]] - self._encd_clk[self._ref_indexes[i]]) \
+                                * (self._num_edges - 1) / (gap_clk[-1] - gap_clk[0]) / (self._num_edges)
+                        gap_clk = corr_factor * (gap_clk - gap_clk[0]) + gap_clk[0]
+
+                        fill_clk = np.zeros(len(diff))
+                        fill_clk[:self._num_edges] = gap_clk
+                        mask = np.full(len(diff), False)
+                        mask[:self._num_edges] = np.logical_not(mask[:self._num_edges])
+                    else:
+                        mask = np.full(len(diff), False)
+                        dead_rots.append(i)
 
                 total_mask.append(mask)
 
@@ -1570,16 +1594,16 @@ class G3tHWP():
     def _find_high_low_values(self, arr):
         """ Finds the two peaks of an array with a bimodal distribution """
         # This function leads to warning of empty array when arr is very short
-        med = np.median(arr[arr > 0.75*np.median(arr)])
+        med = np.median(arr[arr > 0.3*np.median(arr)])
         high = np.median(arr[arr > med])
-        low = np.median(arr[np.logical_and(arr < med, arr > 0.75*med)])
+        low = np.median(arr[np.logical_and(arr < med, arr > 0.3*med)])
 
         return high, low
 
     def _find_rot_start_type(self, arr):
         """ Finds the starting pattern of an array with a bimodal distribution """
-        even = np.median(np.diff(arr)[::2])
-        odd = np.median(np.diff(arr)[1::2])
+        even = np.median(np.diff(arr)[::2][:20])
+        odd = np.median(np.diff(arr)[1::2][:20])
 
         return True if even < odd else False
 
@@ -1595,18 +1619,21 @@ class G3tHWP():
         # Iterate over ever point in the array, checking the rolling sum
         # against what it is expected to be. If the residual doesn't follow
         # the expected pattern, mask that point as a glitch
-        for diff in diffs:
+        for ind, diff in enumerate(diffs):
             diff_sum += diff
             res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
-            if prev_res < res:
-                return_mask.append(True)
-                diff_sum = diff
-                toggle = not toggle
-                res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
-            else:
-                return_mask.append(False)
+            if prev_res > res:
+                diff_forward = diff_sum + diffs[ind+1] if len(diffs) > ind + 1 else diff_sum
+                comp = 2*low + high if toggle else low + 2*high
+                if abs(comp-diff_forward) > abs(high+low-diff_forward):
+                    return_mask.append(False)
+                    prev_res = res
+                    continue
 
-            prev_res = res
+            return_mask.append(True)
+            diff_sum = diff
+            toggle = not toggle
+            prev_res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
         else:
             return_mask.append(True)
             return_mask = return_mask[1:]
@@ -1623,7 +1650,7 @@ class G3tHWP():
         # Find the average value in each rotation
         norm_matrix = np.array([[np.mean(diff)] for diff in diff_matrix])
         # Average rotation template
-        template = np.mean(diff_matrix[1:-1]/norm_matrix[1:-1], axis=0)
+        template = np.median(diff_matrix[1:-1]/norm_matrix[1:-1], axis=0)
         expectation = (norm_matrix*template).flatten()
 
         # Handle the first and last rotations
@@ -1732,29 +1759,41 @@ class G3tHWP():
     def _fill_dropped_packets(self):
         """ Estimate the number of dropped packets """
         cnt_diff = np.diff(self._encd_cnt)
-        dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size])
-        self._num_dropped_pkts = int(dropped_samples // (self._pkt_size - 1))
+        dropped_samples = np.sum(cnt_diff[cnt_diff >= self._pkt_size] - 1)
+        self._num_dropped_pkts = dropped_samples // self._pkt_size
         if self._num_dropped_pkts > 0:
             logger.warning('{} dropped packets are found, performing fill process'.format(
                 self._num_dropped_pkts))
 
-        idx = np.where(np.diff(self._encd_cnt) > 1)[0]
-        for i in range(len(idx)):
-            ii = (np.where(np.diff(self._encd_cnt) > 1)[0])[0]
-            _diff = int(np.diff(self._encd_cnt)[ii])
+        self._edges_dropped_pkts = []
+        for _ in np.where(np.diff(self._encd_cnt) > 1)[0]:
+            index = np.where(np.diff(self._encd_cnt) > 1)[0][0]
+            gap = int(np.diff(self._encd_cnt)[index]) - 1
             # Fill dropped counters with counters one before or one after rotation.
             # This filling method works even when the reference slot counter is dropped.
-            self._filled_ranges.append([ii + 1, ii + 1 + self._pkt_size])
-            if ii - self._num_edges + self._ref_edges + 1 >= 0:
-                gap_clk = self._encd_clk[ii - self._num_edges + self._ref_edges + 1: ii+_diff - self._num_edges + self._ref_edges] \
-                    - self._encd_clk[ii-self._num_edges + self._ref_edges] + self._encd_clk[ii]
+            rot_needed = int(np.ceil(gap/self._edges_per_rev)) + 1
+            self._edges_dropped_pkts.append((self._encd_clk[index], self._encd_clk[index+1]))
+
+            if index - rot_needed*self._edges_per_rev >= 0:
+                rot_before_index = index - rot_needed*self._edges_per_rev
+                gap_clk = self._encd_clk[rot_before_index:rot_before_index + gap + 2] \
+                        - self._encd_clk[rot_before_index] + self._encd_clk[index]
+                corr_factor = (self._encd_clk[index + 1] - self._encd_clk[index])/(gap_clk[-1] - gap_clk[0])
+                gap_clk = (corr_factor*(gap_clk - gap_clk[0]) + gap_clk[0])[1:-1]
             else:
-                gap_clk = self._encd_clk[ii - _diff + self._num_edges: ii - 1 + self._num_edges] \
-                    - self._encd_clk[ii - _diff + self._num_edges - 1] + self._encd_clk[ii]
-            gap_cnt = np.arange(self._encd_cnt[ii]+1, self._encd_cnt[ii+1])
-            self._encd_cnt = np.insert(self._encd_cnt, ii+1, gap_cnt)
-            self._encd_clk = np.insert(self._encd_clk, ii+1, gap_clk)
-        return
+                rot_after_index = index + rot_needed*self._edges_per_rev + 1
+                gap_clk = self._encd_clk[rot_after_index - gap - 1:rot_after_index + 1] \
+                        - self._encd_clk[rot_after_index] + self._encd_clk[index + 1]
+                corr_factor = (self._encd_clk[index + 1] - self._encd_clk[index])/(gap_clk[-1] - gap_clk[0])
+                gap_clk = (corr_factor*(gap_clk[-1] - gap_clk) + gap_clk[-1])[1:-1]
+
+            gap_cnt = np.arange(self._encd_cnt[index] + 1, self._encd_cnt[index+1])
+            self._encd_cnt = np.insert(self._encd_cnt, index + 1, gap_cnt)
+            self._encd_clk = np.insert(self._encd_clk, index + 1, gap_clk)
+
+        self._edges_dropped_pkts = np.array(self._edges_dropped_pkts)
+
+        return True
 
     def _encoder_packet_sort(self):
         cnt_diff = np.diff(self._encd_cnt)
