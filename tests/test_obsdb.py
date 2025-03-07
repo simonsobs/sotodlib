@@ -44,8 +44,8 @@ class TestObsDb(unittest.TestCase):
 
     def test_query(self):
         db = get_example()
-        r0 = db.query('drift == "rising"')
-        r1 = db.query('drift == "setting"')
+        r0 = db.query("drift == 'rising'")
+        r1 = db.query("drift == 'setting'")
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
 
