@@ -1750,7 +1750,7 @@ class PointingModel(_Preprocess):
 
         - name : "pointing_model"
           process: True
-          
+
     .. autofunction:: sotodlib.coords.pointing_model.apply_pointing_model
     """
     name = "pointing_model"
@@ -1759,6 +1759,23 @@ class PointingModel(_Preprocess):
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
+
+class IIRParamsCorrection(_Preprocess):
+    """Correct missing iir_params
+
+    Example config block::
+
+        - name : "iir_params_correction"
+          process: True
+
+    .. autofunction:: sotodlib.obs_ops.utils.iir_params_correction
+    """
+    name = "iir_params_correction"
+
+    def process(self, aman, proc_aman):
+        from sotodlib.obs_ops import iir_params_correction
+        if self.process_cfgs:
+            iir_params_correction(aman)
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -1793,7 +1810,8 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(RotateQU) 
-_Preprocess.register(SubtractQUCommonMode) 
-_Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(PointingModel) 
+_Preprocess.register(RotateQU)
+_Preprocess.register(SubtractQUCommonMode)
+_Preprocess.register(FocalplaneNanFlags)
+_Preprocess.register(PointingModel)
+_Preprocess.register(IIRParamsCorrection)
