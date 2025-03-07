@@ -44,20 +44,20 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Install Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade wheel
+          python3 -m pip install so3g
+          python3 -m pip install pshmem
+          python3 -m pip install --pre toast
+
       - name: Install OpenMPI for Tests
         if: runner.os == 'Linux'
         run: |
           sudo apt update
           sudo apt install -y libopenmpi-dev
-
-      - name: Install Dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install --upgrade wheel
           python3 -m pip install mpi4py
-          python3 -m pip install so3g
-          python3 -m pip install pshmem
-          python3 -m pip install --pre toast
 
       - name: Install sotodlib
         run: |
