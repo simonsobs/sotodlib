@@ -359,23 +359,23 @@ class DemodSignalMap(DemodSignal):
     @property
     def ncomp(self): return len(self.comps)
 
-    def write(self, prefix, tag, m):
+    def write(self, prefix, tag, m, unit='K'):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.pix_scheme == "rectpix":
             if self.tiled:
-                tilemap.write_map(oname, m, self.comm)
+                tilemap.write_map(oname, m, self.comm, extra={'BUNIT':unit})
             else:
                 if self.comm is None or self.comm.rank == 0:
-                    enmap.write_map(oname, m)
+                    enmap.write_map(oname, m, extra={'BUNIT':unit})
         else:
             if self.ext in ["fits", "fits.gz"]:
                 if hp is None:
                     raise ImportError("Cannot save healpix map as fits; healpy could not be imported. Install healpy or save as npy or h5")
                 if m.ndim > 2:
                     m = np.reshape(m, (np.prod(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
-                hp.write_map(oname, m.view(self.dtype_map), nest=(self.hp_geom.ordering=='NEST'), overwrite=True)
+                hp.write_map(oname, m.view(self.dtype_map), nest=(self.hp_geom.ordering=='NEST'), overwrite=True, column_units=unit)
             elif self.ext == "npy":
                 np.save(oname, {'nside': self.hp_geom.nside, 'ordering':self.hp_geom.ordering, 'data':m.view(self.dtype_map)}, allow_pickle=True)
             elif self.ext in ['h5', 'hdf5']:
@@ -439,7 +439,7 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
+def write_demod_maps(prefix, data, info, unit='K', split_labels=None, atomic_db=None):
     """
     Write maps from data into files
     """
@@ -450,11 +450,11 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
                 smutils.atomic_db_aux(atomic_db, info[n_split], valid=False)
             continue
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
-                          data.wmap[n_split])
+                          data.wmap[n_split], unit=unit+'^-1')
         data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                          data.weights[n_split])
+                          data.weights[n_split], unit=unit+'^2')
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
-                          data.signal.hits[n_split])
+                          data.signal.hits[n_split], unit='hits')
         if atomic_db is not None:
             smutils.atomic_db_aux(atomic_db, info[n_split], valid=True)
 
@@ -464,7 +464,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    atomic_db=None):
+                    atomic_db=None, unit='K'):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -589,7 +589,7 @@ def make_demod_map(context, obslist, noise_model, info,
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db)
+    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db, unit=unit)
 
     return errors, outputs
 
