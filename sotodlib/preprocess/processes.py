@@ -1773,14 +1773,16 @@ class CorrectIIRParams(_Preprocess):
     .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
     """
     name = "correct_iir_params"
+    def __init__(self, step_cfgs):
+        self.time_range = step_cfgs.get('time_range')
+        super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
         import datetime
         from sotodlib.obs_ops import correct_iir_params
-        time_range = self.step_cfgs.get('time_range')
-        if time_range is not None:
-            t0 = datetime.datetime.strptime(time_range[0], '%Y-%m-%d')
-            t1 = datetime.datetime.strptime(time_range[1], '%Y-%m-%d')
+        if self.time_range is not None:
+            t0 = datetime.datetime.strptime(self.time_range[0], '%Y-%m-%d')
+            t1 = datetime.datetime.strptime(self.time_range[1], '%Y-%m-%d')
             t0 = t0.replace(tzinfo=datetime.timezone.utc).timestamp()
             t1 = t1.replace(tzinfo=datetime.timezone.utc).timestamp()
             if aman.timestamps[0] >= t0 and aman.timestamps[-1] <= t1:
