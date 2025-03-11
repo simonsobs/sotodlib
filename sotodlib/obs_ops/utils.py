@@ -4,7 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def iir_params_correction(aman):
+def correct_iir_params(aman):
     """
     Add iir_params if missing
 

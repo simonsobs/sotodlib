@@ -1760,22 +1760,31 @@ class PointingModel(_Preprocess):
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
 
-class IIRParamsCorrection(_Preprocess):
-    """Correct missing iir_params
+class CorrectIIRParams(_Preprocess):
+    """Correct missing iir_params by default values if observation is
+    within a given time range.
 
     Example config block::
 
-        - name : "iir_params_correction"
+        - name: "correct_iir_params"
+          time_range: ["2023-01-01", "2025-01-01"]
           process: True
 
-    .. autofunction:: sotodlib.obs_ops.utils.iir_params_correction
+    .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
     """
-    name = "iir_params_correction"
+    name = "correct_iir_params"
 
     def process(self, aman, proc_aman):
-        from sotodlib.obs_ops import iir_params_correction
-        if self.process_cfgs:
-            iir_params_correction(aman)
+        import datetime
+        from sotodlib.obs_ops import correct_iir_params
+        time_range = self.step_cfgs.get('time_range')
+        if time_range is not None:
+            t0 = datetime.datetime.strptime(time_range[0], '%Y-%m-%d')
+            t1 = datetime.datetime.strptime(time_range[1], '%Y-%m-%d')
+            t0 = t0.replace(tzinfo=datetime.timezone.utc).timestamp()
+            t1 = t1.replace(tzinfo=datetime.timezone.utc).timestamp()
+            if aman.timestamps[0] >= t0 and aman.timestamps[-1] <= t1:
+                correct_iir_params(aman)
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -1814,4 +1823,4 @@ _Preprocess.register(RotateQU)
 _Preprocess.register(SubtractQUCommonMode)
 _Preprocess.register(FocalplaneNanFlags)
 _Preprocess.register(PointingModel)
-_Preprocess.register(IIRParamsCorrection)
+_Preprocess.register(CorrectIIRParams)
