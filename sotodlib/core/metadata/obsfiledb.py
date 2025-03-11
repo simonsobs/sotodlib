@@ -196,11 +196,12 @@ class ObsFileDb:
         self.conn.commit()
 
     def add_detset(self, detset_name, detector_names, commit=True):
-        """Add a detset to the detsets table.
+        """Add a detset to the detsets table (by adding detectors with
+        specific names to it).
 
         Arguments:
-          detset_name (str): The (unique) name of this detset.
-          detector_names (list of str): The detectors belonging to
+          detset_name (str): The name of the detset.
+          detector_names (list of str): New detectors belonging to
             this detset.
 
         """

@@ -101,6 +101,7 @@ def get_parser(parser=None):
     parser.add_argument('--overwrite', action='store_true',
                         help="If adding to ObsFileDb, remove existing references "
                         "to this obs first (prevents 'UNIQUE constraint' error).")
+    parser.add_argument('--verbose', '-v', action='store_true')
     return parser
 
 
@@ -158,14 +159,21 @@ def add_to_obsfiledb(info, logger, config, overwrite=False):
         len(info['file_rows']))
     )
     for name, dets in info['detset_rows']:
-        if len(db.get_dets(name)) == 0:
-            db.add_detset(name, dets)
+        dets_already = set(db.get_dets(name))
+        if len(dets_already) == 0:
+            logger.debug(f' -- new detset: {name}')
+        new_dets = [d for d in dets if d not in dets_already]
+        if len(new_dets) > 0:
+            if len(dets_already):
+                logger.debug(f' -- extending det count by {len(new_dets)}')
+            db.add_detset(name, new_dets)
     for row in info['file_rows']:
         db.add_obsfile(**row)
 
 
-def main(book_dir, config=None, add=None, overwrite=None):
-    logger = util.init_logger(__name__, 'check_book: ')
+def main(book_dir, config=None, add=None, overwrite=None, verbose=None):
+    logger = util.init_logger(__name__, 'check_book: ',
+                              verbosity=(3 if verbose else 2))
 
     if config is not None:
         logger.debug(f'Loading config from {config}')
