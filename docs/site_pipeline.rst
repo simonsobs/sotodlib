@@ -183,6 +183,13 @@ Here is a basic configuration file::
     - ufm_mv33
     - ufm_mv35
 
+Check the det_ids for sensibility... and if you need to force bandpass
+values, add a config file entry like this::
+
+  bandpass_remap:
+    90: 220
+    150: 280
+
 
 The output database ``wafer_info.sqlite`` and HDF5 file
 ``wafer_info.h5`` are written to the ``output_dir``, which is created
@@ -843,8 +850,6 @@ Command line arguments
    :module: sotodlib.site_pipeline.make_ml_map
    :func: get_parser
 
-
-
 Default Mapmaker Values
 ```````````````````````
 The following code block contains the hard-coded default values for non-
@@ -925,6 +930,54 @@ Example of a config file:
         # Scripting tools
         verbose: True
         quiet: False
+
+make-atomic-filterbin-map
+-------------------------
+
+This script will create atomic maps (maps of individual observations by wafer and
+frequency, and associated splits). These maps are HWP-demodulated and filtered
+and binned. Every atomic map consist of a ``weights``, ``wmap`` (weighted map),
+and ``hits`` map, as well as an information file that is used for adding the map
+to an atomic map database.
+
+Configuration yaml file
+````````````````````````
+
+The mapmaker is configured by supplying a yaml file with ``--config_file``.
+
+.. autoclass:: sotodlib.site_pipeline.make_atomic_filterbin_map.Cfg
+  :members:
+
+The only mandatory parameters are ``context`` for a context file and ``preprocess_config``,
+a preprocess database configuration file that will tell the script how to process the
+timestreams. A typical configuration file could look like this:
+
+.. code-block:: yaml
+
+        context: /global/cfs/projectdirs/sobs/metadata/satp1/contexts/use_this_local.yaml
+        
+        # Use a pixell area file for rectangular pixel maps or use an nside value for Healpix maps.
+        # Only use one of these options
+        area: band_car_fejer1_5arcmin.fits
+        #nside: 512
+        
+        # A query can be a file with a list of obs, or an obsdb query
+        query: obs_list.txt
+        #query: "subtype == 'cmb' and timestamp >= 1708743600 and timestamp < 1713672000"
+        
+        odir: output_directory
+        preprocess_config: preprocess_config.yaml
+        
+        # Limit the number of obs, map a specific wafer or band
+        #ntod: 3
+        #wafer: ws0
+        #freq: f090
+        
+        # Plataform to map
+        site: so_sat1
+        
+        # Path to housekeeping data (this is used for extracting pwv)
+        hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
 
 QDS Monitor

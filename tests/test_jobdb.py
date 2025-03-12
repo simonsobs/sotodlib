@@ -55,6 +55,11 @@ class TestBasic(unittest.TestCase):
 
         self.assertEqual(len(jdb.get_jobs(jclass='jclass1', jstate='all')), 0)
 
+        # Create-and-operate
+        j = jdb.create_job('jlcass2', {'obs_id': '123455'})
+        with jdb.locked(j) as job:
+            job.mark_visited()
+
     def test_10_report(self):
         db_file = os.path.join(self.tempdir.name, 'test_10.sqlite')
         jdb = jobdb.JobManager(sqlite_file=db_file)

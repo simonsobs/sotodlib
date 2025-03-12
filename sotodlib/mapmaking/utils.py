@@ -1,20 +1,23 @@
+from typing import Optional, Any, Union
+from sqlalchemy import create_engine, exc
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
+import importlib
 import numpy as np
-from pixell import enmap, utils, fft, tilemap, resample
 import so3g
+from pixell import enmap, fft, resample, tilemap, utils as putils
 
-from .. import core
-from .. import tod_ops
-from .. import coords
+from .. import coords, core, tod_ops
+
 
 def deslope_el(tod, el, srate, inplace=False):
     if not inplace: tod = tod.copy()
-    utils.deslope(tod, w=1, inplace=True)
+    putils.deslope(tod, w=1, inplace=True)
     f     = fft.rfftfreq(tod.shape[-1], 1/srate)
     fknee = 3.0
-    with utils.nowarn():
+    with putils.nowarn():
         iN = (1+(f/fknee)**-3.5)**-1
     b  = 1/np.sin(el)
-    utils.deslope(b, w=1, inplace=True)
+    putils.deslope(b, w=1, inplace=True)
     Nb = fft.irfft(iN*fft.rfft(b),b*0)
     amp= np.sum(tod*Nb,-1)/np.sum(b*Nb)
     tod-= amp[:,None]*b
@@ -23,7 +26,7 @@ def deslope_el(tod, el, srate, inplace=False):
 class ArrayZipper:
     def __init__(self, shape, dtype, comm=None):
         self.shape = shape
-        self.ndof  = int(np.product(shape))
+        self.ndof  = int(np.prod(shape))
         self.dtype = dtype
         self.comm  = comm
 
@@ -37,7 +40,7 @@ class ArrayZipper:
 class MapZipper:
     def __init__(self, shape, wcs, dtype, comm=None):
         self.shape, self.wcs = shape, wcs
-        self.ndof  = int(np.product(shape))
+        self.ndof  = int(np.prod(shape))
         self.dtype = dtype
         self.comm  = comm
 
@@ -46,7 +49,7 @@ class MapZipper:
     def unzip(self, x): return enmap.ndmap(x.reshape(self.shape), self.wcs).astype(self.dtype, copy=False)
 
     def dot(self, a, b):
-        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b), self.comm)
+        return np.sum(a*b) if self.comm is None else putils.allreduce(np.sum(a*b), self.comm)
 
 class TileMapZipper:
     def __init__(self, geo, dtype, comm):
@@ -62,7 +65,7 @@ class TileMapZipper:
         return tilemap.TileMap(x.reshape(self.geo.pre+(-1,)).astype(self.dtype, copy=False), self.geo)
 
     def dot(self, a, b):
-        return np.sum(a*b) if self.comm is None else utils.allreduce(np.sum(a*b), self.comm)
+        return np.sum(a*b) if self.comm is None else putils.allreduce(np.sum(a*b), self.comm)
 
 class MultiZipper:
     def __init__(self):
@@ -102,14 +105,14 @@ def inject_map(obs, map, recenter=None, interpol=None):
         rot    = recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime=ctime[len(ctime)//2], geom=(map.shape, map.wcs), site=unarr(obs.site)))
     else: rot = None
     # Set up our pointing matrix for the map
-    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir", interpol=self.interpol)
+    pmat  = coords.pmat.P.for_tod(obs, comps=comps, geom=(map.shape, map.wcs), rot=rot, threads="domdir", interpol=interpol)
     # And perform the actual injection
-    pmat.from_map(map.extract(shape, wcs), dest=obs.signal)
+    pmat.from_map(map.extract(map.shape, map.wcs), dest=obs.signal)
 
 def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
     try:
         # try setting up a context manager that limits the number of threads
-        from threadpoolctl import threadpool_limitse
+        from threadpoolctl import threadpool_limits
         cm = threadpool_limits(limits=1, user_api="blas")
     except:
         # threadpoolctl not available, need a dummy context manager
@@ -134,7 +137,6 @@ def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
         idiv = div*0
         idiv[:,:,hit] = work.T
     return idiv
-
 
 
 def measure_cov(d, nmax=10000):
@@ -233,7 +235,7 @@ def sichol(A):
         return np.linalg.cholesky(-iA), -1
 
 def safe_inv(a):
-    with utils.nowarn():
+    with putils.nowarn():
         res = 1/a
         res[~np.isfinite(res)] = 0
     return res
@@ -329,7 +331,7 @@ def parse_recentering(desc):
             raise ValueError("parse_recentering wants key=value format, but got %s" % (arg))
         # Handle the values
         if ":" in val:
-            val = [float(w)*utils.degree for w in val.split(":")]
+            val = [float(w)*putils.degree for w in val.split(":")]
         info[key] = val
     if "from" not in info:
         raise ValueError("parse_recentering needs at least the from argument")
@@ -339,6 +341,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
     """Evaluate the quaternion that performs the coordinate recentering specified in
     info, which can be obtained from parse_recentering."""
     import ephem
+
     # Get the coordinates of the from, to and up points. This was a bit involved...
     def to_cel(lonlat, sys, ctime=None, site=None, weather=None):
         # Convert lonlat from sys to celestial coorinates. Maybe polish and put elswhere
@@ -370,6 +373,7 @@ def recentering_to_quat_lonlat(p1, p2, pu):
     """Return the quaternion that represents the rotation that takes point p1
     to p2, with the up direction pointing towards the point pu, all given as lonlat pairs"""
     from so3g.proj import quat
+
     # 1. First rotate our point to the north pole: Ry(-(90-dec1))Rz(-ra1)
     # 2. Apply the same rotation to the up point.
     # 3. We want the up point to be upwards, so rotate it to ra = 180°: Rz(pi-rau2)
@@ -395,12 +399,12 @@ def find_boresight_jumps(vals, width=20, tol=0.1):
     # median filter array to get reference behavior
     bad   = np.zeros(vals.size,dtype=bool)
     width = int(width)//2*2+1
-    fvals = utils.block_mean_filter(vals, width)
+    fvals = putils.block_mean_filter(vals, width)
     bad  |= np.abs(vals-fvals) > tol
     return bad
 
 def robust_unwind(a, period=2*np.pi, cut=None, tol=1e-3, mask=None):
-    """Like utils.unwind, but only registers something as an angle jump if
+    """Like putils.unwind, but only registers something as an angle jump if
     it is of just the right shape. If cut is specified, it should be a list
     of valid angle cut positions, which will further restrict when jumps are
     allowed. Only 1d input is supported."""
@@ -421,7 +425,7 @@ def robust_unwind(a, period=2*np.pi, cut=None, tol=1e-3, mask=None):
     # Then correct our values
     return a - np.cumsum(jumps)*period
 
-def find_elevation_outliers(el, tol=0.5*utils.degree):
+def find_elevation_outliers(el, tol=0.5*putils.degree):
     typ = np.median(el[::100])
     return np.abs(el-typ)>tol
 
@@ -439,12 +443,12 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1):
-    ncut  = rangemat_sum(obs.flags.glitch_flags)
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
+    ncut  = rangemat_sum(obs[glitch_flags])
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
-def fix_boresight_glitches(obs, ang_tol=0.1*utils.degree, t_tol=1):
+def fix_boresight_glitches(obs, ang_tol=0.1*putils.degree, t_tol=1):
     az   = robust_unwind(obs.boresight.az)
     bad  = find_boresight_jumps(az,               tol=ang_tol)
     bad |= find_boresight_jumps(obs.boresight.el, tol=ang_tol)
@@ -487,7 +491,7 @@ def downsample_obs(obs, down):
     it uses fourier-resampling when downsampling the detector
     timestreams to avoid both aliasing noise and introducing
     a transfer function."""
-    assert down == utils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
     # Compute how many samples we will end up with
     onsamp = (obs.samps.count+down-1)//down
     # Set up our output axis manager
@@ -499,7 +503,7 @@ def downsample_obs(obs, down):
             if isinstance(val, core.AxisManager):
                 res.wrap(key, val)
             else:
-                axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+                axdesc = [(k, v) for k, v in enumerate(axes) if v is not None]
                 res.wrap(key, val, axdesc)
     # The normal sample stuff
     res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
@@ -507,21 +511,97 @@ def downsample_obs(obs, down):
     for key in ["az", "el", "roll"]:
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
-    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
+    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp),
+             [(0,"dets"),(1,"samps")])
 
-    # The cuts
-    # obs.flags will contain all types of flags. We should query it for glitch_flags and source_flags
-    cut_keys = ["glitch_flags"]
+    # # The cuts
+    # # obs.flags will contain all types of flags. We should query it for glitch_flags
+    # # and source_flags
+    cut_keys = []
+    if "glitch_flags"  in obs:
+        cut_keys.append("glitch_flags")
+    elif "flags.glitch_flags" in obs:
+        cut_keys.append("flags.glitch_flags")
 
-    if "source_flags" in obs.flags:
+    if "source_flags" in obs:
         cut_keys.append("source_flags")
+    elif "flags.source_flags" in obs:
+        cut_keys.append("flags.source_flags")
 
     # We need to add a res.flags FlagManager to res
     res = res.wrap('flags', core.FlagManager.for_tod(res))
 
     for key in cut_keys:
-        res.flags.wrap(key, downsample_cut(getattr(obs.flags, key), down), [(0,"dets"),(1,"samps")])
+        new_key = key.split(".")[-1]
+        res.flags.wrap(new_key, downsample_cut(obs[key], down),
+                       [(0,"dets"),(1,"samps")])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
+
+def import_optional(module_name):
+    try:
+        module = importlib.import_module(module_name)
+        return module
+    except:
+        return None
+
+Base = declarative_base()
+
+class AtomicInfo(Base):
+    __tablename__ = "atomic"
+
+    obs_id: Mapped[str] = mapped_column(primary_key=True)
+    telescope: Mapped[str] = mapped_column(primary_key=True)
+    freq_channel: Mapped[str] = mapped_column(primary_key=True)
+    wafer: Mapped[str] = mapped_column(primary_key=True)
+    ctime: Mapped[int] = mapped_column(primary_key=True)
+    split_label: Mapped[str] = mapped_column(primary_key=True)
+    valid: Mapped[Optional[bool]]
+    split_detail: Mapped[Optional[str]]
+    prefix_path: Mapped[Optional[str]]
+    elevation: Mapped[Optional[float]]
+    azimuth: Mapped[Optional[float]]
+    pwv: Mapped[Optional[float]]
+    dpwv: Mapped[Optional[float]]
+    total_weight_qu: Mapped[Optional[float]]
+    mean_weight_qu: Mapped[Optional[float]]
+    median_weight_qu: Mapped[Optional[float]]
+    leakage_avg: Mapped[Optional[float]]
+    noise_avg: Mapped[Optional[float]]
+    ampl_2f_avg: Mapped[Optional[float]]
+    gain_avg: Mapped[Optional[float]]
+    tau_avg: Mapped[Optional[float]]
+    f_hwp: Mapped[Optional[float]]
+    roll_angle: Mapped[Optional[float]]
+    scan_speed: Mapped[Optional[float]]
+    scan_acc: Mapped[Optional[float]]
+    sun_distance: Mapped[Optional[float]]
+    ambient_temperature: Mapped[Optional[float]]
+    uv: Mapped[Optional[float]]
+    ra_center: Mapped[Optional[float]]
+    dec_center: Mapped[Optional[float]]
+
+    def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
+        self.obs_id = obs_id
+        self.telescope = telescope
+        self.freq_channel = freq_channel
+        self.wafer = wafer
+        self.ctime = ctime
+        self.split_label = split_label
+
+    def __repr__(self):
+        return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
+
+def atomic_db_aux(atomic_db, info, valid = True):
+    info.valid = valid
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        session.add(info)
+        try:
+            session.commit()
+        except exc.IntegrityError:
+            session.rollback()
