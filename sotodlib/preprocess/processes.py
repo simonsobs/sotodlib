@@ -1761,13 +1761,14 @@ class PointingModel(_Preprocess):
             pointing_model.apply_pointing_model(aman)
 
 class CorrectIIRParams(_Preprocess):
-    """Correct missing iir_params by default values if observation is
+    """Correct missing iir_params by default values.
+    If time_range if specified, correct only when the observation is
     within a given time range.
 
     Example config block::
 
         - name: "correct_iir_params"
-          time_range: ["2023-01-01", "2025-01-01"]
+          time_range: ["2023-01-01", "2025-01-01"]  # optional
           process: True
 
     .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
@@ -1780,7 +1781,9 @@ class CorrectIIRParams(_Preprocess):
     def process(self, aman, proc_aman):
         import datetime
         from sotodlib.obs_ops import correct_iir_params
-        if self.time_range is not None:
+        if self.time_range is None:
+            correct_iir_params(aman)
+        else:
             t0 = datetime.datetime.strptime(self.time_range[0], '%Y-%m-%d')
             t1 = datetime.datetime.strptime(self.time_range[1], '%Y-%m-%d')
             t0 = t0.replace(tzinfo=datetime.timezone.utc).timestamp()
