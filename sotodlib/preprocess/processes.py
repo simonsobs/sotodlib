@@ -1750,7 +1750,7 @@ class PointingModel(_Preprocess):
 
         - name : "pointing_model"
           process: True
-          
+
     .. autofunction:: sotodlib.coords.pointing_model.apply_pointing_model
     """
     name = "pointing_model"
@@ -1759,6 +1759,37 @@ class PointingModel(_Preprocess):
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
+
+class CorrectIIRParams(_Preprocess):
+    """Correct missing iir_params by default values.
+    If time_range if specified, correct only when the observation is
+    within a given time range.
+
+    Example config block::
+
+        - name: "correct_iir_params"
+          time_range: ["2023-01-01", "2025-01-01"]  # optional
+          process: True
+
+    .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
+    """
+    name = "correct_iir_params"
+    def __init__(self, step_cfgs):
+        self.time_range = step_cfgs.get('time_range')
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman):
+        import datetime
+        from sotodlib.obs_ops import correct_iir_params
+        if self.time_range is None:
+            correct_iir_params(aman)
+        else:
+            t0 = datetime.datetime.strptime(self.time_range[0], '%Y-%m-%d')
+            t1 = datetime.datetime.strptime(self.time_range[1], '%Y-%m-%d')
+            t0 = t0.replace(tzinfo=datetime.timezone.utc).timestamp()
+            t1 = t1.replace(tzinfo=datetime.timezone.utc).timestamp()
+            if aman.timestamps[0] >= t0 and aman.timestamps[-1] <= t1:
+                correct_iir_params(aman)
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -1793,7 +1824,8 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(RotateQU) 
-_Preprocess.register(SubtractQUCommonMode) 
-_Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(PointingModel) 
+_Preprocess.register(RotateQU)
+_Preprocess.register(SubtractQUCommonMode)
+_Preprocess.register(FocalplaneNanFlags)
+_Preprocess.register(PointingModel)
+_Preprocess.register(CorrectIIRParams)
