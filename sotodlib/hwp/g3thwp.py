@@ -1315,7 +1315,7 @@ class G3tHWP():
         # Find and add glitched references to normal references
         used_ind_pairs = []
         def _before(x, ind):
-            return abs(x - ind) + 1e8*(1 - np.sign(x + ind))
+            return abs(x - ind) + 1e8*(1 + np.sign(x - ind))
         def _after(x, ind):
             return abs(x - ind) + 1e8*(1 - np.sign(x - ind))
 
@@ -1607,14 +1607,14 @@ class G3tHWP():
         Generates a mask of 'good' points in an array which is expected to follow
         a bimodal distribution
         """
-        return_mask = []
+        return_mask = [True, True]
         toggle = not start
         diff_sum = 0
         prev_res = 0
         # Iterate over ever point in the array, checking the rolling sum
         # against what it is expected to be. If the residual doesn't follow
         # the expected pattern, mask that point as a glitch
-        for ind, diff in enumerate(diffs):
+        for ind, diff in enumerate(diffs[2:]):
             diff_sum += diff
             res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
             if prev_res > res:
@@ -1633,6 +1633,9 @@ class G3tHWP():
             return_mask.append(True)
             return_mask = return_mask[1:]
 
+        if np.sum(return_mask) == self._num_edges + 1 and diffs[-1] < 0.3 * low:
+            return_mask[-1] = False
+
         # Check that the number of valid points is what we expect in one rotation
         if np.sum(return_mask) == self._num_edges:
             return True, return_mask
@@ -1643,7 +1646,7 @@ class G3tHWP():
         """ Removes glitches that change the encoder value """
         diff_matrix = np.split(self._encd_diff, self._ref_indexes)
         # Find the average value in each rotation
-        norm_matrix = np.array([[np.mean(diff)] for diff in diff_matrix])
+        norm_matrix = np.array([[np.mean(diff[1:])] for diff in diff_matrix])
         # Average rotation template
         template = np.median(diff_matrix[1:-1]/norm_matrix[1:-1], axis=0)
         expectation = (norm_matrix*template).flatten()
