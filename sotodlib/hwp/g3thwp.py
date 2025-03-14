@@ -938,27 +938,22 @@ class G3tHWP():
         end = int(tod.timestamps[-1])+self._margin
 
         self.data = {}
-        try:
-            if h5_filename is not None:
-                logger.info('Loading raw encoder data from h5')
-                try:
-                    obs_id = tod.obs_info['obs_id']
-                    self.data = self._load_raw_axes(aman, h5_filename, obs_id)
-                except Exception as e:
-                    logger.error(f"Exception '{e}' thrown while loading HWP data from h5. Attempt to load from hk.")
-                    self.data = self.load_data(start, end)
-
-            else:
+        if h5_filename is not None:
+            logger.info('Loading raw encoder data from h5')
+            obs_id = tod.obs_info['obs_id']
+            self.data = self._load_raw_axes(aman, h5_filename, obs_id)
+        else:
+            try:
                 self.data = self.load_data(start, end)
 
-        except Exception as e:
-            logger.error(
-                f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
-            self._write_solution_h5_logger = 'HWP data too short'
-            print(traceback.format_exc())
+            except Exception as e:
+                logger.error(
+                    f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
+                self._write_solution_h5_logger = 'HWP data too short'
+                print(traceback.format_exc())
 
-        finally:
-            self._set_raw_axes(aman, self.data)
+            finally:
+                    self._set_raw_axes(aman, self.data)
 
         return aman
 

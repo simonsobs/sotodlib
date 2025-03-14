@@ -10,11 +10,15 @@ import argparse
 import logging
 import yaml
 import traceback
+import sqlite3
 from typing import Optional
 
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
+
+max_trial = 5
+wait_time = 5
 
 logger = util.init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
 
@@ -77,48 +81,81 @@ def make_db(db_filename):
     dest_file, dest_dataset = policy.get_dest(obs_id)
     Use 'output_dir' argument for now
     """
-
-    if os.path.exists(db_filename):
-        logger.info(f"Mapping {db_filename} for the "
-                    "archive index.")
-        db = core.metadata.ManifestDb(db_filename)
-    else:
-        logger.info(f"Creating {db_filename} for the "
-                    "archive index.")
-        scheme = core.metadata.ManifestScheme()
-        scheme.add_exact_match('obs:obs_id')
-        scheme.add_data_field('dataset')
-        db = core.metadata.ManifestDb(
-            db_filename,
-            scheme=scheme
-        )
-    return db
+    for i in range(1, max_trial + 1):
+        try:
+            if os.path.exists(db_filename):
+                logger.info(f"Mapping {db_filename} for the "
+                            "archive index.")
+                db = core.metadata.ManifestDb(db_filename)
+            else:
+                logger.info(f"Creating {db_filename} for the "
+                            "archive index.")
+                scheme = core.metadata.ManifestScheme()
+                scheme.add_exact_match('obs:obs_id')
+                scheme.add_data_field('dataset')
+                db = core.metadata.ManifestDb(
+                    db_filename,
+                    scheme=scheme
+                )
+            return db
+        except sqlite3.OperationalError:
+            logger.warn(f"db is temporary locked, try again in {wait_time} seconds, "
+                        f"trial {i}/{max_trial}")
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while making db")
+            print(traceback.format_exc())
+            break
+    raise sqlite3.OperationalError(f'{db_filename} is locked, give up.')
 
 
 def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
     """
     Save HDF5 file and add entry to sqlite database
+    Return True if save is succeeded, otherwise return False
     """
-    max_trial = 5
-    wait_time = 5
+    aman_saved = False
+    db_saved = False
+
     for i in range(1, max_trial + 1):
         try:
             aman.save(os.path.join(output_dir, h5_filename), obs_id, overwrite, compression)
             logger.info("Saved aman")
-            db.add_entry(
-                {'obs:obs_id': obs_id, 'dataset': obs_id}, filename=h5_filename, replace=overwrite,
-            )
-            logger.info("Added entry to db")
-            return
+            aman_saved = True
+            break
         except BlockingIOError:
-            logger.warn(f"Cannot save aman because HDF5 is temporary locked, try again in {wait_time} seconds, trial {i}/{max_trial}")
+            logger.warn("Cannot save aman because HDF5 is temporary locked, "
+                        f"try again in {wait_time} seconds, trial {i}/{max_trial}")
             time.sleep(wait_time)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while saving aman")
             print(traceback.format_exc())
             break
+    if not aman_saved:
+        logger.error("Cannot save aman, give up.")
+        return False
 
-    logger.error("Cannot save aman, give up.")
+    for i in range(1, max_trial + 1):
+        try:
+            db.add_entry(
+                {'obs:obs_id': obs_id, 'dataset': obs_id}, filename=h5_filename, replace=overwrite,
+            )
+            logger.info("Added entry to db")
+            db_saved = True
+            break
+        except sqlite3.OperationalError:
+            logger.warn("Cannot save db because db is temporary locked, "
+                        f"try again in {wait_time} seconds, trial {i}/{max_trial}")
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while saving aman")
+            print(traceback.format_exc())
+            break
+    if not db_saved:
+        logger.error("Cannot save db, give up.")
+        return False
+
+    return True
 
 
 def main(
@@ -213,13 +250,18 @@ def main(
             aman_encoder = g3thwp.set_data(tod, h5_filename=os.path.join(encoder_output_dir, h5_encoder))
         else:
             aman_encoder = g3thwp.set_data(tod)
-        logger.info("Saving hwp_encoder")
-        save(aman_encoder, db_encoder, h5_encoder, encoder_output_dir, obs_id, overwrite, 'gzip')
+            logger.info("Saving hwp_encoder")
+            success = save(aman_encoder, db_encoder, h5_encoder, encoder_output_dir, obs_id, overwrite, 'gzip')
+            if not success:
+                logger.warning("Failed to save hwp_encoder, skip hwp_angle process")
+                continue
         del aman_encoder
 
         aman_solution = g3thwp.make_solution(tod)
         logger.info("Saving hwp_angle")
-        save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite, 'gzip')
+        success = save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite, 'gzip')
+        if not success:
+            logger.warning("Failed to save hwp_angle")
         del aman_solution
         del g3thwp
 
