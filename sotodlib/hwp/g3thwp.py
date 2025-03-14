@@ -1539,12 +1539,12 @@ class G3tHWP():
                     # If the rotation had a packet drop
                     if np.any([start_clk < edges[0] and end_clk > edges[1] for edges in self._edges_dropped_pkts]):
                         # Fill the rotation with data from an adjacent rotation
-                        if i:
-                            gap_clk = self._encd_clk[self._ref_indexes[i-1]:self._ref_indexes[i]] \
-                                    - self._encd_clk[self._ref_indexes[i-1]] + self._encd_clk[data._ref_indexes[i]]
-                        else:
+                        if i == 0:
                             gap_clk = self._encd_clk[self._ref_indexes[i+1]:self._ref_indexes[i+2]] \
                                     - self._encd_clk[self._ref_indexes[i+1]] + self._encd_clk[self._ref_indexes[i]]
+                        else:
+                            gap_clk = self._encd_clk[self._ref_indexes[i-1]:self._ref_indexes[i]] \
+                                    - self._encd_clk[self._ref_indexes[i-1]] + self._encd_clk[self._ref_indexes[i]]
 
                         corr_factor = (self._encd_clk[self._ref_indexes[i+1]] - self._encd_clk[self._ref_indexes[i]]) \
                                 * (self._num_edges - 1) / (gap_clk[-1] - gap_clk[0]) / (self._num_edges)
