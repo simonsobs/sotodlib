@@ -8,18 +8,9 @@ from typing import Optional
 from pixell import bunch, enmap, tilemap
 from pixell import utils as putils
 
+from . import utils as smutils
 from .. import coords
 from .pointing_matrix import PmatCut
-from .utilities import (
-    MultiZipper,
-    recentering_to_quat_lonlat,
-    evaluate_recentering,
-    TileMapZipper,
-    MapZipper,
-    safe_invert_div,
-    unarr,
-    ArrayZipper,
-)
 from .noise_model import NmatUncorr
 
 class MLMapmaker:
@@ -48,7 +39,7 @@ class MLMapmaker:
         self.verbose = verbose
         self.noise_model = noise_model
         self.data = []
-        self.dof = MultiZipper()
+        self.dof = smutils.MultiZipper()
         self.ready = False
         self.glitch_flags_path = glitch_flags
 
@@ -336,12 +327,12 @@ class SignalMap(Signal):
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
             if self.recenter:
-                rot = recentering_to_quat_lonlat(
-                    *evaluate_recentering(
+                rot = smutils.recentering_to_quat_lonlat(
+                    *smutils.evaluate_recentering(
                         self.recenter,
                         ctime=ctime[len(ctime) // 2],
                         geom=(self.rhs.shape, self.rhs.wcs),
-                        site=unarr(obs.site),
+                        site=smutils.unarr(obs.site),
                     )
                 )
             else:
@@ -352,8 +343,8 @@ class SignalMap(Signal):
                 geom=self.rhs.geometry,
                 rot=rot,
                 threads="domdir",
-                weather=unarr(obs.weather),
-                site=unarr(obs.site),
+                weather=smutils.unarr(obs.weather),
+                site=smutils.unarr(obs.site),
                 interpol=self.interpol,
             )
         # Build the RHS for this observation
@@ -395,7 +386,7 @@ class SignalMap(Signal):
             self.rhs = tilemap.redistribute(self.rhs, self.comm)
             self.div = tilemap.redistribute(self.div, self.comm)
             self.hits = tilemap.redistribute(self.hits, self.comm)
-            self.dof = TileMapZipper(
+            self.dof = smutils.TileMapZipper(
                 self.rhs.geometry, dtype=self.dtype, comm=self.comm
             )
         else:
@@ -403,8 +394,8 @@ class SignalMap(Signal):
                 self.rhs = putils.allreduce(self.rhs, self.comm)
                 self.div = putils.allreduce(self.div, self.comm)
                 self.hits = putils.allreduce(self.hits, self.comm)
-            self.dof = MapZipper(*self.rhs.geometry, dtype=self.dtype)
-        self.idiv = safe_invert_div(self.div)
+            self.dof = smutils.MapZipper(*self.rhs.geometry, dtype=self.dtype)
+        self.idiv = smutils.safe_invert_div(self.div)
         self.ready = True
 
     @property
@@ -459,16 +450,16 @@ class SignalMap(Signal):
         if self.tiled: return tilemap.zeros(self.rhs.geometry, self.rhs.dtype)
         else:          return enmap.zeros(*self.rhs.geometry,  self.rhs.dtype)
 
-    def write(self, prefix, tag, m):
+    def write(self, prefix, tag, m, unit='K'):
         if not self.output:
             return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.tiled:
-            tilemap.write_map(oname, m, self.comm)
+            tilemap.write_map(oname, m, self.comm, extra={'BUNIT':unit})
         else:
             if self.comm is None or self.comm.rank == 0:
-                enmap.write_map(oname, m)
+                enmap.write_map(oname, m, extra={'BUNIT':unit})
         return oname
 
     def _checkcompat(self, other):
@@ -543,7 +534,7 @@ class SignalCut(Signal):
         if self.ready: return
         self.rhs = np.concatenate(self.rhs)
         self.div = np.concatenate(self.div)
-        self.dof = ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
+        self.dof = smutils.ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
 
     def forward(self, id, tod, junk):

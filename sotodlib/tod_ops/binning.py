@@ -3,8 +3,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 def bin_signal(aman, bin_by, signal=None,
-                   range=None, bins=100, flags=None,
-                   weight_for_signal=None):
+               range=None, bins=100, flags=None,
+               weight_for_signal=None):
     """
     Bin time-ordered data by the ``bin_by`` and return the binned signal and its standard deviation.
 
@@ -23,8 +23,9 @@ def bin_signal(aman, bin_by, signal=None,
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
         If `bins` is a sequence, `bins` overwrite `range`.
-    flags : RangesMatrix, optional
+    flags : (str or RangesMatrix or Ranges), optional
         Flag indicating whether to exclude flagged samples when binning the signal.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
         Default is no mask applied.
     weight_for_signal : array-like, optional
         Array of weights for the signal values. If None, all weights are assumed to be 1. You can get a apodizing window by
@@ -75,10 +76,11 @@ def bin_signal(aman, bin_by, signal=None,
         binned_signal_sigma[:, mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[:,mcnts] - binned_signal[:,mcnts]**2)
                                       ) / np.sqrt(bin_counts[mcnts])
         bin_counts_dets = np.tile(bin_counts, (aman.dets.count, 1))
-            
+
     else:
         bin_counts_dets = np.full([aman.dets.count, nbins], np.nan)
-
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
         if flags.shape == (aman.dets.count, aman.samps.count):
             flag_is_2d = True
             m_2d = ~flags.mask()
@@ -91,7 +93,7 @@ def bin_signal(aman, bin_by, signal=None,
         for i, dets in enumerate(aman.dets.vals):
             if flag_is_2d:
                 m = m_2d[i]
-                
+
             if weight_for_signal.shape == (aman.dets.count, aman.samps.count):
                 weight_for_signal_det = weight_for_signal[i]
             elif weight_for_signal.shape == (aman.samps.count, ):
