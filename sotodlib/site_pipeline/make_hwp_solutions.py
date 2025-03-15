@@ -99,8 +99,8 @@ def make_db(db_filename):
                 )
             return db
         except sqlite3.OperationalError:
-            logger.warn(f"db is temporary locked, try again in {wait_time} seconds, "
-                        f"trial {i}/{max_trial}")
+            logger.warning(f"db is temporary locked, try again in {wait_time} seconds, "
+                           f"trial {i}/{max_trial}")
             time.sleep(wait_time)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while making db")
@@ -124,8 +124,8 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
             aman_saved = True
             break
         except BlockingIOError:
-            logger.warn("Cannot save aman because HDF5 is temporary locked, "
-                        f"try again in {wait_time} seconds, trial {i}/{max_trial}")
+            logger.warning("Cannot save aman because HDF5 is temporary locked, "
+                           f"try again in {wait_time} seconds, trial {i}/{max_trial}")
             time.sleep(wait_time)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while saving aman")
@@ -144,8 +144,7 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
             db_saved = True
             break
         except sqlite3.OperationalError:
-            logger.warn("Cannot save db because db is temporary locked, "
-                        f"try again in {wait_time} seconds, trial {i}/{max_trial}")
+            logger.warning(f"Cannot save db, try again in {wait_time} seconds, trial {i}/{max_trial}")
             time.sleep(wait_time)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while saving aman")

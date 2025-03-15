@@ -441,6 +441,18 @@ class G3tHWP():
                 * Flag indicating the points that are filled due to packet drop.
             * bad_revolution_flag: boolean array
                 * Flag indicating the points of bad revolutions that are contaminated with noise.
+            * num_dropped_packets
+                * number of dropped encoder packets
+            * num_dropped_packets_irig
+                * number of dropped irig packets
+            * num_glitches
+                * number of encoder data point glitches, unexpected data points
+            * num_value_glitches
+                * number of encoder value glitches, points with value shift due to glitches
+            * num_glitches_irig
+                * number of irig data point glitches, unexpected data points
+            * num_value_glitches_irig
+                * number of irig value glitches, points with value shift due to glitches
         """
 
         if not any(data):
@@ -477,13 +489,17 @@ class G3tHWP():
             for r in self._filled_ranges:
                 filled_flag[r[0]:r[1]] = 1
             out['filled_flag'+suffix] = filled_flag
-            out['num_dropped_packets'+suffix] = self._num_dropped_pkts
+            out['num_dropped_packets'+suffix] = int(self._num_dropped_pkts)
+            out['num_dropped_packets_irig'+suffix] = int(self._num_dropped_pkts_irig)
             bad_revolution_flag = np.zeros_like(fast_time, dtype=bool)
             for i in self._bad_ref:
                 ri = self._ref_indexes[i]
                 bad_revolution_flag[ri:ri+self._num_edges] = 1
             out['bad_revolution_flag'+suffix] = bad_revolution_flag
-            out['num_glitches'+suffix] = self._num_glitches
+            out['num_glitches'+suffix] = int(self._num_glitches)
+            out['num_value_glitches'+suffix] = int(self._num_value_glitches)
+            out['num_glitches_irig'+suffix] = int(self._num_glitches_irig)
+            out['num_value_glitches_irig'+suffix] = int(self._num_value_glitches_irig)
         return out
 
     def eval_angle(self, solved, poly_order=3, suffix='_1'):
@@ -848,7 +864,11 @@ class G3tHWP():
             aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('bad_revolution_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap('num_dropped_packets'+suffix, 0)
+            aman.wrap('num_dropped_packets_irig'+suffix, 0)
             aman.wrap('num_glitches'+suffix, 0)
+            aman.wrap('num_glitches_irig'+suffix, 0)
+            aman.wrap('num_value_glitches'+suffix, 0)
+            aman.wrap('num_value_glitches_irig'+suffix, 0)
             aman.wrap('version'+suffix, 1)
             aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -1116,7 +1136,11 @@ class G3tHWP():
             aman['hwp_angle_ver1'+suffix] = np.mod(self._angle_interpolation(
                 solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
             aman['num_dropped_packets'+suffix] = solved['num_dropped_packets'+suffix]
+            aman['num_dropped_packets_irig'+suffix] = solved['num_dropped_packets_irig'+suffix]
             aman['num_glitches'+suffix] = solved['num_glitches'+suffix]
+            aman['num_glitches_irig'+suffix] = solved['num_glitches_irig'+suffix]
+            aman['num_value_glitches'+suffix] = solved['num_value_glitches'+suffix]
+            aman['num_value_glitches_irig'+suffix] = solved['num_value_glitches_irig'+suffix]
 
             # version 2
             # calculate template subtracted angle
@@ -1174,23 +1198,23 @@ class G3tHWP():
             mod2pi,
             fast):
 
-        #   counter: BBB counter values for encoder signal edges
+        # counter: BBB counter values for encoder signal edges
         self._encd_clk = counter
 
-        #   counter_index: index numbers for detected edges by BBB
+        # counter_index: index numbers for detected edges by BBB
         self._encd_cnt = counter_idx
 
-        #   irig_time: decoded time in second since the unix epoch
+        # irig_time: decoded time in second since the unix epoch
         self._irig_time = irig_time
 
         # rising_edge_count: BBB clcok count values for the IRIG on-time
         # reference marker risinge edge
         self._rising_edge = rising_edge
 
-        # Reference slit indexes
+        # reference slit indexes
         self._ref_indexes = []
 
-        #   quad: quadrature signal to determine rotation direction
+        # quad: quadrature signal to determine rotation direction
         self._quad_time = quad_time
         self._quad = quad
 
@@ -1202,10 +1226,14 @@ class G3tHWP():
 
         # metadata of packet drop
         self._num_dropped_pkts = 0
+        self._num_dropped_pkts_irig = 0
         self._filled_ranges = []
 
         # keep bad data points as a dictionary
         self._num_glitches = 0
+        self._num_value_glitches = 0
+        self._num_glitches_irig = 0
+        self._num_value_glitches_irig = 0
         self._bad_ref = []
 
         # if no data, skip analysis
@@ -1232,9 +1260,6 @@ class G3tHWP():
         _status_find_ref = self._find_refs()
         if not _status_find_ref:
             return [], []
-
-        # fix reference
-        # self._fix_ref()
 
         # correct references with glitches
         self._correct_bad_refs()
@@ -1364,16 +1389,6 @@ class G3tHWP():
             self._ref_cnt = np.take(self._encd_cnt, self._ref_indexes)
 
         return True
-
-    def _fix_ref(self):
-        """Delete unexpected ref slit indexes
-        this type of unexpected ref slit is produced from packet drop filling and
-        noise in encoder data
-        """
-        bad_ref_indexes = np.where(np.diff(self._ref_indexes) < self._num_edges - 2)[0]
-        if len(bad_ref_indexes) > 0:
-            logger.warning(f'Delete {len(bad_ref_indexes)} unexpected ref indexes')
-            self._ref_indexes = np.delete(self._ref_indexes, bad_ref_indexes)
 
     def _correct_bad_refs(self, plot=False, **kwargs):
         """ Corrects glitches in reference slits """
@@ -1669,6 +1684,7 @@ class G3tHWP():
                     try:
                         error[i+j] -= dist_sign*dist
                         error[i+j+1:i+j+1+dist_inds] += dist_sign*dist/dist_inds
+                        self._num_value_glitches += 1
                     except IndexError:
                         pass
 
@@ -1722,7 +1738,15 @@ class G3tHWP():
                            np.full(len(self._irig_time)-1, 0.1)))[0]
         if len(self._irig_time) - 1 == len(idx):
             return
+
+        # check packet drop or data point glitches
         elif len(self._irig_time) > len(idx) and len(idx) > 0:
+            self._num_glitches_irig = np.sum(np.diff(self._irig_time) < 1)
+            if self._num_glitches_irig > 0:
+                logger.warning(f'{self._num_glitches_irig} additional irig time is detected')
+            self._num_dropped_pkts_irig = np.sum(np.diff(self._irig_time) > 1)
+            if self._num_dropped_pkts_irig > 0:
+                logger.warning(f'{self._num_dropped_pkts_irig} irig packet drops is detected')
             if np.any(np.diff(self._irig_time) > 5):
                 logger.warning(
                     'a part of the IRIG time is incorrect, performing the correction process...')
@@ -1733,6 +1757,22 @@ class G3tHWP():
         else:
             self._irig_time = np.array([])
             self._rising_edge = np.array([])
+            return
+
+        # check value glitches of irig rising edges
+        def min_distance_clk(time, interval):
+            mod = np.mod(time, interval)
+            return np.min([mod, interval - mod], axis=0)
+
+        bbb_clk = np.diff(self._rising_edge)
+        avg_bbb_clk = np.median(bbb_clk)
+        self._num_value_glitches_irig = np.sum(min_distance_clk(bbb_clk, avg_bbb_clk) >= 1e5)
+        if self._num_value_glitches_irig > 0:
+            logger.warning(f'{self._num_value_glitches_irig} glitched irig_time is detected')
+            idx = np.where(min_distance_clk(bbb_clk, avg_bbb_clk) < 1e5)[0]
+            if len(self._irig_time) > len(idx) and len(idx) > 0:
+                self._irig_time = self._irig_time[idx]
+                self._rising_edge = self._rising_edge[idx]
 
     def _process_counter_overflow_glitch(self):
         """
