@@ -4,7 +4,7 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
 import so3g
-from pixell import enmap, fft, resample, tilemap, bunch utils as putils
+from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
 
 from .. import coords, core, tod_ops
 
