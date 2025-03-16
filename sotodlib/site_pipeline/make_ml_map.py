@@ -50,6 +50,7 @@ from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops, mapmaking, core
 from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
+import yaml
 from enlib import log
 
 try: import moby2.analysis.socompat
@@ -309,9 +310,9 @@ def main(**args):
 
             L.info("Done preparing")
 
-            signal_map.write(pass_prefix, "rhs", signal_map.rhs)
-            signal_map.write(pass_prefix, "div", signal_map.div)
-            signal_map.write(pass_prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs))
+            signal_map.write(prefix, "rhs", signal_map.rhs, unit=args['unit']+'^-1')
+            signal_map.write(prefix, "div", signal_map.div, unit=args['unit']+'^-2')
+            signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args['unit'])
 
             L.info("Wrote rhs, div, bin")
 
@@ -326,13 +327,13 @@ def main(**args):
                     if dump:
                             for signal, val in zip(signals, step.x):
                                     if signal.output:
-                                            signal.write(pass_prefix, "map%04d" % step.i, val)
+                                            signal.write(prefix, "map%04d" % step.i, val, unit=args['unit'])
                     t1 = time.time()
 
             L.info("Done")
             for signal, val in zip(signals, step.x):
                     if signal.output:
-                            signal.write(pass_prefix, "map", val)
+                            signal.write(prefix, "map", val, unit=args['unit'])
             comm.Barrier()
 
             mapmaker_prev = mapmaker
