@@ -335,7 +335,7 @@ def expand_ids(obs_ids, context=None, bands=None):
     if context is not None:
         info   = context.obsdb.query()
         actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
-        inds   = utils.find(info["obs_id"], actual_obs_ids)
+        inds   = putils.find(info["obs_id"], actual_obs_ids)
         flavors= info["tube_flavor"][inds]
         flavors= [flavor.lower() for flavor in flavors]
         flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280"), None:("f000",)}
@@ -603,7 +603,7 @@ def downsample_obs(obs, down, skip_signal=False):
     it uses fourier-resampling when downsampling the detector
     timestreams to avoid both aliasing noise and introducing
     a transfer function."""
-    assert down == utils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
     if down == 1: return obs
     # Compute how many samples we will end up with
     onsamp = (obs.samps.count+down-1)//down
@@ -698,8 +698,8 @@ def setup_passes(downsample="1", maxiter="500", interpol="nearest", npass=None):
      returns bunch.Bunch(downsample=[4,4,1], maxiter=[300,300,50],
       interpol=["linear","linear","linear"])"""
     tmp            = bunch.Bunch()
-    tmp.downsample = utils.parse_ints(downsample)
-    tmp.maxiter    = utils.parse_ints(maxiter)
+    tmp.downsample = putils.parse_ints(downsample)
+    tmp.maxiter    = putils.parse_ints(maxiter)
     tmp.interpol   = interpol.split(",")
     # The entries may have different lengths. We use the max
     # and then pad the others by repeating the last element.
