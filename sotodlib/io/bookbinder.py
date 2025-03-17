@@ -533,7 +533,7 @@ class SmurfStreamProcessor:
         self.readout_ids = readout_ids
         self.out_files = []
         self.book_id = book_id
-        self.allow_bad_timing = allow_bad_timing,
+        self.allow_bad_timing = allow_bad_timing
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
