@@ -358,7 +358,7 @@ def load_wafer_data(filename, array_name, sub_array_name=None):
     if sub_array_name is not None:
         switches = {
             "L" : {"f090" : "f030", "f150" : "f040"},
-            "U" : {"f090" : "f230", "f150" : "f290"},
+            "U" : {"f090" : "f220", "f150" : "f280"},
         }
         for i in range(len(rs)):
             row = rs.rows[i]
