@@ -1,3 +1,4 @@
+import datetime
 from sotodlib import core
 import logging
 
@@ -6,9 +7,11 @@ logger = logging.getLogger(__name__)
 
 def correct_iir_params(aman):
     """
-    Add iir_params if missing
+    Correct missing iir_params by default values.
+    This corrects iir_params only when the observation is within the time_range
+    that is known to have problem.
 
-    See `sotodlib.tod_ops.filters.iir_filter` for more detail
+    See `sotodlib.tod_ops.filters.iir_filter` for more details of iir_params
 
     Parameters
     ----------
@@ -28,15 +31,37 @@ def correct_iir_params(aman):
          0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
          0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00]
 
+    time_range = {
+        'satp1': None,
+        'satp2': None,
+        'satp3': ['2023-01-01', '2024-10-24'],
+        'lat': None,
+    }[aman.obs_info.telescope]
+
     iir_missing = []
     for _field, _sub_iir_params in aman.iir_params._fields.items():
         if isinstance(_sub_iir_params, core.AxisManager):
             if 'a' in _sub_iir_params._fields:
                 if _sub_iir_params['a'] is None:
                     iir_missing.append(_field)
-                    logger.warning(f'iir_params are missing on {_field}. '
-                                   'Fill default params.')
-                    _sub_iir_params['a'] = a
-                    _sub_iir_params['b'] = b
 
+    within_range = False
+    if time_range is not None:
+        t0 = datetime.datetime.strptime(time_range[0], '%Y-%m-%d')
+        t1 = datetime.datetime.strptime(time_range[1], '%Y-%m-%d')
+        t0 = t0.replace(tzinfo=datetime.timezone.utc).timestamp()
+        t1 = t1.replace(tzinfo=datetime.timezone.utc).timestamp()
+        within_range = aman.timestamps[0] >= t0 and aman.timestamps[-1] <= t1
+
+    if within_range:
+        for field in iir_missing:
+            logger.warning(f'iir_params are missing on {field}. '
+                           'Fill default params.')
+            aman[f'iir_params.{field}.a'] = a
+            aman[f'iir_params.{field}.b'] = b
+    else:
+        if len(iir_missing) > 0:
+            raise ValueError('iir_params are missing but the observaiton is '
+                             'not in a time range that is known to have a '
+                             'problem. ' + ' '.join(iir_missing))
     return iir_missing
