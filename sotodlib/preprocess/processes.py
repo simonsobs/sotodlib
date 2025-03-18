@@ -1773,9 +1773,6 @@ class CorrectIIRParams(_Preprocess):
     .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
     """
     name = "correct_iir_params"
-    def __init__(self, step_cfgs):
-        self.time_range = step_cfgs.get('time_range')
-        super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman):
         from sotodlib.obs_ops import correct_iir_params
