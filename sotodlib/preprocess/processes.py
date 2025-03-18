@@ -795,26 +795,20 @@ class A2Stats(_Preprocess):
     name = "a2_stats"
 
     def calc_and_save(self, aman, proc_aman):
-        # Get A2 signal using the demod_tod function; this function generates intermediary
-        # dsT, demodQ, demodU fields in the AxisManager that will be deleted
-        hwp.demod_tod(aman, demod_mode=2)
+        # Get A2 signal using the demod_tod function
+        _, demodQ, demodU = hwp.demod_tod(aman, demod_mode=2, wrap=False)
 
         # Compute A2 stats
         stat_names = self.calc_cfgs.get("stat_names", ["mean", "median", "var", "ptp"])
         split_subscans = self.calc_cfgs.get("subscan", False)
         # Q
-        a2stats_aman = tod_ops.flags.get_stats(aman, aman.demodQ, stat_names=stat_names, split_subscans=split_subscans)
+        a2stats_aman = tod_ops.flags.get_stats(aman, demodQ, stat_names=stat_names, split_subscans=split_subscans)
         for sn in stat_names:
             a2stats_aman.move(sn, f"{sn}Q")
         # U
-        a2stats_aman.merge(tod_ops.flags.get_stats(aman, aman.demodU, stat_names=stat_names, split_subscans=split_subscans))
+        a2stats_aman.merge(tod_ops.flags.get_stats(aman, demodU, stat_names=stat_names, split_subscans=split_subscans))
         for sn in stat_names:
             a2stats_aman.move(sn, f"{sn}U")
-
-        # Delete the intermediary data fields from the AxisManager
-        aman.move('dsT', None)
-        aman.move('demodQ', None)
-        aman.move('demodU', None)
 
         aman.wrap("a2_stats", a2stats_aman)
         self.save(proc_aman, a2stats_aman)
