@@ -802,20 +802,22 @@ class A2Stats(_Preprocess):
         # Compute A2 stats
         stat_names = self.calc_cfgs.get("stat_names", ["mean", "median", "var", "ptp"])
         split_subscans = self.calc_cfgs.get("subscan", False)
-        am_name = "a2_stats"
         # Q
-        tod_ops.flags.get_stats(aman, aman.demodQ, stat_names=stat_names, split_subscans=split_subscans, name=am_name, merge=True)
-        for sn in stat_names: aman[am_name].move(sn, f"{sn}Q")
+        a2stats_aman = tod_ops.flags.get_stats(aman, aman.demodQ, stat_names=stat_names, split_subscans=split_subscans)
+        for sn in stat_names:
+            a2stats_aman.move(sn, f"{sn}Q")
         # U
-        aman[am_name].merge(tod_ops.flags.get_stats(aman, aman.demodU, stat_names=stat_names, split_subscans=split_subscans))
-        for sn in stat_names: aman[am_name].move(sn, f"{sn}U")
+        a2stats_aman.merge(tod_ops.flags.get_stats(aman, aman.demodU, stat_names=stat_names, split_subscans=split_subscans))
+        for sn in stat_names:
+            a2stats_aman.move(sn, f"{sn}U")
 
         # Delete the intermediary data fields from the AxisManager
         aman.move('dsT', None)
         aman.move('demodQ', None)
         aman.move('demodU', None)
 
-        self.save(proc_aman, aman[am_name])
+        aman.wrap("a2_stats", a2stats_aman)
+        self.save(proc_aman, a2stats_aman)
 
     def save(self, proc_aman, a2_stats):
         if self.save_cfgs is None:
