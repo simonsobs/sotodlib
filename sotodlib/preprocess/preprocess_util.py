@@ -1032,14 +1032,20 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
                                   start=os.path.dirname(configs['archive']['index']))
 
         src_file = outputs['temp_file']
+
+        logger.debug(f"Source file: {src_file}")
+        logger.debug(f"Destination file: {dest_file}")
+
         with h5py.File(dest_file,'a') as f_dest:
             with h5py.File(src_file,'r') as f_src:
                 for dts in f_src.keys():
+                    logger.debug(f"\t{dts}")
                     # If the dataset or group already exists, delete it to overwrite
                     if overwrite and dts in f_dest:
                         del f_dest[dts]
                     f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
                     for member in f_src[dts]:
+                        logger.debug(f"\t{dts}/{member}")
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
         logger.info(f"Saving to database under {outputs['db_data']}")

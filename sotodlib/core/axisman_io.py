@@ -329,7 +329,7 @@ def _load_axisman(src, group=None, cls=None, fields=None):
             x = _load_axisman(src[item['name']], fields=subfields)
             if item['subclass'] == 'FlagManager':
                 x = FlagManager.promote(x, *item['special_axes'])
-            axisman.wrap(item['name'], x)
+            axisman.wrap(item['name'], x, restrict_in_place=True)
         elif item['encoding'] == 'rangesmatrix':
             x = src[item['name']]
             rm_flat = {k: x[k][:] for k in ['shape', 'intervals', 'ends']}

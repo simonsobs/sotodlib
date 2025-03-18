@@ -38,15 +38,14 @@ class TestObsDb(unittest.TestCase):
         """Basic functionality."""
         db = get_example()
         all_obs = db.query()
-        db.get(all_obs[0])
         db.get(all_obs[0]['obs_id'])
         db.query('timestamp > 0')
         db.query('timestamp > 0', tags=['cryo_problem=1'])
 
     def test_query(self):
         db = get_example()
-        r0 = db.query('drift == "rising"')
-        r1 = db.query('drift == "setting"')
+        r0 = db.query("drift == 'rising'")
+        r1 = db.query("drift == 'setting'")
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
 

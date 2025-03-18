@@ -76,6 +76,7 @@ def preprocess_tod(obs_id,
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
+
     outputs = []
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -381,9 +382,12 @@ def main(
             futures.remove(future)
 
             if db_datasets:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
-                for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                if err is None:
+                    logger.info(f'Processing future result db_dataset: {db_datasets}')
+                    for db_dataset in db_datasets:
+                        pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                else:
+                    pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)

@@ -20,6 +20,9 @@ The config file could be of the form:
     lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
+    known_bad_books: 
+    - oper_1736874485_satp3_0000100
+    - obs_9999999999_satp0_1111111
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -30,7 +33,7 @@ The config file could be of the form:
 
 from sotodlib.core.metadata import ObsDb
 from sotodlib.core import Context 
-from sotodlib.site_pipeline.check_book import main as checkbook
+from sotodlib.site_pipeline import check_book
 from sotodlib.io import load_book
 import os
 import glob
@@ -150,6 +153,8 @@ def main(config: str,
         bookcartobsdb.add_obs_columns(col_list)
     if "skip_bad_books" not in config_dict:
         config_dict["skip_bad_books"] = False
+    if "known_bad_books" not in config_dict:
+        config_dict["known_bad_books"] = []
         
     #How far back we should look
     tnow = time.time()
@@ -177,9 +182,12 @@ def main(config: str,
                 _, book_id = os.path.split(dirpath)
                 if book_id in existing and not overwrite:
                     continue
-                found_timestamp = re.search(r"\d{10}", book_id)#Find the rough timestamp
-                if found_timestamp and int(found_timestamp.group())>tback:
-                    #Looks like a book folder and young enough
+                if book_id in config_dict["known_bad_books"]:
+                    logger.debug(f"{book_id} known to be bad, skipping it")
+                    continue
+                edit_time = os.path.getmtime(dirpath)
+                if edit_time > tback:
+                    #Looks like a book folder and edited recently enough
                     bookcart.append(dirpath)
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
@@ -190,7 +198,12 @@ def main(config: str,
             logger.info(f"Examining book at {bookpath}")
             try:
                 #obsfiledb creation
-                checkbook(bookpath, config, add=True, overwrite=True)
+                ok, obsfiledb_info = check_book.scan_book_dir(
+                    bookpath, logger, config_dict, prep_obsfiledb=True)
+                if not ok:
+                    raise RuntimeError("check_book found fatal errors, not adding.")
+                check_book.add_to_obsfiledb(
+                    obsfiledb_info, logger, config_dict, overwrite=True)
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
@@ -284,22 +297,22 @@ def main(config: str,
                     coor_enc = stream.ancil[coor+"_enc"]
                     bookcartobsdb.add_obs_columns([f"{coor}_center float", 
                                                    f"{coor}_throw float"])
-                    very_clean[f"{coor}_center"] = .5 * (coor_enc.max() + coor_enc.min())
-                    very_clean[f"{coor}_throw"] = .5 * (coor_enc.max() - coor_enc.min())
+                    very_clean[f"{coor}_center"] = round(.5 * (coor_enc.max() + coor_enc.min()), 4)
+                    very_clean[f"{coor}_throw"] = round(.5 * (coor_enc.max() - coor_enc.min()), 4)
                 except KeyError:
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
 
             try:
                 if very_clean["telescope_flavor"] == "sat":
                     bore_enc = stream.ancil["boresight_enc"]
-                    very_clean["roll_center"] = -.5 * (bore_enc.max() + bore_enc.min())
-                    very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
+                    very_clean["roll_center"] = round(-.5 * (bore_enc.max() + bore_enc.min()), 4)
+                    very_clean["roll_throw"] = round(.5 * (bore_enc.max() - bore_enc.min()), 4)
                 if very_clean["telescope_flavor"] == "lat":
                     el_enc = stream.ancil["el_enc"]
                     corot_enc = stream.ancil["corotator_enc"]
                     roll = el_enc - 60. - corot_enc
-                    very_clean["roll_center"] = .5 * (roll.max() + roll.min())
-                    very_clean["roll_throw"] = .5 * (roll.max() - roll.min())
+                    very_clean["roll_center"] = round(.5 * (roll.max() + roll.min()), 4)
+                    very_clean["roll_throw"] = round(.5 * (roll.max() - roll.min()), 4)
 
                 bookcartobsdb.add_obs_columns(["roll_center float", "roll_throw float"])
             except KeyError:

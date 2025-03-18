@@ -84,6 +84,8 @@ class Cfg:
         Run a specific wafer
     freq: str
         Run a specific frequency band
+    unit: str
+        Unit of data. Default is K
     center_at: str
     max_dets: int
     fixed_time: int
@@ -130,7 +132,8 @@ class Cfg:
         quiet: int = 0,
         window: Optional[float] = None,
         dtype_tod: str = 'float32',
-        dtype_map: str = 'float64'
+        dtype_map: str = 'float64',
+        unit: str = 'K'
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -165,6 +168,7 @@ class Cfg:
         self.window = window
         self.dtype_tod = dtype_tod
         self.dtype_map = dtype_map
+        self.unit = unit
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -448,7 +452,7 @@ def main(
             verbose=verbose,
             split_labels=split_labels,
             singlestream=args.singlestream,
-            site=args.site,
+            site=args.site, unit=args.unit,
             atomic_db=args.atomic_db) for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
