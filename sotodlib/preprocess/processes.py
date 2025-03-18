@@ -782,6 +782,7 @@ class SubtractHWPSS(_Preprocess):
 class A2Stats(_Preprocess):
     """
     Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
+    Uses tod_ops.flags.get_stats; refer there for list of available statistics.
 
     Example config block::
 
