@@ -207,8 +207,6 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         Boolean flag indicating whether to merge the azss model with the aman. Defaults to True.
     azss_model_name: string, optional
         The name to assign to the merged azss model. Defaults to 'azss_model'.
-    turnaround_info: FlagManager or AxisManager
-        Optional, default is aman.flags.
 
     Returns
     -------
