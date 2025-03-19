@@ -289,6 +289,11 @@ class SimMuMUXCrosstalk(Operator):
                         source_squid_phase - target_squid_phase
                     )
 
+                    # Check if collided resonator; disable channel if so
+                    if np.isnan(chi):
+                        temp_obs.detdata[self.det_flags][det_source] = 1
+                        temp_obs.detdata[self.det_flags][det_target] = 1
+
                 # Translate crosstalk into temperature units and scale to
                 # match input data
                 output_data[row_target] += self._squid_phase_to_temperature(
