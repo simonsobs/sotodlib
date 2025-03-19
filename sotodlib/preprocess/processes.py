@@ -945,7 +945,7 @@ class GlitchFill(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         if self.flags is not None:
             glitch_flags=proc_aman.get(self.flags)
             tod_ops.gapfill.fill_glitches(
