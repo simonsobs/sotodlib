@@ -825,7 +825,7 @@ class AzSS(_Preprocess):
         calc:
           signal: 'demodQ'
           azss_stats_name: 'azss_statsQ'
-          range: [-1.57079, 7.85398]
+          azrange: [-1.57079, 7.85398]
           bins: 1080
           flags: 'glitch_flags'
           merge_stats: False
@@ -836,7 +836,7 @@ class AzSS(_Preprocess):
           subtract: True
 
     If we estimate and subtract azss in left going scans only,
-    make union of gltich_flags and scan_flags first
+    make union of glitch_flags and scan_flags first
 
       - name : "union_flags"
         process:
@@ -847,7 +847,7 @@ class AzSS(_Preprocess):
         calc:
           signal: 'demodQ'
           azss_stats_name: 'azss_statsQ_left'
-          range: [-1.57079, 7.85398]
+          azrange: [-1.57079, 7.85398]
           bins: 1080
           flags: 'glitch_flags_left'
           scan_flags: 'left_scan'
@@ -887,7 +887,7 @@ class AzSS(_Preprocess):
                     scan_flags=self.calc_cfgs.get('scan_flags'),
                     method=self.calc_cfgs.get('method', 'interpolate'),
                     max_mode=self.calc_cfgs.get('max_mode'),
-                    range=self.calc_cfgs.get('range'),
+                    azrange=self.calc_cfgs.get('azrange'),
                     in_place=True
                 )
         else:
