@@ -1781,7 +1781,7 @@ class PointingModel(_Preprocess):
 
         - name : "pointing_model"
           process: True
-          
+
     .. autofunction:: sotodlib.coords.pointing_model.apply_pointing_model
     """
     name = "pointing_model"
@@ -1846,6 +1846,24 @@ class BadSubscanFlags(_Preprocess):
             meta.restrict('dets', proc_aman.dets.vals[keep])
         return meta
 
+class CorrectIIRParams(_Preprocess):
+    """Correct missing iir_params by default values.
+    This corrects iir_params only when the observation is within the time_range
+    that is known to have problem.
+
+    Example config block::
+
+        - name: "correct_iir_params"
+          process: True
+
+    .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
+    """
+    name = "correct_iir_params"
+
+    def process(self, aman, proc_aman):
+        from sotodlib.obs_ops import correct_iir_params
+        correct_iir_params(aman)
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -1885,3 +1903,4 @@ _Preprocess.register(SubtractQUCommonMode)
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)
+_Preprocess.register(CorrectIIRParams)
