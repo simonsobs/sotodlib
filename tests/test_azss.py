@@ -104,7 +104,7 @@ class AzssTest(unittest.TestCase):
     def test_fit(self):
         max_mode = 10
         tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
-        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, frange=None, bins=100)
+        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, azrange=None, bins=100)
         ommedian = get_coeff_metric(tod)
         print(ommedian)
         self.assertTrue(ommedian < 5.0)
