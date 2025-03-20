@@ -828,7 +828,7 @@ class AzSS(_Preprocess):
           azrange: [-1.57079, 7.85398]
           bins: 1080
           flags: 'glitch_flags'
-          merge_stats: False
+          merge_stats: True
           merge_model: False
           subtract_in_place: True
         save: True
@@ -851,7 +851,7 @@ class AzSS(_Preprocess):
           bins: 1080
           flags: 'glitch_flags_left'
           scan_flags: 'left_scan'
-          merge_stats: False
+          merge_stats: True
           merge_model: False
           subtract_in_place: True
         save: True
