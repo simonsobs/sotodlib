@@ -84,18 +84,18 @@ class PointingConfig:
 
     def __post_init__(self):
         if self.tel_type == 'LAT' and (self.zemax_path is None):
-            return ValueError("zemax path must be set for 'LAT' tel_type")
-        
+            raise ValueError("zemax path must be set for 'LAT' tel_type")
+
         if self.tel_type not in ['SAT', 'LAT']:
             raise ValueError("tel_typ ")
-        
+
         self.fp_pars = optics.get_ufm_to_fp_pars(
             self.tel_type, self.wafer_slot, self.fp_file
         )
         self.dx = self.fp_pars['dx']
         self.dy = self.fp_pars['dy']
         self.theta = np.deg2rad(self.fp_pars['theta'])
-    
+
     def get_pointing(self, x, y, pol=0):
         xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
         yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
@@ -106,7 +106,7 @@ class PointingConfig:
             )
         elif self.tel_type.upper() == 'LAT':
             xi, eta, gamma = optics.LAT_focal_plane(
-                None, zemax_path, x=xp, y=yp, pol=pol,
+                None, self.zemax_path, x=xp, y=yp, pol=pol,
             )
         return xi, eta, gamma
 
