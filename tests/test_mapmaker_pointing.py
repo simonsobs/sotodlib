@@ -95,7 +95,7 @@ class MapmakerPointingTest(unittest.TestCase):
             stokes_weights=weights,
         )
         scan_hpix.apply(data)
-        
+
         # Bin the map using TOAST
         toast.ops.DefaultNoiseModel(noise_model="noise_model").apply(data)
         binner = toast.ops.BinMap(
@@ -126,7 +126,7 @@ class MapmakerPointingTest(unittest.TestCase):
         res = wpix * utils.arcmin
         shape, wcs = enmap.geometry(box, res=res, proj="car")
         wcs.wcs.crpix[1] -= 0.5
-        enmap.write_map(areafile, enmap.zeros(shape, wcs, np.uint8))
+        enmap.write_map_geometry(areafile, shape, wcs)
 
         mapmaker = so_ops.MLMapmaker(
             area=areafile,

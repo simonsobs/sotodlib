@@ -4,7 +4,7 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
 import so3g
-from pixell import enmap, fft, resample, tilemap, utils as putils, bunch
+from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
 
 from .. import coords, core, tod_ops
 
@@ -698,8 +698,8 @@ def setup_passes(downsample="1", maxiter="500", interpol="nearest", npass=None):
      returns bunch.Bunch(downsample=[4,4,1], maxiter=[300,300,50],
       interpol=["linear","linear","linear"])"""
     tmp            = bunch.Bunch()
-    tmp.downsample = utils.parse_ints(downsample)
-    tmp.maxiter    = utils.parse_ints(maxiter)
+    tmp.downsample = putils.parse_ints(downsample)
+    tmp.maxiter    = putils.parse_ints(maxiter)
     tmp.interpol   = interpol.split(",")
     # The entries may have different lengths. We use the max
     # and then pad the others by repeating the last element.

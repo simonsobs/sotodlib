@@ -1,11 +1,8 @@
 from sotodlib.site_pipeline import util
-def get_parser():
-    parser = util.ArgumentParser()
-    # Remember: util.ArgumentParser adds an implicit --config-file argument
-    # If this argument is given, it points to a yaml-file that will be used
-    # to override the defaults given below. The actual arguments passed
-    # override those in turn. Even required arguments like "query" become
-    # optional if specified in the yaml file
+def get_parser(parser=None):
+    # a config file to pass all parameters is pending
+    if parser is None:
+        parser = argparse.ArgumentParser()
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
@@ -34,22 +31,13 @@ def get_parser():
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     return parser
 
-if __name__ == "__main__":
-    # We do this all the way up here so we can report argument
-    # errors right away, instead of having to potentially wait for
-    # many seconds for heavy modules to import. This relies on
-    # sotodlib.site_pipeline_util being light-weight. If it stops
-    # being so, then ArgumentParser should be split out into a
-    # separate module
-    parser = get_parser()
-    args   = parser.parse_args()
-
 import numpy as np, sys, time, warnings, os, so3g
 from sotodlib.core import Context, AxisManager, IndexAxis
 from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib import tod_ops, mapmaking, core
 from sotodlib.tod_ops import filters
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
+import yaml
 from enlib import log
 
 try: import moby2.analysis.socompat
@@ -334,5 +322,5 @@ def main(**args):
         mapmaker_prev = mapmaker
         eval_prev     = mapmaker.evaluator(step.x_zip)
 
-if __name__ == "__main__":
-    main(**vars(args))
+if __name__ == '__main__':
+    util.main_launcher(main, get_parser)

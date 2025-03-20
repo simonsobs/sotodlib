@@ -99,7 +99,7 @@ class MLMapmaker:
         self.ready = True
 
     def evaluator(self, x_zip):
-        """Return a helper object that lets on evaluate the data model
+        """Return a helper object that lets one evaluate the data model
         Px for the zipped solution x for a TOD"""
         return MLEvaluator(x_zip, self.signals, self.dof, dtype=self.dtype)
     def accumulator(self):
@@ -331,7 +331,7 @@ class SignalMap(Signal):
                     *smutils.evaluate_recentering(
                         self.recenter,
                         ctime=ctime[len(ctime) // 2],
-                        geom=(self.rhs.shape, self.rhs.wcs),
+                        geom=self.rhs.geometry,
                         site=smutils.unarr(obs.site),
                     )
                 )
@@ -432,7 +432,7 @@ class SignalMap(Signal):
 
     def to_work(self, map):
         if self.tiled:
-            return tilemap.redistribute(map, self.comm, self.rhs.geometry.active)
+            return tilemap.redistribute(map, self.comm, self.geo_work.active)
         else:
             return map.copy()
 
@@ -447,7 +447,7 @@ class SignalMap(Signal):
 
     def wzeros(self):
         """Like to_work, but zeroed instead of containing the signal. Much cheaper"""
-        if self.tiled: return tilemap.zeros(self.rhs.geometry, self.rhs.dtype)
+        if self.tiled: return tilemap.zeros(self.geo_work, self.rhs.dtype)
         else:          return enmap.zeros(*self.rhs.geometry,  self.rhs.dtype)
 
     def write(self, prefix, tag, m, unit='K'):
