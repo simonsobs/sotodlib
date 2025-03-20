@@ -745,7 +745,6 @@ def get_subscans(aman, flags="flags", merge=True, include_turnarounds=False, ove
     """
     if not include_turnarounds:
         ss_ind = (~aman.flags.turnarounds).ranges() # sliceable indices (first inclusive, last exclusive) for subscans
-        #ss_ind = (~aman[flags]["turnarounds"]).ranges()
     else:
         left = aman.flags.left_scan.ranges()
         right = aman.flags.right_scan.ranges()
