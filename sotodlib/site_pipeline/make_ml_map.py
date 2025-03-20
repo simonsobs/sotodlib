@@ -81,7 +81,7 @@ def main(**args):
 
     wafers  = args.wafers.split(",") if args.wafers else None
     bands   = args.bands .split(",") if args.bands  else None
-    sub_ids = mapmaking.get_subids(args.query, context=context)
+    sub_ids = mapmaking.get_subids(args.query, context=context, site=SITE)
     sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands)
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
