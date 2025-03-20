@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, filters, apodize
+from so3g.proj import RangesMatrix
 import logging
 
 logger = logging.getLogger(__name__)
@@ -564,7 +565,7 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
             aman.wrap(subtract_name, np.subtract(signal,
                       aman[hwpss_template_name], dtype='float32'),
                       [(0, 'dets'), (1, 'samps')])
-    
+
     if remove_template:
         aman.move(hwpss_template_name, None)
 
@@ -655,3 +656,74 @@ def demod_tod(aman, signal=None, demod_mode=4,
     aman['demodU'] = demod.imag
     aman['demodU'] = tod_ops.fourier_filter(
         aman, lpf, signal_name='demodU', detrend=None) * 2.
+
+
+def get_hwpss_subscan(
+    aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
+    lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
+    prefilt_cfg=None, prefilt_detrend='linear', flags=None,
+    apodize_edges=True, apodize_edges_samps=1600,
+    apodize_flags=True, apodize_flags_samps=200,
+    hwpss_model_name='hwpss_model'
+):
+    '''
+    Function to fit and subtract HWPSS by subscan and merge hwpss_model.
+    This assumes that turnaround flags and subscan flags have already been calculated and wrapped.
+
+    Arguments: same as `get_hwpss`
+    '''
+
+    get_hwpss(
+        aman=aman,
+        flags=flags,
+        signal=signal,
+        hwp_angle=hwp_angle,
+        bin_signal=bin_signal,
+        bins=bins,
+        lin_reg=lin_reg,
+        modes=modes,
+        apply_prefilt=apply_prefilt,
+        prefilt_cfg=prefilt_cfg,
+        prefilt_detrend=prefilt_detrend,
+        apodize_edges=apodize_edges,
+        apodize_edges_samps=apodize_edges,
+        apodize_flags=apodize_flags,
+        apodize_flags_samps=apodize_flags,
+        merge_stats=False,
+        merge_model=True,
+        hwpss_model_name=hwpss_model_name,
+    )
+
+    for subscan_flag in aman.subscan_info.subscan_flags:
+        i = subscan_flag.ranges()[0]
+        sub_aman = aman.restrict('samps', (i[0] + aman.samps.offset, i[1] + aman.samps.offset), in_place=False)
+        sub_aman.move(hwpss_model_name, None)
+        if flags is None:
+            sub_flag = RangesMatrix.from_mask(np.zeros(aman.samps.count, dtype=int)[i[0]:i[1]])
+        else:
+            sub_flag = RangesMatrix.from_mask(flags.mask()[:, i[0]:i[1]])
+
+        get_hwpss(
+            aman=sub_aman,
+            flags=sub_flag,
+            signal=signal,
+            hwp_angle=hwp_angle,
+            bin_signal=bin_signal,
+            bins=bins,
+            lin_reg=lin_reg,
+            modes=modes,
+            apply_prefilt=apply_prefilt,
+            prefilt_cfg=prefilt_cfg,
+            prefilt_detrend=prefilt_detrend,
+            apodize_edges=apodize_edges,
+            apodize_edges_samps=apodize_edges,
+            apodize_flags=apodize_flags,
+            apodize_flags_samps=apodize_flags,
+            merge_stats=False,
+            merge_model=True,
+            hwpss_model_name=hwpss_model_name,
+        )
+        aman.get(hwpss_model_name)[:, i[0]:i[1]] = sub_aman.hwpss_model
+        del sub_aman
+
+    return
