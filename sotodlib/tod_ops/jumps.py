@@ -45,7 +45,10 @@ def std_est(
         ds = 1
     if ds > 1:
         x = np.moveaxis(x, axis, -1)
-        x = x[..., : -1 * (x.shape[-1] % win_size)]
+        stop = -1 * (x.shape[-1] % win_size)
+        if stop == 0:
+            stop = None
+        x = x[..., : stop]
         shape = list(x.shape) + [win_size]
         shape[-2] = -1
         x = x.reshape(tuple(shape))
