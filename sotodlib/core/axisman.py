@@ -426,6 +426,10 @@ class AxisManager:
             # Other assignments update this object
             self.__dict__[name] = value
 
+    def __delattr__(self, name):
+        del self._fields[name]
+        del self._assignments[name]
+
     def __getattr__(self, name):
         # Prevent members from override special class members.
         if name.startswith("__"): raise AttributeError(name)
