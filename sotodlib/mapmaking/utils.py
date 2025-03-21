@@ -343,9 +343,6 @@ def expand_ids(obs_ids, context=None, bands=None, site=None):
             "mf": ("f090", "f150"), #pa5, pa6
             "hf": ("f150", "f220"), #pa4
             "uhf": ("f220", "f280"),
-            "pa4": ("f150", "f220"),
-            "pa5": ("f090", "f150"),
-            "pa6": ("f090", "f150"),
             None: ("f000",),
         }
     elif bands is not None:
