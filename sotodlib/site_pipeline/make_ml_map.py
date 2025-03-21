@@ -204,8 +204,7 @@ def main(**args):
                     if "glitch_flags" in obs:
                         obs.flags.wrap("glitch_flags", obs.glitch_flags, axis_map=((0,obs.dets),(1,obs.samps)))
                     else:
-                        obs.flags.wrap_new('glitch_flags', shape=('dets', 'samps'),
-                                            cls=so3g.proj.RangesMatrix.zeros)
+                        obs.flags.wrap_new('glitch_flags', shape=('dets', 'samps'), cls=so3g.proj.RangesMatrix.zeros)
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
@@ -268,8 +267,7 @@ def main(**args):
                         # for this observation.
                         signal_estimate = eval_prev.evaluate(mapmaker_prev.data[len(mapmaker.data)])
                         # Resample this to the current downsampling level
-                        signal_estimate = mapmaking.resample.resample_fft_simple(
-                                signal_estimate, obs.samps.count)
+                        signal_estimate = mapmaking.resample.resample_fft_simple(signal_estimate, obs.samps.count)
                     else: signal_estimate = None
                     mapmaker.add_obs(sub_id, obs, noise_model=nmat, signal_estimate=signal_estimate)
                     del signal_estimate
@@ -296,13 +294,11 @@ def main(**args):
 
         with bench.mark("prepare"):
             mapmaker.prepare()
-
         L.info("Done preparing")
 
         signal_map.write(prefix, "rhs", signal_map.rhs, unit=args['unit']+'^-1')
         signal_map.write(prefix, "div", signal_map.div, unit=args['unit']+'^-2')
         signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args['unit'])
-
         L.info("Wrote rhs, div, bin")
 
         # Set up initial condition
@@ -316,13 +312,13 @@ def main(**args):
             if dump:
                 for signal, val in zip(signals, step.x):
                     if signal.output:
-                        signal.write(prefix, "map%04d" % step.i, val, unit=args['unit'])
+                        signal.write(pass_prefix, "map%04d" % step.i, val)
             t1 = time.time()
 
         L.info("Done")
         for signal, val in zip(signals, step.x):
             if signal.output:
-                signal.write(prefix, "map", val, unit=args['unit'])
+                signal.write(pass_prefix, "map", val, unit=args['unit'])
         comm.Barrier()
 
         mapmaker_prev = mapmaker
