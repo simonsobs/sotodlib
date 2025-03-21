@@ -184,7 +184,7 @@ def main(**args):
 
                 # Add site and weather, since they're not in obs yet
                 obs.wrap("weather", np.full(1, "typical"))
-                obs.wrap("site",    np.full(1, "so"))
+                obs.wrap("site",    np.full(1, SITE))
 
                 # Prepare our data. FFT-truncate for faster fft ops
                 obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
