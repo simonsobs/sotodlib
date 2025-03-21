@@ -295,31 +295,31 @@ def get_ids(query, context=None):
     except IOError:
         return context.obsdb.query(query or "1")['obs_id']
 
-def get_subids(query, context=None, method="auto"):
+def get_subids(query, context=None, method="auto", site=None):
     """A subid has the form obs_id:wafer_slot:band, and is a natural
     unit to use for mapmaking."""
     if method == "auto":
-        try: return get_subids_file(query, context=context)
-        except IOError: return get_subids_query(query, context=context)
+        try: return get_subids_file(query, context=context, site=site)
+        except IOError: return get_subids_query(query, context=context, site=site)
     elif method == "file":
-        return get_subids_file(query, context=context)
+        return get_subids_file(query, context=context, site=site)
     elif method == "query":
-        return get_subids_query(query, context=context)
+        return get_subids_query(query, context=context, site=site)
     else:
         raise ValueError("Unrecognized method for get_subids: '%s'" % (str(method)))
 
-def get_subids_query(query, context):
+def get_subids_query(query, context, site=None):
     obs_ids = context.obsdb.query(query or "1")['obs_id']
-    sub_ids = expand_ids(obs_ids, context)
+    sub_ids = expand_ids(obs_ids, context, site=site)
     return sub_ids
 
-def get_subids_file(fname, context=None):
+def get_subids_file(fname, context=None, site=None):
     with open(fname, "r") as fname:
         sub_ids = [line.split()[0] for line in fname]
-    sub_ids = expand_ids(sub_ids, context=context)
+    sub_ids = expand_ids(sub_ids, context=context, site=site)
     return sub_ids
 
-def expand_ids(obs_ids, context=None, bands=None):
+def expand_ids(obs_ids, context=None, bands=None, site=None):
     """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
     into sub_ids and return the resulting list.
 
@@ -333,12 +333,18 @@ def expand_ids(obs_ids, context=None, bands=None):
     if len(obs_ids) == 0: return []
     # Get the tube flavor for each. We will need this to get the bands.
     if context is not None:
-        info   = context.obsdb.query()
         actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
-        inds   = putils.find(info["obs_id"], actual_obs_ids)
-        flavors= info["tube_flavor"][inds]
+        queries = ",".join(["'%s'"% x for x in actual_obs_ids])
+        info   = context.obsdb.query(query_text="obs_id in (%s)"% queries)
+        flavors= info["tube_flavor"]
         flavors= [flavor.lower() for flavor in flavors]
-        flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280"), None:("f000",)}
+        flavor_map = {
+            "lf": ("f030", "f040"),
+            "mf": ("f090", "f150"), #pa5, pa6
+            "hf": ("f150", "f220"), #pa4
+            "uhf": ("f220", "f280"),
+            None: ("f000",),
+        }
     elif bands is not None:
         flavors    = ["a"]*len(obs_ids)
         flavor_map = {"a": bands}
@@ -354,6 +360,9 @@ def expand_ids(obs_ids, context=None, bands=None):
             sub_ids.append(obs_id)
         elif len(toks) != 1:
             raise ValueError("Invalid obs_id '%s'" % (str(obs_id)))
+        elif site is not None and site.lower() == "act":
+            for band in bands:
+                sub_ids.append(f"{obs_id}:{flavor}:{band}")
         else:
             toks = obs_id.split("_")
             # SAT format: obs_1719902396_satp1_1111111
