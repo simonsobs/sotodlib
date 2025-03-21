@@ -23,14 +23,20 @@ class Nmat:
     def apply(self, tod):
         """Multiply the time-ordered data tod[ndet,nsamp] by the inverse noise covariance matrix.
         This is done in-pace, but the result is also returned."""
+        self.check_ready()
         return tod*self.ivar
     def white(self, tod):
         """Like apply, but without detector or time correlations"""
+        self.check_ready()
         return tod*self.ivar
     def write(self, fname):
+        self.check_ready()
         bunch.write(fname, bunch.Bunch(type="Nmat"))
     @staticmethod
     def from_bunch(data): return Nmat()
+    def check_ready(self):
+        if not self.ready:
+            raise ValueError("Attempt to use partially constructed %s. Typically one gets a fully constructed one from the return value of nmat.build(tod)" % type(self).__name__)
 
 class NmatWhite(Nmat):
     def __init__(self, ivar=None):
@@ -40,12 +46,15 @@ class NmatWhite(Nmat):
         ivar = 1/np.var(tod,1)
         return NmatWhite(ivar)
     def apply(self, tod, inplace=False):
+        self.check_ready()
         if inplace: tod = np.array(tod)
         tod *= self.ivar[:,None]
         return tod
     def white(self, tod, inplace=True):
+        self.check_ready()
         return self.apply(tod, inplace=inplace)
     def write(self, fname):
+        self.check_ready()
         data = bunch.Bunch(type="NmatWhite")
         for field in ["ivar"]:
             data[field] = getattr(self, field)
@@ -91,6 +100,7 @@ class NmatUncorr(Nmat):
         return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar, window=self.window, nwin=nwin)
 
     def apply(self, tod, inplace=False, exp=1):
+        self.check_ready()
         if inplace: tod = np.array(tod)
         if self.nwin > 0: apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
@@ -100,6 +110,7 @@ class NmatUncorr(Nmat):
         return tod
 
     def apply_fourier(self, ftod, nsamp, exp=1):
+        self.check_ready()
         # Candidate for speedup in C
         for bi, b in enumerate(self.bins):
             ftod[:,b[0]:b[1]] *= (self.ips_binned[:,None,bi])**exp/nsamp
@@ -107,6 +118,7 @@ class NmatUncorr(Nmat):
         # here to reduce the number of operations needed
 
     def white(self, tod, inplace=True):
+        self.check_ready()
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         tod *= self.ivar[:,None]
@@ -114,6 +126,7 @@ class NmatUncorr(Nmat):
         return tod
 
     def write(self, fname):
+        self.check_ready()
         data = bunch.Bunch(type="NmatUncorr")
         for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar", "window", "nwin"]:
             data[field] = getattr(self, field)
@@ -217,6 +230,7 @@ class NmatDetvecs(Nmat):
                 bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
 
     def apply(self, tod, inplace=True, slow=False):
+        self.check_ready()
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
@@ -226,6 +240,7 @@ class NmatDetvecs(Nmat):
         return tod
 
     def apply_fourier(self, ftod, nsamp, slow=False):
+        self.check_ready()
         dtype= utils.real_dtype(ftod.dtype)
         if slow:
             for bi, b in enumerate(self.bins):
@@ -240,6 +255,7 @@ class NmatDetvecs(Nmat):
         # here to reduce the number of operations needed
 
     def white(self, tod, inplace=True):
+        self.check_ready()
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         tod *= self.ivar[:,None]
@@ -247,6 +263,7 @@ class NmatDetvecs(Nmat):
         return tod
 
     def write(self, fname):
+        self.check_ready()
         data = bunch.Bunch(type="NmatDetvecs")
         for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
                 "bins", "D", "V", "iD", "iV", "s", "ivar"]:
@@ -290,6 +307,7 @@ class NmatScaledvecs(Nmat):
         return NmatScaledvecs(nmat_uncorr, nmat_detvecs, window=self.window, nwin=self.nwin)
 
     def apply(self, tod, inplace=True):
+        self.check_ready()
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
@@ -302,9 +320,11 @@ class NmatScaledvecs(Nmat):
         return tod
 
     def white(self, tod, inplace=True):
+        self.check_ready()
         return self.nmat_uncorr.white(tod, inplace=inplace)
 
     def write(self, fname):
+        self.check_ready()
         raise NotImplementedError
 
     @staticmethod
@@ -349,18 +369,21 @@ class NmatWhite(Nmat):
         ivar = 1.0/np.var(tod, 1)
         return NmatWhite(ivar=ivar, window=self.window, nwin=nwin)
     def apply(self, tod, inplace=True):
+        self.check_ready()
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         tod *= self.ivar[:,None]
         apply_window(tod, self.nwin)
         return tod
     def white(self, tod, inplace=True):
+        self.check_ready()
         if not inplace: tod = np.array(tod)
         apply_window(tod, self.nwin)
         tod *= self.ivar[:,None]
         apply_window(tod, self.nwin)
         return tod
     def write(self, fname):
+        self.check_ready()
         bunch.write(fname, bunch.Bunch(type="NmatWhite"))
     @staticmethod
     def from_bunch(data): 
@@ -383,11 +406,14 @@ class NmatUnit(Nmat):
         return NmatUnit(ivar=ivar)
     def apply(self, tod):
         # the tod is returned intact
+        self.check_ready()
         return tod
     def white(self, tod):
         # the tod is returned intact
+        self.check_ready()
         return tod
     def write(self, fname):
+        self.check_ready()
         bunch.write(fname, bunch.Bunch(type="NmatUnit"))
     @staticmethod
     def from_bunch(data): 
