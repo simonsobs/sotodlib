@@ -719,7 +719,7 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
 
     return mskinvar
 
-def get_subscans(aman, flags="flags", merge=True, include_turnarounds=False, overwrite=True):
+def get_subscans(aman, flags=None, merge=True, include_turnarounds=False, overwrite=True):
     """
     Returns an axis manager with information about subscans.
     This includes direction and a ranges matrix (subscans samps)
@@ -729,6 +729,8 @@ def get_subscans(aman, flags="flags", merge=True, include_turnarounds=False, ove
     ----------
     aman : AxisManager
         Input AxisManager.
+    flags : FlagManager
+        AxisManager or FlagManager containing (samps,) Ranges left_scan, right_scan, and turnarounds. Defaults to aman.flags.
     merge : bool
         Merge into aman as 'subscan_info'
     include_turnarounds : bool
@@ -743,11 +745,13 @@ def get_subscans(aman, flags="flags", merge=True, include_turnarounds=False, ove
         "direction" is a (subscans,) array of strings 'left' or 'right'
         "subscan_flags" is a (subscans, samps) RangesMatrix; True inside the subscan.
     """
+    if flags is None:
+        flags = aman.flags
     if not include_turnarounds:
-        ss_ind = (~aman.flags.turnarounds).ranges() # sliceable indices (first inclusive, last exclusive) for subscans
+        ss_ind = (~flags.turnarounds).ranges() # sliceable indices (first inclusive, last exclusive) for subscans
     else:
-        left = aman.flags.left_scan.ranges()
-        right = aman.flags.right_scan.ranges()
+        left = flags.left_scan.ranges()
+        right = flags.right_scan.ranges()
         start_left = 0 if (left[0,0] < right[0,0]) else 1
         ss_ind = np.empty((left.shape[0] + right.shape[0], 2), dtype=left.dtype)
         ss_ind[start_left::2] = left
@@ -755,13 +759,12 @@ def get_subscans(aman, flags="flags", merge=True, include_turnarounds=False, ove
 
     start_inds, end_inds = ss_ind.T
     n_subscan = ss_ind.shape[0]
-    tt = aman.timestamps
     subscan_aman = core.AxisManager(aman.samps, core.IndexAxis("subscans", n_subscan))
 
-    is_left = aman.flags.left_scan.mask()[start_inds]
+    is_left = flags.left_scan.mask()[start_inds]
     subscan_aman.wrap('direction', np.array(['left' if is_left[ii] else 'right' for ii in range(n_subscan)]), [(0, 'subscans')])
 
-    rm = RangesMatrix([Ranges.from_array(np.atleast_2d(ss), tt.size) for ss in ss_ind])
+    rm = RangesMatrix([Ranges.from_array(np.atleast_2d(ss), aman.samps.count) for ss in ss_ind])
     subscan_aman.wrap('subscan_flags', rm, [(0, 'subscans'), (1, 'samps')]) # True in the subscan
     if merge:
         name = 'subscan_info'
@@ -1000,8 +1003,8 @@ def noise_fit_flags(aman, low_wn, high_wn, high_fk):
     else:
         return None
 
-def get_noisy_subscan_flags(aman, subscan_stats, flags="flags",
-                         nstd_lim=None, ptp_lim=None, kurt_lim=None, 
+def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
+                         ptp_lim=None, kurt_lim=None,
                          skew_lim=None, noisy_detector_lim=0.9,
                          merge=False, overwrite=False, 
                          name="noisy_subscan"):
@@ -1020,6 +1023,9 @@ def get_noisy_subscan_flags(aman, subscan_stats, flags="flags",
         Threshold for kurtosis.
     skew_lim : float [optional]
         Threshold for skewness.
+    noisy_detector_lim : float [optional]
+        If > noisy_detector_lim fraction of samps are in flagged subscans
+        then the detector is added to noisy_detector_flags.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -1030,9 +1036,10 @@ def get_noisy_subscan_flags(aman, subscan_stats, flags="flags",
     Returns
     -------
     noisy_subscan_flags : RangesMatrix
-        RangesMatrix of bad subscans.
+        RangesMatrix of bad subscans. (dets, samps), True for flagged (bad) samples.
     noisy_detector_flags : ndarray
-        Array indicating detectors that are too noisy for more than 50% of the subscan duration.
+        Array indicating detectors that are too noisy for more than noisy_detector_lim fraction
+        of the obs duration. (dets,). We return ~noisy_detector_flags which is True for good detectors.
 
     """
 
@@ -1059,16 +1066,14 @@ def get_noisy_subscan_flags(aman, subscan_stats, flags="flags",
 
     if "subscan_info" in aman:
         ssf = aman.subscan_info.subscan_flags
-    elif "subscans" in aman: 
-        # If reading from proc_aman
-        ssf = aman.subscans
     else:
-        get_subscans(aman, flags=flags, merge=False)
+        subscan_aman = get_subscans(aman, merge=False)
+        ssf = subscan_aman.subscan_flags
 
     zeros=RangesMatrix.zeros((1, aman.samps.count)) # Needed when no subscans are True
     # For each det, select flagged subscans and merge their Ranges
     noisy_subscan_flags = RangesMatrix([np.sum(RangesMatrix.concatenate([ssf[noisy_subscan_indicator[idet]], zeros]), axis=0) for idet in range(aman.dets.count)])
-    # Detectors which are too noisy for > 50% of the subscan duration
+    # Detectors which are too noisy for > noisy_detector_lim fraction of the obs duration
     noisy_detector_flags = np.array([np.sum(np.diff(rng.ranges(), axis=1)) / aman.samps.count for rng in noisy_subscan_flags.ranges]) > noisy_detector_lim
     
     if merge:

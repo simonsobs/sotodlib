@@ -1821,8 +1821,8 @@ class BadSubscanFlags(_Preprocess):
             self.calc_cfgs["subscan_stats"] = proc_aman[self.stats_name+"_"+sig[-1]]
             _msk_ss, _msk_det = tod_ops.flags.get_noisy_subscan_flags(
                 aman, **self.calc_cfgs)
-            msk_ss += _msk_ss
-            msk_det &= _msk_det
+            msk_ss += _msk_ss  # True for bad samps
+            msk_det &= _msk_det  # True for good dets
         ss_aman = core.AxisManager(aman.dets, aman.samps)
         ss_aman.wrap("valid_subscans", msk_ss, [(0, 'dets'), (1, 'samps')])
         det_aman = core.AxisManager(aman.dets)
