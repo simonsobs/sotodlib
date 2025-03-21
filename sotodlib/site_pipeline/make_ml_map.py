@@ -50,7 +50,7 @@ class DataMissing(Exception): pass
 def main(**args):
     warnings.simplefilter('ignore')
     args    = bunch.Bunch(**args)
-    SITE    = args.site
+    SITE    = args.site.lower()
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args.area)
@@ -282,6 +282,7 @@ def main(**args):
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
             except (DataMissing,IndexError,ValueError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
+                
                 continue
 
         nkept = comm.allreduce(nkept)
