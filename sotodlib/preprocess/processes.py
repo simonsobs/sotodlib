@@ -887,6 +887,29 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
+class SubtractAzSSTemplate(_Preprocess):
+    """Subtract Azimuth Synchronous Signal (AzSS) common template.
+    Make common template by weighted mean or pca.
+    This requires to calculate AzSS beforehand.
+
+    Example configuration block::
+
+      - name: "subtract_azss_template"
+        process:
+          signal: 'signal'
+          azss: 'azss_stats_left'
+          method: 'interpolate'
+          scan_flags: 'left_scan'
+          pca_modes: 1
+          subtract: True
+
+    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_template
+    """
+    name = "subtract_azss_template"
+
+    def process(self, aman, proc_aman):
+        tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
+
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
     Notes on flags. If flags are provided as step_cfgs, `proc_aman.get(flags)` is used.
@@ -1750,7 +1773,7 @@ class PointingModel(_Preprocess):
 
         - name : "pointing_model"
           process: True
-          
+
     .. autofunction:: sotodlib.coords.pointing_model.apply_pointing_model
     """
     name = "pointing_model"
@@ -1759,6 +1782,25 @@ class PointingModel(_Preprocess):
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
+
+class CorrectIIRParams(_Preprocess):
+    """Correct missing iir_params by default values.
+    This corrects iir_params only when the observation is within the time_range
+    that is known to have problem.
+
+    Example config block::
+
+        - name: "correct_iir_params"
+          process: True
+
+    .. autofunction:: sotodlib.obs_ops.utils.correct_iir_params
+    """
+    name = "correct_iir_params"
+
+    def process(self, aman, proc_aman):
+        from sotodlib.obs_ops import correct_iir_params
+        correct_iir_params(aman)
+
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -1783,6 +1825,7 @@ _Preprocess.register(SubtractHWPSS)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
 _Preprocess.register(AzSS)
+_Preprocess.register(SubtractAzSSTemplate)
 _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
 _Preprocess.register(SubPolyf)
@@ -1793,7 +1836,8 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(RotateQU) 
-_Preprocess.register(SubtractQUCommonMode) 
-_Preprocess.register(FocalplaneNanFlags) 
-_Preprocess.register(PointingModel) 
+_Preprocess.register(RotateQU)
+_Preprocess.register(SubtractQUCommonMode)
+_Preprocess.register(FocalplaneNanFlags)
+_Preprocess.register(PointingModel)
+_Preprocess.register(CorrectIIRParams)

@@ -2036,7 +2036,7 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
         len(ch_list),
         dtype=[
             ("idx", int),
-            ("rchannel", np.unicode_, 30),
+            ("rchannel", np.str_, 30),
             ("band", int),
             ("channel", int),
             ("freqs", float),
@@ -2755,7 +2755,7 @@ def get_channel_info(
         len(ch_list),
         dtype=[
             ("idx", int),
-            ("rchannel", np.unicode_, 30),
+            ("rchannel", np.str_, 30),
             ("band", int),
             ("channel", int),
             ("freqs", float),

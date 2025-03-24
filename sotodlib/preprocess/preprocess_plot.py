@@ -154,7 +154,7 @@ def plot_hwpss_fit_status(aman, hwpss_stats, plot_dets=None, plot_num_dets=3,
         plot_dets_idx = np.arange(0, hwpss_stats.dets.count, plot_step).astype(int)
         plot_dets = hwpss_stats.dets.vals[plot_dets_idx]
     else:
-        plot_dets_idx = np.where(np.in1d(hwpss_stats.dets.vals, plot_dets))[0]
+        plot_dets_idx = np.where(np.isin(hwpss_stats.dets.vals, plot_dets))[0]
 
     for i, det_idx in enumerate(plot_dets_idx):
         ax[0].errorbar(hwpss_stats.binned_angle, hwpss_stats.binned_signal[det_idx], yerr=hwpss_stats.sigma_bin[det_idx],
