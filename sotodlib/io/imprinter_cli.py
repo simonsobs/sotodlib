@@ -54,7 +54,8 @@ def fix_single_book(imprint:Imprinter, book:Books):
             "\n\t2. Retry Binding with lvl2 updates"
             "\n\t3. Rebind with flag(s)"
             "\n\t4. Permanently Skip Binding"
-            "\n\t5. Do Nothing"
+            "\n\t5. Permanently Skip Binding. Delete lvl2."
+            "\n\t6. Do Nothing"
             "\nInput Response: "
         )
         try: 
@@ -62,7 +63,7 @@ def fix_single_book(imprint:Imprinter, book:Books):
         except:
             print(f"Invalid Response {resp}")
             resp=None
-        if resp is None or resp < 1 or resp > 5:
+        if resp is None or resp < 1 or resp > 6:
             print(f"Invalid Response {resp}")
             resp=None
     print(f"You selected {resp}")
@@ -93,6 +94,14 @@ def fix_single_book(imprint:Imprinter, book:Books):
     elif resp == 4:
         utils.set_book_wont_bind(imprint, book)
     elif resp == 5:
+        sure = set_tag_and_validate(
+            "Are you sure you want to delete level 2?"
+        )
+        if sure:
+            utils.delete_level2_obs_and_book(imprint, book)
+        else:
+            print("Skipping")
+    elif resp == 6:
         pass
     else:
         raise ValueError("how did I get here?")
