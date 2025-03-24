@@ -36,17 +36,6 @@ def get_parser(parser=None):
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     return parser
 
-import numpy as np, sys, time, warnings, os, so3g
-from sotodlib.core import Context, AxisManager, IndexAxis
-from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-from sotodlib import tod_ops, mapmaking, core
-from sotodlib.tod_ops import filters
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
-import yaml
-
-try: import moby2.analysis.socompat
-except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
-class DataMissing(Exception): pass
 
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
