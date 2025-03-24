@@ -337,7 +337,7 @@ def expand_ids(obs_ids, context=None, bands=None, site=None):
         queries = ",".join(["'%s'"% x for x in actual_obs_ids])
         info   = context.obsdb.query(query_text="obs_id in (%s)"% queries)
         flavors= info["tube_flavor"]
-        flavors= [flavor.lower() for flavor in flavors]
+        flavors= [flavor.lower() for flavor in flavors]\
         flavor_map = {
             "lf": ("f030", "f040"),
             "mf": ("f090", "f150"), #pa5, pa6

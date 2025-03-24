@@ -4,13 +4,14 @@ from sotodlib.site_pipeline import util
 
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
+    import argparse
     if parser is None:
         parser = ArgumentParser()
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
     parser.add_argument("prefix", nargs="?")
-    parser.add_argument(      "--comps",   type=str, default="T",  help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
+    parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
@@ -32,7 +33,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--interpol",   type=str, default="nearest", help="Pmat interpol per pass. ,-sep")
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
-    parser.add_argument(      "--unit",      type=str, default="K", help="Unit of the maps")
+    parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     return parser
 
 import numpy as np, sys, time, warnings, os, so3g
@@ -48,6 +49,19 @@ except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT dat
 class DataMissing(Exception): pass
 
 def main(**args):
+    import numpy as np, sys, time, warnings, os, so3g
+    from sotodlib.core import Context, AxisManager, IndexAxis
+    from sotodlib.io import metadata   # PerDetectorHdf5 work-around
+    from sotodlib import tod_ops, mapmaking, core
+    from sotodlib.tod_ops import filters
+    from sotodlib.mapmaking import log
+    from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
+    import yaml
+
+    #try: import moby2.analysis.socompat
+    #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
+    class DataMissing(Exception): pass
+
     warnings.simplefilter('ignore')
     args    = bunch.Bunch(**args)
     SITE    = args.site.lower()
@@ -297,9 +311,9 @@ def main(**args):
             mapmaker.prepare()
         L.info("Done preparing")
 
-        signal_map.write(prefix, "rhs", signal_map.rhs, unit=args['unit']+'^-1')
-        signal_map.write(prefix, "div", signal_map.div, unit=args['unit']+'^-2')
-        signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args['unit'])
+        signal_map.write(prefix, "rhs", signal_map.rhs, unit=args.unit+'^-1')
+        signal_map.write(prefix, "div", signal_map.div, unit=args.unit+'^-2')
+        signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args.unit)
         L.info("Wrote rhs, div, bin")
 
         # Set up initial condition
@@ -326,4 +340,5 @@ def main(**args):
         eval_prev     = mapmaker.evaluator(step.x_zip)
 
 if __name__ == '__main__':
+    from sotodlib.site_pipeline import util
     util.main_launcher(main, get_parser)
