@@ -53,6 +53,10 @@ VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 # file patterns excluded from smurf books
 SMURF_EXCLUDE_PATTERNS = ["*.dat", "*_mask.txt", "*_freq.txt"]
 
+# file size limits
+MAX_OBS_LVL2_SIZE = 10 # Gb per level 2 file
+MAX_OPER_LVL2_SIZE = 5 # Gb per level 2 file
+
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
     pass
@@ -72,6 +76,11 @@ class MissingReadoutIDError(Exception):
 class OverlapObsError(Exception):
     """Exception raised when we find observations that could be registered to
     multiple books"""
+    pass
+
+class FileTooLargeError(Exception):
+    """Exception raised when we find level 2 files that are larger than our
+    maximum allowable sizes"""
     pass
 
 ###################
@@ -672,6 +681,23 @@ class Imprinter:
             # get files associated with this book, in the form of
             # a dictionary of {stream_id: [file_paths]}
             filedb = self.get_files_for_book(book)
+
+            # check if any of the files are too large. This is before
+            # readout id checking because that one usually also raises
+            # but for these we want to delete level 2 files
+            if book.type == "obs":
+                file_limit = MAX_OBS_LVL2_SIZE
+            else:
+                file_limit = MAX_OPER_LVL2_SIZE
+            for _, flist in filedb.items():
+                sz = np.array([os.path.getsize(f)/1e9 for f in flist])
+                if np.any(sz > file_limit):
+                    msg = "Files in book are too large:\n"
+                    msg += "\n".join( [
+                        f"{f},{round(s,2)} GB" for f,s in zip(flist, sz)
+                    ])
+                    raise FileTooLargeError(msg)
+
             obsdb = self.get_g3tsmurf_obs_for_book(book)
             readout_ids = self.get_readout_ids_for_book(book)
             hk_fields = self.config.get('hk_fields')

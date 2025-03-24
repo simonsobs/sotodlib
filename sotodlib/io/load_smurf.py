@@ -263,7 +263,6 @@ class G3tSmurf:
             g3tsmurf_db: "/path/to/g3tsmurf.db"
             g3thk_db: "/path/to/g3hk.db"
 
-
             finalization:
                 servers:
                     - smurf-suprsync: "smurf-sync-so1" ## instance-id
