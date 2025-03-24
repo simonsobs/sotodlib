@@ -338,7 +338,7 @@ def expand_ids(obs_ids, context=None, bands=None):
         inds   = putils.find(info["obs_id"], actual_obs_ids)
         flavors= info["tube_flavor"][inds]
         flavors= [flavor.lower() for flavor in flavors]
-        flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "uhf":("f220","f280"), None:("f000",)}
+        flavor_map = {"lf":("f030","f040"), "mf":("f090","f150"), "hf":("f150","f220"), "uhf":("f220","f280"), None:("f000",)}
     elif bands is not None:
         flavors    = ["a"]*len(obs_ids)
         flavor_map = {"a": bands}
