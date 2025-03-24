@@ -1,8 +1,12 @@
+from argparse import ArgumentParser
+from sotodlib.site_pipeline import util
+
+
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
     import argparse
     if parser is None:
-        parser = argparse.ArgumentParser()
+        parser = ArgumentParser()
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
@@ -29,8 +33,9 @@ def get_parser(parser=None):
     parser.add_argument(      "--interpol",   type=str, default="nearest", help="Pmat interpol per pass. ,-sep")
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
-    parser.add_argument(     "--unit",       type=str, default="uK")
+    parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     return parser
+
 
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
@@ -48,8 +53,7 @@ def main(**args):
 
     warnings.simplefilter('ignore')
     args    = bunch.Bunch(**args)
-
-    SITE    = args.site
+    SITE    = args.site.lower()
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args.area)
@@ -255,7 +259,7 @@ def main(**args):
                 # FIXME: How to handle multipass here?
                 nmat_file = nmat_dir + "/nmat_%s.hdf" % name
                 if args.nmat_mode == "load" or args.nmat_mode == "cache" and os.path.isfile(nmat_file):
-                    print("Reading noise model %s" % nmat_file)
+                    L.info("Reading noise model %s" % nmat_file)
                     nmat = mapmaking.read_nmat(nmat_file)
                 else: nmat = None
 
@@ -281,6 +285,7 @@ def main(**args):
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
             except (DataMissing,IndexError,ValueError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
+                
                 continue
 
         nkept = comm.allreduce(nkept)
