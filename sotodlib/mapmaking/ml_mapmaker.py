@@ -3,8 +3,9 @@ import os
 import numpy as np
 import h5py
 import so3g
+import logging
 from typing import Optional
-from pixell import bunch, enmap, tilemap
+from pixell import bunch, bench, enmap, tilemap
 from pixell import utils as putils
 
 from . import utils as smutils
@@ -12,6 +13,7 @@ from .. import coords
 from .pointing_matrix import PmatCut
 from .noise_model import NmatUncorr
 
+L = logging.getLogger(__name__)
 
 class MLMapmaker:
     def __init__(
@@ -101,50 +103,42 @@ class MLMapmaker:
     def A(self, x):
         # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
         # to_work makes a scratch copy and does any redistribution needed
-        # t0 = time()
-        # t1 = time()
-        iwork = [
-            signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x))
-        ]
-        # t2 = time(); print(f" A    iwork : {t2-t1:8.3f}s", flush=True)
-        owork = [w * 0 for w in iwork]
-        # t1 = time(); print(f" A    owork : {t1-t2:8.3f}s", flush=True)
-        # t_forward = 0
-        # t_apply = 0
-        # t_backward = 0
+        with bench.mark("A_prep"):
+            iwork = [
+                signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x))
+            ]
+            owork = [w * 0 for w in iwork]
+        L.debug("A prep %6.2f" % bench.t["A_prep"])
         for di, data in enumerate(self.data):
-            tod = np.zeros([data.ndet, data.nsamp], self.dtype)
-            # t1 = time()
+            with bench.mark("A_z"):
+                tod = np.zeros([data.ndet, data.nsamp], self.dtype)
+            msg = "A z %6.2f" % bench.t["A_z"]
             for si, signal in reversed(list(enumerate(self.signals))):
-                signal.forward(data.id, tod, iwork[si])
-            # t2 = time()
-            # t_forward += t2 - t1
-            data.nmat.apply(tod)
-            # t1 = time()
-            # t_apply += t1 - t2
+                with bench.mark("A_P_" + signal.name):
+                    signal.forward(data.id, tod, iwork[si])
+                msg += " P_%s %6.2f" % (signal.name, bench.t["A_P_"+signal.name])
+            with bench.mark("A_N"):
+                data.nmat.apply(tod)
+            msg += " N %6.2f" % bench.t["A_N"]
             for si, signal in enumerate(self.signals):
-                signal.backward(data.id, tod, owork[si])
-            # t2 = time()
-            # t_backward += t2 - t1
-        # print(f" A  forward : {t_forward:8.3f}s", flush=True)
-        # print(f" A    apply : {t_apply:8.3f}s", flush=True)
-        # print(f" A backward : {t_backward:8.3f}s", flush=True)
-        # t1 = time()
-        result = self.dof.zip(
-            *[signal.from_work(w) for signal, w in zip(self.signals, owork)]
-        )
-        # t2 = time(); print(f" A      zip : {t2-t1:8.3f}s", flush=True)
-        # print(f" A    TOTAL : {t2-t0:8.3f}s", flush=True)
+                with bench.mark("A_PT_" + signal.name):
+                    signal.backward(data.id, tod, owork[si])
+                msg += " PT_%s %6.2f" % (signal.name, bench.t["A_PT_"+signal.name])
+            L.debug(msg)
+        with bench.mark("A_finish"):
+            result = self.dof.zip(
+                *[signal.from_work(w) for signal, w in zip(self.signals, owork)]
+            )
+        L.debug("A finish %6.2f" % bench.t["A_finish"])
         return result
 
     def M(self, x):
-        # t1 = time()
-        iwork = self.dof.unzip(x)
-        # t2 = time(); print(f" M    iwork : {t2-t1:8.3f}s", flush=True)
-        result = self.dof.zip(
-            *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
-        )
-        # t1 = time(); print(f" M      zip : {t1-t2:8.3f}s", flush=True)
+        with bench.mark("M"):
+            iwork = self.dof.unzip(x)
+            result = self.dof.zip(
+                *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
+            )
+        L.debug("M %6.2f" % bench.t["M"])
         return result
 
     def solve(
