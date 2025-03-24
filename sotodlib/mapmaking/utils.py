@@ -334,14 +334,17 @@ def expand_ids(obs_ids, context=None, bands=None):
     # Get the tube flavor for each. We will need this to get the bands.
     if context is not None:
         actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
-        queries = ",".join(["'%s'"% x for x in actual_obs_ids])
-        info   = context.obsdb.query(query_text="obs_id in (%s)"% queries)
-        flavors= info["tube_flavor"]
-        flavors= [flavor.lower() for flavor in flavors]
+        all_ids, flavors = []
+        for row in context.obsdb.conn.execute("select obs_id, tube_flavor from obs"):
+            all_ids.append(row[0])
+            flavors.append(row[1])
+        all_ids = np.array(all_ids)
+        inds    = utils.find(all_inds, actual_obs_ids)
+        flavors = [flavors[ind].lower() for ind in inds]
         flavor_map = {
             "lf": ("f030", "f040"),
-            "mf": ("f090", "f150"), #pa5, pa6
-            "hf": ("f150", "f220"), #pa4
+            "mf": ("f090", "f150"),
+            "hf": ("f150", "f220"),
             "uhf": ("f220", "f280"),
             None: ("f000",),
         }
