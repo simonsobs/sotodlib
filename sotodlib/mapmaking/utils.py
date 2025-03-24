@@ -4,7 +4,7 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
 import so3g
-from pixell import enmap, fft, resample, tilemap, utils as putils
+from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
 
 from .. import coords, core, tod_ops
 
@@ -159,17 +159,24 @@ def project_out_from_matrix(A, V):
 
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
 
-def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None):
+def makebins(edge_freqs, srate, nfreq, nmin=0, rfun=None, cap=True):
+    # Urk, this function is ugly. It's an old one from when I
+    # first started learning python.
     # Translate from frequency to index
-    binds  = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
+    binds = freq2ind(edge_freqs, srate, nfreq, rfun=rfun)
+    if cap: binds = np.concatenate([[0],binds,[nfreq]])
+    # Cap at nfreq and eliminate any resulting empty bins
+    binds = np.unique(np.minimum(binds,nfreq))
     # Make sure no bins have two few entries
     if nmin > 0:
         binds2 = [binds[0]]
-        for b in binds:
+        for b in binds[1:-1]:
             if b-binds2[-1] >= nmin: binds2.append(b)
+        binds2.append(binds[-1])
+        # If the last bin is too short, remove the second-to-last entry
+        if binds2[-1]-binds2[-2] < nmin:
+            del binds2[-2]
         binds = binds2
-    # Cap at nfreq and eliminate any resulting empty bins
-    binds = np.unique(np.minimum(np.concatenate([[0],binds,[nfreq]]),nfreq))
     # Go from edges to [:,{from,to}]
     bins  = np.array([binds[:-1],binds[1:]]).T
     return bins
@@ -214,7 +221,11 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbos
         vecs = np.concatenate([vecs,v],1)
     return vecs
 
-def measure_detvecs(ft, vecs):
+def measure_detvecs(ft, vecs, nper=2):
+    # Allow too narrow bins
+    nfull = vecs.shape[1]
+    n     = min(nfull, ft.shape[-1]//nper+1)
+    vecs  = vecs[:,:n]
     # Measure amps when we have non-orthogonal vecs
     rhs  = vecs.T.dot(ft)
     div  = vecs.T.dot(vecs)
@@ -226,6 +237,10 @@ def measure_detvecs(ft, vecs):
     Nu = np.mean(np.abs(dclean)**2,1)
     # The total auto-power
     Nd = np.mean(np.abs(ft)**2,1)
+    # Expand E to full requested len with low but
+    # non-zero power so we don't need to special-case elsewhere
+    small = np.min(Nu)*1e-6
+    E  = np.pad(E, (0,nfull-n), constant_values=small)
     return E, Nu, Nd
 
 def sichol(A):
@@ -279,6 +294,114 @@ def get_ids(query, context=None):
             return [line.split()[0] for line in fname]
     except IOError:
         return context.obsdb.query(query or "1")['obs_id']
+
+def get_subids(query, context=None, method="auto"):
+    """A subid has the form obs_id:wafer_slot:band, and is a natural
+    unit to use for mapmaking."""
+    if method == "auto":
+        try: return get_subids_file(query, context=context)
+        except IOError: return get_subids_query(query, context=context)
+    elif method == "file":
+        return get_subids_file(query, context=context)
+    elif method == "query":
+        return get_subids_query(query, context=context)
+    else:
+        raise ValueError("Unrecognized method for get_subids: '%s'" % (str(method)))
+
+def get_subids_query(query, context):
+    obs_ids = context.obsdb.query(query or "1")['obs_id']
+    sub_ids = expand_ids(obs_ids, context)
+    return sub_ids
+
+def get_subids_file(fname, context=None):
+    with open(fname, "r") as fname:
+        sub_ids = [line.split()[0] for line in fname]
+    sub_ids = expand_ids(sub_ids, context=context)
+    return sub_ids
+
+def expand_ids(obs_ids, context=None, bands=None):
+    """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
+    into sub_ids and return the resulting list.
+
+    To infer the bands available either bands or context must be passed.
+    If bands is passed then it should be a list of the multichroic bands
+    available for all the wafers. Example: bands=["f090","f150"].
+
+    Otherwise a Context should be passed, and the bands will be inferred
+    per obs by querying its obsdb. This is the standard case.
+    """
+    if len(obs_ids) == 0: return []
+    # Get the tube flavor for each. We will need this to get the bands.
+    if context is not None:
+        # Make sure we have plain obs_id regardless of whether obs_ids or sub_ids were passed
+        actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
+        # Get the tube flavor for each, and their meanings
+        all_ids, flavors = [], []
+        for row in context.obsdb.conn.execute("select obs_id, tube_flavor from obs"):
+            all_ids.append(row[0])
+            flavors.append(row[1])
+        all_ids = np.array(all_ids)
+        inds    = putils.find(all_ids, actual_obs_ids)
+        flavors = [flavors[ind].lower() for ind in inds]
+        flavor_map = {
+            "lf": ("f030", "f040"),
+            "mf": ("f090", "f150"),
+            "hf": ("f150", "f220"),
+            "uhf": ("f220", "f280"),
+            None: ("f000",),
+        }
+    elif bands is not None:
+        flavors    = ["a"]*len(obs_ids)
+        flavor_map = {"a": bands}
+    else:
+        raise ValueError("Either bands or context must be passed")
+    # Then loop through each and expand as necessary
+    sub_ids = []
+    for obs_id, flavor in zip(obs_ids, flavors):
+        bands  = flavor_map[flavor]
+        toks   = obs_id.split(":")
+        if len(toks) == 3:
+            # Already sub_id
+            sub_ids.append(obs_id)
+        elif len(toks) != 1:
+            raise ValueError("Invalid obs_id '%s'" % (str(obs_id)))
+        else:
+            toks = obs_id.split("_")
+            # SAT format: obs_1719902396_satp1_1111111
+            # LAT format: 1696118940_i3_100 (why no obs in front?)
+            wafer_mask = toks[-1]
+            # Loop through wafer slots
+            for si, status in enumerate(wafer_mask):
+                if status == "1":
+                    for band in bands:
+                        sub_ids.append("%s:ws%d:%s" % (obs_id, si, band))
+    return sub_ids
+
+def filter_subids(subids, wafers=None, bands=None):
+    subids = np.asarray(subids)
+    if wafers is not None:
+        wafs   = astr_tok(subids,":",1)
+        subids = subids[np.isin(wafs, wafers)]
+    if bands is not None:
+        bpass  = astr_tok(subids,":",2)
+        subids = subids[np.isin(bpass, bands)]
+    return subids
+
+def astr_cat(*arrs):
+    res = np.char.add(arrs[0], arrs[1])
+    for arr in arrs[2:]:
+        res = np.char.add(res,arr)
+    return res
+
+def astr_tok(astr, sep, i):
+    for j in range(i):
+        astr = np.char.partition(astr,sep)[:,2]
+    return np.char.partition(astr,sep)[:,0]
+
+def split_subids(subids):
+    ids, _, rest   = np.char.partition(subids, ":").T
+    wafs, _, bands = np.char.partition(rest, ":").T
+    return ids, wafs, bands
 
 def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
@@ -482,7 +605,7 @@ def downsample_cut(cut, down):
     factor down."""
     return so3g.proj.ranges.RangesMatrix([downsample_ranges(r,down) for r in cut.ranges])
 
-def downsample_obs(obs, down):
+def downsample_obs(obs, down, skip_signal=False):
     """Downsample AxisManager obs by the integer factor down.
 
     This implementation is quite specific and probably needs
@@ -492,31 +615,27 @@ def downsample_obs(obs, down):
     timestreams to avoid both aliasing noise and introducing
     a transfer function."""
     assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    if down == 1: return obs
     # Compute how many samples we will end up with
     onsamp = (obs.samps.count+down-1)//down
     # Set up our output axis manager
-    res    = core.AxisManager(obs.dets, core.IndexAxis("samps", onsamp))
+    axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
+    res    = core.AxisManager(core.IndexAxis("samps", onsamp), *axes)
     # Stuff without sample axes
     for key, axes in obs._assignments.items():
         if "samps" not in axes:
-            val = getattr(obs, key)
-            if isinstance(val, core.AxisManager):
-                res.wrap(key, val)
-            else:
-                axdesc = [(k, v) for k, v in enumerate(axes) if v is not None]
-                res.wrap(key, val, axdesc)
+            res.wrap(*get_wrappable(obs, key))
     # The normal sample stuff
     res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
     bore = core.AxisManager(core.IndexAxis("samps", onsamp))
     for key in ["az", "el", "roll"]:
         bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
     res.wrap("boresight", bore)
-    res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp),
-             [(0,"dets"),(1,"samps")])
+    if not skip_signal:
+        res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
 
-    # # The cuts
-    # # obs.flags will contain all types of flags. We should query it for glitch_flags
-    # # and source_flags
+    # TODO: Once it's finalized whether cuts are in obs.flags.X or obs.X, remove these
+    # if tests
     cut_keys = []
     if "glitch_flags"  in obs:
         cut_keys.append("glitch_flags")
@@ -530,7 +649,6 @@ def downsample_obs(obs, down):
 
     # We need to add a res.flags FlagManager to res
     res = res.wrap('flags', core.FlagManager.for_tod(res))
-
     for key in cut_keys:
         new_key = key.split(".")[-1]
         res.flags.wrap(new_key, downsample_cut(obs[key], down),
@@ -540,12 +658,72 @@ def downsample_obs(obs, down):
     # doesn't matter anyway
     return res
 
+def get_wrappable(axman, key):
+    val = getattr(axman, key)
+    if isinstance(val, core.AxisManager):
+        return key,val
+    else:
+        axes   = axman._assignments[key]
+        axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+        return key, val, axdesc
+
+def get_flags(obs, flagnames):
+    """Parse detector-set splits"""
+    cuts_out = None
+    if flagnames is None:
+        return so3g.proj.RangesMatrix.zeros(obs.shape)
+    det_splits = ['det_left','det_right','det_in','det_out','det_upper','det_lower']
+    for flagname in flagnames:
+        if flagname in det_splits:
+            cuts = obs.det_flags[flagname]
+        elif flagname == 'scan_left':
+            cuts = obs.flags.left_scan
+        elif flagname == 'scan_right':
+            cuts = obs.flags.right_scan
+        else:
+            cuts = getattr(obs.flags, flagname) # obs.flags.flagname
+
+        ## Add to the output matrix
+        if cuts_out is None:
+            cuts_out = cuts
+        else:
+            cuts_out += cuts
+    return cuts_out
+
 def import_optional(module_name):
     try:
         module = importlib.import_module(module_name)
         return module
     except:
         return None
+
+def setup_passes(downsample="1", maxiter="500", interpol="nearest", npass=None):
+    """Set up information multipass mapmaking. Supports arguments
+    of the form num or num,num,.... Infers the number of passes
+    from the maximum length of these (or npass if explicitly given),
+    and makes sure they all have this length by duplicating the item
+    as necessary.
+
+    Example:
+     setup_passes(downsample="4,4,1", maxiter="300,300,50", interpol="linear")
+     returns bunch.Bunch(downsample=[4,4,1], maxiter=[300,300,50],
+      interpol=["linear","linear","linear"])"""
+    tmp            = bunch.Bunch()
+    tmp.downsample = putils.parse_ints(downsample)
+    tmp.maxiter    = putils.parse_ints(maxiter)
+    tmp.interpol   = interpol.split(",")
+    # The entries may have different lengths. We use the max
+    # and then pad the others by repeating the last element.
+    # The final output will be a list of bunches
+    if npass is None:
+        npass = max([len(tmp[key]) for key in tmp])
+    passes    = []
+    for i in range(npass):
+        entry = bunch.Bunch()
+        for key in tmp:
+            entry[key] = tmp[key][min(i,len(tmp[key])-1)]
+        passes.append(entry)
+    return passes
 
 Base = declarative_base()
 
