@@ -12,11 +12,20 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 
-
-
 from .. import core
 
 from . import _Preprocess, Pipeline, processes
+
+
+class PreprocessErrors:
+    MetaDataError = "get_meta_data_error"
+    NoDetsRemainError = "no_dets_remain_error"
+    NoGroupOverlapError = "no_group_overlap_error"
+    PipeLineRunError = "pipeline_step_error"
+    PipeLineStepError = "pipeline_step_error"
+    GroupOutputError = "group_output_error"
+    MultiProcessFutureError = "multiprocess_future_error"
+
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -519,7 +528,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             if init_only:
                 return aman
-            
+
             if t2ptemplate_aman is not None:
                 # Replace Q,U with simulated timestreams
                 t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
@@ -995,13 +1004,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             return error, outputs_init, outputs_proc, aman
 
 
-def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
+def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=False):
     """
     Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
     See the ``preproc_or_load_group`` docstring for the varying expected
-    values of ``error`` and the associated ``outputs``. This function will
+    values of ``error`` and the associated ``out_dict``. This function will
     either:
 
     1) Update the mandb sqlite file and move the h5 archive from its temporary
@@ -1016,7 +1025,7 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
 
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
+        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
         nfile = 0
         folder = os.path.dirname(configs['archive']['policy']['filename'])
@@ -1027,11 +1036,11 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-        group_by = [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
+        group_by = [k.split(':')[-1] for k in out_dict['db_data'].keys() if 'dets' in k]
         h5_path = os.path.relpath(dest_file,
                                   start=os.path.dirname(configs['archive']['index']))
 
-        src_file = outputs['temp_file']
+        src_file = out_dict['temp_file']
 
         logger.debug(f"Source file: {src_file}")
         logger.debug(f"Destination file: {dest_file}")
@@ -1048,10 +1057,10 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
                         logger.debug(f"\t{dts}/{member}")
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-        logger.info(f"Saving to database under {outputs['db_data']}")
+        logger.info(f"Saving to database under {out_dict['db_data']}")
         db = get_preprocess_db(configs, group_by, logger)
-        if len(db.inspect(outputs['db_data'])) == 0:
-            db.add_entry(outputs['db_data'], h5_path)
+        if len(db.inspect(out_dict['db_data'])) == 0:
+            db.add_entry(out_dict['db_data'], h5_path)
         os.remove(src_file)
     elif error == 'load_success':
         return
@@ -1061,9 +1070,7 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
             os.makedirs(folder)
         errlog = os.path.join(folder, 'errlog.txt')
         f = open(errlog, 'a')
-        f.write(f'{time.time()}, {error}\n')
-        if outputs is not None:
-            f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
+        f.write(f"{time.time()}, {out_meta[0]}, {out_meta[1]}, {error}\n")
         f.close()
 
 

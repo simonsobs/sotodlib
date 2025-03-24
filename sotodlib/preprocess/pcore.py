@@ -398,7 +398,7 @@ class Pipeline(list):
             super().extend( [self._check_item(item) for item in other])
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
-    
+
     def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
         """
         The main workhorse function for the pipeline class. This function takes
@@ -441,7 +441,7 @@ class Pipeline(list):
         proc_aman: AxisManager
             A preprocess axismanager that contains all data products calculated
             throughout the running of the pipeline
-        
+
         """
         if proc_aman is None:
             if 'preprocess' in aman:
@@ -460,12 +460,12 @@ class Pipeline(list):
                 proc_aman.restrict('dets', det_list)
             full = proc_aman.copy()
             run_calc = False
-        
+
         success = 'end'
         for step, process in enumerate(self):
             if sim and process.skip_on_sim:
                 continue
-            self.logger.debug(f"Running {process.name}")
+            self.logger.debug(f"Running {process.name} ({step+1}/{len(self)})")
             process.process(aman, proc_aman, sim)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
@@ -478,13 +478,13 @@ class Pipeline(list):
                 process.select(aman, proc_aman)
                 proc_aman.restrict('dets', aman.dets.vals)
             self.logger.debug(f"{proc_aman.dets.count} detectors remaining")
-            
+
             if aman.dets.count == 0:
                 success = process.name
                 break
-        
+
         return full, success
-        
+
 
 class _FracFlaggedMixIn(object):
 
