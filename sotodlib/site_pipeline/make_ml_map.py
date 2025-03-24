@@ -1,12 +1,10 @@
-from argparse import ArgumentParser
 from sotodlib.site_pipeline import util
-
 
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
     import argparse
     if parser is None:
-        parser = ArgumentParser()
+        parser = argparse.ArgumentParser()
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")

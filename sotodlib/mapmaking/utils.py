@@ -333,10 +333,10 @@ def expand_ids(obs_ids, context=None, bands=None):
     if len(obs_ids) == 0: return []
     # Get the tube flavor for each. We will need this to get the bands.
     if context is not None:
+        info   = context.obsdb.query()
         actual_obs_ids = np.char.partition(obs_ids, ":")[:,0]
-        queries = ",".join(["'%s'"% x for x in actual_obs_ids])
-        info   = context.obsdb.query(query_text="obs_id in (%s)"% queries)
-        flavors= info["tube_flavor"]
+        inds   = putils.find(info["obs_id"], actual_obs_ids)
+        flavors= info["tube_flavor"][inds]
         flavors= [flavor.lower() for flavor in flavors]
         flavor_map = {
             "lf": ("f030", "f040"),
