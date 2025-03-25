@@ -80,6 +80,9 @@ class ObsDb(object):
             if map_file is None:
                 map_file = ':memory:'
             self.conn = sqlite3.connect(map_file)
+        
+        global TABLE_DEFS
+        global TABLE_DEFS_OWB
         if obs_wafer_band:
             TABLE_DEFS = TABLE_DEFS_OWB
 
