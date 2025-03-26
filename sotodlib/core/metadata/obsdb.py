@@ -194,8 +194,8 @@ class ObsDb(object):
             self.conn.commit()
         return self
 
-    def update_obs(self, obs_id, wafer_band=(None, None),
-                   data={}, tags=[], commit=True):
+    def update_obs(self, obs_id, data={}, tags=[],
+                   wafer_band=(None, None), commit=True):
         """Update an entry in the obs table.
 
         Arguments:
