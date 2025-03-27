@@ -175,6 +175,7 @@ def model_sat_v1(params, az, el, roll):
             raise ValueError(f'Handling of model param "{k}" is not implemented.')
 
     # Construct offsetted encoders.
+    az_spot_test = az.copy()
     az_twist = params['az_rot'] * (el + params['enc_offset_el'])
     az = az + params['enc_offset_az'] + az_twist
     el = el + params['enc_offset_el'] 
@@ -195,7 +196,14 @@ def model_sat_v1(params, az, el, roll):
             * q_fp_offset * ~q_fp_rot * quat.euler(2, roll) * q_fp_rot)
 
     neg_az, el, roll = quat.decompose_lonlat(q_hs)
-    return -neg_az, el, roll
+    
+    if np.any((-1*neg_az - az_spot_test) > 2*np.pi):
+        new_az = -1 * neg_az - 2*np.pi
+    elif np.any((-1*neg_az - az_spot_test) < -2*np.pi):
+        new_az = -1 * neg_az + 2*np.pi
+    else:
+        new_az = -neg_az
+    return new_az, el, roll
 
 
 # Support functions
