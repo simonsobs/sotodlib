@@ -92,3 +92,8 @@ class HkDbTest(unittest.TestCase):
 
         self.assertEqual(len(res.test[0]), nsamp)
 
+        feeds = hkdb.get_feed_list(load_spec)
+        self.assertEqual(list(map(str, feeds)), ['test_agent.test_feed.*'])
+
+        fields = hkdb.get_field_list(load_spec)
+        self.assertEqual(fields, ['test_agent.test_feed.test_field'])
