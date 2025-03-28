@@ -615,4 +615,4 @@ def get_field_list(load_spec: Union[LoadSpec, dict],
 
     """
     return load_hk(load_spec, fields=feeds,
-                   field_list_only=True):
+                   field_list_only=True)
