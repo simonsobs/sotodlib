@@ -72,15 +72,18 @@ class PointingConfig:
     zemax_path: str
         If running for a "LAT" tel_type, the path to the zemax file must be specified.
     roll: float
-        Rotation about the line of site = elev - 60 - corotator.
+        Rotation about the line of sight.
+        For the LAT this is elev - 60 - corotator.
+        For the SAT this is -1*boresight.
     tube_slot: str/int
+        If running for a "LAT" tel_type, the tube slot must be specified.
         Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
     wafer_slot: str
     tel_type: str
     zemax_path: Optional[str] = None
-    roll: Optional[int] = None
+    roll: Optional[float] = 0
     tube_slot: Optional[Union[str, int]] = None
 
     dx: float = field(init=False)
@@ -89,8 +92,11 @@ class PointingConfig:
     fp_pars: dict = field(init=False)
 
     def __post_init__(self):
-        if self.tel_type == 'LAT' and (self.zemax_path is None):
-            raise ValueError("zemax path must be set for 'LAT' tel_type")
+        if self.tel_type == 'LAT':
+            if self.zemax_path is None:
+                raise ValueError("zemax path must be set for 'LAT' tel_type")
+            if self.tube_slot is None:
+                raise ValueError("tube slot must be set for 'LAT' tel_type")
 
         if self.tel_type not in ['SAT', 'LAT']:
             raise ValueError("tel_type should be 'SAT' or 'LAT' ")
@@ -108,7 +114,7 @@ class PointingConfig:
 
         if self.tel_type.upper() == 'SAT':
             xi, eta, gamma = optics.SAT_focal_plane(
-                None, x=xp, y=yp, pol=pol
+                None, x=xp, y=yp, pol=pol, roll=self.roll
             )
         elif self.tel_type.upper() == 'LAT':
             xi, eta, gamma = optics.LAT_focal_plane(
