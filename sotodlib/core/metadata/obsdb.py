@@ -67,14 +67,15 @@ class ObsDb(object):
                             'tags': [
                                 "`obs_id` varchar(256)",
                                 "`tag` varchar(256)",
-                                "CONSTRAINT one_tag UNIQUE (`obs_id`, `tag`)",
                             ]}
         pkeys = ["`obs_id`"]
         if wafer_info:
             for k in wafer_info:
                 self._table_defs['obs'].append(f"`{k}` varchar(256)")
+                self._table_defs['tags'].append(f"`{k}` varchar(256)")
                 pkeys.append(f"`{k}`")
-        self._table_defs['obs'].append(f"PRIMARY KEY ({', '.join(pkeys)})")        
+        self._table_defs['obs'].append(f"PRIMARY KEY ({', '.join(pkeys)})")
+        self._table_defs['tags'].append(f"PRIMARY KEY ({', '.join(pkeys)}, `tag`)")
 
         self.conn.row_factory = sqlite3.Row  # access columns by name
         if init_db:
@@ -92,9 +93,6 @@ class ObsDb(object):
             if changes:
                 self.conn.commit()
         self.primary_keys = self.get_primary_fields()
-        if ~np.isin(len(self.primary_keys), [1,3]):
-            raise ValueError("Unsupported number of primary keys in the 'obs' table"
-                             " only 1 or 3 are allowed.")
 
     def get_primary_fields(self):
         """Retrieve the primary keys of the specified table.
@@ -108,18 +106,25 @@ class ObsDb(object):
     def warn_primary_keys(self, wafer_info):
         """Warn the user if the primary keys are not specified 
            and we're defaulting to using _all."""
-        wafer_info = list(wafer_info)
-        if (None in wafer_info):
-            warn_str = 'WARNING: Primary key(s)'
-            for i, wb in enumerate(wafer_info):
-                if wb is None:
-                    wafer_info[i] = '_all'
-                    warn_str += f' wafer_info[{i}],'
-            warn_str += """
-            are not specified and ObsDb is indexed by obs_id, wafer_slot,
-            and bandpass. These keys will be set to _all.
-            """
-            warnings.warn(warn_str, UserWarning)
+        if len(self.primary_keys) == 1:
+                return []
+        else:
+            if len(wafer_info) != len(self.primary_keys) - 1:
+                raise ValueError(f"Wafer info must be of length {len(self.primary_keys) - 1}")
+            if wafer_info is None:
+                wafer_info = [None] * (len(self.primary_keys) - 1)
+            wafer_info = list(wafer_info)
+            if (None in wafer_info):
+                    warn_str = 'WARNING: Primary key(s)'
+                    for i, wb in enumerate(wafer_info):
+                        if wb is None:
+                            wafer_info[i] = '_all'
+                            warn_str += f' wafer_info[{i}],'
+                    warn_str += f"""
+                    are not specified and ObsDb is indexed by {self.primary_keys}.
+                    These keys will be set to _all.
+                    """
+                    warnings.warn(warn_str, UserWarning)
         return wafer_info
     
     def __len__(self):
@@ -187,13 +192,13 @@ class ObsDb(object):
         return self
 
     def update_obs(self, obs_id, data={}, tags=[],
-                   wafer_info=(None, None), commit=True):
+                   wafer_info=None, commit=True):
         """Update an entry in the obs table.
 
         Arguments:
           obs_id (str): The id of the obs to update.
-          wafer_info (tuple of str): The wafer_info[0] = wafer_slot and wafer_info[1] = bandpass
-            to update.  The default value is ('_all', '_all').
+          wafer_info (tuple of str): The wafer_info used as primary keys in addition to obs_id.
+            The default will be replaced with '_all' all primary keys other than obs_id
           data (dict): map from column_name to value.
           tags (list of str): tags to apply to this observation (if a
             tag name is prefxed with '!', then the tag name will be
@@ -203,16 +208,15 @@ class ObsDb(object):
             self.
 
         """
-        if (len(self.primary_keys) == 3):
+        obs_key = {'obs_id': obs_id}
+        if (len(self.primary_keys) > 1):
             wafer_info = self.warn_primary_keys(wafer_info)
-            obs_key = {'obs_id': obs_id, 'wafer_slot': wafer_info[0],
-                      'bandpass': wafer_info[1]}
-        else:
-            obs_key = {'obs_id': obs_id}
+            for i, k in enumerate(self.primary_keys[1:]):
+                obs_key[k] = wafer_info[i]
 
         c = self.conn.cursor()
         columns = ', '.join(obs_key.keys())
-        placeholders = ', '.join(['?'] * len(obs_id))
+        placeholders = ', '.join(['?'] * len(obs_key))
         c.execute(f'INSERT OR IGNORE INTO obs ({columns}) VALUES ({placeholders})',
                   tuple(obs_key.values()))
             
@@ -221,17 +225,21 @@ class ObsDb(object):
             where_str = ' AND '.join([f'{k}=?' for k in obs_key.keys()])
             c.execute(f'UPDATE obs SET {", ".join(settors)} WHERE {where_str}',
                       tuple(data.values()) + tuple(obs_key.values()))
-            
+                        
         for t in tags:
             if t[0] == '!':
-                # Kill this tag.
-                c.execute('DELETE FROM tags WHERE obs_id=? AND tag=?',
-                          (obs_id, t[1:]))
+                # Kill this tag
+                where_str = ' AND '.join([f'{k}=?' for k in obs_key.keys()])
+                c.execute(f'DELETE FROM tags WHERE {where_str} AND tag=?',
+                            tuple(obs_key.values()) + (t[1:],))
             else:
-                c.execute('INSERT OR REPLACE INTO tags (obs_id, tag) '
-                          'VALUES (?,?)', (obs_id, t))
-        if commit:
-            self.conn.commit()
+                # Add the tag for the specific primary key combination.
+                columns = ', '.join(list(obs_key.keys()) + ['tag'])
+                placeholders = ', '.join(['?'] * (len(obs_key) + 1))
+                c.execute(f'INSERT OR REPLACE INTO tags ({columns}) VALUES ({placeholders})',
+                            tuple(obs_key.values()) + (t,))
+            if commit:
+                self.conn.commit()
         return self
 
     def copy(self, map_file=None, overwrite=False):
@@ -274,7 +282,7 @@ class ObsDb(object):
         conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
         return cls(conn, init_db=False)
 
-    def get(self, obs_id=None, wafer_info=(None, None), tags=None, add_prefix=''):
+    def get(self, obs_id=None, wafer_info=None, tags=None, add_prefix=''):
         """Returns the entry for obs_id, as an ordered dict.
 
         If obs_id is None, returns all entries, as a ResultSet.
@@ -282,8 +290,12 @@ class ObsDb(object):
 
         Args:
           obs_id (str): The observation id to get info for.
-          wafer_info (tuple of str): The wafer_info[0] = wafer_slot and wafer_info[1] = bandpass
-            to update.  The default value is ('_all', '_all').
+          wafer_info (tuple of str): The wafer_info used as primary keys in addition to obs_id.
+            The default will be replaced with '_all' all primary keys other than obs_id
+          tags (bool): If True, include the tags associated with this
+            observation in the output.  The tags will be stored in a
+            field called 'tags', which will be a list of strings.
+            If False or None, the tags will not be included in the output.
           add_prefix (str): A string that will be prepended to each
             field name.  This is for the lazy metadata system, because
             obsdb selectors are prefixed with 'obs:'.
@@ -297,19 +309,10 @@ class ObsDb(object):
         if obs_id is None:
             return self.query('1', add_prefix=add_prefix)
         
-        if len(self.primary_keys) == 1:
-            query_condition = f"obs_id = ?"
-            query_values = (obs_id,)
+        wafer_info = self.warn_primary_keys(wafer_info)
+        query_condition = " AND ".join([f"{key} == '{val}'" for key, val in zip(self.primary_keys, [obs_id] + wafer_info)])
 
-        elif len(self.primary_keys) == 3:
-            wafer_info = self.warn_primary_keys(wafer_info)
-            query_condition = " AND ".join([f"{key} = ?" for key in primary_keys])
-            query_values = (obs_id, wafer_info[0], wafer_info[1])
-
-        else:
-            raise ValueError("Unsupported number of primary keys in the 'obs' table.")
-
-        results = self.query(query_condition, add_prefix=add_prefix, query_values=query_values)
+        results = self.query(query_condition, add_prefix=add_prefix)
         if len(results) == 0:
             return None
         if len(results) > 1:
@@ -317,19 +320,18 @@ class ObsDb(object):
         output = results[0]
         if tags:
             # "distinct" should not be needed given uniqueness constraint.
-            c = self.conn.execute('select distinct tag from tags where obs_id=?', (obs_id,))
+            where_str = ' AND '.join([f"{k}='{v}'" for k, v in zip(self.primary_keys, [obs_id] + list(wafer_info))])
+            c = self.conn.execute(f'SELECT DISTINCT tag FROM tags WHERE {where_str}')
             output['tags'] = [r[0] for r in c]
         return output
 
-    def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix='',
-              query_values=()):
+    def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix=''):
         """Queries the ObsDb using user-provided text.  Returns a ResultSet.
 
         Args:
           query_text (str): The sqlite query string.  All fields
             should refer to the obs table, or to tags explicitly
             listed in the tags argument.
-          query_values (tuple): Values to pass in tuples for obs-wafer-band indexing.
           tags (list of str): Tags to include in the output; if they
             are listed here then they can also be used in the query
             string.  Filtering on tag value can be done here by
@@ -384,37 +386,40 @@ class ObsDb(object):
                           f"obs.obs_id = tt{tagi}.obs_id")
         extra_fields = ''.join([','+f for f in extra_fields])
         q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)
-        c = self.conn.execute(q, query_values)
+        c = self.conn.execute(q)
         results = ResultSet.from_cursor(c)
         if add_prefix is not None:
             results.keys = [add_prefix + k for k in results.keys]
         return results
     
-    def query_linked_dbs(self, secondary_dbs, query_condition,
-                         query_values=(), add_prefix=''):
+    def query_linked_dbs(self, secondary_dbs, query_condition, add_prefix='',
+                         wafer_info=None):
         """
         Query two ObsDb objects and link their results based on obs_id. Primary ObsDb
-        can be either keyed by obs_id or obs_id and wafer_info (such as wafer_slot and bandpass)
-        in order to query using wafer_info the appropriate query_values must be passed.
+        can be either keyed by obs_id or obs_id and wafer_info (such as wafer_slot and bandpass).
         For every row returned from the primary database, the linked secondary databases
-        are queried for rows with the same obs_id. The results are returned as a list of tuples
-        the first element of the tuple is the primary database result and the rest are the linked
-        secondary database results.
+        are queried for rows with the same obs_id (and a specific wafer_info subset if wafer_info is passed).
+        The results are returned as a list of tuples the first element of the tuple is the primary
+        database result and the rest are the linked secondary database results.
 
         Args:
             self (ObsDb): The primary database to query.
             secondary_dbs (list of ObsDb): A list of secondary database to query for linked rows.
+                If a single ObsDb is passed, it will be converted to a list of length 1.
             query_condition (str): The query condition for the primary database.
-            query_values (tuple): Values to parameterize the query for the primary database.
-                Can be used to in tuples for wafer_info indexing i.e. ('obs_id', 'wafer_slot', 'bandpass').
             add_prefix (str): A string to prepend to field names in the result.
+            wafer_info (tuple of str): The wafer_info to restrict what's returned from the secondary
+                database. The default value is None, which means all wafer_info will be returned.
 
         Returns:
             results (list of ResultSet): A list containing tuples of resultsets from the primary and secondary databases.
         """
+        # Ensure secondary_dbs is a list
+        if not isinstance(secondary_dbs, list):
+            secondary_dbs = [secondary_dbs]
+        
         # Query the primary database
-        primary_results = self.query(query_condition, query_values=query_values,
-                                           add_prefix=add_prefix)
+        primary_results = self.query(query_condition, add_prefix=add_prefix)
         if len(primary_results) == 0:
             return None
 
@@ -422,7 +427,12 @@ class ObsDb(object):
         for pr in primary_results:
             _res = (pr, )
             for secondary_db in secondary_dbs:
-                secondary_result = secondary_db.query("obs_id = ?", query_values=(pr['obs_id'],))
+                if wafer_info:
+                    _wafer_info = secondary_db.warn_primary_keys(wafer_info)
+                    query_str = ' and '.join([f"{k}=='{v}'" for k, v in zip(secondary_db.primary_keys, [pr['obs_id']] + list(_wafer_info))])
+                else:
+                    query_str = f"obs_id=='{pr['obs_id']}'"
+                secondary_result = secondary_db.query(query_str, add_prefix=add_prefix)
                 _res += ([sr for sr in secondary_result],)
             results.append(_res)
         return results
