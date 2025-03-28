@@ -9,6 +9,7 @@ import os
 import logging
 import time
 import numpy as np
+import pathlib
 
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
@@ -208,9 +209,8 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
                    for subdir in os.listdir(hkcfg.hk_root)]
         min_ctime
     else:
-        import pathlib
         _root = pathlib.Path(hkcfg.hk_root)
-        assert all([pathlib.Path(subdir) in _root for subdir in subdirs])
+        assert all([_root in pathlib.Path(sdir).parents for sdir in subdirs])
 
     for sdir in subdirs:
         if min_ctime > 0 and min_ctime > os.path.getmtime(sdir):
@@ -559,9 +559,9 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
 
     for k, d in result.items():
         if len(d[0]) == 0:
-            result[k] = np.array([])
+            result[k] = (np.array([]), np.array([]))
         else:
-            result[k] = np.array([np.hstack(d[0]), np.hstack(d[1])])
+            result[k] = (np.hstack(d[0]), np.hstack(d[1]))
 
     return HkResult(result, aliases=load_spec.cfg.aliases)
 
@@ -614,5 +614,4 @@ def get_field_list(load_spec: Union[LoadSpec, dict],
     E.g. fields = hkdb.get_field_list(load_spec, fields=[Field.from_str('acu.*.*')])
 
     """
-    return load_hk(load_spec, fields=feeds,
-                   field_list_only=True)
+    return load_hk(load_spec, fields=fields, field_list_only=True)
