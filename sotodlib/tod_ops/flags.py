@@ -901,7 +901,7 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
         Name of axis manager to add to aman if merge is True.
     """
     stat_names = np.atleast_1d(stat_names)
-    fn_dict = {'mean': np.mean, 'median': np.median, 'ptp': np.ptp, 'std': np.std,
+    fn_dict = {'mean': np.mean, 'median': np.median, 'ptp': np.ptp, 'std': np.std, 'var': np.var,
                      'kurtosis': stats.kurtosis, 'skew': stats.skew}
 
     if isinstance(signal, str):
