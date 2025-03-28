@@ -111,6 +111,14 @@ class MLMapmaker(Operator):
         "If None, write to {out_dir}/nmats"
     )
 
+    srcsamp = Unicode(
+        None,
+        allow_none=True,
+        help="path to mask file where True regions indicate where bright object "
+        "mitigation should be applied. Mask is in equatorial coordinates. "
+        "Not tiled, so should be low-res to not waste memory."
+    )
+
     dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
     times = Unicode(defaults.times, help="Observation shared key for timestamps")
@@ -617,6 +625,13 @@ class MLMapmaker(Operator):
         mapmaker_prev = None
         x_prev = None
 
+        if self.srcsamp is None:
+            srcsamp_mask = None
+        else:
+            if not os.path.isfile(self.srcsamp):
+                raise RuntimeError(f"Source mask does not exist: {self.srcsamp}")
+            srcsamp_mask = enmap.read_map(self.srcsamp)
+
         for ipass, passinfo in enumerate(passes):
             # The multipass mapmaking loop
             log.info_rank(
@@ -641,6 +656,9 @@ class MLMapmaker(Operator):
                 interpol=passinfo.interpol,
             )
             signals = [signal_cut, signal_map]
+            if srcsamp_mask is not None:
+                signal_srcsamp = mm.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
+                signals.append(signal_srcsamp)
             mapmaker = mm.MLMapmaker(
                 signals, noise_model=noise_model, dtype=dtype_tod, verbose=self.verbose
             )
