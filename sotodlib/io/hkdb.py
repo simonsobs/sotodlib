@@ -10,6 +10,7 @@ import logging
 import time
 import numpy as np
 import pathlib
+import fnmatch
 
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
@@ -352,14 +353,18 @@ class Field:
     def __str__(self):
         return f"{self.agent}.{self.feed}.{self.field}"
 
+    @staticmethod
+    def _wcmatch(a, b):
+        if '*' in a:
+            return fnmatch.fnmatch(b, a)
+        if '*' in b:
+            return fnmatch.fnmatch(a, b)
+        return a == b
+
     def matches(self, other):
-        if self.agent != other.agent:
-            return False
-        if self.feed != other.feed and self.feed != '*' and other.feed != '*':
-            return False
-        if self.field != other.field and self.field != '*' and other.field != '*':
-            return False
-        return True
+        return (self.agent == other.agent
+                and Field._wcmatch(self.feed, other.feed)
+                and Field._wcmatch(self.field, other.field))
 
     @classmethod
     def from_str(cls, s):
@@ -382,9 +387,10 @@ class LoadSpec:
     fields: List[str]
         List of field specifications to load. This can either be a field
         descriptor, of the format ``agent.feed.field``, or an alias defined in
-        the config. Field descriptors can contain wildcards, for instance
-        ``agent.*.*`` will load all fields belonging to the specified agent.
-        ``agent.feed.*`` and ``agent.*.field`` will also work as expected.
+        the config. Field descriptors can contain wildcards in the feed and
+        field portion., for instance ``agent.*.*`` will load all fields
+        belonging to the specified agent.  ``agent.feed.*`` and
+        ``agent.*.*word*`` will also work as expected.
     start: float
         Start time to load
     end: float
