@@ -123,7 +123,7 @@ class TestObsDb(unittest.TestCase):
     def test_linked_query(self):
         obs_db = get_example()
         owb_db = get_owb_example()
-        query_res = obs_db.query_linked_dbs(owb_db, 'myobs2')
+        query_res = obs_db.query_linked_dbs(owb_db, 'obs_id == "myobs2"')
         self.assertIsInstance(query_res, list)
         self.assertEqual(len(query_res), 1)
         self.assertIsInstance(query_res[0], tuple)
