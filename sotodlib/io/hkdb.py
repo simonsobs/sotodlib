@@ -606,10 +606,13 @@ def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[Field]:
     return [Field.from_str(f'{a}.{b}.*') for a, b in sorted(list(pairs))]
 
 def get_field_list(load_spec: Union[LoadSpec, dict],
-                   feeds: List[]=None, start=None):
+                   fields: List[Field]=None):
     """Run a shallow search on the HK data files to get the field names
-    associated with each feed covered by the load_spec.
+    associated with each feed covered by the load_spec (or by the
+    fields argument).
+
+    E.g. fields = hkdb.get_field_list(load_spec, fields=[Field.from_str('acu.*.*')])
 
     """
-    return load_hk(load_spec, fields=feeds, start=start, 
-                   field_list_only=False):
+    return load_hk(load_spec, fields=feeds,
+                   field_list_only=True):
