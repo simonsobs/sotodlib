@@ -582,7 +582,7 @@ def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[str]:
 
     Returns
     -------
-    feeds
+    List[str]
       The list of feeds, as field spec strings, with wildcard for the
       field e.g. "an_agent.a_feed.*".
 
@@ -628,9 +628,8 @@ def get_field_list(load_spec: Union[LoadSpec, dict],
 
     Returns
     -------
-    feeds
-      The list of feeds, as Field instances with wildcard for the field
-      e.g. "an_agent.a_feed.*".
+    List[str]
+      The list of fields, as field spec strings.
 
     Notes
     -----
