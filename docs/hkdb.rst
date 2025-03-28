@@ -1,6 +1,8 @@
-==============================
-Loading L3 Houskeeping Data
-==============================
+.. py:module:: sotodlib.io.hkdb
+
+============================
+Loading L3 Housekeeping Data
+============================
 
 The ``sotodlib.io.hkdb`` module provides methods for indexing, and quickly
 loading housekeeping data from an archive.
@@ -137,15 +139,21 @@ a database, use the :func:`get_feed_list` function.  For example:
 
 .. code-block:: python
 
-    >>> feeds = hkdb.get_feeds_list(lspec)
-    >>> print(feeds)
-    [Field(agent='acu', feed='acu_error', field='*'),
-     Field(agent='acu', feed='acu_status', field='*'),
-     Field(agent='acu', feed='acu_udp_stream', field='*'),
-     ...]
+    feeds = hkdb.get_feed_list(lspec)
+    print(feeds)
+    >> [Field(agent='acu', feed='acu_error', field='*'),
+        Field(agent='acu', feed='acu_status', field='*'),
+        Field(agent='acu', feed='acu_udp_stream', field='*'),
+        ...]
 
 
-To get a list of all fields, use :func:`get_field_list`.  
+To get a list of all fields, use :func:`get_field_list`.  E.g.:
+
+.. code-block:: python
+
+    fields = hkdb.get_field_list(lspec, fields=['acu.*.*Az*'])
+    print(len(fields), fields[0])
+    >> 61 acu.acu_status.Azimuth_current_position
 
 
 API

@@ -452,7 +452,7 @@ class HkResult:
 
 def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
             fields=None, start=None, end=None,
-            field_list_only=False):
+            _field_list_scan=False):
     """
     Loads hk data
 
@@ -462,6 +462,14 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
         Load specification. See docstrings of the LoadSpec class.
     show_pb: bool
         If true, will show a progressbar :)
+    fields: List[str]
+        Fields to load (overrides load_spec.fields).
+    start: float
+        Starting timestamp (overrides load_spec.start).
+    end: float
+        Ending timestamp (overrides load_spec.end).
+    _field_list_scan: bool
+        Run in special mode to support get_field_list.
     """
     if isinstance(load_spec, dict):
         load_spec = LoadSpec(**load_spec)
@@ -484,6 +492,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
     agent_set = list(set(f.agent for f in fields))
 
     file_spec = {}  # {path: [offsets]}
+    feeds = []
     with hkdb.Session.begin() as sess:
         query = sess.query(HkFrame).filter(
             HkFrame.start_time <= end,
@@ -491,24 +500,29 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
             HkFrame.agent.in_(agent_set)
         ).order_by(HkFrame.start_time)
         for frame in query:
+            if _field_list_scan:
+                feed_key = (frame.agent, frame.feed)
+                if feed_key in feeds:
+                    continue
+                feeds.append(feed_key)
             if frame.file.path not in file_spec:
                 file_spec[frame.file.path] = []
-            file_spec[frame.file.path].append((frame.byte_offset, frame.agent, frame.feed))
+            file_spec[frame.file.path].append(frame.byte_offset)
 
     # Filter down?
-    if field_list_only:
-        found = []
-        keepers = {k: [] for k in file_spec.keys()}
-        for k, frames in file_spec.items():
-            for (off, ag, fe) in frames:
-                if (ag, fe) in found:
-                    continue
-                keepers[k].append(off)
-                found.append((ag, fe))
-        file_spec = keepers
-    else:
-        file_spec = {k: [off for (off, ag, fe) in v]
-                     for k, v in file_spec.items()}
+#    if _field_list_scan:
+#        found = []
+#        keepers = {k: [] for k in file_spec.keys()}
+#        for k, frames in file_spec.items():
+#            for (off, ag, fe) in frames:
+#                if (ag, fe) in found:
+#                    continue
+#                keepers[k].append(off)
+#                found.append((ag, fe))
+#        file_spec = keepers
+#    else:
+#        file_spec = {k: [off for (off, ag, fe) in v]
+#                     for k, v in file_spec.items()}
 
     # Convert all paths to absolute paths based on cfg.hk_root
     def create_abs_path(path):
@@ -553,14 +567,14 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
                 ts = np.array(block.times)[::ds_factor] / spt3g_core.G3Units.s
                 for field_name, data in block.items():
                     field = get_result_field(agent, feed, field_name)
-                    if field is None or field_list_only:
+                    if field is None or _field_list_scan:
                         continue
                     field[0].append(ts)
                     field[1].append(np.array(data)[::ds_factor])
             pb.update()
     pb.close()
 
-    if field_list_only:
+    if _field_list_scan:
         return list(result.keys())
 
     for k, d in result.items():
@@ -572,7 +586,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
     return HkResult(result, aliases=load_spec.cfg.aliases)
 
 
-def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[Field]:
+def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[str]:
     """Return the list of feeds present in the db and for the time range
     specified by a LoadSpec.
 
@@ -583,8 +597,9 @@ def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[Field]:
 
     Returns
     -------
-    The list of feeds, as Field instances with wildcard for the field
-    e.g. "an_agent.a_feed.*".
+    feeds
+      The list of feeds, as field spec strings, with wildcard for the
+      field e.g. "an_agent.a_feed.*".
 
     Notes
     -----
@@ -612,12 +627,32 @@ def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[Field]:
     return [Field.from_str(f'{a}.{b}.*') for a, b in sorted(list(pairs))]
 
 def get_field_list(load_spec: Union[LoadSpec, dict],
-                   fields: List[Field]=None):
-    """Run a shallow search on the HK data files to get the field names
-    associated with each feed covered by the load_spec (or by the
-    fields argument).
+                   fields: List[Field]=None) -> List[str]:
+    """Inspect the HK files to get the field names associated with
+    each feed covered by the load_spec (or by the fields argument).
+    This is shallow search in that only a single frame from every
+    ``agent.feed`` combination matching the fields list is inspected.
 
-    E.g. fields = hkdb.get_field_list(load_spec, fields=[Field.from_str('acu.*.*')])
+    Args
+    ----
+    load_spec: LoadSpec
+        Load specification. See docstrings of the LoadSpec class.
+    fields:
+        List of fields (which may include wildcards) to match against.
+
+    Returns
+    -------
+    feeds
+      The list of feeds, as Field instances with wildcard for the field
+      e.g. "an_agent.a_feed.*".
+
+    Notes
+    -----
+
+    If fields is not specified, then it is taken from load_spec.  But
+    normally you'd want it from the get_feeds_list.  The .start_time
+    and .end_time are respected in the query, especially in the sense
+    that the shallow data search will begin at .start_time.
 
     """
-    return load_hk(load_spec, fields=fields, field_list_only=True)
+    return load_hk(load_spec, fields=fields, _field_list_scan=True)
