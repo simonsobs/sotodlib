@@ -1,10 +1,16 @@
 """
-Module for loading L3 housekeeping data.
+Module for loading L3 housekeeping data using a database that
+indexes an archive of HK files.
+
 """
 from dataclasses import dataclass, field
 import yaml
 import os
+import logging
+import time
 import numpy as np
+import pathlib
+import fnmatch
 
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
@@ -13,13 +19,11 @@ from typing import Union, List, Optional, Dict, Any
 import so3g
 from spt3g import core as spt3g_core
 from tqdm.auto import tqdm
-import time
-from sotodlib.site_pipeline.util import init_logger
 
 Base = declarative_base()
 Session = sessionmaker()
 
-log = init_logger('hkdb')
+log = logging.getLogger(__name__)
 
 @dataclass
 class HkConfig:
@@ -53,7 +57,7 @@ class HkConfig:
                 'fp_temp': 'cryo-ls372-lsa21yc.temperatures.Channel_02_T',
             }
 
-        These aliases are only used on load, and do not effect how data is stored in the hkdb.
+        These aliases are only used on load, and do not affect how data is stored in the hkdb.
         Aliases should be valid python identifiers, since they will be set as attributes in
         the HkResult object.
     """
@@ -180,21 +184,36 @@ class HkDb:
         Base.metadata.create_all(self.engine)
 
 
-def update_file_index(hkcfg: HkConfig, session=None):
-    """Updates HkFiles database with new files on disk"""
+def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
+    """Updates HkFiles database with new files on disk.
+
+    If subdirs is specified, it must be a list of (full path)
+    sub-directories of hk_root; those will be scanned and any new
+    files added to database.
+
+    Otherwise, all subdirs of hk_root will be scanned, subject to any
+    restriction from hkcfg.file_idx_lookback_time.
+
+    """
     if session is None:
         hkdb = HkDb(hkcfg)
         session = hkdb.Session()
 
-    if hkcfg.file_idx_lookback_time is not None:
+    if hkcfg.file_idx_lookback_time is not None and subdirs is None:
         min_ctime = time.time() - hkcfg.file_idx_lookback_time
     else:
         min_ctime = 0
 
     all_files = []
-    for subdir in os.listdir(hkcfg.hk_root):
-        sdir = os.path.join(hkcfg.hk_root, subdir)
-        if min_ctime > os.path.getmtime(sdir):
+    if subdirs is None:
+        subdirs = [os.path.join(hkcfg.hk_root, subdir)
+                   for subdir in os.listdir(hkcfg.hk_root)]
+    else:
+        _root = pathlib.Path(hkcfg.hk_root)
+        assert all([_root in pathlib.Path(sdir).parents for sdir in subdirs])
+
+    for sdir in subdirs:
+        if min_ctime > 0 and min_ctime > os.path.getmtime(sdir):
             continue
         all_files.extend([
             os.path.join(sdir, f)
@@ -311,13 +330,13 @@ def update_frame_index(hkcfg: HkConfig, session=None):
             session.commit()
 
 
-def update_index_all(cfg: Union[HkConfig, str]):
+def update_index_all(cfg: Union[HkConfig, str], subdirs=None):
     """Updates all HK index databases"""
     if isinstance(cfg, str):
         cfg = HkConfig.from_yaml(cfg)
     hkdb = HkDb(cfg)
     session = hkdb.Session()
-    update_file_index(cfg, session=session)
+    update_file_index(cfg, session=session, subdirs=subdirs)
     update_frame_index(cfg, session=session)
 
 
@@ -333,14 +352,18 @@ class Field:
     def __str__(self):
         return f"{self.agent}.{self.feed}.{self.field}"
 
+    @staticmethod
+    def _wcmatch(a, b):
+        if '*' in a:
+            return fnmatch.fnmatch(b, a)
+        if '*' in b:
+            return fnmatch.fnmatch(a, b)
+        return a == b
+
     def matches(self, other):
-        if self.agent != other.agent:
-            return False
-        if self.feed != other.feed and self.feed != '*' and other.feed != '*':
-            return False
-        if self.field != other.field and self.field != '*' and other.field != '*':
-            return False
-        return True
+        return (self.agent == other.agent
+                and Field._wcmatch(self.feed, other.feed)
+                and Field._wcmatch(self.field, other.field))
 
     @classmethod
     def from_str(cls, s):
@@ -363,9 +386,10 @@ class LoadSpec:
     fields: List[str]
         List of field specifications to load. This can either be a field
         descriptor, of the format ``agent.feed.field``, or an alias defined in
-        the config. Field descriptors can contain wildcards, for instance
-        ``agent.*.*`` will load all fields belonging to the specified agent.
-        ``agent.feed.*`` and ``agent.*.field`` will also work as expected.
+        the config. Field descriptors can contain wildcards in the feed and
+        field portion., for instance ``agent.*.*`` will load all fields
+        belonging to the specified agent.  ``agent.feed.*`` and
+        ``agent.*.*word*`` will also work as expected.
     start: float
         Start time to load
     end: float
@@ -425,7 +449,8 @@ class HkResult:
         return cls(data, aliases=aliases)
 
 
-def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
+def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
+            fields=None, start=None, end=None):
     """
     Loads hk data
 
@@ -435,6 +460,12 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
         Load specification. See docstrings of the LoadSpec class.
     show_pb: bool
         If true, will show a progressbar :)
+    fields: List[str]
+        Fields to load (overrides load_spec.fields).
+    start: float
+        Starting timestamp (overrides load_spec.start).
+    end: float
+        Ending timestamp (overrides load_spec.end).
     """
     if isinstance(load_spec, dict):
         load_spec = LoadSpec(**load_spec)
@@ -444,13 +475,23 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
     else:
         hkdb = HkDb(load_spec.cfg)
 
-    agent_set = list(set(f.agent for f in load_spec.fields))
+    if fields is None:
+        fields = load_spec.fields
+    fields = [Field.from_str(f) if isinstance(f, str) else f
+              for f in fields]
+
+    if start is None:
+        start = load_spec.start
+    if end is None:
+        end = load_spec.end
+
+    agent_set = list(set(f.agent for f in fields))
 
     file_spec = {}  # {path: [offsets]}
     with hkdb.Session.begin() as sess:
         query = sess.query(HkFrame).filter(
-            HkFrame.start_time <= load_spec.end,
-            HkFrame.end_time >= load_spec.start,
+            HkFrame.start_time <= end,
+            HkFrame.end_time >= start,
             HkFrame.agent.in_(agent_set)
         ).order_by(HkFrame.start_time)
         for frame in query:
@@ -477,16 +518,17 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
         if key in field_misses:
             return None
 
-        for field in load_spec.fields:
+        for field in fields:
             if field.matches(f):
                 result[key] = [[], []]
                 return result[key]
         # Cache field on miss
         field_misses.add(key)
         return None
-    ds_factor = load_spec.downsample_factor
 
+    ds_factor = load_spec.downsample_factor
     nframes = np.sum([len(offsets) for offsets in file_spec.values()])
+
     pb = tqdm(total=nframes, disable=(not show_pb))
     for path in sorted(list(file_spec.keys())):
         offsets = file_spec[path]
@@ -506,10 +548,52 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False):
                     field[1].append(np.array(data)[::ds_factor])
             pb.update()
     pb.close()
+
     for k, d in result.items():
         if len(d[0]) == 0:
-            result[k] = np.array([])
+            result[k] = (np.array([]), np.array([]))
         else:
-            result[k] = np.array([np.hstack(d[0]), np.hstack(d[1])])
+            result[k] = (np.hstack(d[0]), np.hstack(d[1]))
 
     return HkResult(result, aliases=load_spec.cfg.aliases)
+
+
+def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[str]:
+    """Return the list of feeds present in the db and for the time range
+    specified by a LoadSpec.
+
+    Args
+    ----
+    load_spec: LoadSpec
+        Load specification. See docstrings of the LoadSpec class.
+
+    Returns
+    -------
+    List[str]
+      The list of feeds, as field spec strings, with wildcard for the
+      field e.g. "an_agent.a_feed.*".
+
+    Notes
+    -----
+    The .start_time and .end_time are respected in the query, but the
+    .fields entry is ignored in the search.
+
+    """
+    if isinstance(load_spec, dict):
+        load_spec = LoadSpec(**load_spec)
+
+    if load_spec.hkdb is not None:
+        hkdb: HkDb = load_spec.hkdb
+    else:
+        hkdb = HkDb(load_spec.cfg)
+
+    pairs = set()
+    with hkdb.Session.begin() as sess:
+        query = sess.query(HkFrame.agent, HkFrame.feed).filter(
+            HkFrame.start_time <= load_spec.end,
+            HkFrame.end_time >= load_spec.start,
+        )
+        for row in query:
+            pairs.add(tuple(row))
+
+    return [f'{a}.{b}.*' for a, b in sorted(list(pairs))]
