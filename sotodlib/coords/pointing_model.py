@@ -196,13 +196,11 @@ def model_sat_v1(params, az, el, roll):
             * q_fp_offset * ~q_fp_rot * quat.euler(2, roll) * q_fp_rot)
 
     neg_az, el, roll = quat.decompose_lonlat(q_hs)
-    
-    if np.any((-neg_az - az_orig) > 2*np.pi):
-        new_az = -neg_az - 2*np.pi
-    elif np.any((-neg_az - az_orig) < -2*np.pi):
-        new_az = -neg_az + 2*np.pi
-    else:
-        new_az = -neg_az
+
+    # Make corrected az as close as possible to the input az.
+    change = ((-neg_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
+    new_az = az_orig + change
+
     return new_az, el, roll
 
 
