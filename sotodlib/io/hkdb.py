@@ -509,21 +509,6 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
                 file_spec[frame.file.path] = []
             file_spec[frame.file.path].append(frame.byte_offset)
 
-    # Filter down?
-#    if _field_list_scan:
-#        found = []
-#        keepers = {k: [] for k in file_spec.keys()}
-#        for k, frames in file_spec.items():
-#            for (off, ag, fe) in frames:
-#                if (ag, fe) in found:
-#                    continue
-#                keepers[k].append(off)
-#                found.append((ag, fe))
-#        file_spec = keepers
-#    else:
-#        file_spec = {k: [off for (off, ag, fe) in v]
-#                     for k, v in file_spec.items()}
-
     # Convert all paths to absolute paths based on cfg.hk_root
     def create_abs_path(path):
         if os.path.isabs(path):
@@ -624,7 +609,8 @@ def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[str]:
         for row in query:
             pairs.add(tuple(row))
 
-    return [Field.from_str(f'{a}.{b}.*') for a, b in sorted(list(pairs))]
+    return [f'{a}.{b}.*' for a, b in sorted(list(pairs))]
+
 
 def get_field_list(load_spec: Union[LoadSpec, dict],
                    fields: List[Field]=None) -> List[str]:
