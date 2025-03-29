@@ -40,20 +40,36 @@ def write_hk(filepath):
     data = np.zeros(len(times), dtype=float)
     frame_idxs = (times - t0) // frame_len
 
-    prov_address = 'site.test_agent.feeds.test_feed'
-    prov_session_id = int(time.time())
+    prov1 = {
+        'addr': 'site.test_agent.feeds.test_feed',
+        'session_id': int(time.time()),
+    }
+    prov2 = {
+        'addr': 'site.weird_agent.feeds.misc_feed',
+        'session_id': int(time.time() + 5)
+    }
+
+    def hk_frame(prov, times, data, block_name='test_block'):
+        frame = hksess.data_frame(0)
+        tsmap = core.G3TimesampleMap()
+        tsmap.times = core.G3VectorTime(times * core.G3Units.s)
+        for k, v in data.items():
+            tsmap[k] = core.G3VectorDouble(v)
+        frame['block_names'] = core.G3VectorString([block_name])
+        frame['blocks'].append(tsmap)
+        frame['address'] = core.G3String(prov['addr'])
+        frame['provider_session_id'] = core.G3Int(prov['session_id'])
+        return frame
 
     for fr_idx in np.unique(frame_idxs):
         m = frame_idxs == fr_idx
-        frame = hksess.data_frame(0)
-        tsmap = core.G3TimesampleMap()
-        tsmap.times = core.G3VectorTime(times[m] * core.G3Units.s)
-        tsmap['test_field'] = core.G3VectorDouble(data[m].tolist())
-        frame['block_names'] = core.G3VectorString(['test_block'])
-        frame['blocks'].append(tsmap)
-        frame['address'] = core.G3String(prov_address)
-        frame['provider_session_id'] = core.G3Int(prov_session_id)
-        frames.append(frame)
+        frames.append(hk_frame(prov1, times[m], {'test_field': data[m]}))
+        if fr_idx % 2 == 0:
+            frames.append(hk_frame(prov2, times[m], {'field1': data[m]},
+                                   block_name='block1'))
+        else:
+            frames.append(hk_frame(prov2, times[m], {'field2': data[m]},
+                                   block_name='block2'))
 
     for f in frames:
         writer(f)
@@ -92,3 +108,13 @@ class HkDbTest(unittest.TestCase):
 
         self.assertEqual(len(res.test[0]), nsamp)
 
+        feeds = hkdb.get_feed_list(load_spec)
+        self.assertEqual(list(map(str, feeds)),
+                         ['test_agent.test_feed.*', 'weird_agent.misc_feed.*'])
+
+        fields = hkdb.get_field_list(load_spec)
+        self.assertEqual(fields, ['test_agent.test_feed.test_field'])
+
+        fields = hkdb.get_field_list(load_spec, fields=['weird_agent.*.*'])
+        self.assertEqual(fields, ['weird_agent.misc_feed.field1',
+                                  'weird_agent.misc_feed.field2'])
