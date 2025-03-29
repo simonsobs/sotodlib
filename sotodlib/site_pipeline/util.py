@@ -285,13 +285,14 @@ class _ReltimeFormatter(logging.Formatter):
             datefmt = '%8.3f'
         return datefmt % (record.created - self.start_time)
 
-def init_logger(name, announce='', verbosity=2):
+def init_logger(name, announce='', verbosity=2, logger=None):
     """Configure and return a logger for site_pipeline elements.  It is
     disconnected from general sotodlib (propagate=False) and displays
     relative instead of absolute timestamps.
 
     """
-    logger = logging.getLogger(name)
+    if logger is None:
+        logger = logging.getLogger(name)
 
     if verbosity == 0:
         level = logging.ERROR
