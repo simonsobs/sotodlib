@@ -8,6 +8,11 @@ import numpy as np
 import h5py
 import traceback
 import inspect
+from sotodlib.hwp import hwp_angle_model
+from sotodlib.coords import demod as demod_mm
+from sotodlib.tod_ops import t2pleakage
+
+
 
 from .. import core
 
@@ -349,7 +354,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
-                                   logger=None):
+                                   logger=None, init_only=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -378,6 +383,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         the (large) TOD blob.  Not all loaders may support this.
     logger: PythonLogger
         Optional. Logger object or None will generate a new one.
+    init_only: bool
+        Optional. Whether or not to run the dependent pipeline.
     """
 
     if logger is None:
@@ -415,6 +422,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess)
+            if init_only:
+                return aman
 
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
@@ -423,6 +432,116 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             aman.preprocess.merge(proc_aman.preprocess)
 
             pipe_proc.run(aman, aman.preprocess)
+
+            return aman
+        else:
+            raise ValueError('Dependency check between configs failed.')
+
+
+def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
+                                       sim_map, meta=None,
+                                       logger=None, init_only=False,
+                                       t2ptemplate_aman=None):
+    """Loads the saved information from the preprocessing pipeline from a
+    reference and a dependent database, loads the signal from a (simulated)
+    map into the AxisManager and runs the processing section of the pipeline
+    for both databases.
+
+    Assumes preprocess_tod and multilayer_preprocess_tod have already been run
+    on the requested observation.
+
+    Arguments
+    ----------
+    obs_id: multiple
+        Passed to `context.get_obs` to load AxisManager, see Notes for
+        `context.get_obs`
+    configs_init: string or dictionary
+        Config file or loaded config directory
+    configs_proc: string or dictionary
+        Second config file or loaded config dictionary to load
+        dependent databases generated using multilayer_preprocess_tod.py.
+    sim_map: numpy.ndmap or enmap.ndmap
+        Input simulated map to be observed
+    meta: AxisManager
+        Contains supporting metadata to use for loading.
+        Can be pre-restricted in any way. See context.get_meta.
+    no_signal: bool
+        If True, signal will be set to None.
+        This is a way to get the axes and pointing info without
+        the (large) TOD blob.  Not all loaders may support this.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    init_only: bool
+        Optional. Whether or not to run the dependent pipeline.
+    t2ptemplate_aman: AxisManager
+        Optional. AxisManager to use as a template for t2p leakage
+        deprojection.
+    """
+    if logger is None:
+        logger = init_logger("preprocess")
+
+    configs_init, context_init = get_preprocess_context(configs_init)
+    meta_init = context_init.get_meta(obs_id, meta=meta)
+
+    configs_proc, context_proc = get_preprocess_context(configs_proc)
+    meta_proc = context_proc.get_meta(obs_id, meta=meta)
+
+    group_by_init, groups_init, error_init = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, error_proc = get_groups(obs_id, configs_proc, context_proc)
+
+    if error_init is not None:
+        raise ValueError(f"{error_init[0]}\n{error_init[1]}\n{error_init[2]}")
+
+    if error_proc is not None:
+        raise ValueError(f"{error_proc[0]}\n{error_proc[1]}\n{error_proc[2]}")
+
+    if (group_by_init != group_by_proc).any():
+        raise ValueError('init and proc groups do not match')
+
+    if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
+        logger.info(f"No detectors in obs {obs_id}")
+        return None
+    else:
+        pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
+        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+
+        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
+                           logger=logger):
+            aman = context_init.get_obs(meta_proc, no_signal=True)
+            aman = hwp_angle_model.apply_hwp_angle_model(aman)
+            aman.move("signal", None)
+
+            logger.info("Reading in simulated map")
+            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True)
+
+            logger.info("Running initial pipeline")
+            pipe_init.run(aman, aman.preprocess, sim=True)
+
+            if init_only:
+                return aman
+            
+            if t2ptemplate_aman is not None:
+                # Replace Q,U with simulated timestreams
+                t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
+                t2ptemplate_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
+
+                t2p_aman = t2pleakage.get_t2p_coeffs(
+                    t2ptemplate_aman,
+                    merge_stats=False
+                )
+                t2pleakage.subtract_t2p(
+                    aman,
+                    t2p_aman,
+                    T_signal=t2ptemplate_aman.dsT
+                )
+
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+            logger.info("Running dependent pipeline")
+            proc_aman = context_proc.get_meta(obs_id, meta=aman)
+            proc_aman.preprocess.noisy_dets_flags.move("valid_dets", None)
+            aman.preprocess.merge(proc_aman.preprocess)
+
+            pipe_proc.run(aman, aman.preprocess, sim=True)
 
             return aman
         else:

@@ -37,7 +37,7 @@ class _Preprocess(object):
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
         self.skip_on_sim = step_cfgs.get("skip_on_sim", False)
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
         any configuration information under the ``process`` key of the
@@ -466,7 +466,7 @@ class Pipeline(list):
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
-            process.process(aman, proc_aman)
+            process.process(aman, proc_aman, sim)
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
