@@ -441,8 +441,8 @@ class MLMapmaker(Operator):
             axobs.restrict("samps", [0, fft.fft_len(axobs.samps.count)])
 
         # MLMapmaker.add_obs will apply deslope
-        # if self.deslope:
-        #    utils.deslope(axobs.signal, w=5, inplace=True)
+        if self.deslope:
+            utils.deslope(axobs.signal, w=5, inplace=True)
 
         if self.downsample != 1:
             axobs = mm.downsample_obs(axobs, passinfo.downsample)
@@ -610,7 +610,10 @@ class MLMapmaker(Operator):
                 )
 
         # nmat_type is guaranteed to be a valid Nmat class
-        noise_model = getattr(mm, self.nmat_type)()
+        if self.nmat_type == 'NmatDetvecs':
+            noise_model = getattr(mm, self.nmat_type)(downweight=[1e-4, 0.25, 0.50], window=0)
+        else:
+            noise_model = getattr(mm, self.nmat_type)()
 
         shape, wcs = enmap.read_map_geometry(self.area)
 
