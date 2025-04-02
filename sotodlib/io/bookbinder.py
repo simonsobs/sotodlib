@@ -33,8 +33,9 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
+MAX_DROPPED_SAMPLES = 100
 class BadTimeSamples(Exception):
-    """Exception raised when there are glitches in the time samples in the 
+    """Exception raised when there are drops in the time samples in the 
     UFM timestreams"""
     pass
 
@@ -593,11 +594,19 @@ class SmurfStreamProcessor:
             raise BadTimeSamples(
                 f"{self.obs_id} has time samples not increasing"
             )
-        if np.any( dts > 100*np.median(dts) ):
-            raise BadTimeSamples(
-                f"{self.obs_id} has more than 100 time samples missing"
-            )
-
+        
+        if np.any( dts > MAX_DROPPED_SAMPLES*np.median(dts) ):
+            if (not self.allow_bad_timing):
+                raise BadTimeSamples(
+                    f"{self.obs_id} has more than {MAX_DROPPED_SAMPLES} time"
+                    " samples missing. Pass `allow_bad_timing=True` to bind " "anyway"
+                )
+            else:
+                self.log.warning(
+                    f"{self.obs_id} has more than {MAX_DROPPED_SAMPLES} time"
+                    " samples missing"
+                )
+        
         timing = timing and (not self.timing_paradigm=='Low Precision')
         
         if (not self.allow_bad_timing) and (not timing):
@@ -761,7 +770,7 @@ class SmurfStreamProcessor:
                 )
                 raise ValueError(f"Cannot finish binding {self.obs_id}")
             elif np.any(~filled):
-                self.log.debug(
+                self.log.warning(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
                 )
                 # Missing samples at the beginning / end of a frame will be
