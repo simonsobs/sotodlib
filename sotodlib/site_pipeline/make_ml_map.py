@@ -247,7 +247,7 @@ def main(**args):
                     mapmaking.inject_map(obs, map_to_inject, recenter=recenter, interpol=args.interpol)
                 utils.deslope(obs.signal, w=5, inplace=True)
 
-                if args.downsample != 1:
+                if passinfo.downsample != 1:
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
 
                 # Maybe load precomputed noise model.
