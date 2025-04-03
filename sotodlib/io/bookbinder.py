@@ -588,24 +588,11 @@ class SmurfStreamProcessor:
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
-
-        dts = np.diff(self.times)
-        if np.any( dts < 0):
+ 
+        if np.any( np.diff(self.times) < 0):
             raise BadTimeSamples(
                 f"{self.obs_id} has time samples not increasing"
             )
-        
-        if np.any( dts > MAX_DROPPED_SAMPLES*np.median(dts) ):
-            if (not self.allow_bad_timing):
-                raise BadTimeSamples(
-                    f"{self.obs_id} has more than {MAX_DROPPED_SAMPLES} time"
-                    " samples missing. Pass `allow_bad_timing=True` to bind " "anyway"
-                )
-            else:
-                self.log.warning(
-                    f"{self.obs_id} has more than {MAX_DROPPED_SAMPLES} time"
-                    " samples missing"
-                )
         
         timing = timing and (not self.timing_paradigm=='Low Precision')
         
@@ -1031,11 +1018,55 @@ class BookBinder:
             file_idxs.append(totsize[idx] // self.max_file_size)
         file_idxs = np.array(file_idxs, dtype=int)
 
-        self.log.info("Finished preprocessing data")
-
         self.times = ts
         self.frame_idxs = frame_idxs
         self.file_idxs = file_idxs
+
+        self.check_timesamples()
+        self.log.info("Finished preprocessing data")
+
+    def check_timesamples(self, atol=1e-4):
+        """
+        Checks for missing timesamples in individual streams relative to the 
+        book times. Makes sure individual readout slots haven't dropped too many
+        points
+        """
+        if self.times is None:
+            raise ValueError(
+                "Preprocess must have been run to check_timesamples"
+            )
+        
+        self.dropped = {}
+        for u, s in self.streams.items():
+            sample_map = find_ref_idxs(self.times, s.times)
+            mapped = np.abs(self.times[sample_map] - s.times) < atol
+            diffs = np.diff(sample_map[mapped])
+            idx = np.where( diffs>1)[0]
+            self.dropped[u] = sum( [diffs[i]-1 for i in idx] )
+        
+        if np.all( [x==0 for x in self.dropped.values()] ):
+            ## no dropped samples from any slot
+            return
+        msg = '\n'.join([
+            f"\t{self.streams[u].obs_id}: {x}" for u, x in self.dropped.items()
+        ])
+        if np.any( [x>MAX_DROPPED_SAMPLES for x in self.dropped.values()]):
+            if (not self.allow_bad_timing):
+                raise BadTimeSamples(
+                    f"Streams have more than {MAX_DROPPED_SAMPLES} time samples"
+                    f" missing. Pass `allow_bad_timing=True` to bind anyway. "
+                    "Missing samples:\n" + msg
+                )
+            else:
+                self.log.warning(
+                    f"Streams have more than {MAX_DROPPED_SAMPLES} time samples"
+                    f" missing. Missing Samples: \n" + msg
+                )
+        else:
+            self.log.warning(
+                f"Streams have time samples missing. Missing Samples: \n" + msg
+            )
+
 
     def copy_smurf_files_to_book(self):
         """
@@ -1114,6 +1145,7 @@ class BookBinder:
         meta['n_frames'] = len(np.unique(self.frame_idxs))
         meta['n_samples'] = len(self.times)
         meta['session_id'] = self.book.bid.split('_')[1]
+        meta['filled_samples'] = {k:int(x) for k,x in self.dropped.items()}
 
         sample_ranges = []
         for file_idx in np.unique(self.file_idxs):
@@ -1203,7 +1235,7 @@ class BookBinder:
             If True, will enable a progress bar.
         """
         self.preprocess()
-
+        
         self.log.info(f"Binding data to {self.outdir}")
         if not os.path.exists(self.outdir):
             os.makedirs(self.outdir)
