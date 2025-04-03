@@ -454,6 +454,21 @@ class MLMapmaker(Operator):
         return axobs
 
     @function_timer
+    def _add_obs(self, mapmaker, axobs, nmat, name):
+        """ Add data to the mapmaker
+
+        Singled out for more granular timing
+        """
+        mapmaker.add_obs(
+            name,
+            axobs,
+            deslope=self.deslope,
+            noise_model=nmat,
+            signal_estimate=None,
+        )
+        return
+
+    @function_timer
     def _init_mapmaker(
             self, mapmaker, signal_map, mapmaker_prev, x_prev, comm, gcomm, prefix,
     ):
@@ -655,13 +670,7 @@ class MLMapmaker(Operator):
                 nmat, nmat_file = self._load_noise_model(ob, npass, ipass, gcomm)
 
                 axobs = self._wrap_obs(ob, dets, passinfo)
-                mapmaker.add_obs(
-                    ob.name,
-                    axobs,
-                    deslope=self.deslope,
-                    noise_model=nmat,
-                    signal_estimate=None,
-                )
+                self._add_obs(mapmaker, axobs, nmat, ob.name)
                 del axobs
 
                 self._save_noise_model(mapmaker, nmat, nmat_file, gcomm)
