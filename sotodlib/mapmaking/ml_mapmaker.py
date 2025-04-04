@@ -638,13 +638,13 @@ class SignalSrcsamp(SignalCut):
         # First scan our mask to find which samples need this
         # treatment
         if self.recenter:
-            rec = evaluate_recentering(self.recenter, ctime=ctime[len(ctime) // 2],
-                    geom=(self.mask.shape, self.mask.wcs), site=unarr(obs.site))
-            rot = recentering_to_quat_lonlat(*rec)
+            rec = smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime) // 2],
+                    geom=(self.mask.shape, self.mask.wcs), site=smutils.unarr(obs.site))
+            rot = smutils.recentering_to_quat_lonlat(*rec)
         else: rot = None
         pmap = coords.pmat.P.for_tod(obs, comps="T", geom=self.mask.geometry,
-            rot=rot, threads="domdir", weather=unarr(obs.weather),
-            site=unarr(obs.site), interpol="nearest")
+            rot=rot, threads="domdir", weather=smutils.unarr(obs.weather),
+            site=smutils.unarr(obs.site), interpol="nearest")
         tod = np.zeros((obs.dets.count, obs.samps.count), Nd.dtype)
         pmap.from_map(self.mask, dest=tod)
         cuts= so3g.proj.RangesMatrix.from_mask(tod>0.5)
@@ -777,7 +777,7 @@ def get_pmap(obs, geom, recenter=None, **kwargs):
     if recenter:
         t0  = obs.timestamps[obs.samps.count//2]
         rot = recentering_to_quat_lonlat(*evaluate_recentering(recenter,
-            ctime=t0, geom=geom, site=unarr(obs.site)))
+            ctime=t0, geom=geom, site=smutils.unarr(obs.site)))
     else: rot = None
     if "multibeam" in obs:
         return PmatMultibeam.for_tod(obs, focal_planes=obs.multibeam, geom=geom, rot=rot, **kwargs)
