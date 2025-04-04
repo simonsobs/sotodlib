@@ -560,7 +560,16 @@ class DataPackaging:
                 for k in flist:
                     x.extend(flist[k])
                 flist=x
-            file_list.extend(flist)
+            ## annoying edge case catcher because we use datetimes in
+            ## book.start and book.stop
+            for f in flist:
+                if f"/{timecode}/" not in f:
+                    self.logger.info(
+                        f"Not adding {f} to file list because it is not in "
+                        f"the {timecode} folder"
+                    )
+                    continue
+                file_list.append(f)
         # add suprsync files 
         file_list.extend( self.get_suprsync_files(timecode) )
         return file_list, deletable
