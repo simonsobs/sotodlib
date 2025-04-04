@@ -54,7 +54,8 @@ def fix_single_book(imprint:Imprinter, book:Books):
             "\n\t2. Retry Binding with lvl2 updates"
             "\n\t3. Rebind with flag(s)"
             "\n\t4. Permanently Skip Binding"
-            "\n\t5. Do Nothing"
+            "\n\t5. Permanently Skip Binding. Delete lvl2."
+            "\n\t6. Do Nothing"
             "\nInput Response: "
         )
         try: 
@@ -62,7 +63,7 @@ def fix_single_book(imprint:Imprinter, book:Books):
         except:
             print(f"Invalid Response {resp}")
             resp=None
-        if resp is None or resp < 1 or resp > 5:
+        if resp is None or resp < 1 or resp > 6:
             print(f"Invalid Response {resp}")
             resp=None
     print(f"You selected {resp}")
@@ -76,19 +77,31 @@ def fix_single_book(imprint:Imprinter, book:Books):
             "Drop Ancillary Duplicates? (y/[n])"
         )
         allow_bad_timing = set_tag_and_validate(
-            "Allow Low Precision Timing? (y/[n])"
+            "Allow Bad Timing? (Low Precision or Dropped Samples)? (y/[n])"
         )
         require_acu = set_tag_and_validate("Require ACU data? ([y]/n)")
         require_hwp = set_tag_and_validate("Require HWP data? ([y]/n)")
+        require_monotonic_times = set_tag_and_validate(
+            "Require Monotonic Housekeeping times? ([y]/n)"
+        )
         imprint.bind_book(
             book, ignore_tags=ignore_tags, ancil_drop_duplicates=ancil_drop_duplicates,
             allow_bad_timing=allow_bad_timing,
             require_acu=require_acu,
             require_hwp=require_hwp,
+            require_monotonic_times=require_monotonic_times,
         )
     elif resp == 4:
         utils.set_book_wont_bind(imprint, book)
     elif resp == 5:
+        sure = set_tag_and_validate(
+            "Are you sure you want to delete level 2?"
+        )
+        if sure:
+            utils.delete_level2_obs_and_book(imprint, book)
+        else:
+            print("Skipping")
+    elif resp == 6:
         pass
     else:
         raise ValueError("how did I get here?")
@@ -144,7 +157,7 @@ def autofix_failed_books(
                     utils.set_book_rebind(imprint, book)
                     imprint.bind_book(book)
             except Exception as e :
-                print(f"Book {book.bid} failed again!")
+                print(f"Book {book.bid} failed again!")            
         elif "DuplicateAncillaryData" in book.message:
             print(f"Binding {book.bid} while fixing Duplicate Ancil Data")
             try:
@@ -178,10 +191,29 @@ def autofix_failed_books(
                 if not test_mode:
                     utils.set_book_rebind(imprint, book)
                     imprint.bind_book(book, allow_bad_timing=True,)
-            except Exception as e:
+            except Exception:
                 print(f"Book {book.bid} failed again!")
                 book.message = book.message + \
                     ' SECOND-FAIL. Tried with `allow_bad_timing=True`'
+                imprint.get_session().commit()
+        elif (
+            "NoMountData" in book.message
+        ):
+            ## ACU data was messed up somehow. this is ok for oper books
+            if book.type == 'obs':
+                print("Not autofixing obs books with bad mount data")
+                continue
+            elif book.type != 'oper':
+                raise ValueError(f"What book got me here? {book.bid}")
+            print(f"Binding {book.bid} without complete ACU data")
+            try:
+                if not test_mode:
+                    utils.set_book_rebind(imprint, book)
+                    imprint.bind_book(book, require_acu=False,)
+            except:
+                print(f"Book {book.bid} failed again!")
+                book.message = book.message + \
+                    ' SECOND-FAIL. Tried with `require_acu=False`'
                 imprint.get_session().commit()
         elif 'MissingReadoutIDError' in book.message:
             print(f"Book {book.bid} does not have readout ids, not binding")
