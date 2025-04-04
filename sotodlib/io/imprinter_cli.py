@@ -77,7 +77,7 @@ def fix_single_book(imprint:Imprinter, book:Books):
             "Drop Ancillary Duplicates? (y/[n])"
         )
         allow_bad_timing = set_tag_and_validate(
-            "Allow Low Precision Timing? (y/[n])"
+            "Allow Bad Timing? (Low Precision or Dropped Samples)? (y/[n])"
         )
         require_acu = set_tag_and_validate("Require ACU data? ([y]/n)")
         require_hwp = set_tag_and_validate("Require HWP data? ([y]/n)")
