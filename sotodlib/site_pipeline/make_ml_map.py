@@ -192,7 +192,6 @@ def main(**args):
                 # Desolope to make it periodic. This should be done *before*
                 # dropping to single precision, to avoid unnecessary loss of precision due
                 # to potential high offses in the raw tod.
-                utils.deslope(obs.signal, w=5, inplace=True)
                 obs.signal = obs.signal.astype(dtype_tod)
 
                 if "flags" not in obs:
@@ -245,7 +244,6 @@ def main(**args):
                 # the main mapmaking.
                 if args.inject:
                     mapmaking.inject_map(obs, map_to_inject, recenter=recenter, interpol=args.interpol)
-                utils.deslope(obs.signal, w=5, inplace=True)
 
                 if passinfo.downsample != 1:
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
