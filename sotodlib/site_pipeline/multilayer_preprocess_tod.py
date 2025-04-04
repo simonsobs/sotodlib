@@ -2,12 +2,12 @@ import os
 import yaml
 import time
 import logging
+from typing import Optional, Union, Callable
 import numpy as np
 import argparse
 import traceback
 from typing import Optional
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
 from sotodlib.coords import demod as demod_mm
@@ -271,7 +271,9 @@ def get_parser(parser=None):
     )
     return parser
 
-def main(configs_init: str,
+def main(executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"],
+         as_completed_callable: Callable,
+         configs_init: str,
          configs_proc: str,
          query: Optional[str] = None, 
          obs_id: Optional[str] = None, 
@@ -291,7 +293,6 @@ def main(configs_init: str,
 
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog.txt')
-    multiprocessing.set_start_method('spawn')
 
     obs_list = sp_util.get_obslist(context_proc, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
@@ -332,41 +333,43 @@ def main(configs_init: str,
     logger.info(f'Run list created with {len(run_list)} obsids')
 
     # run write_block obs-ids in parallel at once then write all to the sqlite db.
-    with ProcessPoolExecutor(nproc) as exe:
-        futures = [exe.submit(multilayer_preprocess_tod, obs_id=r[0]['obs_id'],
-                    group_list=r[1], verbosity=verbosity,
-                    configs_init=configs_init,
-                    configs_proc=configs_proc,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
-        for future in as_completed(futures):
-            logger.info('New future as_completed result')
-            try:
-                err, db_datasets_init, db_datasets_proc = future.result()
-            except Exception as e:
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-                f.close()
-                continue
-            futures.remove(future)
+    futures = [executor.submit(multilayer_preprocess_tod, obs_id=r[0]['obs_id'],
+                group_list=r[1], verbosity=verbosity,
+                configs_init=configs_init,
+                configs_proc=configs_proc,
+                overwrite=overwrite, run_parallel=True) for r in run_list]
+    for future in as_completed_callable(futures):
+        logger.info('New future as_completed result')
+        try:
+            err, db_datasets_init, db_datasets_proc = future.result()
+        except Exception as e:
+            errmsg = f'{type(e)}: {e}'
+            tb = ''.join(traceback.format_tb(e.__traceback__))
+            logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+            f.close()
+            continue
+        futures.remove(future)
 
-            if db_datasets_init:
-                if err is None:
-                    for db_dataset in db_datasets_init:
-                        logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                        pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
-                else:
-                    pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
+        if db_datasets_init:
+            if err is None:
+                for db_dataset in db_datasets_init:
+                    logger.info(f'Processing future result db_dataset: {db_datasets_init}')
+                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+            else:
+                pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
 
-            if db_datasets_proc:
-                if err is None:
-                    logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
-                    for db_dataset in db_datasets_proc:
-                        pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
-                else:
-                    pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
+        if db_datasets_proc:
+            if err is None:
+                logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
+                for db_dataset in db_datasets_proc:
+                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+            else:
+                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    args = get_parser().parse_args()
+    rank, executor, as_completed_callable = get_exec_env(args.nprocs)
+    if rank == 0:
+        main(executor=executor, as_completed_callable=as_completed_callable, **args)
