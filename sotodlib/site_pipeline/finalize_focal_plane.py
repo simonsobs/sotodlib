@@ -382,6 +382,38 @@ def _restrict_inliers(aman, focal_plane):
     )
 
 
+def _reverse_roll(fp, aff, sft, aman):
+    if "obs_info" not in aman:
+        raise ValueError("Can't reverse roll without obs information")
+    if "roll_center" not in aman.obs_info:
+        raise ValueError("Can't reverse roll without roll information")
+    roll = -1*np.deg2rad(aman.obs_info.roll_center)
+
+    # We want to shift so we rotating about the origin
+    # To get to nominal we do fp@aff + sft
+    # So if we just want to recenter we do fp + sft@aff^-1
+    inv_aff, _ = mt.invert_transform(aff, np.zeros_like(sft))
+    sft_adj = sft@inv_aff
+    fp_sft = fp[:, :2] + sft_adj
+
+    # Now lets reverse the roll
+    # The transpose is the inverse
+    rot = np.array([[np.cos(roll), -1*np.sin(roll)], [np.sin(roll), np.cos(roll)]])
+    fp_rot = fp_sft@rot
+
+    # And undo the shift, keeping track of rotations
+    fp_rot -= sft_adj@rot
+
+    # Make sure its set 
+    fp[:, :2] = fp_rot
+
+    # For gamma lets just shift by the roll
+    fp[:, 2] -= roll
+
+    return fp
+
+
+
 def main():
     # Read in input pars
     parser = ap.ArgumentParser()
@@ -565,6 +597,9 @@ def main():
                     logger.error("\t\t%s", e)
                     continue
                 aligned = mt.apply_transform(fp[:, :2], aff, sft)
+
+                if config.get('reverse_roll', False):
+                    fp = _reverse_roll(fp, aff, sft, aman)
                 if np.any(np.isfinite(fp[:, 2])):
                     gscale, gsft = gamma_fit(
                         fp[:, 2], focal_plane.template.fp[template_msk, 2]
