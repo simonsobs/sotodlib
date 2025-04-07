@@ -271,7 +271,7 @@ def get_parser(parser=None):
     )
     return parser
 
-def main(executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"],
+def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
          as_completed_callable: Callable,
          configs_init: str,
          configs_proc: str,
@@ -370,6 +370,6 @@ def main(executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"],
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
-    rank, executor, as_completed_callable = get_exec_env(args.nprocs)
+    rank, executor, as_completed_callable = get_exec_env(args.nproc)
     if rank == 0:
         main(executor=executor, as_completed_callable=as_completed_callable, **args)
