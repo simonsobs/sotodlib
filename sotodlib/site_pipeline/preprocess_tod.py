@@ -390,4 +390,4 @@ if __name__ == '__main__':
     args = get_parser().parse_args()
     rank, executor, as_completed_callable = get_exec_env(args.nproc)
     if rank == 0:
-        main(executor=executor, as_completed_callable=as_completed_callable, **args)
+        main(executor=executor, as_completed_callable=as_completed_callable, **vars(args))
