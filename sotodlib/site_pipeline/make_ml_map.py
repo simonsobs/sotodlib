@@ -262,7 +262,7 @@ def main(**args):
                 with bench.mark("add_obs %s" % sub_id):
                     if ipass > 0:
                         # Evaluate the final model of the previous pass' mapmaker
-                        # for this observation.
+                        # for this observation. len(mapmaker.data) is the index of the current obs
                         signal_estimate = eval_prev.evaluate(mapmaker_prev.data[len(mapmaker.data)])
                         # Resample this to the current downsampling level
                         signal_estimate = mapmaking.resample.resample_fft_simple(signal_estimate, obs.samps.count)
