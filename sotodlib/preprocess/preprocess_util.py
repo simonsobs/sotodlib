@@ -9,6 +9,8 @@ import h5py
 import traceback
 import inspect
 
+from so3g.proj import RangesMatrix
+
 from .. import core
 
 from . import _Preprocess, Pipeline, processes
@@ -296,8 +298,12 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
     logger.info("Restricting detectors on all processes")
+    keep_all = np.ones(meta.dets.count,dtype=bool)
     for process in pipe[:]:
-        process.select(meta)
+        keep = process.select(meta, in_place=False)
+        if isinstance(keep, np.ndarray):
+            keep_all &= keep
+    meta.restrict("dets", meta.dets.vals[keep_all])
     return meta
 
 
@@ -412,10 +418,16 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+
             logger.info("Restricting detectors on all proc pipeline processes")
+            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
             for process in pipe_proc[:]:
-                process.select(meta_proc)
+                keep = process.select(meta_proc, in_place=False)
+                if isinstance(keep, np.ndarray):
+                    keep_all &= keep
+            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
+
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, select=False)

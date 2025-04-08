@@ -65,14 +65,17 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("det_bias_flags", dbc_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~proc_aman.det_bias_flags.det_bias_flags
-        meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
-        return meta
+        keep = has_all_cut(~proc_aman.det_bias_flags.det_bias_flags)
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
     
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -129,7 +132,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("trends", trend_aman)
     
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -141,8 +144,11 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
                                 "understood. Expect 'any' or 'all'")
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -212,8 +218,11 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -317,7 +326,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
             name = self.save_cfgs.get('jumps_name', 'jumps')
             proc_aman.wrap(name, jump_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -326,8 +335,10 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
         n_cut = count_cuts(proc_aman[name].jump_flag)
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -575,8 +586,11 @@ class Noise(_Preprocess):
             keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
             keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
     
 class Calibrate(_Preprocess):
     """Calibrate the timestreams based on some provided information.
@@ -1003,14 +1017,17 @@ class DarkDets(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("darks", dark_aman)
     
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.darks.darks)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 class SourceFlags(_Preprocess):
     """Calculate the source flags in the data.
@@ -1074,7 +1091,7 @@ class SourceFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("source_flags", source_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -1089,12 +1106,20 @@ class SourceFlags(_Preprocess):
             if len(source_list) == 0:
                 raise ValueError("No tags match source list")
 
+        keep_all = np.ones(meta.dets.count)
+
         for source in source_list:
             if source in source_flags._fields:
                 keep = ~has_all_cut(source_flags[source])
-                meta.restrict("dets", meta.dets.vals[keep])
-                source_flags.restrict("dets", source_flags.dets.vals[keep])
-        return meta
+                if in_place:
+                    meta.restrict("dets", meta.dets.vals[keep])
+                    source_flags.restrict("dets", source_flags.dets.vals[keep])
+                else:
+                   keep_all &= keep
+        if in_place:
+            return meta
+        else:
+            return keep_all
 
 class HWPAngleModel(_Preprocess):
     """Apply hwp angle model to the TOD.
@@ -1302,7 +1327,7 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.run_name, pca_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -1419,14 +1444,17 @@ class PTPFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("ptp_flags", ptp_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.ptp_flags.ptp_flags)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 class InvVarFlags(_Preprocess):
     """Find detectors with too high inverse variance.
@@ -1459,14 +1487,16 @@ class InvVarFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("inv_var_flags", inv_var_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
 
 class EstimateT2P(_Preprocess):
     """Estimate T to P leakage coefficients.
@@ -1676,14 +1706,16 @@ class FocalplaneNanFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("fp_flags", fp_aman)
     
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.fp_flags.fp_nans)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
 
 class PointingModel(_Preprocess):
     """Apply pointing model to the TOD.
