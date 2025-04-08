@@ -70,7 +70,7 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = has_all_cut(~proc_aman.det_bias_flags.det_bias_flags)
+        keep = ~has_all_cut(proc_aman.det_bias_flags.det_bias_flags)
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
@@ -1333,8 +1333,11 @@ class PCARelCal(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~proc_aman[self.run_name]['pca_det_mask']
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
