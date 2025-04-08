@@ -779,6 +779,47 @@ class SubtractHWPSS(_Preprocess):
                 subtract_name = self.process_cfgs["subtract_name"]
                 )
 
+class A2Stats(_Preprocess):
+    """
+    Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
+    Uses tod_ops.flags.get_stats; refer there for list of available statistics.
+
+    Example config block::
+
+      - name: "a2_stats"
+        calc:
+          stat_names: ["mean", "median", "var", "ptp"]
+          subscan: True
+        save: True
+
+    """
+    name = "a2_stats"
+
+    def calc_and_save(self, aman, proc_aman):
+        # Get A2 signal using the demod_tod function
+        _, demodQ, demodU = hwp.demod_tod(aman, demod_mode=2, wrap=False)
+
+        # Compute A2 stats
+        stat_names = self.calc_cfgs.get("stat_names", ["mean", "median", "var", "ptp"])
+        split_subscans = self.calc_cfgs.get("subscan", False)
+        # Q
+        a2stats_aman = tod_ops.flags.get_stats(aman, demodQ, stat_names=stat_names, split_subscans=split_subscans)
+        for sn in stat_names:
+            a2stats_aman.move(sn, f"{sn}Q")
+        # U
+        a2stats_aman.merge(tod_ops.flags.get_stats(aman, demodU, stat_names=stat_names, split_subscans=split_subscans))
+        for sn in stat_names:
+            a2stats_aman.move(sn, f"{sn}U")
+
+        aman.wrap("a2_stats", a2stats_aman)
+        self.save(proc_aman, a2stats_aman)
+
+    def save(self, proc_aman, a2_stats):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("a2_stats", a2_stats)
+
 class Apodize(_Preprocess):
     """Apodize the edges of a signal. All process configs go to `apodize_cosine`
 
@@ -1822,6 +1863,7 @@ _Preprocess.register(Noise)
 _Preprocess.register(Calibrate)
 _Preprocess.register(EstimateHWPSS)
 _Preprocess.register(SubtractHWPSS)
+_Preprocess.register(A2Stats)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
 _Preprocess.register(AzSS)
