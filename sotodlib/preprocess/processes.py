@@ -208,7 +208,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("glitches", glitch_aman)
  
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -557,7 +557,7 @@ class Noise(_Preprocess):
         else:
             proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
 
