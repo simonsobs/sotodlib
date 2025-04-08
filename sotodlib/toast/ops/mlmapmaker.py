@@ -111,6 +111,14 @@ class MLMapmaker(Operator):
         "If None, write to {out_dir}/nmats"
     )
 
+    srcsamp = Unicode(
+        None,
+        allow_none=True,
+        help="path to mask file where True regions indicate where bright object "
+        "mitigation should be applied. Mask is in equatorial coordinates. "
+        "Not tiled, so should be low-res to not waste memory."
+    )
+
     dtype_map = Unicode("float64", help="Numpy dtype of map products")
 
     times = Unicode(defaults.times, help="Observation shared key for timestamps")
@@ -433,8 +441,8 @@ class MLMapmaker(Operator):
             axobs.restrict("samps", [0, fft.fft_len(axobs.samps.count)])
 
         # MLMapmaker.add_obs will apply deslope
-        # if self.deslope:
-        #    utils.deslope(axobs.signal, w=5, inplace=True)
+        if self.deslope:
+            utils.deslope(axobs.signal, w=5, inplace=True)
 
         if self.downsample != 1:
             axobs = mm.downsample_obs(axobs, passinfo.downsample)
@@ -455,8 +463,12 @@ class MLMapmaker(Operator):
 
     @function_timer
     def _init_mapmaker(
-            self, mapmaker, signal_map, mapmaker_prev, x_prev, comm, gcomm, prefix,
+            self, mapmaker, signal_map, mapmaker_prev, eval_prev, comm, gcomm, prefix,
     ):
+        """
+        This function is run at the end of the pass, runs the prepare, writes the maps
+        and sets up the initial condition
+        """
         log = Logger.get()
         timer = Timer()
         timer.start()
@@ -523,12 +535,11 @@ class MLMapmaker(Operator):
         log.info_rank(f"MLMapmaker finished writing rhs, div, bin in", comm=comm, timer=timer)
 
         # Set up initial condition
-
-        if x_prev is None:
+        if eval_prev is None:
+            # this will be the first pass
             x0 = None
         else:
-            x0 = mapmaker.translate(mapmaker_prev, x_prev)
-
+            x0 = mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
         return x0
 
     @function_timer
@@ -577,7 +588,7 @@ class MLMapmaker(Operator):
             comm.barrier()
         log.info_rank(f"MLMapmaker wrote map in", comm=comm, timer=timer)
 
-        return mapmaker, step.x
+        return mapmaker, mapmaker.evaluator(step.x_zip)
 
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
@@ -599,7 +610,10 @@ class MLMapmaker(Operator):
                 )
 
         # nmat_type is guaranteed to be a valid Nmat class
-        noise_model = getattr(mm, self.nmat_type)()
+        if self.nmat_type == 'NmatDetvecs':
+            noise_model = getattr(mm, self.nmat_type)(downweight=[1e-4, 0.25, 0.50], window=0)
+        else:
+            noise_model = getattr(mm, self.nmat_type)()
 
         shape, wcs = enmap.read_map_geometry(self.area)
 
@@ -615,7 +629,14 @@ class MLMapmaker(Operator):
         passes = self.setup_passes()
         npass = len(passes)
         mapmaker_prev = None
-        x_prev = None
+        eval_prev = None
+
+        if self.srcsamp is None:
+            srcsamp_mask = None
+        else:
+            if not os.path.isfile(self.srcsamp):
+                raise RuntimeError(f"Source mask does not exist: {self.srcsamp}")
+            srcsamp_mask = enmap.read_map(self.srcsamp)
 
         for ipass, passinfo in enumerate(passes):
             # The multipass mapmaking loop
@@ -641,6 +662,9 @@ class MLMapmaker(Operator):
                 interpol=passinfo.interpol,
             )
             signals = [signal_cut, signal_map]
+            if srcsamp_mask is not None:
+                signal_srcsamp = mm.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
+                signals.append(signal_srcsamp)
             mapmaker = mm.MLMapmaker(
                 signals, noise_model=noise_model, dtype=dtype_tod, verbose=self.verbose
             )
@@ -654,15 +678,27 @@ class MLMapmaker(Operator):
 
                 nmat, nmat_file = self._load_noise_model(ob, npass, ipass, gcomm)
 
+                # wrap_obs finishes in line 250 of make_ml_map.py, at the downsampling
                 axobs = self._wrap_obs(ob, dets, passinfo)
+
+                if ipass > 0:
+                    # Evaluate the final model of the previous pass' mapmaker
+                    # for this observation.
+                    signal_estimate = eval_prev.evaluate(mapmaker_prev.data[len(mapmaker.data)])
+                    # Resample this to the current downsampling level
+                    signal_estimate = mm.resample.resample_fft_simple(signal_estimate, axobs.samps.count)
+                else:
+                    signal_estimate = None
+
                 mapmaker.add_obs(
                     ob.name,
                     axobs,
                     deslope=self.deslope,
                     noise_model=nmat,
-                    signal_estimate=None,
+                    signal_estimate=signal_estimate,
                 )
                 del axobs
+                del signal_estimate
 
                 self._save_noise_model(mapmaker, nmat, nmat_file, gcomm)
 
@@ -680,18 +716,18 @@ class MLMapmaker(Operator):
                 timer=timer,
             )
 
+            # _init_mapmaker covers lines 293-303 of make_ml_map.py
             x0 = self._init_mapmaker(
                 mapmaker,
                 signal_map,
                 mapmaker_prev,
-                x_prev,
+                eval_prev,
                 comm,
                 gcomm,
                 pass_prefix,
             )
-            mapmaker_prev, x_prev = self._apply_mapmaker(
-                mapmaker, x0, passinfo, pass_prefix, comm
-            )
+            # _apply_mapmaker covers lines 305-320 of make_ml_map.py
+            mapmaker_prev, eval_prev = self._apply_mapmaker(mapmaker, x0, passinfo, pass_prefix, comm)
 
             # Save metadata, may get dropped later
 
