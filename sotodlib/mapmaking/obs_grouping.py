@@ -20,7 +20,7 @@ import numpy as np
 from pixell import utils
 from scipy import ndimage
 
-from .utilities import get_ids
+from .utils import get_ids
 
 class NoTODFound(Exception):
     def __init__(self, msg):
