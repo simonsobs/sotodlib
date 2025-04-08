@@ -3,9 +3,10 @@
 ################################
 import numpy as np
 import so3g
-from pixell import fft, utils, bunch
+from pixell import bunch, fft, utils
 
 from .utils import *
+
 
 class Nmat:
     def __init__(self):

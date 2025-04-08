@@ -22,6 +22,7 @@ from scipy import ndimage
 
 from .utils import get_ids
 
+
 class NoTODFound(Exception):
     def __init__(self, msg):
         self.msg = msg
