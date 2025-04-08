@@ -344,7 +344,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
-        pipe.run(aman, aman.preprocess)
+        pipe.run(aman, aman.preprocess, select=False)
         return aman
 
 
@@ -418,14 +418,14 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             meta_init.restrict('dets', meta_proc.dets.vals)
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess)
+            pipe_init.run(aman, aman.preprocess, select=False)
 
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
             aman.preprocess.merge(proc_aman.preprocess)
 
-            pipe_proc.run(aman, aman.preprocess)
+            pipe_proc.run(aman, aman.preprocess, select=False)
 
             return aman
         else:
