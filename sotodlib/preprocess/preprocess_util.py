@@ -9,8 +9,6 @@ import h5py
 import traceback
 import inspect
 
-from so3g.proj import RangesMatrix
-
 from .. import core
 
 from . import _Preprocess, Pipeline, processes
