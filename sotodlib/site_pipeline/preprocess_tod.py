@@ -325,31 +325,33 @@ def main(configs: str,
 
     run_list = []
 
+    futures_dict = {}
+
     if overwrite or not os.path.exists(configs['archive']['index']):
-        for obs in obs_list:
-            _, groups, _ = pp_util.get_groups(obs["obs_id"], configs,
-                                              context
-                                             )
+        db = None
+    else:
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+
+    with ProcessPoolExecutor(nproc) as exe:
+        futures = [exe.submit(pp_util.get_groups,
+                              obs["obs_id"],
+                              configs) for obs in obs_list]
+        for obs, future in zip(obs_list, futures):
+            futures_dict[future] = obs["obs_id"]
+
+        for future in tqdm(as_completed(futures), total=len(futures),
+                           desc="building run list"):
+            obs_id = futures_dict[future]
+            _, groups, _ = future.result()
+
+            if db is not None:
+                x = db.inspect({'obs:obs_id': obs_id})
+                if x is not None and len(x) != 0 and len(x) != len(groups):
+                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+
             for group in groups:
                 if 'NC' not in group:
                     run_list.append((obs, group))
-    else:
-        db = core.metadata.ManifestDb(configs['archive']['index'])
-        for obs in obs_list:
-            group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs,
-                                                     context
-                                                    )
-            x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            if x is None or len(x) == 0:
-                for group in groups:
-                    if 'NC' not in group:
-                        run_list.append((obs, group))
-            else:
-                if len(x) != len(groups):
-                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-                    for group in groups:
-                        if 'NC' not in group:
-                            run_list.append((obs, group))
 
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 

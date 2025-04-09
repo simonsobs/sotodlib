@@ -172,7 +172,7 @@ def get_preprocess_context(configs, context=None):
     return configs, context
 
 
-def get_groups(obs_id, configs, context):
+def get_groups(obs_id, configs, context=None):
     """Get subobs group method and groups. To be used in
     ``preprocess_*.py`` site pipeline scripts.
 
@@ -193,6 +193,7 @@ def get_groups(obs_id, configs, context):
         The list of groups of detectors.
     """
     try:
+        configs, context = get_preprocess_context(configs)
         group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
         for i, gb in enumerate(group_by):
             if gb.startswith('dets:'):
