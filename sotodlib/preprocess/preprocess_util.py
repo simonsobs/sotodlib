@@ -384,7 +384,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     logger: PythonLogger
         Optional. Logger object or None will generate a new one.
     init_only: bool
-        Optional. Whether or not to run the dependent pipeline.
+        Optional. If True, do not run the dependent pipeline.
     """
 
     if logger is None:
