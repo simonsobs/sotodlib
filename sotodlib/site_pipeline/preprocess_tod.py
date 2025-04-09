@@ -10,6 +10,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import h5py
 import copy
+from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
@@ -41,8 +42,8 @@ def dummy_preproc(obs_id,
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
 
     error = None
-    pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
-    logger.info(f"Starting preprocess run of {obs_id}: {group}")
+    pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"],
+                    logger=logger)
     dets = {gb:gg for gb, gg in zip(group_by, group)}
     proc_aman = core.AxisManager(core.LabelAxis('dets', ['det%i' % i for i in range(3)]),
                                  core.OffsetAxis('samps', 1000))
@@ -152,8 +153,7 @@ def preprocess_tod(obs_id,
 
     try:
         meta = context.get_meta(obs_id, dets = {gb:gg for gb,
-                                                gg in zip(group_by, group)
-                                               })
+                                                gg in zip(group_by, group)})
     except Exception as e:
         errmsg = f'{type(e)}: {e}'
         tb = ''.join(traceback.format_tb(e.__traceback__))
@@ -177,8 +177,7 @@ def preprocess_tod(obs_id,
     try:
         aman = context.get_obs(obs_id, dets=dets)
         aman.wrap('tags', np.array(context.obsdb.get(aman.obs_info.obs_id,
-                                                     tags=True)['tags'])
-                 )
+                                                     tags=True)['tags']))
         proc_aman, success = pipe.run(aman)
 
         if make_lmsi:
@@ -276,6 +275,12 @@ def get_parser(parser=None):
         type=int,
         default=4
     )
+    parser.add_argument(
+        '--raise-error',
+        help="Raise an error upon completion if any obsids or groups fail.",
+        type=bool,
+        default=False
+    )
     return parser
 
 
@@ -289,7 +294,8 @@ def main(configs: str,
          tags: Optional[str] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
-         nproc: Optional[int] = 4):
+         nproc: Optional[int] = 4,
+         raise_error: Optional[bool] = False):
 
     multiprocessing.set_start_method('spawn')
 
@@ -307,6 +313,7 @@ def main(configs: str,
                                    planet_obs=planet_obs)
     if len(obs_list) == 0:
         logger.warning(f"No observations returned from query: {query}")
+        return
 
     # clean up lingering files from previous incomplete runs
     policy_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']),
@@ -365,7 +372,8 @@ def main(configs: str,
             if r[0]['obs_id'] not in obs_errors:
                     obs_errors[r[0]['obs_id']] = []
 
-        for future in as_completed(futures):
+        for future in tqdm(as_completed(futures), total=len(futures),
+                           desc="preprocess_tod"):
             obs_id, group = futures_dict[future]
             logger.info(f"{obs_id}: {group} extracted successfully")
             try:
@@ -397,7 +405,11 @@ def main(configs: str,
 
     logger.warn(f"{n_obs_fail}/{len(obs_errors)} observations failed entirely")
     logger.warn(f"{n_groups_fail}/{len(run_list)} groups failed")
-    logger.info("preprocess_tod is done")
+
+    if raise_error:
+        raise RuntimeError("preprocess_tod ended with failed obsids")
+    else:
+        logger.info("preprocess_tod is done")
 
 
 if __name__ == '__main__':

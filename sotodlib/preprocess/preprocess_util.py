@@ -22,6 +22,8 @@ class PreprocessErrors:
     NoDetsRemainError = "no_dets_remain_error"
     NoGroupOverlapError = "no_group_overlap_error"
     PipeLineRunError = "pipeline_step_error"
+    InitPipeLineRunError = "init_pipeline_step_error"
+    ProcPipeLineRunError = "proc_pipeline_step_error"
     PipeLineStepError = "pipeline_step_error"
     GroupOutputError = "group_output_error"
     MultiProcessFutureError = "multiprocess_future_error"
@@ -713,7 +715,8 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
         if os.path.exists(outputs_grp['temp_file']):
             try:
                 if not remove:
-                    cleanup_mandb(None, outputs_grp, configs, logger)
+                    cleanup_mandb(outputs_grp, (obs_id, g),
+                                  None, configs, logger)
                 else:
                     # if we're overwriting, remove file so it will re-run
                     os.remove(outputs_grp['temp_file'])
@@ -1023,7 +1026,7 @@ def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=Fal
     if logger is None:
         logger = init_logger("preprocess")
 
-    if error is None:
+    if error is None and out_dict is not None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
@@ -1062,7 +1065,7 @@ def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=Fal
         if len(db.inspect(out_dict['db_data'])) == 0:
             db.add_entry(out_dict['db_data'], h5_path)
         os.remove(src_file)
-    elif error == 'load_success':
+    elif error == 'load_success' or (error is None and out_dict is None):
         return
     else:
         folder = os.path.dirname(configs['archive']['index'])
