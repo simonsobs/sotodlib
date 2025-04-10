@@ -19,7 +19,14 @@ def main(config):
 
     monitor = Monitor.from_configs(config["monitor"])
     context = core.Context(config["context_file"])
-    jdb = JobManager(sqlite_file=config["jobdb"])
+
+    # get JobDB configuration
+    jdb_max_retry = 5  # mark a job as failed after this number of tries
+    if isinstance(config["jobdb"], str):  # support previous convention
+        jdb = JobManager(sqlite_file=config["jobdb"])
+    else:
+        jdb = JobManager(sqlite_file=config["jobdb"]["db_file"])
+        jdb_max_retry = config["jobdb"].get("max_retry", jdb_max_retry)
 
     # get a list of metrics from the config
     metrics = []
@@ -100,7 +107,8 @@ def main(config):
                     )
                     with jdb.locked(m_obs[oid]) as job:
                         job.mark_visited()
-                        job.jstate = "failed"
+                        if job.visit_count > jdb_max_retry:
+                            job.jstate = "failed"
 
 
 def get_parser(parser=None):
