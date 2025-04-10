@@ -19,7 +19,14 @@ def main(config):
 
     monitor = Monitor.from_configs(config["monitor"])
     context = core.Context(config["context_file"])
-    jdb = JobManager(sqlite_file=config["jobdb"])
+
+    # get JobDB configuration
+    jdb_max_retry = 5  # mark a job as failed after this number of tries
+    if isinstance(config["jobdb"], str):  # support previous convention
+        jdb = JobManager(sqlite_file=config["jobdb"])
+    else:
+        jdb = JobManager(sqlite_file=config["jobdb"]["db_file"])
+        jdb_max_retry = config["jobdb"].get("max_retry", jdb_max_retry)
 
     # get a list of metrics from the config
     metrics = []
@@ -64,6 +71,7 @@ def main(config):
     logger.info(f"Found {len(all_obs_id)} obs_id with new metrics to record.")
 
     n = len(all_obs_id)
+    n_fail = 0
     # process one obs_id at a time
     for i, oid in enumerate(all_obs_id):
         logger.info(f"Recording metrics for obs_id {oid} ({i}/{n})...")
@@ -100,7 +108,12 @@ def main(config):
                     )
                     with jdb.locked(m_obs[oid]) as job:
                         job.mark_visited()
-                        job.jstate = "failed"
+                        if job.visit_count > jdb_max_retry:
+                            job.jstate = "failed"
+                            n_fail += 1
+
+    if n_fail > 0:
+        raise RuntimeError(f"This run produced {n_fail} failures.")
 
 
 def get_parser(parser=None):
