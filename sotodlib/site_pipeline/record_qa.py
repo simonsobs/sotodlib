@@ -71,6 +71,7 @@ def main(config):
     logger.info(f"Found {len(all_obs_id)} obs_id with new metrics to record.")
 
     n = len(all_obs_id)
+    n_fail = 0
     # process one obs_id at a time
     for i, oid in enumerate(all_obs_id):
         logger.info(f"Recording metrics for obs_id {oid} ({i}/{n})...")
@@ -109,6 +110,10 @@ def main(config):
                         job.mark_visited()
                         if job.visit_count > jdb_max_retry:
                             job.jstate = "failed"
+                            n_fail += 1
+
+    if n_fail > 0:
+        raise RuntimeError(f"This run produced {n_fail} failures.")
 
 
 def get_parser(parser=None):
