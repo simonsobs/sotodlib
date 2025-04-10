@@ -340,7 +340,7 @@ def main(configs: str,
             futures_dict[future] = obs["obs_id"]
 
         for future in tqdm(as_completed(futures), total=len(futures),
-                           desc="building run list"):
+                           desc="building run list from obs list"):
             obs_id = futures_dict[future]
             _, groups, _ = future.result()
 
@@ -407,6 +407,8 @@ def main(configs: str,
 
     logger.warn(f"{n_obs_fail}/{len(obs_errors)} observations failed entirely")
     logger.warn(f"{n_groups_fail}/{len(run_list)} groups failed")
+
+    pp_util.create_error_db(configs, obs_errors)
 
     if raise_error:
         raise RuntimeError("preprocess_tod ended with failed obsids")
