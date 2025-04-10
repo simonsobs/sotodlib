@@ -12,8 +12,6 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 
-
-
 from .. import core
 
 from . import _Preprocess, Pipeline, processes
@@ -76,7 +74,25 @@ def init_logger(name, announce='', verbosity=2):
     disconnected from general sotodlib (propagate=False) and displays
     relative instead of absolute timestamps.
 
+    Arguments
+    ----------
+    name : str
+        The name of the logger
+    announce : str
+        Initial message to be displayed after logger is instantiated.
+    verbosity : int
+        Level of logger output
+        0: Error
+        1: Warning
+        2: Info
+        3: Debug
+
+    Returns
+    -------
+    logger : PythonLogger
+        The initialized logger object
     """
+
     logger = logging.getLogger(name)
 
     if verbosity == 0:
@@ -118,7 +134,7 @@ def get_preprocess_context(configs, context=None):
     file does not have a metadata entry for preprocess then one will
     be added based on the definition in the config file.
 
-    Parameters
+    Arguments
     ----------
     configs : str or dict
         The configuration file or dictionary.
@@ -132,6 +148,7 @@ def get_preprocess_context(configs, context=None):
     context : core.Context
         The context file.
     """
+
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
 
@@ -165,7 +182,7 @@ def get_groups(obs_id, configs, context):
     """Get subobs group method and groups. To be used in
     ``preprocess_*.py`` site pipeline scripts.
 
-    Parameters
+    Arguments
     ----------
     obs_id : str
         The obsid.
@@ -181,6 +198,7 @@ def get_groups(obs_id, configs, context):
     groups : list of list of int
         The list of groups of detectors.
     """
+
     try:
         group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
         for i, gb in enumerate(group_by):
@@ -261,6 +279,7 @@ def swap_archive(config, fpath):
     tc : dict
         Copy of the configuration file with an updated archive policy filename
     """
+
     tc = copy.deepcopy(config)
     tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
     dname = os.path.dirname(tc['archive']['policy']['filename'])
@@ -721,7 +740,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
     if it exists for any files with that obsnum in their filename. If any are
     found, it will run save_group_and_cleanup for that obs id.
 
-     Arguments
+    Arguments
     ---------
     obs_id: str
         Obs id to check and clean up
@@ -1010,7 +1029,24 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
     2) Return nothing if error is ``load_success``.
 
     3) Update the error log if error is anything else.
+
+    Arguments
+    ---------
+    error : str
+        Error message output form preprocessing functions
+    outputs : dict
+        Dictionary including entries for the temporary h5 filename
+        ('temp_file') and the obs_id group metadata and db entry (db_data).
+        See save_group for more info.
+    configs : dict
+        Preprocessing configuration dictionary
+    logger : PythonLogger
+        Optional.  Python logger.
+    overwrite : bool
+        Optional. Delete the entry in the archive file if it exists and
+        replace it with the new entry.
     """
+
     if logger is None:
         logger = init_logger("preprocess")
 
@@ -1071,7 +1107,14 @@ def get_pcfg_check_aman(pipe):
     """
     Given a preprocess pipeline class return an axis manager containing
     the ordered steps of the pipeline with all arguments for each step.
+
+    Arguments
+    ---------
+    pipe: _Preprocess class
+        Preprocess pipeline class from which to build the step argument axis
+        manager.
     """
+
     pcfg_ref = core.AxisManager()
     for i, pp in enumerate(pipe):
         pcfg_ref.wrap(f'{i}_{pp.name}', core.AxisManager())
@@ -1090,7 +1133,15 @@ def _check_assignment_length(a, b):
     """
     Helper function to check if the set of assignments in axis manager ``a`` matches
     the length of assignments in axis manager ``b``.
+
+    Arguments
+    ---------
+    a: AxisManager
+        Primary axis manager to cross check assignments with.
+    b: AxisManager
+        Secondary axis manager to cross check assignments with
     """
+
     aa = np.fromiter(a._assignments.keys(), dtype='<U32')
     bb = np.fromiter(b._assignments.keys(), dtype='<U32')
 
@@ -1104,7 +1155,17 @@ def check_cfg_match(ref, loaded, logger=None):
     """
     Checks that the ``ref`` and ``loaded`` axis managers containing the ordered
     preprocess pipelines match one another.
+
+    Arguments
+    ---------
+    ref : AxisManager
+        Reference axis manager for cross checking
+    loaded : AxisManager
+        Loaded axis manager for cross checking.
+    logger : PythonLogger
+        Optional. Python logger object.
     """
+
     if logger is None:
         logger = init_logger("preprocess")
     check, ref_items, loaded_items = _check_assignment_length(ref, loaded)

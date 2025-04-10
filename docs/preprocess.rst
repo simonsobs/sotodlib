@@ -51,11 +51,46 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_tod.preprocess_tod
 
+.. autofunction:: sotodlib.site_pipeline.preprocess_tod.load_preprocess_tod_sim
+
+.. autofunction:: sotodlib.site_pipeline.multilayer_preprocess_tod.multilayer_preprocess_tod
+
+.. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.init_logger
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.get_preprocess_context
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.get_groups
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.get_preprocess_db
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.swap_archive
+
 .. autofunction:: sotodlib.preprocess.preprocess_util.load_preprocess_det_select
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.load_and_preprocess
 
-.. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
+.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess_sim
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.find_db
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.save_group
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.save_group_and_cleanup
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.cleanup_obs
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.preproc_or_load_group
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.cleanup_mandb
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.get_pcfg_check_aman
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.check_cfg_match
+
 
 Example TOD Pipeline Configuration File
 ---------------------------------------
