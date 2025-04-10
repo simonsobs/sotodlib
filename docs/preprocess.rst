@@ -57,6 +57,22 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.site_pipeline.preprocess_obs.preprocess_obs
 
+.. autofunction:: sotodlib.preprocess.preprocess_util.load_and_preprocess
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess_sim
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.preproc_or_load_group
+
+
+Processing Util Functions
+---------------------------
+These functions support and are used within the driver processing scripts
+above and are useful for saving, loading, and verifying preprocessing archives
+and databases.
+
+
 .. autofunction:: sotodlib.preprocess.preprocess_util.init_logger
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.get_preprocess_context
@@ -69,12 +85,6 @@ configuration files and specific manifest databases.
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.load_preprocess_det_select
 
-.. autofunction:: sotodlib.preprocess.preprocess_util.load_and_preprocess
-
-.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess
-
-.. autofunction:: sotodlib.preprocess.preprocess_util.multilayer_load_and_preprocess_sim
-
 .. autofunction:: sotodlib.preprocess.preprocess_util.find_db
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.save_group
@@ -82,8 +92,6 @@ configuration files and specific manifest databases.
 .. autofunction:: sotodlib.preprocess.preprocess_util.save_group_and_cleanup
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.cleanup_obs
-
-.. autofunction:: sotodlib.preprocess.preprocess_util.preproc_or_load_group
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.cleanup_mandb
 
