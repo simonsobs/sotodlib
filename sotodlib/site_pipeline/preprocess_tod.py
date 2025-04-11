@@ -147,6 +147,9 @@ def preprocess_tod(obs_id,
     logger = pp_util.init_logger("preprocess", verbosity=verbosity)
     logger.info(f"Starting preprocess run of {obs_id}: {group}")
 
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+
     context = core.Context(configs["context_file"])
 
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
@@ -191,7 +194,7 @@ def preprocess_tod(obs_id,
         logger.error(f"Pipeline Run Error for {obs_id}: {group}\n{errmsg}\n{tb}")
         return None, (obs_id, group), PreprocessErrors.PipeLineRunError
     if success != 'end':
-        logger.error(f"Pipeline Step Error for {obs_id} {group}\nFailed at step {success}")
+        logger.error(f"Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
         return None, (obs_id, group), PreprocessErrors.PipeLineStepError
 
     out_dict = pp_util.save_group(obs_id, configs, dets, context,

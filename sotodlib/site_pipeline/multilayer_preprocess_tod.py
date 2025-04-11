@@ -57,6 +57,12 @@ def multilayer_preprocess_tod(obs_id,
     logger = pp_util.init_logger("preprocess", verbosity=verbosity)
     logger.info(f"Starting preprocess run of {obs_id}: {group}")
 
+    if type(configs_init) == str:
+        configs_init = yaml.safe_load(open(configs_init, "r"))
+
+    if type(configs_proc) == str:
+        configs_proc = yaml.safe_load(open(configs_proc, "r"))
+
     context_init = core.Context(configs_init["context_file"])
     context_proc = core.Context(configs_proc["context_file"])
 
@@ -88,7 +94,7 @@ def multilayer_preprocess_tod(obs_id,
         pipe_proc = Pipeline(configs_proc["process_pipe"],
                              plot_dir=configs_proc["plot_dir"], logger=logger)
 
-        error, out_dict_init, _, aman = pp_util.preproc_or_load_group(obs_id,
+        aman, out_dict_init, _, error = pp_util.preproc_or_load_group(obs_id,
                                                                       configs_init,
                                                                       dets=dets,
                                                                       logger=logger,
@@ -96,9 +102,7 @@ def multilayer_preprocess_tod(obs_id,
         if error == 'load_success':
             out_dict_init = None
         init_fields = aman.preprocess._fields.copy()
-        out_dict_proc = pp_util.save_group(obs_id, configs_proc,
-                                           dets, context_proc,
-                                           subdir='temp_proc')
+
     except Exception as e:
         errmsg = f'{type(e)}: {e}'
         tb = ''.join(traceback.format_tb(e.__traceback__))
@@ -107,6 +111,9 @@ def multilayer_preprocess_tod(obs_id,
 
     try:
         logger.info(f"Starting proc pipeline on {obs_id}: {group}")
+        out_dict_proc = pp_util.save_group(obs_id, configs_proc,
+                                           dets, context_proc,
+                                           subdir='temp_proc')
         tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id,
                                                     tags=True)['tags'])
         if "tags" in aman._fields:
@@ -125,7 +132,7 @@ def multilayer_preprocess_tod(obs_id,
         logger.error(f"Pipeline Run Error for {obs_id}: {group}\n{errmsg}\n{tb}")
         return None, None, (obs_id, group), (obs_id, group), PreprocessErrors.ProcPipeLineRunError
     if success != 'end':
-        logger.error(f"Pipeline Step Error for {obs_id} {group}\nFailed at step {success}")
+        logger.error(f"Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
         return None, None, (obs_id, group), (obs_id, group), PreprocessErrors.PipeLineStepError
 
     logger.info(f"Saving data to {out_dict_proc['temp_file']}:{out_dict_proc['db_data']['dataset']}")
