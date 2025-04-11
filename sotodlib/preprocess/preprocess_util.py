@@ -859,6 +859,23 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     save_archive :
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc
+
+    Returns
+    -------
+    aman : AxisManager
+        Preprocessed axis manager
+    out_dict_init : dict or tuple
+        Dictionary output for init config from save_group if preprocessing
+        ran successfully or tuple of (obs_id, group) if preprocessing was
+        loaded or preproc_or_load_group failed.
+    out_dict_proc : dict or tuple
+        Dictionary output for proc config from save_group if preprocessing
+        ran successfully for that layer or a tuple of (obs_id, group)
+        if preprocessing was loaded, that layer was not run or loaded, or
+        preproc_or_load_group failed.
+    error : str or None
+        Error from PreprocessError or None if preproc_or_load_group finished
+        successfully.
     """
 
     init_temp_subdir = "temp"
