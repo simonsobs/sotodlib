@@ -898,7 +898,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
     # Cannot run if proc db exists but init db does not
     if db_proc_exist and not db_init_exist and not overwrite:
-        logger.warning("if initial db does not exist, overwrite must be true")
+        logger.warning("loading from proc db requires init db if overwrite is False")
         return None, (obs_id, group), (obs_id, group), PreprocessErrors.NoInitDbError
 
     # Load first layer only
