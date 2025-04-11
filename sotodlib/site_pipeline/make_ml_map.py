@@ -68,7 +68,8 @@ def main(**args):
     prefix= args.odir + "/"
     if args.prefix: prefix += args.prefix + "_"
     utils.mkdir(args.odir)
-    L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
+    print(mapmaking.DEBUG, mapmaking.INFO)
+    L = mapmaking.init(level=verbose*10, rank=comm.rank)
 
     recenter = None
     if args.center_at:

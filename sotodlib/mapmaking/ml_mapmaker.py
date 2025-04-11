@@ -4,14 +4,18 @@ import warnings
 import numpy as np
 import h5py
 import so3g
+import logging
 from typing import Optional
-from pixell import bunch, enmap, tilemap
+from pixell import bunch, bench, enmap, tilemap
 from pixell import utils as putils
 
 from . import utils as smutils
 from .. import coords
 from .pointing_matrix import PmatCut
 from .noise_model import NmatUncorr
+
+print(__name__)
+L = logging.getLogger(__name__)
 
 class MLMapmaker:
     def __init__(
@@ -108,21 +112,30 @@ class MLMapmaker:
         return MLAccumulator(self.signals, self.dof)
 
     def A(self, x_zip):
-        # unzip goes from flat array of all the degrees of freedom to individual maps, cuts etc.
-        # to_work makes a scratch copy and does any redistribution needed
-        evaluator   = self.evaluator(x_zip)
-        accumulator = self.accumulator()
+        with bench.mark("A_prep"):
+            evaluator   = self.evaluator(x_zip)
+            accumulator = self.accumulator()
+        L.debug("A prep %7.3f" % bench.t["A_prep"])
         for di, data in enumerate(self.data):
-            tod = evaluator.evaluate(data)
-            data.nmat.apply(tod)
-            accumulator.accumulate(data, tod)
-        return accumulator.finish()
+            with bench.mark("A_P"):
+                tod = evaluator.evaluate(data)
+            with bench.mark("A_N"):
+                data.nmat.apply(tod)
+            with bench.mark("A_PT"):
+                accumulator.accumulate(data, tod)
+            L.debug("A P %7.3f N %7.3f P' %7.3f" % (bench.t.A_P, bench.t.A_N, bench.t.A_PT))
+        with bench.mark("A_finish"):
+            res = accumulator.finish()
+        L.debug("A finish %7.3f" % bench.t["A_finish"])
+        return res
 
     def M(self, x_zip):
-        iwork = self.dof.unzip(x_zip)
-        result = self.dof.zip(
-            *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
-        )
+        with bench.mark("M"):
+            iwork = self.dof.unzip(x_zip)
+            result = self.dof.zip(
+                *[signal.precon(w) for signal, w in zip(self.signals, iwork)]
+            )
+        L.debug("M %7.3f" % bench.t["M"])
         return result
 
     def solve(

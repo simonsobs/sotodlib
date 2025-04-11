@@ -368,7 +368,7 @@ def expand_ids(obs_ids, context=None, bands=None):
         else:
             toks = obs_id.split("_")
             # SAT format: obs_1719902396_satp1_1111111
-            # LAT format: 1696118940_i3_100 (why no obs in front?)
+            # LAT format: obs_1696118940_i3_100
             wafer_mask = toks[-1]
             # Loop through wafer slots
             for si, status in enumerate(wafer_mask):
