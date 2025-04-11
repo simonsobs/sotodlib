@@ -252,7 +252,7 @@ class BadTimeSamples(BookError):
         msg = f"{self.book.bid} has dropped time samples\n"
         for l in self.book.message.split('\n'):
             if len(l)>0 and l[0] == '\t':
-                msg += l
+                msg += l + "\n"
         return msg
 
 AUTOFIX_ERRORS = [
