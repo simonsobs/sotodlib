@@ -350,12 +350,12 @@ class G3tHWP():
 
             fast_irig_time = fast_time
             locked = np.ones_like(fast_time, dtype=bool)
-            locked[np.where(hwp_rate == 0)] = False
+            locked[hwp_rate == 0] = False
             stable = np.ones_like(fast_time, dtype=bool)
 
             # irig only status
-            irig_only_time = irig_time[np.where(
-                (irig_time < fast_time[0]) | (irig_time > fast_time[-1]))]
+            irig_only_time = irig_time[
+                (irig_time < fast_time[0]) | (irig_time > fast_time[-1])]
             irig_only_locked = np.zeros_like(irig_only_time, dtype=bool)
             irig_only_hwp_rate = np.zeros_like(
                 irig_only_time, dtype=np.float32)
@@ -368,8 +368,8 @@ class G3tHWP():
             stable = np.ones_like(fast_irig_time, dtype=bool)
 
         # slow status
-        slow_time = slow_time[np.where(
-            (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1]))]
+        slow_time = slow_time[
+            (slow_time < fast_irig_time[0]) | (slow_time > fast_irig_time[-1])]
         slow_locked = np.zeros_like(slow_time, dtype=bool)
         slow_stable = np.zeros_like(slow_time, dtype=bool)
         slow_hwp_rate = np.zeros_like(slow_time, dtype=np.float32)
@@ -381,7 +381,7 @@ class G3tHWP():
         stable = np.append(slow_stable, stable)[slow_idx]
         hwp_rate = np.append(slow_hwp_rate, hwp_rate)[slow_idx]
 
-        locked[np.where(hwp_rate == 0)] = False
+        locked[hwp_rate == 0] = False
 
         return {'locked'+suffix: locked, 'stable'+suffix: stable, 'hwp_rate'+suffix: hwp_rate, 'slow_time'+suffix: slow_time}
 
@@ -1217,8 +1217,8 @@ class G3tHWP():
             _diff_upperlim = np.percentile(
                 _diff, (1 - self._slit_width_lim) * 100)
             _diff_lowerlim = np.percentile(_diff, self._slit_width_lim * 100)
-            __diff = _diff[np.where(
-                (_diff < _diff_upperlim) & (_diff > _diff_lowerlim))]
+            __diff = _diff[
+                (_diff < _diff_upperlim) & (_diff > _diff_lowerlim)]
             # Define mean value as nominal slit distance
             if len(__diff) == 0:
                 continue
