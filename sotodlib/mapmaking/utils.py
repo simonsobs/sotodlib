@@ -605,7 +605,16 @@ def downsample_cut(cut, down):
     factor down."""
     return so3g.proj.ranges.RangesMatrix([downsample_ranges(r,down) for r in cut.ranges])
 
-def downsample_obs(obs, down, skip_signal=False):
+def get_wrappable(axman, key):
+    val = getattr(axman, key)
+    if isinstance(val, core.AxisManager):
+        return key,val
+    else:
+        axes   = axman._assignments[key]
+        axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
+        return key, val, axdesc
+
+def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
     """Downsample AxisManager obs by the integer factor down.
 
     This implementation is quite specific and probably needs
@@ -616,56 +625,41 @@ def downsample_obs(obs, down, skip_signal=False):
     a transfer function."""
     assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
     if down == 1: return obs
+    if "samps" not in obs: return obs
     # Compute how many samples we will end up with
     onsamp = (obs.samps.count+down-1)//down
     # Set up our output axis manager
     axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
     res    = core.AxisManager(core.IndexAxis("samps", onsamp), *axes)
-    # Stuff without sample axes
     for key, axes in obs._assignments.items():
+        # Stuff without sample axes
         if "samps" not in axes:
             res.wrap(*get_wrappable(obs, key))
-    # The normal sample stuff
-    res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
-    bore = core.AxisManager(core.IndexAxis("samps", onsamp))
-    for key in ["az", "el", "roll"]:
-        bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
-    res.wrap("boresight", bore)
-    if not skip_signal:
-        res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
-
-    # TODO: Once it's finalized whether cuts are in obs.flags.X or obs.X, remove these
-    # if tests
-    cut_keys = []
-    if "glitch_flags"  in obs:
-        cut_keys.append("glitch_flags")
-    elif "flags.glitch_flags" in obs:
-        cut_keys.append("flags.glitch_flags")
-
-    if "source_flags" in obs:
-        cut_keys.append("source_flags")
-    elif "flags.source_flags" in obs:
-        cut_keys.append("flags.source_flags")
-
-    # We need to add a res.flags FlagManager to res
-    res = res.wrap('flags', core.FlagManager.for_tod(res))
-    for key in cut_keys:
-        new_key = key.split(".")[-1]
-        res.flags.wrap(new_key, downsample_cut(obs[key], down),
-                       [(0,"dets"),(1,"samps")])
+        elif isinstance(obs[key], (core.AxisManager, core.FlagManager)):
+            res.wrap(key, downsample_obs(obs["key"], down, skip_signal, fft_resample))
+        elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
+            res.wrap(key, downsample_cut(obs[key], down))
+        elif key in "fft_resample":
+            if key is "signal" and skip_signal:
+                continue
+            # Make the axis that is samps the last one
+            ax_idx = np.where(np.array(axes) == "samps")[0]
+            dat = np.moveaxis(obs[key], ax_idx, -1)
+            # Resample and return to original order
+            dat = np.moveaxis(resample.resample_fft_simple(dat, onsamp), -1, ax_idx)
+            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+        # Some naive slicing for everything else
+        else:
+            # Make the axis that is samps the last one
+            ax_idx = np.where(np.array(axes) == "samps")[0]
+            dat = np.moveaxis(obs[key], ax_idx, -1)
+            # Resample and return to original order
+            dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
+            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
 
     # Not sure how to deal with flags. Some sort of or-binning operation? But it
     # doesn't matter anyway
     return res
-
-def get_wrappable(axman, key):
-    val = getattr(axman, key)
-    if isinstance(val, core.AxisManager):
-        return key,val
-    else:
-        axes   = axman._assignments[key]
-        axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
-        return key, val, axdesc
 
 def get_flags(obs, flagnames):
     """Parse detector-set splits"""
