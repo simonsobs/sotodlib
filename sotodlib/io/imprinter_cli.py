@@ -7,7 +7,8 @@ give the option to retry binding (useful if software changes mean we expect the
 books to now be successfully bound), to skip binding those files (push
 timestreams into the stray books), or do nothing.
 
---action=timecodes: not implemented yet
+--action=autofix: run through all the book errors and fix ones that have well
+understood issues
 
 """
 
@@ -18,27 +19,6 @@ from typing import Optional
 
 from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
-
-def main():
-
-    parser = get_parser(parser=None)
-    args = parser.parse_args()
-
-    print("You must be running this from an account with write permissions to"
-         " the database and the book write directory.")
-    
-    imprint = Imprinter.for_platform(args.platform)
-
-    if args.action == 'failed':
-        check_failed_books(imprint)
-    elif args.action == 'timecodes':
-        raise NotImplementedError
-    elif args.action == 'autofix':
-        autofix_failed_books(imprint, args.test_mode)
-    else:
-        raise ValueError(
-            "Chosen action must be 'failed' 'autofix' or 'timecodes'"
-        )
 
 def fix_single_book(imprint:Imprinter, book:Books):
     print(
@@ -124,8 +104,204 @@ def _last_line(book):
         if len(s) > 0:
             return s
 
+class BookError:
+    def __init__(self, imprint, book):
+        self.imprint = imprint
+        self.book = book
+    
+    @staticmethod
+    def has_error(book):
+        raise NotImplementedError
+    def fix_book(self):
+        raise NotImplementedError
+    def report_error(self):
+        raise NotImplementedError
+
+class BookDirHasFiles(BookError):
+    @staticmethod
+    def has_error(book):
+        return "BookDirHasFiles" in book.message
+    def fix_book(self):
+        utils.set_book_rebind(self.imprint, self.book)
+        self.imprint.bind_book(self.book)
+    def report_error(self):
+        return f"{self.book.bid} has files already in staged" 
+
+class SecondFail(BookError):
+    @staticmethod
+    def has_error(book):
+        return "SECOND-FAIL" in book.message
+    def fix_book(self):
+        return 
+    def report_error(self):
+        msg = f"{self.book.bid} has already failed once during autofix\n\t" 
+        msg += _last_line(self.book)
+        return msg
+
+class MissingReadoutIDs(BookError):
+    @staticmethod
+    def has_error(book):
+        return 'MissingReadoutIDError' in book.message
+    def fix_book(self):
+        utils.set_book_wont_bind(self.imprint, self.book)
+    def report_error(self):
+        return f"{self.book.bid} does not have readout ids"
+
+class NoScanFrames(BookError):
+    @staticmethod
+    def has_error(book):
+        return 'NoScanFrames' in book.message
+    def fix_book(self):
+        utils.set_book_wont_bind(self.imprint, self.book)
+    def report_error(self):
+        return f"{self.book.bid} does not have detector data"
+
+class NoHWPData(BookError):
+    @staticmethod
+    def has_error(book):
+        return 'NoHWPData' in book.message
+    def fix_book(self):
+        utils.set_book_rebind(self.imprint, self.book)
+        self.imprint.bind_book(self.book, require_hwp=False,)
+    def report_error(self):
+        return f"{self.book.bid} does not HWP data reading out"
+
+class DuplicateAncillaryData(BookError):
+    @staticmethod
+    def has_error(book):
+        return "DuplicateAncillaryData" in book.message
+    def fix_book(self):
+        utils.set_book_rebind(self.imprint, self.book)
+        self.imprint.bind_book(self.book, ancil_drop_duplicates=True,)
+    def report_error(self):
+        return f"{self.book.bid} has duplicate ancillary data"
+
+class NoMountData(BookError):
+    @staticmethod
+    def has_error(book):
+        return "NoMountData" in book.message
+    def fix_book(self):
+        if book.type == 'obs':
+            print("Cannot autofix obs books where the ACU was not reading out")
+            return
+        elif book.type == 'oper':
+            utils.set_book_rebind(self.imprint, self.book)
+            self.imprint.bind_book(self.book, require_acu=False,)
+        else: 
+            raise ValueError(f"What book got me here? {book.bid}")
+    def report_error(self):
+        return f"{self.book.bid} does not ACU data reading out"
+
+class TimingSystemOff(BookError):
+    """Two places this error is thrown. If we get to the timing counter
+    incrementing error then we know the level 2 metadata isn't set correctly.
+    This can mess up observation books because low precision timing means the
+    different slots cannot be bound together.
+    """
+    @staticmethod
+    def has_error(book):
+        return 'TimingSystemOff' in book.message
+
+    def fix_book(self):
+        if "Timing counters not incrementing" in book.message:
+            if book.type == 'obs':
+                print(
+                    "Cannot autofix obs books where timing counters aren't" 
+                    " incrementing"
+                )
+            elif book.type == 'oper':
+                utils.set_book_rebind(imprint, book, update_level2=True)
+                imprint.bind_book(book)
+            else:
+                raise ValueError(f"What book got me here? {book.bid}")
+        else:
+            utils.set_book_rebind(self.imprint, self.book)
+            self.imprint.bind_book(self.book, allow_bad_timing=True,)
+    
+    def report_error(self):
+        if "Timing counters not incrementing" in book.message:
+            msg = f"{book.bid} has timing system errors not caught at level 2"
+            if book.type == 'obs':
+                msg += "\n\t LEVEL2-FAIL: probably have to delete book, update"
+                msg += "update level 2, and replan books"
+            return msg
+        else:
+            return f"{book.bid} has low precision timing"
+
+class FileTooLargeError(BookError):
+    @staticmethod
+    def has_error(book):
+        return "FileTooLargeError" in book.message
+    def fix_book(self):
+        utils.set_book_rebind(self.imprint, self.book)       
+        utils.delete_level2_obs_and_book(self.imprint, self.book)
+    def report_error(self):
+        msg = f"{self.book.bid} has too large level 2 files\n"
+        l = _last_line(self.book)
+        msg += f"\t {l.split('/')[-1]}"
+        return msg
+
+class BadTimeSamples(BookError):
+    @staticmethod
+    def has_error(book):
+        return "BadTimeSamples" in book.message
+    def fix_book(self):
+        utils.set_book_rebind(self.imprint, self.book)        
+        self.imprint.bind_book(self.book, allow_bad_timing=True,)
+    def report_error(self):
+        msg = f"{self.book.bid} has dropped time samples\n"
+        for l in self.book.message.split('\n'):
+            if len(l)>0 and l[0] == '\t':
+                msg += l
+        return msg
+
+AUTOFIX_ERRORS = [
+    SecondFail,
+    BookDirHasFiles,
+    MissingReadoutIDs,
+    NoScanFrames,
+    NoHWPData,
+    DuplicateAncillaryData,
+    NoMountData,
+    TimingSystemOff,
+    FileTooLargeError,
+    BadTimeSamples,
+]
+
+def process_book_failure(
+    imprint:Imprinter, 
+    book:Books, 
+    report=True, 
+    fix=False,
+    error_list = None,
+):
+    if error_list is None:
+        error_list = AUTOFIX_ERRORS
+
+    found = False
+    for error in error_list:
+        if error.has_error(book):
+            found = True
+            err = error(imprint, book)
+            if report:
+                print( err.report_error() )
+            if fix:
+                try:
+                    err.fix_book()  
+                except:
+                    print(f"Failed on {book.bid}. Recording Failure")
+                    book.status = FAILED #just in case we cleared the error
+                    book.message = book.message + \
+                    f'\nSECOND-FAIL. Tried with to fix with {error.__name__}'
+                    imprint.get_session().commit()
+        if found:
+            break ## stop on first found error
+    return found
+            
+
 def autofix_failed_books(
-    imprint:Imprinter, test_mode=False, min_ctime=None, max_ctime=None,
+    imprint:Imprinter, min_ctime=None, max_ctime=None,
+    report=True, fix=True, error_list=None,
 ):
     session = imprint.get_session()
     failed = session.query(Books).filter(Books.status == FAILED)
@@ -139,101 +315,14 @@ def autofix_failed_books(
         )
     failed = failed.all()
     for book in failed:
-        print("-----------------------------------------------------")
-        print(f"On book {book.bid}. Has error:\n{_last_line(book)}")
-        if 'SECOND-FAIL' in book.message:
-            print(f"I already tried to fix {book.bid}")
-            continue
-        elif 'LEVEL2-FAIL' in book.message:
-            print(f"Level 2 failure for {book.bid}")
-            continue
-        elif (
-            "BookDirHasFiles" in book.message or
-            "contains files. Delete" in book.message # old valueerror message
-        ):
-            print(f"Removing {book.bid} files to try again")
-            try:
-                if not test_mode:
-                    utils.set_book_rebind(imprint, book)
-                    imprint.bind_book(book)
-            except Exception as e :
-                print(f"Book {book.bid} failed again!")            
-        elif "DuplicateAncillaryData" in book.message:
-            print(f"Binding {book.bid} while fixing Duplicate Ancil Data")
-            try:
-                if not test_mode:
-                    utils.set_book_rebind(imprint, book)
-                    imprint.bind_book(book, ancil_drop_duplicates=True,)
-            except Exception as e :
-                print(f"Book {book.bid} failed again!")
-                book.message = book.message + \
-                    ' SECOND-FAIL. Tried with `ancil_drop_duplicates=True`'
-                imprint.get_session().commit()
-        elif 'TimingSystemOff' in book.message:
-            if "Timing counters not incrementing" in book.message:
-                print(
-                    f"{book.bid} Timing system errors weren't caught by level 2"
-                )
-                if book.type == 'obs':
-                    if not test_mode:
-                        book.message = book.message + \
-                            " LEVEL2-FAIL! Book re-update needed at level 2" \
-                            " and probably have to delete book"
-                        imprint.get_session().commit()
-                    continue
-                elif book.type == 'oper':
-                    if not test_mode:
-                        utils.set_book_rebind(imprint, book, update_level2=True)
-                else:
-                    raise ValueError(f"What book got me here? {book.bid}")
-            print(f"Binding {book.bid} with low precision timing")
-            try:
-                if not test_mode:
-                    utils.set_book_rebind(imprint, book)
-                    imprint.bind_book(book, allow_bad_timing=True,)
-            except Exception:
-                print(f"Book {book.bid} failed again!")
-                book.message = book.message + \
-                    ' SECOND-FAIL. Tried with `allow_bad_timing=True`'
-                imprint.get_session().commit()
-        elif (
-            "NoMountData" in book.message
-        ):
-            ## ACU data was messed up somehow. this is ok for oper books
-            if book.type == 'obs':
-                print("Not autofixing obs books with bad mount data")
-                continue
-            elif book.type != 'oper':
-                raise ValueError(f"What book got me here? {book.bid}")
-            print(f"Binding {book.bid} without complete ACU data")
-            try:
-                if not test_mode:
-                    utils.set_book_rebind(imprint, book)
-                    imprint.bind_book(book, require_acu=False,)
-            except:
-                print(f"Book {book.bid} failed again!")
-                book.message = book.message + \
-                    ' SECOND-FAIL. Tried with `require_acu=False`'
-                imprint.get_session().commit()
-        elif 'MissingReadoutIDError' in book.message:
-            print(f"Book {book.bid} does not have readout ids, not binding")
-            if not test_mode:
-                utils.set_book_wont_bind(imprint, book)
-        elif 'NoScanFrames' in book.message:
-            print(f"Book {book.bid} does not have scan frames, not binding")
-            if not test_mode:
-                utils.set_book_wont_bind(imprint, book)
-        elif 'NoHWPData' in book.message:
-            print(
-                f"Book {book.bid} does not HWP data reading out, binding "
-                "anyway"
-            )
-            if not test_mode:
-                utils.set_book_rebind(imprint, book)
-                imprint.bind_book(book, require_hwp=False,)
-        else:
-            print(f"I cannot catagorize book {book.bid}")
-
+        success = process_book_failure(
+            imprint, book, 
+            report=report, 
+            fix=fix, 
+            error_list=error_list
+        )
+        if not success:
+            print(f"Cannot categorize {book.bid}")
 
 def get_parser(parser=None):
     if parser is None:
@@ -250,7 +339,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         "action", 
-        help=" 'failed' or 'timecodes' or 'autofix'",
+        help=" 'failed' or 'report' or 'autofix'",
         type=str
     )
     parser.add_argument(
@@ -258,3 +347,24 @@ def get_parser(parser=None):
         help="if true, do not try to rebind books",
     )
     return parser
+
+def main():
+
+    parser = get_parser(parser=None)
+    args = parser.parse_args()
+
+    print("You must be running this from an account with write permissions to"
+         " the database and the book write directory.")
+    
+    imprint = Imprinter.for_platform(args.platform)
+
+    if args.action == 'failed':
+        check_failed_books(imprint)
+    elif args.action == 'report':
+        autofix_failed_books(imprint, report=True, fix=False)
+    elif args.action == 'autofix':
+        autofix_failed_books(imprint, report=True, fix=True)
+    else:
+        raise ValueError(
+            "Chosen action must be 'failed' 'autofix' or 'report'"
+        )
