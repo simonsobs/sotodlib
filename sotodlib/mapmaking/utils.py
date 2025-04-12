@@ -640,7 +640,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
             res.wrap(key, downsample_cut(obs[key], down))
         elif key in "fft_resample":
-            if key is "signal" and skip_signal:
+            if key == "signal" and skip_signal:
                 continue
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
