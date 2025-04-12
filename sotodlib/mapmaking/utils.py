@@ -635,13 +635,13 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
         # Stuff without sample axes
         if "samps" not in axes:
             res.wrap(*get_wrappable(obs, key))
+        elif key == "signal" and skip_signal:
+            continue
         elif isinstance(obs[key], (core.AxisManager, core.FlagManager)):
-            res.wrap(key, downsample_obs(obs["key"], down, skip_signal, fft_resample))
+            res.wrap(key, downsample_obs(obs[key], down, skip_signal, fft_resample))
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
             res.wrap(key, downsample_cut(obs[key], down))
         elif key in "fft_resample":
-            if key == "signal" and skip_signal:
-                continue
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
             dat = np.moveaxis(obs[key], ax_idx, -1)
