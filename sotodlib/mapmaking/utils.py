@@ -630,7 +630,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
     onsamp = (obs.samps.count+down-1)//down
     # Set up our output axis manager
     axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
-    res    = core.AxisManager(core.IndexAxis("samps", onsamp), *axes)
+    res    = core.AxisManager(core.OffsetAxis("samps", onsamp), *axes)
     for key, axes in obs._assignments.items():
         # Stuff without sample axes
         if "samps" not in axes:
