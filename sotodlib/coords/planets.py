@@ -364,17 +364,18 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
       Before checking in the ephemeris, the source_name will be
       matched against a regular expression and if it has the format
-      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers, then a
       fixed-position source at RA,Dec = xxx,yyy in degrees will be
       processed.  In that case, the distance is returned as Inf.
 
     """
     # Check against fixed-position template...
     m = re.match(
-        r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
     if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
         ra, dec = float(m['ra_deg']) * \
-            coords.DEG, float(m['dec_deg']) * coords.DEG
+            coords.DEG, sign * float(m['dec_deg']) * coords.DEG
         return ra, dec, float('inf')
     
     # Derive from skyfield astrometric object
