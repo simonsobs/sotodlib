@@ -341,6 +341,15 @@ def high_pass_butter4(freqs, tod, fc):
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
+def band_pass_butter4(freqs, tod, fc_low, fc_high):
+    """4th-order band-pass filter with f3db at fc (Hz).
+
+    """
+    b, a = signal.butter(4, [2*np.pi*fc_low, 2*np.pi*fc_high],
+                         'bandpass', analog=True)
+    return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
+
+@fft_filter
 def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
     """tau_filter is deprecated; use timeconst_filter."""
     logging.warning('tau_filter is deprecated; use timeconst_filter.')
@@ -615,8 +624,7 @@ def get_bpf(cfg):
     elif cfg['type'] == 'butter4':
         center = cfg['center']
         width = cfg['width']
-        return low_pass_butter4(fc=center + width/2.) *\
-                high_pass_butter4(fc=center - width/2.)
+        return band_pass_butter4(fc_low=center - width/2., fc_high=center + width/2.)
     elif cfg['type'] == 'sine2':
         center = cfg['center']
         width = cfg['width']

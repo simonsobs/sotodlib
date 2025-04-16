@@ -117,7 +117,7 @@ class ObsDb(object):
             'timestamp float, drift str'
 
         """
-        current_cols = self.conn.execute('pragma table_info("obs")').fetchall()
+        current_cols = self.conn.execute('pragma table_info(obs)').fetchall()
         current_cols = [r[1] for r in current_cols]
         if isinstance(column_defs, str):
             column_defs = column_defs.split(',')
@@ -241,7 +241,7 @@ class ObsDb(object):
         """
         if obs_id is None:
             return self.query('1', add_prefix=add_prefix)
-        results = self.query(f'obs_id="{obs_id}"', add_prefix=add_prefix)
+        results = self.query(f"obs_id='{obs_id}'", add_prefix=add_prefix)
         if len(results) == 0:
             return None
         if len(results) > 1:
@@ -302,16 +302,16 @@ class ObsDb(object):
                     val = None
                 if val is None:
                     join_type = 'left join'
-                    extra_fields.append(f'ifnull(tt{tagi}.obs_id,"") != "" as {t}')
+                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as {t}")
                 elif val == '0':
                     join_type = 'left join'
-                    extra_fields.append(f'ifnull(tt{tagi}.obs_id,"") != "" as {t}')
+                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as {t}")
                     query_text += f' and {t}==0'
                 else:
                     join_type = 'join'
                     extra_fields.append(f'1 as {t}')
-                joins += (f' {join_type} (select distinct obs_id from tags where tag="{t}") as tt{tagi} on '
-                          f'obs.obs_id = tt{tagi}.obs_id')
+                joins += (f" {join_type} (select distinct obs_id from tags where tag='{t}') as tt{tagi} on "
+                          f"obs.obs_id = tt{tagi}.obs_id")
         extra_fields = ''.join([','+f for f in extra_fields])
         q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)
         c = self.conn.execute(q)

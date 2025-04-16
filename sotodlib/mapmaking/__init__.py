@@ -1,4 +1,4 @@
-from .utilities import *
+from .utils import *
 from .ml_mapmaker import *
 from .demod_mapmaker import *
 from .noise_model import *

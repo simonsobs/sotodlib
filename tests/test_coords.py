@@ -7,6 +7,7 @@
 
 import itertools
 import unittest
+import time
 import numpy as np
 
 from sotodlib import coords, core
@@ -210,6 +211,24 @@ class CoordsUtilsTest(unittest.TestCase):
         xy[1,1:] = np.nan
         with self.assertRaises(ValueError):
             coords.helpers.get_focal_plane_cover(xieta=xy)
+
+
+    def test_source_pos(self):
+        """
+        Test getting the position of a fixed source.
+        """
+        t = time.time()
+
+        pos1 = coords.planets.get_source_pos("J1000+1000", t)
+        pos2 = coords.planets.get_source_pos("j1000p1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        pos1 = coords.planets.get_source_pos("J1000-1000", t)
+        pos2 = coords.planets.get_source_pos("j1000m1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
             
 
 class OpticsTest(unittest.TestCase):

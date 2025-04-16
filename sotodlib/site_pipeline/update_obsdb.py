@@ -297,22 +297,22 @@ def main(config: str,
                     coor_enc = stream.ancil[coor+"_enc"]
                     bookcartobsdb.add_obs_columns([f"{coor}_center float", 
                                                    f"{coor}_throw float"])
-                    very_clean[f"{coor}_center"] = .5 * (coor_enc.max() + coor_enc.min())
-                    very_clean[f"{coor}_throw"] = .5 * (coor_enc.max() - coor_enc.min())
+                    very_clean[f"{coor}_center"] = round(.5 * (coor_enc.max() + coor_enc.min()), 4)
+                    very_clean[f"{coor}_throw"] = round(.5 * (coor_enc.max() - coor_enc.min()), 4)
                 except KeyError:
                     logger.error(f"No {coor} pointing in some streams for obs_id {obs_id}")
 
             try:
                 if very_clean["telescope_flavor"] == "sat":
                     bore_enc = stream.ancil["boresight_enc"]
-                    very_clean["roll_center"] = -.5 * (bore_enc.max() + bore_enc.min())
-                    very_clean["roll_throw"] = .5 * (bore_enc.max() - bore_enc.min())
+                    very_clean["roll_center"] = round(-.5 * (bore_enc.max() + bore_enc.min()), 4)
+                    very_clean["roll_throw"] = round(.5 * (bore_enc.max() - bore_enc.min()), 4)
                 if very_clean["telescope_flavor"] == "lat":
                     el_enc = stream.ancil["el_enc"]
                     corot_enc = stream.ancil["corotator_enc"]
                     roll = el_enc - 60. - corot_enc
-                    very_clean["roll_center"] = .5 * (roll.max() + roll.min())
-                    very_clean["roll_throw"] = .5 * (roll.max() - roll.min())
+                    very_clean["roll_center"] = round(.5 * (roll.max() + roll.min()), 4)
+                    very_clean["roll_throw"] = round(.5 * (roll.max() - roll.min()), 4)
 
                 bookcartobsdb.add_obs_columns(["roll_center float", "roll_throw float"])
             except KeyError:

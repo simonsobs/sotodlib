@@ -261,14 +261,14 @@ class MetadataTest(unittest.TestCase):
         entries = mandb.inspect({'dets:band': 'f220'})
         mandb.remove_entry(entries[0])
         ## check file unreg'd
-        c = mandb.conn.execute('select count(id) from files where name="y"')
+        c = mandb.conn.execute("select count(id) from files where name='y'")
         self.assertEqual(c.fetchall()[0][0], 0)
 
         # Delete another entry
         entries = mandb.inspect()
         mandb.remove_entry(entries[0])
         ## check file not unreg'd (because it's used twice)
-        c = mandb.conn.execute('select count(id) from files where name="x"')
+        c = mandb.conn.execute("select count(id) from files where name='x'")
         self.assertEqual(1, c.fetchone()[0])
 
 

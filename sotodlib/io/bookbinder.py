@@ -1349,7 +1349,7 @@ def counters_to_timestamps(c0, c2):
     s, ns = split_ts_bits(c2)
 
     # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPOCH time referenced to 1990 relative to UNIX time.
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
     c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
     ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
     return ts
