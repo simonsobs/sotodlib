@@ -1322,7 +1322,7 @@ class G3tHWP():
         self._generate_sub_data(ref_clk=False)
 
         # Find the instantaneous average encoder clk spacing between datapoints
-        rot_spacing = np.arange(0, len(self._encd_diff), self._num_edges - 2)
+        rot_spacing = np.arange(0, len(self._encd_diff), 100*(self._num_edges - 2))
         diff_split = np.split(self._encd_diff, rot_spacing[1:])
         slit_dist = np.concatenate([np.ones(len(_diff)) * _mean(_diff) for _diff in diff_split])
         slit_dist_high = np.concatenate([np.ones(len(_diff)) * _mean_high(_diff) for _diff in diff_split])
@@ -1532,6 +1532,7 @@ class G3tHWP():
         self._bad_ref = np.where(self._glitches != 0)[0]
         encd_diff_split = np.split(self._encd_diff, self._ref_indexes)
 
+        bad_fills = []
         dead_rots = []
         total_mask = [np.ones(len(encd_diff_split[0]))]
         # Loop through every rotation and find which points to mask out
@@ -1579,6 +1580,10 @@ class G3tHWP():
                 num_glitches = len(mask) - np.sum(mask)
                 self._ref_indexes[i+1:] -= num_glitches
                 logger.debug(f'{num_glitches}, {np.where(~np.array(mask))[0]}')
+            elif min(diff) < 0.1*np.median(diff):
+                # Sometimes a dropped packet gets filled with glitched data
+                bad_fills.append(self._ref_indexes[i])
+                total_mask.append(np.ones(len(diff)))
             else:
                 total_mask.append(np.ones(len(diff)))
 
@@ -1593,6 +1598,17 @@ class G3tHWP():
         self._encd_cnt -= np.cumsum(np.logical_not(total_mask).astype(int))
         self._encd_cnt = self._encd_cnt[total_mask]
         self._ref_indexes = np.delete(self._ref_indexes, dead_rots)
+
+        # Correct for packet drop fills which have glitches
+        for ref in bad_fills:
+            before_ref = max(self._ref_indexes[self._ref_indexes < ref])
+            after_ref = min(self._ref_indexes[self._ref_indexes > ref])
+            fill_ref = before_ref if before_ref else after_ref
+            fill_values = (self._encd_clk[ref + self._num_edges] - self._encd_clk[ref]) * \
+                          (self._encd_clk[fill_ref:fill_ref + self._num_edges] - self._encd_clk[fill_ref]) / \
+                          (self._encd_clk[fill_ref + self._num_edges] - self._encd_clk[fill_ref]) + \
+                          self._encd_clk[ref]
+            self._encd_clk[ref:ref + self._num_edges] = fill_values
 
         self._glitches = np.ediff1d(self._ref_indexes, to_end=self._num_edges) - self._num_edges
         self._bad_ref = np.where(self._glitches != 0)[0]
@@ -1633,7 +1649,7 @@ class G3tHWP():
             diff_sum += diff
             res = abs(high-diff_sum) if toggle else abs(low-diff_sum)
             if prev_res > res:
-                diff_forward = diff_sum + diffs[ind+1] if len(diffs) > ind + 1 else diff_sum
+                diff_forward = diff_sum + diffs[ind+3] if len(diffs) > ind + 3 else diff_sum
                 comp = 2*low + high if toggle else low + 2*high
                 if abs(comp-diff_forward) > abs(high+low-diff_forward):
                     return_mask.append(False)
@@ -1677,7 +1693,7 @@ class G3tHWP():
         for i in self._ref_indexes[:-1]:
             for j in range(self._num_edges):
                 dist = abs(error[i+j]) - 0.01*expectation[i+j]
-                if dist > 0:
+                if dist > 0 and dist < expectation[i+j]:
                     dist_inds = 3 if j == self._num_edges - 1 else 1
                     dist_sign = np.sign(error[i+j])
 
@@ -1823,7 +1839,7 @@ class G3tHWP():
                 gap_clk = self._encd_clk[rot_after_index - gap - 1:rot_after_index + 1] \
                         - self._encd_clk[rot_after_index] + self._encd_clk[index + 1]
                 corr_factor = (self._encd_clk[index + 1] - self._encd_clk[index])/(gap_clk[-1] - gap_clk[0])
-                gap_clk = (corr_factor*(gap_clk[-1] - gap_clk) + gap_clk[-1])[1:-1]
+                gap_clk = (corr_factor*(gap_clk - gap_clk[-1]) + gap_clk[-1])[1:-1]
 
             gap_cnt = np.arange(self._encd_cnt[index] + 1, self._encd_cnt[index+1])
             self._encd_cnt = np.insert(self._encd_cnt, index + 1, gap_cnt)
