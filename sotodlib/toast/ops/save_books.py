@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2024 Simons Observatory.
+# Copyright (c) 2022-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -205,12 +205,8 @@ class SaveBooks(Operator):
                         local_sets = list()
                         offset = 0
                         for intr in ob.intervals[frame_intervals]:
-                            chunk = intr.last - offset + 1
-                            local_sets.append(
-                                [
-                                    chunk,
-                                ]
-                            )
+                            chunk = intr.last - offset
+                            local_sets.append([chunk])
                             offset += chunk
                         if offset != ob.n_local_samples:
                             local_sets.append([ob.n_local_samples - offset])
