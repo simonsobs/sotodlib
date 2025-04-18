@@ -409,8 +409,7 @@ class G3tHWP():
         Returns
         --------
         dict
-            {fast_time, angle, slow_time, stable, locked, hwp_rate, ref_indexes, bad_indexes_each_ref,
-             filled_flag, bad_revolution_flag}
+            {fast_time, angle, slow_time, stable, locked, hwp_rate, ref_indexes, filled_flag}
 
 
         Notes
@@ -432,15 +431,8 @@ class G3tHWP():
                 * Use placeholder value of 0 for cases when not "stable".
             * ref_indexes: int
                 * Indexes of of reference slots.
-            * bad_indexes_each_ref: dictionary
-                * Information about bad data points in each revolution starting from reference slot
-                * key: Index of reference slots which have bad data points.
-                * value: A list of indexes indicating the positions of bad data points
-                         within each revolution, starting from the reference index.
             * filled_flag: bool
                 * Flag indicating the points that are filled due to packet drop.
-            * bad_revolution_flag: boolean array
-                * Flag indicating the points of bad revolutions that are contaminated with noise.
             * num_dropped_packets
                 * number of dropped encoder packets
             * num_dropped_packets_irig
@@ -486,19 +478,12 @@ class G3tHWP():
             out['bad_ref'+suffix] = self._bad_ref
             # generate flags
             filled_flag = np.zeros_like(fast_time, dtype=bool)
-            for r in self._filled_ranges:
-                filled_flag[r[0]:r[1]] = 1
             out['filled_flag'+suffix] = filled_flag
             out['num_dropped_packets'+suffix] = int(self._num_dropped_pkts)
             out['num_dropped_packets_irig'+suffix] = int(self._num_dropped_pkts_irig)
-            bad_revolution_flag = np.zeros_like(fast_time, dtype=bool)
-            for i in self._bad_ref:
-                ri = self._ref_indexes[i]
-                bad_revolution_flag[ri:ri+self._num_edges] = 1
-            out['bad_revolution_flag'+suffix] = bad_revolution_flag
             out['num_glitches'+suffix] = int(self._num_glitches)
-            out['num_value_glitches'+suffix] = int(self._num_value_glitches)
             out['num_glitches_irig'+suffix] = int(self._num_glitches_irig)
+            out['num_value_glitches'+suffix] = int(self._num_value_glitches)
             out['num_value_glitches_irig'+suffix] = int(self._num_value_glitches_irig)
         return out
 
@@ -862,7 +847,6 @@ class G3tHWP():
             aman.wrap_new('template_t'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('template_t_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('filled_flag'+suffix, shape=('samps', ), dtype=bool)
-            aman.wrap_new('bad_revolution_flag'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap('num_dropped_packets'+suffix, 0)
             aman.wrap('num_dropped_packets_irig'+suffix, 0)
             aman.wrap('num_glitches'+suffix, 0)
@@ -1038,9 +1022,6 @@ class G3tHWP():
 
             - filled_flag_1/2: bool (samps,)
                 Array to indicate the data points that are filled due to packet drop.
-
-            - bad_revolution_flag_1/2: bool (samps,)
-                Array to indicate the data points of bad revolutions that are contaminated with noise.
 
             - quad_1/2: int (quad,)
                 0 or 1 or -1. 0 means no data
@@ -1227,7 +1208,6 @@ class G3tHWP():
         # metadata of packet drop
         self._num_dropped_pkts = 0
         self._num_dropped_pkts_irig = 0
-        self._filled_ranges = []
 
         # keep bad data points as a dictionary
         self._num_glitches = 0
