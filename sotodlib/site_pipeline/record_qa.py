@@ -44,7 +44,7 @@ def main(config):
         jclass = f"{m._influx_meas}.{m._influx_field}"
         skipped_jobs = jdb.get_jobs(jclass=jclass, jstate=["done", "failed", "ignored"])
         skipped_obs = set([j.tags["obs_id"] for j in skipped_jobs])
-        logger.debug(f"Found {len(skipped_obs)} obs_id to skip for metric {m._influx_meas}.{m._influx_field}")
+        logger.debug(f"Skipping {len(skipped_obs & new_obs)} / {len(new_obs)} obs_id for metric {m._influx_meas}.{m._influx_field}")
         new_obs -= skipped_obs
 
         # create list of jobs to process
@@ -66,7 +66,7 @@ def main(config):
     n = len(all_obs_id)
     # process one obs_id at a time
     for i, oid in enumerate(all_obs_id):
-        logger.info(f"Recording metrics for obs_id {oid} ({i}/{n})...")
+        logger.info(f"Recording metrics for obs_id {oid} ({i+1}/{n})...")
         # load metadata once
         meta_fail = False
         try:
