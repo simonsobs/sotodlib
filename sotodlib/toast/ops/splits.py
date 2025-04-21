@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2024 Simons Observatory.
+# Copyright (c) 2024-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -435,6 +435,24 @@ class Splits(Operator):
 
     splits = List([], help="The list of named splits to apply")
 
+    write_hits = Bool(True, help="If True, write the hits map")
+
+    write_cov = Bool(False, help="If True, write the white noise covariance matrices.")
+
+    write_invcov = Bool(
+        True,
+        help="If True, write the inverse white noise covariance matrices.",
+    )
+
+    write_rcond = Bool(False, help="If True, write the reciprocal condition numbers.")
+
+    write_map = Bool(True, help="If True, write the filtered/destriped map")
+
+    write_noiseweighted_map = Bool(
+        False,
+        help="If True, write the noise-weighted map (for fast co-add)",
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         return
@@ -581,10 +599,14 @@ class Splits(Operator):
             msg = "No splits have been created yet, cannot write"
             raise RuntimeError(msg)
 
-        is_pix_wcs = hasattr(self.mapmaker.map_binning.pixel_pointing, "wcs")
+        if hasattr(self.mapmaker, "map_binning"):
+            pixel_pointing = self.mapmaker.map_binning.pixel_pointing
+        else:
+            pixel_pointing = self.mapmaker.binning.pixel_pointing
+        is_pix_wcs = hasattr(pixel_pointing, "wcs")
         is_hpix_nest = None
         if not is_pix_wcs:
-            is_hpix_nest = self.mapmaker.map_binning.pixel_pointing.nest
+            is_hpix_nest = pixel_pointing.nest
 
         if split_name is None:
             to_write = dict(self._split_obj)
@@ -593,8 +615,26 @@ class Splits(Operator):
 
         for spname, spl in to_write.items():
             mname = f"{self.name}_{split_name}"
-            for prod in ["hits", "map", "invcov", "noiseweighted_map"]:
-                mkey = f"{mname}_{prod}"
+            for prod, binner_key, write in [
+                    ("hits", None, self.write_hits),
+                    ("cov", None, self.write_cov),
+                    ("invcov", None, self.write_invcov),
+                    ("rcond", None, self.write_rcond),
+                    ("map", "binned", self.write_map),
+                    ("noiseweighted_map", "noiseweighted", self.write_noiseweighted_map),
+            ]:
+                if not write:
+                    continue
+                if binner_key is not None:
+                    # get the product name from BinMap
+                    mkey = getattr(self.mapmaker.binning, binner_key)
+                else:
+                    # hits and covariance are not made by BinMap.
+                    # Try synthesizing the product name
+                    mkey = f"{mname}_{prod}"
+                if mkey not in data:
+                    msg = f"'{mkey}' not found in data.  Available keys are {data.keys()}"
+                    raise RuntimeError(msg)
                 if is_pix_wcs:
                     fname = os.path.join(
                         self.output_dir, f"{self.name}_{split_name}_{prod}.fits"
