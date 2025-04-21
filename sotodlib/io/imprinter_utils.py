@@ -112,7 +112,7 @@ def delete_level2_obs_and_book(imprint, book, session=None):
     
     if session is None:
         session = imprint.get_session()
-
+    print(f"Removing Level 2 for {book.bid}")
     obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
     g3session, SMURF = imprint.get_g3tsmurf_session(
         return_archive=True
