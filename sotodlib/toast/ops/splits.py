@@ -12,7 +12,7 @@ from toast.traits import trait_docs, Int, Unicode, Instance, List, Bool
 from toast.timing import function_timer
 from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
-from toast.ops import Operator
+from toast.ops import Operator, FlagIntervals
 from toast.pixels_io_healpix import write_healpix_fits, write_healpix_hdf5
 from toast.pixels_io_wcs import write_wcs_fits
 from toast import qarray as qa
@@ -435,16 +435,39 @@ class Splits(Operator):
 
     splits = List([], help="The list of named splits to apply")
 
+    splits_as_flags = Bool(
+        False,
+        help="If True, splits are applied through flagging rather than views. "
+        "This can be more efficient if there are only a few samples in each "
+        "interval.",
+    )
+
+    shared_flags = Unicode(
+        defaults.shared_flags,
+        allow_none=True,
+        help="Observation shared key for telescope flags to use when "
+        "splits_as_flags is True",
+    )
+
+    shared_flag_mask = Int(
+        128,
+        help="Bit mask value for flagging when splits_as_flags is True",
+    )
+
     write_hits = Bool(True, help="If True, write the hits map")
 
-    write_cov = Bool(False, help="If True, write the white noise covariance matrices.")
+    write_cov = Bool(
+        False, help="If True, write the white noise covariance matrices."
+    )
 
     write_invcov = Bool(
         True,
         help="If True, write the inverse white noise covariance matrices.",
     )
 
-    write_rcond = Bool(False, help="If True, write the reciprocal condition numbers.")
+    write_rcond = Bool(
+        False, help="If True, write the reciprocal condition numbers."
+    )
 
     write_map = Bool(True, help="If True, write the filtered/destriped map")
 
@@ -534,6 +557,7 @@ class Splits(Operator):
         else:
             map_binner = self.mapmaker.binning
         pointing_view_save = map_binner.pixel_pointing.view
+        shared_flag_mask_save = map_binner.shared_flag_mask
 
         # If the pixel distribution does yet exit, we create it once prior to
         # doing any splits.
@@ -565,8 +589,22 @@ class Splits(Operator):
             for ob in data.obs:
                 spl.create_split(ob)
 
-            # Set mapmaking tools to use the current split interval list
-            map_binner.pixel_pointing.view = spl.split_intervals
+            if self.splits_as_flags:
+                # Split is applied through flagging, not as a view
+                # Flag samples outside the intervals by prefixing '~'
+                # to the view name
+                FlagIntervals(
+                    shared_flags=self.shared_flags,
+                    shared_flag_bytes=1,
+                    view_mask=[
+                        ("~" + spl.split_intervals, np.uint8(self.shared_flag_mask))
+                    ],
+                ).apply(data)
+                map_binner.shared_flag_mask |= self.shared_flag_mask
+            else:
+                # Set mapmaking tools to use the current split interval list
+                map_binner.pixel_pointing.view = spl.split_intervals
+
             if not map_binner.full_pointing:
                 # We are not using full pointing and so we clear the
                 # residual pointing for this split
@@ -592,6 +630,7 @@ class Splits(Operator):
         for k, v in mapmaker_save_traits.items():
             setattr(self.mapmaker, k, v)
         map_binner.pixel_pointing.view = pointing_view_save
+        map_binner.pixel_pointing.shared_flag_mask = shared_flag_mask_save
 
     def write_splits(self, data, split_name=None):
         """Write out all split products."""
