@@ -20,9 +20,7 @@ The config file could be of the form:
     lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
     skip_bad_books: True
-    known_bad_books: 
-    - oper_1736874485_satp3_0000100
-    - obs_9999999999_satp0_1111111
+    known_bad_books_file: path to \n-separated file listing bad books 
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -153,8 +151,14 @@ def main(config: str,
         bookcartobsdb.add_obs_columns(col_list)
     if "skip_bad_books" not in config_dict:
         config_dict["skip_bad_books"] = False
-    if "known_bad_books" not in config_dict:
-        config_dict["known_bad_books"] = []
+    
+    config_dict["known_bad_books"] = []
+    if "known_bad_books_file" in config_dict:
+        try:
+            with open(config_dict["known_bad_books_file"], "r") as bbf:
+                config_dict["known_bad_books"] = bbf.read().split("\n")
+        except:
+            raise IOError("Bad books file couldn't be read in")
         
     #How far back we should look
     tnow = time.time()
@@ -192,6 +196,7 @@ def main(config: str,
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
     #Check the books for the observations we want
+    bad_book_counter = 0
     for bookpath in sorted(bookcart):
         if check_meta_type(bookpath) in accept_type:
             t1 = time.time()
@@ -207,7 +212,12 @@ def main(config: str,
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
-                    logger.warning(f"failed to add {bookpath}")
+                    config_dict["known_bad_books"].append(book_id)
+                    logger.error(f"failed to add {bookpath}. There are now {len(config_dict['known_bad_books'])} known bad books.")
+                    bad_book_counter +=1
+                    if "known_bad_books_file" in config_dict:
+                        with open(config_dict["known_bad_books_file"], "w") as bbf:
+                            bbf.write("\n".join(config_dict["known_bad_books"]))
                     continue
                 else:
                     raise e
@@ -226,8 +236,7 @@ def main(config: str,
                 for key, val in very_clean.items():
                     col_list.append(key+" "+type(val).__name__)
                 bookcartobsdb.add_obs_columns(col_list)
-            if "skip_bad_books" not in config_dict:
-                config_dict["skip_bad_books"] = False
+
             #Adding info that should be there for all observations
             #Descriptive string columns
             try:
@@ -326,7 +335,9 @@ def main(config: str,
             logger.info(f"Finished {obs_id} in {time.time()-t1} s")
         else:
             bookcart.remove(bookpath)
-
+    if bad_book_counter != 0:
+        logger.error(f"Found {bad_book_counter} new bad books, There are now {len(config_dict['known_bad_books'])} known bad books.")
+        raise(Exception)
 
 def get_parser(parser=None):
     if parser is None:
