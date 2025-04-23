@@ -1,7 +1,6 @@
 """Module for estimating Azimuth Synchronous Signal (azss)"""
 import numpy as np
 from numpy.polynomial import legendre as L
-from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters, pca
@@ -9,7 +8,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None, 
+
+def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
               apodize_edges=True, apodize_edges_samps=1600,
               apodize_flags=True, apodize_flags_samps=200):
     """
@@ -23,13 +23,13 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         numpy array of signal to be binned. If None, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az attribute.
-    range: array-like, optional
+    azrange: array-like, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to None.
         If None, [min(az), max(az)] will be used for binning.
     bins: int or sequence of scalars
-        If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
+        If bins is an int, it defines the number of equal-width bins in the given azrange (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
-        If ``bins`` is a sequence, ``bins`` overwrite ``range``.
+        If ``bins`` is a sequence, ``bins`` overwrite ``azrange``.
     flags: str or RangesMatrix or Ranges, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         If provided by a string, `aman.flags.get(flags)` is used for the flags.
@@ -83,7 +83,7 @@ def bin_by_az(aman, signal=None, az=None, range=None, bins=100, flags=None,
         else:
             weight_for_signal = None
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
-                              range=range, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
+                              range=azrange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
 
 def fit_azss(az, azss_stats, max_mode, fit_range=None):
@@ -110,11 +110,11 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
         Model fit for each detector size ndets x n_samps
     """
     bin_width = azss_stats.binned_az[1] - azss_stats.binned_az[0]
-    m = ~np.isnan(azss_stats.binned_signal[0]) # masks bins without counts
+    m = ~np.isnan(azss_stats.binned_signal[0])  # masks bins without counts
     if np.count_nonzero(m) < max_mode + 1:
         raise ValueError('Number of valid bins is smaller than mode of Legendre function')
 
-    if fit_range==None:
+    if fit_range is None:
         az_min = np.min(azss_stats.binned_az[m]) - bin_width / 2
         az_max = np.max(azss_stats.binned_az[m]) + bin_width / 2
     else:
@@ -142,12 +142,12 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     return L.legval(x_legendre, coeffs.T)
 
 
-def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, scan_flags=None,
-            apodize_edges=True, apodize_edges_samps=40000, apodize_flags=True, apodize_flags_samps=200,
-            apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
-            method='interpolate', max_mode=None, subtract_in_place=False,
-            merge_stats=True, azss_stats_name='azss_stats',
-            merge_model=True, azss_model_name='azss_model'):
+def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None, scan_flags=None,
+             apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
+             apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
+             method='interpolate', max_mode=None, subtract_in_place=False,
+             merge_stats=True, azss_stats_name='azss_stats',
+             merge_model=True, azss_model_name='azss_model'):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
     **NOTE:** This function does not modify the ``signal`` unless ``subtract_in_place = True``.
@@ -160,14 +160,14 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         A numpy array representing the signal to be used for azss extraction. If not provided, the signal is taken from aman.signal.
     az: array-like, optional
         A 1D numpy array representing the azimuth angles. If not provided, the azimuth angles are taken from aman.boresight.az.
-    range: list, optional
+    azrange: list, optional
         A list specifying the range of azimuth angles to consider for binning. Defaults to [-np.pi, np.pi].
         If None, [min(az), max(az)] will be used for binning.
     bins: int or sequence of scalars
-        If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
+        If bins is an int, it defines the number of equal-width bins in the given azrange (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
-        If `bins` is a sequence, `bins` overwrite `range`.
-    flags : str or Rannges or RangesMatrix, optinal
+        If `bins` is a sequence, `bins` overwrite `azrange`.
+    flags : str or Rannges or RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
     scan_flags : str or Ranges, optional
@@ -191,11 +191,11 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
     prefilt_detrend : str, optional
         Method for detrending before filtering. Defaults to 'linear'.
     method: str
-        The method to use for azss modeling. Options are 'interpolate' and 'fit'. 
+        The method to use for azss modeling. Options are 'interpolate' and 'fit'.
         In 'interpolate', binned signal is used directly.
         In 'fit', fitting is applied to the binned signal.
         Defaults to 'interpolate'.
-    max_mode: integer, optinal
+    max_mode: integer, optional
         The number of Legendre modes to use for azss when method is 'fit'. Required when method is 'fit'.
     subtract_in_place: bool
         If True, it subtract the modeled tod from original signal. The aman.signal will be modified.
@@ -250,7 +250,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
         az = aman.boresight.az
 
     # do binning
-    binning_dict = bin_by_az(aman, signal=signal, az=az, range=range, bins=bins, flags=flags,
+    binning_dict = bin_by_az(aman, signal=signal, az=az, azrange=azrange, bins=bins, flags=flags,
                              apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps,
                              apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
     bin_centers = binning_dict['bin_centers']
@@ -266,7 +266,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
 
-    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, range)
+    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -277,7 +277,7 @@ def get_azss(aman, signal='signal', az=None, range=None, bins=100, flags=None, s
     return azss_stats, model_sig_tod
 
 
-def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=None, range=None):
+def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=None, azrange=None):
     """
     Function to return the azss template for subtraction given the azss_stats AxisManager
     """
@@ -287,7 +287,7 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=Non
     if method == 'fit':
         if not isinstance(max_mode, int):
             raise ValueError('max_mode is not provided as integer')
-        model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=range)
+        model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=azrange)
 
     if method == 'interpolate':
         # mask az bins that has no data and extrapolate
@@ -301,7 +301,7 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=Non
     return model
 
 
-def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None, range=None,
+def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None, azrange=None,
                   scan_flags=None, subtract_name='azss_remove', in_place=False, remove_template=False):
     """
     Subtract the scan synchronous signal (azss) template from the
@@ -320,7 +320,7 @@ def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_m
         The method to use for azss modeling. Options are 'interpolate' and 'fit'.
     max_mode: integer, optinal
         The number of Legendre modes to use for azss when method is 'fit'. Required when method is 'fit'.
-    range:
+    azrange:
         Azimuth range used for 'fit' method.
     scan_flags: str or Ranges, optional
         Subtract in the scan/time region specified by flags.
@@ -349,7 +349,7 @@ def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_m
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
-    model = get_azss_model(aman, azss_stats, method=method, max_mode=max_mode, range=range)
+    model = get_azss_model(aman, azss_stats, method=method, max_mode=max_mode, azrange=azrange)
 
     if scan_flags is None:
         scan_flags = np.ones(aman.samps.count, dtype=bool)

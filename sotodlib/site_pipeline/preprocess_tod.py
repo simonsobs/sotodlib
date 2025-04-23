@@ -200,7 +200,7 @@ def preprocess_tod(obs_id,
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
                             context=None, dets=None,
-                            meta=None, modulated=True):
+                            meta=None, modulated=True, logger=logger):
     """Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
@@ -226,9 +226,11 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         If False, scan the simulation into demodulated timestreams.
     """
     configs, context = pp_util.get_preprocess_context(configs, context)
-    meta = pp_util.load_preprocess_det_select(obs_id, configs=configs,
-                                              context=context, dets=dets,
-                                              meta=meta)
+    if dets is not None:
+        meta.restrict("dets", dets)
+    meta = pp_util.load_preprocess_det_select(
+        obs_id, configs=configs, context=context, meta=meta, logger=logger
+    )
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
