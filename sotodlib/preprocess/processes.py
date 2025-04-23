@@ -1,5 +1,6 @@
 import numpy as np
 from operator import attrgetter
+import copy
 
 from so3g.proj import Ranges, RangesMatrix
 
@@ -1818,9 +1819,10 @@ class BadSubscanFlags(_Preprocess):
         msk_det = np.ones(aman.dets.count, dtype=bool)
         signal = self.calc_cfgs["subscan_stats"] if isinstance(self.calc_cfgs["subscan_stats"], list) else [self.calc_cfgs["subscan_stats"]]
         for sig in signal:
-            self.calc_cfgs["subscan_stats"] = proc_aman[self.stats_name+"_"+sig[-1]]
+            calc_cfgs_copy = copy.deepcopy(self.calc_cfgs)
+            calc_cfgs_copy["subscan_stats"] = proc_aman[self.stats_name+"_"+sig[-1]]
             _msk_ss, _msk_det = tod_ops.flags.get_noisy_subscan_flags(
-                aman, **self.calc_cfgs)
+                aman, **calc_cfgs_copy)
             msk_ss += _msk_ss  # True for bad samps
             msk_det &= _msk_det  # True for good dets
         ss_aman = core.AxisManager(aman.dets, aman.samps)
