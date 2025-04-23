@@ -186,10 +186,12 @@ class SaveBooks(Operator):
                     n_set = ob.dist.samp_sets[ob.comm.group_rank].n_elem
                     for sset in range(first_set, first_set + n_set):
                         for chunk in ob.dist.sample_sets[sset]:
+                            first = offset
+                            last = min(offset + chunk, ob.n_local_samples - 1)
                             timespans.append(
                                 (
-                                    ob.shared[self.times][offset],
-                                    ob.shared[self.times][offset + chunk - 1],
+                                    ob.shared[self.times][first],
+                                    ob.shared[self.times][last],
                                 )
                             )
                             n_frames += 1

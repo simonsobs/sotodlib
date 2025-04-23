@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2023 Simons Observatory.
+# Copyright (c) 2020-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Tools for saving Level-3 Book format data.
 
