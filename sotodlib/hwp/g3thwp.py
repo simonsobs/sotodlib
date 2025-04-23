@@ -90,6 +90,10 @@ class G3tHWP():
         self._encoder_disk_radius = self.configs.get(
             'encoder_disk_radius', 346.25)
 
+        # The time period and amount of irig desynchronization
+        # [ start_time, stop_time, amount of time shift ]
+        self._irig_desync = self.configs.get('irig_desync', None)
+
         # Output path + filename
         self._output = self.configs.get('output', None)
 
@@ -1128,6 +1132,8 @@ class G3tHWP():
         # check IRIG timing quality
         self._irig_quality_check()
 
+        self._fix_irig_desync()
+
         # check 32 bit internal counter overflow glitch
         self._process_counter_overflow_glitch()
 
@@ -1384,6 +1390,20 @@ class G3tHWP():
         else:
             self._irig_time = np.array([])
             self._rising_edge = np.array([])
+
+    def _fix_irig_desync(self):
+        """ Fix IRIG desynchronization by adding constant time offset """
+        if self._irig_desync is None:
+            return
+
+        if len(self._irig_time) < 1:
+            return
+
+        for t0, t1, dt in self._irig_desync:
+            desynced = (t0 <= self._irig_time) & (self._irig_time <= t1)
+            if np.any(desynced):
+                logger.warning('irig time has known desynchronization, apply correction')
+                self._irig_time[desynced] -= dt
 
     def _process_counter_overflow_glitch(self):
         """
