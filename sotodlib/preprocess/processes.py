@@ -1818,8 +1818,8 @@ class BadSubscanFlags(_Preprocess):
         msk_ss = RangesMatrix.zeros((aman.dets.count, aman.samps.count))
         msk_det = np.ones(aman.dets.count, dtype=bool)
         signal = self.calc_cfgs["subscan_stats"] if isinstance(self.calc_cfgs["subscan_stats"], list) else [self.calc_cfgs["subscan_stats"]]
+        calc_cfgs_copy = copy.deepcopy(self.calc_cfgs)
         for sig in signal:
-            calc_cfgs_copy = copy.deepcopy(self.calc_cfgs)
             calc_cfgs_copy["subscan_stats"] = proc_aman[self.stats_name+"_"+sig[-1]]
             _msk_ss, _msk_det = tod_ops.flags.get_noisy_subscan_flags(
                 aman, **calc_cfgs_copy)
