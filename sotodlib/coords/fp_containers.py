@@ -219,7 +219,9 @@ class FocalPlane:
         srt = np.argsort(aman.det_info.det_id[msk])
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
-        r2 = aman.pointing.R2[msk][srt][mapping]
+        r2 = np.nan + np.zeros_like(eta)
+        if "r2" in aman.pointing:
+            r2 = aman.pointing.R2[msk][srt][mapping]
         if "polarization" in aman:
             # name of field just a placeholder for now
             gamma = aman.polarization.polang[msk][srt][mapping]
@@ -641,21 +643,21 @@ def plot_receiver(receiver, plot_dir):
     xlims, ylims = receiver.lims
 
     fig, axs_all = plt.subplots(
-        4, 3, sharex="col", sharey="row", constrained_layout=True
+        len(valid_ids), 3, sharex="col", sharey="row", constrained_layout=True
     )
     axs = axs_all.flat
     axs[0].set_title("Xi")
     axs[1].set_title("Eta")
     axs[2].set_title("Gamma")
     cf = None
-    for i in range(4):
+    for i in range(len(valid_ids)):
         for j in range(3):
             axs[3 * i + j].set_aspect("equal")
             axs[3 * i + j].set_xlim(xlims)
             axs[3 * i + j].set_ylim(ylims)
         for fp in receiver.focal_planes:
             msk = (fp.template.id_strs == valid_ids[i]) * fp.isfinite
-            if np.sum(msk) == 0:
+            if np.sum(msk) < 3:
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
             cf = axs[3 * i + 0].tricontourf(

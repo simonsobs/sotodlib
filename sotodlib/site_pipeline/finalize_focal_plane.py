@@ -139,13 +139,15 @@ def _load_template(template_path, ufm, pointing_cfg):
 
 
 def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], tags=[]):
-    query_all = query
+    all_obs = obs_ids
     query_obs = []
-    if query is None:
-        query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
-    if ctx.obsdb is None:
-        raise ValueError("No obsdb!")
-    all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
+    if len(obs_ids) == 0:
+        query_all = query
+        if query is None:
+            query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+        if ctx.obsdb is None:
+            raise ValueError("No obsdb!")
+        all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
     dbs = [
         metadata.ManifestDb(md["db"])
         for md in ctx["metadata"]
@@ -194,7 +196,11 @@ def _load_ctx(config):
         if roll < roll_range[0] or roll > roll_range[1]:
             logger.info("%s has a roll that is out of range", obs_id)
             continue
-        aman = ctx.get_meta(obs_id, dets=dets)
+        try:
+            aman = ctx.get_meta(obs_id, dets=dets)
+        except metadata.loader.LoaderError:
+            logger.error("Failed to load %s, skipping", obs_id)
+            continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
         if "det_info" not in aman:
@@ -568,9 +574,12 @@ def main():
 
             for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
                 logger.info("\tWorking on %s", obs_id)
-                if aman.dets.count == 0:
-                    logger.info("\t\tNo dets found, skipping")
+                if aman.dets.count < min_points:
+                    logger.info("\t\tToo few dets found, skipping")
                     continue
+
+                if config.get("faked_gamma", False):
+                    aman.pointing.gamma[:] = np.nan
 
                 # Restrict to optical dets
                 optical = np.isin(
@@ -578,7 +587,7 @@ def main():
                 )
                 aman.restrict("dets", aman.dets.vals[optical])
                 if aman.dets.count == 0:
-                    logger.info("\t\tNo optical dets, skipping", stream_id)
+                    logger.info("\t\tNo optical dets, skipping...")
                     continue
 
                 # Do some outlier cuts
