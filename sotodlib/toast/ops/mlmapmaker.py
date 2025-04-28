@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2024 Simons Observatory.
+# Copyright (c) 2020-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Operator for interfacing with the Maximum Likelihood Mapmaker.
 
@@ -394,7 +394,7 @@ class MLMapmaker(Operator):
         ranges = so3g.proj.ranges.RangesMatrix.zeros((len(dets), nsample))
         if self.view is not None:
              view_ranges = np.array(
-                 [[x.first, min(x.last, nsample) + 1] for x in ob.intervals[self.view]]
+                 [[x.first, x.last] for x in ob.intervals[self.view]]
              )
              ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, nsample)
 

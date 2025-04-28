@@ -148,7 +148,13 @@ a database, use the :func:`get_feed_list` function.  For example:
         ...]
 
 
-It is currently not easy to get a list of available fields.
+To get a list of all fields, use :func:`get_field_list`.  E.g.:
+
+.. code-block:: python
+
+    fields = hkdb.get_field_list(lspec, fields=['acu.*.*Az*'])
+    print(len(fields), fields[0])
+    >> 61 acu.acu_status.Azimuth_current_position
 
 
 API
