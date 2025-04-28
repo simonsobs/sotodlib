@@ -143,6 +143,13 @@ def get_parser(parser=None):
         default=2,
         type=int
     )
+    parser.add_argument(
+        '--lat',
+        help="If true, filter obs list to only keep the first obs_ids of those with \
+              timestamps within 10 seconds, since lat obs_ids are split by optics tube. \
+              We only need one for preprocess_obs loads the entire aman without signal.",
+        action='store_true',
+    )
     return parser
 
 def main(
@@ -156,6 +163,7 @@ def main(
     tags: Optional[List[str]] = None,
     planet_obs: bool = False,
     verbosity: Optional[int] = None,
+    lat: bool = False,
  ):
     configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
@@ -177,6 +185,26 @@ def main(
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:
                 run_list.append(obs)
+                
+    if lat:
+        time_tolerance = 10
+        kept = []
+        seen_ctimes = []
+
+        for s in run_list:
+            try:
+                ctime_str = s['obs_id'].split('_')[1]
+                ctime = int(ctime_str)
+            except (IndexError, ValueError):
+                continue
+
+            is_close = any(abs(ctime - seen) <= time_tolerance for seen in seen_ctimes)
+
+            if not is_close:
+                kept.append(s)
+                seen_ctimes.append(ctime)
+                
+        run_list = kept
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs in run_list:
