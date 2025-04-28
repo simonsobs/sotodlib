@@ -514,6 +514,10 @@ class SimSource(Operator):
         help="Initial distance of the artificial source in meters",
     )
 
+    source_azimuth_start = Quantity(
+        u.Quantity(0, u.degree), help="Start of the scan along the azimuth axis"
+    )
+
     source_azimuth_range = Quantity(
         u.Quantity(0, u.degree), help="Range of the scan along the azimuthal axis"
     )
@@ -530,6 +534,10 @@ class SimSource(Operator):
 
     source_azimuth_direction = Unicode(
         "increasing", help="Determine if the azimuth value is increasing or decreasing"
+    )
+
+    source_elevation_start = Quantity(
+        u.Quantity(0, u.degree), help="Start of the scan along the elevation axis"
     )
 
     source_elevation_range = Quantity(
@@ -837,39 +845,61 @@ class SimSource(Operator):
 
         if scan_type == "fixed":
 
-            el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
-            az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+            if self.source_azimuth_start.value == 0:
+                az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+            else:
+                az_start = self.source_azimuth_start
+
+            if self.source_elevation_start.value == 0:
+                el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
+            else:
+                el_start = self.source_elevation_start
 
         elif scan_type == "azimuth_only" or scan_type == "azimuth_only_single":
 
-            if self.source_azimuth_direction == "increasing":
-                az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
-                az_start -= az_range / 2
+            if self.source_azimuth_start.value != 0:
+                az_start = self.source_azimuth_start
             else:
-                az_start = np.amax(np.array(obs.shared[self.azimuth])) * u.rad
-                az_start += az_range / 2
+                if self.source_azimuth_direction == "increasing":
+                    az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad
+                    az_start -= az_range / 2
+                else:
+                    az_start = np.amax(np.array(obs.shared[self.azimuth])) * u.rad
+                    az_start += az_range / 2
 
-            el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
+            if self.source_elevation_start.value == 0:
+                el_start = np.median(np.array(obs.shared[self.elevation])) * u.rad
+            else:
+                el_start = self.source_elevation_start
 
         elif scan_type == "elevation_only" or scan_type == "elevation_only_single":
 
-            if self.source_elevation_direction == "increasing":
-                el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
-                el_start -= el_range / 2
+            if self.source_elevation_start.value != 0:
+                el_start = self.source_elevation_start
             else:
-                el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
-                el_start += el_range / 2
+                if self.source_elevation_direction == "increasing":
+                    el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
+                    el_start -= el_range / 2
+                else:
+                    el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
+                    el_start += el_range / 2
 
-            az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+            if self.source_azimuth_start.value == 0:
+                az_start = np.median(np.array(obs.shared[self.azimuth])) * u.rad
+            else:
+                az_start = self.source_azimuth_start
 
         elif scan_type == "grid_scan":
 
-            if self.source_elevation_direction == "increasing":
-                el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
-                el_start -= el_range / 2
+            if self.source_elevation_start.value != 0:
+                el_start = self.source_elevation_start
             else:
-                el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
-                el_start += el_range / 2
+                if self.source_elevation_direction == "increasing":
+                    el_start = np.amin(np.array(obs.shared[self.elevation])) * u.rad
+                    el_start -= el_range / 2
+                else:
+                    el_start = np.amax(np.array(obs.shared[self.elevation])) * u.rad
+                    el_start += el_range / 2
 
             if self.source_azimuth_direction == "increasing":
                 az_start = np.amin(np.array(obs.shared[self.azimuth])) * u.rad

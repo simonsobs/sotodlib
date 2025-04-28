@@ -11,6 +11,7 @@ import time
 import numpy as np
 import pathlib
 import fnmatch
+import hashlib
 
 import sqlalchemy as db
 from sqlalchemy.ext.declarative import declarative_base
@@ -146,6 +147,8 @@ class HkFrame(Base):
         instance-id of the OCS agent for the frame
     feed: str
         Name of the OCS feed for the frame
+    fields_hash: str
+        Hash to identify the combination of fields included in this frame.
     byte_offset: int
         Offset of the frame in the G3 file in bytes
     start_time: float
@@ -155,10 +158,13 @@ class HkFrame(Base):
     """
     __tablename__ = 'hk_frames'
     id = db.Column(db.Integer, primary_key=True)
-    file_id = db.Column(db.Integer, db.ForeignKey('hk_files.id'))
+    file_id = db.Column(db.Integer, db.ForeignKey('hk_files.id'),
+                        index=True)  # index required on postgres, or
+                                     # else delete is slow
     file = relationship('HkFile')
     agent = db.Column(db.String)
     feed = db.Column(db.String)
+    fields_hash = db.Column(db.String)
     byte_offset = db.Column(db.Integer)
     start_time = db.Column(db.Float)
     end_time = db.Column(db.Float)
@@ -241,6 +247,7 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
     session.add_all(files)
     session.commit()
 
+
 def get_frames_from_file(
     hkcfg: HkConfig,
     file: HkFile,
@@ -292,12 +299,16 @@ def get_frames_from_file(
         addr = frame['address']
         _, agent, _, feed = addr.split('.')
         start_time, stop_time = 1<<32, 0
+        fields = []
         for block in frame['blocks']:
             ts = np.array(block.times) / spt3g_core.G3Units.s
+            fields.extend(block.keys())
             start_time = min(start_time, ts[0])
             stop_time = max(stop_time, ts[-1])
+
+        fields_hash = hashlib.sha256(','.join(sorted(fields)).encode('ascii')).hexdigest()[:16]
         frames.append(HkFrame(
-            agent=agent, feed=feed, byte_offset=byte_offset,
+            agent=agent, feed=feed, fields_hash=fields_hash, byte_offset=byte_offset,
             start_time=start_time, end_time=stop_time, file=file
         ))
 
@@ -338,6 +349,18 @@ def update_index_all(cfg: Union[HkConfig, str], subdirs=None):
     session = hkdb.Session()
     update_file_index(cfg, session=session, subdirs=subdirs)
     update_frame_index(cfg, session=session)
+
+
+def purge_unindexed_files(hkcfg: HkConfig):
+    """Remove any 'unindexed' files from the database.  This can be used
+    to ignore files that disappeared from filesystem before being indexed.
+
+    """
+    hkdb = HkDb(hkcfg)
+    session = hkdb.Session()
+    session.query(HkFile).filter(HkFile.index_status == 'unindexed').delete(
+        synchronize_session=False)
+    session.commit()
 
 
 #####################
@@ -450,7 +473,8 @@ class HkResult:
 
 
 def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
-            fields=None, start=None, end=None):
+            fields=None, start=None, end=None,
+            _field_list_scan=False):
     """
     Loads hk data
 
@@ -466,6 +490,8 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
         Starting timestamp (overrides load_spec.start).
     end: float
         Ending timestamp (overrides load_spec.end).
+    _field_list_scan: bool
+        Run in special mode to support get_field_list.
     """
     if isinstance(load_spec, dict):
         load_spec = LoadSpec(**load_spec)
@@ -488,6 +514,7 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
     agent_set = list(set(f.agent for f in fields))
 
     file_spec = {}  # {path: [offsets]}
+    feeds = []
     with hkdb.Session.begin() as sess:
         query = sess.query(HkFrame).filter(
             HkFrame.start_time <= end,
@@ -495,6 +522,11 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
             HkFrame.agent.in_(agent_set)
         ).order_by(HkFrame.start_time)
         for frame in query:
+            if _field_list_scan:
+                feed_key = (frame.agent, frame.feed, frame.fields_hash)
+                if feed_key in feeds:
+                    continue
+                feeds.append(feed_key)
             if frame.file.path not in file_spec:
                 file_spec[frame.file.path] = []
             file_spec[frame.file.path].append(frame.byte_offset)
@@ -542,12 +574,15 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
                 ts = np.array(block.times)[::ds_factor] / spt3g_core.G3Units.s
                 for field_name, data in block.items():
                     field = get_result_field(agent, feed, field_name)
-                    if field is None:
+                    if field is None or _field_list_scan:
                         continue
                     field[0].append(ts)
                     field[1].append(np.array(data)[::ds_factor])
             pb.update()
     pb.close()
+
+    if _field_list_scan:
+        return list(result.keys())
 
     for k, d in result.items():
         if len(d[0]) == 0:
@@ -597,3 +632,34 @@ def get_feed_list(load_spec: Union[LoadSpec, dict]) -> List[str]:
             pairs.add(tuple(row))
 
     return [f'{a}.{b}.*' for a, b in sorted(list(pairs))]
+
+
+def get_field_list(load_spec: Union[LoadSpec, dict],
+                   fields: List[Field]=None) -> List[str]:
+    """Inspect the HK files to get the field names associated with
+    each feed covered by the load_spec (or by the fields argument).
+    This is shallow search in that only a single frame from every
+    ``agent.feed`` combination matching the fields list is inspected.
+
+    Args
+    ----
+    load_spec: LoadSpec
+        Load specification. See docstrings of the LoadSpec class.
+    fields:
+        List of fields (which may include wildcards) to match against.
+
+    Returns
+    -------
+    List[str]
+      The list of fields, as field spec strings.
+
+    Notes
+    -----
+
+    If fields is not specified, then it is taken from load_spec.  But
+    normally you'd want it from the get_feeds_list.  The .start_time
+    and .end_time are respected in the query, especially in the sense
+    that the shallow data search will begin at .start_time.
+
+    """
+    return load_hk(load_spec, fields=fields, _field_list_scan=True)
