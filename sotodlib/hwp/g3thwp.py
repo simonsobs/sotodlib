@@ -1396,9 +1396,6 @@ class G3tHWP():
         if self._irig_desync is None:
             return
 
-        if len(self._irig_time) < 1:
-            return
-
         for t0, t1, dt in self._irig_desync:
             desynced = (t0 <= self._irig_time) & (self._irig_time <= t1)
             if np.any(desynced):
