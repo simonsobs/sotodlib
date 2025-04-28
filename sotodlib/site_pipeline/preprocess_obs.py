@@ -175,23 +175,13 @@ def main(
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
-
-    if overwrite or not os.path.exists(configs['archive']['index']):
-        #run on all if database doesn't exist
-        run_list = [o for o in obs_list]
-    else:
-        db = core.metadata.ManifestDb(configs['archive']['index'])
-        for obs in obs_list:
-            x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            if x is None or len(x) == 0:
-                run_list.append(obs)
-                
+    
     if lat:
         time_tolerance = 10
         kept = []
         seen_ctimes = []
 
-        for s in run_list:
+        for s in obs_list:
             try:
                 ctime_str = s['obs_id'].split('_')[1]
                 ctime = int(ctime_str)
@@ -204,7 +194,17 @@ def main(
                 kept.append(s)
                 seen_ctimes.append(ctime)
                 
-        run_list = kept
+        obs_list = kept
+
+    if overwrite or not os.path.exists(configs['archive']['index']):
+        #run on all if database doesn't exist
+        run_list = [o for o in obs_list]
+    else:
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        for obs in obs_list:
+            x = db.inspect({'obs:obs_id': obs["obs_id"]})
+            if x is None or len(x) == 0:
+                run_list.append(obs)
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
     for obs in run_list:
