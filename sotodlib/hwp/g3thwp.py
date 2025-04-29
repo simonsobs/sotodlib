@@ -449,6 +449,8 @@ class G3tHWP():
                 * number of irig data point glitches, unexpected data points
             * num_value_glitches_irig
                 * number of irig value glitches, points with value shift due to glitches
+            * num_dead_rots
+                * number rotations that failed to fix glitches
         """
 
         if not any(data):
@@ -489,6 +491,7 @@ class G3tHWP():
             out['num_glitches_irig'+suffix] = int(self._num_glitches_irig)
             out['num_value_glitches'+suffix] = int(self._num_value_glitches)
             out['num_value_glitches_irig'+suffix] = int(self._num_value_glitches_irig)
+            out['num_dead_rots'+suffix] = int(self._num_dead_rots)
         return out
 
     def eval_angle(self, solved, poly_order=3, suffix='_1'):
@@ -857,6 +860,7 @@ class G3tHWP():
             aman.wrap('num_glitches_irig'+suffix, 0)
             aman.wrap('num_value_glitches'+suffix, 0)
             aman.wrap('num_value_glitches_irig'+suffix, 0)
+            aman.wrap('num_dead_rots'+suffix, 0)
             aman.wrap('version'+suffix, 1)
             aman.wrap('logger'+suffix, self._write_solution_h5_logger)
         return aman
@@ -1126,6 +1130,7 @@ class G3tHWP():
             aman['num_glitches_irig'+suffix] = solved['num_glitches_irig'+suffix]
             aman['num_value_glitches'+suffix] = solved['num_value_glitches'+suffix]
             aman['num_value_glitches_irig'+suffix] = solved['num_value_glitches_irig'+suffix]
+            aman['num_dead_rots'+suffix] = solved['num_dead_rots'+suffix]
 
             # version 2
             # calculate template subtracted angle
@@ -1213,11 +1218,12 @@ class G3tHWP():
         self._num_dropped_pkts = 0
         self._num_dropped_pkts_irig = 0
 
-        # keep bad data points as a dictionary
+        # glitch statistics
         self._num_glitches = 0
         self._num_value_glitches = 0
         self._num_glitches_irig = 0
         self._num_value_glitches_irig = 0
+        self._num_dead_rots = 0
         self._bad_ref = []
 
         # if no data, skip analysis
@@ -1582,6 +1588,7 @@ class G3tHWP():
         if self._num_glitches > 0:
             logger.warning(f'{self._num_glitches} glitches are removed')
         if len(dead_rots) > 0:
+            self._num_dead_rots = len(dead_rots)
             logger.warning(f'Could not remove glitches from {len(dead_rots)} rotations')
         self._encd_clk = self._encd_clk[total_mask]
         self._encd_cnt -= np.cumsum(np.logical_not(total_mask).astype(int))
