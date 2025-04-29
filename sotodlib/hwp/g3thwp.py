@@ -1530,8 +1530,8 @@ class G3tHWP():
                 result, mask = self._glitch_mask(diff, high, low, start_high)
                 # If the mask could not be generated, check if it was because of a packet drop or remove the rotation
                 if not result:
-                    start_clk = self._encd_clk[self._ref_indexes[i]]
-                    end_clk = self._encd_clk[self._ref_indexes[i+1]]
+                    start_clk = self._ref_clk[i]
+                    end_clk = self._ref_clk[i+1]
                     # If the rotation had a packet drop
                     if np.any([start_clk < edges[0] and end_clk > edges[1] for edges in self._edges_dropped_pkts]):
                         # Fill the rotation with data from an adjacent rotation
@@ -1539,15 +1539,18 @@ class G3tHWP():
                             gap_clk = self._encd_clk[self._ref_indexes[i+1]:self._ref_indexes[i+2]] \
                                     - self._encd_clk[self._ref_indexes[i+1]] + self._encd_clk[self._ref_indexes[i]]
                         else:
-                            gap_clk = self._encd_clk[self._ref_indexes[i-1]:self._ref_indexes[i]] \
-                                    - self._encd_clk[self._ref_indexes[i-1]] + self._encd_clk[self._ref_indexes[i]]
+                            gap_clk = self._encd_clk[(self._ref_clk[i-1] <= self._encd_clk) &
+                                                     (self._encd_clk < self._ref_clk[i])]
+                            gap_clk = gap_clk[total_mask[-1]] - self._ref_clk[i-1] + self._ref_clk[i]
 
-                        corr_factor = (self._encd_clk[self._ref_indexes[i+1]] - self._encd_clk[self._ref_indexes[i]]) \
-                                * (self._num_edges - 1) / (gap_clk[-1] - gap_clk[0]) / (self._num_edges)
+                        corr_factor = (self._ref_clk[i+1] - self._ref_clk[i]) * \
+                                      (self._num_edges - 1) / (gap_clk[-1] - gap_clk[0]) / (self._num_edges)
                         gap_clk = corr_factor * (gap_clk - gap_clk[0]) + gap_clk[0]
 
                         fill_clk = np.zeros(len(diff))
                         fill_clk[:self._num_edges] = gap_clk
+                        self._encd_clk[(self._ref_clk[i] <= self._encd_clk) &
+                                       (self._encd_clk < self._ref_clk[i+1])] = fill_clk
                         mask = np.full(len(diff), False)
                         mask[:self._num_edges] = np.logical_not(mask[:self._num_edges])
                     else:
