@@ -339,6 +339,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
+    planets.close()
     return astrometric
 
 

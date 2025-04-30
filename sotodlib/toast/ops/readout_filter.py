@@ -65,15 +65,16 @@ class ReadoutFilter(Operator):
 
             # Get the rows of the focalplane table containing these dets
             det_table = ob.telescope.focalplane.detector_data
-            fp_rows = np.array(
-                [x for x, y in enumerate(det_table["name"]) if y in local_set_dets]
-            )
+            det_to_row = {
+                y: x for x, y in enumerate(det_table["name"]) if y in local_set_dets
+            }
+            fp_rows = np.array([det_to_row[x] for x in local_dets])
 
             # Get the set of all stream IDs
             all_wafers = set(det_table[self.wafer_key][fp_rows])
 
-            # The IIR filter parameters will either be in a single, top-level dictionary
-            # or they are organized per-UFM.
+            # The IIR filter parameters will either be in a single,
+            # top-level dictionary or they are organized per-UFM.
             if (
                 "per_stream" in ob[self.iir_params] and
                 ob[self.iir_params]["per_stream"]

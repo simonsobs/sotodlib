@@ -54,7 +54,9 @@ def setup_deconvolve_detector_timeconstant(operators):
     """
     operators.append(
         toast.ops.TimeConstant(
-            name="deconvolve_time_constant", deconvolve=True, enabled=False
+            name="deconvolve_time_constant",
+            deconvolve=True,
+            enabled=False,
         )
     )
 
@@ -230,7 +232,11 @@ def setup_filter_common_mode(operators):
 
     """
     operators.append(
-        toast.ops.CommonModeFilter(name="common_mode_filter", enabled=False)
+        toast.ops.CommonModeFilter(
+            name="common_mode_filter",
+            regress=True,
+            enabled=False,
+        )
     )
 
 
