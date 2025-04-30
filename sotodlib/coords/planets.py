@@ -339,6 +339,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
+    planets.close()
     return astrometric
 
 
@@ -364,17 +365,18 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
       Before checking in the ephemeris, the source_name will be
       matched against a regular expression and if it has the format
-      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers, then a
       fixed-position source at RA,Dec = xxx,yyy in degrees will be
       processed.  In that case, the distance is returned as Inf.
 
     """
     # Check against fixed-position template...
     m = re.match(
-        r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
     if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
         ra, dec = float(m['ra_deg']) * \
-            coords.DEG, float(m['dec_deg']) * coords.DEG
+            coords.DEG, sign * float(m['dec_deg']) * coords.DEG
         return ra, dec, float('inf')
     
     # Derive from skyfield astrometric object
@@ -439,7 +441,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     # One central detector
     xieta0, R, _ = coords.helpers.get_focal_plane_cover(tod, 0)
-    fp = so3g.proj.FocalPlane.from_xieta(xieta0[0], xieta0[1])
+    fp = so3g.proj.FocalPlane.from_xieta([xieta0[0]], [xieta0[1]])
 
     asm = so3g.proj.Assembly.attach(sight, fp)
     p = so3g.proj.Projectionist.for_geom(shape, wcs)
