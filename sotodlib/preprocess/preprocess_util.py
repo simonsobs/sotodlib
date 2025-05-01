@@ -18,7 +18,11 @@ from . import _Preprocess, Pipeline, processes
 
 
 class PreprocessErrors:
+    """Stores the various errors that can occur from the preprocessing
+    functions.
+    """
     LoadSuccess = "load_success"
+    GetGroupsError = "get_groups_error"
     MetaDataError = "get_meta_data_error"
     NoDetsRemainError = "no_dets_remain_error"
     NoGroupOverlapError = "no_group_overlap_error"
@@ -215,7 +219,7 @@ def get_groups(obs_id, configs, context=None):
         groups = [[b for a,b in r.items()] for r in rs]
         return group_by, groups, None
     except Exception as e:
-        error = f'Failed get groups for: {obs_id}'
+        error = PreprocessErrors.GetGroupsError
         errmsg = f'{type(e)}: {e}'
         tb = ''.join(traceback.format_tb(e.__traceback__))
         return [], [], [error, errmsg, tb]
@@ -285,7 +289,7 @@ def create_error_db(configs, obs_errors, exclude_no_error=True):
                      "preprocess_error_archive.sqlite")
 
     if os.path.exists(err_db_path):
-        err_db = core.metadata.ManifestDb(configs['archive']['index'])
+        err_db = core.metadata.ManifestDb(err_db_path)
     else:
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
@@ -786,8 +790,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
 def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
                 subdir='temp', remove=False):
-    """
-    For a given obs id, this function will search the policy_dir directory
+    """For a given obs id, this function will search the policy_dir directory
     if it exists for any files with that obsnum in their filename. If any are
     found, it will run save_group_and_cleanup for that obs id.
 
@@ -828,8 +831,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          logger=None, overwrite=False, save_archive=False):
-    """
-    This function takes a single obs_id and dets dictionary and will either
+    """This function takes a single obs_id and dets dictionary and will either
     load from a preprocessing database if it exists or run the preprocessing
     pipeline if it does not or overwrite is True. Both single and multilayer
     preprocessing are supported. The dets dict must match the grouping
@@ -862,8 +864,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
     Returns
     -------
-    aman : AxisManager
-        Preprocessed axis manager
+    aman : AxisManager or None
+        Preprocessed axis manager if preproc_or_load_group finished
+        successfully or None if it failed.
     out_dict_init : dict or tuple
         Dictionary output for init config from save_group if preprocessing
         ran successfully or tuple of (obs_id, group) if preprocessing was
@@ -897,6 +900,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     else:
         group_by, groups, error = get_groups(obs_id, configs_init)
 
+    if error is not None:
+        logger.error(f"Get Groups Error for {obs_id}: {group}\n{error[1]}\n{error[2]}")
+        return None, (obs_id, group), (obs_id, group), error[0]
+
     group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
 
     # Verify if group exists for this obs id
@@ -915,7 +922,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
     # Cannot run if proc db exists but init db does not
     if db_proc_exist and not db_init_exist and not overwrite:
-        logger.warning("loading from proc db requires init db if overwrite is False")
+        logger.error("loading from proc db requires init db if overwrite is False")
         return None, (obs_id, group), (obs_id, group), PreprocessErrors.NoInitDbError
 
     # Load first layer only
@@ -1035,8 +1042,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
 
 def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=False):
-    """
-    Function to update the manifest db when data is collected from the
+    """Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
     See the ``preproc_or_load_group`` docstring for the varying expected
@@ -1105,8 +1111,7 @@ def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=Fal
 
 
 def get_pcfg_check_aman(pipe):
-    """
-    Given a preprocess pipeline class return an axis manager containing
+    """Given a preprocess pipeline class return an axis manager containing
     the ordered steps of the pipeline with all arguments for each step.
     """
     pcfg_ref = core.AxisManager()
@@ -1124,9 +1129,8 @@ def get_pcfg_check_aman(pipe):
 
 
 def _check_assignment_length(a, b):
-    """
-    Helper function to check if the set of assignments in axis manager ``a`` matches
-    the length of assignments in axis manager ``b``.
+    """Helper function to check if the set of assignments in axis manager
+    ``a`` matches the length of assignments in axis manager ``b``.
     """
     aa = np.fromiter(a._assignments.keys(), dtype='<U32')
     bb = np.fromiter(b._assignments.keys(), dtype='<U32')
@@ -1138,9 +1142,8 @@ def _check_assignment_length(a, b):
 
 
 def check_cfg_match(ref, loaded, logger=None):
-    """
-    Checks that the ``ref`` and ``loaded`` axis managers containing the ordered
-    preprocess pipelines match one another.
+    """Checks that the ``ref`` and ``loaded`` axis managers containing the
+    ordered preprocess pipelines match one another.
     """
     if logger is None:
         logger = init_logger("preprocess")
