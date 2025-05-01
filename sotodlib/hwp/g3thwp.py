@@ -1118,7 +1118,7 @@ class G3tHWP():
             for suffix in self._suffixes:
                 aman['logger'+suffix] += ', failed to correct ambiguous references'
             success = [False, False]
-        else:
+        if sum(ref_ambiguous) == 1 and sum(success) == 2:
             ambiguous_suffix = np.array(self._suffixes)[ref_ambiguous][0]
             good_suffix = np.array(self._suffixes)[np.logical_not(ref_ambiguous)][0]
             good_angle = np.interp(solved['fast_time' + ambiguous_suffix],
