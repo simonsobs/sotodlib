@@ -759,6 +759,13 @@ class EstimateHWPSS(_Preprocess):
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
 
+    Example config block::
+
+      - name: "subtract_hwpss"
+        hwpss_stats: "hwpss_stats"
+        process:
+          subtract_name: "hwpss_remove"
+
     .. autofunction:: sotodlib.hwp.hwp.subtract_hwpss
     """
     name = "subtract_hwpss"
