@@ -220,6 +220,46 @@ class ResultSetHdfLoader(LoaderInterface):
                                                   row_order=mask.nonzero()[0])
         return results
 
+class ModifyFieldsResultSetHdfLoader(ResultSetHdfLoader):
+    def __init__(self):
+        self.load_fields = None
+
+    def _check_key_map(self, key_map, data_in):
+        for key in key_map.keys():
+            if key not in data_in.dtype.names:
+                raise KeyError(f"{key} not included inside dataset with keys"
+                               f"{data_in.dtype.names}")
+
+
+    def _prefilter_data(self, data_in):
+        """Extend to allow us to specify which data fields to load."""
+        key_map = {}
+        if self.load_fields is not None:
+            for field in self.load_fields:
+                if isinstance(field, dict):
+                    key_map.update(field)
+                else:
+                    key_map[field] = field
+
+            for k in data_in.dtype.names:
+                if k not in key_map.keys():
+                    key_map[k] = None
+
+            self._check_key_map(key_map, data_in)
+
+        return _decode_array(data_in, key_map=key_map)
+
+    def batch_from_loadspec(self, load_params, **kwargs):
+        """Extend to allow us to input 'load_fields' which will modify our
+        class variables as used in _prefilter_data(...).
+
+        """
+        if 'load_fields' in kwargs.keys():
+            self.load_fields = kwargs['load_fields']
+        results = super().batch_from_loadspec(load_params)
+        return results
+
+
 
 def _decode_array(data_in, key_map={}):
     """Converts a structured numpy array to a structured numpy array,
@@ -278,6 +318,7 @@ class _nullcontext:
 SuperLoader.register_metadata('DefaultHdf', DefaultHdfLoader)
 SuperLoader.register_metadata('AxisManagerHdf', AxisManagerHdfLoader)
 SuperLoader.register_metadata('ResultSetHdf', ResultSetHdfLoader)
+SuperLoader.register_metadata('ModifyFieldsResultSetHdf', ModifyFieldsResultSetHdfLoader)
 
 # The old name... remove some day.
 SuperLoader.register_metadata('PerDetectorHdf5', ResultSetHdfLoader)

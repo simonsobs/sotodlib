@@ -248,6 +248,8 @@ class CalInfo:
         Current responsivity of the TES [1/V] computed using bias steps at the
         bias point. This is based on the naive bias step estimation without
         using any additional corrections.
+    bandpass: str
+        Detector bandpass, computed from bias group information.
     """
 
     readout_id: str = ""
@@ -269,6 +271,7 @@ class CalInfo:
     naive_r_frac: float = np.nan
     naive_p_bias: float = np.nan
     naive_s_i: float = np.nan
+    bandpass: str = "NC"
 
     @classmethod
     def dtype(cls) -> List[Tuple[str, Any]]:
@@ -616,6 +619,28 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 cal.phase_to_pW = np.nan
             else:
                 cal.phase_to_pW = pA_per_phi0 / (2 * np.pi) / cal.s_i * cal.polarity
+
+            # Add bandpass informaton from bias group
+            bgs_lowband = [0, 1, 4, 5, 8, 9]
+            bgs_highband = [2, 3, 6, 7, 10, 11]
+
+            tube_flavor = am.obs_info.tube_flavor
+            if tube_flavor == 'mf':
+                lowband_str = 'f090'
+                highband_str = 'f150'
+
+            elif tube_flavor == 'uhf':
+                lowband_str = 'f220'
+                highband_str = 'f280'
+
+            elif tube_flavor == 'lf':
+                lowband_str = 'f030'
+                highband_str = 'f040'
+
+            if cal.bg in bgs_lowband:
+                cal.bandpass = lowband_str
+            elif cal.bg in bgs_highband:
+                cal.bandpass = highband_str
 
         res.result_set = np.array([astuple(c) for c in cals], dtype=CalInfo.dtype())
         res.success = True
