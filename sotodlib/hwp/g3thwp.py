@@ -1619,12 +1619,14 @@ class G3tHWP():
                     start_clk = self._ref_clk[i]
                     end_clk = self._ref_clk[i+1]
                     # If the rotation had a packet drop
-                    if np.any([start_clk < edges[0] and end_clk > edges[1] for edges in self._edges_dropped_pkts]):
+                    if np.any([edges[0] < end_clk and start_clk < edges[1] for edges in self._edges_dropped_pkts]):
                         # Fill the rotation with data from an adjacent rotation
                         if i == 0:
                             gap_clk = self._encd_clk[self._ref_indexes[i+1]:self._ref_indexes[i+2]] \
                                     - self._encd_clk[self._ref_indexes[i+1]] + self._encd_clk[self._ref_indexes[i]]
                         else:
+                            if self._ref_indexes[i - 1] in bad_fills:
+                                bad_fills.append(self._ref_indexes[i])
                             gap_clk = self._encd_clk[(self._ref_clk[i-1] <= self._encd_clk) &
                                                      (self._encd_clk < self._ref_clk[i])]
                             gap_clk = gap_clk[total_mask[-1]] - self._ref_clk[i-1] + self._ref_clk[i]
@@ -1640,6 +1642,7 @@ class G3tHWP():
                         mask = np.full(len(diff), False)
                         mask[:self._num_edges] = np.logical_not(mask[:self._num_edges])
                     else:
+                        logger.debug(i, ' dead rots index')
                         mask = np.full(len(diff), False)
                         dead_rots.append(i)
 
@@ -1652,9 +1655,9 @@ class G3tHWP():
             elif min(diff) < 0.1*np.median(diff):
                 # Sometimes a dropped packet gets filled with glitched data
                 bad_fills.append(self._ref_indexes[i])
-                total_mask.append(np.ones(len(diff)))
+                total_mask.append(np.ones(len(diff), dtype=bool))
             else:
-                total_mask.append(np.ones(len(diff)))
+                total_mask.append(np.ones(len(diff), dtype=bool))
 
         # Join the individual rotation masks into a single overall mask
         total_mask = np.array([bool(mask) for entry in total_mask for mask in entry])
