@@ -13,20 +13,21 @@ Command line interface
 Usage
 -----
 
-To get calibrated angles for detectors, ``'gamma'``, users have to load an axismanger,
-which corresponds to the target run of the wire grid operation in this pipeline.
-And the calibration script of the wire grid requires the HWP preprocess,
-that is, ``hwp.demod_tod``.
+To get calibrated polarization angles for detectors, ``'gamma'``,
+users have to load an axismanger, which corresponds to the target run
+of the wire grid operation. And this calibration script requires the HWP preprocess,
+``hwp.demod_tod``, before applying wire grid methods.
 
 ``'gamma'`` here is the same definition as in the coords module:
     orientation of the detector, measured clockwise from
     North, i.e. 0 degrees is parall to the eta axis, and 90 degrees is
-    parallel to the xi axis.
+    parallel to the xi axis. Currently, the results are adjusted to
+    the longitudinal direction of the SAT cryostat.
 
 
 The main functions of the wire grid consists of 4 functions:
 
- - correct_wg_angle
+ - initialize_wire_grid
  - wrap_qu_cal
  - fit_with_circle
  - get_cal_gamma
@@ -34,15 +35,14 @@ The main functions of the wire grid consists of 4 functions:
 One can get calibration results by calling these functions.
 ``tod`` here stands for an AxisManager. For example::
 
-  # Get wires' direction in a single operation with hardware correction
-  _, idx_wg_inside = correct_wg_angle(tod)
-
-  # May have to restrict the AxisManger into the opration rangle
-  tod.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=True)
+  # Include the wire grid operation into your AxisManager
+  # with hardware correction. If you want to use any other
+  # step size data, 5 sec or 20 sec stopped time, please
+  # specify stopped_time argument here.
+  initialize_wire_grid(tod)
 
   # Wrap Q and U signal related to the steps of the wire grid
-  # stopped_time can be changed for each calibration
-  wrap_qu_cal(tod, stopped_time=10)
+  wrap_qu_cal(tod)
 
   # Fit the stepped QU signal by a circle
   fit_with_circle(tod)
@@ -52,12 +52,39 @@ One can get calibration results by calling these functions.
 
 Finally, the AxisManager has the field of ``gamma_cal`` that has:
 
+ - ``'gamma_raw'`` : raw estimated value corresponding to each step
+ - ``'gamma_raw_err'`` : error of the raw values
  - ``'gamma'``: gamma, theta_det by the wire grid calibration,
  - ``'gamma_err'``: statistical errors on gamma,
  - ``'wires_relative_power'``: input power of the wire grid itself, that is, input QU minus the center offset,
  - ``'background_pol_relative_power'``: center offset in the QU plane, pseudo or background polarization,
  - ``'background_pol_rad'``: the direction of the center offset,
  - ``'theta_det_instr'``: estimated instrumental polarization response direction
+
+For the time constant measurement, the results for both directions
+will be provided as follows::
+
+  # First, you need to devide the target opration, in which the rotation
+  # of HWP changes (+/-) 2 Hz to (-/+) 2 Hz.
+  tod1, tod2 = devide_tod(tod)
+
+  # After applying IIR filter and correcting hwp_angle,
+  # you must demodulate TOD with a specific band pass to use
+  # the broad speed range for the calibration.
+  bpf_cfg = {'type': 'butter4',
+            'center': 6,
+            'width': 8}
+  hwp.demod_tod(tod1, signal='signal', bpf_cfg=bpf_cfg)
+  hwp.demod_tod(tod2, signal='signal', bpf_cfg=bpf_cfg)
+
+  # Then, wrap the wire grid data just in case
+  wrap_wg_hk(tod1)
+  correct_wg_angle(tod1)
+  wrap_wg_hk(tod2)
+  correct_wg_angle(tod2)
+
+  # Finally, call get_tc_result to get the time constant
+  get_time_constant(tod1, tod2)
 
 Background
 ----------
@@ -75,11 +102,11 @@ sky signal, and tiny amount of CMB.
 
 The static background polarization and the wire signal have polarization angle dependencies,
 :math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`, respectively.
-The demodulation by the HWP and the projection by the detector polarization response directions
-are multiplied as the overall factor in the polarization term.
+The demodulation by the HWP and the projection by the detector polarization response
+directions are multiplied as the overall factor in the polarization term.
 
-Unwrapping the charateristic of HWP from the TOD (Demodulation) gives the static background
-polarization and the polarized signal by wires independently
+Unwrapping the charateristic of HWP from the TOD (Demodulation) gives the static
+background(=offset) polarization and the polarized signal by wires independently
 
 .. math::
 
@@ -102,6 +129,22 @@ This module gives the result of calibration as fields like:
  - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}^2 + U_\mathrm{offset}^2}`
  - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})` in radian,
  - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
+
+The time constant of TES bolometers in TODs looks like
+
+.. math::
+
+    \mathrm{d} & \propto \exp i \left[-4\theta_\mathrm{HWP}(t)+2\theta_\mathrm{det}\right] \\
+    & = \exp i \left[-4(\theta_\mathrm{HWP} - \omega_\mathrm{HWP}\tau_\mathrm{det})+2\theta_\mathrm{det}\right].
+
+The observed angle :math:`\hat{\theta}_\mathrm{det}` will then be modified and seen as
+
+.. math::
+
+    \hat{\theta}_\mathrm{det} = \theta_\mathrm{det} + 2\omega_\mathrm{HWP}\tau_\mathrm{det}.
+
+The time constant measurement using HWP/wire grid works with the principle above.
+
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
