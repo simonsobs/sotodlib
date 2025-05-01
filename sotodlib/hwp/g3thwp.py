@@ -101,9 +101,6 @@ class G3tHWP():
         # Output path + filename
         self._output = self.configs.get('output', None)
 
-        # logger for write_solution_h5
-        self._write_solution_h5_logger = 'Not set'
-
         # encoder suffixes
         self._suffixes = ['_1', '_2']
 
@@ -348,13 +345,16 @@ class G3tHWP():
 
         else:
             # hwp speed calc. (approximate using ref)
-            hwp_rate_ref = 1 / np.diff(fast_time[self._ref_indexes])
-            hwp_rate = [hwp_rate_ref[0] for i in range(self._ref_indexes[0])]
-            for n in range(len(np.diff(self._ref_indexes))):
+            ref_indexes = self._ref_indexes
+            if isinstance(self._ref_indexes, tuple):
+                ref_indexes = self._ref_indexes[0]
+            hwp_rate_ref = 1 / np.diff(fast_time[ref_indexes])
+            hwp_rate = [hwp_rate_ref[0] for i in range(ref_indexes[0])]
+            for n in range(len(np.diff(ref_indexes))):
                 hwp_rate += [hwp_rate_ref[n]
-                             for r in range(np.diff(self._ref_indexes)[n])]
+                             for r in range(np.diff(ref_indexes)[n])]
             hwp_rate += [hwp_rate_ref[-1] for i in range(len(fast_time) -
-                                                         self._ref_indexes[-1])]
+                                                         ref_indexes[-1])]
 
             fast_irig_time = fast_time
             locked = np.ones_like(fast_time, dtype=bool)
@@ -833,7 +833,7 @@ class G3tHWP():
         if suffix is None:
             aman.wrap_new('hwp_angle', shape=('samps', ), dtype=np.float64)
             aman.wrap('primary_encoder', 0)
-            aman.wrap('version', 1)
+            aman.wrap('version', 0)
             aman.wrap('pid_direction', 0)
             aman.wrap('offcenter_direction', 0)
             aman.wrap_new('offcenter', shape=(2,), dtype=np.float64)
@@ -862,7 +862,7 @@ class G3tHWP():
             aman.wrap('num_value_glitches_irig'+suffix, 0)
             aman.wrap('num_dead_rots'+suffix, 0)
             aman.wrap('version'+suffix, 1)
-            aman.wrap('logger'+suffix, self._write_solution_h5_logger)
+            aman.wrap('logger'+suffix, 'Not set')
         return aman
 
     def _set_raw_axes(self, aman, data):
@@ -961,11 +961,10 @@ class G3tHWP():
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while loading HWP data. The specified encoder field is missing.")
-                self._write_solution_h5_logger = 'HWP data too short'
                 print(traceback.format_exc())
 
             finally:
-                    self._set_raw_axes(aman, self.data)
+                self._set_raw_axes(aman, self.data)
 
         return aman
 
@@ -1078,32 +1077,69 @@ class G3tHWP():
                 aman['pid_direction'] = 0
 
         solved = {}
+        success = []
+
+        # version 0
+        # No data or angle calculation is failed
         for suffix in self._suffixes:
             logger.info('Start analyzing encoder'+suffix)
             self._set_empty_axes(aman, suffix)
             # load data
             if not 'counter' + suffix in self.data.keys():
                 logger.warning('No HWP data in the specified timestamps.')
-                self._write_solution_h5_logger = 'No HWP data'
-                continue
-
-            # version 1
-            # calculate HWP angle
+                aman['logger'+suffix] = 'No HWP data'
+                success.append(False)
             try:
                 solved.update(self.analyze(self.data, mod2pi=False, suffix=suffix))
             except Exception as e:
                 logger.error(
                     f"Exception '{e}' thrown while calculating HWP angle. Angle calculation failed.")
-                self._write_solution_h5_logger = 'Angle calculation failed'
+                aman['logger'+suffix] = 'Angle calculation failed'
+                success.append(False)
                 print(traceback.format_exc())
-                continue
             if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time'+suffix]) == 0:
                 logger.info(
                     'No correct rotation data in the specified timestamps.')
-                self._write_solution_h5_logger = 'No HWP data'
-                continue
+                aman['logger'+suffix] = 'No HWP data'
+                success.append(False)
+            aman['logger'+suffix] = 'Angle calculation succeeded'
+            success.append(True)
 
-            self._write_solution_h5_logger = 'Angle calculation succeeded'
+        # Correct ambiguity of references when angle solution is succeeded
+        # and only one of the encoders have ambiguity
+        ref_ambiguous = [isinstance(solved['angle' + suffix], tuple) for suffix in self._suffixes]
+        if sum(ref_ambiguous) == 2:
+            logger.error('Both encoders have ambiguity in references. Abort angle calculation')
+            for suffix in self._suffixes:
+                aman['logger'+suffix] += ', failed to correct ambiguous references'
+            success = [False, False]
+        if sum(ref_ambiguous) == 1 and sum(success) < 2:
+            logger.error('Cannot correct ambiguity of references. Abort angle calculation')
+            for suffix in self._suffixes:
+                aman['logger'+suffix] += ', failed to correct ambiguous references'
+            success = [False, False]
+        else:
+            ambiguous_suffix = np.array(self._suffixes)[ref_ambiguous][0]
+            good_suffix = np.array(self._suffixes)[np.logical_not(ref_ambiguous)][0]
+            good_angle = np.interp(solved['fast_time' + ambiguous_suffix],
+                         solved['fast_time' + good_suffix], solved['angle' + good_suffix])
+            for i, ambiguous_angle in enumerate(solved['angle' + ambiguous_suffix]):
+                median_diff = np.median(ambiguous_angle - good_angle)
+                if abs(abs(median_diff) - np.pi) < 2 * np.arctan(5 / self._encoder_disk_radius):
+                    solved['angle' + ambiguous_suffix] = solved['angle' + ambiguous_suffix][i]
+                    solved['ref_indexes' + ambiguous_suffix] = solved['ref_indexes' + ambiguous_suffix][i]
+                    logger.warning(f'Corrected ambiguous references of encoder{ambiguous_suffix}')
+            if isinstance(solved['angle' + ambiguous_suffix], tuple):
+                logger.error('Cannot correct ambiguity of references. Abort angle calculation')
+                for suffix in self._suffixes:
+                    aman['logger'+suffix] += ', failed to correct ambiguous references'
+                success = [False, False]
+
+        # version 1
+        # angle calculation succeeded
+        for i, suffix in enumerate(self._suffixes):
+            if not success[i]:
+                continue
             aman['version'+suffix] = 1
             aman['stable'+suffix] = self._bool_interpolation(
                 solved['slow_time'+suffix], solved['stable'+suffix], tod.timestamps, 0, 'floor')
@@ -1111,7 +1147,6 @@ class G3tHWP():
                 solved['slow_time'+suffix], solved['locked'+suffix], tod.timestamps, 0, 'floor')
             aman['hwp_rate'+suffix] = np.interp(
                 tod.timestamps, solved['slow_time'+suffix], solved['hwp_rate'+suffix], left=0, right=0)
-            aman['logger'+suffix] = self._write_solution_h5_logger
 
             quad = scipy.interpolate.interp1d(
                 solved['fast_time'+suffix], solved['quad'+suffix], kind='linear', fill_value='extrapolate')(tod.timestamps)
@@ -1132,8 +1167,11 @@ class G3tHWP():
             aman['num_value_glitches_irig'+suffix] = solved['num_value_glitches_irig'+suffix]
             aman['num_dead_rots'+suffix] = solved['num_dead_rots'+suffix]
 
-            # version 2
-            # calculate template subtracted angle
+        # version 2
+        # calculate template subtracted angle
+        for i, suffix in enumerate(self._suffixes):
+            if not success[i]:
+                continue
             try:
                 self.template_subtraction(solved, suffix=suffix)
                 aman['hwp_angle_ver2'+suffix] = np.mod(self._angle_interpolation(
@@ -1203,6 +1241,8 @@ class G3tHWP():
 
         # reference slit indexes
         self._ref_indexes = []
+        # temporary placeholder for full references
+        self._ref_clk_tmp = None
 
         # quad: quadrature signal to determine rotation direction
         self._quad_time = quad_time
@@ -1217,6 +1257,8 @@ class G3tHWP():
         # metadata of packet drop
         self._num_dropped_pkts = 0
         self._num_dropped_pkts_irig = 0
+
+        self._num_dropped_slits = 0
 
         # glitch statistics
         self._num_glitches = 0
@@ -1262,6 +1304,17 @@ class G3tHWP():
         else:
             self._fill_refs()
 
+        # If encoder slit is missing, temporarily "correct" refereces
+        # to fix glitches. ambiguity of references needs to be corrected
+        # by comparing two encoders
+        for i in range(1, 3):
+            if np.median(np.diff(self._ref_indexes[::i + 1])) - self._num_edges < 3:
+                logger.warning(f'Detected {i} missing slit, '
+                               'ambiguous references needs to be corrected')
+                self._ref_clk_tmp = self._ref_clk
+                self._ref_indexes = self._ref_indexes[::i + 1]
+                self._num_dropped_slits = i
+
         # glitch removal
         self._fix_datapoint_glitches()
         self._fix_value_glitches()
@@ -1280,8 +1333,24 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(self._time))
 
-        # calculate hwp angle
-        self._calc_angle_linear(mod2pi)
+
+        # If references are ambiguous, list up all possible patterns of
+        # reference indexes and angles
+        if self._num_dropped_slits > 0:
+            _angle = []
+            _ref_indexes = []
+            _full_ref_indexes = np.where(np.isin(self._encd_clk, self._ref_clk_tmp))[0]
+            for i in range(self._num_dropped_slits + 1):
+                self._ref_indexes = _full_ref_indexes[i::self._num_dropped_slits + 1]
+                self._generate_sub_data(ref_clk=True)
+                self._calc_angle_linear(mod2pi)
+                _angle.append(self._angle)
+                _ref_indexes.append(self._ref_indexes)
+            self._angle = tuple(_angle)
+            self._ref_indexes = tuple(_ref_indexes)
+
+        else:
+            self._calc_angle_linear(mod2pi)
 
         logger.debug('qualitycheck')
         logger.debug('_time:        ' + str(len(self._time)))
@@ -1291,9 +1360,14 @@ class G3tHWP():
         logger.debug('_ref_cnt:     ' + str(len(self._ref_cnt)))
         logger.debug('_ref_indexes: ' + str(len(self._ref_indexes)))
 
-        if len(self._time) != len(self._angle):
-            logger.warning('Failed to calculate hwp angle!')
-            return [], []
+        if isinstance(self._angle, tuple):
+            if np.any([len(self._time) != len(angle) for angle in self._angle]):
+                logger.warning('Failed to calculate hwp angle!')
+                return [], []
+        else:
+            if len(self._time) != len(self._angle):
+                logger.warning('Failed to calculate hwp angle!')
+                return [], []
         logger.info('hwp angle calculation is finished.')
         return self._time, self._angle
 
