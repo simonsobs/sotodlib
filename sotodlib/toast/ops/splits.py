@@ -597,8 +597,9 @@ class Splits(Operator):
                     shared_flags=self.shared_flags,
                     shared_flag_bytes=1,
                     view_mask=[
-                        ("~" + spl.split_intervals, np.uint8(self.shared_flag_mask))
+                        (f"~{spl.split_intervals}", np.uint8(self.shared_flag_mask))
                     ],
+                    reset=True,
                 ).apply(data)
                 map_binner.shared_flag_mask |= self.shared_flag_mask
             else:
