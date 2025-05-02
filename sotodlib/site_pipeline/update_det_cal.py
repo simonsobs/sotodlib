@@ -33,6 +33,12 @@ DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 TES_BIAS_COUNT = 12  # per detset / primary file group
 
+# For converting bias group to bandpass.
+BGS = {'lb': [0, 1, 4, 5, 8, 9], 'hb': [2, 3, 6, 7, 10, 11]}
+BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
+            'uhf': {'lb': 'f220', 'hb': 'f280'},
+            'lf': {'lb': 'f030', 'hb': 'f040'}}
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
     sp_util.init_logger("det_cal")
@@ -621,26 +627,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 cal.phase_to_pW = pA_per_phi0 / (2 * np.pi) / cal.s_i * cal.polarity
 
             # Add bandpass informaton from bias group
-            bgs_lowband = [0, 1, 4, 5, 8, 9]
-            bgs_highband = [2, 3, 6, 7, 10, 11]
-
-            tube_flavor = am.obs_info.tube_flavor
-            if tube_flavor == 'mf':
-                lowband_str = 'f090'
-                highband_str = 'f150'
-
-            elif tube_flavor == 'uhf':
-                lowband_str = 'f220'
-                highband_str = 'f280'
-
-            elif tube_flavor == 'lf':
-                lowband_str = 'f030'
-                highband_str = 'f040'
-
-            if cal.bg in bgs_lowband:
-                cal.bandpass = lowband_str
-            elif cal.bg in bgs_highband:
-                cal.bandpass = highband_str
+            if cal.bg in bgs['lb']:
+                cal.bandpass = band_str[tube_flavor]['lb']
+            elif cal.bg in bgs['hb']:
+                cal.bandpass = band_str[tube_flavor]['hb']
 
         res.result_set = np.array([astuple(c) for c in cals], dtype=CalInfo.dtype())
         res.success = True
