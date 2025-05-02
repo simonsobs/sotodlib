@@ -627,10 +627,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 cal.phase_to_pW = pA_per_phi0 / (2 * np.pi) / cal.s_i * cal.polarity
 
             # Add bandpass informaton from bias group
-            if cal.bg in bgs['lb']:
-                cal.bandpass = band_str[tube_flavor]['lb']
-            elif cal.bg in bgs['hb']:
-                cal.bandpass = band_str[tube_flavor]['hb']
+            if cal.bg in BGS['lb']:
+                cal.bandpass = BAND_STR[tube_flavor]['lb']
+            elif cal.bg in BGS['hb']:
+                cal.bandpass = BAND_STR[tube_flavor]['hb']
 
         res.result_set = np.array([astuple(c) for c in cals], dtype=CalInfo.dtype())
         res.success = True
