@@ -1647,105 +1647,66 @@ class PointingModel(_Preprocess):
             pointing_model.apply_pointing_model(aman)
 
 
-class GlitchAggregate(_Preprocess):
-    """Collect glitches across detectors and compute relevant stats for
-    understanding the nature of each glitch
-    """
-    name = "glitch_aggregate"
-
-    def process(self, aman, proc_aman):
-        assert "glitches" in aman
-
-        n_thres = self.process_cfgs.get("n_thres", 2)
-        n_buffer = self.process_cfgs.get("n_buffer", 5)
-
-        glitches = aman.glitches
-        flags = glitches.glitch_flags
-
-        # get the number of detectors affected by each glitch
-        n_affected = np.zeros(glitches.shape[1], dtype=int)
-        for r in flags:
-            n_affected += r.mask()
-
-        # get the ranges when >= `n_thres` detectors are affected
-        ranges_affected = gl.ranges_from_n_affected(n_affected, n_thres=n_thres, buffer=n_buffer)
-
-        # compile list of dets in each range
-        dets_affected = gl.dets_in_ranges(flags, ranges_affected)
-
-        # compile slices for each range
-        slices = gl.ranges2slices(ranges_affected, offset=glitches.samps.offset)
-
-        # build snippet layouts each of which is an axis manager containing
-        # restricted axes
-        snippet_layouts = gl.build_snippet_layouts(aman, slices, dets_affected)
-
-        # if we need extract snippets from aman, here's how to do it:
-        snippets = gl.extract_snippets(aman, snippet_layouts)
-
-        # TODO: save them for later in a proper way
-        proc_aman.snippets = snippets
-        proc_aman.snippet_layouts = snippet_layouts
-
-
-
-class GlitchComputeStats(_Preprocess):
-    """Compute the summary statistics required to classify each glitch
-    """
-
-    name = "glitch_compute_stats"
-    
-    def process(self, aman, proc_aman):
-
-        cols_for_stats = self.process_cfgs.get("cols_for_stats",['Number of Detectors', 
-        'Y and X Extent Ratio', 'Mean abs(Correlation)','Mean abs(Time Lag)', 
-        'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
-        'Start Index', 'Stop Index', 'Start Ctime', 'Stop Ctime'])
-
-        ##need to figure out a way to save snippet layout too
-
-        #df_stats returns dataframe with summary statistics for glitch classification
-        df_stats = glitch_classification.compute_summary_stats(proc_aman.snippets, cols_for_stats)
-
-        # HOW TO SAVE? temporary solution for now
-
-        outdir = self.process_cfgs.get("outdir", os.getcwd())
-
-        df_name = self.process_cfgs.get("df_name", "df_stats")
-
-        df_stats.to_hdf('{}/{}.h5'.format(outdir, df_name), key='df', mode='a')
-
-
 class GlitchClassification(_Preprocess):
     """Classify glitches using a random forest. Will return the probability of being each
     type of glitch: 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other
+
+    Saves results in proc_aman under the "glitch_snippets" field.
+
+    Takes the following ``calc`` config options:
+    :n_thres: (int) Minimum number of detectors flagged as glitch simultaneously to be
+        considered for classification. Default is 2.
+    :n_buffer: (int) Number of samples to buffer around the glitch. Defalut is 5.
+    :trained_forest_name: (str) Name of the trained random forest to use for classification.
+
+    Example config block::
+        - name : "classify_glitches"
+          calc:
+            n_thres: 2
+            n_buffer: 5
+            trained_forest_name: "trained_forest"
+          save: True
     """
-
     name = "classify_glitches"
-    
-    def process(self, aman, proc_aman):
 
-        outdir = self.process_cfgs.get("outdir", os.getcwd())
+    def calc_and_save(self, aman, proc_aman):
+        n_thres = self.calc_cfgs.get("n_thres", 2)
+        n_buffer = self.calc_cfgs.get("n_buffer", 5)
+        trained_forest_name = self.calc_cfgs.get("trained_forest_name", "trained_forest")
 
-        df_name = self.process_cfgs.get("df_name", "df_stats")
+        # get the number of detectors flagged as glitch (at each sample)
+        glitch_flags = proc_aman.glitches.glitch_flags  # size: (ndets, nsamps)
+        n_flagged = np.sum(glitch_flags.mask(), axis=0)
 
-        trained_forest_name = self.process_cfgs.get("trained_forest_name", "trained_forest")
+        # get the ranges when >= `n_thres` detectors are flagged simultaneously
+        snippet_ranges = gl.ranges_from_n_flagged(n_flagged, n_thres=n_thres, buffer=n_buffer)
 
-        trained_forest = pk.load(open('{}/{}.pkl'.format(outdir, trained_forest_name), 'rb'))
+        # compile list of dets in each range
+        det_mask = gl.get_det_mask(glitch_flags, snippet_ranges)
 
-        classifying_cols = self.process_cfgs.get("columns_for_classifying", ['Number of Detectors', 'Y and X Extent Ratio', 
-        'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks'])
+        # get the glitch snippets
+        snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.glitches.samps.offset)
 
-        df_stats_t = pd.read_hdf('{}/{}.h5'.format(outdir, df_name))
+        # compute the stats for classification
+        stats = gc.build_dataframe_for_classification(snippets)
 
-        df_stats = df_stats_t.dropna()
+        # classify the glitches
+        predictions = gc.classify_glitch_stats(stats, trained_forest_name)
 
-        df_w_predictions = glitch_classification.classify_data_forest(df_stats, classifying_cols, trained_forest)
+        # wrap the ranges and dets in an axis manager
+        snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets, core.LabelAxis("stat_names", list(stats.columns)))
+        snippet_aman.wrap("snippet_ranges", snippet_ranges, [(0, 'samps')])
+        snippet_aman.wrap("det_mask", np.array(det_mask), [(0, 'snippets'), (1, 'dets')])
+        snippet_aman.wrap("stats", stats.to_numpy(), [(0, 'snippets'), (1, 'stat_names')])
+        snippet_aman.wrap("predictions", predictions, [(0, 'snippets')])
+        snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
+        self.save(proc_aman, snippet_aman)
 
-        df_w_predictions.to_hdf('{}/{}_w_predictions.h5'.format(outdir, df_name), key='df', mode='w')        
-
+    def save(self, proc_aman, snippet_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("glitch_snippets", snippet_aman)
 
 
 _Preprocess.register(SplitFlags)
@@ -1783,6 +1744,4 @@ _Preprocess.register(RotateQU)
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(PointingModel) 
-_Preprocess.register(GlitchAggregate)
-_Preprocess.register(GlitchComputeStats)
 _Preprocess.register(GlitchClassification)
