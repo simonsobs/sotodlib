@@ -1614,7 +1614,10 @@ class G3tHWP():
 
                 # Generate a glitch mask for this rotation
                 result, mask = self._glitch_mask(diff, high, low, start_high)
-                # If the mask could not be generated, check if it was because of a packet drop or remove the rotation
+                # If the mask could not be generated, check if the duty cycle was incorrectly calculated
+                if not result:
+                    result, mask = self._glitch_mask(diff, high, low, not start_high)
+                # If the mask could still not be generated, check if it was because of a packet drop or remove the rotation
                 if not result:
                     start_clk = self._ref_clk[i]
                     end_clk = self._ref_clk[i+1]
