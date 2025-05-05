@@ -104,9 +104,9 @@ class ObsDb(object):
         if wafer_info:
             pkeys = ["`obs_id`"]
             pkeys.extend([f"`{k}`" for k in wafer_info])
-        if sorted(pkeys) != sorted(primary_keys): # sorted allows for different order
-            raise ValueError(f"Primary keys do not match: {primary_keys} != {pkeys}"+
-                             f" must use `wafer_info`=={primary_keys} or create a new dB with {pkeys}")
+            if sorted(pkeys) != sorted(primary_keys): # sorted allows for different order
+                raise ValueError(f"Primary keys do not match: {primary_keys} != {pkeys}"+
+                                f" must use `wafer_info`=={primary_keys} or create a new dB with {pkeys}")
         return primary_keys
     
     def _warn_primary_keys(self):
