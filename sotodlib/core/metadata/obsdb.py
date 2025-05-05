@@ -46,6 +46,8 @@ class ObsDb(object):
             The default is None, which defaults to ['obs_id'] only.
             An example of an alternative is ['wafer_slot', 'bandpass'] in which case
             the ObsDb will be indexed by obs_id, wafer_slot, and bandpass.
+            This is only required when first initialializing a database;
+            otherwise the primary fields are determined from the loaded database.
 
         Notes:
           If map_file is provided, the database will be connected to
