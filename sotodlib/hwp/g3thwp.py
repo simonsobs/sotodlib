@@ -451,6 +451,8 @@ class G3tHWP():
                 * number of irig value glitches, points with value shift due to glitches
             * num_dead_rots
                 * number rotations that failed to fix glitches
+            * num_dropped_slits
+                * number rotations that failed to fix glitches
         """
 
         if not any(data):
@@ -492,6 +494,7 @@ class G3tHWP():
             out['num_value_glitches'+suffix] = int(self._num_value_glitches)
             out['num_value_glitches_irig'+suffix] = int(self._num_value_glitches_irig)
             out['num_dead_rots'+suffix] = int(self._num_dead_rots)
+            out['num_dropped_slits'+suffix] = int(self._num_dropped_slits)
         return out
 
     def eval_angle(self, solved, poly_order=3, suffix='_1'):
@@ -861,6 +864,7 @@ class G3tHWP():
             aman.wrap('num_value_glitches'+suffix, 0)
             aman.wrap('num_value_glitches_irig'+suffix, 0)
             aman.wrap('num_dead_rots'+suffix, 0)
+            aman.wrap('num_dropped_slits'+suffix, 0)
             aman.wrap('version'+suffix, 1)
             aman.wrap('logger'+suffix, 'Not set')
         return aman
@@ -1129,6 +1133,7 @@ class G3tHWP():
                     solved['angle' + ambiguous_suffix] = solved['angle' + ambiguous_suffix][i]
                     solved['ref_indexes' + ambiguous_suffix] = solved['ref_indexes' + ambiguous_suffix][i]
                     logger.warning(f'Corrected ambiguous references of encoder{ambiguous_suffix}')
+                    break
             if isinstance(solved['angle' + ambiguous_suffix], tuple):
                 logger.error('Cannot correct ambiguity of references. Abort angle calculation')
                 for suffix in self._suffixes:
@@ -1166,6 +1171,7 @@ class G3tHWP():
             aman['num_value_glitches'+suffix] = solved['num_value_glitches'+suffix]
             aman['num_value_glitches_irig'+suffix] = solved['num_value_glitches_irig'+suffix]
             aman['num_dead_rots'+suffix] = solved['num_dead_rots'+suffix]
+            aman['num_dropped_slits'+suffix] = solved['num_dropped_slits'+suffix]
 
         # version 2
         # calculate template subtracted angle
@@ -1312,8 +1318,11 @@ class G3tHWP():
                 logger.warning(f'Detected {i} missing slit, '
                                'ambiguous references needs to be corrected')
                 self._ref_clk_tmp = self._ref_clk
-                self._ref_indexes = self._ref_indexes[::i + 1]
                 self._num_dropped_slits = i
+
+                refs = self._find_true_refs()
+                self._ref_indexes = refs[0]
+                break
 
         # glitch removal
         self._fix_datapoint_glitches()
@@ -1333,15 +1342,16 @@ class G3tHWP():
                 kind='linear',
                 fill_value='extrapolate')(self._time))
 
-
         # If references are ambiguous, list up all possible patterns of
         # reference indexes and angles
         if self._num_dropped_slits > 0:
             _angle = []
             _ref_indexes = []
-            _full_ref_indexes = np.where(np.isin(self._encd_clk, self._ref_clk_tmp))[0]
-            for i in range(self._num_dropped_slits + 1):
-                self._ref_indexes = _full_ref_indexes[i::self._num_dropped_slits + 1]
+            # restore all the reference indexes
+            self._ref_indexes = np.where(np.isin(self._encd_clk, self._ref_clk_tmp))[0]
+            refs = self._find_true_refs()
+            for ref in refs:
+                self._ref_indexes = ref
                 self._generate_sub_data(ref_clk=True)
                 self._calc_angle_linear(mod2pi)
                 _angle.append(self._angle)
@@ -1590,6 +1600,21 @@ class G3tHWP():
         self._generate_sub_data()
 
         return True
+
+    def _find_true_refs(self):
+        # If encoder slit is missing, true references and fake references are mixed
+        # find true references from the distance between references
+        if self._num_dropped_slits > 0:
+            refs = [[]] * (self._num_dropped_slits + 1)
+            for i in range(self._num_dropped_slits + 1):
+                refs[i] = [self._ref_indexes[i]]
+                for ref_i in self._ref_indexes[i + 1:]:
+                    if ref_i - refs[i][-1] >= self._num_edges and \
+                            ref_i - refs[i][-1] < self._num_edges + 10:
+                        refs[i].append(ref_i)
+        # sort by length, very short ones are not true references
+        refs = sorted(refs, key=len, reverse=True)
+        return refs
 
     def _fix_datapoint_glitches(self):
         """ Removes glitches that add encoder datapoints """
