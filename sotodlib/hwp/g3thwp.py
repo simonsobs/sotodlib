@@ -483,7 +483,6 @@ class G3tHWP():
             out['angle'+suffix] = angle
             out['quad'+suffix] = self._quad_corrected
             out['ref_indexes'+suffix] = self._ref_indexes
-            out['bad_ref'+suffix] = self._bad_ref
             # generate flags
             filled_flag = np.zeros_like(fast_time, dtype=bool)
             out['filled_flag'+suffix] = filled_flag
@@ -551,20 +550,14 @@ class G3tHWP():
 
         logger.info('Remove non-uniformity from hwp angle and overwrite')
         ref_indexes = solved['ref_indexes'+suffix]
-        bad_ref = solved['bad_ref'+suffix]
         fast_time = solved['fast_time'+suffix]
 
         # Trim only the timestamps of integer revolutions
         ft = fast_time[ref_indexes[0]:ref_indexes[-2]+1]
         # remove rotation frequency drift for making a template of encoder slits
         ft = detrend(ft, deg=poly_order)
-        # make template from good revolutions
-        good_revolutions = np.logical_not([i in bad_ref for i, ri in enumerate(ref_indexes)])
-        # abort template subtraction is there is no good revolutions
-        assert np.sum(good_revolutions) > 0
         # make template from difference of time
         template_slit = np.diff(ft).reshape(len(solved['ref_indexes'+suffix])-2, self._num_edges)
-        template_slit = template_slit[good_revolutions[:-2]]
         template_err = np.std(template_slit, axis=0)
         template_slit = np.average(template_slit, axis=0) # take average of all revolutions
         template_slit = np.cumsum(template_slit)
@@ -584,7 +577,6 @@ class G3tHWP():
         """ Template subtraction taking into account the drift of hwp rotation speed
         """
         ref_indexes = solved['ref_indexes'+suffix]
-        bad_ref = solved['bad_ref'+suffix]
         fast_time = solved['fast_time'+suffix]
 
         counter = np.arange(len(fast_time))
@@ -592,8 +584,7 @@ class G3tHWP():
         dt_smoothed = spl(counter)
         dt_derivative = spl.derivative()(counter)
 
-        template_list = np.split(fast_time - dt_smoothed, ref_indexes)[1:-1]
-        template = np.array([li for i, li in enumerate(template_list) if i not in bad_ref])
+        template = np.split(fast_time - dt_smoothed, ref_indexes)[1:-1]
         template_err = np.std(template, axis=0)
         template = np.average(template, axis=0)
         template -= np.average(template)  #  no global shift
@@ -1272,7 +1263,6 @@ class G3tHWP():
         self._num_glitches_irig = 0
         self._num_value_glitches_irig = 0
         self._num_dead_rots = 0
-        self._bad_ref = []
 
         # if no data, skip analysis
         if len(self._encd_clk) == 0:
@@ -1604,14 +1594,13 @@ class G3tHWP():
     def _find_true_refs(self):
         # If encoder slit is missing, true references and fake references are mixed
         # find true references from the distance between references
-        if self._num_dropped_slits > 0:
-            refs = [[]] * (self._num_dropped_slits + 1)
-            for i in range(self._num_dropped_slits + 1):
-                refs[i] = [self._ref_indexes[i]]
-                for ref_i in self._ref_indexes[i + 1:]:
-                    if ref_i - refs[i][-1] >= self._num_edges and \
-                            ref_i - refs[i][-1] < self._num_edges + 10:
-                        refs[i].append(ref_i)
+        refs = [[]] * (self._num_dropped_slits + 1)
+        for i in range(self._num_dropped_slits + 1):
+            refs[i] = [self._ref_indexes[i]]
+            for ref_i in self._ref_indexes[i + 1:]:
+                if ref_i - refs[i][-1] >= self._num_edges and \
+                        ref_i - refs[i][-1] < self._num_edges + 10:
+                    refs[i].append(ref_i)
         # sort by length, very short ones are not true references
         refs = sorted(refs, key=len, reverse=True)
         return refs
@@ -1620,7 +1609,6 @@ class G3tHWP():
         """ Removes glitches that add encoder datapoints """
         # Find how many extra datapoints there are per revolution
         self._glitches = np.ediff1d(self._ref_indexes, to_end=self._num_edges) - self._num_edges
-        self._bad_ref = np.where(self._glitches != 0)[0]
         encd_diff_split = np.split(self._encd_diff, self._ref_indexes)
 
         bad_fills = []
@@ -1710,9 +1698,6 @@ class G3tHWP():
                           (self._encd_clk[fill_ref + self._num_edges] - self._encd_clk[fill_ref]) + \
                           self._encd_clk[ref]
             self._encd_clk[ref:ref + self._num_edges] = fill_values
-
-        self._glitches = np.ediff1d(self._ref_indexes, to_end=self._num_edges) - self._num_edges
-        self._bad_ref = np.where(self._glitches != 0)[0]
 
         self._generate_sub_data()
 
