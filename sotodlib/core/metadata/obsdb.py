@@ -112,23 +112,23 @@ class ObsDb(object):
            and we're defaulting to using _all."""
         if len(self.primary_keys) == 1:
             return []
-        else:
-            if len(wafer_info) != len(self.primary_keys) - 1:
-                raise ValueError(f"Wafer info must be of length {len(self.primary_keys) - 1}")
-            if wafer_info is None:
-                wafer_info = [None] * (len(self.primary_keys) - 1)
-            wafer_info = list(wafer_info)
-            if (None in wafer_info):
-                warn_str = 'WARNING: Primary key(s)'
-                for i, wb in enumerate(wafer_info):
-                    if wb is None:
-                        wafer_info[i] = DBROW_ALL
-                        warn_str += f' wafer_info[{i}],'
-                warn_str += f"""
-                are not specified and ObsDb is indexed by {self.primary_keys}.
-                These keys will be set to _all.
-                """
-                warnings.warn(warn_str, UserWarning)
+
+        if len(wafer_info) != len(self.primary_keys) - 1:
+            raise ValueError(f"Wafer info must be of length {len(self.primary_keys) - 1}")
+        if wafer_info is None:
+            wafer_info = [None] * (len(self.primary_keys) - 1)
+        wafer_info = list(wafer_info)
+        if (None in wafer_info):
+            warn_str = 'WARNING: Primary key(s)'
+            for i, wb in enumerate(wafer_info):
+                if wb is None:
+                    wafer_info[i] = DBROW_ALL
+                    warn_str += f' wafer_info[{i}],'
+            warn_str += f"""
+            are not specified and ObsDb is indexed by {self.primary_keys}.
+            These keys will be set to _all.
+            """
+            warnings.warn(warn_str, UserWarning)
         return wafer_info
     
     def __len__(self):
