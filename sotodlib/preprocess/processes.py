@@ -1656,10 +1656,11 @@ class GlitchClassification(_Preprocess):
     Takes the following ``calc`` config options:
     :n_thres: (int) Minimum number of detectors flagged as glitch simultaneously to be
         considered for classification. Default is 2.
-    :n_buffer: (int) Number of samples to buffer around the glitch. Defalut is 5.
+    :n_buffer: (int) Number of samples to buffer around the glitch. Default is 5.
     :trained_forest_name: (str) Name of the trained random forest to use for classification.
 
     Example config block::
+
         - name : "classify_glitches"
           calc:
             n_thres: 2
