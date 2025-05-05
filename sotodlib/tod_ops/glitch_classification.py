@@ -104,10 +104,10 @@ def build_dataframe_for_classification(snippets):
 def split_into_training_and_test(df, train_per):
 
     '''
-    Split panadas dataframe into training and test set.
+    Split pandas dataframe into training and test set.
 
-    Input: df: panadas data frame, train_per: percent of the data for training set in decimal form
-    Output: df_train: pandas dataframe of the training data, df_test: pandas dataframe of the test data, 
+    Input: df: pandas data frame, train_per: percent of the data for training set in decimal form
+    Output: df_train: pandas dataframe of the training data, df_test: pandas dataframe of the test data,
     inds: array of the indicies of the training data in orginal dataframe
     '''
 
@@ -124,7 +124,7 @@ def training_forest(df_train, cols, n_trees = 50, max_depth = 15):
     '''
     Train random forest.
 
-    Input: df_train: panadas data frame of training data, cols: list of columns of stats to train with
+    Input: df_train: pandas data frame of training data, cols: list of columns of stats to train with
     Optional: n_trees: number of trees in forest (default = 50),
     max_depth: maximum number of splits for each tree (default = 15)
     Output: forest: trained random forest
@@ -144,10 +144,10 @@ def classify_data_forest(df_classify, trained_forest):
     '''
     Classify glitches using a random forest.
 
-    Input: df_classify: panadas data frame of data to classify,
+    Input: df_classify: pandas data frame of data to classify,
     trained_forest: trained random forest
-    Output: df_w_labs_and_stats: returns the dataframe with a column for the predicted labels - int from 
-    0 - 3 corresponding to 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other also columns 
+    Output: df_w_labs_and_stats: returns the dataframe with a column for the predicted labels - int from
+    0 - 3 corresponding to 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other also columns
     with the probability that the glitch is each of the categories
     '''
 
@@ -207,8 +207,8 @@ def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0'
     '''
     Plot confusion matrix.
 
-    Input: pred_labs: predicted labels, 
-    df: panadas data frame of data ensure Glitch column is present for labels, title: plot title (str)
+    Input: pred_labs: predicted labels,
+    df: pandas data frame of data ensure Glitch column is present for labels, title: plot title (str)
     Optional: colours: list colours for plotting, save: True or False for if you want to save the figure,
     save_file_name: file name for plots, outdir: output directory, show: True or False for if you want to show the plot
     Output: No output, plot will show and/or save
