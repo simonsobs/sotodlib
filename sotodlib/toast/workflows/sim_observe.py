@@ -214,6 +214,12 @@ def simulate_observing(job, otherargs, runargs, comm):
 
     # Create the toast communicator.
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
+    log.info_rank(
+        f"  Created a TOAST communicator with {toast_comm.world_size} ranks"
+        f" and {toast_comm.ngroups} process groups of "
+        f"{toast_comm.group_size} ranks each",
+        comm,
+    )
 
     # The data container
     data = toast.Data(comm=toast_comm)
