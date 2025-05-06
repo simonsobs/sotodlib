@@ -1776,11 +1776,20 @@ class G3tHWP():
         norm_matrix = np.array([[np.mean(diff[1:])] for diff in diff_matrix])
         # Average rotation template
         template = np.median(diff_matrix[1:-1]/norm_matrix[1:-1], axis=0)
+        # Extend norm_matrix if first or last rotation is longer
+        if len(diff_matrix) > 1 and len(diff_matrix[0]) > self._num_edges:
+            first_additional_rots = int(len(diff_matrix[0]) / self._num_edges)
+            norm_matrix = np.append([norm_matrix[0]] * first_additional_rots, norm_matrix, axis=0)
+        if len(diff_matrix) > 1 and len(diff_matrix[-1]) > self._num_edges:
+            last_additional_rots = int(len(diff_matrix[-1]) / self._num_edges)
+            norm_matrix = np.append(norm_matrix, [norm_matrix[-1]] * last_additional_rots, axis=0)
         expectation = (norm_matrix*template).flatten()
-
         # Handle the first and last rotations
-        cut_start = self._num_edges - len(diff_matrix[0])
-        cut_end = len(diff_matrix[-1]) - self._num_edges if len(diff_matrix[-1]) != self._num_edges else None
+        cut_start = self._num_edges * int(len(diff_matrix[0]) / self._num_edges + 1) - len(diff_matrix[0])
+        if len(diff_matrix[-1]) == self._num_edges:
+            cut_end = None
+        else:
+            cut_end = len(diff_matrix[-1]) - self._num_edges * int(len(diff_matrix[-1]) / self._num_edges + 1)
         expectation = expectation[cut_start:cut_end]
 
         # Find which encd values differ from expectation in a way that
