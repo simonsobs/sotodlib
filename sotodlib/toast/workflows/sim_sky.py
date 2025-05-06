@@ -144,7 +144,6 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
                 toast.ops.Delete(detdata=[
                     job_ops.scan_map_weights.weights,
                 ]).apply(data)
-            data.info()
 
     # Scan signal from WCS maps
 
