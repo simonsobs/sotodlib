@@ -1084,6 +1084,7 @@ class G3tHWP():
                 logger.warning('No HWP data in the specified timestamps.')
                 aman['logger'+suffix] = 'No HWP data'
                 success.append(False)
+                continue
             try:
                 solved.update(self.analyze(self.data, mod2pi=False, suffix=suffix))
             except Exception as e:
@@ -1092,17 +1093,20 @@ class G3tHWP():
                 aman['logger'+suffix] = 'Angle calculation failed'
                 success.append(False)
                 print(traceback.format_exc())
+                continue
             if len(solved) == 0 or ('fast_time'+suffix not in solved.keys()) or len(solved['fast_time'+suffix]) == 0:
                 logger.info(
                     'No correct rotation data in the specified timestamps.')
                 aman['logger'+suffix] = 'No HWP data'
                 success.append(False)
+                continue
             aman['logger'+suffix] = 'Angle calculation succeeded'
             success.append(True)
 
         # Correct ambiguity of references when angle solution is succeeded
         # and only one of the encoders have ambiguity
-        ref_ambiguous = [isinstance(solved['angle' + suffix], tuple) for suffix in self._suffixes]
+        ref_ambiguous = ['angle' + suffix in solved.keys() and
+                         isinstance(solved['angle' + suffix], tuple) for suffix in self._suffixes]
         if sum(ref_ambiguous) == 2:
             logger.error('Both encoders have ambiguity in references. Abort angle calculation')
             for suffix in self._suffixes:
@@ -1304,7 +1308,8 @@ class G3tHWP():
         # to fix glitches. ambiguity of references needs to be corrected
         # by comparing two encoders
         for i in range(1, 3):
-            if np.median(np.diff(self._ref_indexes[::i + 1])) - self._num_edges < 3:
+            diff_ref = np.median(np.diff(self._ref_indexes[::i + 1])) - self._num_edges
+            if diff_ref >= 0 and diff_ref < 3:
                 logger.warning(f'Detected {i} missing slit, '
                                'ambiguous references needs to be corrected')
                 self._ref_clk_tmp = self._ref_clk
@@ -1690,9 +1695,14 @@ class G3tHWP():
 
         # Correct for packet drop fills which have glitches
         for ref in bad_fills:
-            before_ref = max(self._ref_indexes[self._ref_indexes < ref])
-            after_ref = min(self._ref_indexes[self._ref_indexes > ref])
+            _before = self._ref_indexes[self._ref_indexes < ref]
+            before_ref = max(_before) if len(_before) > 0 else False
+            _after = self._ref_indexes[self._ref_indexes > ref]
+            after_ref = min(_after) if len(_after) > 0 else False
             fill_ref = before_ref if before_ref else after_ref
+            if not fill_ref:
+                logger.warning(f'Cannot correct glitches, data might be too short')
+                continue
             fill_values = (self._encd_clk[ref + self._num_edges] - self._encd_clk[ref]) * \
                           (self._encd_clk[fill_ref:fill_ref + self._num_edges] - self._encd_clk[fill_ref]) / \
                           (self._encd_clk[fill_ref + self._num_edges] - self._encd_clk[fill_ref]) + \
