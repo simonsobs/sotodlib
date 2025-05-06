@@ -16,7 +16,7 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
-from ..tod_ops import glitch as gl
+from ..tod_ops import glitch as gl, glitch_classification as gc
 
 
 class FFTTrim(_Preprocess):
