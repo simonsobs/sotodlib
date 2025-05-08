@@ -10,7 +10,7 @@ import tempfile
 
 from sotodlib import core
 from sotodlib.core import metadata, Context, OBSLOADER_REGISTRY
-from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array
+from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array, ModifyFieldsResultSetHdfLoader
 import so3g
 
 import numpy as np
@@ -311,6 +311,19 @@ class ContextTest(unittest.TestCase):
         self.assertCountEqual(tod.ondisk._fields.keys(), ['disk1', 'subaman'])
         self.assertCountEqual(tod.ondisk.subaman._fields.keys(), ['disk2'])
 
+    def test_130_load_fields(self):
+        dataset_sim = DatasetSim()
+        obs_id = dataset_sim.obss['obs_id'][1]
+        ctx = dataset_sim.get_context(with_resultset_ondisk=True)
+        tod = ctx.get_obs(obs_id)
+        # Make sure that 'band1' was loaded  into det_info
+        self.assertTrue('band1' in tod.det_info._fields)
+        # Make sure that 'band1' laods the same informaton as 'band'
+        self.assertTrue((tod.det_info.band1 == tod.det_info.band).all())
+        # Make sure that only 'pol_code' was loaded into ondisc_resultset
+        self.assertCountEqual(tod.ondisk_resultset._fields.keys(), ['pol_code'])
+        self.assertTrue((tod.det_info.pol_code == tod.ondisk_resultset.pol_code).all())
+
     def test_200_load_metadata(self):
         """Test the simple metadata load wrapper."""
         dataset_sim = DatasetSim()
@@ -376,8 +389,8 @@ class DatasetSim:
         self.sample_count = 100
 
         class _TestML(metadata.LoaderInterface):
-            def from_loadspec(_self, load_params):
-                return self.metadata_loader(load_params)
+            def from_loadspec(_self, load_params, **load_kwargs):
+                return self.metadata_loader(load_params, **load_kwargs)
 
         OBSLOADER_REGISTRY['unittest_loader'] = self.tod_loader
         metadata.SuperLoader.register_metadata('unittest_loader', _TestML)
@@ -388,6 +401,7 @@ class DatasetSim:
                     with_incomplete_metadata=False,
                     with_inconcatable=False,
                     with_axisman_ondisk=False,
+                    with_resultset_ondisk=False,
                     on_missing='trim'):
         """Args:
           with_detdb: if False, no detdb is included.
@@ -636,10 +650,37 @@ class DatasetSim:
                 output['subaman'].wrap_new(f'disk{i}', shape=('dets',))
             output.save(filename, 'xyz')
 
+        if with_resultset_ondisk:
+            _scheme = metadata.ManifestScheme() \
+                .add_exact_match('obs:obs_id') \
+                .add_data_field('dataset')
+            ondisk_db = metadata.ManifestDb(scheme=_scheme)
+            ondisk_db._tempdir = tempfile.TemporaryDirectory()
+            filename = os.path.join(ondisk_db._tempdir.name,
+                                    'ondisk_resultset_metadata.h5')
+            write_dataset(self.dets, filename, 'obs_number_12')
+            ondisk_db.add_entry(
+                {'obs:obs_id': 'obs_number_12',
+                 'dataset': 'obs_number_12'},
+                filename)
+            ctx['metadata'].insert(0, {
+                'db': ondisk_db,
+                'det_info': True,
+                'loader': 'ModifyFieldsResultSetHdf',
+                'load_fields': [{'band': 'dets:band1'}, {'readout_id': 'dets:readout_id'}],
+            })
+
+            ctx['metadata'].insert(0, {
+                'db': ondisk_db,
+                'unpack': 'ondisk_resultset',
+                'loader': 'ModifyFieldsResultSetHdf',
+                'load_fields': [{'readout_id': 'dets:readout_id'}, 'pol_code'],
+            })
+
         return ctx
 
 
-    def metadata_loader(self, kw):
+    def metadata_loader(self, kw, **load_kwargs):
         # For Superloader.
         filename = os.path.split(kw['filename'])[1]
         if filename == 'bands.h5':
