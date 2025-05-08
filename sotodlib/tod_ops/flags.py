@@ -116,10 +116,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         if psat_range is not None:
             ranges.append(detcal.p_sat*1e12 >= psat_range[0])
             ranges.append(detcal.p_sat*1e12 <= psat_range[1])
-        
+
         if rn_range is not None:
-             ranges.append(detcal.r_n >= rn_range[0])
-             ranges.append(detcal.r_n <= rn_range[1])
+            ranges.append(detcal.r_n >= rn_range[0])
+            ranges.append(detcal.r_n <= rn_range[1])
 
         for range in ranges:
             msk = ~(np.all([range], axis=0))
@@ -130,10 +130,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         
         if psat_range is not None:
             msk_names.extend(['p_sat_gt', 'p_sat_lt'])
-            
+
         if rn_range is not None:
             msk_names.extend(['r_n_gt', 'r_n_lt'])
-
+            
         for i, msk in enumerate(msks):
             if 'samps' in aman:
                 msk_aman.wrap(f'{msk_names[i]}_flags', msk, [(0, 'dets'), (1, 'samps')])

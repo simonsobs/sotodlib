@@ -119,8 +119,12 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
-    if isinstance(planet, str):
-        planet = SlowSource.for_named_source(planet, t)
+    if isinstance(planet, (list, tuple)):
+        planet_name, ra, dec = planet
+        planet = coords.planets.SlowSource(t, float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+    else:
+        planet = coords.planets.SlowSource.for_named_source(planet, t)
 
     def scan_q_model(t, az, el, planet):
         csl = so3g.proj.CelestialSightLine.az_el(
