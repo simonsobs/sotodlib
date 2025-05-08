@@ -1393,10 +1393,11 @@ class G3tHWP():
         self._generate_sub_data(ref_clk=False)
 
         # Find the instantaneous average encoder clk spacing between datapoints
-        rot_spacing = np.arange(0, len(self._encd_diff), 100*(self._num_edges - 2))
+        rot_spacing = np.arange(0, len(self._encd_diff), self._num_edges - 2)
         diff_split = np.split(self._encd_diff, rot_spacing[1:])
-        slit_dist = np.concatenate([np.ones(len(_diff)) * _mean(_diff) for _diff in diff_split])
-        slit_dist_high = np.concatenate([np.ones(len(_diff)) * _mean_high(_diff) for _diff in diff_split])
+        clk_split = [np.average(clk) for clk in np.split(self._encd_clk, rot_spacing[1:])]
+        slit_dist = np.interp(self._encd_clk, clk_split, [_mean(_diff) for _diff in diff_split])
+        slit_dist_high = np.interp(self._encd_clk, clk_split, [_mean_high(_diff) for _diff in diff_split])
 
         # Generate thresholds to distinguish references and glitched references
         ref_hi_cond = (self._ref_edges + 1) * slit_dist * (1 + self._ref_range)
@@ -1615,12 +1616,11 @@ class G3tHWP():
         # Find how many extra datapoints there are per revolution
         self._glitches = np.ediff1d(self._ref_indexes, to_end=self._num_edges) - self._num_edges
         encd_diff_split = np.split(self._encd_diff, self._ref_indexes)
-
         bad_fills = []
         dead_rots = []
-        total_mask = [np.ones(len(encd_diff_split[0]))]
+        total_mask = [np.ones(len(encd_diff_split[0]), dtype=bool)]
         # Loop through every rotation and find which points to mask out
-        for i, diff in enumerate(encd_diff_split[1:]):
+        for i, diff in enumerate(encd_diff_split[1:-1]):
             # Only process rotations which have a glitch
             if self._glitches[i] != 0:
                 # Assuming the signal has some static duty cycle, the clk difference between
@@ -1640,7 +1640,8 @@ class G3tHWP():
                     start_clk = self._ref_clk[i]
                     end_clk = self._ref_clk[i+1]
                     # If the rotation had a packet drop
-                    if np.any([edges[0] < end_clk and start_clk < edges[1] for edges in self._edges_dropped_pkts]):
+                    if len(diff) >= self._num_edges and \
+                            np.any([edges[0] < end_clk and start_clk < edges[1] for edges in self._edges_dropped_pkts]):
                         # Fill the rotation with data from an adjacent rotation
                         if i == 0:
                             gap_clk = self._encd_clk[self._ref_indexes[i+1]:self._ref_indexes[i+2]] \
@@ -1663,7 +1664,10 @@ class G3tHWP():
                         mask = np.full(len(diff), False)
                         mask[:self._num_edges] = np.logical_not(mask[:self._num_edges])
                     else:
-                        logger.debug(i, ' dead rots index')
+                        logger.debug(f'{i} dead rots index')
+                        if i == 0:  # For removing first rotation of spin up data if necessary
+                            total_mask = [np.zeros(len(encd_diff_split[0]), dtype=bool)]
+                            self._ref_indexes[1:] -= len(encd_diff_split[0])
                         mask = np.full(len(diff), False)
                         dead_rots.append(i)
 
@@ -1679,6 +1683,13 @@ class G3tHWP():
                 total_mask.append(np.ones(len(diff), dtype=bool))
             else:
                 total_mask.append(np.ones(len(diff), dtype=bool))
+
+        # For removing last rotation of spin down data if necessary
+        if len(encd_diff_split) - 3 in dead_rots:
+            total_mask.append(np.zeros(len(encd_diff_split[-1]), dtype=bool))
+            self._ref_indexes = self._ref_indexes[:-1]
+        else:
+            total_mask.append(np.ones(len(encd_diff_split[-1]), dtype=bool))
 
         # Join the individual rotation masks into a single overall mask
         total_mask = np.array([bool(mask) for entry in total_mask for mask in entry])
@@ -1776,28 +1787,25 @@ class G3tHWP():
         norm_matrix = np.array([[np.mean(diff[1:])] for diff in diff_matrix])
         # Average rotation template
         template = np.median(diff_matrix[1:-1]/norm_matrix[1:-1], axis=0)
-        # Extend norm_matrix if first or last rotation is longer
-        if len(diff_matrix) > 1 and len(diff_matrix[0]) > self._num_edges:
-            first_additional_rots = int(len(diff_matrix[0]) / self._num_edges)
-            norm_matrix = np.append([norm_matrix[0]] * first_additional_rots, norm_matrix, axis=0)
-        if len(diff_matrix) > 1 and len(diff_matrix[-1]) > self._num_edges:
-            last_additional_rots = int(len(diff_matrix[-1]) / self._num_edges)
-            norm_matrix = np.append(norm_matrix, [norm_matrix[-1]] * last_additional_rots, axis=0)
-        expectation = (norm_matrix*template).flatten()
+
         # Handle the first and last rotations
         cut_start = self._num_edges * int(len(diff_matrix[0]) / self._num_edges + 1) - len(diff_matrix[0])
-        if len(diff_matrix[-1]) == self._num_edges:
-            cut_end = None
-        else:
-            cut_end = len(diff_matrix[-1]) - self._num_edges * int(len(diff_matrix[-1]) / self._num_edges + 1)
-        expectation = expectation[cut_start:cut_end]
+        expectation = np.tile(template, int(len(self._encd_diff) / self._num_edges) + 2)
+        expectation = expectation[cut_start:cut_start + len(self._encd_diff)]
 
+        # Smoothly vary the expectation depending on speed
+        spl = scipy.interpolate.CubicSpline(self._encd_cnt[self._ref_indexes], self._encd_clk[self._ref_indexes])
+        expectation *= spl.derivative()(self._encd_cnt)
         # Find which encd values differ from expectation in a way that
-        # looks like a glitch
+        # looks like a glitch. At 2 Hz points 5% away from expectations are
+        # regarded as value glutches.
+        # Increase the threshold depending on rotation speed
         error = self._encd_diff - expectation
-        for i in self._ref_indexes[:-1]:
+        fhwp_inv = np.diff(self._encd_clk[self._ref_indexes]) / 2e8
+        thresholds = 0.05 * 2 * fhwp_inv
+        for i, threshold in zip(self._ref_indexes[:-1], thresholds):
             for j in range(self._num_edges):
-                dist = abs(error[i+j]) - 0.01*expectation[i+j]
+                dist = abs(error[i+j]) - threshold * expectation[i+j]
                 if dist > 0 and dist < expectation[i+j]:
                     dist_inds = 3 if j == self._num_edges - 1 else 1
                     dist_sign = np.sign(error[i+j])
