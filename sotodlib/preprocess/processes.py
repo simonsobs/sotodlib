@@ -1734,6 +1734,36 @@ class UnionFlags(_Preprocess):
         if self.process_cfgs['total_flags_label'] in aman['flags']:
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
+        
+class IntersectFlags(_Preprocess):
+    """Do the intersect of relevant flags for mapping
+    Typically you would include source_inv, glitches, etc.
+
+    Saves results for aman under the "flags.[total_flags_label]" field.
+
+     Example config block::
+
+        - name : "intersect_flags"
+          process:
+            flag_labels: ['glitches.glitch_flags', 'source_flags.jupiter_inv']
+            total_flags_label: 'glitch_flags'
+
+    """
+    name = "intersect_flags"
+
+    def process(self, aman, proc_aman, sim=False):
+        from so3g.proj import RangesMatrix
+        total_flags = RangesMatrix.ones([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
+        for label in self.process_cfgs['flag_labels']:
+            _label = attrgetter(label)
+            total_flags *= _label(proc_aman) # The + operator is the union operator in this case
+
+        if 'flags' not in aman._fields:
+            from sotodlib.core import FlagManager
+            aman.wrap('flags', FlagManager.for_tod(aman))
+        if self.process_cfgs['total_flags_label'] in aman['flags']:
+            aman['flags'].move(self.process_cfgs['total_flags_label'], None)
+        aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
 class RotateQU(_Preprocess):
     """Rotate Q and U components to/from telescope coordinates.
@@ -1961,6 +1991,7 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
+_Preprocess.register(IntersectFlags)
 _Preprocess.register(RotateQU) 
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
