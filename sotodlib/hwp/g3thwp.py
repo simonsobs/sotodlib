@@ -485,6 +485,8 @@ class G3tHWP():
             out['ref_indexes'+suffix] = self._ref_indexes
             # generate flags
             filled_flag = np.zeros_like(fast_time, dtype=bool)
+            for edge in self._edges_dropped_pkts:
+                filled_flag[(self._encd_clk >= edge[0]) & (self._encd_clk <= edge[1])] = True
             out['filled_flag'+suffix] = filled_flag
             out['num_dropped_packets'+suffix] = int(self._num_dropped_pkts)
             out['num_dropped_packets_irig'+suffix] = int(self._num_dropped_pkts_irig)
@@ -1049,14 +1051,6 @@ class G3tHWP():
 
             - offcenter_direction: int
                 Estimation by the offcentering measured by the time offset between two encoders.
-
-            - template_direction: int
-                Estimation by the template of encoder plate.
-                To be implemented.
-
-            - scan_direction: int
-                Estimation by scan synchronous modulation of rotation speed.
-                To be implemented.
 
         """
 
