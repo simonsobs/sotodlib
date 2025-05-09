@@ -118,8 +118,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             ranges.append(detcal.p_sat*1e12 <= psat_range[1])
         
         if rn_range is not None:
-             ranges.append(detcal.r_n >= rn_range[0])
-             ranges.append(detcal.r_n <= rn_range[1])
+            ranges.append(detcal.r_n >= rn_range[0])
+            ranges.append(detcal.r_n <= rn_range[1])
 
         for range in ranges:
             msk = ~(np.all([range], axis=0))
