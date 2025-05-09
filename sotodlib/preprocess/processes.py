@@ -1362,7 +1362,8 @@ class PCARelCal(_Preprocess):
         pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
             m0 = aman.det_info.wafer.bandpass == band
-            rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
+            if self.plot_cfgs is not None:
+                rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
 
             filt_aman = filt_aman.restrict('dets', aman.dets.vals[m0], in_place=False)
@@ -1379,10 +1380,11 @@ class PCARelCal(_Preprocess):
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
             pca_weight0[m0] = result_aman['pca_weight0']
-            rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
-            rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
-            rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
-            rc_aman.wrap(f'{band}_median', result_aman['median'])
+            if self.plot_cfgs is not None:
+                rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
+                rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+                rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+                rc_aman.wrap(f'{band}_median', result_aman['median'])
 
         rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
         rc_aman.wrap('relcal', relcal, [(0, 'dets')])
@@ -1419,8 +1421,17 @@ class PCARelCal(_Preprocess):
             bands = bands[bands != 'NC']
             for band in bands:
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                if self.calc_cfgs.get("lpf") is not None:
+                    trim = self.calc_cfgs["trim_samps"]
+                    pca_aman.restrict('samps', (pca_aman.samps.offset + trim,
+                                                pca_aman.samps.offset + pca_aman.samps.count - trim))
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+                proc_aman[self.run_name].move(f'{band}_idx', None)
+                proc_aman[self.run_name].move(f'{band}_pca_mode0', None)
+                proc_aman[self.run_name].move(f'{band}_xbounds', None)
+                proc_aman[self.run_name].move(f'{band}_ybounds', None)
+                proc_aman[self.run_name].move(f'{band}_median', None)
 
 class PCAFilter(_Preprocess):
     """
