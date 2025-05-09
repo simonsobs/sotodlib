@@ -126,6 +126,38 @@ class Timer:
             elapsed=self.elapsed)
         self.print_func(self.text)
 
+def get_fplane(tod, dets=None, focal_plane=None, hwp=False):
+    """Return a FocalPlane object for the AxisManager tod.
+
+    Args:
+      dets (list of str): If set, the detectors will be restricted to this list.
+      focal_plane (AxisManager): A sub-axis-manager containing the detector
+        layout and response information. Defaults to tod.focal_plane.
+        This must contain at least the xi and eta members. Optional members are
+        gamma, T, P, Q and U, which are used to specify the detector response.
+        Typically these would be used like this:
+          gamma: Only detector polariztion angle specified. Detectors assumed to
+            have 100% response in total intensity and polarization.
+          gamma, P: Detector polarization angle and polarization efficiency.
+          gamma, T, P: As above, but also including total intensity. This is
+            usually unnecessary, but in demodulation mapmaking it's sometimes
+            useful to support polarization-sensitive detectors with no sensitivity
+            to total intensity.
+          T, Q, U: Alternative to specifying polarization angles. The detectors'
+            response to T, Q and U are directly specified in the focal plane frame.
+            Equivalent to gamma = arctan(U,Q)/2, P = (Q**2+U**2)**0.5.
+
+    Returns:
+      A FocalPlane object, which simply encapsulates a numpy array of detector
+      quaternions and a numpy array of detector responses to total intensity
+      and polarization.
+    """
+    dets   = _valid_arg(dets, tod.dets.vals, src=tod)
+    fp     = _valid_arg(focal_plane, 'focal_plane', src=tod)
+    fp     = fp.restrict("dets", dets)
+    kwargs = {key:getattr(fp,key) for key in ["gamma","T","P","Q","U"] if key in fp}
+    fplane = so3g.proj.FocalPlane.from_xieta(fp.xi, fp.eta, **kwargs, hwp=hwp)
+    return fplane
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None, sight=None):
@@ -146,10 +178,8 @@ def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
       correspond to RA and dec of equatorial coordinates.  Psi is is
       the parallactic rotation, measured from North towards West
       (opposite the direction of standard Position Angle).
-
     """
     dets = _valid_arg(dets, tod.dets.vals, src=tod)
-    fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
     if sight is None:
         timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
         boresight = _valid_arg(boresight, 'boresight', src=tod)
@@ -158,8 +188,8 @@ def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
             site='so', weather='typical')
     else:
         sight = _get_csl(_valid_arg(sight, 'sight', src=tod))
-    fp = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
-    asm = so3g.proj.Assembly.attach(sight, fp)
+    fplane = get_fplane(tod, dets=dets, focal_plane=focal_plane)
+    asm    = so3g.proj.Assembly.attach(sight, fplane)
     output = np.zeros((len(dets), len(sight.Q), 4))
     proj = so3g.proj.Projectionist()
     proj.get_coords(asm, output=output)
@@ -193,12 +223,11 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
     dets = _valid_arg(dets, tod.dets.vals, src=tod)
     timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
     boresight = _valid_arg(boresight, 'boresight', src=tod)
-    fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
 
     sight = so3g.proj.CelestialSightLine.for_horizon(
         timestamps, boresight.az, boresight.el, roll=boresight.roll)
 
-    fp = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
+    fplane = get_fplane(tod, dets=dets, focal_plane=focal_plane)
     asm = so3g.proj.Assembly.attach(sight, fp)
     output = np.zeros((len(dets), len(timestamps), 4))
     proj = so3g.proj.Projectionist()
@@ -317,12 +346,11 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     # Get a convex hull focal plane.
     (xi0, eta0), R, xieta1 = get_focal_plane_cover(
         focal_plane=fp0, count=16)
-    fake_dets = ['hull%i' % i for i in range(xieta1.shape[1])]
-    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
+    fp1 = so3g.proj.FocalPlane.from_xieta(xieta1[0], xieta1[1])
 
-    asm = so3g.proj.Assembly.attach(sight, fp1)
-    planar = np.zeros((len(fake_dets), n_samp, 4))
-    proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
+    asm    = so3g.proj.Assembly.attach(sight, fp1)
+    planar = np.zeros((xieta1.shape[1], n_samp, 4))
+    proj   = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     if rot:
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
@@ -602,6 +630,8 @@ def _apply_inverse_weights_map(inverse_weights, target, out=None):
     if out is None:
         out = np.empty(inverse_weights.shape[1:],
                        dtype=target.dtype)
+        if isinstance(target, enmap.ndmap):
+            out = enmap.ndmap(out, target.wcs)
     # Recall matmul(a, b) operates on the last two axes of (a, b). So
     # move axes, and create a second one in target; re-order at end.
     iw = np.moveaxis(inverse_weights, (0,1), (-2,-1))

@@ -7,12 +7,7 @@ import sys
 import copy
 import argparse
 import yaml
-import numpy as np
 import copy
-
-from astropy import units as u
-
-from .. import core
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -38,6 +33,43 @@ class ArchivePolicy:
         """
         return self.filename, product_id
 
+class ArgumentParser(argparse.ArgumentParser):
+    """A variant of ArgumentParser that allows the defaults
+    to be overriden by values in a yaml config files. Thus the
+    priority order becomes, from highest to lowest:
+
+    1. Arguments passed on the command line
+    2. The config file
+    3. Defaults defined with add_argument()
+
+    The config file is specified using the --config-file option,
+    which this class adds automatically. It should therefore not
+    be added manually.
+    """
+    def __init__(self, *args, **kwargs):
+        argparse.ArgumentParser.__init__(self, *args, **kwargs)
+        self.add_argument("--config-file", type=str, default=None,
+            help="Optional yaml file containing overrides for the default values")
+    def parse_args(self, argv=None):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--config-file", type=str, default=None)
+        args, _ = parser.parse_known_args()
+        if args.config_file != None:
+            # Ok, we have a config file, parse it and use it to
+            # replace our defaults
+            with open(args.config_file, "r") as ifile:
+                config = yaml.safe_load(ifile)
+            for action in self._actions:
+                try:
+                    action.default  = config[action.dest]
+                    # We mark it as non-required so we can run
+                    # without even normally required arguments
+                    # if they're provided by the config file
+                    action.required = False
+                except (KeyError, AttributeError) as e:
+                    pass
+        # Then parse again, taking into account any default update
+        return argparse.ArgumentParser.parse_args(self, argv)
 
 class DirectoryArchivePolicy:
     """Storage policy for stuff organized directly on the filesystem.
@@ -95,6 +127,11 @@ def parse_quantity(val, default_units=None):
       <Quantity 100. m>
 
     """
+    # Heavy to import, and we want this module to be fast to import
+    # because it provides an ArgumentParser that should inform us
+    # of incorrect arguments with as low latency as possible
+    from astropy import units as u
+
     if default_units is not None:
         default_units = u.Unit(default_units)
 
@@ -248,13 +285,14 @@ class _ReltimeFormatter(logging.Formatter):
             datefmt = '%8.3f'
         return datefmt % (record.created - self.start_time)
 
-def init_logger(name, announce='', verbosity=2):
+def init_logger(name, announce='', verbosity=2, logger=None):
     """Configure and return a logger for site_pipeline elements.  It is
     disconnected from general sotodlib (propagate=False) and displays
     relative instead of absolute timestamps.
 
     """
-    logger = logging.getLogger(name)
+    if logger is None:
+        logger = logging.getLogger(name)
 
     if verbosity == 0:
         level = logging.ERROR

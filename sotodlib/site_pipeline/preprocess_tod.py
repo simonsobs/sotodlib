@@ -2,12 +2,12 @@ import os
 import yaml
 import time
 import logging
+from typing import Optional, Union, Callable
 import numpy as np
 import argparse
 import traceback
 from typing import Optional
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
 from sotodlib.coords import demod as demod_mm
@@ -76,6 +76,7 @@ def preprocess_tod(obs_id,
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
+
     outputs = []
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -199,7 +200,7 @@ def preprocess_tod(obs_id,
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
                             context=None, dets=None,
-                            meta=None, modulated=True):
+                            meta=None, modulated=True, logger=logger):
     """Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
@@ -225,9 +226,11 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         If False, scan the simulation into demodulated timestreams.
     """
     configs, context = pp_util.get_preprocess_context(configs, context)
-    meta = pp_util.load_preprocess_det_select(obs_id, configs=configs,
-                                              context=context, dets=dets,
-                                              meta=meta)
+    if dets is not None:
+        meta.restrict("dets", dets)
+    meta = pp_util.load_preprocess_det_select(
+        obs_id, configs=configs, context=context, meta=meta, logger=logger
+    )
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -304,7 +307,8 @@ def get_parser(parser=None):
     return parser
 
 
-def main(
+def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+        as_completed_callable: Callable,
         configs: str,
         query: Optional[str] = None,
         obs_id: Optional[str] = None,
@@ -322,7 +326,6 @@ def main(
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
-    multiprocessing.set_start_method('spawn')
 
     obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
@@ -359,29 +362,34 @@ def main(
     logger.info(f'Run list created with {len(run_list)} obsids')
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    with ProcessPoolExecutor(nproc) as exe:
-        futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                     group_list=r[1], verbosity=verbosity,
-                     configs=configs,
-                     overwrite=overwrite, run_parallel=True) for r in run_list]
-        for future in as_completed(futures):
-            logger.info('New future as_completed result')
-            try:
-                err, db_datasets = future.result()
-            except Exception as e:
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-                f.close()
-                continue
-            futures.remove(future)
+    futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+                    group_list=r[1], verbosity=verbosity,
+                    configs=configs,
+                    overwrite=overwrite, run_parallel=True) for r in run_list]
+    for future in as_completed_callable(futures):
+        logger.info('New future as_completed result')
+        try:
+            err, db_datasets = future.result()
+        except Exception as e:
+            errmsg = f'{type(e)}: {e}'
+            tb = ''.join(traceback.format_tb(e.__traceback__))
+            logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+            f.close()
+            continue
+        futures.remove(future)
 
-            if db_datasets:
+        if db_datasets:
+            if err is None:
                 logger.info(f'Processing future result db_dataset: {db_datasets}')
                 for db_dataset in db_datasets:
                     pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+            else:
+                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    args = get_parser().parse_args()
+    rank, executor, as_completed_callable = get_exec_env(args.nproc)
+    if rank == 0:
+        main(executor=executor, as_completed_callable=as_completed_callable, **vars(args))

@@ -17,6 +17,8 @@ from sotodlib.io.imprinter import (
     BOUND,
     UPLOADED,
     DONE,    
+    ObsSet,
+    G3tObservations,
 )
 
 from .load_smurf import (
@@ -99,6 +101,63 @@ def set_book_rebind(imprint, book, update_level2=False):
         for _, obs in obs_dict.items():
             SMURF.update_observation_files(obs, g3session, force=True)
 
+def delete_level2_obs_and_book(imprint, book, session=None):
+    """When there are certain readout communication errors, smurf will blindly 
+    stream full rate data that is nonsense. For these, we don't want to keep 
+    the data in stray books because it's nonsense and it's massive. Delete the 
+    level 2 files, observation, and the book.
+    """
+    assert book.type == "oper", f"This function is for oper books"
+    set_book_rebind(imprint, book)
+    
+    if session is None:
+        session = imprint.get_session()
+    print(f"Removing Level 2 for {book.bid}")
+    obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+    g3session, SMURF = imprint.get_g3tsmurf_session(
+        return_archive=True
+    )
+    for _, obs in obs_dict.items():
+        SMURF.delete_observation_files(
+            obs, g3session, dry_run=False
+        )  
+    for o in book.obs:
+        session.delete(o)
+    session.delete(book)
+    session.commit()   
+
+
+def remove_level2_obs_from_book(imprint, book, bad_obs_id):
+    """If one level2 observation is problematic, delete that book and re-register without it.
+    """
+    assert book.type == "obs", f"Book should be an 'obs' book"
+
+    # keep staged clean
+    set_book_rebind(imprint, book)
+    odic = imprint.get_g3tsmurf_obs_for_book(book)
+    obs_ids = [k for k in odic.keys()]
+    assert bad_obs_id in obs_ids, f"{bad_obs_id} not in book {book.bid}"
+    
+    new_obs_list = [o for o in obs_ids if o != bad_obs_id]
+    g3session = imprint.get_g3tsmurf_session()
+    olist = [
+        g3session.query(G3tObservations).filter(
+            G3tObservations.obs_id == o
+        ).one() for o in new_obs_list
+    ]
+    oset = ObsSet(
+        olist,
+        mode=book.type, 
+        slots=imprint.tubes[book.tel_tube]['slots'],
+        tel_tube=book.tel_tube
+    )
+    session = imprint.get_session()
+    for o in book.obs:
+        session.delete(o)
+    session.delete(book)
+    session.commit()
+    return imprint.register_book(oset, session=session)
+
 def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     """ helper function for when a level 2 observation could span multiple
     books. Creates a list of ObsSets with that obs_id, prints info to screen and
@@ -169,7 +228,7 @@ def block_fix_bad_timing(imprint):
     """Run through and try rebinding all books with bad timing"""
     failed_books = imprint.get_failed_books()
     fix_list = []
-    for book in failed_book:
+    for book in failed_books:
         if "TimingSystemOff" in book.message:
             fix_list.append(book)
     for book in fix_list:

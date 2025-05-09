@@ -48,8 +48,9 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     prefilt_detrend: str or None
         Method of detrending when you apply prefilter. Default is `linear`. If data is already detrended or you do not want to detrend,
         set it to `None`.
-    flags : RangesMatrix, optional
+    flags : str or RangesMatrix or Ranges, optional
         Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
     merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
@@ -160,6 +161,8 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
     else:
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
         if flags is None:
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
         else:
@@ -206,8 +209,9 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         The name of the timestream of hwp_angle. Defaults to aman.hwp_angle if not specified.
     bins : int, optional
         The number of HWP angle bins to use. Default is 360.
-    flags : None or RangesMatrix
+    flags : str or RangesMatrix or Ranges. optional
         Flag indicating whether to exclude flagged samples when binning the signal.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
         Default is no mask applied.
     apodize_edges : bool, optional
         If True, applies an apodization window to the edges of the signal. Defaults to True.
@@ -230,9 +234,11 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
-        
+
     if apodize_edges:
         weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
         if (flags is not None) and apodize_flags:
             flags_mask = flags.mask()
             if flags_mask.ndim == 1:
@@ -578,15 +584,15 @@ def demod_tod(aman, signal=None, demod_mode=4,
         Demodulation mode. Default is 4 (i.e. 4th harmonic of HWP).
     bpf_cfg : dict
         Configuration for Band-pass filter applied to the TOD data before demodulation.
-        If not specified, a 4th-order Butterworth filter of 
-        (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used.
-        Example) bpf_cfg = {'type': 'butter4', 'center': 8.0, 'width': 3.8}
+        If not specified, a sine-squared bandwidth filter of
+        (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used with transition width 0.1.
+        Example) bpf_cfg = {'type': 'sine2', 'center': 8.0, 'width': 3.8, 'trans_width': 0.1}
         See filters.get_bpf for details.
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
-        a 4th-order Butterworth filter with a cutoff frequency of 0.95*(HWP speed)
-        is used.
-        Example) lpf_cfg = {'type': 'butter4', 'cutoff': 1.9}
+        a sine-squared filter with a cutoff frequency of 0.95*(HWP speed) and transition width
+        0.1 is used.
+        Example) lpf_cfg = {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
         See filters.get_lpf for details.
 
     Returns

@@ -95,7 +95,7 @@ class MapmakerPointingTest(unittest.TestCase):
             stokes_weights=weights,
         )
         scan_hpix.apply(data)
-        
+
         # Bin the map using TOAST
         toast.ops.DefaultNoiseModel(noise_model="noise_model").apply(data)
         binner = toast.ops.BinMap(
@@ -126,7 +126,7 @@ class MapmakerPointingTest(unittest.TestCase):
         res = wpix * utils.arcmin
         shape, wcs = enmap.geometry(box, res=res, proj="car")
         wcs.wcs.crpix[1] -= 0.5
-        enmap.write_map(areafile, enmap.zeros(shape, wcs, np.uint8))
+        enmap.write_map_geometry(areafile, shape, wcs)
 
         mapmaker = so_ops.MLMapmaker(
             area=areafile,
@@ -148,8 +148,8 @@ class MapmakerPointingTest(unittest.TestCase):
             # Direct comparison of pointing
             obs = data.obs[0]
             pmap = mapmaker.signal_map.data[obs.name].pmap
-            det_quats = pmap._get_asm().dets
-            coords = np.array(pmap.sight.coords(det_quats))
+            fplane = pmap._get_asm().fplane
+            coords = np.array(pmap.sight.coords(fplane))
             dets = mapmaker.mapmaker.data[0].dets
             ndet = len(dets)
 

@@ -284,6 +284,7 @@ class JumpfindTest(unittest.TestCase):
         """Test that jumpfinder finds jumps in white noise."""
         np.random.seed(0)
         tod = get_tod('white')
+        ptp_orig = np.ptp(tod.signal)
         sig_jumps = tod.signal[0]
         jump_locs = np.array([200, 400, 700])
         sig_jumps[jump_locs[0]:] += 10
@@ -293,8 +294,8 @@ class JumpfindTest(unittest.TestCase):
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps without filtering
-        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5, win_size=23)
-        jumps_nf = jumps_nf.ranges().flatten()
+        jumps, _, fixed = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5, win_size=23, fix=True)
+        jumps_nf = jumps.ranges().flatten()
         
         # Remove double counted jumps and round to remove uncertainty
         jumps_nf = np.unique(np.round(jumps_nf, -2))
@@ -309,6 +310,10 @@ class JumpfindTest(unittest.TestCase):
         heights = tod_ops.jumps.estimate_heights(sig_jumps, jumps_msk)
         heights = heights[heights.nonzero()].ravel()
         self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
+
+        # Check fixing
+        ptp_fix = np.ptp(fixed.ravel()[~jumps.buffer(10).mask().ravel()])
+        self.assertTrue(ptp_fix < 1.1*ptp_orig)
 
 
 class FFTTest(unittest.TestCase):

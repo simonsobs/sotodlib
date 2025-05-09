@@ -74,7 +74,7 @@ class SlowSource:
         dt = 3600
         ra0, dec0, distance = get_source_pos(name, timestamp)
         ra1, dec1, distance = get_source_pos(name, timestamp + dt)
-        return cls(timestamp, ra0, dec0, ((ra1-ra0+180) % 360 - 180)/dt, (dec1-dec0)/dt)
+        return cls(timestamp, ra0, dec0, ((ra1-ra0+np.pi) % (2*np.pi) - np.pi)/dt, (dec1-dec0)/dt)
 
     def pos(self, timestamps):
         """Get the (approximate) source position at the times given by the
@@ -178,7 +178,7 @@ def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=Non
     return P, X
 
 
-def get_horizon_P(tod, az, el, **kw):
+def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
     """Get a standard Projection Matrix targeting arbitrary source (for example
     drone) in horizon coordinates.
 
@@ -186,6 +186,10 @@ def get_horizon_P(tod, az, el, **kw):
       tod: AxisManager of the observation
       az: azimuth of the target source (rad)
       el: elevation of the target source (rad)
+      receiver_fixed:
+          If true, rotate the source centered coordinate to be receiver fixed.
+          This should be True for receiver fixed beam measurement.
+          This should be False for pol angle calibration with source on drone.
 
     Return:
       a Projection Matrix
@@ -198,7 +202,11 @@ def get_horizon_P(tod, az, el, **kw):
         tod.boresight.roll
     )
     pq = so3g.proj.quat.rotation_lonlat(-az, el)
-    sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
+    if receiver_fixed:
+        rot = so3g.proj.quat.euler(2, -tod.boresight.roll)
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * rot * ~pq * sight.Q
+    else:
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
     P = coords.P.for_tod(tod, sight, **kw)
     return P
 
@@ -331,6 +339,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
+    planets.close()
     return astrometric
 
 
@@ -356,17 +365,18 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
       Before checking in the ephemeris, the source_name will be
       matched against a regular expression and if it has the format
-      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers, then a
       fixed-position source at RA,Dec = xxx,yyy in degrees will be
       processed.  In that case, the distance is returned as Inf.
 
     """
     # Check against fixed-position template...
     m = re.match(
-        r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
     if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
         ra, dec = float(m['ra_deg']) * \
-            coords.DEG, float(m['dec_deg']) * coords.DEG
+            coords.DEG, sign * float(m['dec_deg']) * coords.DEG
         return ra, dec, float('inf')
     
     # Derive from skyfield astrometric object
@@ -431,7 +441,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     # One central detector
     xieta0, R, _ = coords.helpers.get_focal_plane_cover(tod, 0)
-    fp = so3g.proj.FocalPlane.from_xieta(['x'], [xieta0[0]], [xieta0[1]], [0])
+    fp = so3g.proj.FocalPlane.from_xieta([xieta0[0]], [xieta0[1]])
 
     asm = so3g.proj.Assembly.attach(sight, fp)
     p = so3g.proj.Projectionist.for_geom(shape, wcs)
