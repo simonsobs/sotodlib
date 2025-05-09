@@ -1108,8 +1108,8 @@ class G3tHWP():
             success = [False, False]
         if sum(ref_ambiguous) == 1 and sum(success) < 2:
             logger.error('Cannot correct ambiguity of references. Abort angle calculation')
-            for suffix in self._suffixes:
-                aman['logger'+suffix] += ', failed to correct ambiguous references'
+            ambiguous_suffix = np.array(self._suffixes)[ref_ambiguous][0]
+            aman['logger'+ambiguous_suffix] += ', failed to correct ambiguous references'
             success = [False, False]
         if sum(ref_ambiguous) == 1 and sum(success) == 2:
             ambiguous_suffix = np.array(self._suffixes)[ref_ambiguous][0]
@@ -1117,17 +1117,17 @@ class G3tHWP():
             good_angle = np.interp(solved['fast_time' + ambiguous_suffix],
                          solved['fast_time' + good_suffix], solved['angle' + good_suffix])
             for i, ambiguous_angle in enumerate(solved['angle' + ambiguous_suffix]):
-                median_diff = np.median(ambiguous_angle - good_angle)
+                median_diff = np.mod(np.median(ambiguous_angle - good_angle) - np.pi, 2 * np.pi) - np.pi
+                logger.debug(median_diff)
                 if abs(abs(median_diff) - np.pi) < 2 * np.arctan(5 / self._encoder_disk_radius):
                     solved['angle' + ambiguous_suffix] = solved['angle' + ambiguous_suffix][i]
                     solved['ref_indexes' + ambiguous_suffix] = solved['ref_indexes' + ambiguous_suffix][i]
                     logger.warning(f'Corrected ambiguous references of encoder{ambiguous_suffix}')
                     break
             if isinstance(solved['angle' + ambiguous_suffix], tuple):
-                logger.error('Cannot correct ambiguity of references. Abort angle calculation')
-                for suffix in self._suffixes:
-                    aman['logger'+suffix] += ', failed to correct ambiguous references'
-                success = [False, False]
+                logger.error('Cannot correct ambiguity of references.')
+                aman['logger'+ambiguous_suffix] += ', failed to correct ambiguous references'
+                success = success & np.logical_not(ref_ambiguous)
 
         # version 1
         # angle calculation succeeded
@@ -1252,6 +1252,7 @@ class G3tHWP():
         # metadata of packet drop
         self._num_dropped_pkts = 0
         self._num_dropped_pkts_irig = 0
+        self._edges_dropped_pkts = []
 
         self._num_dropped_slits = 0
 
@@ -1594,15 +1595,24 @@ class G3tHWP():
     def _find_true_refs(self):
         # If encoder slit is missing, true references and fake references are mixed
         # find true references from the distance between references
-        refs = [[]] * (self._num_dropped_slits + 1)
-        for i in range(self._num_dropped_slits + 1):
-            refs[i] = [self._ref_indexes[i]]
-            for ref_i in self._ref_indexes[i + 1:]:
-                if ref_i - refs[i][-1] >= self._num_edges and \
-                        ref_i - refs[i][-1] < self._num_edges + 10:
-                    refs[i].append(ref_i)
+        max_gl = 20  # maximum number of glitches
+        unique_refs = set()
+        for i in range(len(self._ref_indexes)):
+            refs = [self._ref_indexes[i]]
+            for j in range(0, i):
+                r = self._ref_indexes[j]
+                if refs[0] - r >= self._num_edges and \
+                        refs[0] - r < self._num_edges + max_gl:
+                    refs = [r] + refs
+            for j in range(i + 1, len(self._ref_indexes)):
+                r = self._ref_indexes[j]
+                if r - refs[-1] >= self._num_edges and \
+                        r - refs[-1] < self._num_edges + max_gl:
+                    refs = refs + [r]
+            unique_refs.add(tuple(sorted(refs)))
         # sort by length, very short ones are not true references
-        refs = sorted(refs, key=len, reverse=True)
+        refs = sorted([np.array(v) for v in unique_refs], key=len, reverse=True)
+        refs = [v for v in refs if len(v) > len(refs[0]) / 2]
         return refs
 
     def _fix_datapoint_glitches(self):
@@ -1937,7 +1947,6 @@ class G3tHWP():
             logger.warning('{} dropped packets are found, performing fill process'.format(
                 self._num_dropped_pkts))
 
-        self._edges_dropped_pkts = []
         for _ in np.where(np.diff(self._encd_cnt) > 1)[0]:
             index = np.where(np.diff(self._encd_cnt) > 1)[0][0]
             gap = int(np.diff(self._encd_cnt)[index]) - 1
