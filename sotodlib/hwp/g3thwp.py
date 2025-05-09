@@ -1304,7 +1304,7 @@ class G3tHWP():
         # by comparing two encoders
         for i in range(1, 3):
             diff_ref = np.median(np.diff(self._ref_indexes[::i + 1])) - self._num_edges
-            if diff_ref >= 0 and diff_ref < 3:
+            if 0 <= diff_ref < 3:
                 logger.warning(f'Detected {i} missing slit, '
                                'ambiguous references needs to be corrected')
                 self._ref_clk_tmp = self._ref_clk
@@ -1316,6 +1316,8 @@ class G3tHWP():
 
         # glitch removal
         self._fix_datapoint_glitches()
+        if len(self._encd_clk) < self._num_edges:
+            return [], []
         self._fix_value_glitches()
 
         # assign IRIG synched timestamp
@@ -1595,21 +1597,21 @@ class G3tHWP():
     def _find_true_refs(self):
         # If encoder slit is missing, true references and fake references are mixed
         # find true references from the distance between references
+        # this is one of the slowest processes
         max_gl = 20  # maximum number of glitches
         unique_refs = set()
         for i in range(len(self._ref_indexes)):
             refs = [self._ref_indexes[i]]
-            for j in range(0, i):
+            for j in range(i, 0, -1):
                 r = self._ref_indexes[j]
-                if refs[0] - r >= self._num_edges and \
-                        refs[0] - r < self._num_edges + max_gl:
-                    refs = [r] + refs
+                if 0 <= refs[-1] - r - self._num_edges < max_gl:
+                    refs.append(r)
+            refs = refs[::-1]
             for j in range(i + 1, len(self._ref_indexes)):
                 r = self._ref_indexes[j]
-                if r - refs[-1] >= self._num_edges and \
-                        r - refs[-1] < self._num_edges + max_gl:
-                    refs = refs + [r]
-            unique_refs.add(tuple(sorted(refs)))
+                if 0 <= r - refs[-1] - self._num_edges < max_gl:
+                    refs.append(r)
+            unique_refs.add(tuple(refs))
         # sort by length, very short ones are not true references
         refs = sorted([np.array(v) for v in unique_refs], key=len, reverse=True)
         refs = [v for v in refs if len(v) > len(refs[0]) / 2]
@@ -1724,8 +1726,6 @@ class G3tHWP():
                           self._encd_clk[ref]
             self._encd_clk[ref:ref + self._num_edges] = fill_values
 
-        self._generate_sub_data()
-
         return True
 
     def _find_high_low_values(self, arr):
@@ -1786,6 +1786,8 @@ class G3tHWP():
 
     def _fix_value_glitches(self):
         """ Removes glitches that change the encoder value """
+        self._generate_sub_data()
+
         diff_matrix = np.split(self._encd_diff, self._ref_indexes)
         # Find the average value in each rotation
         norm_matrix = np.array([[np.mean(diff[1:])] for diff in diff_matrix])
