@@ -1420,18 +1420,19 @@ class PCARelCal(_Preprocess):
             bands = np.unique(aman.det_info.wafer.bandpass)
             bands = bands[bands != 'NC']
             for band in bands:
-                pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                if self.calc_cfgs.get("lpf") is not None:
-                    trim = self.calc_cfgs["trim_samps"]
-                    pca_aman.restrict('samps', (pca_aman.samps.offset + trim,
-                                                pca_aman.samps.offset + pca_aman.samps.count - trim))
-                band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
-                proc_aman[self.run_name].move(f'{band}_idx', None)
-                proc_aman[self.run_name].move(f'{band}_pca_mode0', None)
-                proc_aman[self.run_name].move(f'{band}_xbounds', None)
-                proc_aman[self.run_name].move(f'{band}_ybounds', None)
-                proc_aman[self.run_name].move(f'{band}_median', None)
+                if f'{band}_pca_mode0' in proc_aman[self.run_name]:
+                    pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                    if self.calc_cfgs.get("lpf") is not None:
+                        trim = self.calc_cfgs["trim_samps"]
+                        pca_aman.restrict('samps', (pca_aman.samps.offset + trim,
+                                                    pca_aman.samps.offset + pca_aman.samps.count - trim))
+                    band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                    plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+                    proc_aman[self.run_name].move(f'{band}_idx', None)
+                    proc_aman[self.run_name].move(f'{band}_pca_mode0', None)
+                    proc_aman[self.run_name].move(f'{band}_xbounds', None)
+                    proc_aman[self.run_name].move(f'{band}_ybounds', None)
+                    proc_aman[self.run_name].move(f'{band}_median', None)
 
 class PCAFilter(_Preprocess):
     """
