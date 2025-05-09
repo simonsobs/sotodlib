@@ -309,8 +309,8 @@ class DataPackaging:
         )
         if incomplete.count() > 0:
             ic_list = incomplete.all()
-            """Check if these are actually incomplete, imprinter incomplete checker
-            includes making sure the stop isn't beyond max ctime. 
+            """Check if these are actually incomplete, imprinter incomplete 
+            checker includes making sure the stop isn't beyond max ctime. 
             """
             obs_list = []
             for obs in ic_list:
@@ -560,7 +560,16 @@ class DataPackaging:
                 for k in flist:
                     x.extend(flist[k])
                 flist=x
-            file_list.extend(flist)
+            ## annoying edge case catcher because we use datetimes in
+            ## book.start and book.stop
+            for f in flist:
+                if f"/{timecode}/" not in f:
+                    self.logger.info(
+                        f"Not adding {f} to file list because it is not in "
+                        f"the {timecode} folder"
+                    )
+                    continue
+                file_list.append(f)
         # add suprsync files 
         file_list.extend( self.get_suprsync_files(timecode) )
         return file_list, deletable
@@ -610,7 +619,8 @@ class DataPackaging:
         if len(missed_files) == 0 and len(extra_files) == 0:
             self.logger.info(f"Timecode {timecode} has complete coverage")
         if len(missed_files)>0:
-            msg = f"Files on disk but not in database {len(missed_files)}:\n"
+            msg = f"Files on disk but not marked as uploaded in database"
+            msg += f" {len(missed_files)}:\n"
             for f in missed_files:
                 msg += f"\t{f}\n"
             self.logger.warning(msg)
@@ -635,7 +645,7 @@ class DataPackaging:
         for book in book_list:
             stat = self.imprint.delete_level2_files(
                 book, verify_with_librarian=verify_with_librarian,
-                n_copies_in_lib=2, dry_run=dry_run
+                n_copies_in_lib=2, dry_run=dry_run, n_tries=2
             )
             if stat > 0:
                 books_not_deleted.append(book)    

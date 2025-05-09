@@ -19,7 +19,14 @@ def main(config):
 
     monitor = Monitor.from_configs(config["monitor"])
     context = core.Context(config["context_file"])
-    jdb = JobManager(sqlite_file=config["jobdb"])
+
+    # get JobDB configuration
+    jdb_max_retry = 5  # mark a job as failed after this number of tries
+    if isinstance(config["jobdb"], str):  # support previous convention
+        jdb = JobManager(sqlite_file=config["jobdb"])
+    else:
+        jdb = JobManager(sqlite_file=config["jobdb"]["db_file"])
+        jdb_max_retry = config["jobdb"].get("max_retry", jdb_max_retry)
 
     # get a list of metrics from the config
     metrics = []
@@ -44,7 +51,7 @@ def main(config):
         jclass = f"{m._influx_meas}.{m._influx_field}"
         skipped_jobs = jdb.get_jobs(jclass=jclass, jstate=["done", "failed", "ignored"])
         skipped_obs = set([j.tags["obs_id"] for j in skipped_jobs])
-        logger.debug(f"Found {len(skipped_obs)} obs_id to skip for metric {m._influx_meas}.{m._influx_field}")
+        logger.debug(f"Skipping {len(skipped_obs & new_obs)} / {len(new_obs)} obs_id for metric {m._influx_meas}.{m._influx_field}")
         new_obs -= skipped_obs
 
         # create list of jobs to process
@@ -63,10 +70,21 @@ def main(config):
 
     logger.info(f"Found {len(all_obs_id)} obs_id with new metrics to record.")
 
+    # convenience function for marking a job failure
+    def _mark_failure(job_id):
+        with jdb.locked(job_id) as job:
+            job.mark_visited()
+            if job.visit_count > jdb_max_retry:
+                logger.error(f"Reached max retries for {oid}.")
+                job.jstate = "failed"
+                return True
+        return False
+
     n = len(all_obs_id)
+    n_fail = 0
     # process one obs_id at a time
     for i, oid in enumerate(all_obs_id):
-        logger.info(f"Recording metrics for obs_id {oid} ({i}/{n})...")
+        logger.info(f"Recording metrics for obs_id {oid} ({i+1}/{n})...")
         # load metadata once
         meta_fail = False
         try:
@@ -83,10 +101,9 @@ def main(config):
         # iterate over metrics and record, or mark failure to load metadata
         for m, m_obs in zip(metrics, jobs):
             if oid in m_obs:
-                if meta_fail:  # no metadata, record job as ignored
-                    with jdb.locked(m_obs[oid]) as job:
-                        job.mark_visited()
-                        job.jstate = "ignored"
+                if meta_fail:
+                    if _mark_failure(m_obs[oid]):  # returns True if we reached max retries
+                        n_fail += 1
                     continue
                 try:
                     m.process_and_record(oid, meta)
@@ -98,9 +115,11 @@ def main(config):
                         f"Processing metric {m._influx_meas}.{m._influx_field} failed.",
                         exc_info=True
                     )
-                    with jdb.locked(m_obs[oid]) as job:
-                        job.mark_visited()
-                        job.jstate = "failed"
+                    if _mark_failure(m_obs[oid]):  # returns True if we reached max retries
+                        n_fail += 1
+
+    if n_fail > 0:
+        raise RuntimeError(f"This run produced {n_fail} failures.")
 
 
 def get_parser(parser=None):

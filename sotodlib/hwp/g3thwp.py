@@ -1920,6 +1920,17 @@ class G3tHWP():
                 logger.warning('irig time has known desynchronization, apply correction')
                 self._irig_time[desynced] -= dt
 
+    def _fix_irig_desync(self):
+        """ Fix IRIG desynchronization by adding constant time offset """
+        if self._irig_desync is None:
+            return
+
+        for t0, t1, dt in self._irig_desync:
+            desynced = (t0 <= self._irig_time) & (self._irig_time <= t1)
+            if np.any(desynced):
+                logger.warning('irig time has known desynchronization, apply correction')
+                self._irig_time[desynced] -= dt
+
     def _process_counter_overflow_glitch(self):
         """
         Treat glitches due to 32 bit internal counter overflow
