@@ -1,14 +1,12 @@
 # Copyright (c) 2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
-import logging
-
 import numpy as np
-from so3g.proj import quat
-
 from .. import core
 from .helpers import _valid_arg
+from so3g.proj import quat
 
+import logging
 logger = logging.getLogger(__name__)
 
 DEG = np.pi / 180
@@ -44,15 +42,16 @@ def apply_basic_pointing_model(tod):
         _boresight.wrap("el", _ancil.el_enc * DEG, [(0, "samps")])
         _boresight.wrap("roll", -1 * _ancil.boresight_enc * DEG, [(0, "samps")])
 
-    if "boresight" in tod:
-        del tod["boresight"]
+    if 'boresight' in tod:
+        del tod['boresight']
 
-    tod.wrap("boresight", _boresight)
+    tod.wrap('boresight', _boresight)
 
     return _boresight
 
 
-def apply_pointing_model(tod, pointing_model=None, ancil=None, wrap=None):
+def apply_pointing_model(tod, pointing_model=None, ancil=None,
+                         wrap=None):
     """Applies a static pointing model to compute corrected boresight
     position and orientation in horizon coordinates.  The encoder
     values in tod.ancil are consumed as raw data, and the computed
@@ -110,10 +109,10 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None, wrap=None):
 def apply_pointing_model_sat(vers, params, tod, ancil):
     az, el, roll = _get_sat_enc_radians(ancil)
 
-    if vers == "sat_naive":
+    if vers == 'sat_naive':
         return _new_boresight(ancil.samps, az=az, el=el, roll=roll)
 
-    elif vers == "sat_v1":
+    elif vers == 'sat_v1':
         az1, el1, roll1 = model_sat_v1(params, az, el, roll)
         return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
 
@@ -155,15 +154,15 @@ def model_lat_v1(params, az, el, roll):
     - el_offset: The elevation encoder offset.
     """
     _params = {
-        "az_offset": -6.431949463522369e-07,
-        "el_offset": 0.10784213916209494,
-        "cr_offset": 0.1068009204473848,
-        "el_xi_offset": 0.07524197484976551,
-        "el_eta_offset": 0.13704409641376075,
-        "rx_xi_offset": -0.03523515856319279,
-        "rx_eta_offset": -0.005858421274865713,
-        "mir_xi_offset": -0.17792288910750848,
-        "mir_eta_offset": 0.21440894087003562,
+        "az_offset": 0,
+        "el_offset": 0,
+        "cr_offset": 0,
+        "el_xi_offset": 0,
+        "el_eta_offset": 0,
+        "rx_xi_offset": 0,
+        "rx_eta_offset": 0,
+        "mir_xi_offset": 0,
+        "mir_eta_offset": 0,
     }
     _params = _params.copy()
     _params.update(params)
@@ -200,18 +199,17 @@ def model_lat_v1(params, az, el, roll):
 # if their value is zero (and that should be the registered default).
 
 defaults_sat_v1 = {
-    "enc_offset_az": 0.0,
-    "enc_offset_el": 0.0,
-    "enc_offset_boresight": 0.0,
-    "fp_offset_xi0": 0.0,
-    "fp_offset_eta0": 0.0,
-    "fp_rot_xi0": 0.0,
-    "fp_rot_eta0": 0.0,
-    "az_rot": 0.0,
-    "base_tilt_cos": 0.0,
-    "base_tilt_sin": 0.0,
+    'enc_offset_az': 0.,
+    'enc_offset_el': 0.,
+    'enc_offset_boresight': 0.,
+    'fp_offset_xi0': 0.,
+    'fp_offset_eta0': 0.,
+    'fp_rot_xi0': 0.,
+    'fp_rot_eta0': 0.,
+    'az_rot': 0.,
+    'base_tilt_cos': 0.,
+    'base_tilt_sin': 0.,
 }
-
 
 def model_sat_v1(params, az, el, roll):
     """Applies pointing model to (az, el, roll).
@@ -226,12 +224,12 @@ def model_sat_v1(params, az, el, roll):
       - fp_rot_{xi,eta}0: within the focal plane (i.e. relative to the
         corrected boresight), the center of rotation of the boresight.
         Radians.
-      - fp_offset_{xi,eta}0: Offset of focal plane's rotational center
+      - fp_offset_{xi,eta}0: Offset of focal plane's rotational center 
         relative to position in focal plane that lies along the optical axis.
         Corrects for "collimation error".
-      - enc_offset_{az,el,boresight}: Encoder offsets, in Radians.
+      - enc_offset_{az,el,boresight}: Encoder offsets, in Radians. 
         Sign convention: True = Encoder + Offset
-      - base_tilt_{cos,sin}: Base tilt coefficients, in radians.
+      - base_tilt_{cos,sin}: Base tilt coefficients, in radians. 
       - az_rot: Dimensionless parameter describing a linear dependence of Az on El.
 
     """
@@ -243,37 +241,31 @@ def model_sat_v1(params, az, el, roll):
     params, _p = _p, None
 
     for k, v in params.items():
-        if k == "version":
+        if k == 'version':
             continue
-        if k not in defaults_sat_v1 and v != 0.0:
+        if k not in defaults_sat_v1 and v != 0.:
             raise ValueError(f'Handling of model param "{k}" is not implemented.')
 
     # Construct offsetted encoders.
     az_orig = az.copy()
-    az_twist = params["az_rot"] * (el + params["enc_offset_el"])
-    az = az + params["enc_offset_az"] + az_twist
-    el = el + params["enc_offset_el"]
-    roll = roll - params["enc_offset_boresight"]
+    az_twist = params['az_rot'] * (el + params['enc_offset_el'])
+    az = az + params['enc_offset_az'] + az_twist
+    el = el + params['enc_offset_el'] 
+    roll = roll - params['enc_offset_boresight'] 
 
     # Rotation that tilts the base (referred to vals after enc correction).
-    base_tilt = get_base_tilt_q(params["base_tilt_cos"], params["base_tilt_sin"])
+    base_tilt = get_base_tilt_q(params['base_tilt_cos'], params['base_tilt_sin'])
 
     # Rotation that takes a vector in array-centered focal plane coords
     # to a vector in boresight-rotation-centered focal plane coords.
-    q_fp_rot = ~quat.rotation_xieta(params["fp_rot_xi0"], params["fp_rot_eta0"])
-
-    # Rotation that moves the center of the focal plane to fp_offset_(xi, eta)0.
-    q_fp_offset = quat.rotation_xieta(params["fp_offset_xi0"], params["fp_offset_eta0"])
+    q_fp_rot = ~quat.rotation_xieta(params['fp_rot_xi0'], params['fp_rot_eta0'])
+    
+    # Rotation that moves the center of the focal plane to fp_offset_(xi, eta)0.  
+    q_fp_offset = quat.rotation_xieta(params['fp_offset_xi0'], params['fp_offset_eta0'])
 
     # Horizon coordinates.
-    q_hs = (
-        base_tilt
-        * quat.rotation_lonlat(-az, el)
-        * q_fp_offset
-        * ~q_fp_rot
-        * quat.euler(2, roll)
-        * q_fp_rot
-    )
+    q_hs = (base_tilt * quat.rotation_lonlat(-az, el)
+            * q_fp_offset * ~q_fp_rot * quat.euler(2, roll) * q_fp_rot)
 
     neg_az, el, roll = quat.decompose_lonlat(q_hs)
 
@@ -286,19 +278,18 @@ def model_sat_v1(params, az, el, roll):
 
 # Support functions
 
-
 def _new_boresight(samps, az=None, el=None, roll=None):
     boresight = core.AxisManager(samps)
-    for k, v in zip(["az", "el", "roll"], [az, el, roll]):
-        boresight.wrap_new(k, shape=("samps",), dtype="float64")
+    for k, v in zip(['az', 'el', 'roll'], [az, el, roll]):
+        boresight.wrap_new(k, shape=('samps',), dtype='float64')
         if v is not None:
             boresight[k][:] = v
     return boresight
 
-
 def _get_sat_enc_radians(ancil):
-    return (ancil.az_enc * DEG, ancil.el_enc * DEG, -ancil.boresight_enc * DEG)
-
+    return (ancil.az_enc * DEG,
+            ancil.el_enc * DEG,
+            -ancil.boresight_enc * DEG)
 
 def _get_lat_enc_radians(ancil):
     az = ancil.az_enc * DEG
@@ -308,7 +299,6 @@ def _get_lat_enc_radians(ancil):
     else:
         roll = (ancil.el_enc - ancil.corotator_enc - 60) * DEG
     return (az, el, roll)
-
 
 def get_base_tilt_q(c, s):
     """Returns the quaternion rotation that applies base tilt, taking
@@ -324,5 +314,6 @@ def get_base_tilt_q(c, s):
     phi = np.arctan2(s, c)
     # And that base tilt causes the true el to lie below the expected
     # (encoder) el, at that position.
-    amp = (c**2 + s**2) ** 0.5
+    amp = (c**2 + s**2)**.5
     return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
+
