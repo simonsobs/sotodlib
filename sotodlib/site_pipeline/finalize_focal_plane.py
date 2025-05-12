@@ -416,6 +416,13 @@ def _apply_pointing_model(config, aman):
         raise ValueError("Need to have roll in pointing fits to apply pointing model")
 
     params = config["pointing_model"].get("params", {})
+    if "pointing_model" in aman:
+        for key, val in params.items():
+            if key in aman.pointing_model:
+                aman.pointing_model[key] = val
+            else:
+                aman.pointing_model.wrap(key, val)
+        params = aman.pointing_model
     ancil = AxisManager(IndexAxis("samps", aman.dets.count))
     ancil.wrap("az_enc", np.rad2deg(aman.pointing.az))
     ancil.wrap("el_enc", np.rad2deg(aman.pointing.el))
