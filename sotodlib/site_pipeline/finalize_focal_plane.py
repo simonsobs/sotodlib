@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import os
 from copy import deepcopy
+from importlib import import_module
 from typing import List, Optional
 
 import h5py
@@ -12,6 +13,7 @@ import numpy as np
 import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
+from so3g.proj import quat
 from sotodlib.coords import optics as op
 from sotodlib.coords.fp_containers import (
     FocalPlane,
@@ -24,7 +26,8 @@ from sotodlib.coords.fp_containers import (
     plot_receiver,
     plot_ufm,
 )
-from sotodlib.core import AxisManager, Context, metadata
+from sotodlib.coords.pointing_model import apply_pointing_model
+from sotodlib.core import AxisManager, Context, IndexAxis, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
 
@@ -144,7 +147,9 @@ def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], t
     if len(obs_ids) == 0:
         query_all = query
         if query is None:
-            query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+            query_all = (
+                f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+            )
         if ctx.obsdb is None:
             raise ValueError("No obsdb!")
         all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
@@ -388,36 +393,92 @@ def _restrict_inliers(aman, focal_plane):
     )
 
 
+def _apply_pointing_model(config, aman):
+    if "pointing_model" not in config:
+        logger.info("\t\tNo pointing model specified!")
+        return aman
+    if not config["pointing_model"].get("apply", False):
+        logger.info("\t\tNot applying pointing model")
+        return aman
+    if "function" not in config["pointing_model"]:
+        logger.info("\t\tUsing default pointing model function")
+        func = apply_pointing_model
+    else:
+        func = getattr(
+            import_module(config["pointing_model"]["function"][0]),
+            config["pointing_model"]["function"][1],
+        )
+    if "az" not in aman.pointing:
+        raise ValueError("Need to have az in pointing fits to apply pointing model")
+    if "el" not in aman.pointing:
+        raise ValueError("Need to have el in pointing fits to apply pointing model")
+    if "roll" not in aman.pointing:
+        raise ValueError("Need to have roll in pointing fits to apply pointing model")
+
+    params = config["pointing_model"].get("params", {})
+    ancil = AxisManager(IndexAxis("samps", aman.dets.count))
+    ancil.wrap("az_enc", np.rad2deg(aman.pointing.az))
+    ancil.wrap("el_enc", np.rad2deg(aman.pointing.el))
+    ancil.wrap("roll_enc", np.rad2deg(aman.pointing.roll))
+    bs = func(aman, params, ancil, False)
+    q_fp = quat.rotation_xieta(aman.pointing.xi, aman.pointing.eta)
+    have_gamma = False
+    if "gamma" in aman.pointing:
+        if np.any(np.isnan(aman.pointing.gamma)):
+            logger.warning(
+                "\t\tnans in gamma, not including in pointing model correction"
+            )
+        else:
+            q_fp = quat.rotation_xieta(
+                aman.pointing.xi, aman.pointing.eta, aman.pointing.gamma
+            )
+            have_gamma = True
+
+    xi, eta, gamma = quat.decompose_xieta(
+        ~quat.euler(2, bs.roll)
+        * ~quat.rotation_lonlat(-bs.az, bs.el)
+        * quat.rotation_lonlat(-1 * aman.pointing.az, aman.pointing.el)
+        * quat.euler(2, aman.pointing.roll)
+        * q_fp
+    )
+
+    aman.pointing.xi[:] = xi
+    aman.pointing.eta[:] = eta
+    if have_gamma:
+        aman.pointing.gamma[:] = gamma
+
+    return aman
+
+
 def _reverse_roll(fp, aff, sft, aman):
     if "obs_info" not in aman:
         raise ValueError("Can't reverse roll without obs information")
     if "roll_center" not in aman.obs_info:
         raise ValueError("Can't reverse roll without roll information")
-    roll = -1*np.deg2rad(aman.obs_info.roll_center)
+    roll = -1 * np.deg2rad(aman.obs_info.roll_center)
 
     # We want to shift so we rotating about the origin
     # To get to nominal we do fp@aff + sft
     # So if we just want to recenter we do fp + sft@aff^-1
     inv_aff, _ = mt.invert_transform(aff, np.zeros_like(sft))
-    sft_adj = sft@inv_aff
+    sft_adj = sft @ inv_aff
     fp_sft = fp[:, :2] + sft_adj
 
     # Now lets reverse the roll
     # The transpose is the inverse
-    rot = np.array([[np.cos(roll), -1*np.sin(roll)], [np.sin(roll), np.cos(roll)]])
-    fp_rot = fp_sft@rot
+    rot = np.array([[np.cos(roll), -1 * np.sin(roll)], [np.sin(roll), np.cos(roll)]])
+    fp_rot = fp_sft @ rot
 
     # And undo the shift, keeping track of rotations
-    fp_rot -= sft_adj@rot
+    fp_rot -= sft_adj @ rot
 
-    # Make sure its set 
+    # Make sure its set
     fp[:, :2] = fp_rot
 
     # For gamma lets just shift by the roll
     fp[:, 2] -= roll
 
     return fp
-
 
 
 def main():
@@ -590,7 +651,20 @@ def main():
                     logger.info("\t\tNo optical dets, skipping...")
                     continue
 
+                # Apply pointing model if we want to
+                aman = _apply_pointing_model(config, aman)
+
                 # Do some outlier cuts
+                if "hits" in aman.pointing:
+                    aman.restrict(
+                        "dets", aman.pointing.hits > config.get("min_hits", 5)
+                    )
+                    if aman.dets.count == 0:
+                        logger.info("\t\tNo high hits dets, skipping...")
+                        continue
+                if aman.dets.count < min_points:
+                    logger.info("\t\tToo few dets found, skipping")
+                    continue
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
@@ -607,7 +681,7 @@ def main():
                     continue
                 aligned = mt.apply_transform(fp[:, :2], aff, sft)
 
-                if config.get('reverse_roll', False):
+                if config.get("reverse_roll", False):
                     fp = _reverse_roll(fp, aff, sft, aman)
                 if np.any(np.isfinite(fp[:, 2])):
                     gscale, gsft = gamma_fit(
