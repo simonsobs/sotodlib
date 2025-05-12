@@ -553,6 +553,14 @@ def main():
         logger.error("Provided template doesn't exist, trying to generate one")
         gen_template = True
 
+    # Need to move installed OT and WS of array to templace for this
+    # if config.get("pad", False):
+    #     logger.info("Padding missing arrays with template, getting complete list of arrays from template")
+    #     if not have_template:
+    #         logger.warning("\tNo template provided, arrays not found in any observations will be missing")
+    #     with h5py.File(template_path) as f:
+    #         stream_ids = list(f.keys()) 
+
     # Split up into batches
     # Right now either per_obs or all at once
     # Maybe allow for batch my encoder angle later?
@@ -718,6 +726,11 @@ def main():
             logger.info("\t%d points in fit", tot_points)
             if tot_points < min_points:
                 logger.error("\tToo few points! Skipping...")
+                if config.get("pad", False):
+                    logger.info("\tPadding output with template")
+                    focal_plane.transformed = focal_plane.template.fp
+                    focal_plane.tot_weight = None
+                    ots[ot].focal_planes.append(focal_plane)
                 continue
 
             try:
@@ -790,15 +803,16 @@ def main():
         todel = []
         for name, ot in ots.items():
             logger.info("Fitting common mode for %s", ot.name)
-            if len(ot.focal_planes) == 0:
+            centers = np.vstack([fp.template.center for fp in ot.focal_planes if fp.tot_weight is not None])
+            centers_transformed = np.vstack(
+                [fp.center_transformed for fp in ot.focal_planes if fp.tot_weight is not None]
+            )
+            if len(centers) == 0:
                 logger.error("\tNo focal planes found! Skipping...")
-                todel.append(name)
+                if not config.get("pad", False):
+                    todel.append(name)
                 continue
             plot_ot(ot, plot_dir)
-            centers = np.vstack([fp.template.center for fp in ot.focal_planes])
-            centers_transformed = np.vstack(
-                [fp.center_transformed for fp in ot.focal_planes]
-            )
             if centers.shape[0] < 3:
                 logger.warning(
                     "\tToo few wafers fit to compute common mode, transform will be approximated"
@@ -842,9 +856,9 @@ def main():
             )
             recv_transform = deepcopy(tuple(ots.values())[0].transform_fullcm)
         else:
-            centers = np.vstack([ot.center for ot in ots.values()])
+            centers = np.vstack([ot.center for ot in ots.values() if ot.num_fps > 0])
             centers_transformed = np.vstack(
-                [ot.center_transformed for ot in ots.values()]
+                [ot.center_transformed for ot in ots.values() if ot.num_fps > 0]
             )
             if len(ots) < 3:
                 logger.info(
@@ -921,6 +935,8 @@ def main():
             start_time=config["start_time"],
             stop_time=config["stop_time"],
         )
+        if config.get("pad", False):
+            logger.info("Padding missing arrays with values from template")
         with h5py.File(outpath, "a") as f:
             if group in f:
                 del f[group]

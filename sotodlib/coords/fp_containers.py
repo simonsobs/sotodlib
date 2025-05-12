@@ -173,6 +173,10 @@ class FocalPlane:
             return np.linalg.norm(self.diff, axis=1)
         return np.linalg.norm(self.diff[:, :2], axis=1)
 
+    @property
+    def padded(self):
+        return self.tot_weight is None 
+
     @classmethod
     def empty(cls, template, stream_id, wafer_slot, n_aman):
         if template is None:
@@ -246,9 +250,10 @@ class FocalPlane:
             ("xi", np.float32),
             ("eta", np.float32),
             ("gamma", np.float32),
+            ("measured", np.bool_),
         ]
         fpout = np.fromiter(
-            zip(self.det_ids, *(self.transformed.T)), dtype=outdt, count=ndets
+            zip(self.det_ids, *(self.transformed.T), np.ones(len(self.det_ids), dtype=bool)*(self.padded)), dtype=outdt, count=ndets
         )
         write_dataset(
             metadata.ResultSet.from_friend(fpout),
@@ -376,6 +381,11 @@ class OpticsTube:
         self.center_transformed = mt.apply_transform(
             self.center, self.transform_fullcm.affine, self.transform_fullcm.shift
         )
+
+    @property
+    def num_fps(self):
+        fps = [fp for fp in self.focal_planes if fp.tot_weight is not None]
+        return len(fps)
 
     @classmethod
     def from_pointing_cfg(cls, pointing_cfg):
@@ -554,9 +564,9 @@ def plot_ufm(focal_plane, plot_dir):
 
 def plot_ot(ot, plot_dir):
     fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
-    dists = [fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi for fp in ot.focal_planes]
-    xis = [fp.transformed[fp.isfinite, 0] for fp in ot.focal_planes]
-    etas = [fp.transformed[fp.isfinite, 1] for fp in ot.focal_planes]
+    dists = [fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi for fp in ot.focal_planes if fp.tot_weight is not None]
+    xis = [fp.transformed[fp.isfinite, 0] for fp in ot.focal_planes if fp.tot_weight is not None]
+    etas = [fp.transformed[fp.isfinite, 1] for fp in ot.focal_planes if fp.tot_weight is not None]
 
     # Plot the radial dist
     r = np.sqrt(np.hstack(xis) ** 2 + np.hstack(etas) ** 2)
@@ -656,6 +666,8 @@ def plot_receiver(receiver, plot_dir):
             axs[3 * i + j].set_xlim(xlims)
             axs[3 * i + j].set_ylim(ylims)
         for fp in receiver.focal_planes:
+            if fp.tot_weight is None:
+                continue
             msk = (fp.template.id_strs == valid_ids[i]) * fp.isfinite
             if np.sum(msk) < 3:
                 continue
