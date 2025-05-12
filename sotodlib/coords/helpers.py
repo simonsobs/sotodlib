@@ -228,7 +228,7 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
         timestamps, boresight.az, boresight.el, roll=boresight.roll)
 
     fplane = get_fplane(tod, dets=dets, focal_plane=focal_plane)
-    asm = so3g.proj.Assembly.attach(sight, fp)
+    asm = so3g.proj.Assembly.attach(sight, fplane)
     output = np.zeros((len(dets), len(timestamps), 4))
     proj = so3g.proj.Projectionist()
     proj.get_coords(asm, output=output)
