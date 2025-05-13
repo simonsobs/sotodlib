@@ -733,7 +733,12 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                 if not remove and g not in db_groups:
                     cleanup_mandb(None, outputs_grp, configs, logger)
                 else:
-                    # if we're overwriting, remove file so it will re-run
+                    # if we're overwriting
+                    if remove:
+                        logger.info(f"remove={remove}: removing {outputs_grp['temp_file']}")
+                    # if found in database already
+                    elif g in db_groups:
+                        logger.info(f"{outputs_grp['temp_file']} found in db, removing")
                     os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
