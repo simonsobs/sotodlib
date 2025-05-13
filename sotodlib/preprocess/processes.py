@@ -889,21 +889,28 @@ class AzSS(_Preprocess):
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
-        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
-            if sim:
-                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        if self.process_cfgs["subtract"]:
+            if self.calc_cfgs.get('azss_stats_name') in proc_aman:
+                if sim:
+                    tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+                else:
+                    tod_ops.azss.subtract_azss(
+                        aman,
+                        proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                        signal=self.calc_cfgs.get('signal', 'signal'),
+                        scan_flags=self.calc_cfgs.get('scan_flags'),
+                        method=self.calc_cfgs.get('method', 'interpolate'),
+                        max_mode=self.calc_cfgs.get('max_mode'),
+                        azrange=self.calc_cfgs.get('azrange'),
+                        in_place=True
+                    )
             else:
-                tod_ops.azss.subtract_azss(
-                    aman,
-                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
-                    signal=self.calc_cfgs.get('signal', 'signal'),
-                    scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method', 'interpolate'),
-                    max_mode=self.calc_cfgs.get('max_mode'),
-                    azrange=self.calc_cfgs.get('azrange'),
-                    in_place=True
-                )
+                cfgs = dict(copy.deepcopy(self.calc_cfgs))
+                cfgs.pop('subtract_in_place', None)
+                tod_ops.azss.get_azss(aman, subtract_in_place=True, **cfgs)
         else:
+            if self.calc_cfgs.get('subtract_in_place', 'False'):
+                raise ValueError("calc_cfgs.subtract_in_place must be False when process_cfgs.subtract is False")
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
 
