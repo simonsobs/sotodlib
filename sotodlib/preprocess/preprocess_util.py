@@ -709,6 +709,9 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     group_by, groups, error = get_groups(obs_id, configs, context)
 
+    db = core.metadata.ManifestDb(configs['archive']['index'])
+    x = db.inspect({'obs:obs_id': obs_id})
+
     all_groups = groups.copy()
     for g in all_groups:
         if 'wafer.bandpass' in group_by:
@@ -716,16 +719,26 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                 groups.remove(g)
                 continue
 
+    # get groups in db
+    db_groups = []
+    if x is not None and len(x) > 0:
+        [db_groups.append([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+
     for g in groups:
         dets = {gb:gg for gb, gg in zip(group_by, g)}
         outputs_grp = save_group(obs_id, configs, dets, context, subdir)
 
         if os.path.exists(outputs_grp['temp_file']):
             try:
-                if not remove:
+                if not remove and g not in db_groups:
                     cleanup_mandb(None, outputs_grp, configs, logger)
                 else:
-                    # if we're overwriting, remove file so it will re-run
+                    # if we're overwriting
+                    if remove:
+                        logger.info(f"remove={remove}: removing {outputs_grp['temp_file']}")
+                    # if found in database already
+                    elif g in db_groups:
+                        logger.info(f"{outputs_grp['temp_file']} found in db, removing")
                     os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
