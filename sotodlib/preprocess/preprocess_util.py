@@ -728,7 +728,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                     # if we're overwriting, remove file so it will re-run
                     os.remove(outputs_grp['temp_file'])
             except (OSError, RuntimeError) as e:
-                # remove if it can't be opened
+                # remove if it can't be opened or already exists in the db
                 os.remove(outputs_grp['temp_file'])
     return error
 
