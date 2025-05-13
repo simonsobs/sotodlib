@@ -169,6 +169,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     Example configuration block::
         
       - name: "glitches"
+        glitch_name: "my_glitches"
         calc:
           signal_name: "hwpss_remove"
           t_glitch: 0.00001
@@ -188,11 +189,15 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     name = "glitches"
     _influx_field = "glitch_flags_frac"
 
+    def __init__(self, step_cfgs):
+        self.glitch_name = step_cfgs.get('glitch_name', 'glitches')
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
         ) 
-        aman.wrap("glitches", glitch_aman)
+        aman.wrap(self.glitch_name, glitch_aman)
         self.save(proc_aman, glitch_aman)
         if self.calc_cfgs.get('save_plot', False):
             flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
@@ -201,7 +206,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("glitches", glitch_aman)
+            proc_aman.wrap(self.glitch_name, glitch_aman)
  
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -209,7 +214,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
         flag = sparse_to_ranges_matrix(
-            proc_aman.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
+            proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
@@ -225,9 +230,9 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
-            plot_signal_diff(aman, proc_aman.glitches, flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
+            plot_signal_diff(aman, proc_aman[self.glitch_name], flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
-            plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
+            plot_flag_stats(aman, proc_aman[self.glitch_name], flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
 
 class FixJumps(_Preprocess):
