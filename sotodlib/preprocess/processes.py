@@ -1,7 +1,6 @@
 import numpy as np
 from operator import attrgetter
 import copy
-import warnings
 
 from so3g.proj import Ranges, RangesMatrix
 
