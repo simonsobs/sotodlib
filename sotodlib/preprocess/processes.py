@@ -889,7 +889,7 @@ class AzSS(_Preprocess):
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
-        if self.process_cfgs["subtract"]:
+        if self.process_cfgs.get("subtract"):
             if self.calc_cfgs.get('azss_stats_name') in proc_aman:
                 if sim:
                     tod_ops.azss.get_azss(aman, **self.calc_cfgs)
