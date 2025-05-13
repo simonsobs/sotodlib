@@ -17,7 +17,6 @@ from sqlalchemy.orm import relationship
 import so3g
 from spt3g import core
 
-import sotodlib
 from .bookbinder import BookBinder, TimeCodeBinder
 from .load_smurf import (
     G3tSmurf,
@@ -762,12 +761,94 @@ class Imprinter:
                 f"binder for book type {book.type} not implemented"
             )
 
+    def _run_book_binding(
+        self,
+        book,
+        session=None,
+        message="",
+        pbar=False,
+        ignore_tags=False,
+        ancil_drop_duplicates=False,
+        allow_bad_timing=False,
+        require_hwp=True,
+        require_acu=True,
+        require_monotonic_times=True,
+        min_ctime=None, max_ctime=None,
+        check_configs={}
+    ):
+        """Function that calls book-binding but does not update the database 
+        this is implemented so be able to run things in parallel
+        """
+        if session is None:
+            session = self.get_session()
+        # get book id and book object, depending on whether book id is given or not
+        if isinstance(book, Books):
+            bid = book.bid
+        elif isinstance(book, str):
+            bid = book
+            book = self.get_book(bid, session=session)
+        else:
+            raise NotImplementedError
+        # check whether book exists in the database
+        if not self.book_exists(bid, session=session):
+            raise BookExistsError(f"Book {bid} does not exist in the database")
+        # check whether book is already bound
+        if (book.status == BOUND) :
+            raise BookBoundError(f"Book {bid} is already bound")
+        assert book.type in VALID_OBSTYPES
+
+        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
+        ## or if we ever plan to run the SATs without HWPs
+        if 'lat' in self.daq_node:
+            require_hwp = False
+        err = None
+        try:
+            # find appropriate binder for the book type
+            binder = self._get_binder_for_book(
+                book, 
+                ignore_tags=ignore_tags,
+                ancil_drop_duplicates=ancil_drop_duplicates,
+                allow_bad_timing=allow_bad_timing,
+                require_acu=require_acu,
+                require_hwp=require_hwp,
+                require_monotonic_times=require_monotonic_times,
+                min_ctime=min_ctime, max_ctime=max_ctime
+            )
+            binder.bind(pbar=pbar)
+            
+            # write M_index file
+            if book.type in ['obs', 'oper']:
+                tc = self.tube_configs[book.tel_tube]
+            else:
+                tc = {}
+            binder.write_M_files(self.daq_node, tc)
+
+            if book.type in ['obs', 'oper']:
+                # check that detectors books were written out correctly
+                self.logger.info("Checking Book {}".format(book.bid))
+                check = BookScanner(
+                    self.get_book_abs_path(book), config=check_configs
+                )
+                check.go()
+
+            self.logger.info("Book {} bound".format(book.bid))
+            status = BOUND
+            
+        except Exception as e:
+            self.logger.error("Book {} failed".format(book.bid))
+            err_msg = traceback.format_exc()
+            self.logger.error(err_msg)
+            message = f"{message}\ntrace={err_msg}" if message else err_msg
+            status = FAILED
+            err = e
+        
+        return book.bid, status, message, err
+
     def bind_book(
         self,
         book,
         session=None,
         message="",
-        test_mode=False,
         pbar=False,
         ignore_tags=False,
         ancil_drop_duplicates=False,
@@ -818,79 +899,28 @@ class Imprinter:
         """
         if session is None:
             session = self.get_session()
-        # get book id and book object, depending on whether book id is given or not
-        if isinstance(book, Books):
-            bid = book.bid
-        elif isinstance(book, str):
-            bid = book
-            book = self.get_book(bid, session=session)
-        else:
-            raise NotImplementedError
-        # check whether book exists in the database
-        if not self.book_exists(bid, session=session):
-            raise BookExistsError(f"Book {bid} does not exist in the database")
-        # check whether book is already bound
-        if (book.status == BOUND) and (not test_mode):
-            raise BookBoundError(f"Book {bid} is already bound")
-        assert book.type in VALID_OBSTYPES
 
-        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
-        ## or if we ever plan to run the SATs without HWPs
-        if 'lat' in self.daq_node:
-            require_hwp = False
+        bid, status, message, err = self._run_book_binding(
+            book,
+            session=session,
+            message=message,
+            pbar=pbar,
+            ignore_tags=ignore_tags,
+            ancil_drop_duplicates=ancil_drop_duplicates,
+            allow_bad_timing=allow_bad_timing,
+            require_hwp=require_hwp,
+            require_acu=require_acu,
+            require_monotonic_times=require_monotonic_times,
+            min_ctime=min_ctime, max_ctime=max_ctime,
+            check_configs=check_configs
+        )
+        book = session.query(Books).filter(Books.bid == bid).one()
+        book.status = status
+        book.message = message
+        session.commit()
+        if status == FAILED:
+            raise err
 
-        try:
-            # find appropriate binder for the book type
-            binder = self._get_binder_for_book(
-                book, 
-                ignore_tags=ignore_tags,
-                ancil_drop_duplicates=ancil_drop_duplicates,
-                allow_bad_timing=allow_bad_timing,
-                require_acu=require_acu,
-                require_hwp=require_hwp,
-                require_monotonic_times=require_monotonic_times,
-                min_ctime=min_ctime, max_ctime=max_ctime
-            )
-            binder.bind(pbar=pbar)
-            
-            # write M_index file
-            if book.type in ['obs', 'oper']:
-                tc = self.tube_configs[book.tel_tube]
-            else:
-                tc = {}
-            binder.write_M_files(self.daq_node, tc)
-
-            if book.type in ['obs', 'oper']:
-                # check that detectors books were written out correctly
-                self.logger.info("Checking Book {}".format(book.bid))
-                check = BookScanner(
-                    self.get_book_abs_path(book), config=check_configs
-                )
-                check.go()
-
-            # not sure if this is the best place to update
-            book.status = BOUND
-            
-            self.logger.info("Book {} bound".format(book.bid))
-            book.message = message
-            if not test_mode:
-                session.commit()
-            else:
-                session.rollback()
-        except Exception as e:
-            session.rollback()
-            book.status = FAILED
-            self.logger.error("Book {} failed".format(book.bid))
-            err_msg = traceback.format_exc()
-            self.logger.error(err_msg)
-            message = f"{message}\ntrace={err_msg}" if message else err_msg
-            book.message = message
-
-            if not test_mode:
-                session.commit()
-            else:
-                session.rollback()
-            raise e
 
     def get_book(self, bid, session=None):
         """Get book from database.
@@ -1869,7 +1899,6 @@ class Imprinter:
 #####################
 # Utility functions #
 #####################
-
 
 _primary_idx_map = {}
 
