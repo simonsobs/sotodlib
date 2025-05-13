@@ -501,7 +501,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             for k in v['tones'].keys:
                 # Should look like this: sch_NONE_2_326
                 b, c = map(int, k.split('_')[2:])
-                tone_info.append((v['stream_id'], v['stream_id'] + '_' + k, b, c))
+                tone_info.append((v['stream_id'], v['stream_id'] + f'_{b}_{c}', b, c))
         ts, tk, tb, tc = map(np.array, zip(*tone_info))
         tman = core.AxisManager(core.LabelAxis('tdets', tk),
                                 aman.samps)
