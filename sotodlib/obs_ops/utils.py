@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def correct_iir_params(aman):
+def correct_iir_params(aman, ignore_time=False, check_srate=-1):
     """
     Correct missing iir_params by default values.
     This corrects iir_params only when the observation is within the time_range
@@ -16,6 +16,12 @@ def correct_iir_params(aman):
     Parameters
     ----------
     aman: AxisManager of observation
+
+    ignore_time: Boolean. True if we don't want to check if the observation is within
+                 a known bad time range.
+
+    check_srate: If greater than 0 will check that the observations sample rate is within
+                 check_srate Hz of 200 Hz. If less than 0 the check is skipped.
 
     Returns
     -------
@@ -46,14 +52,19 @@ def correct_iir_params(aman):
                     iir_missing.append(_field)
 
     within_range = False
-    if time_range is not None:
+    if time_range is not None and not ignore_time:
         t0 = datetime.datetime.strptime(time_range[0], '%Y-%m-%d')
         t1 = datetime.datetime.strptime(time_range[1], '%Y-%m-%d')
         t0 = t0.replace(tzinfo=datetime.timezone.utc).timestamp()
         t1 = t1.replace(tzinfo=datetime.timezone.utc).timestamp()
         within_range = aman.timestamps[0] >= t0 and aman.timestamps[-1] <= t1
 
-    if within_range:
+    if check_srate >= 0:
+        srate = 1./np.mean(np.diff(aman.timestamps))
+        if abs(srate - 200) > check_srate:
+            raise ValueError(f"Sample rate is {srate}, too far from 200 Hz to use default params.")
+
+    if within_range or ignore_time:
         for field in iir_missing:
             logger.warning(f'iir_params are missing on {field}. '
                            'Fill default params.')
