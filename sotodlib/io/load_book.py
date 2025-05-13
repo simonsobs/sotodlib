@@ -552,9 +552,9 @@ def _concat_filesets(results, ancil=None, timestamps=None,
 
     # Assemble per-wafer flags by suffixing the stream_id.
     for flag_key in one_result['flags'].keys():
-        for stream_id, v in results.items():
+        for v in results.values():
             fasr = so3g.RangesInt32.from_mask(v['flags'][flag_key].finalize())
-            aman.flags.wrap(f'{flag_key}_{stream_id}', fasr, axis_map=[(0, 'samps')])
+            aman.flags.wrap(f'{flag_key}_{v["stream_id"]}', fasr, axis_map=[(0, 'samps')])
 
     if not get_frame_det_info:
         return aman
