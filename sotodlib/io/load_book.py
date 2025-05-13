@@ -237,7 +237,7 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False,
         samples=samples, dets=dets, no_signal=no_signal,
         no_headers=no_headers, special_channels=special_channels)
 
-    return _concat_filesets({this_detset['stream_id']: this_detset},
+    return _concat_filesets({'?': this_detset},
                             this_detset['ancil'],
                             this_detset['timestamps'],
                             sample0=samples[0])
