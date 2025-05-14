@@ -1604,6 +1604,7 @@ class EstimateT2P(_Preprocess):
               type: 'sine2'
               cutoff: 0.5
               trans_width: 0.1
+            flag_name: 'exclude' # a field in aman.flags can combine with union_flags.
           save: True
     
     .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
