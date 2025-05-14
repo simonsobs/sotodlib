@@ -829,7 +829,7 @@ class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight and subtract.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
-    fitting will be applied and used as AzSS model. If `subtract_in_place` is True, subtract AzSS model
+    fitting will be applied and used as AzSS model. If `subtract` is True in process, subtract AzSS model
     from signal in place.
 
     Example configuration block::
@@ -843,7 +843,6 @@ class AzSS(_Preprocess):
           flags: 'glitch_flags'
           merge_stats: True
           merge_model: False
-          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -866,7 +865,6 @@ class AzSS(_Preprocess):
           scan_flags: 'left_scan'
           merge_stats: True
           merge_model: False
-          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -889,20 +887,29 @@ class AzSS(_Preprocess):
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
-        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
-            if sim:
-                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        if 'subtract_in_place' in self.calc_cfgs:
+            raise ValueError('calc_cfgs.subtract_in_place is not allowed use process_cfgs.subtract')
+        if self.process_cfgs is None:
+            # This handles the case if no process configs are passed.
+            return
+            
+        if self.process_cfgs.get("subtract"):
+            if self.calc_cfgs.get('azss_stats_name') in proc_aman:
+                if sim:
+                    tod_ops.azss.get_azss(aman, subtract_in_place=True, **self.calc_cfgs)
+                else:
+                    tod_ops.azss.subtract_azss(
+                        aman,
+                        proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                        signal=self.calc_cfgs.get('signal', 'signal'),
+                        scan_flags=self.calc_cfgs.get('scan_flags'),
+                        method=self.calc_cfgs.get('method', 'interpolate'),
+                        max_mode=self.calc_cfgs.get('max_mode'),
+                        azrange=self.calc_cfgs.get('azrange'),
+                        in_place=True
+                    )
             else:
-                tod_ops.azss.subtract_azss(
-                    aman,
-                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
-                    signal=self.calc_cfgs.get('signal', 'signal'),
-                    scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method', 'interpolate'),
-                    max_mode=self.calc_cfgs.get('max_mode'),
-                    azrange=self.calc_cfgs.get('azrange'),
-                    in_place=True
-                )
+                tod_ops.azss.get_azss(aman, subtract_in_place=True, **self.calc_cfgs)
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
