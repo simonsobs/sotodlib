@@ -1343,7 +1343,7 @@ class PCARelCal(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.run = step_cfgs.get('pca_run', 'run1')
-        self.bandpass = step_cfgs.get('bandpass', 'wafer.bandpass')
+        self.bandpass = step_cfgs.get('bandpass_key', 'wafer.bandpass')
         self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
