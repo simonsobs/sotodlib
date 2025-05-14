@@ -165,6 +165,8 @@ class Context(odict):
                 on_missing=None,
                 free_tags=None,
                 no_signal=None,
+                no_headers=None,
+                special_channels=None,
                 loader_type=None,
     ):
         """Load TOD and supporting metadata for some observation.
@@ -204,6 +206,10 @@ class Context(odict):
           no_signal (bool): If True, the .signal will be set to None.
             This is a way to get the axes and pointing info without
             the (large) TOD blob.  Not all loaders may support this.
+          no_headers (bool): If True, avoid loading "header"
+            information that tags along with the signal.
+          special_channels (bool): If True, load "special" readout
+            channels that are normally skipped (e.g. fixed tones).
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
@@ -286,7 +292,9 @@ class Context(odict):
             loader_type = self.get('obs_loader_type', 'default')
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets=dets,
-                           samples=samples, no_signal=no_signal)
+                           samples=samples, no_signal=no_signal,
+                           no_headers=no_headers,
+                           special_channels=special_channels)
 
         if aman is None:
             return meta
@@ -567,6 +575,11 @@ def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
       no_signal (bool): If True, loader should avoid reading signal
         data (if possible) and should set .signal=None in the output.
         Passing None is equivalent to passing False.
+      no_headers (bool): If True, loader should avoid loading "header"
+        information that tags along with the signal (such as frame
+        counters, biases, etc.)
+      special_channels (bool): If True, load additional special /
+        diagnostic readout channels that are normally skipped.
 
     Notes:
       This interface is subject to further extension.  When possible
