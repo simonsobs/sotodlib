@@ -119,7 +119,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
             cleared = []
         else:
             with open(checked_file) as f:
-                cleared = [c.strip("\n") for c in f.readlines()]
+                cleared = [c.strip("\n").strip() for c in f.readlines()]
         raise_list_timing = [x for x in raise_list_timing if x not in cleared]
         raise_list_readout_ids = [
             x for x in raise_list_readout_ids if x not in cleared

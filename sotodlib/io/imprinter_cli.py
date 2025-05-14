@@ -181,14 +181,14 @@ class NoMountData(BookError):
     def has_error(book):
         return "NoMountData" in book.message
     def fix_book(self):
-        if book.type == 'obs':
+        if self.book.type == 'obs':
             print("Cannot autofix obs books where the ACU was not reading out")
             return
-        elif book.type == 'oper':
+        elif self.book.type == 'oper':
             utils.set_book_rebind(self.imprint, self.book)
             self.imprint.bind_book(self.book, require_acu=False,)
         else: 
-            raise ValueError(f"What book got me here? {book.bid}")
+            raise ValueError(f"What book got me here? {self.book.bid}")
     def report_error(self):
         return f"{self.book.bid} does not ACU data reading out"
 
@@ -203,30 +203,32 @@ class TimingSystemOff(BookError):
         return 'TimingSystemOff' in book.message
 
     def fix_book(self):
-        if "Timing counters not incrementing" in book.message:
-            if book.type == 'obs':
+        if "Timing counters not incrementing" in self.book.message:
+            if self.book.type == 'obs':
                 print(
                     "Cannot autofix obs books where timing counters aren't" 
                     " incrementing"
                 )
-            elif book.type == 'oper':
-                utils.set_book_rebind(imprint, book, update_level2=True)
-                imprint.bind_book(book)
+            elif self.book.type == 'oper':
+                utils.set_book_rebind(
+                    self.imprint, self.book, update_level2=True
+                )
+                self.imprint.bind_book(self.book)
             else:
-                raise ValueError(f"What book got me here? {book.bid}")
+                raise ValueError(f"What book got me here? {self.book.bid}")
         else:
             utils.set_book_rebind(self.imprint, self.book)
             self.imprint.bind_book(self.book, allow_bad_timing=True,)
     
     def report_error(self):
-        if "Timing counters not incrementing" in book.message:
-            msg = f"{book.bid} has timing system errors not caught at level 2"
-            if book.type == 'obs':
+        if "Timing counters not incrementing" in self.book.message:
+            msg = f"{self.book.bid} has timing system errors not caught at level 2"
+            if self.book.type == 'obs':
                 msg += "\n\t LEVEL2-FAIL: probably have to delete book, update"
                 msg += "update level 2, and replan books"
             return msg
         else:
-            return f"{book.bid} has low precision timing"
+            return f"{self.book.bid} has low precision timing"
 
 class FileTooLargeError(BookError):
     @staticmethod
