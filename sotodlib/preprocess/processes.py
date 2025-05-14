@@ -169,6 +169,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     Example configuration block::
         
       - name: "glitches"
+        glitch_name: "my_glitches"
         calc:
           signal_name: "hwpss_remove"
           t_glitch: 0.00001
@@ -188,11 +189,15 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     name = "glitches"
     _influx_field = "glitch_flags_frac"
 
+    def __init__(self, step_cfgs):
+        self.glitch_name = step_cfgs.get('glitch_name', 'glitches')
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         _, glitch_aman = tod_ops.flags.get_glitch_flags(aman,
             merge=False, full_output=True, **self.calc_cfgs
         ) 
-        aman.wrap("glitches", glitch_aman)
+        aman.wrap(self.glitch_name, glitch_aman)
         self.save(proc_aman, glitch_aman)
         if self.calc_cfgs.get('save_plot', False):
             flag_utils.plot_glitch_stats(aman, save_path=self.calc_cfgs['save_plot'])
@@ -201,7 +206,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("glitches", glitch_aman)
+            proc_aman.wrap(self.glitch_name, glitch_aman)
  
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -209,7 +214,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
         flag = sparse_to_ranges_matrix(
-            proc_aman.glitches.glitch_detection > self.select_cfgs["sig_glitch"]
+            proc_aman[self.glitch_name].glitch_detection > self.select_cfgs["sig_glitch"]
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
@@ -225,9 +230,9 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
             filename = filename.replace('{obsid}', aman.obs_info.obs_id)
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
-            plot_signal_diff(aman, proc_aman.glitches, flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
+            plot_signal_diff(aman, proc_aman[self.glitch_name], flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
-            plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
+            plot_flag_stats(aman, proc_aman[self.glitch_name], flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
 
 class FixJumps(_Preprocess):
@@ -759,6 +764,13 @@ class EstimateHWPSS(_Preprocess):
 class SubtractHWPSS(_Preprocess):
     """Subtracts a HWPSS template from signal. 
 
+    Example config block::
+
+      - name: "subtract_hwpss"
+        hwpss_stats: "hwpss_stats"
+        process:
+          subtract_name: "hwpss_remove"
+
     .. autofunction:: sotodlib.hwp.hwp.subtract_hwpss
     """
     name = "subtract_hwpss"
@@ -817,7 +829,7 @@ class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight and subtract.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
-    fitting will be applied and used as AzSS model. If `subtract_in_place` is True, subtract AzSS model
+    fitting will be applied and used as AzSS model. If `subtract` is True in process, subtract AzSS model
     from signal in place.
 
     Example configuration block::
@@ -831,7 +843,6 @@ class AzSS(_Preprocess):
           flags: 'glitch_flags'
           merge_stats: True
           merge_model: False
-          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -854,7 +865,6 @@ class AzSS(_Preprocess):
           scan_flags: 'left_scan'
           merge_stats: True
           merge_model: False
-          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -877,20 +887,29 @@ class AzSS(_Preprocess):
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
-        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
-            if sim:
-                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        if 'subtract_in_place' in self.calc_cfgs:
+            raise ValueError('calc_cfgs.subtract_in_place is not allowed use process_cfgs.subtract')
+        if self.process_cfgs is None:
+            # This handles the case if no process configs are passed.
+            return
+            
+        if self.process_cfgs.get("subtract"):
+            if self.calc_cfgs.get('azss_stats_name') in proc_aman:
+                if sim:
+                    tod_ops.azss.get_azss(aman, subtract_in_place=True, **self.calc_cfgs)
+                else:
+                    tod_ops.azss.subtract_azss(
+                        aman,
+                        proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                        signal=self.calc_cfgs.get('signal', 'signal'),
+                        scan_flags=self.calc_cfgs.get('scan_flags'),
+                        method=self.calc_cfgs.get('method', 'interpolate'),
+                        max_mode=self.calc_cfgs.get('max_mode'),
+                        azrange=self.calc_cfgs.get('azrange'),
+                        in_place=True
+                    )
             else:
-                tod_ops.azss.subtract_azss(
-                    aman,
-                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
-                    signal=self.calc_cfgs.get('signal', 'signal'),
-                    scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method', 'interpolate'),
-                    max_mode=self.calc_cfgs.get('max_mode'),
-                    azrange=self.calc_cfgs.get('azrange'),
-                    in_place=True
-                )
+                tod_ops.azss.get_azss(aman, subtract_in_place=True, **self.calc_cfgs)
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
@@ -1356,7 +1375,8 @@ class PCARelCal(_Preprocess):
         pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
             m0 = aman.det_info[self.bandpass] == band
-            rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
+            if self.plot_cfgs is not None:
+                rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
 
             filt_aman = filt_aman.restrict('dets', aman.dets.vals[m0], in_place=False)
@@ -1373,10 +1393,11 @@ class PCARelCal(_Preprocess):
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
             pca_weight0[m0] = result_aman['pca_weight0']
-            rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
-            rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
-            rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
-            rc_aman.wrap(f'{band}_median', result_aman['median'])
+            if self.plot_cfgs is not None:
+                rc_aman.wrap(f'{band}_pca_mode0', result_aman['pca_mode0'], [(0, 'samps')])
+                rc_aman.wrap(f'{band}_xbounds', result_aman['xbounds'])
+                rc_aman.wrap(f'{band}_ybounds', result_aman['ybounds'])
+                rc_aman.wrap(f'{band}_median', result_aman['median'])
 
         rc_aman.wrap('pca_det_mask', pca_det_mask, [(0, 'dets')])
         rc_aman.wrap('relcal', relcal, [(0, 'dets')])
@@ -1412,9 +1433,19 @@ class PCARelCal(_Preprocess):
             bands = np.unique(aman.det_info[self.bandpass])
             bands = bands[bands != 'NC']
             for band in bands:
-                pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
-                plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+                if f'{band}_pca_mode0' in proc_aman[self.run_name]:
+                    pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                    if self.calc_cfgs.get("lpf") is not None:
+                        trim = self.calc_cfgs["trim_samps"]
+                        pca_aman.restrict('samps', (pca_aman.samps.offset + trim,
+                                                    pca_aman.samps.offset + pca_aman.samps.count - trim))
+                    band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
+                    plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.plot_signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+                    proc_aman[self.run_name].move(f'{band}_idx', None)
+                    proc_aman[self.run_name].move(f'{band}_pca_mode0', None)
+                    proc_aman[self.run_name].move(f'{band}_xbounds', None)
+                    proc_aman[self.run_name].move(f'{band}_ybounds', None)
+                    proc_aman[self.run_name].move(f'{band}_median', None)
 
 class PCAFilter(_Preprocess):
     """
@@ -1574,6 +1605,7 @@ class EstimateT2P(_Preprocess):
               type: 'sine2'
               cutoff: 0.5
               trans_width: 0.1
+            flag_name: 'exclude' # a field in aman.flags can combine with union_flags.
           save: True
     
     .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
