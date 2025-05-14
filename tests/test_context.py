@@ -10,7 +10,7 @@ import tempfile
 
 from sotodlib import core
 from sotodlib.core import metadata, Context, OBSLOADER_REGISTRY
-from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array, ModifyFieldsResultSetHdfLoader
+from sotodlib.io.metadata import ResultSetHdfLoader, write_dataset, _decode_array
 import so3g
 
 import numpy as np
@@ -311,7 +311,7 @@ class ContextTest(unittest.TestCase):
         self.assertCountEqual(tod.ondisk._fields.keys(), ['disk1', 'subaman'])
         self.assertCountEqual(tod.ondisk.subaman._fields.keys(), ['disk2'])
 
-    def test_130_load_fields(self):
+    def test_load_fields_resultset(self):
         dataset_sim = DatasetSim()
         obs_id = dataset_sim.obss['obs_id'][1]
         ctx = dataset_sim.get_context(with_resultset_ondisk=True)
@@ -666,14 +666,12 @@ class DatasetSim:
             ctx['metadata'].insert(0, {
                 'db': ondisk_db,
                 'det_info': True,
-                'loader': 'ModifyFieldsResultSetHdf',
                 'load_fields': [{'band': 'dets:band1'}, {'readout_id': 'dets:readout_id'}],
             })
 
             ctx['metadata'].insert(0, {
                 'db': ondisk_db,
                 'unpack': 'ondisk_resultset',
-                'loader': 'ModifyFieldsResultSetHdf',
                 'load_fields': [{'readout_id': 'dets:readout_id'}, 'pol_code'],
             })
 

@@ -112,17 +112,38 @@ class AxisManagerHdfLoader(LoaderInterface):
 
 
 class ResultSetHdfLoader(LoaderInterface):
-    def _prefilter_data(self, data_in, key_map={}):
-        """When a dataset is loaded and converted to a structured numpy
-        array, this function is called before the data are returned to
-        the user.  The key_map can be used to rename fields, on load.
+    def _check_key_map(self, key_map, data_in):
+        """Check that all keys in key_map are valid fields in data_in."""
+        for key in key_map.keys():
+            if key not in data_in.dtype.names:
+                raise KeyError(f"{key} not included inside dataset with keys"
+                               f"{data_in.dtype.names}")
+
+    def _prefilter_data(self, data_in, load_fields=None):
+        """When a dataset is loaded and converted to a structured numpy array,
+        this function is called before the data are returned to the user. If
+        'load_fields' has data for this instance, this function adds any fields
+        specified within to the key map and checks that these fields are all
+        valid fields in data_in.
 
         This function may be extended in subclasses, but you will
         likely want to call the super() handler before doing
-        additional processing.  The loading functions do not pass in
-        key_map -- this is for the exclusive use of subclasses.
-
+        additional processing.
         """
+        key_map = {}
+        if load_fields is not None:
+            for field in load_fields:
+                if isinstance(field, dict):
+                    key_map.update(field)
+                else:
+                    key_map[field] = field
+
+            for k in data_in.dtype.names:
+                if k not in key_map.keys():
+                    key_map[k] = None
+
+            self._check_key_map(key_map, data_in)
+
         return _decode_array(data_in, key_map=key_map)
 
     def _populate(self, data, keys=None, row_order=None):
@@ -192,7 +213,7 @@ class ResultSetHdfLoader(LoaderInterface):
                     dataset = load_params[idx]['dataset']
                     if dataset is not last_dataset:
                         data = fin[dataset][()]
-                        data = self._prefilter_data(data)
+                        data = self._prefilter_data(data, **kwargs)
                         last_dataset = dataset
 
                     # Dereference the extrinsic axis request.  Every
@@ -219,46 +240,6 @@ class ResultSetHdfLoader(LoaderInterface):
                     results[idx] = self._populate(data, keys=keys_out,
                                                   row_order=mask.nonzero()[0])
         return results
-
-class ModifyFieldsResultSetHdfLoader(ResultSetHdfLoader):
-    def __init__(self):
-        self.load_fields = None
-
-    def _check_key_map(self, key_map, data_in):
-        for key in key_map.keys():
-            if key not in data_in.dtype.names:
-                raise KeyError(f"{key} not included inside dataset with keys"
-                               f"{data_in.dtype.names}")
-
-
-    def _prefilter_data(self, data_in):
-        """Extend to allow us to specify which data fields to load."""
-        key_map = {}
-        if self.load_fields is not None:
-            for field in self.load_fields:
-                if isinstance(field, dict):
-                    key_map.update(field)
-                else:
-                    key_map[field] = field
-
-            for k in data_in.dtype.names:
-                if k not in key_map.keys():
-                    key_map[k] = None
-
-            self._check_key_map(key_map, data_in)
-
-        return _decode_array(data_in, key_map=key_map)
-
-    def batch_from_loadspec(self, load_params, **kwargs):
-        """Extend to allow us to input 'load_fields' which will modify our
-        class variables as used in _prefilter_data(...).
-
-        """
-        if 'load_fields' in kwargs.keys():
-            self.load_fields = kwargs['load_fields']
-        results = super().batch_from_loadspec(load_params)
-        return results
-
 
 
 def _decode_array(data_in, key_map={}):
@@ -318,7 +299,6 @@ class _nullcontext:
 SuperLoader.register_metadata('DefaultHdf', DefaultHdfLoader)
 SuperLoader.register_metadata('AxisManagerHdf', AxisManagerHdfLoader)
 SuperLoader.register_metadata('ResultSetHdf', ResultSetHdfLoader)
-SuperLoader.register_metadata('ModifyFieldsResultSetHdf', ModifyFieldsResultSetHdfLoader)
 
 # The old name... remove some day.
 SuperLoader.register_metadata('PerDetectorHdf5', ResultSetHdfLoader)
