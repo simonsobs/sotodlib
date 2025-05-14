@@ -286,6 +286,9 @@ class CalInfo:
         for field in fields(cls):
             if field.name == "readout_id":
                 dt: Tuple[str, Any] = ("dets:readout_id", "<U40")
+            elif field_name == 'bandpass':
+                # Our bandpass str is at max 4 characters
+                dt: Tuple[str, Any] = ("bandpass", "<U4")
             else:
                 dt = (field.name, field.type)
             dtype.append(dt)
