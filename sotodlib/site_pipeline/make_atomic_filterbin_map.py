@@ -86,6 +86,10 @@ class Cfg:
         Run a specific frequency band
     unit: str
         Unit of data. Default is K
+    use_psd: bool
+        True by default. Use white noise measured by PSD
+        as the weights for mapmaking. Must be provided by
+        the preprocessing
     center_at: str
     max_dets: int
     fixed_time: int
@@ -133,7 +137,8 @@ class Cfg:
         window: Optional[float] = None,
         dtype_tod: str = 'float32',
         dtype_map: str = 'float64',
-        unit: str = 'K'
+        unit: str = 'K',
+        use_psd: bool = True
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -169,6 +174,7 @@ class Cfg:
         self.dtype_tod = dtype_tod
         self.dtype_map = dtype_map
         self.unit = unit
+        self.use_psd = use_psd
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -453,6 +459,7 @@ def main(
             split_labels=split_labels,
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
+            use_this=args.use_psd,
             atomic_db=args.atomic_db) for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
