@@ -541,8 +541,8 @@ def get_hw_positions(tele, band, tube=None):
         'f040': 'SAT4',
         'f090': 'SAT1',
         'f150': 'SAT1',
-        'f230': 'SAT3',
-        'f290': 'SAT3',
+        'f220': 'SAT3',
+        'f280': 'SAT3',
     }
 
     if tube is None:
