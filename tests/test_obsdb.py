@@ -145,13 +145,32 @@ class TestObsDb(unittest.TestCase):
                 self.assertEqual(row['bandpass'], 'f090')
 
     def test_owb_update(self):
-        """Test updating data for specific wafer_info keys."""
+        """
+        Test updating data for specific wafer_info keys.
+        Tests all 4 possible ways to update data.
+        """
         db = get_owb_example()
+        # Method 1
         db.update_obs('myobs0', wafer_info=('ws3', 'f090'), data={'data1': 999})
         result = db.get('myobs0', wafer_info=('ws3', 'f090'))
         self.assertEqual(result['data1'], 999)
         result_other = db.get('myobs0', wafer_info=('ws4', 'f090'))
         self.assertNotEqual(result_other['data1'], 999)
+        # Method 2
+        db.update_obs('myobs0', wafer_info={'wafer_slot':'ws3', 'bandpass':'f150'},
+                      data={'data1': 998})
+        result_m2 = db.get('myobs0', wafer_info={'wafer_slot':'ws3', 'bandpass':'f150'})
+        self.assertNotEqual(result_m2['data1'], 998)
+        # Method 3
+        db.update_obs({'obs_id':'myobs0', 'wafer_slot':'ws5', 'bandpass':'f090'},
+                      data={'data1': 997})
+        result_m3 = db.get({'obs_id':'myobs0', 'wafer_slot':'ws5', 'bandpass':'f090'})
+        self.assertNotEqual(result_m3['data1'], 997)
+        # Method 4
+        db.update_obs(('myobs0', 'ws5', 'f150'),
+                      data={'data1': 996})
+        result_m4 = db.get(('myobs0', 'ws5', 'f150'))
+        self.assertNotEqual(result_m4['data1'], 996)
 
     def test_io(self):
         """Check to_file and from_file."""

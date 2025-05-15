@@ -70,12 +70,12 @@ class ObsDb(object):
 
             self._table_defs = {'obs': [
                                     "`timestamp` float",
-                                    *(f"`{k}` varchar(256)" for k in pkeys),
+                                    *(f"{k} varchar(256)" for k in pkeys),
                                     f"PRIMARY KEY ({', '.join(pkeys)})"
                                 ],
                                 'tags': [
                                     "`tag` varchar(256)",
-                                    *(f"`{k}` varchar(256)" for k in pkeys),
+                                    *(f"{k} varchar(256)" for k in pkeys),
                                     f"PRIMARY KEY ({', '.join(pkeys)}, `tag`)"
                                 ]}
             
@@ -102,14 +102,32 @@ class ObsDb(object):
         c = self.conn.execute(query)
         primary_keys = [row['name'] for row in c.fetchall() if row['pk'] > 0]
         if wafer_info:
-            pkeys = ["`obs_id`"]
-            pkeys.extend([f"`{k}`" for k in wafer_info])
+            pkeys = ["obs_id"]
+            pkeys.extend([f"{k}" for k in wafer_info])
             if sorted(pkeys) != sorted(primary_keys): # sorted allows for different order
                 raise ValueError(f"Primary keys do not match: {primary_keys} != {pkeys}"+
                                 f" must use `wafer_info`=={primary_keys} or create a new dB with {pkeys}")
         return primary_keys
     
-    def _warn_primary_keys(self):
+    def _convert_wafer_info(self, obs_id, wafer_info):
+        """Helper function to allow flexibility in way obs_id and wafer_info are passed in."""
+        if isinstance(wafer_info, dict):
+            wafer_info = wafer_info.values()
+        if isinstance(obs_id, tuple):
+            if len(obs_id) == len(self.primary_keys):
+                wafer_info = tuple([wi for wi in obs_id[1:]])
+                obs_id = obs_id[0]
+            else:
+                raise ValueError(f"obs_id tuple must be of length {len(self.primary_keys)}")
+        if isinstance(obs_id, dict):
+            if len(obs_id) == len(self.primary_keys):
+                wafer_info = tuple([wi for ki, wi in obs_id.items() if ki != 'obs_id'])
+                obs_id = obs_id['obs_id']
+            else:
+                raise ValueError(f"obs_id dict must be of length {len(self.primary_keys)}")
+        return obs_id, wafer_info
+
+    def _warn_primary_keys(self, wafer_info):
         """Warn the user if the primary keys are not specified 
            and we're defaulting to using _all."""
         if len(self.primary_keys) == 1:
@@ -210,10 +228,26 @@ class ObsDb(object):
             tag name is prefxed with '!', then the tag name will be
             un-applied, i.e. cleared from this observation.
 
-        Returns:
-            self.
+        Example of ways to pass updates to obsdb when there are multiple primary keys.
+        1) obs_id as str and wafer_info as tuple::
+        
+            obsdb.update_obs('obs_2345_xyz_110', wafer_info=('ws0', 'f090'), ...)
 
+        2) obs_id as str and wafer_info as dict::
+
+            obsdb.update_obs('obs_2345_xyz_110', wafer_info={'wafer_slot': 'ws0', 'bandpass': 'f090'}, ...)
+
+        3) obs_id as dict and wafer_info is None::
+
+            obsdb.update_obs({'obs_id': 'obs_2345_xyz_110', 'wafer_slot': 'ws0', 'bandpass': 'f090'}, ...)
+
+        4) obs_id as tuple and wafer_info is None::
+
+            obsdb.update_obs(('obs_2345_xyz_110', 'ws0', 'f090'), ...)
+        
         """
+        obs_id, wafer_info = self._convert_wafer_info(obs_id, wafer_info)
+
         obs_key = {'obs_id': obs_id}
         if (len(self.primary_keys) > 1):
             wafer_info = self._warn_primary_keys(wafer_info)
@@ -312,6 +346,7 @@ class ObsDb(object):
           requested, they will be stored in 'tags' as a list of strings.
 
         """
+        obs_id, wafer_info = self._convert_wafer_info(obs_id, wafer_info)
         if obs_id is None:
             return self.query('1', add_prefix=add_prefix)
         
