@@ -160,17 +160,17 @@ class TestObsDb(unittest.TestCase):
         db.update_obs('myobs0', wafer_info={'wafer_slot':'ws3', 'bandpass':'f150'},
                       data={'data1': 998})
         result_m2 = db.get('myobs0', wafer_info={'wafer_slot':'ws3', 'bandpass':'f150'})
-        self.assertNotEqual(result_m2['data1'], 998)
+        self.assertEqual(result_m2['data1'], 998)
         # Method 3
         db.update_obs({'obs_id':'myobs0', 'wafer_slot':'ws5', 'bandpass':'f090'},
                       data={'data1': 997})
         result_m3 = db.get({'obs_id':'myobs0', 'wafer_slot':'ws5', 'bandpass':'f090'})
-        self.assertNotEqual(result_m3['data1'], 997)
+        self.assertEqual(result_m3['data1'], 997)
         # Method 4
         db.update_obs(('myobs0', 'ws5', 'f150'),
                       data={'data1': 996})
         result_m4 = db.get(('myobs0', 'ws5', 'f150'))
-        self.assertNotEqual(result_m4['data1'], 996)
+        self.assertEqual(result_m4['data1'], 996)
 
     def test_io(self):
         """Check to_file and from_file."""
