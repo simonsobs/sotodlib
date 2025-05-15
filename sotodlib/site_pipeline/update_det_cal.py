@@ -33,6 +33,12 @@ DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 TES_BIAS_COUNT = 12  # per detset / primary file group
 
+# For converting bias group to bandpass.
+BGS = {'lb': [0, 1, 4, 5, 8, 9], 'hb': [2, 3, 6, 7, 10, 11]}
+BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
+            'uhf': {'lb': 'f220', 'hb': 'f280'},
+            'lf': {'lb': 'f030', 'hb': 'f040'}}
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
     sp_util.init_logger("det_cal")
@@ -248,6 +254,8 @@ class CalInfo:
         Current responsivity of the TES [1/V] computed using bias steps at the
         bias point. This is based on the naive bias step estimation without
         using any additional corrections.
+    bandpass: str
+        Detector bandpass, computed from bias group information.
     """
 
     readout_id: str = ""
@@ -269,6 +277,7 @@ class CalInfo:
     naive_r_frac: float = np.nan
     naive_p_bias: float = np.nan
     naive_s_i: float = np.nan
+    bandpass: str = "NC"
 
     @classmethod
     def dtype(cls) -> List[Tuple[str, Any]]:
@@ -277,6 +286,9 @@ class CalInfo:
         for field in fields(cls):
             if field.name == "readout_id":
                 dt: Tuple[str, Any] = ("dets:readout_id", "<U40")
+            elif field_name == 'bandpass':
+                # Our bandpass str is at max 4 characters
+                dt: Tuple[str, Any] = ("bandpass", "<U4")
             else:
                 dt = (field.name, field.type)
             dtype.append(dt)
@@ -616,6 +628,12 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                 cal.phase_to_pW = np.nan
             else:
                 cal.phase_to_pW = pA_per_phi0 / (2 * np.pi) / cal.s_i * cal.polarity
+
+            # Add bandpass informaton from bias group
+            if cal.bg in BGS['lb']:
+                cal.bandpass = BAND_STR[tube_flavor]['lb']
+            elif cal.bg in BGS['hb']:
+                cal.bandpass = BAND_STR[tube_flavor]['hb']
 
         res.result_set = np.array([astuple(c) for c in cals], dtype=CalInfo.dtype())
         res.success = True
