@@ -811,7 +811,6 @@ class A2Stats(_Preprocess):
         for sn in stat_names:
             a2stats_aman.move(sn, f"{sn}U")
 
-        aman.wrap("a2_stats", a2stats_aman)
         self.save(proc_aman, a2stats_aman)
 
     def save(self, proc_aman, a2_stats):
