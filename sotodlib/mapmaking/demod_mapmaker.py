@@ -64,7 +64,7 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None, use_psd=True):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None, use_psd=True, wn_label = 'preprocess.noiseQ_mapmaking.white_noise'):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -96,9 +96,12 @@ class DemodMapmaker:
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
         if use_psd:
-            noise_model.ivar = 1.0 / obs.wn**2
-        assert noise_model.ready
-        if noise_model.ready:
+            try:
+                noise_model.ivar = 1.0 / obs[wn_label]**2
+            except:
+                msg = f"use_psd is True but '{wn_label}' does not contain the white noise estimated on the preprocessing"
+                raise RuntimeError(msg)
+        if noise_model.check_ready():
             nmat = noise_model
         else:
             try:
@@ -467,7 +470,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    atomic_db=None, unit='K', use_psd=True):
+                    atomic_db=None, unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -526,6 +529,8 @@ def make_demod_map(context, obslist, noise_model, info,
         By default True. Use the white noise measured from PSD as mapmaking weights,
         which must be provided in the preprocessing. This is done as opposed to
         build the ivar locally from the std of the TOD.
+    wn_label : str, optional
+        Path where to find the white noise per det estimated by the preprocessing.
 
     Returns
     -------
@@ -573,7 +578,7 @@ def make_demod_map(context, obslist, noise_model, info,
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd)
+        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
     nobs_kept = comm.allreduce(nobs_kept)
