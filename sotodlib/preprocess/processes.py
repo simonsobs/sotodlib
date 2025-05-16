@@ -1,6 +1,7 @@
 import numpy as np
 from operator import attrgetter
 import copy
+import warnings
 
 from so3g.proj import Ranges, RangesMatrix
 
@@ -829,7 +830,7 @@ class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight and subtract.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
-    fitting will be applied and used as AzSS model. If `subtract_in_place` is True, subtract AzSS model
+    fitting will be applied and used as AzSS model. If `subtract` is True in process, subtract AzSS model
     from signal in place.
 
     Example configuration block::
@@ -843,7 +844,6 @@ class AzSS(_Preprocess):
           flags: 'glitch_flags'
           merge_stats: True
           merge_model: False
-          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -866,7 +866,6 @@ class AzSS(_Preprocess):
           scan_flags: 'left_scan'
           merge_stats: True
           merge_model: False
-          subtract_in_place: True
         save: True
         process:
           subtract: True
@@ -889,20 +888,29 @@ class AzSS(_Preprocess):
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
-        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
-            if sim:
-                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+        if 'subtract_in_place' in self.calc_cfgs:
+            raise ValueError('calc_cfgs.subtract_in_place is not allowed use process_cfgs.subtract')
+        if self.process_cfgs is None:
+            # This handles the case if no process configs are passed.
+            return
+            
+        if self.process_cfgs.get("subtract"):
+            if self.calc_cfgs.get('azss_stats_name') in proc_aman:
+                if sim:
+                    tod_ops.azss.get_azss(aman, subtract_in_place=True, **self.calc_cfgs)
+                else:
+                    tod_ops.azss.subtract_azss(
+                        aman,
+                        proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                        signal=self.calc_cfgs.get('signal', 'signal'),
+                        scan_flags=self.calc_cfgs.get('scan_flags'),
+                        method=self.calc_cfgs.get('method', 'interpolate'),
+                        max_mode=self.calc_cfgs.get('max_mode'),
+                        azrange=self.calc_cfgs.get('azrange'),
+                        in_place=True
+                    )
             else:
-                tod_ops.azss.subtract_azss(
-                    aman,
-                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
-                    signal=self.calc_cfgs.get('signal', 'signal'),
-                    scan_flags=self.calc_cfgs.get('scan_flags'),
-                    method=self.calc_cfgs.get('method', 'interpolate'),
-                    max_mode=self.calc_cfgs.get('max_mode'),
-                    azrange=self.calc_cfgs.get('azrange'),
-                    in_place=True
-                )
+                tod_ops.azss.get_azss(aman, subtract_in_place=True, **self.calc_cfgs)
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
@@ -1597,6 +1605,7 @@ class EstimateT2P(_Preprocess):
               type: 'sine2'
               cutoff: 0.5
               trans_width: 0.1
+            flag_name: 'exclude' # a field in aman.flags can combine with union_flags.
           save: True
     
     .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
@@ -1685,11 +1694,63 @@ class UnionFlags(_Preprocess):
     name = "union_flags"
 
     def process(self, aman, proc_aman, sim=False):
+        warnings.warn("UnionFlags function is deprecated and only kept to allow loading of old process archives. Use generalized method CombineFlags")
+
         from so3g.proj import RangesMatrix
         total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for label in self.process_cfgs['flag_labels']:
             _label = attrgetter(label)
             total_flags += _label(proc_aman) # The + operator is the union operator in this case
+
+        if 'flags' not in aman._fields:
+            from sotodlib.core import FlagManager
+            aman.wrap('flags', FlagManager.for_tod(aman))
+        if self.process_cfgs['total_flags_label'] in aman['flags']:
+            aman['flags'].move(self.process_cfgs['total_flags_label'], None)
+        aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
+
+class CombineFlags(_Preprocess):
+    """Do the conbine of relevant flags for mapping
+    
+
+    Saves results for aman under the "flags.[total_flags_label]" field.
+
+     Example config block::
+
+        - name : "combine_flags"
+          process:
+            flag_labels: ['glitches.glitch_flags', 'source_flags.jupiter_inv']
+            total_flags_label: 'glitch_flags'
+            method: 'union' # You can select a method from ['union', '+', 'intersect', '*'].
+            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. Lentgh must match the length of flag_labels.
+
+    """
+    name = "combine_flags"
+
+    def process(self, aman, proc_aman, sim=False):
+        from so3g.proj import RangesMatrix
+        if isinstance(self.process_cfgs['method'], list):
+            if len(self.process_cfgs['flag_labels']) != len(self.process_cfgs['method']):
+                raise ValueError("The length of method does not match to the length of flag_labels")
+            elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
+                raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
+        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
+            self.process_cfgs['method'] = len(self.process_cfgs['flag_labels'])*[self.process_cfgs['method']]
+        else:
+            raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
+        
+        total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
+        for i, (method, label) in enumerate(zip(self.process_cfgs['method'], self.process_cfgs['flag_labels'])):
+            _label = attrgetter(label)
+            if i == 0:
+                total_flags += _label(proc_aman) # First flags must be added.
+                if method in ['*', 'intersect']:
+                    warnings.warn("The first method is neither '+' nor 'union'. Interpreted as '+' by default.")
+            else:
+                if method in ['+', 'union']:
+                    total_flags += _label(proc_aman) # The + operator is the union operator in this case
+                elif method in ['*', 'intersect']:
+                    total_flags *= _label(proc_aman) # The * operator is the intersect operator in this case
 
         if 'flags' not in aman._fields:
             from sotodlib.core import FlagManager
@@ -1924,6 +1985,7 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
+_Preprocess.register(CombineFlags)
 _Preprocess.register(RotateQU) 
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
