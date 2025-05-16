@@ -935,7 +935,7 @@ class SubtractAzSSTemplate(_Preprocess):
     """
     name = "subtract_azss_template"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
 
 class GlitchFill(_Preprocess):
