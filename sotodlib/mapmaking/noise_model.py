@@ -38,31 +38,6 @@ class Nmat:
         if not self.ready:
             raise ValueError("Attempt to use partially constructed %s. Typically one gets a fully constructed one from the return value of nmat.build(tod)" % type(self).__name__)
 
-class NmatWhite(Nmat):
-    def __init__(self, ivar=None):
-        self.ivar = ivar
-        self.ready= ivar is not None
-    def build(self, tod, srate, **kwargs):
-        ivar = 1/np.var(tod,1)
-        return NmatWhite(ivar)
-    def apply(self, tod, inplace=False):
-        self.check_ready()
-        if inplace: tod = np.array(tod)
-        tod *= self.ivar[:,None]
-        return tod
-    def white(self, tod, inplace=True):
-        self.check_ready()
-        return self.apply(tod, inplace=inplace)
-    def write(self, fname):
-        self.check_ready()
-        data = bunch.Bunch(type="NmatWhite")
-        for field in ["ivar"]:
-            data[field] = getattr(self, field)
-        bunch.write(fname, data)
-    @staticmethod
-    def from_bunch(data):
-        return NmatWhite(ivar=data.ivar)
-
 class NmatUncorr(Nmat):
     def __init__(self, spacing="exp", nbin=100, nmin=10, window=2, bins=None, ips_binned=None, ivar=None, nwin=None):
         self.spacing    = spacing
@@ -360,7 +335,7 @@ class NmatWhite(Nmat):
         self.ivar  = ivar
         self.window     = window
         self.nwin       = nwin
-        self.ready = ivar is not None
+        self.ready = self.check_ready()
     def build(self, tod, srate, **kwargs):
         #ndet, nsamps = tod.shape
         nwin  = utils.nint(self.window*srate)
@@ -385,6 +360,10 @@ class NmatWhite(Nmat):
     def write(self, fname):
         self.check_ready()
         bunch.write(fname, bunch.Bunch(type="NmatWhite"))
+
+    def check_ready(self):
+        return self.ivar is not None
+
     @staticmethod
     def from_bunch(data): 
         return NmatWhite(ivar=data.ivar, window=window, nwin=nwin)
