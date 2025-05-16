@@ -250,7 +250,7 @@ class FocalPlane:
             ("xi", np.float32),
             ("eta", np.float32),
             ("gamma", np.float32),
-            ("measured", np.bool_),
+            ("padded", np.bool_),
         ]
         fpout = np.fromiter(
             zip(self.det_ids, *(self.transformed.T), np.ones(len(self.det_ids), dtype=bool)*(self.padded)), dtype=outdt, count=ndets

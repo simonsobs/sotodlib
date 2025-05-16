@@ -810,15 +810,15 @@ def main():
         todel = []
         for name, ot in ots.items():
             logger.info("Fitting common mode for %s", ot.name)
-            centers = np.vstack([fp.template.center for fp in ot.focal_planes if fp.tot_weight is not None])
-            centers_transformed = np.vstack(
-                [fp.center_transformed for fp in ot.focal_planes if fp.tot_weight is not None]
-            )
-            if len(centers) == 0:
+            if ot.num_fps == 0:
                 logger.error("\tNo focal planes found! Skipping...")
                 if not config.get("pad", False):
                     todel.append(name)
                 continue
+            centers = np.vstack([fp.template.center for fp in ot.focal_planes if fp.tot_weight is not None])
+            centers_transformed = np.vstack(
+                [fp.center_transformed for fp in ot.focal_planes if fp.tot_weight is not None]
+            )
             plot_ot(ot, plot_dir)
             if centers.shape[0] < 3:
                 logger.warning(
