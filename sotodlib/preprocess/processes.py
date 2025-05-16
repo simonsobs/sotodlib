@@ -1517,6 +1517,8 @@ class FilterForSources(_Preprocess):
         process:
           n_modes: 10
           source_flags: "source_flags"
+          #order: 1 # number of order for gapfill
+          #nbuf: 10 # number of buffer for gapfill
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -1528,13 +1530,18 @@ class FilterForSources(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False):
+        if self.process_cfgs.get('n_modes') is None:
+            raise ValueError('n_modes is None. should be set.')
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        order = self.process_cfgs['order'] if self.process_cfgs['order'] is not None else 10
+        nbuf = self.process_cfgs['nbuf'] if self.process_cfgs['nbuf'] is not None else 10
+
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, order=order, nbuf=nbuf)
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.

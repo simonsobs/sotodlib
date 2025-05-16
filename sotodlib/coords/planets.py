@@ -217,7 +217,7 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
-                       wrap=None):
+                       wrap=None, order=1, nbuf=10):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -238,6 +238,8 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      order (int): Number of order is used for `get_gap_fill`
+      nbuf (int): Number of buffer is used for `get_gap_fill`
 
     Returns:
       The filtered signal.
@@ -250,7 +252,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
-    gaps = tod_ops.get_gap_fill(tod, signal=signal_pca, flags=source_flags)
+    gaps = tod_ops.get_gap_fill(tod, signal=signal_pca, flags=source_flags, order=order, nbuf=nbuf)
     gaps.swap(tod, signal=signal_pca)
 
     # Low pass filter?
