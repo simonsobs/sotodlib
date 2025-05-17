@@ -587,12 +587,14 @@ def demod_tod(aman, signal=None, demod_mode=4,
         If not specified, a sine-squared bandwidth filter of
         (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used with transition width 0.1.
         Example) bpf_cfg = {'type': 'sine2', 'center': 8.0, 'width': 3.8, 'trans_width': 0.1}
+        or bpf_cfg = {'type': 'sine2', 'center': '4*f_HWP', 'width': '1.9*f_HWP', 'trans_width': 0.1}
         See filters.get_bpf for details.
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
         a sine-squared filter with a cutoff frequency of 0.95*(HWP speed) and transition width
         0.1 is used.
         Example) lpf_cfg = {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
+        or lpf_cfg = {'type': 'sine2', 'cutoff': '0.95*f_HWP', 'trans_width': 0.1}
         See filters.get_lpf for details.
 
     Returns
@@ -627,6 +629,12 @@ def demod_tod(aman, signal=None, demod_mode=4,
                    'center': bpf_center,
                    'width': bpf_width,
                    'trans_width': 0.1}
+    
+    for k, v in bpf_cfg.items():
+        if isinstance(v, str):
+            if k in ['center', 'width']:
+                bpf_cfg[k] = speed*float(v.split('*')[0])
+
     bpf = filters.get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
@@ -634,6 +642,12 @@ def demod_tod(aman, signal=None, demod_mode=4,
         lpf_cfg = {'type': 'sine2',
                    'cutoff': lpf_cutoff,
                    'trans_width': 0.1}
+    
+    for k, v in lpf_cfg.items():
+        if isinstance(v, str):
+            if k == 'cutoff':
+                lpf_cfg[k] = speed*float(v.split('*')[0])
+
     lpf = filters.get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
