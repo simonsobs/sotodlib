@@ -812,6 +812,26 @@ class Apodize(_Preprocess):
 class Demodulate(_Preprocess):
     """Demodulate the tod. All process confgis go to `demod_tod`.
 
+    Example config block::
+
+      - name: "demodulate"
+        process:
+          trim_samps: 6000
+          demod_cfgs:
+            bpf_cfg: {'type': 'sine2', 'center': 8, 'width': 3.8, 'trans_width': 0.1}
+            lpf_cfg: {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
+
+    If you want to set filters with respect to actual HWP rotation frequency,
+    you can pass string like below. `*` is needed after the number you want to multiply HWP freq by.
+
+      - name: "demodulate"
+        process:
+          trim_samps: 6000
+          demod_cfgs:
+            # You can set float number or str(i.e., '4*f_HWP') as configs
+            bpf_cfg: {'type': 'sine2', 'center': '4*f_HWP', 'width': '3.8*f_HWP', 'trans_width': 0.1}
+            lpf_cfg: {'type': 'sine2', 'cutoff': '1.9*f_HWP', 'trans_width': 0.1}
+
     .. autofunction:: sotodlib.hwp.hwp.demod_tod
     """
     name = "demodulate"
