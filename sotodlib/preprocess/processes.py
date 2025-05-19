@@ -1,6 +1,7 @@
 import numpy as np
 from operator import attrgetter
 import copy
+import warnings
 
 from so3g.proj import Ranges, RangesMatrix
 
@@ -934,7 +935,7 @@ class SubtractAzSSTemplate(_Preprocess):
     """
     name = "subtract_azss_template"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
 
 class GlitchFill(_Preprocess):
@@ -1694,11 +1695,63 @@ class UnionFlags(_Preprocess):
     name = "union_flags"
 
     def process(self, aman, proc_aman, sim=False):
+        warnings.warn("UnionFlags function is deprecated and only kept to allow loading of old process archives. Use generalized method CombineFlags")
+
         from so3g.proj import RangesMatrix
         total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for label in self.process_cfgs['flag_labels']:
             _label = attrgetter(label)
             total_flags += _label(proc_aman) # The + operator is the union operator in this case
+
+        if 'flags' not in aman._fields:
+            from sotodlib.core import FlagManager
+            aman.wrap('flags', FlagManager.for_tod(aman))
+        if self.process_cfgs['total_flags_label'] in aman['flags']:
+            aman['flags'].move(self.process_cfgs['total_flags_label'], None)
+        aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
+
+class CombineFlags(_Preprocess):
+    """Do the conbine of relevant flags for mapping
+    
+
+    Saves results for aman under the "flags.[total_flags_label]" field.
+
+     Example config block::
+
+        - name : "combine_flags"
+          process:
+            flag_labels: ['glitches.glitch_flags', 'source_flags.jupiter_inv']
+            total_flags_label: 'glitch_flags'
+            method: 'union' # You can select a method from ['union', '+', 'intersect', '*'].
+            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. Lentgh must match the length of flag_labels.
+
+    """
+    name = "combine_flags"
+
+    def process(self, aman, proc_aman, sim=False):
+        from so3g.proj import RangesMatrix
+        if isinstance(self.process_cfgs['method'], list):
+            if len(self.process_cfgs['flag_labels']) != len(self.process_cfgs['method']):
+                raise ValueError("The length of method does not match to the length of flag_labels")
+            elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
+                raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
+        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
+            self.process_cfgs['method'] = len(self.process_cfgs['flag_labels'])*[self.process_cfgs['method']]
+        else:
+            raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
+        
+        total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
+        for i, (method, label) in enumerate(zip(self.process_cfgs['method'], self.process_cfgs['flag_labels'])):
+            _label = attrgetter(label)
+            if i == 0:
+                total_flags += _label(proc_aman) # First flags must be added.
+                if method in ['*', 'intersect']:
+                    warnings.warn("The first method is neither '+' nor 'union'. Interpreted as '+' by default.")
+            else:
+                if method in ['+', 'union']:
+                    total_flags += _label(proc_aman) # The + operator is the union operator in this case
+                elif method in ['*', 'intersect']:
+                    total_flags *= _label(proc_aman) # The * operator is the intersect operator in this case
 
         if 'flags' not in aman._fields:
             from sotodlib.core import FlagManager
@@ -1933,9 +1986,10 @@ _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
-_Preprocess.register(RotateQU)
-_Preprocess.register(SubtractQUCommonMode)
-_Preprocess.register(FocalplaneNanFlags)
-_Preprocess.register(PointingModel)
+_Preprocess.register(CombineFlags)
+_Preprocess.register(RotateQU) 
+_Preprocess.register(SubtractQUCommonMode) 
+_Preprocess.register(FocalplaneNanFlags) 
+_Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)

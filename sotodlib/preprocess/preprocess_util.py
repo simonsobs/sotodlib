@@ -709,8 +709,11 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     group_by, groups, error = get_groups(obs_id, configs, context)
 
-    db = core.metadata.ManifestDb(configs['archive']['index'])
-    x = db.inspect({'obs:obs_id': obs_id})
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        x = db.inspect({'obs:obs_id': obs_id})
+    else:
+        x = None
 
     all_groups = groups.copy()
     for g in all_groups:
