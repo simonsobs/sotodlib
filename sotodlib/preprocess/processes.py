@@ -1964,6 +1964,21 @@ class CorrectIIRParams(_Preprocess):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
+class TrimFlagEdge(_Preprocess):
+     """Trim edge until flags of all detectors are False
+     """
+     name = 'trim_flag_edge'
+
+     def process(self, aman, proc_aman, sim=False):
+        flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        trimst = np.where(~np.any(flags.mask(), axis = 0))[0][0]
+        trimen = np.where(~np.any(flags.mask(), axis = 0))[0][-1]
+        aman.restrict('samps', (aman.samps.offset + trimst,
+                                aman.samps.offset + trimen))
+        proc_aman.restrict('samps', (proc_aman.samps.offset + trimst,
+                                     proc_aman.samps.offset + trimen))
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2005,3 +2020,4 @@ _Preprocess.register(FocalplaneNanFlags)
 _Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
+_Preprocess.register(TrimFlagEdge)
