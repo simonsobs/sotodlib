@@ -64,7 +64,8 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None, use_psd=True, wn_label = 'preprocess.noiseQ_mapmaking.white_noise'):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None,
+                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -81,7 +82,13 @@ class DemodMapmaker:
             if None, the default model defined in the Demodmapmaker object is used.
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
-            i.e. we will produce one map 
+            i.e. we will produce one map
+        use_psd : bool, optional
+            By default True. Use the white noise measured from PSD as mapmaking weights,
+            which must be provided in the preprocessing. This is done as opposed to
+            build the ivar locally from the std of the TOD.
+        wn_label : str, optional
+            Path where to find the white noise per det estimated by the preprocessing.
 
         """
         ctime  = obs.timestamps
