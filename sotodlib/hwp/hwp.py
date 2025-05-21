@@ -570,7 +570,7 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
 
 
 def demod_tod(aman, signal=None, demod_mode=4,
-              bpf_cfg=None, lpf_cfg=None):
+              bpf_cfg=None, lpf_cfg=None, wrap=True):
     """
     Demodulate TOD based on HWP angle
 
@@ -596,6 +596,9 @@ def demod_tod(aman, signal=None, demod_mode=4,
         Example) lpf_cfg = {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
         or lpf_cfg = {'type': 'sine2', 'cutoff': '0.95*f_HWP', 'trans_width': 0.1}
         See filters.get_lpf for details.
+    wrap : bool, optional
+        If True, the demodulated signal is wrapped and stored in the input aman container.
+        If False, the demodulated signal is returned.
 
     Returns
     -------
@@ -653,19 +656,20 @@ def demod_tod(aman, signal=None, demod_mode=4,
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
                                    signal_name=signal_name) * phasor
-    
-    # dsT
-    aman.wrap_new('dsT', dtype='float32', shape=('dets', 'samps'))
-    aman.dsT = aman[signal_name]
-    aman['dsT'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='dsT', detrend=None)
-    # demodQ
-    aman.wrap_new('demodQ', dtype='float32', shape=('dets', 'samps'))
-    aman['demodQ'] = demod.real
-    aman['demodQ'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='demodQ', detrend=None) * 2.
-    # demodU
-    aman.wrap_new('demodU', dtype='float32', shape=('dets', 'samps'))
-    aman['demodU'] = demod.imag
-    aman['demodU'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='demodU', detrend=None) * 2.
+
+    # Filter the demodulated signal
+    demod_aman = core.AxisManager(aman.dets, aman.samps)
+    demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
+    demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None)
+    demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None) * 2.
+    demod_aman.wrap("demodU", demod.imag, axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None) * 2.
+    # Either wrap or return the demodulated signal
+    if wrap:
+        for fld in ['dsT', 'demodQ', 'demodU']:
+            aman.wrap(fld, demod_aman[fld], axis_map=[(0, 'dets'), (1, 'samps')])
+        del demod_aman
+    else:
+        return demod_aman['dsT'], demod_aman['demodQ'], demod_aman['demodU']
