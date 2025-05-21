@@ -1496,6 +1496,35 @@ class PCAFilter(_Preprocess):
         model = tod_ops.pca.get_pca_model(aman, signal=signal, n_modes=n_modes)
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
 
+class GetCommonMode(_Preprocess):
+    """
+    Calculate common mode.
+
+    example config file entry::
+
+      - name: "get_common_mode"
+        calc:
+            signal: "signal"
+            method: "median"
+            wrap: "signal_commonmode"
+        save: True
+
+    .. autofunction:: sotodlib.tod_ops.pca.get_common_mode.
+    """
+    name = 'get_common_mode'
+
+    def calc_and_save(self, aman, proc_aman):
+        common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
+        common_aman = fp_aman = core.AxisManager(aman.samps)
+        common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
+        self.save(proc_aman, common_aman)
+
+    def save(self, proc_aman, common_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs['wrap'], common_aman)
+
 class FilterForSources(_Preprocess):
     """
     Mask and gap-fill the signal at samples flagged by source_flags.
@@ -1978,6 +2007,7 @@ _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(PCAFilter)
+_Preprocess.register(GetCommonMode)
 _Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
