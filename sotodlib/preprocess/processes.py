@@ -1216,7 +1216,10 @@ class SourceFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("source_flags", source_aman)
+            if self.calc_cfgs.get('source_flags_name') is not None:
+                proc_aman.wrap(self.calc_cfgs.get('source_flags_name', None), source_aman)
+            else:
+                proc_aman.wrap("source_flags", source_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1224,12 +1227,15 @@ class SourceFlags(_Preprocess):
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
         else:
-            source_flags = proc_aman.source_flags
+            if self.calc_cfgs.get('source_flags_name') is not None:
+                source_flags = proc_aman[self.calc_cfgs.get('source_flags_name')]
+            else:
+                source_flags = proc_aman.source_flags
 
         select_list = np.atleast_1d(self.select_cfgs["select_source"])
         if 'planet' in select_list:
             from sotodlib.coords.planets import SOURCE_LIST
-            select_list = [x for x in aman.tags if x in SOURCE_LIST]
+            select_list = [x for x in meta.tags if x in SOURCE_LIST]
             if len(select_list) == 0:
                 raise ValueError("No tags match source list")
 
@@ -1238,6 +1244,8 @@ class SourceFlags(_Preprocess):
                 #keep = ~has_all_cut(source_flags[source])
                 if self.select_cfgs["kind"] == "any":
                     keep = has_any_cuts(source_flags[source])
+                if self.select_cfgs["kind"] == "cut":
+                    keep = ~has_any_cuts(source_flags[source])
                 elif self.select_cfgs["kind"] == "all":
                     keep = ~has_all_cut(source_flags[source])
                 meta.restrict("dets", meta.dets.vals[keep])
@@ -1965,11 +1973,13 @@ class CorrectIIRParams(_Preprocess):
         correct_iir_params(aman)
 
 class TrimFlagEdge(_Preprocess):
-     """Trim edge until flags of all detectors are False
-     """
-     name = 'trim_flag_edge'
+    """Trim edge until flags of all detectors are False
+    To find first and last sample id that has False (i.e., no flags applied) for all detectors.
+    This is for avoiding glitchfill problem with one side data.
+    """
+    name = 'trim_flag_edge'
 
-     def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False):
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
         trimst = np.where(~np.any(flags.mask(), axis = 0))[0][0]
         trimen = np.where(~np.any(flags.mask(), axis = 0))[0][-1]
@@ -1977,6 +1987,33 @@ class TrimFlagEdge(_Preprocess):
                                 aman.samps.offset + trimen))
         proc_aman.restrict('samps', (proc_aman.samps.offset + trimst,
                                      proc_aman.samps.offset + trimen))
+        
+
+class DetectorCut(_Preprocess):
+    """This is for cutting detectors based on flags
+    """
+    name = 'detector_cut'
+
+    def calc_and_save(self, aman, proc_aman):
+        mskfp = tod_ops.flags.get_focalplane_flags(aman, **self.calc_cfgs)
+        fp_aman = core.AxisManager(aman.dets, aman.samps)
+        fp_aman.wrap('detector_cut', mskfp, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, fp_aman)
+    
+    def save(self, proc_aman, fp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("fp_flags", fp_aman)
+
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.fp_flags.fp_nans)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
 
 
 _Preprocess.register(SplitFlags)
