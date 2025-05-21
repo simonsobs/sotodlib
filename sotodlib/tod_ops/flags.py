@@ -885,6 +885,15 @@ def get_stats(aman, signal, stat_names, split_subscans=False, mask=None, name="s
     """
     Calculate basic statistics on a TOD or power spectrum.
 
+    The statistics currently implemented are:
+    - ``'mean'``
+    - ``'median'``
+    - ``'ptp'`` (peak to peak)
+    - ``'std'`` (standard deviation)
+    - ``'var'`` (variance)
+    - ``'kurtosis'``
+    - ``'skew'``
+
     Parameters
     ----------
     aman : AxisManager

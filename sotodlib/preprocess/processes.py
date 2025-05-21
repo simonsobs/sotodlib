@@ -782,7 +782,13 @@ class SubtractHWPSS(_Preprocess):
 class A2Stats(_Preprocess):
     """
     Calculate statistical metrics for A2, the 2f-demodulated Q and U signals.
-    Uses tod_ops.flags.get_stats; refer there for list of available statistics.
+
+    Takes the following ``calc`` config options:
+    :stat_names: (*list*) List of strings identifying which statistics to calculate.
+        Refer to ``sotodlib.tod_ops.flags.get_stats`` (below) for available stats.
+        Default is ``["mean", "median", "var", "ptp"]``.
+    :subscan: (*bool*) Whether to calculate stats for each subscan separately.
+        Default is ``False``.
 
     Example config block::
 
@@ -792,6 +798,8 @@ class A2Stats(_Preprocess):
           subscan: True
         save: True
 
+    .. autofunction:: sotodlib.hwp.hwp.demod_tod
+    .. autofunction:: sotodlib.tod_ops.flags.get_stats
     """
     name = "a2_stats"
 
