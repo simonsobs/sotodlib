@@ -284,7 +284,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     ancil_acc = None
     times_acc = None
 
-    flag_accs = {'smurfgaps': Accumulator1d(samples=samples)}
+    flag_accs = {}
     this_stream_dets = None
 
     if load_ancil:
@@ -320,18 +320,26 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     else:
         tones_acc = None
 
+    if (not no_signal) or (not no_headers) or (special_channels):
+        # If we're not otherwise scanning every frame ... don't due
+        # any smurfy flags.
+        flag_accs['smurfgaps'] = Accumulator1d(samples=samples)
+
     # Sniff out a smurf status frame.
     smurf_proc = load_smurf.SmurfStatus._get_frame_processor()
 
     for frame, frame_offset in _frames_iterator(files, prefix, samples,
                                                 smurf_proc=smurf_proc):
-        more_data = True
+        # This is to escape once requested number of samples (and a
+        # smurf dump frame) are read.  Loop can exit early if no data
+        # are actually required from frame.
+        more_data = (not smurf_proc.get('dump_frame', False))
 
         # Anything in ancil should be identical across
         # filesets, so only process it once.
         if load_ancil:
-            more_data &= times_acc.append(frame['ancil'].times, frame_offset)
-            more_data &= ancil_acc.append(frame['ancil'], frame_offset)
+            more_data |= times_acc.append(frame['ancil'].times, frame_offset)
+            more_data |= ancil_acc.append(frame['ancil'], frame_offset)
 
         if 'stream_id' in frame:
             if stream_id is None:
@@ -339,9 +347,9 @@ def _load_book_detset(files, prefix='', load_ancil=True,
             assert (stream_id == frame['stream_id'])  # check your data files
 
         if 'primary' in frame and primary_acc is not None:
-            more_data &= primary_acc.append(frame['primary'], frame_offset)
+            more_data |= primary_acc.append(frame['primary'], frame_offset)
             bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
-            more_data &= bias_acc.append(frame['tes_biases'], frame_offset)
+            more_data |= bias_acc.append(frame['tes_biases'], frame_offset)
 
         if 'signal' in frame:
             # Even if no_signal, we need the det list.
@@ -350,13 +358,13 @@ def _load_book_detset(files, prefix='', load_ancil=True,
 
             # Extract the main signal
             if not no_signal:
-                more_data &= signal_acc.append(frame['signal'], frame_offset)
+                more_data |= signal_acc.append(frame['signal'], frame_offset)
 
         if 'untracked' in frame and special_channels:
-            more_data &= tones_acc.append(frame['untracked'], frame_offset)
+            more_data |= tones_acc.append(frame['untracked'], frame_offset)
 
-        if 'flag_smurfgaps' in frame:
-            flag_accs['smurfgaps'].append(frame['flag_smurfgaps'])
+        if 'flag_smurfgaps' in frame and 'smurfgaps' in flag_accs:
+            more_data |= flag_accs['smurfgaps'].append(frame['flag_smurfgaps'])
 
         if not more_data:
             break
