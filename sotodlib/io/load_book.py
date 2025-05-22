@@ -56,7 +56,7 @@ TMPDIR_VAR = 'SOTODLIB_TOD_TMPDIR'
 
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
-                  no_signal=None, no_headers=False, special_channels=False,
+                  no_signal=None, no_headers=None, special_channels=None,
                   **kwargs):
     """Obsloader function for SO "Level 3" obs/oper Books.
 
@@ -82,6 +82,9 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     if no_signal is None:
         no_signal = False  # from here, assume no_signal in [True, False]
+    if no_headers is None:
+        # By default, suppress headers for "obs" book loads.
+        no_headers = obs_id.startswith('obs_')
 
     # Regardless of what dets have been asked for (maybe none), get
     # the list of detsets implicated in this observation.  Make sure
@@ -537,17 +540,22 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             aman['biases'][i * _TES_BIAS_COUNT:(i + 1) * _TES_BIAS_COUNT, :] = \
                 v['biases'].finalize()[:_TES_BIAS_COUNT, :]
 
-        # Primary (and other stuff to group per-stream)
+        # Other header data, per-stream
         aman.wrap('primary', core.AxisManager(aman.samps))
-        aman.wrap('iir_params', core.AxisManager())
-        aman['iir_params'].wrap('per_stream', True)
         for r in results.values():
             # Primary.
             _prim = core.AxisManager(aman.samps)
             for k, v in r['primary'].finalize().items():
                 _prim.wrap(k, v, [(0, 'samps')])
             aman['primary'].wrap(r['stream_id'], _prim)
-            # Filter parameters
+
+
+    if any([v['iir_params'] is not None
+            for v in results.values()]):
+        # Filter parameters, per-stream
+        aman.wrap('iir_params', core.AxisManager())
+        aman['iir_params'].wrap('per_stream', True)
+        for r in results.values():
             _iir = None
             if r.get('iir_params') is not None:
                 _iir = core.AxisManager()
@@ -859,8 +867,9 @@ class Accumulator2d(Accumulator):
                              self.extract_at_idx,
                              src_slice.start, src_slice.stop)
             elif self.shape is not None:
-                data.extract(self.data[:, dest_slice], None, self.extract_at_idx,
-                             src_slice.start, src_slice.stop)
+                if len(data.names) > 0:
+                    data.extract(self.data[:, dest_slice], None, self.extract_at_idx,
+                                 src_slice.start, src_slice.stop)
             else:
                 _sh = [len(data.names), len(data.times)]
                 if self.extract_at_idx is not None:
