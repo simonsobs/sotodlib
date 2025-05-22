@@ -239,10 +239,16 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
       The filtered signal.
 
     """
-    if source_flags is None:
+    if source_flags is None and tod is not None:
         source_flags = tod.source_flags
-    if signal is None:
+    elif source_flags is None and tod is None:
+        raise ValueError("Must provide source_flags if tod is None")
+    if signal is None and tod is not None:
         signal = tod.signal
+    elif signal is None and tod is None:
+        raise ValueError("Must provide signal if tod is None")
+    if signal is None:
+        raise ValueError("signal somehow still None!")
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
@@ -251,21 +257,23 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
     # Low pass filter?
     if low_pass is not None:
+        if tod is None:
+            raise ValueError("tod cannot be None when lowpassing")
         if isinstance(low_pass, tod_ops.filters._chainable):
             filt = low_pass
         else:
             filt = tod_ops.filters.low_pass_butter4(low_pass)
 
         n_det, n = signal.shape
-        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, 'BOTH')
-        a[:] = signal_pca
-        t_1()
+        rfft = tod_ops.fft_ops.RFFTObj.for_shape(n_det, n, 'BOTH')
+        rfft.a[:] = signal_pca
+        rfft.t_forward()
         times = tod.timestamps
         delta_t = (times[-1]-times[0])/(tod.samps.count - 1)
         freqs = np.fft.rfftfreq(n, delta_t)
-        filt.apply(freqs, tod, target=b)
-        signal_pca = t_2()
-        del a, b
+        filt.apply(freqs, tod, target=rfft.b)
+        signal_pca = rfft.t_backward()
+        del rfft
 
     # Measure TOD means (after gap fill, low pass, etc).
     if isinstance(n_modes, str) and n_modes == 'all':
@@ -288,7 +296,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
-    if wrap:
+    if wrap and tod is not None:
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
