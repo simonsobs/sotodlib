@@ -236,3 +236,45 @@ def get_base_tilt_q(c, s):
     amp = (c**2 + s**2)**.5
     return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
 
+def deflection_model(aman, band):
+    """
+    Returns quaternion for HWP-synchronous pointing deflection
+    using per-wafer, per-band calibration from metadata.
+
+    Parameters:
+        aman : AxisManager
+            The observation AxisManager, expected to have
+            deflection_amp.amp and deflection_phase.phase fields.
+        band : str
+            Frequency band, e.g. 'f090' or 'f150'.
+
+    Returns:
+        deflq : quat
+            Quaternion representing the deflection rotation.
+    """
+    arcmin_to_rad = np.pi / (180 * 60)
+    
+    # Get wafer slot from metadata (assumes uniform wafer per obs)
+    wafer_slot = np.unique(aman.det_info.wafer_slot)
+    if len(wafer_slot) != 1:
+        raise RuntimeError(f"Expected 1 wafer slot, got {wafer_slot}")
+    wafer_slot = wafer_slot[0]
+
+    # Get mask for wafer and band
+    match = ((aman.deflection_amp['dets:wafer_slot'] == wafer_slot) &
+             (aman.deflection_amp['dets:wafer.bandpass'] == band))
+    
+    if not np.any(match):
+        raise RuntimeError(f"No match found in deflection_amp for wafer={wafer_slot}, band={band}")
+
+    amp_val = aman.deflection_amp.amp[match][0] * arcmin_to_rad
+    phase_val = aman.deflection_phase.phase[match][0]  # already in radians
+
+    dxi = amp_val * np.cos(aman.hwp_angle - phase_val)
+    deta = -amp_val * np.sin(aman.hwp_angle - phase_val)
+    deflq = quat.rotation_xieta(xi=dxi, eta=deta)
+    return deflq
+
+
+
+
