@@ -2049,10 +2049,7 @@ class DeflectionCorrection(_Preprocess):
                 band_aman = aman.restrict('dets', aman.dets.vals[match], in_place=False)
 
                 # Apply deflection model
-                sight = pointing_model.apply_deflection_model(band_aman, band, ws)
-
-                # Decompose to az, el, roll
-                az, el, roll = decompose_lonlat(sight.Q)
+                az, el, roll, _ = pointing_model.apply_deflection_model(band_aman, band, ws)
 
                 # Store in full arrays
                 idx = np.where(match)[0]
