@@ -254,7 +254,7 @@ def deflection_model(aman, band):
     """
     arcmin_to_rad = np.pi / (180 * 60)
     
-    # Get wafer slot from metadata (assumes uniform wafer per obs)
+    # Get wafer slot from metadata 
     wafer_slot = np.unique(aman.det_info.wafer_slot)
     if len(wafer_slot) != 1:
         raise RuntimeError(f"Expected 1 wafer slot, got {wafer_slot}")
