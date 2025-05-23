@@ -4,7 +4,7 @@
 import numpy as np
 from .. import core
 from .helpers import _valid_arg
-from so3g.proj import quat
+from so3g.proj import quat, CelestialSightLine
 
 import logging
 logger = logging.getLogger(__name__)
@@ -236,7 +236,14 @@ def get_base_tilt_q(c, s):
     amp = (c**2 + s**2)**.5
     return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
 
-def deflection_model(aman, band):
+def _deflection_model(aman, amp_val, phase_val):
+    """Returns quaternion for HWP-synchronous pointing deflection"""
+    dxi = amp_val * np.cos(aman.hwp_angle - phase_val)
+    deta = -amp_val * np.sin(aman.hwp_angle - phase_val)
+    deflq = quat.rotation_xieta(xi=dxi, eta=deta)
+    return deflq
+
+def apply_deflection_model(aman, band, wafer_slot, rot=None, return_sight=False):
     """
     Returns quaternion for HWP-synchronous pointing deflection
     using per-wafer, per-band calibration from metadata.
@@ -254,26 +261,37 @@ def deflection_model(aman, band):
     """
     arcmin_to_rad = np.pi / (180 * 60)
     
-    # Get wafer slot from metadata 
-    wafer_slot = np.unique(aman.det_info.wafer_slot)
-    if len(wafer_slot) != 1:
-        raise RuntimeError(f"Expected 1 wafer slot, got {wafer_slot}")
-    wafer_slot = wafer_slot[0]
-
-    # Get mask for wafer and band
-    match = ((aman.deflection_amp['dets:wafer_slot'] == wafer_slot) &
-             (aman.deflection_amp['dets:wafer.bandpass'] == band))
+    match = aman.det_info.wafer.bandpass == band
+    match &= aman.det_info.wafer_slot == wafer_slot
     
-    if not np.any(match):
-        raise RuntimeError(f"No match found in deflection_amp for wafer={wafer_slot}, band={band}")
-
+    # Read corresponding deflection amplitude and phase from metadata
     amp_val = aman.deflection_amp.amp[match][0] * arcmin_to_rad
     phase_val = aman.deflection_phase.phase[match][0]  # already in radians
+    deflq = _deflection_model(aman, amp_val, phase_val)
+    
+    # Apply deflection to the boresight
+    sight = CelestialSightLine.az_el(
+        aman.timestamps,
+        aman.boresight.az,
+        aman.boresight.el,
+        weather='typical',
+        site='so'
+        )
+    sight.Q = sight.Q * ~deflq
 
-    dxi = amp_val * np.cos(aman.hwp_angle - phase_val)
-    deta = -amp_val * np.sin(aman.hwp_angle - phase_val)
-    deflq = quat.rotation_xieta(xi=dxi, eta=deta)
-    return deflq
+    if return_sight:
+        ## The sight argument could go directly in the pointing used for the maps, for example 
+        #geom = enmap.fullsky_geometry(res=res, proj='car')
+        #P = coords.P.for_tod(aman, rot=None, sight=sight, geom=geom, hwp=hwp, comps='TQU', cuts=cuts)
+        return sight
+    else:
+        # Decompose into lon/lat/roll
+        az, el, roll = quat.decompose_lonlat(sight.Q)
+        
+        # Reconstruct quaternions 
+        q_deflected = quat.rotation_lonlat(-az, el) * quat.euler(2, roll)
+
+        return az, el, roll, q_deflected
 
 
 

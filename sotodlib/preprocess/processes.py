@@ -2018,6 +2018,62 @@ class CorrectIIRParams(_Preprocess):
     def process(self, aman, proc_aman):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
+        
+class DeflectionCorrection(_Preprocess):
+    """
+    Apply HWP-synchronous pointing deflection correction using metadata-calibrated amplitude and phase.
+
+    Adds `deflected_boresight` field to the TOD containing corrected (az, el, roll).
+    """
+    name = "deflection_correction"
+
+    def calc_and_save(self, aman, proc_aman, sim=False):
+        from sotodlib.coords import pointing_model
+        from so3g.proj.quat import decompose_lonlat
+
+        n_dets = aman.dets.count
+        n_samps = aman.samps.count
+
+        az_all = np.full((n_dets, n_samps), np.nan)
+        el_all = np.full((n_dets, n_samps), np.nan)
+        roll_all = np.full((n_dets, n_samps), np.nan)
+
+        for band in np.unique(aman.det_info.wafer.bandpass):
+            if band == 'NC':
+                continue
+            for ws in np.unique(aman.det_info.wafer_slot):
+                # Build mask and restrict
+                match = (aman.det_info.wafer.bandpass == band) & (aman.det_info.wafer_slot == ws)
+                if not np.any(match):
+                    continue
+                band_aman = aman.restrict('dets', aman.dets.vals[match], in_place=False)
+
+                # Apply deflection model
+                sight = pointing_model.apply_deflection_model(band_aman, band, ws)
+
+                # Decompose to az, el, roll
+                az, el, roll = decompose_lonlat(sight.Q)
+
+                # Store in full arrays
+                idx = np.where(match)[0]
+                az_all[idx] = az
+                el_all[idx] = el
+                roll_all[idx] = roll
+
+        # Wrap into AxisManager
+        defl_boresight = core.AxisManager(aman.dets, aman.samps)
+        defl_boresight.wrap("az", az_all, [(0, "dets"), (1, "samps")])
+        defl_boresight.wrap("el", el_all, [(0, "dets"), (1, "samps")])
+        defl_boresight.wrap("roll", roll_all, [(0, "dets"), (1, "samps")])
+
+        self.save(proc_aman, defl_boresight, "deflected_boresight")
+
+    def save(self, proc_aman, calc_aman, name): 
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(name, calc_aman)
+
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -2061,3 +2117,4 @@ _Preprocess.register(FocalplaneNanFlags)
 _Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
+_Preprocess.register(DeflectionCorrection)
