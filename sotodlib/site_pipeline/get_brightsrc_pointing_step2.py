@@ -6,11 +6,12 @@ import argparse
 import time
 import glob
 from tqdm import tqdm
+from joblib import Parallel, delayed
 
 from scipy.optimize import curve_fit
 from sotodlib.core import metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
-from sotodlib.coords import map_based_pointing as mbp
+from sotodlib.coords import brightsrc_pointing as bsp
 from sotodlib import core
 from sotodlib import coords
 from sotodlib import tod_ops
@@ -334,7 +335,14 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
     logger.info('loading data')
     meta = ctx.get_meta(obs_id, dets={'wafer_slot': wafer_slot})
     if restrict_dets_for_debug is not False:
-        meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
+        try:
+            restrict_dets_for_debug = int(restrict_dets_for_debug)
+            meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
+        except ValueError:
+            _testdets = restrict_dets_for_debug.split(',')
+            restrict_list = [det.split('\'')[1].strip() for det in _testdets]
+            meta.restrict('dets', restrict_list)
+            
     tod = ctx.get_obs(meta)
     
     # get pointing
@@ -372,7 +380,13 @@ def main_one_wafer_dummy(configs, obs_id, wafer_slot, restrict_dets_for_debug=Fa
     
     meta = ctx.get_meta(obs_id, dets={'wafer_slot': wafer_slot})
     if restrict_dets_for_debug is not False:
-        meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
+        try:
+            restrict_dets_for_debug = int(restrict_dets_for_debug)
+            meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
+        except ValueError:
+            _testdets = restrict_dets_for_debug.split(',')
+            restrict_list = [det.split('\'')[1].strip() for det in _testdets]
+            meta.restrict('dets', restrict_list)
     result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
     
     fp_rset_dummy = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 
@@ -408,6 +422,14 @@ def combine_pointings(pointing_result_files):
         focal_plane.rows.append((det, val['xi'], val['eta'], val['gamma'], val['xi_err'], val['eta_err'], val['R2'], val['redchi2']))
     return focal_plane
 
+def parallel_process_wafer_slot(configs, obs_id, wafer_slot, sso_name, restrict_dets_for_debug):
+    logger.info(f'Processing {obs_id}, {wafer_slot}')
+    main_one_wafer(configs=configs,
+                   obs_id=obs_id,
+                   wafer_slot=wafer_slot,
+                   sso_name=sso_name,
+                   restrict_dets_for_debug=restrict_dets_for_debug)
+
 def main_one_obs(configs, obs_id, sso_name=None,
                 restrict_dets_for_debug=False):
     if type(configs) == str:
@@ -434,25 +456,54 @@ def main_one_obs(configs, obs_id, sso_name=None,
     tod = ctx.get_obs(obs_id, dets=[])
     streamed_wafer_slots = ['ws{}'.format(index) for index, bit in enumerate(obs_id.split('_')[-1]) if bit == '1']
     processed_wafer_slots = []
+    finished_wafer_slots = []
     skipped_wafer_slots = []
+    check_dir = result_dir + '_force_zero_roll' if force_zero_roll else result_dir
+
     for ws in streamed_wafer_slots:
-        hit_time = mbp.get_rough_hit_time(tod, wafer_slot=ws, sso_name=sso_name, circle_r_deg=hit_circle_r_deg,
-                                         optics_config_fn=optics_config_fn)
+        hit_time = bsp.get_rough_hit_time(tod,
+                                          wafer_slot=ws,
+                                          sso_name=sso_name,
+                                          circle_r_deg=hit_circle_r_deg,
+                                          optics_config_fn=optics_config_fn)
         logger.info(f'hit_time for {ws} is {hit_time:.1f} [sec]')
-        if hit_time > hit_time_threshold:
-            processed_wafer_slots.append(ws)
+        if hit_time >= hit_time_threshold:
+            if os.path.exists(os.path.join(check_dir, f'focal_plane_{obs_id}_{ws}.hdf')):
+                finished_wafer_slots.append(ws)
+            else:
+                processed_wafer_slots.append(ws)
         else:
             skipped_wafer_slots.append(ws)
-    
-    logger.info(f'wafer_slots which pointing calculated: {processed_wafer_slots}')
-    for wafer_slot in processed_wafer_slots:
-        logger.info(f'Processing {obs_id}, {wafer_slot}')
-        main_one_wafer(configs=configs,
-                       obs_id=obs_id,
-                       wafer_slot=wafer_slot,
-                       sso_name=sso_name,
-                       restrict_dets_for_debug=restrict_dets_for_debug)
-    
+
+    logger.info(f'Found saved data for these wafer_slots: {finished_wafer_slots}')
+    logger.info(f'Will continue for these wafer_slots: {processed_wafer_slots}')
+
+    if configs.get('parallel_job'):
+        logger.info('Continuing with parallel job')
+        try:
+            n_jobs = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+        except: 
+            n_jobs = -1
+        Parallel(n_jobs=n_jobs)(
+            delayed(parallel_process_wafer_slot)(
+                configs,
+                obs_id, 
+                wafer_slot, 
+                sso_name, 
+                restrict_dets_for_debug
+            ) 
+            for wafer_slot in processed_wafer_slots
+        )
+    else:
+        logger.info('Continuing with serial processing of wafers.')
+        for wafer_slot in processed_wafer_slots:
+            logger.info(f'Processing {obs_id}, {wafer_slot}')
+            main_one_wafer(configs=configs,
+                           obs_id=obs_id,
+                           wafer_slot=wafer_slot,
+                           sso_name=sso_name,
+                           restrict_dets_for_debug=restrict_dets_for_debug)            
+
     logger.info(f'create dummy hdf for non-hitting wafer: {skipped_wafer_slots}')
     for wafer_slot in skipped_wafer_slots:
         main_one_wafer_dummy(configs=configs,
@@ -466,6 +517,7 @@ def main_one_obs(configs, obs_id, sso_name=None,
     fp_rset_full_file = os.path.join(os.path.join(result_dir, f'focal_plane_{obs_id}_all.hdf'))
     write_dataset(fp_rset_full, filename=fp_rset_full_file,
                   address='focal_plane', overwrite=True)
+    logger.info(f'ta da! Finsihed with {obs_id}')
         
 def main(configs, min_ctime=None, max_ctime=None, update_delay=None,
          obs_id=None, wafer_slot=None, sso_name=None, restrict_dets_for_debug=False):
@@ -502,6 +554,7 @@ def main(configs, min_ctime=None, max_ctime=None, update_delay=None,
                         restrict_dets_for_debug=restrict_dets_for_debug)
     
     elif obs_id is not None:
+        logger.info(f'Processing {obs_id}')
         if wafer_slot is None:
             main_one_obs(configs=configs, obs_id=obs_id, sso_name=sso_name,
                          restrict_dets_for_debug=restrict_dets_for_debug)

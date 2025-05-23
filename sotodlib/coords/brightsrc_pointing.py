@@ -4,6 +4,7 @@ from tqdm import tqdm
 import numpy as np
 from scipy import interpolate
 from scipy.optimize import curve_fit
+from joblib import Parallel, delayed
 
 from sotodlib import core
 from sotodlib import coords
@@ -16,7 +17,8 @@ from pixell import enmap
 import h5py
 from scipy.ndimage import maximum_filter
 
-def get_planet_trajectry(tod, planet, _split=20, return_model=False):
+
+def get_planet_trajectory(tod, planet, _split=20, return_model=False):
     """
     Generate the trajectory of a given planet over a specified time range.
 
@@ -30,7 +32,7 @@ def get_planet_trajectry(tod, planet, _split=20, return_model=False):
         If return_model is True:
             tuple: Tuple containing interpolation functions for azimuth and elevation.
         If return_model is False:
-            array: Array of quaternions representing trajectry of the planet at each timestamp.
+            array: Array of quaternions representing trajectory of the planet at each timestamp.
     """
     print(planet)
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
@@ -58,19 +60,19 @@ def get_wafer_centered_sight(tod=None, planet=None, q_planet=None, q_bs=None, q_
     Parameters:
         tod : An axis manager
         planet (str): The name of the planet to calculate the sightline vector.
-        q_planet (optional): Quaternion representing the trajectry of the planet. 
+        q_planet (optional): Quaternion representing the trajectory of the planet. 
             If None, it will be computed using get_planet_trajectory. Defaults to None.
-        q_bs (optional): Quaternion representing the trajectry of the boresight.
+        q_bs (optional): Quaternion representing the trajectory of the boresight.
             If None, it will be computed using the current boresight angles from tod. Defaults to None.
         q_wafer (optional): Quaternion representing the center of wafer to the center of boresight.
             If None, it will be computed using the median of the focal plane xi and eta from tod.focal_plane. 
             Defaults to None.
 
     Returns:
-        Sightline vector for the planet trajectry centered on the center of the wafer.
+        Sightline vector for the planet trajectory centered on the center of the wafer.
     """
     if q_planet is None:
-        q_planet = get_planet_trajectry(tod, planet)
+        q_planet = get_planet_trajectory(tod, planet)
     if q_bs is None:
         q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
     if q_wafer is None:
@@ -147,7 +149,7 @@ def get_rough_hit_time(tod, wafer_slot, sso_name, circle_r_deg=7.,optics_config_
         float: Estimated rough hit time within the circular region around the wafer center.
     """
     q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
-    q_planet = get_planet_trajectry(tod, sso_name)
+    q_planet = get_planet_trajectory(tod, sso_name)
     xi_wafer, eta_wafer = get_wafer_xieta(wafer_slot, optics_config_fn=optics_config_fn, 
                                             roll_bs_offset=np.median(tod.boresight.roll), wrap_to_tod=False)
     q_wafer = quat.rotation_xieta(xi_wafer, eta_wafer)
@@ -159,13 +161,11 @@ def get_rough_hit_time(tod, wafer_slot, sso_name, circle_r_deg=7.,optics_config_
     hit_time = (tod.timestamps[-1] - tod.timestamps[0]) * np.mean(np.rad2deg(r_wafer_centered) < circle_r_deg)
     return hit_time
 
-
 def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf, 
                            xieta_bs_offset=(0., 0.), roll_bs_offset=None,
                            signal='signal', wafer_mask_deg=8., res_deg=0.3, cuts=None,):
     """
     Generate boresight-centered maps from Time-Ordered Data (TOD) for each individual detector.
-
     Parameters:
         tod : an axismanager object
         sso_name (str): Name of the planet for which the trajectory is calculated.
@@ -181,9 +181,8 @@ def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf,
     Returns:
         None
     """    
-    q_planet = get_planet_trajectry(tod, sso_name)
+    q_planet = get_planet_trajectory(tod, sso_name)
     q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
-    
     if roll_bs_offset is None:
         roll_bs_offset = np.mean(tod.boresight.roll)
         
@@ -218,16 +217,22 @@ def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf,
     if cuts is None:
         cuts = ~tod.flags['source']
     P = coords.P.for_tod(tod=tod, geom=geom, comps='T', cuts=cuts, sight=sight, threads=False)
+
+    wT = None
     for di, det in enumerate(tqdm(tod.dets.vals)):
         det_weights = np.zeros(tod.dets.count, dtype='float32')
         det_weights[di] = 1.
         mT_weighted = P.to_map(tod=tod, signal=signal, comps='T', det_weights=det_weights)
-        wT = P.to_weights(tod, signal=signal, comps='T', det_weights=det_weights)
+        if wT is None:
+            wT = P.to_weights(tod, signal=signal, comps='T', det_weights=det_weights)
         mT = P.remove_weights(signal_map=mT_weighted, weights_map=wT, comps='T')[0]
         
         enmap.write_hdf(map_hdf, mT, address=det,
-                        extra={'xi0': xi0, 'eta0': eta0, 
-                               'xi_bs_offset': xi_bs_offset, 'eta_bs_offset': eta_bs_offset, 'roll_bs_offset': roll_bs_offset})
+                        extra={'xi0': xi0,
+                               'eta0': eta0, 
+                               'xi_bs_offset': xi_bs_offset,
+                               'eta_bs_offset': eta_bs_offset,
+                               'roll_bs_offset': roll_bs_offset})
     return
 
 def detect_peak_xieta(mT, filter_size=None):
