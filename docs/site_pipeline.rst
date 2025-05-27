@@ -125,6 +125,32 @@ Command line arguments
    :func: get_parser
    :prog: update_smurf_caldbs.py
 
+update-det-cal
+-----------------------
+.. automodule:: sotodlib.site_pipeline.update_det_cal
+   :no-members:
+
+CalInfo object
+```````````````````
+
+.. autoclass:: sotodlib.site_pipeline.update_det_cal.CalInfo
+   :no-members:
+
+Configuration
+``````````````
+
+Configuration of the update_det_cal script is done by supplying a yaml file.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_det_cal
+   :func: get_parser
+   :prog: update_smurf_caldbs.py
+
+The possible configuration parameters are defined by the DetCalCfg class:
+
+.. autoclass:: sotodlib.site_pipeline.update_det_cal.DetCalCfg
+  :members:
+
 Detector and Readout ID Mapping
 -------------------------------
 
@@ -135,27 +161,39 @@ resulting ManifestDbs should work for both level 2 and level 3 SMuRf data.
 
 make_det_info_wafer
 ```````````````````
-This script uses based array construction inputs to build detector IDs for a set of
-UFMs and save them in a ManifestDb / HDF5 file. The formatting of the ResultSet 
-saved in HDF5 file will map all this information into ``det_info.wafer`` when used 
-with a correctly formatted context file and a readout to detector id mapping.
-The detector info mapping created by this script will be stable as long as the
-same UFMs are used in the same optics tube positions, meaning it only needs to
-be re-made if the physical hardware setup changes. 
 
-Although the full config presented for ``make_read_det_match`` will
-work, here's a more basic example that will work::
+This script uses basic array construction inputs to assemble a table
+of information about a set of UFMs and save it toan HDF5 file.  The
+resulting datasets may be used to populate ``det_info.wafer``, once
+the ``det_id`` of the readout channels is known.  The detector info
+mapping created by this script is re-usable as long as the UFM
+continues to be associated with the same ``stream_id``.
 
-  det_db: "./det_info_wafer.db"
-  det_info: "./det_info_wafer.h5"
-  array_info_dir: "/home/so/git/site-pipeline-configs/shared/detmapping/design/"
+Here is a basic configuration file::
 
-  arrays:
-    - name: mv7
-      stream_id: ufm_mv7
-    - name: mv9
-      stream_id: ufm_mv9
+  output_dir: ./satp3_wafer_info_240305
+  array_info_dir: "/home/pipeline/site-pipeline-configs/shared/detmapping/design/"
 
+  stream_ids:
+    - ufm_mv5
+    - ufm_mv12
+    - ufm_mv17
+    - ufm_mv23
+    - ufm_mv27
+    - ufm_mv33
+    - ufm_mv35
+
+Check the det_ids for sensibility... and if you need to force bandpass
+values, add a config file entry like this::
+
+  bandpass_remap:
+    90: 220
+    150: 280
+
+
+The output database ``wafer_info.sqlite`` and HDF5 file
+``wafer_info.h5`` are written to the ``output_dir``, which is created
+if it does not exist.
 
 
 get_brightsrc_pointing_part1  and  get_brightsrc_pointing_part2
@@ -536,6 +574,10 @@ Here's an annotated example:
 
 .. code-block:: yaml
 
+  # This is the time range that this focal plane is valid for
+  # These are ctime
+  start_time: 0 # default is 0
+  stop_time: 1726605779 # default is 2**32
   # There are two options to get the data in
   # One is to pass in ResultSets like so:
   resultsets:
@@ -573,7 +615,8 @@ Here's an annotated example:
     obs_id: [obs_1, obs_2] # Pass in the obs_id directly
     query: QUERY # Pass in a query
     # You can pass in detector restrictions here as well
-    dets: {} # Should be a dict you would pass to the dets areg of ctx.get_meta
+    dets: {} # Should be a dict you would pass to the dets arg of ctx.get_meta
+    # If neither option is passed all obs from start_time to stop_timewith valid metadata are used
   
   per_obs: False # Set to true if you want to run in per obs mode
   weight_factor: 1000 # Weights are computed with sigma=template_spacing/weight_factor.
@@ -608,23 +651,26 @@ The datasets and attributes are organized by tube and array as seem below:
 .. code-block:: text
 
    focal_plane.h5
-   - (attr) center # The nominal center of the receive on sky
-   - (attr) center_transformed # The center with the common mode transform applied
-   - (group) transform # The receiver common mode
-   - (group) tube1 # The first tube (ie st1, oti1, etc.)
-     - (attr) center # The nominal center of the tube on sky
+   - (group) result # For combined results this is the start of the validity period
+                    # For per-obs this is the obs_id
+     - (attr) center # The nominal center of the receive on sky
      - (attr) center_transformed # The center with the common mode transform applied
-     - (group) transform # The tube common mode
-     - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
-       - (attr) template_centers # The nominal center for this array
-       - (attr) fit_centers # The fit center for this array
-       - (group) transform # The transform for the ufm, includes parameters with and without the common mode
-       - (dataset) focal_plane # The focal_plane with just fit positions
-         - (attr) measured_gamma # If gamma was actually measured
-       - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
-     - (group) ufm_2
+     - (group) transform # The receiver common mode
+     - (group) tube1 # The first tube (ie st1, oti1, etc.)
+       - (attr) center # The nominal center of the tube on sky
+       - (attr) center_transformed # The center with the common mode transform applied
+       - (group) transform # The tube common mode
+       - (group) ufm_1 # The first ufm for thi tube (ie ufm_mv29) 
+         - (attr) template_centers # The nominal center for this array
+         - (attr) fit_centers # The fit center for this array
+         - (group) transform # The transform for the ufm, includes parameters with and without the common mode
+         - (dataset) focal_plane # The focal_plane with just fit positions
+           - (attr) measured_gamma # If gamma was actually measured
+         - (dataset) focal_plane_full # Also includes avg positions, weights, and counts
+       - (group) ufm_2
+         ...
        ...
-     ...
+    ...
 
 
 The ``focal_plane`` dataset contains four columns:
@@ -687,12 +733,23 @@ always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 
 ``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
 in the output directory.
-By default this will be indexed by ``stream_id`` and will point to the ``focal_plane`` dataset.
-If you are running in ``per_obs`` mode then it will also be indexed by ``obs_id`` and will point
+By default this will be indexed by ``stream_id`` and ``obs:timestamp`` and will point to the ``focal_plane`` dataset.
+If you are running in ``per_obs`` mode then it wirbe indexed by ``obs_id`` and will point
 to results associated with data observation.
 Be warned that in this case there will only be entries for observations with pointing fits,
 so design your context accordingly.
 
+Focal planes can be loaded directly from the ``hdf5`` files if you require information other than 
+the ``focal_plane`` dataset. This can be done like so:
+
+.. code-block:: python
+
+   from sotodlib.coords import fp_containers as fpc
+   rxs = fpc.Receiver.load_file(PATH)
+
+
+This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
+The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
 
 preprocess-tod
 --------------
@@ -977,8 +1034,6 @@ Command line arguments
    :module: sotodlib.site_pipeline.make_ml_map
    :func: get_parser
 
-
-
 Default Mapmaker Values
 ```````````````````````
 The following code block contains the hard-coded default values for non-
@@ -1059,6 +1114,54 @@ Example of a config file:
         # Scripting tools
         verbose: True
         quiet: False
+
+make-atomic-filterbin-map
+-------------------------
+
+This script will create atomic maps (maps of individual observations by wafer and
+frequency, and associated splits). These maps are HWP-demodulated and filtered
+and binned. Every atomic map consist of a ``weights``, ``wmap`` (weighted map),
+and ``hits`` map, as well as an information file that is used for adding the map
+to an atomic map database.
+
+Configuration yaml file
+````````````````````````
+
+The mapmaker is configured by supplying a yaml file with ``--config_file``.
+
+.. autoclass:: sotodlib.site_pipeline.make_atomic_filterbin_map.Cfg
+  :members:
+
+The only mandatory parameters are ``context`` for a context file and ``preprocess_config``,
+a preprocess database configuration file that will tell the script how to process the
+timestreams. A typical configuration file could look like this:
+
+.. code-block:: yaml
+
+        context: /global/cfs/projectdirs/sobs/metadata/satp1/contexts/use_this_local.yaml
+        
+        # Use a pixell area file for rectangular pixel maps or use an nside value for Healpix maps.
+        # Only use one of these options
+        area: band_car_fejer1_5arcmin.fits
+        #nside: 512
+        
+        # A query can be a file with a list of obs, or an obsdb query
+        query: obs_list.txt
+        #query: "subtype == 'cmb' and timestamp >= 1708743600 and timestamp < 1713672000"
+        
+        odir: output_directory
+        preprocess_config: preprocess_config.yaml
+        
+        # Limit the number of obs, map a specific wafer or band
+        #ntod: 3
+        #wafer: ws0
+        #freq: f090
+        
+        # Plataform to map
+        site: so_sat1
+        
+        # Path to housekeeping data (this is used for extracting pwv)
+        hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
 
 QDS Monitor
@@ -1176,7 +1279,7 @@ I'm just writing in SAT1)::
             det_tag = dict(base_tags)
             det_tag['detector'] = det
             tag_list.append(det_tag)
-        log_tags = {'observation': obs_id, 'wafer': wafer}
+        log_tags = {'telescope': 'SAT1', 'wafer': wafer}
         monitor.record('white_noise_level', det_white_noise, timestamps, tag_list, 'detector_stats', log_tags=log_tags)
         monitor.write()
 
@@ -1297,5 +1400,9 @@ Support
 =======
 
 .. automodule:: sotodlib.site_pipeline.util
+   :members:
+   :undoc-members:
+
+.. automodule:: sotodlib.site_pipeline.jobdb
    :members:
    :undoc-members:

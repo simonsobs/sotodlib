@@ -19,10 +19,11 @@ import healpy as hp
 from scipy.constants import au as AU
 from scipy.interpolate import RectBivariateSpline, splrep, splev
 
+import toast.rng
 from toast.timing import function_timer
 from toast import qarray as qa
 from toast.data import Data
-from toast.traits import trait_docs, Int, Unicode, Instance
+from toast.traits import trait_docs, Float, Int, Unicode, Instance, Bool
 from toast.ops.operator import Operator
 from toast.utils import Logger, unit_conversion
 from toast.observation import default_values as defaults
@@ -43,6 +44,11 @@ class SimHWPSS(Operator):
 
     API = Int(0, help="Internal interface version for this operator")
 
+    times = Unicode(
+        defaults.times,
+        help="Observation shared key for timestamps, only used for drift.",
+    )
+
     hwp_angle = Unicode(
         defaults.hwp_angle, help="Observation shared key for HWP angle"
     )
@@ -50,6 +56,13 @@ class SimHWPSS(Operator):
     det_data = Unicode(
         defaults.det_data,
         help="Observation detdata key for simulated signal",
+    )
+
+    atmo_data = Unicode(
+        None,
+        allow_none=True,
+        help="Observation detdata key for simulated atmosphere "
+        "(modulates part of the HWPSS)",
     )
 
     stokes_weights = Instance(
@@ -65,6 +78,45 @@ class SimHWPSS(Operator):
         ),
         help="File containing measured or estimated HWPSS profiles",
     )
+
+    drift_rate = Float(
+        None,
+        allow_none=True,
+        help="If non-zero, the width of the Gaussian distribution to draw "
+        "drift rate [1/hour] from.  All detectors will observe the same "
+        "drift rate."
+    )
+
+    hwpss_random_drift = Bool(
+        False,
+        help="If True, the hwpss drift will be a random signal"
+        "following a 1/f^alpha spectrum, and fully correlated between "
+        "detectors."
+    )
+
+    hwpss_drift_alpha = Float(
+        1.0,
+        help="The power law exponent of the HWPSS random drift."
+    )
+
+    hwpss_drift_rms = Float(
+        0.01,
+        help="RMS of the relative HWPSS fluctuations."
+    )
+
+    hwpss_drift_coupling_center = Float(
+        1.0,
+        help="Mean coupling strength between the detectors and the HWPSS "
+        "random drift mode."
+    )
+
+    hwpss_drift_coupling_width = Float(
+        0.0,
+        help="Width of the coupling strength distribution between the "
+        "detectors and the HWPSS random drift mode."
+    )
+
+    realization = Int(0, help="Realization ID")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -97,11 +149,54 @@ class SimHWPSS(Operator):
             det_scale = unit_conversion(u.K, det_units)
 
             focalplane = obs.telescope.focalplane
+            fs = focalplane.sample_rate.to_value(u.Hz)
+
+            if self.drift_rate is not None and self.drift_rate != 0:
+                # Randomize the drift in a reproducible manner
+                counter1 = obs.session.uid
+                counter2 = self.realization
+                key1 = 683584
+                key2 = 476365
+                x = toast.rng.random(
+                    1,
+                    sampler="gaussian",
+                    key=(key1, key2),
+                    counter=(counter1, counter2),
+                )[0]
+                drift_rate = self.drift_rate * x
+                # Translate to actual drift
+                t = obs.shared[self.times].data
+                tmean = np.mean(t)  # Assumes data distribution by detector
+                drift = drift_rate * (t - tmean) / 3600
+            elif self.hwpss_random_drift and self.hwpss_drift_alpha is not None:
+                # Generate the HWPSS random drift common mode
+                counter1 = obs.session.uid
+                counter2 = self.realization
+                key1 = 683584
+                key2 = 476365
+                nsamp = obs.shared[self.times].data.size
+                w = toast.rng.random(
+                    nsamp,
+                    sampler="gaussian",
+                    key=(key1, key2),
+                    counter=(counter1, counter2),
+                ).array()
+                freqs = np.fft.rfftfreq(nsamp, 1/fs)
+                drift_psd = np.zeros_like(freqs)
+                drift_psd[1:] = np.abs(1 / freqs[1:])**self.hwpss_drift_alpha
+                drift = np.fft.irfft(np.fft.rfft(w) * np.sqrt(drift_psd))
+                drift *= self.hwpss_drift_rms / np.std(drift)
+            else:
+                drift = 0
 
             # Get HWP angle
             chi = obs.shared[self.hwp_angle].data
             for det in dets:
                 signal = obs.detdata[self.det_data][det]
+                if self.atmo_data is None:
+                    atmo = None
+                else:
+                    atmo = obs.detdata[self.atmo_data][det]
                 band = focalplane[det]["band"]
                 freq = {
                     "SAT_f030" : "027",
@@ -154,18 +249,39 @@ class SimHWPSS(Operator):
                 theta_high = self.thetas[itheta_high]
                 r = (theta_deg - theta_low) / (theta_high - theta_low)
 
-                transmission = (
-                    (1 - r) * self.all_stokes[freq]["transmission"][itheta_low]
-                    + r * self.all_stokes[freq]["transmission"][itheta_high]
+                # HWPSS not from atmosphere
+
+                transmission_wo_atmo = (
+                    (1 - r) * self.all_stokes[freq]["transmission_wo_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["transmission_wo_atmo"][itheta_high]
                 )
-                reflection = (
-                    (1 - r) * self.all_stokes[freq]["reflection"][itheta_low]
-                    + r * self.all_stokes[freq]["reflection"][itheta_high]
+                reflection_wo_atmo = (
+                    (1 - r) * self.all_stokes[freq]["reflection_wo_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["reflection_wo_atmo"][itheta_high]
                 )
+                # Thermal emission from the HWP is not driven by the atmosphere
                 emission = (
-                    (1 - r) * self.all_stokes[freq]["emission"][itheta_low]
-                    + r * self.all_stokes[freq]["emission"][itheta_high]
+                    (1 - r) * self.all_stokes[freq]["emission_wo_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["emission_wo_atmo"][itheta_high]
                 )
+
+                # HWPSS from atmosphere
+
+                transmission_atmo = (
+                    (1 - r) * self.all_stokes[freq]["transmission_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["transmission_atmo"][itheta_high]
+                )
+                reflection_atmo = (
+                    (1 - r) * self.all_stokes[freq]["reflection_atmo"][itheta_low]
+                    + r * self.all_stokes[freq]["reflection_atmo"][itheta_high]
+                )
+
+                if atmo is None:
+                    transmission = transmission_wo_atmo + transmission_atmo
+                    reflection = reflection_wo_atmo + reflection_atmo
+                else:
+                    transmission = transmission_wo_atmo
+                    reflection = reflection_wo_atmo
 
                 # Scale HWPSS for observing elevation
 
@@ -174,25 +290,62 @@ class SimHWPSS(Operator):
 
                 # Observe HWPSS with the detector
 
-                iquv = (transmission + reflection).T
+                iquv = (transmission + reflection)
+                iquv = iquv.T.copy()
                 iquss = (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                     uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 ) * scale
 
-                iquv = emission.T
+                if atmo is not None:
+                    # Atmospheric HWPSS is modulated by the relative
+                    # atmospheric fluctuation
+                    modulation = atmo / np.median(atmo)
+                    iquv = (transmission_atmo + reflection_atmo)
+                    iquv = iquv.T.copy()
+                    # Replace the generic T offset with the simulated atmosphere
+                    # offset
+                    iquv[0] += np.median(atmo) / det_scale - np.mean(iquv[0])
+                    iquss += (
+                        iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
+                        qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
+                        uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
+                    ) * scale * modulation
+
+                iquv = (emission).T.copy()
                 iquss += (
                     iweights * splev(chi, splrep(self.chis, iquv[0], k=5)) +
                     qweights * splev(chi, splrep(self.chis, iquv[1], k=5)) +
                     uweights * splev(chi, splrep(self.chis, iquv[2], k=5))
                 )
 
-                iquss -= np.median(iquss)
+                if self.hwpss_random_drift:
+                    # Apply detector couplings to HWPSS random drift common mode
+                    key1 = obs.telescope.uid
+                    key2 = obs.session.uid
+                    counter1 = self.realization
+                    counter2 = focalplane[det]["uid"]
+                    gaussian = toast.rng.random(
+                        1,
+                        sampler="gaussian",
+                        key=(key1, key2),
+                        counter=(counter1, counter2),
+                    )[0]
+                    coupling = (
+                        self.hwpss_drift_coupling_center
+                        + gaussian * self.hwpss_drift_coupling_width
+                    )
+                else:
+                    coupling = 1.0
 
                 # Co-add with the cached signal
 
-                signal += det_scale * iquss
+                if atmo is not None:
+                    # Avoid double-counting the atmosphere.
+                    # HWPSS has a copy of it
+                    signal -= atmo
+                signal += det_scale * iquss * (1 + drift * coupling)
 
         return
 

@@ -12,14 +12,13 @@ import logging
 from sqlalchemy import not_, or_, and_
 from typing import Optional
 
-from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
 from sotodlib.io.datapkg_utils import load_configs
 
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False, use_monitor:bool=False):
+         index_via_actions: bool=False, checked_file: Optional[str]=None):
     """
     Arguments
     ---------
@@ -37,9 +36,10 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         will be necessary for data older than Oct 2022 but creates concurancy 
         issues on systems (like the site) running automatic deletion of level 2 
         data.
-    use_monitor : bool
-        if True, will send monitor information to influx, set to false by
-        default so we can use identical config files for development
+    checked_file: str
+        a file name that contains a list of observations that would by default 
+        cause errors to be thrown during this script but have been manually
+        checked and dealt with
     """
     show_pb = True if verbosity > 1 else False
 
@@ -62,17 +62,6 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     cfgs = load_configs( config )
     SMURF = G3tSmurf.from_configs(cfgs, make_db=make_db)
-
-    monitor = None
-    if use_monitor and "monitor" in cfgs:
-        logger.info("Will send monitor information to Influx")
-        try:
-            monitor = Monitor.from_configs(cfgs["monitor"]["connect_configs"])
-            to_record = cfgs["monitor"].get("record", [])
-        except Exception as e:
-            logger.error(f"Monitor connectioned failed {e}")
-            monitor = None
-            to_record = []
 
     updates_start = dt.datetime.now().timestamp()
 
@@ -102,7 +91,8 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         )
     ).all()
 
-    raise_list = []
+    raise_list_timing = []
+    raise_list_readout_ids = []
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
@@ -111,70 +101,36 @@ def main(config: Optional[str] = None, update_delay: float = 2,
                 force=True,
             )
         if (obs.stop is not None) and (not obs.timing):
-            raise_list.append( obs.obs_id)
+            raise_list_timing.append(obs.obs_id)
 
-        if monitor is not None:
-            if obs.stop is not None:
-                try:
-                    if "timing_on" in to_record:
-                        record_timing(monitor, obs, cfgs)
-                    if "has_tuneset" in to_record:
-                        record_tuning(monitor, obs, cfgs)
-                except Exception as e:
-                    logger.error(
-                        f"Monitor Update failed for {obs.obs_id} with {e}"
-                    )
-    if len(raise_list) > 0:
+        if (obs.stop is not None) and len(obs.tunesets)==0:
+            raise_list_readout_ids.append(obs.obs_id)
+
+    if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
+        logger.info(
+            f"Found observations with bad timing or missing readout ids "
+            "checking to see if they've been manually cleared"
+        )
+        if checked_file is None or not os.path.exists(checked_file):
+            logger.warning(
+                f"File {checked_file} does not exist so cannot check if "
+                "problematic observations have been manually cleared"
+            )
+            cleared = []
+        else:
+            with open(checked_file) as f:
+                cleared = [c.strip("\n").strip() for c in f.readlines()]
+        raise_list_timing = [x for x in raise_list_timing if x not in cleared]
+        raise_list_readout_ids = [
+            x for x in raise_list_readout_ids if x not in cleared
+        ]
+    if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
         raise ValueError(
-            f"Found {len(raise_list)} observations with bad timing. obs_ids " f"are {raise_list}"
+            f"Found {len(raise_list_timing)} observations with bad timing"
+            f" obs_ids are {raise_list_timing}.\nFound "
+            f"{len(raise_list_readout_ids)} observations without Tunesets" 
+            f" obs_ids are {raise_list_readout_ids}."
         )
-
-def _obs_tags(obs, cfgs):
-    
-    tags = [{
-        "telescope" : cfgs["monitor"]["telescope"], 
-        "stream_id" : obs.stream_id
-    }]
-
-    log_tags = {"observation": obs.obs_id, "stream_id": obs.stream_id}
-
-    return tags, log_tags
-
-def record_tuning(monitor, obs, cfgs):
-    """Send a record of the Tune Status to the Influx QDS database.
-    Will be used to alter if the database readout_ids are not working.
-    """
-    tags, log_tags = _obs_tags(obs, cfgs)
-    if not monitor.check("has_tuneset", obs.obs_id, tags=tags[0]):
-        monitor.record(
-            "has_tuneset", 
-            [ len(obs.tunesets)==1 ], 
-            [obs.timestamp], 
-            tags, 
-            cfgs["monitor"]["measurement"], 
-            log_tags=log_tags
-        )
-        monitor.write()
-
-
-def record_timing(monitor, obs, cfgs):
-    """Send a record of the timing status to the Influx QDS database
-    """
-    tags, log_tags = _obs_tags(obs, cfgs)
-
-    if not monitor.check("timing_on", obs.obs_id, tags=tags[0]):
-        timing = obs.timing
-        if timing is None:
-            timing = False
-        monitor.record(
-            "timing_on", 
-            [timing], 
-            [obs.timestamp], 
-            tags, 
-            cfgs["monitor"]["measurement"], 
-            log_tags=log_tags
-        )
-        monitor.write()
 
 def get_parser(parser=None):
     if parser is None:
@@ -188,8 +144,8 @@ def get_parser(parser=None):
                         default=2, type=int)
     parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
                         action="store_true")
-    parser.add_argument('--use-monitor', help="Send updates to influx",
-                        action="store_true")
+    parser.add_argument("--checked-file", 
+        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
     return parser
 
 if __name__ == '__main__':

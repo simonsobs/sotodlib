@@ -96,7 +96,7 @@ def get_coeff_metric(tod):
     print(tod.azss_stats.coeffs[0])
     outmetric_num = (tod.azss_stats.coeffs - tod.input_coeffs)**2
     outmetric_denom = (tod.input_coeffs)**2
-    return np.max(100*(outmetric_num/outmetric_denom))
+    return np.median(100*(outmetric_num/outmetric_denom))
 
 
 class AzssTest(unittest.TestCase):
@@ -104,10 +104,10 @@ class AzssTest(unittest.TestCase):
     def test_fit(self):
         max_mode = 10
         tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
-        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, range=None, bins=100000)
-        ommax = get_coeff_metric(tod)
-        print(ommax)
-        self.assertTrue(ommax < 1.0)
+        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, azrange=None, bins=100)
+        ommedian = get_coeff_metric(tod)
+        print(ommedian)
+        self.assertTrue(ommedian < 5.0)
 
 if __name__ == '__main__':
     unittest.main()

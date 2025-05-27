@@ -1,6 +1,8 @@
+from typing import Optional, Dict
+from dataclasses import dataclass, fields
+
 import so3g
 from so3g.proj import Ranges
-
 from spt3g import core
 import itertools
 import numpy as np
@@ -8,11 +10,15 @@ from scipy.interpolate import interp1d
 from scipy.signal import convolve
 from tqdm.auto import tqdm
 import os
-import yaml
 import logging
 import sys
 import shutil
+import yaml
+import datetime as dt
+from zipfile import ZipFile, ZIP_DEFLATED
+import sotodlib
 from sotodlib.site_pipeline.util import init_logger
+from .datapkg_utils import walk_files
 
 
 log = logging.getLogger('bookbinder')
@@ -25,6 +31,36 @@ class TimingSystemOff(Exception):
 
 class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
+    pass
+
+MAX_DROPPED_SAMPLES = 100
+class BadTimeSamples(Exception):
+    """Exception raised when there are drops in the time samples in the 
+    UFM timestreams"""
+    pass
+
+class NoHKFiles(Exception):
+    """Exception raised when we cannot find any HK data around the book time"""
+    pass
+
+class NoMountData(Exception):
+    """Exception raised when we cannot find mount data"""
+    pass
+
+class NoHWPData(Exception):
+    """Exception raised when we cannot find HWP data"""
+    pass
+
+class DuplicateAncillaryData(Exception):
+    """Exception raised when we find the HK data has copies of the same timestamps"""
+    pass
+
+class NonMonotonicAncillaryTimes(Exception):
+    """Exception raised when we find the HK data has timestamps that are not strictly increasing monotonically"""
+    pass
+
+class BookDirHasFiles(Exception):
+    """Exception raised when files already exist in a book directory"""
     pass
 
 def setup_logger(logfile=None):
@@ -51,13 +87,11 @@ def setup_logger(logfile=None):
 
     return log
 
-
 def get_frame_iter(files):
     """
     Returns a continuous iterator over frames for a list of files.
     """
     return itertools.chain(*[core.G3File(f) for f in files])
-
 
 def close_writer(writer):
     """
@@ -67,7 +101,6 @@ def close_writer(writer):
     if writer is None:
         return
     writer(core.G3Frame(core.G3FrameType.EndProcessing))
-
 
 def next_scan(it):
     """
@@ -81,83 +114,201 @@ def next_scan(it):
         interm_frames.append(frame)
     return None, interm_frames
 
+class HkDataField:
+    """
+    Class containing HK Data for a single field.
 
-class HKBlock:
-    def __init__(self, name):
-        self.name = name
-        self.data = {}
-        self.times = []
-    
+    Args
+    -----
+    instance_id: str
+        Instance id of the agent producing the data.
+    feed: str
+        Feed name for hk data feed.
+    field: str
+        Field name for hk data feed.
+
+    Attributes
+    -----------
+    times: np.ndarray
+        HK sample timestamps.
+    data: np.ndarray
+        HK sample data.
+    finalized: bool
+        True if datas has been processed and finalized.
+    """
+    def __init__(self, instance_id: str, feed: str, field: str):
+        self.instance_id = instance_id
+        self.feed = feed
+        self.field = field
+
+        self.times =[]
+        self.data = []
+        self.finalized = False
+
+    def __len__(self):
+        return len(self.times)
+
+    @property
+    def addr(self):
+        """Returns full address of field"""
+        return f"{self.instance_id}.{self.feed}.{self.field}"
+
     def process_frame(self, frame):
-        if self.name not in frame['block_names']:
+        """Update data based on G3Frame"""
+        address = frame['address']  # "<site>.<instance_id>.feeds.<feed_name>""
+        spl = address.split('.')
+        instance_id, feed = spl[1], spl[3]
+        if instance_id != self.instance_id or feed != self.feed:
             return
-        idx = list(frame['block_names']).index(self.name)
-        block = frame['blocks'][idx]
 
-        self.times.append(np.array(block.times) / core.G3Units.s)
-        for k, v in block.items():
-            if k not in self.data:
-                self.data[k] = []
-            self.data[k].append(v)
-    
-    def finalize(self,drop_duplicates=False):
-        if self.times:
-            self.times = np.hstack(self.times)
-            clean_times, idxs = np.unique(self.times, return_index=True)
-            if len(self.times) != len(clean_times):
-                if not drop_duplicates:
-                    raise ValueError(f"HK data from block {self.name} has" 
-                                    " duplicate timestamps")
-                self.times = self.times[idxs]
-            assert (np.all(np.diff(self.times)>0), f"Times from {self.name} are"
-                            " not increasing")
-            for k, v in self.data.items():
-                self.data[k] = np.hstack(v)[idxs]
-        else:
-            self.times = np.array([], dtype=np.float64)
-            self.data = {}
+        for block in frame['blocks']:
+            if self.field not in block:
+                continue
+            self.times.append(np.array(block.times) / core.G3Units.s)
+            self.data.append(block[self.field])
 
+    def finalize(self, drop_duplicates=False, require_monotonic_times=True):
+        """Finalize data, and store in numpy array"""
+        self.times = np.hstack(self.times, dtype=np.float64)
+        self.data = np.hstack(self.data)
+        self.finalized = True
+
+        # Check for duplicates
+        clean_times, idxs = np.unique(self.times, return_index=True)
+        if len(self.times) != len(clean_times):
+            if not drop_duplicates:
+                raise DuplicateAncillaryData(
+                    f"HK data from {self.addr} has" 
+                    " duplicate timestamps"
+                )
+            else:
+                log.warning(
+                    f"HK data from {self.addr} has duplicate timestamps"
+                )
+            self.times = self.times[idxs]
+            self.data = self.data[idxs]
+        if not np.all(np.diff(self.times)>0):
+            bad = np.sum( np.diff(self.times) <= 0)
+            msg = f"Times from {self.addr} have {bad} samples that are " \
+                "not increasing"
+            if require_monotonic_times:
+                raise NonMonotonicAncillaryTimes(msg)
+            else:
+                log.warning(msg)
+        
+@dataclass
+class HkData:
+    """
+    Class containing HkData for bookbinding, including ACU and HWP data.
+    """
+    az: Optional[HkDataField] = None
+    el: Optional[HkDataField] = None
+    boresight: Optional[HkDataField] = None
+    corotator_enc: Optional[HkDataField] = None
+    az_mode: Optional[HkDataField] = None
+    hwp_freq: Optional[HkDataField] = None
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, str]):
+        """
+        Creates HkData object from a dict of field addresses. Addresses must be formatted like ``<instance_id>.<feed>.<field>``.
+        Keys of dict must be valide fields of HkData class, such as ``az`` or ``el``.
+        """
+        kw = {}
+        for k, v in d.items():
+            try:
+                instance, feed, field = v.split('.')
+            except Exception as exc:
+                raise ValueError(f"Could not parse field: {v}. "
+                                 "Must be formatted <instance_id>.<feed>.<field>") from exc
+            kw[k] = HkDataField(instance, feed, field)
+        return cls(**kw)
+
+    def process_frame(self, frame):
+        """Processes G3frame, and updates relevant HkDataFields"""
+        for fld in fields(self):
+            f = getattr(self, fld.name)
+            if isinstance(f, HkDataField):
+                f.process_frame(frame)
+
+    def finalize(self, drop_duplicates=True, require_monotonic_times=True):
+        """Finalizes HkDatafields"""
+        for fld in fields(self):
+            f = getattr(self, fld.name)
+            if isinstance(f, HkDataField):
+                f.finalize(
+                    drop_duplicates=drop_duplicates,
+                    require_monotonic_times=require_monotonic_times,
+                )
 
 class AncilProcessor:
     """
     Processor for ancillary (ACU) data
-    
+
     Params
     --------
     files : list
-        List of HK files to process
+        List of HK files to process.
+    book_id: str
+        ID of book being bound.
+    hk_fields: dict
+        Dictionary of fields corresponding to relevant HK Data. See the HkData
+        class for what housekeeping fields are allowed.  For example::
+
+            >> hk_fields = {
+                'az': 'acu.acu_udp_stream.Corrected_Azimuth',
+                'el': 'acu.acu_udp_stream.Corrected_Elevation',
+                'boresight': 'acu.acu_udp_stream.Corrected_Boresight',
+                # corotator_enc: acu.acu_status.Corotator_current_position # (For LAT)
+                'az_mode':  'acu.acu_status.Azimuth_mode',
+                'hwp_freq': 'hwp-bbb-e1.HWPEncoder.approx_hwp_freq',
+            }
 
     Attributes
     -----------
-    blocks : dict
-        Dict containing ancillary blocks of co-sampled data, read from HK files.
-        This will be populated during preprocess.
+    hkdata : HkData
+        Class containing relevant Hk data for the duration of the book.
     times : np.ndarray
         Timestamps for anc data. This will be populated after preprocess.
     anc_frame_data : List[G3TimestreamMap]
         List of G3TimestreamMaps saved for each bound frame. This will be
         populated on bind and should be used to add copies of the anc data to
-        the detector frames. 
+        the detector frames.
     """
-    def __init__(self, files, book_id, drop_duplicates=False, log=None):
+    def __init__(self, files, book_id, hk_fields: Dict, 
+                 drop_duplicates=False, require_hwp=True, 
+                 require_acu=True, require_monotonic_times=True, 
+                 log=None
+                 ):
+        self.hkdata: HkData = HkData.from_dict(hk_fields)
+
         self.files = files
-        self.times = None
-        self.blocks = {
-            name: HKBlock(name) 
-            for name in ['ACU_broadcast', 'ACU_summary_output', 
-                         'HWPEncoder_freq', 'ACU_corotator']
-        }
         self.anc_frame_data = None
         self.out_files = []
         self.book_id = book_id
         self.preprocessed = False
         self.drop_duplicates = drop_duplicates
-
+        self.require_hwp = require_hwp
+        self.require_acu = require_acu
+        self.require_monotonic_times = require_monotonic_times
         if log is None:
             self.log = logging.getLogger('bookbinder')
         else:
             self.log = log
-    
+
+        if len(self.files) == 0:
+            if self.require_acu or self.require_hwp:
+                raise NoHKFiles("No HK files specified for book")
+            self.log.warning("No HK files found for book")
+            for fld in ['az', 'el', 'boresight', 'corotator_enc','az_mode', 'hwp_freq']:
+                setattr(self.hkdata, fld, None)
+
+        if self.require_acu and self.hkdata.az is None:
+            self.log.warning("No ACU data specified in hk_fields!")
+
+        if self.require_hwp and self.hkdata.hwp_freq is None:
+            self.log.warning("No HWP Freq data is specified in hk_fields.")
+
     def preprocess(self):
         """
         Preprocesses HK data and populates the `data` and `times` objects.
@@ -171,15 +322,45 @@ class AncilProcessor:
         for fr in frame_iter:
             if fr['hkagg_type'] != 2:
                 continue
+            self.hkdata.process_frame(fr)
 
-            for block in self.blocks.values():
-                block.process_frame(fr)
+        # look for ACU fields that are configured but not found in HK data files
+        # will not check fields that are not in the configuration file
+        for fld in ['az', 'el', 'boresight', 'corotator_enc']:
+            f = getattr(self.hkdata, fld)
+            if f is not None:
+                if self.require_acu and len(f) == 0:
+                    raise NoMountData(
+                        f"Did not find ACU data in {self.files} for {fld}",
+                    )
+                elif len(f) == 0:
+                    ## requiring Az data is fails and we didn't find any
+                    self.log.warning(
+                        f"Did not find ACU data for {fld}. Bypassed because "
+                        "require_acu is false"
+                    )
+                    setattr(self.hkdata, fld, None)
 
-        for block in self.blocks.values():
-            block.finalize(drop_duplicates=self.drop_duplicates)
+        # look for HWP data if HWP fields are in configuration file
+        if self.hkdata.hwp_freq is not None:
+            if self.require_hwp and len(self.hkdata.hwp_freq) == 0:
+                raise NoHWPData(
+                    f"Did not find HWP data in {self.files}",
+                )
+            elif len(self.hkdata.hwp_freq) == 0:
+                ## requiring HWP data is false and we didn't find any
+                self.log.warning(
+                    f"Did not find HWP data in data. Bypassed because "
+                    "require_hwp is false"
+                )
+                self.hkdata.hwp_freq = None
+        
+        self.hkdata.finalize(
+            drop_duplicates=self.drop_duplicates,
+            require_monotonic_times=self.require_monotonic_times,
+        )
         self.preprocessed = True
 
-    
     def bind(self, outdir, times, frame_idxs, file_idxs):
         """
         Binds ancillary data.
@@ -202,24 +383,43 @@ class AncilProcessor:
         cur_file_idx = None
         out_files = []
 
-        az, el, boresight, corotation = None, None, None, None
-        block = self.blocks['ACU_broadcast']
-        if 'Corrected_Azimuth' in block.data:
-            az = np.interp(times, block.times, block.data['Corrected_Azimuth'])
-            el = np.interp(times, block.times, block.data['Corrected_Elevation'])
-        if 'Corrected_Boresight' in block.data:
-            boresight = np.interp(
-                times, 
-                block.times, 
-                block.data['Corrected_Boresight']
-            )
-        block = self.blocks['ACU_corotator']
-        if 'Corotator_current_position' in block.data:
-            corotation = np.interp(
-                times, 
-                block.times, 
-                block.data['Corotator_current_position']
-            )
+        def validate_mount_field(hk_field: HkDataField, max_dt=None):
+            m = (times[0] <= hk_field.times) & (hk_field.times <= times[-1])
+            if m.sum() < 2:
+                raise NoMountData(
+                    f"No mount data overlapping with detector data: {hk_field.addr}"
+                )
+            if max_dt is not None:
+                _max_dt = np.max(np.diff(hk_field.times[m]))
+                if _max_dt > max_dt:
+                    raise NoMountData(
+                        f"Max data spacing {_max_dt}s is higher than {max_dt}s for {hk_field.addr}. "
+                        "Interpolation may be questionable."
+                    )
+
+        # go through and interpolate ACU times to detector times
+        acu_interp_data = {}
+        for fld in ['az', 'el', 'boresight', 'corotator_enc']:
+            f = getattr(self.hkdata, fld)
+            if f is not None:
+                try:
+                    validate_mount_field(f, max_dt=10)
+                    acu_interp_data[fld] = np.interp(
+                        times, f.times, f.data
+                    )
+                except NoMountData as e:
+                    if self.require_acu:
+                        raise e
+                    else:
+                        self.log.warning(e)
+                        acu_interp_data[fld] = None
+            else: 
+                acu_interp_data[fld] = None
+
+        az = acu_interp_data['az']
+        el = acu_interp_data['el']
+        boresight = acu_interp_data['boresight']
+        corotator_enc = acu_interp_data['corotator_enc']
 
         anc_frame_data = []
         for oframe_idx in np.unique(frame_idxs):
@@ -247,8 +447,8 @@ class AncilProcessor:
                 anc_data['el_enc'] = core.G3VectorDouble(el[m])
             if boresight is not None:
                 anc_data['boresight_enc'] = core.G3VectorDouble(boresight[m])
-            if corotation is not None:
-                anc_data['corotator_enc'] = core.G3VectorDouble(corotation[m])
+            if corotator_enc is not None:
+                anc_data['corotator_enc'] = core.G3VectorDouble(corotator_enc[m])
             oframe['ancil'] = anc_data
             writer(oframe)
             anc_frame_data.append(anc_data)
@@ -258,7 +458,7 @@ class AncilProcessor:
         # Save this to be added to detector files
         self.anc_frame_data = anc_frame_data
         self.out_files = out_files
-    
+
     def add_acu_summary_info(self, frame, t0, t1):
         """
         Adds ACU summary information to a G3Frame. This will add the following
@@ -271,7 +471,7 @@ class AncilProcessor:
                 Mean and standard deviation of the az velocity (deg / sec)
             - elevation_velocity_mean / elevaction_velocity_std: (float / float)
                 Mean and standard deviation of the el velocity (deg / sec)
-            
+
         Params
         ----------
         frame : G3Frame
@@ -281,35 +481,42 @@ class AncilProcessor:
         t1 : float
             Stop time of frame (unix time), inclusive
         """
-        bl = self.blocks.get('ACU_summary_output')
-        if bl.data:
-            az_mode = bl.data["Azimuth_mode"]
-            acu_summary_times = bl.times
-            m = (t0 <= acu_summary_times) & (acu_summary_times <= t1)
+        az_mode = self.hkdata.az_mode
+        az = self.hkdata.az
+        el = self.hkdata.el
+        if az_mode is not None:
+            m = (t0 <= az_mode.times) & (az_mode.times <= t1)
             if not np.any(m):
                 frame['azimuth_mode'] = 'None'
-            elif 'ProgramTrack' in az_mode[m]:
-                frame['azimuth_mode'] = 'ProgramTrack'  # Scanning
+            elif 'ProgramTrack' in az_mode.data[m]:
+                frame['azimuth_mode'] = 'ProgramTrack' # Scanning
             else:
-                frame['azimuth_mode'] = 'Preset'  # "Slewing"
+                frame['azimuth_mode'] = 'Preset'  # Slewing
 
-        bl = self.blocks['ACU_broadcast']
-        if bl.data:
-            az = bl.data["Corrected_Azimuth"]
-            el = bl.data["Corrected_Elevation"]
-            m = (t0 <= bl.times) & (bl.times <= t1)
-            dt = np.diff(bl.times[m]).mean()
-            az_vel = np.diff(az[m]) / dt
-            el_vel = np.diff(el[m]) / dt
+        if az is not None:
+            m = (t0 <= az.times) & (az.times <= t1)
+            if m.sum() >= 2:
+                dt = np.diff(az.times[m]).mean()
+                az_vel = np.diff(az.data[m]) / dt
+                frame['azimuth_velocity_mean'] = np.mean(az_vel)
+                frame['azimuth_velocity_stdev'] = np.std(az_vel)
+        for k in ['azimuth_velocity_mean', 'azimuth_velocity_stdev']:
+            if k not in frame:
+                frame[k] = np.nan
 
-            frame['azimuth_velocity_mean'] = np.mean(az_vel)
-            frame['azimuth_velocity_stdev'] = np.std(az_vel)
-            frame['elevation_velocity_mean'] = np.mean(el_vel)
-            frame['elevation_velocity_stdev'] = np.std(el_vel)
+        if el is not None:
+            m = (t0 <= el.times) & (el.times <= t1)
+            if m.sum() >= 2:
+                dt = np.diff(el.times[m]).mean()
+                el_vel = np.diff(el.data[m]) / dt
+                frame['elevation_velocity_mean'] = np.mean(el_vel)
+                frame['elevation_velocity_stdev'] = np.std(el_vel)
+        for k in ['elevation_velocity_mean', 'elevation_velocity_stdev']:
+            if k not in frame:
+                frame[k] = np.nan
 
-        
 class SmurfStreamProcessor:
-    def __init__(self, obs_id, files, book_id, readout_ids, 
+    def __init__(self, obs_id, files, book_id, readout_ids,
                  log=None, allow_bad_timing=False):
         self.files = files
         self.obs_id = obs_id
@@ -381,7 +588,12 @@ class SmurfStreamProcessor:
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
-
+ 
+        if np.any( np.diff(self.times) < 0):
+            raise BadTimeSamples(
+                f"{self.obs_id} has time samples not increasing"
+            )
+        
         timing = timing and (not self.timing_paradigm=='Low Precision')
         
         if (not self.allow_bad_timing) and (not timing):
@@ -451,6 +663,10 @@ class SmurfStreamProcessor:
         # Sample idx within each in-frame for every input sample
         in_offset_idxs = np.arange(len(self.times)) - offsets[self.frame_idxs]
 
+        # Mask to use to separate out non-resonator signal from resonator signal
+        tracked_chans = np.array(['NONE' not in r for r in self.readout_ids], dtype=bool)
+        readout_id_arr = np.array(self.readout_ids)
+
         # Handle file writers
         writer = None
         cur_file_idx = None
@@ -503,7 +719,7 @@ class SmurfStreamProcessor:
                 #    >> arr_out[:, o0:o1] = arr_in[:, i0:i1]
                 # since numpy does not need to create a temporary copy of the
                 # data, and can just do a direct mem-map. This speeds up binding
-                # by a factory of ~4.
+                # by a factor of ~4.
                 #
                 # Here we are splitting outsamps and insamps into a list
                 # of ranges where both arrays are contiguous. Then we loop
@@ -541,7 +757,7 @@ class SmurfStreamProcessor:
                 )
                 raise ValueError(f"Cannot finish binding {self.obs_id}")
             elif np.any(~filled):
-                self.log.debug(
+                self.log.warning(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
                 )
                 # Missing samples at the beginning / end of a frame will be
@@ -567,7 +783,8 @@ class SmurfStreamProcessor:
             oframe['flag_smurfgaps'] = core.G3VectorBool(~filled)
 
             ts = core.G3VectorTime(ts * core.G3Units.s)
-            oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids, ts, data)
+            oframe['signal'] = so3g.G3SuperTimestream(readout_id_arr[tracked_chans], ts, data[tracked_chans, :])
+            oframe['untracked'] = so3g.G3SuperTimestream(readout_id_arr[~tracked_chans], ts, data[~tracked_chans, :])
             oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
             oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
             oframe['stream_id'] = self.stream_id
@@ -584,10 +801,10 @@ class SmurfStreamProcessor:
         if pbar.n >= pbar.total:
             pbar.close()
 
-
 class BookBinder:
     """
-    Class for combining smurf and hk L2 data to create books.
+    Class for combining smurf and hk L2 data to create books containing detector
+    timestreams.
 
     Parameters
     ----------
@@ -617,8 +834,18 @@ class BookBinder:
         if true, will drop duplicate timestamp data from ancillary files. added
         to deal with an occassional hk aggregator error where it is picking up
         multiple copies of the same data
+    require_acu: bool, optional
+        if true, will throw error if we do not find Mount data
+    require_monotonic_times: bool, optional
+        if true, will throw error if we ever see timestamps not increasing or going backwards
+    require_hwp: bool, optional
+        if true, will throw error if we do not find HWP data
     allow_bad_time: bool, optional
         if not true, books will not be bound if the timing systems signals are not found. 
+    min_ctime: float, optional
+        if not None, will cut book to this minimum ctime
+    max_ctime: float optional
+        if not None, will cut book to this maximum ctime
     
     Attributes
     -----------
@@ -633,19 +860,22 @@ class BookBinder:
     file_idxs : np.ndarray
         Array of output file indices for all output frames in the book
     """
-    def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir,
-                 max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False, ancil_drop_duplicates=False, allow_bad_timing=False):
+    def __init__(self, book, obsdb, filedb, data_root, readout_ids, 
+                outdir, hk_fields, max_samps_per_frame=50_000, max_file_size=1e9, ignore_tags=False, ancil_drop_duplicates=False, 
+                require_hwp=True, require_acu=True,
+                require_monotonic_times=True,
+                allow_bad_timing=False,
+                min_ctime=None, max_ctime=None):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
         self.hk_root = os.path.join(data_root, 'hk')
         self.meta_root = os.path.join(data_root, 'smurf')
-        self.hkfiles = get_hk_files(os.path.join(data_root, 'hk'), 
-                                    book.start.timestamp(),
-                                    book.stop.timestamp())
+        
         self.obsdb = obsdb
         self.outdir = outdir
+
+        assert book.schema==0, "obs/oper books only have schema=0"
 
         self.max_samps_per_frame = max_samps_per_frame
         self.max_file_size = max_file_size
@@ -653,27 +883,52 @@ class BookBinder:
         self.allow_bad_timing = allow_bad_timing
 
         if os.path.exists(outdir):
-            if len(os.listdir(outdir)) > 1:
-                raise ValueError(
+            # don't count hidden files, possibly from NFS processes
+            nfiles = len([f for f in os.listdir(outdir) if f[0] != '.'])
+            if nfiles > 1:
+                raise BookDirHasFiles(
                     f"Output directory {outdir} contains files. Delete to retry"
                       " bookbinding"
                 )
-            elif len(os.listdir(outdir)) == 1:
-                assert (os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', 
-                    f"only acceptable file in new book path {outdir} is "
+
+            elif nfiles == 1:
+                assert os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', \
+                    f"only acceptable file in new book path {outdir} is " \
                     " Z_bookbinder_log.txt"
-                )
+
         else:
             os.makedirs(outdir)
 
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')
         self.log = setup_logger(logfile)
 
+        try:
+            self.hkfiles = get_hk_files(
+                self.hk_root, 
+                book.start.timestamp(),
+                book.stop.timestamp()
+            )
+        except NoHKFiles as e:
+            if require_hwp or require_acu:
+                self.log.error(
+                    "HK files are required if we require ACU or HWP data"
+                )
+                raise e
+            self.log.warning(
+                "Found no HK files during book time, binding anyway because "
+                "require_acu and require_hwp are False"
+            )
+            self.hkfiles = []            
+
         self.ancil = AncilProcessor(
             self.hkfiles, 
             book.bid, 
+            hk_fields,
             log=self.log, 
-            drop_duplicates=ancil_drop_duplicates
+            drop_duplicates=ancil_drop_duplicates,
+            require_hwp=require_hwp,
+            require_acu=require_acu,
+            require_monotonic_times=require_monotonic_times,
         )
         self.streams = {}
         for obs_id, files in filedb.items():
@@ -689,6 +944,8 @@ class BookBinder:
                 allow_bad_timing=self.allow_bad_timing,
             )
 
+        self.min_ctime = min_ctime
+        self.max_ctime = max_ctime
         self.times = None
         self.frame_idxs = None
         self.file_idxs = None
@@ -707,7 +964,26 @@ class BookBinder:
             stream.preprocess()
 
         t0 = np.max([s.times[0] for s in self.streams.values()])
+        if self.min_ctime is not None:
+            assert self.min_ctime >= t0, \
+                f"{self.min_ctime} is less than the first time found in"\
+                f" the detector data {t0}"
+            self.log.warning(
+                f"Over-riding minimum ctime from {t0} to {self.min_ctime}"
+            )
+            t0 = self.min_ctime
+        else:
+            self.min_ctime = t0
         t1 = np.min([s.times[-1] for s in self.streams.values()])
+        if self.max_ctime is not None:
+            assert self.max_ctime <= t1, \
+                f"{self.max_ctime} is greater than the last time found in"\
+                f" the detector data {t1}"
+            self.log.warning(
+                f"Over-riding maximum ctime from {t1} to {self.max_ctime}"
+            )
+        else:
+            self.max_ctime = t1
         # prioritizes the last stream
         # implicitly assumes co-sampled (this is where we could throw errors
         # after looking for co-sampled data)
@@ -742,11 +1018,55 @@ class BookBinder:
             file_idxs.append(totsize[idx] // self.max_file_size)
         file_idxs = np.array(file_idxs, dtype=int)
 
-        self.log.info("Finished preprocessing data")
-
         self.times = ts
         self.frame_idxs = frame_idxs
         self.file_idxs = file_idxs
+
+        self.check_timesamples()
+        self.log.info("Finished preprocessing data")
+
+    def check_timesamples(self, atol=1e-4):
+        """
+        Checks for missing timesamples in individual streams relative to the 
+        book times. Makes sure individual readout slots haven't dropped too many
+        points
+        """
+        if self.times is None:
+            raise ValueError(
+                "Preprocess must have been run to check_timesamples"
+            )
+        
+        self.dropped = {}
+        for u, s in self.streams.items():
+            sample_map = find_ref_idxs(self.times, s.times)
+            mapped = np.abs(self.times[sample_map] - s.times) < atol
+            diffs = np.diff(sample_map[mapped])
+            idx = np.where( diffs>1)[0]
+            self.dropped[u] = sum( [diffs[i]-1 for i in idx] )
+        
+        if np.all( [x==0 for x in self.dropped.values()] ):
+            ## no dropped samples from any slot
+            return
+        msg = '\n'.join([
+            f"\t{self.streams[u].obs_id}: {x}" for u, x in self.dropped.items()
+        ])
+        if np.any( [x>MAX_DROPPED_SAMPLES for x in self.dropped.values()]):
+            if (not self.allow_bad_timing):
+                raise BadTimeSamples(
+                    f"Streams have more than {MAX_DROPPED_SAMPLES} time samples"
+                    f" missing. Pass `allow_bad_timing=True` to bind anyway. "
+                    "Missing samples:\n" + msg
+                )
+            else:
+                self.log.warning(
+                    f"Streams have more than {MAX_DROPPED_SAMPLES} time samples"
+                    f" missing. Missing Samples: \n" + msg
+                )
+        else:
+            self.log.warning(
+                f"Streams have time samples missing. Missing Samples: \n" + msg
+            )
+
 
     def copy_smurf_files_to_book(self):
         """
@@ -782,6 +1102,34 @@ class BookBinder:
 
         self.meta_files = meta_files
 
+    def write_M_files(self, telescope, tube_config):
+        # write M_book file
+        m_book_file = os.path.join(self.outdir, "M_book.yaml")
+        book_meta = {}
+        book_meta["book"] = {
+            "type": self.book.type,
+            "schema_version": self.book.schema,
+            "book_id": self.book.bid,
+            "finalized_at": dt.datetime.utcnow().isoformat(),
+        }
+        book_meta["bookbinder"] = {
+            "codebase": sotodlib.__file__,
+            "version": sotodlib.__version__,
+            # leaving this in but KH doesn't know what it's supposed to be for
+            "context": "unknown", 
+        }
+        with open(m_book_file, "w") as f:
+            yaml.dump(book_meta, f)
+        
+        mfile = os.path.join(self.outdir, "M_index.yaml")
+        with open(mfile, "w") as f:
+            yaml.dump(
+                self.get_metadata(
+                    telescope=telescope,
+                    tube_config=tube_config,
+                ), f
+            )
+
     def get_metadata(self, telescope=None, tube_config={}):
         """
         Returns metadata dict for the book
@@ -797,6 +1145,7 @@ class BookBinder:
         meta['n_frames'] = len(np.unique(self.frame_idxs))
         meta['n_samples'] = len(self.times)
         meta['session_id'] = self.book.bid.split('_')[1]
+        meta['filled_samples'] = {k:int(x) for k,x in self.dropped.items()}
 
         sample_ranges = []
         for file_idx in np.unique(self.file_idxs):
@@ -838,26 +1187,24 @@ class BookBinder:
             tags.append(g3tobs.tag)
         meta['detsets'] = detsets
 
-        block = self.ancil.blocks['HWPEncoder_freq']
+        hwp_freq = self.ancil.hkdata.hwp_freq
         meta['hwp_freq_mean'] = None
         meta['hwp_freq_stdev'] = None
         t0, t1 = self.times[0], self.times[-1]
-        if 'approx_hwp_freq' in block.data:
-            hwp_freq = block.data['approx_hwp_freq']
-            m = (t0 < block.times) & (block.times < t1)
+        if hwp_freq is not None:
+            m = (t0 < hwp_freq.times) & (hwp_freq.times < t1)
             if m.any():
-                meta['hwp_freq_mean'] = float(np.mean(hwp_freq[m]))
-                meta['hwp_freq_stdev'] = float(np.std(hwp_freq[m]))
+                meta['hwp_freq_mean'] = float(np.mean(hwp_freq.data[m]))
+                meta['hwp_freq_stdev'] = float(np.std(hwp_freq.data[m]))
         
+        az = self.ancil.hkdata.az
         meta['az_speed_mean'] = None
         meta['az_speed_stdev'] = None
-        block = self.ancil.blocks['ACU_broadcast']
-        if 'Corrected_Azimuth' in block.data:
-            m = (t0 < block.times) & (block.times <= t1)
-            dt = np.diff(block.times[m]).mean()
-            az = block.data['Corrected_Azimuth']
-            az_speed = np.abs(np.diff(az[m]) / dt)
-            if m.any():
+        if az is not None:
+            m = (t0 < az.times) & (az.times <= t1)
+            if np.sum(m) >= 2:
+                dt = np.diff(az.times[m]).mean()
+                az_speed = np.abs(np.diff(az.data[m]) / dt)
                 meta['az_speed_mean'] = float(np.mean(az_speed))
                 meta['az_speed_stdev'] = float(np.std(az_speed))
 
@@ -888,7 +1235,7 @@ class BookBinder:
             If True, will enable a progress bar.
         """
         self.preprocess()
-
+        
         self.log.info(f"Binding data to {self.outdir}")
         if not os.path.exists(self.outdir):
             os.makedirs(self.outdir)
@@ -908,6 +1255,108 @@ class BookBinder:
         self.log.info("Finished binding data. Exiting.")
         return True
 
+class TimeCodeBinder:
+    """Class for building the timecode based books, smurf, stray, and hk books. 
+    These books are built primarily just by copying specified files from level 
+    2 locations to new locations at level 2.
+    """
+
+    def __init__(
+        self, book, timecode, indir, outdir, file_list=None, 
+        ignore_pattern=None,
+    ):
+        self.book = book
+        self.timecode = timecode
+        self.indir = indir
+        self.outdir = outdir
+        self.file_list = file_list
+        if ignore_pattern is not None:
+            self.ignore_pattern = ignore_pattern
+        else:
+            self.ignore_pattern = []
+        
+        if book.type == 'smurf' and book.schema > 0:
+            self.compress_output = True
+        else:
+            self.compress_output = False    
+
+    def get_metadata(self, telescope=None, tube_config={}):
+        return {
+            "book_id": self.book.bid,
+            # dummy start and stop times
+            "start_time": float(self.timecode) * 1e5,
+            "stop_time": (float(self.timecode) + 1) * 1e5,
+            "telescope": telescope,
+            "type": self.book.type,
+        }
+    
+    def write_M_files(self, telescope, tube_config):
+        # write M_book file
+        
+        book_meta = {}
+        book_meta["book"] = {
+            "type": self.book.type,
+            "schema_version": self.book.schema,
+            "book_id": self.book.bid,
+            "finalized_at": dt.datetime.utcnow().isoformat(),
+        }
+        book_meta["bookbinder"] = {
+            "codebase": sotodlib.__file__,
+            "version": sotodlib.__version__,
+            # leaving this in but KH doesn't know what it's supposed to be for
+            "context": "unknown", 
+        }
+        if self.compress_output:
+            with ZipFile(self.outdir, mode='a') as zf:
+                zf.writestr("M_book.yaml", yaml.dump(book_meta))
+        else:
+            m_book_file = os.path.join(self.outdir, "M_book.yaml")
+            with open(m_book_file, "w") as f:
+                yaml.dump(book_meta, f)
+        
+        index = self.get_metadata(
+            telescope=telescope,
+            tube_config=tube_config,
+        )
+        if self.compress_output:
+            with ZipFile(self.outdir, mode='a') as zf:
+                zf.writestr("M_index.yaml", yaml.dump(index))
+        else:
+            mfile = os.path.join(self.outdir, "M_index.yaml")
+            with open(mfile, "w") as f:
+                yaml.dump(index, f)
+
+    def bind(self, pbar=False):
+        if self.compress_output:
+            if self.file_list is None:
+                self.file_list = walk_files(self.indir, include_suprsync=True)
+                ignore = shutil.ignore_patterns(*self.ignore_pattern)
+                to_ignore = ignore("", self.file_list)
+                self.file_list = sorted(
+                    [f for f in self.file_list if f not in to_ignore]
+                )
+            with ZipFile(self.outdir, mode='x') as zf:
+                for f in self.file_list:
+                    relpath = os.path.relpath(f, self.indir)
+                    zf.write(f, arcname=relpath, compress_type=ZIP_DEFLATED)
+        elif self.file_list is None:
+            shutil.copytree(
+                self.indir,
+                self.outdir,
+                ignore=shutil.ignore_patterns(
+                    *self.ignore_pattern,
+                ),
+            )
+        else:
+            if not os.path.exists(self.outdir):
+                os.makedirs(self.outdir)
+            for f in self.file_list:
+                relpath = os.path.relpath(f, self.indir)
+                path = os.path.join(self.outdir, relpath)
+                base, _ = os.path.split(path)
+                if not os.path.exists(base):
+                    os.makedirs(base)
+                shutil.copy(f, os.path.join(self.outdir, relpath))
 
 def fill_time_gaps(ts):
     """
@@ -949,7 +1398,6 @@ def fill_time_gaps(ts):
 
     return new_ts, ~m
 
-
 _primary_idx_map = {}
 def get_frame_times(frame, allow_bad_timing=False):
     """
@@ -986,8 +1434,8 @@ def get_frame_times(frame, allow_bad_timing=False):
     elif allow_bad_timing:
         return False, np.array(frame['data'].times) / core.G3Units.s
     else:
+        ## don't change this error message. used in Imprinter CLI
         raise TimingSystemOff("Timing counters not incrementing")
-
 
 def split_ts_bits(c):
     """
@@ -999,16 +1447,14 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
-
 def counters_to_timestamps(c0, c2):
     s, ns = split_ts_bits(c2)
 
     # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPOCH time referenced to 1990 relative to UNIX time.
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
     c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
     ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
     return ts
-
 
 def find_ref_idxs(refs, vs):
     """
@@ -1067,9 +1513,12 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
     m = (start-tbuff <= file_times) & (file_times < stop+tbuff)
     if not np.any(m):
         check = np.where( file_times <= start )
-        if len(check) < 1:
-            raise ValueError("Cannot find HK files we need")
+        if len(check) < 1 or len(check[0]) < 1:
+            raise NoHKFiles(
+                f"Cannot find HK files between {start} and {stop}"
+            )
         fidxs = [check[0][-1]]
+        m[fidxs] = 1
     else:
         fidxs = np.where(m)[0]
     # Add files before and after for good measure
@@ -1170,23 +1619,21 @@ def find_frame_splits(ancil, t0=None, t1=None):
     t1: float (optional)
         stop time to analyze ACU behavior
     """
-    block = ancil.blocks['ACU_broadcast']
-    if 'Corrected_Azimuth' not in block.data:
-        return None 
+    az = ancil.hkdata.az
+    if az is None:
+        return None
 
     if t0 is None:
-        t0 = block.data.times[0]
+        t0 = az.times[0]
     if t1 is None:
-        t1 = block.data.times[-1]
+        t1 = az.times[-1]
 
     msk = np.all(
-        [block.times >= t0, block.times <= t1],
+        [az.times >= t0, az.times <= t1],
         axis=0
     )
-    az = block.data['Corrected_Azimuth'][msk]
-    idxs = locate_scan_events(block.times[msk], az, filter_window=100)
-    return block.times[msk][idxs]
-
+    idxs = locate_scan_events(az.times[msk], az.data[msk], filter_window=100)
+    return az.times[msk][idxs]
 
 def get_smurf_files(obs, meta_path, all_files=False):
     """

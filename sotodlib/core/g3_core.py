@@ -6,7 +6,7 @@ This module contains the core data I/O and processing tools.
 
 """
 
-from spt3g import core
+from so3g.spt3g import core
 
 
 class DataG3Module(object):

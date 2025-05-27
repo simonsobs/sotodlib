@@ -12,10 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
-  linux:
-    name: Linux with Python-${{ matrix.python }}
-    runs-on: ubuntu-latest
+  test:
+    name: ${{ matrix.os }} with Python-${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
     env:
       SOTODLIB_TEST_DISABLE_PLOTS: 1
     strategy:
@@ -24,12 +23,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python: "3.8"
-            pyshort: "38"
-          - python: "3.9"
+          - os: ubuntu-latest
+            python: "3.9"
             pyshort: "39"
-          - python: "3.10"
+          - os: ubuntu-latest
+            python: "3.12"
+            pyshort: "312"
+          - os: macos-14
+            python: "3.10"
             pyshort: "310"
+          - os: macos-14
+            python: "3.12"
+            pyshort: "312"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,87 +44,35 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install OpenMPI for Tests
-        run: |
-          sudo apt update
-          sudo apt install -y libopenmpi-dev
-
       - name: Install Dependencies
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade wheel
-          python3 -m pip install mpi4py
           python3 -m pip install so3g
           python3 -m pip install pshmem
           python3 -m pip install --pre toast
 
+      - name: Install OpenMPI for Tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install -y libopenmpi-dev
+          python3 -m pip install mpi4py
+
       - name: Install sotodlib
         run: |
-          python3 -m pip install -vvv .[tests]
+          python3 -m pip install -vv .[tests]
 
       - name: Run Serial Tests
         run: |
           export OMP_NUM_THREADS=2
           export OPENBLAS_NUM_THREADS=2
           export MPI_DISABLE=1
-          python3 setup.py test
+          python3 -m pytest -vv ./tests
 
       - name: Run MPI Tests
+        if: runner.os == 'Linux'
         run: |
           export OMP_NUM_THREADS=1
           export OPENBLAS_NUM_THREADS=1
-          mpirun -np 2 python3 setup.py test
-
-  # FIXME:  Re-enable after testing this procedure on a local
-  # apple machine.
-  #
-  # macos-clang:
-  #   name: MacOS (clang) with Python-${{ matrix.python }}
-  #   runs-on: macos-latest
-  #   env:
-  #     SOTODLIB_TEST_DISABLE_PLOTS: 1
-  #   strategy:
-  #     # Ensure that a test continues even if another fails.  Useful for
-  #     # debugging multiple problems in parallel.
-  #     fail-fast: false
-  #     matrix:
-  #       include:
-  #         - python: "3.9"
-  #           pyshort: "39"
-  #         - python: "3.10"
-  #           pyshort: "310"
-  #   steps:
-  #     - name: Cancel Previous Runs
-  #       uses: styfle/cancel-workflow-action@0.12.0
-  #       with:
-  #         access_token: ${{ github.token }}
-
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-
-  #     - uses: actions/setup-python@v5
-  #       name: Install Python
-  #       with:
-  #         python-version: ${{ matrix.python }}
-
-  #     - name: Install Homebrew Packages
-  #       run: |
-  #         brew install freetype pkg-config libpng
-
-  #     - name: Install Dependencies
-  #       run: |
-  #         python3 -m pip install --upgrade pip
-  #         python3 -m pip install --upgrade wheel
-  #         python3 -m pip install so3g
-  #         python3 -m pip install --pre toast
-
-  #     - name: Install sotodlib
-  #       run: |
-  #         python3 -m pip install -vvv .
-
-  #     - name: Run Serial Tests
-  #       run: |
-  #         export OMP_NUM_THREADS=1
-  #         export OPENBLAS_NUM_THREADS=1
-  #         export MPI_DISABLE=1
-  #         python3 setup.py test
+          mpirun -n 2 python3 -m pytest -vv ./tests

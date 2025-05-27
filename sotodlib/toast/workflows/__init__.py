@@ -56,7 +56,14 @@ from .proc_intervals import setup_az_intervals, create_az_intervals
 from .proc_mapmaker_filterbin import setup_mapmaker_filterbin, mapmaker_filterbin
 from .proc_mapmaker_madam import setup_mapmaker_madam, mapmaker_madam
 from .proc_mapmaker_ml import setup_mapmaker_ml, mapmaker_ml
-from .proc_mapmaker import setup_mapmaker, mapmaker
+from .proc_mapmaker import (
+    setup_splits,
+    splits,
+    setup_mapmaker,
+    mapmaker,
+    mapmaker_select_noise_and_binner,
+    mapmaker_run,
+)
 from .proc_noise_est import (
     setup_diff_noise_estimation,
     diff_noise_estimation,
@@ -75,8 +82,12 @@ from .proc_characterize import (
     setup_crosslinking_map,
     crosslinking_map,
 )
-from .sat import setup_splits, splits
-from .scripting import setup_load_or_simulate_observing, load_or_simulate_observing
+from .scripting import (
+    setup_load_or_simulate_observing,
+    load_or_simulate_observing,
+    setup_preprocess,
+    preprocess,
+)
 from .sim_observe import setup_simulate_observing, simulate_observing
 from .sim_noise_model import setup_simple_noise_models, simple_noise_models
 from .sim_sky import (

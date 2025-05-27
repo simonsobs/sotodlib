@@ -1,15 +1,17 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters
+from sotodlib.tod_ops import bin_signal, filters, apodize
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
-              lin_reg=True, modes=[1, 2, 3, 4, 6, 8], apply_prefilt=True,
+def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
+              lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
+              apodize_edges=True, apodize_edges_samps=1600, 
+              apodize_flags=True, apodize_flags_samps=200,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
     """
@@ -23,7 +25,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     ----------
     aman : AxisManager object
         The TOD to extract HWPSS from.
-    signal_name : str
+    signal : str or None
         The field name in the axis manager to use for the TOD signal.
         If not provided, ``signal`` will be used.
     hwp_angle : array-like, optional
@@ -36,7 +38,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         Whether to use linear regression to extract HWPSS from the binned signal. If `False`, curve-fitting will be used instead.
         Default is `True`.
     modes : list of int, optional
-        The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 6, 8].
+        The HWPSS harmonic modes to extract. Default is [1, 2, 3, 4, 5, 6, 7, 8].
     apply_prefilt : bool, optional
         Whether to apply a high-pass filter to signal before extracting HWPSS. Default is `True`.
         If run through preprocess and `signal` is not `aman.signal` then default to `False`.
@@ -46,8 +48,9 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     prefilt_detrend: str or None
         Method of detrending when you apply prefilter. Default is `linear`. If data is already detrended or you do not want to detrend,
         set it to `None`.
-    flags : RangesMatrix, optional
+    flags : str or RangesMatrix or Ranges, optional
         Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
     merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
@@ -75,6 +78,7 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
             **In the binned case the following are returned:**
             
             - **binned_angle** (n_bins) : binned version of hwp_angle in range (0, 2pi] with number of bins set by bins argument.
+            - **bin_counts** (n_dets x n_bins): sample counts of each bin for each detector.
             - **binned_signal** (n_dets x n_bins) : binned signal for each detector.
             - **sigma_bin** (n_dets) : average over all bins of the standard deviation of the signal within each bin.
         
@@ -86,19 +90,23 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         prefilt_cfg = {'type': 'sine2', 'cutoff': 1.0, 'trans_width': 1.0}
 
     prefilt = filters.get_hpf(prefilt_cfg)
-
-    if signal_name is None:
-        if apply_prefilt:
-            signal = np.array(tod_ops.fourier_filter(
-                aman, prefilt, detrend=prefilt_detrend, signal_name='signal'))
-        else:
-            signal = aman.signal
+    if signal is None:
+        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        raise TypeError("Currently ndarray not supported, need update to tod_ops.fourier_filter module to remove signal_name argument.")
     else:
-        if apply_prefilt:
-            signal = np.array(tod_ops.fourier_filter(
-                aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name))
-        else:
-            signal = aman[signal_name]
+        raise TypeError("Signal must be None, str, or ndarray")
+
+    if apply_prefilt:
+        # This requires signal to be a string.
+        signal = np.array(tod_ops.fourier_filter(
+                aman, prefilt, detrend=prefilt_detrend, signal_name=signal_name)
+                )
 
     if hwp_angle is None:
         hwp_angle = aman.hwp_angle
@@ -112,8 +120,10 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
     hwpss_stats = core.AxisManager(aman.dets, core.LabelAxis(
         name='modes', vals=np.array(mode_names, dtype='<U3')))
     if bin_signal:
-        hwp_angle_bin_centers, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
-            aman, signal, hwp_angle=None, bins=bins, flags=flags)
+        hwp_angle_bin_centers, bin_counts, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
+            aman, signal, hwp_angle=None, bins=bins, flags=flags, 
+            apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
+            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
         
         # check bin count
         num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
@@ -124,9 +134,11 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
         
         # wrap
         hwpss_stats.wrap('binned_angle', hwp_angle_bin_centers, [
-                       (0, core.IndexAxis('bin_samps', count=bins))])
+                       (0, core.IndexAxis('bin_hwp_samps', count=bins))])
+        hwpss_stats.wrap('bin_counts', bin_counts, [
+                       (0, 'dets'), (1, 'bin_hwp_samps')])
         hwpss_stats.wrap('binned_signal', binned_hwpss, [
-                       (0, 'dets'), (1, 'bin_samps')])
+                       (0, 'dets'), (1, 'bin_hwp_samps')])
         hwpss_stats.wrap('sigma_bin', hwpss_sigma_bin, [(0, 'dets')])
 
         if lin_reg:
@@ -142,13 +154,15 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
 
         # wrap the optimal values and stats
         hwpss_stats.wrap('binned_model', fitsig_binned,
-                       [(0, 'dets'), (1, 'bin_samps')])
+                       [(0, 'dets'), (1, 'bin_hwp_samps')])
         hwpss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'modes')])
         hwpss_stats.wrap('covars', covars, [
                        (0, 'dets'), (1, 'modes'), (2, 'modes')])
         hwpss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
     else:
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
         if flags is None:
             m = np.ones([aman.dets.count, aman.samps.count], dtype=bool)
         else:
@@ -179,7 +193,9 @@ def get_hwpss(aman, signal_name=None, hwp_angle=None, bin_signal=True, bins=360,
 
 
 def get_binned_hwpss(aman, signal=None, hwp_angle=None,
-               bins=360, flags=None):
+                     bins=360, flags=None, 
+                     apodize_edges=True, apodize_edges_samps=1600,
+                     apodize_flags=True, apodize_flags_samps=200):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
@@ -193,9 +209,18 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         The name of the timestream of hwp_angle. Defaults to aman.hwp_angle if not specified.
     bins : int, optional
         The number of HWP angle bins to use. Default is 360.
-    flags : None or RangesMatrix
+    flags : str or RangesMatrix or Ranges. optional
         Flag indicating whether to exclude flagged samples when binning the signal.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
         Default is no mask applied.
+    apodize_edges : bool, optional
+        If True, applies an apodization window to the edges of the signal. Defaults to True.
+    apodize_edges_samps : int, optional
+        The number of samples over which to apply the edge apodization window. Defaults to 1600.
+    apodize_flags : bool, optional
+        If True, applies an apodization window based on the flags. Defaults to True.
+    apodize_flags_samps : int, optional
+        The number of samples over which to apply the flags apodization window. Defaults to 200.
 
     Returns
     -------
@@ -209,18 +234,48 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         signal = aman.signal
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
-        
+
+    if apodize_edges:
+        weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
+        if (flags is not None) and apodize_flags:
+            flags_mask = flags.mask()
+            if flags_mask.ndim == 1:
+                flag_is_1d = True
+            else:
+                all_columns_same = np.all(np.all(flags_mask == flags_mask[0, :], axis=0))
+                if all_columns_same:
+                    flag_is_1d = True
+                    flags_mask = flags_mask[0]
+                else:
+                    flag_is_1d = False
+            if flag_is_1d:
+                weight_for_signal = weight_for_signal * apodize.get_apodize_window_from_flags(aman, 
+                                                                                              flags=flags,
+                                                                                              apodize_samps=apodize_flags_samps)
+            else:
+                weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
+                                                                                                             flags=flags, 
+                                                                                                             apodize_samps=apodize_flags_samps)
+        else:
+            if (flags is not None) and apodize_flags:
+                weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+            else:
+                weight_for_signal = None
+    
     binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
-                              bins=bins, signal=signal, flags=flags)
+                              bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
+    bin_counts = binning_dict['bin_counts']
     binned_hwpss = binning_dict['binned_signal']
     binned_hwpss_sigma = binning_dict['binned_signal_sigma']
     
     # use median of sigma of each bin as uniform sigma for a detector
     hwpss_sigma = np.nanmedian(binned_hwpss_sigma, axis=-1)
     
-    return bin_centers, binned_hwpss, hwpss_sigma
+    return bin_centers, bin_counts, binned_hwpss, hwpss_sigma
 
 
 def hwpss_linreg(x, ys, yerrs, modes):
@@ -454,8 +509,8 @@ def estimate_sigma_tod(signal, hwp_angle):
     return hwpss_sigma_tod
 
 
-def subtract_hwpss(aman, signal=None, hwpss_template=None,
-                   subtract_name='hwpss_remove'):
+def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
+                   subtract_name='hwpss_remove', in_place=False, remove_template=True):
     """
     Subtract the half-wave plate synchronous signal (HWPSS) template from the
     signal in the given axis manager.
@@ -463,37 +518,59 @@ def subtract_hwpss(aman, signal=None, hwpss_template=None,
     Parameters
     ----------
     aman : AxisManager
-        The axis manager containing the signal to which the HWPSS template will
-        be applied.
-    signal : ndarray, optional
-        The signal to which the HWPSS template will be applied. If `signal` is
-        None (default), the signal contained in the axis manager will be used.
-    hwpss_template : ndarray, optional
-        The HWPSS template to be subtracted from the signal. If `hwpss_template`
-        is None (default), the HWPSS template stored in the axis manager under
-        the key 'hwpss_extract' will be used.
+        The axis manager containing the signal and the HWPSS template.
+    signal : str, optional
+        The name of the field in the axis manager containing the signal to be processed.
+        Defaults to 'signal'.
+    hwpss_template_name : str, optional
+        The name of the field in the axis manager containing the HWPSS template.
+        Defaults to 'hwpss_model'.
     subtract_name : str, optional
-        The name of the output axis manager that will contain the HWPSS-
-        subtracted signal. Defaults to 'hwpss_remove'.
+        The name of the field in the axis manager that will store the HWPSS-subtracted signal.
+        Only used if in_place is False. Defaults to 'hwpss_remove'.
+    in_place : bool, optional
+        If True, the subtraction is done in place, modifying the original signal in the axis manager.
+        If False, the result is stored in a new field specified by subtract_name. Defaults to False.
+    remove_template : bool, optional
+        If True, the HWPSS template field is removed from the axis manager after subtraction.
+        Defaults to True.
 
     Returns
     -------
     None
     """
     if signal is None:
-        signal = aman.signal
-    if hwpss_template is None:
-        hwpss_template = aman['hwpss_model']
-    
-    if subtract_name in aman._fields:
-        aman[subtract_name] = np.subtract(signal, hwpss_template)
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        if np.shape(signal) != (aman.dets.count, aman.samps.count):
+            raise ValueError("When passing signal as ndarray shape must match (n_dets x n_samps).")
+        signal_name = None
     else:
-        aman.wrap(subtract_name, np.subtract(
-            signal, hwpss_template), [(0, 'dets'), (1, 'samps')])
+        raise TypeError("Signal must be None, str, or ndarray")
+
+    if in_place:
+        if signal_name is None:
+            signal -= aman[hwpss_template_name].astype(signal.dtype)
+        else:
+            aman[signal_name] -= aman[hwpss_template_name].astype(aman[signal_name].dtype)
+    else:
+        if subtract_name in aman._fields:
+            aman[subtract_name] = np.subtract(signal, aman[hwpss_template_name], dtype='float32')
+        else:
+            aman.wrap(subtract_name, np.subtract(signal,
+                      aman[hwpss_template_name], dtype='float32'),
+                      [(0, 'dets'), (1, 'samps')])
+    
+    if remove_template:
+        aman.move(hwpss_template_name, None)
 
 
-def demod_tod(aman, signal_name='signal', demod_mode=4,
-              bpf_cfg=None, lpf_cfg=None):
+def demod_tod(aman, signal=None, demod_mode=4,
+              bpf_cfg=None, lpf_cfg=None, wrap=True):
     """
     Demodulate TOD based on HWP angle
 
@@ -501,22 +578,27 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
     ----------
     aman : AxisManager
         The AxisManager object
-    signal_name : str, optional
-        Axis name of the demodulated signal in aman. Default is 'signal'.
+    signal : str, optional
+        Axis name of the signal to demodulate in aman. Default is 'signal'.
     demod_mode : int, optional
-        Demodulation mode. Default is 4.
+        Demodulation mode. Default is 4 (i.e. 4th harmonic of HWP).
     bpf_cfg : dict
         Configuration for Band-pass filter applied to the TOD data before demodulation.
-        If not specified, a 4th-order Butterworth filter of 
-        (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used.
-        Example) bpf_cfg = {'type': 'butter4', 'center': 8.0, 'width': 3.8}
+        If not specified, a sine-squared bandwidth filter of
+        (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used with transition width 0.1.
+        Example) bpf_cfg = {'type': 'sine2', 'center': 8.0, 'width': 3.8, 'trans_width': 0.1}
+        or bpf_cfg = {'type': 'sine2', 'center': '4*f_HWP', 'width': '1.9*f_HWP', 'trans_width': 0.1}
         See filters.get_bpf for details.
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
-        a 4th-order Butterworth filter with a cutoff frequency of 0.95*(HWP speed)
-        is used.
-        Example) lpf_cfg = {'type': 'butter4', 'cutoff': 1.9}
+        a sine-squared filter with a cutoff frequency of 0.95*(HWP speed) and transition width
+        0.1 is used.
+        Example) lpf_cfg = {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
+        or lpf_cfg = {'type': 'sine2', 'cutoff': '0.95*f_HWP', 'trans_width': 0.1}
         See filters.get_lpf for details.
+    wrap : bool, optional
+        If True, the demodulated signal is wrapped and stored in the input aman container.
+        If False, the demodulated signal is returned.
 
     Returns
     -------
@@ -527,6 +609,18 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         the demodulated signal imaginary component filtered with `lpf` and multiplied by 2.
 
     """
+    if signal is None:
+        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        signal_name = 'signal'
+        signal = aman[signal_name]
+    elif isinstance(signal, str):
+        signal_name = signal
+        signal = aman[signal_name]
+    elif isinstance(signal, np.ndarray):
+        raise TypeError("Currently ndarray not supported, need update to tod_ops.fourier_filter module to remove signal_name argument.")
+    else:
+        raise TypeError("Signal must be None, str, or ndarray")
+    
     # HWP speed in Hz
     speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
@@ -538,6 +632,12 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
                    'center': bpf_center,
                    'width': bpf_width,
                    'trans_width': 0.1}
+    
+    for k, v in bpf_cfg.items():
+        if isinstance(v, str):
+            if k in ['center', 'width']:
+                bpf_cfg[k] = speed*float(v.split('*')[0])
+
     bpf = filters.get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
@@ -545,24 +645,31 @@ def demod_tod(aman, signal_name='signal', demod_mode=4,
         lpf_cfg = {'type': 'sine2',
                    'cutoff': lpf_cutoff,
                    'trans_width': 0.1}
+    
+    for k, v in lpf_cfg.items():
+        if isinstance(v, str):
+            if k == 'cutoff':
+                lpf_cfg[k] = speed*float(v.split('*')[0])
+
     lpf = filters.get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
                                    signal_name=signal_name) * phasor
-    
-    # dsT
-    aman.wrap_new('dsT', dtype='float32', shape=('dets', 'samps'))
-    aman.dsT = aman[signal_name]
-    aman['dsT'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='dsT', detrend=None)
-    # demodQ
-    aman.wrap_new('demodQ', dtype='float32', shape=('dets', 'samps'))
-    aman['demodQ'] = demod.real
-    aman['demodQ'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='demodQ', detrend=None) * 2.
-    # demodU
-    aman.wrap_new('demodU', dtype='float32', shape=('dets', 'samps'))
-    aman['demodU'] = demod.imag
-    aman['demodU'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='demodU', detrend=None) * 2.
+
+    # Filter the demodulated signal
+    demod_aman = core.AxisManager(aman.dets, aman.samps)
+    demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
+    demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None)
+    demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None) * 2.
+    demod_aman.wrap("demodU", demod.imag, axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None) * 2.
+    # Either wrap or return the demodulated signal
+    if wrap:
+        for fld in ['dsT', 'demodQ', 'demodU']:
+            aman.wrap(fld, demod_aman[fld], axis_map=[(0, 'dets'), (1, 'samps')])
+        del demod_aman
+    else:
+        return demod_aman['dsT'], demod_aman['demodQ'], demod_aman['demodU']

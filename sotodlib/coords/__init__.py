@@ -8,3 +8,4 @@ from . import local
 from .plotting import *
 from . import demod
 from . import pointing_model
+from . import healpix_utils

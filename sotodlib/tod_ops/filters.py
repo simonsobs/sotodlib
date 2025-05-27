@@ -2,6 +2,7 @@ import numpy as np
 import pyfftw
 import inspect
 import scipy.signal as signal
+from operator import attrgetter
 
 import logging
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 def fourier_filter(tod, filt_function,
                    detrend=None, resize='zero_pad',
                    axis_name='samps', signal_name='signal', 
-                   time_name='timestamps',
+                   time_name='timestamps', rfft=None,
                    **kwargs):
     """Return a filtered tod.signal_name along the axis axis_name. 
         Does not change the data in the axis manager.
@@ -46,15 +47,15 @@ def fourier_filter(tod, filt_function,
         signal_name: name of the variable in tod to fft
         
         time_name: name for getting time of data (in seconds) from tod
+
+        rfft: A RFFTObj for performing the FFTs.
+              Must be valid for the input data and contain both t_forward and t_backward.
         
     Returns:
     
         signal: filtered tod.signal_name 
         
     """
-    if len(tod._assignments[signal_name]) >2:
-        raise ValueError('fourier_filter only works for 1D or 2D data streams')
-        
     axis = getattr(tod, axis_name)
     times = getattr(tod, time_name)
     delta_t = (times[-1]-times[0])/axis.count
@@ -62,15 +63,14 @@ def fourier_filter(tod, filt_function,
     if len(tod._assignments[signal_name])==1:
         n_det = 1
         ## signal will be at least 2D
-        main_idx = 1
         other_idx = None
-        
     elif len(tod._assignments[signal_name])==2:
         checks = np.array([x==axis_name for x in tod._assignments[signal_name]],dtype='bool')
-        main_idx = np.where(checks)[0][0]
         other_idx = np.where(~checks)[0][0]
         other_axis = getattr(tod, tod._assignments[signal_name][other_idx])
         n_det = other_axis.count
+    else:
+        raise ValueError('fourier_filter only works for 1D or 2D data streams')
     
     if resize == 'zero_pad':
         n = fft_ops.find_superior_integer(axis.count)
@@ -96,8 +96,12 @@ def fourier_filter(tod, filt_function,
         signal = signal.copy()
 
     else:
-        logger.info('fourier_filter: initializing rfft object.')
-        a, b, t_1, t_2 = fft_ops.build_rfft_object(n_det, n, 'BOTH')
+        if rfft is None:
+            logger.info('fourier_filter: initializing rfft object.')
+            rfft = fft_ops.RFFTObj.for_shape(n_det, n, 'BOTH')
+        else:
+            logger.info('fourier_filter: using provided rfft object.')
+            rfft.validate((n_det, n))
 
         if other_idx is not None and other_idx != 0:
             ## so that code can be written always along axis 1
@@ -105,24 +109,24 @@ def fourier_filter(tod, filt_function,
 
         # This copy is valid for all modes of "resize"
         logger.info('fourier_filter: copying in data.')
-        a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
-        a[:,min(n, axis.count):] = 0
+        rfft.a[:,:min(n, axis.count)] = signal[:,:min(n, axis.count)]
+        rfft.a[:,min(n, axis.count):] = 0
 
         ## FFT Signal
         logger.info('fourier_filter: FFT.')
-        t_1()
+        rfft.t_forward()
 
         ## Get Filter
         logger.info('fourier_filter: applying filter.')
         freqs = np.fft.rfftfreq(n, delta_t)
-        filt_function.apply(freqs, tod, b, **kwargs)
+        filt_function.apply(freqs, tod, rfft.b, **kwargs)
 
         ## FFT Back
         logger.info('fourier_filter: IFFT.')
-        t_2()
+        rfft.t_backward()
 
         # Un-pad?
-        signal = a[:,:min(n, axis.count)]
+        signal = rfft.a[:,:min(n, axis.count)]
 
         if other_idx is not None and other_idx != 0:
             return signal.transpose()
@@ -313,6 +317,17 @@ def identity_filter(freqs, tod, invert=False):
     return np.ones(len(freqs))
 
 @fft_filter
+def gain(freqs, tod, gain=1.):
+    """Filter that simply applies a simple gain (which could be complex)
+    to the entire spectrum.
+
+    This can be used (with gain=1) as an identity filter for testing
+    the filter preprocessing.
+
+    """
+    return gain * np.ones(len(freqs))
+
+@fft_filter
 def low_pass_butter4(freqs, tod, fc):
     """4th-order low-pass filter with f3db at fc (Hz).
 
@@ -326,6 +341,15 @@ def high_pass_butter4(freqs, tod, fc):
 
     """
     b, a = signal.butter(4, 2*np.pi*fc, 'highpass', analog=True)
+    return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
+
+@fft_filter
+def band_pass_butter4(freqs, tod, fc_low, fc_high):
+    """4th-order band-pass filter with f3db at fc (Hz).
+
+    """
+    b, a = signal.butter(4, [2*np.pi*fc_low, 2*np.pi*fc_high],
+                         'bandpass', analog=True)
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
@@ -364,7 +388,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        timeconst = tod[timeconst]
+        # attrgetter used to retrieve a field multiple layers deep.
+        _f = attrgetter(timeconst)
+        timeconst = _f(tod)
 
     if target is None:
         filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]
@@ -507,6 +533,9 @@ def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
                                              sub_iir_params['fscale'] != _fscale,])):
                             raise ValueError('iir parameters are not uniform.')
             iir_params = sub_iir_params
+            # check if iir_params from axis manager are None
+            if iir_params['a'] is None or iir_params['b'] is None:
+                raise ValueError('axis manager iir parameters are empty')
         try:
             a = iir_params['a']
             b = iir_params['b']
@@ -598,8 +627,7 @@ def get_bpf(cfg):
     elif cfg['type'] == 'butter4':
         center = cfg['center']
         width = cfg['width']
-        return low_pass_butter4(fc=center + width/2.) *\
-                high_pass_butter4(fc=center - width/2.)
+        return band_pass_butter4(fc_low=center - width/2., fc_high=center + width/2.)
     elif cfg['type'] == 'sine2':
         center = cfg['center']
         width = cfg['width']

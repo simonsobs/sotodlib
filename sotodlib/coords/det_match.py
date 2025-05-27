@@ -1,6 +1,6 @@
 import warnings
 from dataclasses import dataclass, fields, asdict, field
-from typing import List, Optional, Tuple, Iterator
+from typing import List, Optional, Tuple, Iterator, Union
 from copy import deepcopy
 import h5py
 
@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 
+from sotodlib.core import AxisManager
 from sotodlib.coords import optics
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset
@@ -70,11 +71,20 @@ class PointingConfig:
         Tel type for the optics model. Either "SAT" or "LAT"
     zemax_path: str
         If running for a "LAT" tel_type, the path to the zemax file must be specified.
+    roll: float
+        Rotation about the line of sight.
+        For the LAT this is elev - 60 - corotator.
+        For the SAT this is -1*boresight.
+    tube_slot: str/int
+        If running for a "LAT" tel_type, the tube slot must be specified.
+        Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
     wafer_slot: str
     tel_type: str
     zemax_path: Optional[str] = None
+    roll: Optional[float] = 0
+    tube_slot: Optional[Union[str, int]] = None
 
     dx: float = field(init=False)
     dy: float = field(init=False)
@@ -82,30 +92,34 @@ class PointingConfig:
     fp_pars: dict = field(init=False)
 
     def __post_init__(self):
-        if self.tel_type == 'LAT' and (self.zemax_path is None):
-            return ValueError("zemax path must be set for 'LAT' tel_type")
-        
+        if self.tel_type == 'LAT':
+            if self.zemax_path is None:
+                raise ValueError("zemax path must be set for 'LAT' tel_type")
+            if self.tube_slot is None:
+                raise ValueError("tube slot must be set for 'LAT' tel_type")
+
         if self.tel_type not in ['SAT', 'LAT']:
-            raise ValueError("tel_typ ")
-        
+            raise ValueError("tel_type should be 'SAT' or 'LAT' ")
+
         self.fp_pars = optics.get_ufm_to_fp_pars(
             self.tel_type, self.wafer_slot, self.fp_file
         )
         self.dx = self.fp_pars['dx']
         self.dy = self.fp_pars['dy']
         self.theta = np.deg2rad(self.fp_pars['theta'])
-    
+
     def get_pointing(self, x, y, pol=0):
         xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
         yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
 
         if self.tel_type.upper() == 'SAT':
             xi, eta, gamma = optics.SAT_focal_plane(
-                None, x=xp, y=yp, pol=pol
+                None, x=xp, y=yp, pol=pol, roll=self.roll
             )
         elif self.tel_type.upper() == 'LAT':
             xi, eta, gamma = optics.LAT_focal_plane(
-                None, zemax_path, x=xp, y=yp, pol=pol,
+                None, self.zemax_path, x=xp, y=yp, pol=pol,
+                roll=self.roll, tube_slot=self.tube_slot
             )
         return xi, eta, gamma
 
@@ -153,7 +167,7 @@ class Resonator:
 
     matched: int = 0
     match_idx: int = -1
- 
+
 
 def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointing=True):
     """
@@ -174,7 +188,7 @@ def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointin
         r = smurf_res
     else:
         r = deepcopy(smurf_res)
-    
+
     design_props = [
         'bg', 'det_x', 'det_y', 'det_row', 'det_col', 'pixel_num', 'det_rhomb',
         'det_pol', 'det_freq', 'det_bandpass', 'det_angle_raw_deg',
@@ -263,7 +277,7 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
-    def from_aman(cls, aman, stream_id, det_cal=None, name=None):
+    def from_aman(cls, aman, stream_id, det_cal=None, name=None, pointing: Optional[AxisManager]=None):
         """
         Load a resonator set from a Context object based on an obs_id
 
@@ -276,6 +290,10 @@ class ResSet:
         det_cal: AxisManager
             Detector calibration metadata. If not specified, will default to
             ``aman.det_cal``
+        pointing: Optional[AxisManager]
+            AxisManager containing pointing metadata. If set, this should be an
+            AxisManager containing the fields ``xi`` and ``eta``, and resonator
+            pointing information will be added from here.
         """
         m = aman.det_info.stream_id == stream_id
         if not np.any(m):
@@ -300,6 +318,10 @@ class ResSet:
                 idx=i, is_north=is_north, res_freq=res_freq, smurf_band=band,
                 smurf_channel=channel, readout_id=readout_id, bg=bg
             )
+            if pointing is not None:
+                res.xi = pointing.xi[ri]
+                res.eta = pointing.eta[ri]
+
             resonators.append(res)
 
         return cls(resonators, name=name)
@@ -410,9 +432,9 @@ class ResSet:
             idx += 1
 
         return cls(resonators, name=name)
-        
+
     @classmethod
-    def from_solutions(cls, sol_file, north_is_highband=True, name=None, 
+    def from_solutions(cls, sol_file, north_is_highband=True, name=None,
                        fp_pars=None, platform='SAT', zemax_path=None):
         """
         Creates an instance from an input-solution file. This will include both design data, along with smurf-band
@@ -548,6 +570,7 @@ class ResSet:
             r.xi = xis[idx]
             r.eta = etas[idx]
 
+
 @dataclass
 class MatchParams:
     """
@@ -567,9 +590,13 @@ class MatchParams:
             penalty to apply to leaving a resonator with a good qi unassigned
         good_res_qi_thresh (float):
             qi threshold that is considered "good"
-        force_src_pointing (bool):
-            If true, will assign a np.inf penalty to leaving a src resonator
-            with a provided pointing unmatched.
+        enforce_pointing_reqs (bool):
+            If this is enabled, it will enforce the following requirements when
+            matching:
+
+             - Resonators with OPTC det_type must have pointing data.
+             - Resonators with UNRT, SQID, or BARE det_types must _not_ have pointing data.
+             - Resonators with DARK or SLOT det_types may or may not have pointing data.
         assigned_bg_unmatched_pen (float):
             Penalty to apply to leaving a resonator with an assigned bg
             unmatched
@@ -589,7 +616,8 @@ class MatchParams:
     dist_width: float =0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
-    force_src_pointing: bool = False
+    enforce_pointing_reqs: bool = False
+
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
     assigned_bg_mismatch_pen: float = 100000
@@ -609,16 +637,15 @@ class MatchingStats:
 
 
 class Match:
-    """ 
+    """
     Class for performing a Resonance Matching between two sets of resonators,
     labeled `src` and `dst`. In the matching algorithm there is basically no
     difference between `src` and `dst` res-sets, except:
 
      - When merged, smurf-data such as band, channel, and res-idx will be taken
-       from the ``src`` res-set
-     - The ``force_src_pointing`` param can be used to assign a very high penalty
-       to leaving any `src` resonator that has pointing info unassigned.
-    
+       from the ``src`` res-set, while detector information will be taken from
+       the ``dst`` set.
+
     Args:
         src (ResSet):
             The source resonator set
@@ -630,7 +657,7 @@ class Match:
         apply_dst_pointing (bool):
             If True, the ``merged`` res-set will take its pointing information
             from ``dst`` instead of ``src``.
-    
+
     Attributes:
         src (ResSet):
             The source resonator set
@@ -669,7 +696,7 @@ class Match:
         self.matching, self.merged = self._match()
         self.stats = self.get_stats()
 
-    def _get_biadjacency_matrix(self):
+    def _get_biadjacency_matrix(self) -> np.ndarray:
         src_arr = self.src.as_array()
         dst_arr = self.dst.as_array()
 
@@ -678,6 +705,33 @@ class Match:
         # N/S mismatch
         m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
+
+        if self.match_pars.enforce_pointing_reqs:
+            # Det types of DARK and SLOT are allowed to may or may not have
+            # pointing data. For these types of detectors, the cost is left
+            # untouched.
+
+            src_has_pointing = np.isfinite(src_arr['xi']) & np.isfinite(src_arr['eta'])
+            dst_has_pointing = np.isfinite(dst_arr['xi']) & np.isfinite(dst_arr['eta'])
+
+            src_no_match = np.isin(src_arr['det_type'], ['NC'])
+            dst_no_match = np.isin(dst_arr['det_type'], ['NC'])
+            mat[src_no_match, :] = np.inf
+            mat[:, dst_no_match] = np.inf
+
+            src_pointing_forbidden = np.isin(src_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+            dst_pointing_forbidden = np.isin(dst_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+            m = src_pointing_forbidden[:, None] & dst_has_pointing[None, :]
+            mat[m] = np.inf
+            m = src_has_pointing[:, None] & dst_pointing_forbidden[None, :]
+            mat[m] = np.inf
+
+            src_pointing_required = np.isin(src_arr['det_type'], ['OPTC'])
+            dst_pointing_required = np.isin(dst_arr['det_type'], ['OPTC'])
+            m = src_pointing_required[:, None] & (~dst_has_pointing[None, :])
+            mat[m] = np.inf
+            m = (~src_has_pointing[:, None]) & dst_pointing_required[None, :]
+            mat[m] = np.inf
 
         # Frequency offset
         df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
@@ -705,7 +759,7 @@ class Match:
 
         return mat
 
-    def _get_unassigned_costs(self, rs, force_if_pointing=True):
+    def _get_unassigned_costs(self, rs):
         ra = rs.as_array()
 
         arr = np.zeros(len(rs))
@@ -718,11 +772,6 @@ class Match:
         bg_assigned = ra['bg'] != -1
         arr[bg_assigned] += self.match_pars.assigned_bg_unmatched_pen
         arr[~bg_assigned] += self.match_pars.unassigned_bg_unmatched_pen
-
-        # Infinite cost if has pointing
-        if force_if_pointing:
-            m = ~np.isnan(ra['xi'])
-            arr[m] = np.inf
 
         return arr
 
@@ -741,12 +790,9 @@ class Match:
 
             mat_full[:len(self.src), :len(self.dst)] = self._get_biadjacency_matrix()
             mat_full[:len(self.src), len(self.dst):] = \
-                self._get_unassigned_costs(
-                    self.src,
-                    force_if_pointing=self.match_pars.force_src_pointing
-                )[:, None]
+                self._get_unassigned_costs(self.src)[:, None]
             mat_full[len(self.src):, :len(self.dst)] = \
-                self._get_unassigned_costs(self.dst, force_if_pointing=False)[None, :]
+                self._get_unassigned_costs(self.dst)[None, :]
             mat_full[len(self.src):, len(self.dst):] = 0
 
         self.matching = np.array(linear_sum_assignment(mat_full))
@@ -883,12 +929,16 @@ class Match:
             if 'meta/dst_name' in f:
                 dst.name = f['meta/dst_name'][()].decode()
             match_pars = {}
+            match_par_fields = [f.name for f in fields(MatchParams)]
             for k in f['meta/match_pars'].keys():
-                match_pars[k] = f['meta/match_pars'][k][()]
+                if k not in match_par_fields:
+                    print(f"Ignoring unknonwn kwarg for match-param: {k}")
+                else:
+                    match_pars[k] = f['meta/match_pars'][k][()]
             match_pars = MatchParams(**match_pars)
         match = cls(src, dst, match_pars=match_pars)
         return match
-    
+
 
 def plot_match_freqs(m: Match, is_north=True, show_offset=False, xlim=None):
     """

@@ -8,6 +8,8 @@ import numpy as np
 from . import common
 from .resultset import ResultSet
 
+_DB_VERSION = 3
+
 TABLE_DEFS = {
     'detsets': [
         "`name`    varchar(16)",
@@ -32,6 +34,10 @@ TABLE_DEFS = {
     'meta': [
         "`param` varchar(32) UNIQUE",
         "`value` varchar",
+    ],
+    '_indices': [
+        "CREATE INDEX IF NOT EXISTS idx_obs_id_column ON files(obs_id)",
+        "CREATE INDEX IF NOT EXISTS idx_detset_column ON detsets(name)",
     ],
 }
 
@@ -161,8 +167,8 @@ class ObsFileDb:
     def _get_version(self, conn=None):
         if conn is None:
             conn = self.conn
-        rows = conn.execute('select value from meta where '
-                            'param="obsfiledb_version"').fetchall()
+        rows = conn.execute("select value from meta where "
+                            "param='obsfiledb_version'").fetchall()
         if len(rows) == 0:
             return None
         return int(rows[0][0])
@@ -172,25 +178,30 @@ class ObsFileDb:
         Create the database tables if they do not already exist.
         """
         # Create the tables:
-        table_defs = TABLE_DEFS.items()
         c = self.conn.cursor()
-        for table_name, column_defs in table_defs:
+        for table_name, column_defs in TABLE_DEFS.items():
+            if table_name.startswith('_'):
+                continue
             q = ('create table if not exists `%s` (' % table_name  +
                  ','.join(column_defs) + ')')
             c.execute(q)
 
+        for index in TABLE_DEFS['_indices']:
+            c.execute(index)
+
         if self._get_version(conn=c) is None:
             c.execute('insert or ignore into meta (param,value) values (?,?)',
-                      ('obsfiledb_version', 2))
+                      ('obsfiledb_version', _DB_VERSION))
 
         self.conn.commit()
 
     def add_detset(self, detset_name, detector_names, commit=True):
-        """Add a detset to the detsets table.
+        """Add a detset to the detsets table (by adding detectors with
+        specific names to it).
 
         Arguments:
-          detset_name (str): The (unique) name of this detset.
-          detector_names (list of str): The detectors belonging to
+          detset_name (str): The name of the detset.
+          detector_names (list of str): New detectors belonging to
             this detset.
 
         """
@@ -278,13 +289,16 @@ class ObsFileDb:
             prefix = self.prefix
 
         if detsets is None:
-            detsets = self.get_detsets(obs_id)
-
-        c = self.conn.execute('select detset, name, sample_start, sample_stop '
-                              'from files where obs_id=? and detset in (%s) '
-                              'order by detset, sample_start' %
-                              ','.join(['?' for _ in detsets]),
-                              (obs_id,) + tuple(detsets))
+            c = self.conn.execute('select detset, name, sample_start, sample_stop '
+                                  'from files where obs_id=? '
+                                  'order by detset, sample_start',
+                                  (obs_id,))
+        else:
+            c = self.conn.execute('select detset, name, sample_start, sample_stop '
+                                  'from files where obs_id=? and detset in (%s) '
+                                  'order by detset, sample_start' %
+                                  ','.join(['?' for _ in detsets]),
+                                  (obs_id,) + tuple(detsets))
         output = OrderedDict()
         for r in c:
             if not r[0] in output:
@@ -699,6 +713,19 @@ def main(args=None, parser=None):
                 print(f'Running: {line}')
                 db.conn.execute(line)
             print()
+
+            for index in TABLE_DEFS['_indices']:
+                print('Adding indexes...')
+                db.conn.execute(index)
+
+        elif v == 2:
+            changes = True
+            for index in TABLE_DEFS['_indices']:
+                print('Adding indexes...')
+                db.conn.execute(index)
+            print('Bumping version')
+            db.conn.execute('insert or replace into meta (param,value) values (?,?)',
+                            ('obsfiledb_version', 3))
 
         if changes:
             print('Saving to %s' % args.output_db)

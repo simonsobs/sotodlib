@@ -23,6 +23,14 @@ def flatten_RangesMatrix(rm):
       Dict with arrays called 'shape', 'intervals', and 'ends'.
     """
     shape = rm.shape
+    if len(shape) == 1:
+        intervals = rm.ranges().reshape(-1)
+        ends = np.array([len(intervals)])
+        return {
+            'shape': np.array(shape),
+            'intervals': intervals,
+            'ends': ends,
+        }
     if len(shape) == 2:
         intervals = [r.ranges().reshape(-1) for r in rm.ranges]
         ends = np.cumsum([len(i) for i in intervals])
@@ -57,7 +65,7 @@ def expand_RangesMatrix(flat_rm):
     if shape[0] == 0:
         return so3g.proj.RangesMatrix([], child_shape=shape[1:])
     # Otherwise non-trivial
-    count = np.product(shape[:-1])
+    count = np.prod(shape[:-1])
     start, stride = 0, count // shape[0]
     for i in range(0, len(ends), stride):
         _e = ends[i:i+stride] - start
@@ -155,7 +163,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 item['special_axes'] = v._dets_name, v._samps_name
             else:
                 raise ValueError(f"No encoder system for {k}={v.__class__}")
-        elif isinstance(v, so3g.proj.RangesMatrix):
+        elif isinstance(v, (so3g.RangesInt32, so3g.proj.RangesMatrix)):
             item['encoding'] = 'rangesmatrix'
         elif isinstance(v, csr_array):
             item['encoding'] = 'csrarray'
@@ -321,7 +329,7 @@ def _load_axisman(src, group=None, cls=None, fields=None):
             x = _load_axisman(src[item['name']], fields=subfields)
             if item['subclass'] == 'FlagManager':
                 x = FlagManager.promote(x, *item['special_axes'])
-            axisman.wrap(item['name'], x)
+            axisman.wrap(item['name'], x, restrict_in_place=True)
         elif item['encoding'] == 'rangesmatrix':
             x = src[item['name']]
             rm_flat = {k: x[k][:] for k in ['shape', 'intervals', 'ends']}
