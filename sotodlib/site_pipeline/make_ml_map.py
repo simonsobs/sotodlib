@@ -199,7 +199,7 @@ def main(**args):
                 obs.wrap("site",    np.full(1, SITE))
 
                 # Prepare our data. FFT-truncate for faster fft ops
-                obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
+                #obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
 
                 # Desolope to make it periodic. This should be done *before*
                 # dropping to single precision, to avoid unnecessary loss of precision due
@@ -225,20 +225,21 @@ def main(**args):
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
                         continue
                     # Gapfill glitches. This function name isn't the clearest
-                    tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
+                    #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                     # Gain calibration
                     gain  = 1
-                    for gtype in ["relcal","abscal"]:
-                        gain *= obs[gtype][:,None]
+                    #for gtype in ["relcal","abscal"]:
+                    #    gain *= obs[gtype][:,None]
                     obs.signal *= gain
                     # Fourier-space calibration
                     fsig  = fft.rfft(obs.signal)
                     freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    # iir and timeconstant will be applied in the preprocessing eventually
                     # iir filter
                     iir_filter  = filters.iir_filter()(freq, obs)
                     fsig       /= iir_filter
                     gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= filters.timeconst_filter(None)(freq, obs)
+                    fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
                     fft.irfft(fsig, obs.signal, normalize=True)
                     del fsig
 
@@ -246,9 +247,9 @@ def main(**args):
                     #obs.focal_plane.xi    += obs.boresight_offset.xi
                     #obs.focal_plane.eta   += obs.boresight_offset.eta
                     #obs.focal_plane.gamma += obs.boresight_offset.gamma
-                    obs.focal_plane.xi    += obs.boresight_offset.dx
-                    obs.focal_plane.eta   += obs.boresight_offset.dy
-                    obs.focal_plane.gamma += obs.boresight_offset.gamma
+                    #obs.focal_plane.xi    += obs.boresight_offset.dx
+                    #obs.focal_plane.eta   += obs.boresight_offset.dy
+                    #obs.focal_plane.gamma += obs.boresight_offset.gamma
 
                 # Injecting at this point makes us insensitive to any bias introduced
                 # in the earlier steps (mainly from gapfilling). The alternative is
