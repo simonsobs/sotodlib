@@ -6,6 +6,7 @@ def get_parser(parser=None):
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
+    parser.add_argument("preprocess_config", help="Preprocess configuration file")
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
@@ -39,6 +40,7 @@ def main(**args):
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
     from sotodlib.mapmaking import log
+    from sotodlib.preprocess import preprocess_util as pp_util
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
 
@@ -99,6 +101,14 @@ def main(**args):
 
     if args.srcsamp:
         srcsamp_mask  = enmap.read_map(args.srcsamp)
+
+    # set up the preprocessing
+    try:
+        preproc = yaml.safe_load(open(args.preprocess_config, 'r'))
+    except:
+        if comm.rank==0:
+            L.info(f"{args.preprocess_config} is not a valid config")
+        sys.exit(1)
 
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
     for ipass, passinfo in enumerate(passes):
@@ -175,7 +185,9 @@ def main(**args):
                 if len(my_dets) == 0: raise DataMissing("no dets left")
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
-                    obs = context.get_obs(sub_id, meta=meta)
+                    #obs = context.get_obs(sub_id, meta=meta)
+                    #print(obs_id)
+                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta, logger=L)
 
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
