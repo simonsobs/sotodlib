@@ -28,7 +28,8 @@ class FFTTrim(_Preprocess):
     """
     name = "fft_trim"
     def process(self, aman, proc_aman, sim=False):
-        tod_ops.fft_trim(aman, **self.process_cfgs)
+        start_stop = tod_ops.fft_trim(aman, **self.process_cfgs)
+        proc_aman.restrict(self.process_cfgs.get('axis', 'samps'), (start_stop))
 
 class Detrend(_Preprocess):
     """Detrend the signal. All processing configs go to `detrend_tod`
