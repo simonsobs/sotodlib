@@ -809,7 +809,7 @@ class Demodulate(_Preprocess):
     name = "demodulate"
 
     def process(self, aman, proc_aman, sim=False):
-        if self.process_cfgs["band_ratio"] is not None:
+        if self.process_cfgs.get("band_ratio") is not None:
             speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                         (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
             bpf_center = 4 * speed
@@ -820,7 +820,7 @@ class Demodulate(_Preprocess):
                             'trans_width': 0.1}
             self.process_cfgs["demod_cfgs"]['bpf_cfg'] = bpf_cfg
 
-        if self.process_cfgs["cutoff_ratio"] is not None:
+        if self.process_cfgs.get("cutoff_ratio") is not None:
             speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                         (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
             lpf_cutoff = speed * self.process_cfgs["cutoff_ratio"]
