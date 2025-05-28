@@ -1,5 +1,9 @@
 """FFTs and related operations
 """
+from dataclasses import dataclass, field
+from functools import lru_cache, partial
+from typing_extensions import Callable
+from numpy.typing import NDArray
 import sys
 import numdifftools as ndt
 import numpy as np
@@ -59,24 +63,21 @@ def rfft(
 
         freqs: the frequencies it is value at (since resizing is an option)
     """
-    if len(aman._assignments[signal_name]) > 2:
-        raise ValueError("rfft only works for 1D or 2D data streams")
 
     axis = getattr(aman, axis_name)
 
     if len(aman._assignments[signal_name]) == 1:
         n_det = 1
-        main_idx = 0
         other_idx = None
-
     elif len(aman._assignments[signal_name]) == 2:
         checks = np.array(
             [x == axis_name for x in aman._assignments[signal_name]], dtype="bool"
         )
-        main_idx = np.where(checks)[0][0]
         other_idx = np.where(~checks)[0][0]
         other_axis = getattr(aman, aman._assignments[signal_name][other_idx])
         n_det = other_axis.count
+    else:
+        raise ValueError("rfft only works for 1D or 2D data streams")
 
     if detrend is None:
         signal = np.atleast_2d(getattr(aman, signal_name))
@@ -101,16 +102,16 @@ def rfft(
     else:
         raise ValueError('resize must be "zero_pad", "trim", or None')
 
-    a, b, t_fun = build_rfft_object(n_det, n, "FFTW_FORWARD")
+    rfft = RFFTObj.for_shape(n_det, n, "FFTW_FORWARD")
     if resize == "zero_pad":
-        a[:, : axis.count] = signal
-        a[:, axis.count :] = 0
+        rfft.a[:, : axis.count] = signal
+        rfft.a[:, axis.count :] = 0
     elif resize == "trim":
-        a[:] = signal[:, :n]
+        rfft.a[:] = signal[:, :n]
     else:
-        a[:] = signal[:]
+        rfft.a[:] = signal[:]
 
-    t_fun()
+    rfft.t_forward()
 
     if delta_t is None:
         if "timestamps" in aman:
@@ -120,54 +121,109 @@ def rfft(
     freqs = np.fft.rfftfreq(n, delta_t)
 
     if other_idx is not None and other_idx != 0:
-        return b.transpose(), freqs
+        return rfft.b.transpose(), freqs
 
-    return b, freqs
+    return rfft.b, freqs
 
 
-def build_rfft_object(n_det, n, direction="FFTW_FORWARD", **kwargs):
-    """Build PyFFTW object for fft-ing
+def _t_null(direction):
+    raise ValueError(f"No {direction} FFT defined")
 
-    Arguments:
-
-        n_det: number of detectors (or just the arr.shape[0] for the
-            array you are going to fft)
-
-        n: number of samples in timestream
-
-        direction: fft direction. Can be FFTW_FORWARD, FFTW_BACKWARD, or BOTH
-
-        kwargs: additional arguments to pass to pyfftw.FFTW
-
-    Returns:
-
-        a: array for the real valued side of the fft
-
-        b: array for the the complex side of the fft
-
-        t_fun: function for performing FFT (two are returned if direction=='BOTH')
+@dataclass
+class RFFTObj:
     """
-    fftargs = {"threads": _get_num_threads(), "flags": ["FFTW_ESTIMATE"]}
-    fftargs.update(kwargs)
+    Dataclass to store information needed for rfft.
 
-    a = pyfftw.empty_aligned((n_det, n), dtype="float32")
-    b = pyfftw.empty_aligned((n_det, (n + 2) // 2), dtype="complex64")
+    Attributes:
+
+        n_det: Number of detectors this object was built for.
+
+        n: Number of samples this object was built for.
+
+        a: Buffer for the real part of the FFT.
+
+        b: Buffer for the complex part of the FFT.
+
+        t_forward: Function for performing the forward FFT.
+
+        t_backward: Function for performing the backward FFT.
+    """
+    n_det: int
+    n: int
+    a: NDArray[np.float32]
+    b: NDArray[np.complex64]
+    t_forward: Callable = field(default=partial(_t_null, "forward"))
+    t_backward: Callable = field(default=partial(_t_null, "backward"))
+
+    def validate(self, shape):
+        if shape != (self.n_det, self.n):
+            raise ValueError("Data is wrong shape for the rfft object")
+
+    @classmethod
+    def for_shape(cls, n_det, n, direction="FFTW_FORWARD", **kwargs):
+        """Build PyFFTW object for fft-ing
     
-    if direction == "FFTW_FORWARD":
-        t_fun = pyfftw.FFTW(a, b, direction=direction, **fftargs)
-    elif direction == "FFTW_BACKWARD":
-        t_fun = pyfftw.FFTW(b, a, direction=direction, **fftargs)
-    elif direction == "BOTH":
-        t_1 = pyfftw.FFTW(a, b, direction="FFTW_FORWARD", **fftargs)
-        t_2 = pyfftw.FFTW(b, a, direction="FFTW_BACKWARD", **fftargs)
-        return a, b, t_1, t_2
-    else:
-        raise ValueError("direction must be FFTW_FORWARD or FFTW_BACKWARD")
+        Arguments:
+    
+            n_det: number of detectors (or just the arr.shape[0] for the
+                array you are going to fft)
+    
+            n: number of samples in timestream
+    
+            direction: fft direction. Can be FFTW_FORWARD, FFTW_BACKWARD, or BOTH
+    
+            kwargs: additional arguments to pass to pyfftw.FFTW
+    
+        Returns:
+    
+            rfft_obj: An instance of RFFTObj
+        """
+        fftargs = {"threads": _get_num_threads(), "flags": ["FFTW_ESTIMATE"]}
+        fftargs.update(kwargs)
+    
+        a = pyfftw.empty_aligned((n_det, n), dtype="float32")
+        b = pyfftw.empty_aligned((n_det, (n + 2) // 2), dtype="complex64")
+        
+        t_forward = partial(_t_null, "forward") 
+        t_backward = partial(_t_null, "backward") 
+        if direction == "FFTW_FORWARD":
+            t_forward = pyfftw.FFTW(a, b, direction=direction, **fftargs)
+        elif direction == "FFTW_BACKWARD":
+            t_backward = pyfftw.FFTW(b, a, direction=direction, **fftargs)
+        elif direction == "BOTH":
+            t_forward = pyfftw.FFTW(a, b, direction="FFTW_FORWARD", **fftargs)
+            t_backward = pyfftw.FFTW(b, a, direction="FFTW_BACKWARD", **fftargs)
+        else:
+            raise ValueError("direction must be FFTW_FORWARD, FFTW_BACKWARD, or BOTH")
+    
+        rfft_obj = cls(n_det, n, a, b, t_forward, t_backward)
+    
+        return rfft_obj 
 
-    return a, b, t_fun
+    @classmethod
+    def for_tod(cls, tod, direction="FFTW_FORWARD", **kwargs):
+        """
+        Wrapper around ``for_shape`` that pulls the shape from a 2d array
+
+        Arguments: 
+
+            tod: 2D array to build rfft object for.
+    
+            direction: fft direction. Can be FFTW_FORWARD, FFTW_BACKWARD, or BOTH
+    
+            kwargs: additional arguments to pass to pyfftw.FFTW
+    
+        Returns:
+    
+            rfft_obj: An instance of RFFTObj
+        """
+        if len(tod.shape) != 2:
+            raise ValueError("Can only build rfft object for 2D arrays")
+        return cls.for_shape(tod.shape[0], tod.shape[1], direction, **kwargs)
 
 
-def find_inferior_integer(target, primes=[2, 3, 5, 7, 11, 13]):
+@lru_cache
+def find_inferior_integer(target, primes=(2, 3, 5, 7, 11, 13)):
     """Find the largest integer less than or equal to target whose prime
     factorization contains only the integers listed in primes.
 
@@ -180,13 +236,14 @@ def find_inferior_integer(target, primes=[2, 3, 5, 7, 11, 13]):
     while n > 0:
         n -= 1
         base = p**n
-        best_friend = find_inferior_integer(target / base, primes[1:])
+        best_friend = getattr(find_inferior_integer, "__wrapped__", find_inferior_integer)(target / base, primes[1:])
         if (best_friend * base) >= best:
             best = best_friend * base
     return int(best)
 
 
-def find_superior_integer(target, primes=[2, 3, 5, 7, 11, 13]):
+@lru_cache
+def find_superior_integer(target, primes=(2, 3, 5, 7, 11, 13)):
     """Find the smallest integer less than or equal to target whose prime
     factorization contains only the integers listed in primes.
 
@@ -199,7 +256,7 @@ def find_superior_integer(target, primes=[2, 3, 5, 7, 11, 13]):
     while n > 0:
         n -= 1
         base = p**n
-        best_friend = find_superior_integer(target / base, primes[1:])
+        best_friend = getattr(find_superior_integer, "__wrapped__", find_superior_integer)(target / base, primes[1:])
         if (best_friend * base) <= best:
             best = best_friend * base
     return int(best)

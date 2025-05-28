@@ -435,16 +435,16 @@ def main(
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
-            run_list.append([obslist, shape, wcs, info_list, prefix, t])
+            run_list.append([obslist, shape, wcs, info_list, prefix, t, tag])
         elif args.nside is not None:
-            run_list.append([obslist, None, None, info_list, prefix, t])
+            run_list.append([obslist, None, None, info_list, prefix, t, tag])
 
     
     futures = [executor.submit(
             mapmaking.make_demod_map, args.context, r[0],
             noise_model, r[3], preprocess_config, r[4],
             shape=r[1], wcs=r[2], nside=args.nside,
-            comm=FakeCommunicator(), t0=r[5], tag=tag,
+            comm=FakeCommunicator(), t0=r[5], tag=r[6],
             recenter=recenter,
             dtype_map=args.dtype_map,
             dtype_tod=args.dtype_tod,
