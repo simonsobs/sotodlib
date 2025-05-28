@@ -478,7 +478,7 @@ class Noise(_Preprocess):
     Can run data selection of a "max_noise" value.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
-    axis manager containing a array named ``white_noise``.  If not specified and
+    axis manager containing an array named ``white_noise``.  If not specified and
     white noise is fixed, the white noise is calculated with ``calc_wn()`` and used
     for ``wn_est``.  The calculated white noise is not stored.
 
@@ -526,12 +526,14 @@ class Noise(_Preprocess):
             fixed_param = self.calc_cfgs.get('fixed_param', [])
             wn_est = self.calc_cfgs.get('wn_est', None)
 
+            calc_wn = False
+
             if isinstance(wn_est, str):
-                if wn_est not in proc_aman:
-                     raise ValueError(f"{wn_est} not found in proc_aman")
-                self.calc_cfgs['wn_est'] = proc_aman[wn_est].white_noise
-            # only calculate if fixing wn, otherwise just use default guess
-            elif wn_est is None and 'wn' in fixed_param:
+                if wn_est in proc_aman:
+                    self.calc_cfgs['wn_est'] = proc_aman[wn_est].white_noise
+                else:
+                    calc_wn = True
+            if calc_wn or wn_est is None:
                 wn_f_low = self.calc_cfgs.get("wn_f_low", 5)
                 wn_f_high = self.calc_cfgs.get("wn_f_high", 10)
                 self.calc_cfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
@@ -545,6 +547,11 @@ class Noise(_Preprocess):
                                                         f=psd.freqs,
                                                         merge_fit=True,
                                                         **self.calc_cfgs)
+            if calc_wn or wn_est is None:
+                if not self.subscan:
+                    calc_aman.wrap("white_noise", self.calc_cfgs['wn_est'], [(0,"dets")])
+                else:
+                    calc_aman.wrap("white_noise", self.calc_cfgs['wn_est'], [(0,"dets"), (1,"subscans")])
         else:
             wn_f_low = self.calc_cfgs.get("wn_f_low", 5)
             wn_f_high = self.calc_cfgs.get("wn_f_high", 10)
