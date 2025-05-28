@@ -666,7 +666,7 @@ def get_bsf(cfg):
             - "trans_width": A float specifying the transition width of the band-stop filter (only for "sine2" type).
 
     Returns:
-        filters.fourier_filter: the band-pass filter.
+        filters.fourier_filter: the band-stop filter.
     """
     if cfg['type'] == 'identity':
         return identity_filter()
