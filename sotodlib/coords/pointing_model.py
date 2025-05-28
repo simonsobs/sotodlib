@@ -122,6 +122,10 @@ def apply_pointing_model_sat(vers, params, tod, ancil):
 
 def apply_pointing_model_lat(vers, params, ancil):
     az, el, roll = _get_lat_enc_radians(ancil)
+    
+    if vers == 'lat_naive':
+        return _new_boresight(ancil.samps, az=az, el=el, roll=roll)
+        
     if vers == "lat_v1":
         az1, el1, roll1 = model_lat_v1(params, az, el, roll)
         return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
@@ -132,7 +136,7 @@ def apply_pointing_model_lat(vers, params, ancil):
 
 #
 # LAT model(s)
-#
+#       
 def model_lat_v1(params, az, el, roll):
     """Applies pointing model to (az, el, roll).
 
@@ -153,25 +157,20 @@ def model_lat_v1(params, az, el, roll):
     - az_offset: The azimuth encoder offset.
     - el_offset: The elevation encoder offset.
     """
-    _params = {
-        "az_offset": 0,
-        "el_offset": 0,
-        "cr_offset": 0,
-        "el_xi_offset": 0,
-        "el_eta_offset": 0,
-        "rx_xi_offset": 0,
-        "rx_eta_offset": 0,
-        "mir_xi_offset": 0,
-        "mir_eta_offset": 0,
-    }
-    _params = _params.copy()
-    _params.update(params)
-    params = _params
-    cr = el - roll - np.deg2rad(60)
-    for key, val in params.items():
-        if not isinstance(val, (float, int)):
+    _p = dict(param_defaults['lat_v1'])
+    if isinstance(params, dict):
+        _p.update(params)
+    else:
+        _p.update({k: params[k] for k in params._fields.keys()})
+    params, _p = _p, None   
+         
+    for k, v in params.items():
+        if k == 'version':
             continue
-        params[key] = np.deg2rad(val)
+        if k not in param_defaults['lat_v1'] and v != 0.:
+            raise ValueError(f'Handling of model param "{k}" is not implemented.')
+
+    cr = el - roll - np.deg2rad(60)    
     q_enc = quat.rotation_lonlat(
         -1 * (az.copy() + params["az_offset"]), el.copy() + params["el_offset"]
     )
@@ -198,19 +197,6 @@ def model_lat_v1(params, az, el, roll):
 # sat_v1: you can expand v1, as long as new params don't do anything
 # if their value is zero (and that should be the registered default).
 
-defaults_sat_v1 = {
-    'enc_offset_az': 0.,
-    'enc_offset_el': 0.,
-    'enc_offset_boresight': 0.,
-    'fp_offset_xi0': 0.,
-    'fp_offset_eta0': 0.,
-    'fp_rot_xi0': 0.,
-    'fp_rot_eta0': 0.,
-    'az_rot': 0.,
-    'base_tilt_cos': 0.,
-    'base_tilt_sin': 0.,
-}
-
 def model_sat_v1(params, az, el, roll):
     """Applies pointing model to (az, el, roll).
 
@@ -233,7 +219,7 @@ def model_sat_v1(params, az, el, roll):
       - az_rot: Dimensionless parameter describing a linear dependence of Az on El.
 
     """
-    _p = dict(defaults_sat_v1)
+    _p = dict(param_defaults['sat_v1'])
     if isinstance(params, dict):
         _p.update(params)
     else:
@@ -243,7 +229,7 @@ def model_sat_v1(params, az, el, roll):
     for k, v in params.items():
         if k == 'version':
             continue
-        if k not in defaults_sat_v1 and v != 0.:
+        if k not in param_defaults['sat_v1'] and v != 0.:
             raise ValueError(f'Handling of model param "{k}" is not implemented.')
 
     # Construct offsetted encoders.
@@ -277,6 +263,31 @@ def model_sat_v1(params, az, el, roll):
 
 
 # Support functions
+param_defaults={
+    'lat_v1' : {
+        'az_offset': 0,
+        'el_offset': 0,
+        'cr_offset': 0,
+        'el_xi_offset': 0,
+        'el_eta_offset': 0,
+        'rx_xi_offset': 0,
+        'rx_eta_offset': 0,
+        'mir_xi_offset': 0,
+        'mir_eta_offset': 0,
+    },
+    'sat_v1' : {
+        'enc_offset_az': 0.,
+        'enc_offset_el': 0.,
+        'enc_offset_boresight': 0.,
+        'fp_offset_xi0': 0.,
+        'fp_offset_eta0': 0.,
+        'fp_rot_xi0': 0.,
+        'fp_rot_eta0': 0.,
+        'az_rot': 0.,
+        'base_tilt_cos': 0.,
+        'base_tilt_sin': 0.
+    }
+}
 
 def _new_boresight(samps, az=None, el=None, roll=None):
     boresight = core.AxisManager(samps)
