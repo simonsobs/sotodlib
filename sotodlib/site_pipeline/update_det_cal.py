@@ -785,7 +785,6 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     # We split into multiple pools because:
     # - we don't want to overload sqlite files with too much concurrent access
     # - we want to be able to continue getting the next obs_info data while ressets are being computed
-    # mp.set_start_method(cfg.multiprocess_start_method)
     pool1 = mp.Pool(cfg.nprocs_obs_info)
     pool2 = mp.Pool(cfg.nprocs_result_set)
 
@@ -864,5 +863,7 @@ if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
     cfg = DetCalCfg.from_yaml(args.config_file)
+    # This needs to be run here in __main__ or else this will throw a "context
+    # has already been set" RuntimeError
     mp.set_start_method(cfg.multiprocess_start_method)
     main(config_file=args.config_file)
