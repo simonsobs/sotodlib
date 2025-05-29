@@ -362,16 +362,17 @@ class PSDCalc(_Preprocess):
         "signal: "signal" # optional
         "wrap": "psd" # optional
         "calc":
-          "psd_cfgs": # optional, kwargs to scipy.welch
-            "nperseg": 1024
+          "nperseg": 1024
+          "noverlap": 0
           "wrap_name": "psd" # optional
           "subscan": False
+          "full_output": True
         "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
-    
+
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
@@ -379,18 +380,26 @@ class PSDCalc(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **self.calc_cfgs)
+        # make sure full_output is True
+        if 'full_output' not in self.calc_cfgs:
+            self.calc_cfgs['full_output'] = True
+        self.calc_cfgs['full_output'] = True
+
+        freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                    **self.calc_cfgs)
 
         fft_aman = core.AxisManager(aman.dets,
                                     core.OffsetAxis("nusamps", len(freqs)))
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
         if self.calc_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
+            fft_aman.wrap("nseg_ss", Pxx, [(0, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
+            nseg = np.nansum(nseg) # Sum of segments
 
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
+        fft_aman.wrap("nseg", nseg)
 
         self.save(proc_aman, fft_aman)
 
@@ -530,6 +539,7 @@ class Noise(_Preprocess):
         else:
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
+                                         nseg=psd.nseg,
                                          **self.calc_cfgs)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)

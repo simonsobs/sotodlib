@@ -8,12 +8,16 @@ import sys
 import numdifftools as ndt
 import numpy as np
 import pyfftw
+import logging
 import so3g
 from scipy.optimize import minimize
 from scipy.signal import welch
+from scipy.stats import chi2
 from sotodlib import core
 
 from . import detrend_tod
+
+logger = logging.getLogger(__name__)
 
 
 def _get_num_threads():
@@ -272,6 +276,7 @@ def calc_psd(
     merge=False, 
     overwrite=True,
     subscan=False,
+    full_output=False,
     **kwargs
 ):
     """Calculates the power spectrum density of an input signal using signal.welch().
@@ -293,17 +298,36 @@ def calc_psd(
         merge (bool): if True merge results into axismanager.
         overwrite (bool): if true will overwrite f, pxx axes.
         subscan (bool): if True, compute psd on subscans.
+        full_output: if True this also outputs nseg, the number of segments used for
+            welch, for correcting bias of median white noise estimation by calc_wn.
         **kwargs: keyword args to be passed to signal.welch().
 
     Returns:
         freqs: array of frequencies corresponding to PSD calculated from welch.
         Pxx: array of PSD values.
+        nseg: number of segments used for welch. this is returned if full_output is True.
     """
     if signal is None:
         signal = aman.signal
+
+    if "noverlap" in kwargs and kwargs["noverlap"] != 0:
+        logger.warning('noverlap argument of welch is not 0. '
+                       'calc_wn will be biased.')
+    else:
+        kwargs["noverlap"] = 0
+
     if subscan:
-        freqs, Pxx = _calc_psd_subscan(aman, signal=signal, freq_spacing=freq_spacing, **kwargs)
+        if full_output:
+            freqs, Pxx, nseg = _calc_psd_subscan(aman, signal=signal,
+                                                 freq_spacing=freq_spacing,
+                                                 full_output=True,
+                                                 **kwargs)
+        else:
+            freqs, Pxx = _calc_psd_subscan(aman, signal=signal,
+                                           freq_spacing=freq_spacing,
+                                           **kwargs)
         axis_map_pxx = [(0, "dets"), (1, "nusamps"), (2, "subscans")]
+        axis_map_nseg = [(0, "subscans")]
     else:
         if timestamps is None:
             timestamps = aman.timestamps
@@ -332,8 +356,14 @@ def calc_psd(
                 nperseg = int(2 ** (np.around(np.log2((stop - start) / 50.0))))
             kwargs["nperseg"] = nperseg
 
+        if kwargs["nperseg"] > max_samples:
+            nseg = 1
+        else:
+            nseg = int(max_samples / kwargs["nperseg"])
+
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
         axis_map_pxx = [(0, aman.dets), (1, "nusamps")]
+        axis_map_nseg = None
 
     if merge:
         aman.merge( core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
@@ -344,9 +374,16 @@ def calc_psd(
                 aman.move("Pxx", None)
         aman.wrap("freqs", freqs, [(0,"nusamps")])
         aman.wrap("Pxx", Pxx, axis_map_pxx)
-    return freqs, Pxx
+        if full_output:
+            if overwrite and "nseg" in aman._fields:
+                aman.move("nseg", None)
+            aman.wrap("nseg", nseg, axis_map_nseg)
+    if full_output:
+        return freqs, Pxx, nseg
+    else:
+        return freqs, Pxx
 
-def _calc_psd_subscan(aman, signal=None, freq_spacing=None, **kwargs):
+def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, **kwargs):
     """
     Calculate the power spectrum density of subscans using signal.welch().
     Data defaults to aman.signal. aman.timestamps is used for times.
@@ -367,20 +404,27 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, **kwargs):
             nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
         kwargs["nperseg"] = nperseg
 
-    Pxx = []
+    Pxx, nseg = [], []
     for iss in range(aman.subscan_info.subscans.count):
         signal_ss = get_subscan_signal(aman, signal, iss)
         axis = -1 if "axis" not in kwargs else kwargs["axis"]
-        if signal_ss.shape[axis] >= kwargs["nperseg"]:
+        nsamps = signal_ss.shape[axis]
+        if nsamps >= kwargs["nperseg"]:
             freqs, pxx_sub = welch(signal_ss, fs, **kwargs)
             Pxx.append(pxx_sub)
+            nseg.append(int(nsamps / kwargs["nperseg"]))
         else:
             Pxx.append(np.full((signal.shape[0], kwargs["nperseg"]//2+1), np.nan)) # Add nans if subscan is too short
+            nseg.append(np.nan)
+    nseg = np.array(nseg)
     Pxx = np.array(Pxx)
     Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
-    return freqs, Pxx
+    if full_output:
+        return freqs, Pxx, nseg
+    else:
+        return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
+def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
@@ -396,6 +440,13 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
 
         freqs (1d Float array):
             frequency information related to the psd. Defaults to aman.freqs
+
+        nseg (int or 1d float array):
+            number of segmnents used for welch. Defaults to aman.nseg. This is
+            necessary for debiasing median white noise estimation. welch PSD with
+            non-overlapping n segments follows chi square distribution with
+            2 * nseg degrees of freedom. The median of chi square distribution is
+            biased from its average.
 
         low_f (Float):
             low frequency cutoff to calculate median psd value. Defaults to 5Hz
@@ -413,12 +464,27 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
     if pxx is None:
         pxx = aman.Pxx
 
+    if nseg is None:
+        nseg = aman.get('nseg')
+
+    if nseg is None:
+        logger.warning('white noise level estimated by median PSD is biased. '
+                       'nseg is necessary to debias. Make full_output argument '
+                       'of calc_psd True to get nseg.')
+        debias = None
+    else:
+        debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)
+
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0)
     if pxx.ndim == 1:
         wn2 = np.median(pxx[fmsk])
     else:
         wn2 = np.median(pxx[:, fmsk], axis=1)
-
+    if debias is not None:
+        if pxx.ndim == 3:
+            wn2 *= debias[None, :]
+        else:
+            wn2 *= debias
     wn = np.sqrt(wn2)
     return wn
 
