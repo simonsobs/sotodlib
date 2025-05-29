@@ -39,6 +39,7 @@ def main(**args):
     from sotodlib.io import metadata   # PerDetectorHdf5 work-around
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
+    from sotodlib.coords import pointing_model
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
@@ -189,10 +190,16 @@ def main(**args):
                     #print(obs_id)
                     obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta, logger=L)
 
+                # Cut non-optical dets
+                obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
                 srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
+                # Apply pointing model
+                pointing_model.apply_pointing_model(obs)
+                # Calibrate to pW
+                obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
 
                 # Add site and weather, since they're not in obs yet
                 obs.wrap("weather", np.full(1, "typical"))
