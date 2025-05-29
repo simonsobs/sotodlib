@@ -384,8 +384,8 @@ def get_glitch_flags(aman,
     )
     # get the threshods based on n_sig x nlev = n_sig x iqu x 0.741
     fvec = np.abs(fvec)
-    if fvec.shape[1] > 50000:
-        ds = int(fvec.shape[1]/20000)
+    if fvec.shape[-1] > 50000:
+        ds = int(fvec.shape[-1]/20000)
     else: 
         ds = 1
 
@@ -393,16 +393,25 @@ def get_glitch_flags(aman,
         # We include turnarounds
         subscan_indices = np.concatenate([aman.flags.left_scan.ranges(), (~aman.flags.left_scan).ranges()])
     else:
-        subscan_indices = np.array([[0, fvec.shape[1]]])
+        subscan_indices = np.array([[0, fvec.shape[-1]]])
 
     msk = np.zeros_like(fvec, dtype='bool')
-    for ss in subscan_indices:
-        iqr_range = 0.741 * stats.iqr(fvec[:,ss[0]:ss[1]:ds], axis=1)
-        # get flags
-        msk[:,ss[0]:ss[1]] = fvec[:,ss[0]:ss[1]] > iqr_range[:, None] * n_sig
-    msk[:,:edge_guard] = False
-    msk[:,-edge_guard:] = False
-    flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
+    if fvec.ndim == 1:
+        for ss in subscan_indices:
+            iqr_range = 0.741 * stats.iqr(fvec[ss[0]:ss[1]:ds])
+            # get flags
+            msk[ss[0]:ss[1]] = fvec[ss[0]:ss[1]] > iqr_range * n_sig
+        msk[:edge_guard] = False
+        msk[-edge_guard:] = False
+        flag = Ranges.from_bitmask(msk)
+    else:
+        for ss in subscan_indices:
+            iqr_range = 0.741 * stats.iqr(fvec[:,ss[0]:ss[1]:ds], axis=1)
+            # get flags
+            msk[:,ss[0]:ss[1]] = fvec[:,ss[0]:ss[1]] > iqr_range[:, None] * n_sig
+        msk[:,:edge_guard] = False
+        msk[:,-edge_guard:] = False
+        flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
     flag.buffer(buffer)
 
     if merge:
@@ -414,22 +423,30 @@ def get_glitch_flags(aman,
             aman.flags.wrap(name, flag)
 
     if full_output:
-        indptr = np.append(
-            0, np.cumsum([np.sum(msk[i]) for i in range(aman.dets.count)])
-        )
-        indices = np.concatenate([np.where(msk[i])[0] for i in range(aman.dets.count)])
-        data = np.concatenate(
-            [fvec[i][msk[i]] / iqr_range[i] for i in range(aman.dets.count)]
-        )
-        smat = csr_array(
-            (data, indices, indptr), shape=(aman.dets.count, aman.samps.count)
-        )
-        glitches = core.AxisManager(
-            aman.dets,
-            aman.samps,
-        )
-        glitches.wrap("glitch_flags", flag, [(0, "dets"), (1, "samps")])
-        glitches.wrap("glitch_detection", smat, [(0, "dets"), (1, "samps")])
+        if fvec.ndim == 1:
+            # do not compress into csr_array
+            glitches = core.AxisManager(aman.samps)
+            data = np.zeros_like(fvec)
+            data[msk] = fvec[msk] / iqr_range
+            glitches.wrap("glitch_flags", flag, [(0, "samps")])
+            glitches.wrap("glitch_detection", data, [(0, "samps")])
+        else:
+            indptr = np.append(
+                0, np.cumsum([np.sum(msk[i]) for i in range(aman.dets.count)])
+            )
+            indices = np.concatenate([np.where(msk[i])[0] for i in range(aman.dets.count)])
+            data = np.concatenate(
+                [fvec[i][msk[i]] / iqr_range[i] for i in range(aman.dets.count)]
+            )
+            smat = csr_array(
+                (data, indices, indptr), shape=(aman.dets.count, aman.samps.count)
+            )
+            glitches = core.AxisManager(
+                aman.dets,
+                aman.samps,
+            )
+            glitches.wrap("glitch_flags", flag, [(0, "dets"), (1, "samps")])
+            glitches.wrap("glitch_detection", smat, [(0, "dets"), (1, "samps")])
         return flag, glitches
 
     return flag
