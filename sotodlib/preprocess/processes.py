@@ -1509,13 +1509,13 @@ class GetCommonMode(_Preprocess):
             wrap: "signal_commonmode"
         save: True
 
-    .. autofunction:: sotodlib.tod_ops.pca.get_common_mode.
+    .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
     """
     name = 'get_common_mode'
 
     def calc_and_save(self, aman, proc_aman):
         common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
-        common_aman = fp_aman = core.AxisManager(aman.samps)
+        common_aman = core.AxisManager(aman.samps)
         common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
         self.save(proc_aman, common_aman)
 
