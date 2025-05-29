@@ -9,7 +9,9 @@ import unittest
 import numpy as np
 import pylab as pl
 import scipy.signal
-
+from numpy.fft import rfftfreq,irfft
+from numpy.fft import fftfreq,rfft
+from scipy import interpolate
 from numpy.testing import assert_array_equal, assert_allclose
 
 from sotodlib import core, tod_ops, sim_flags
@@ -318,11 +320,47 @@ class JumpfindTest(unittest.TestCase):
 
 class FFTTest(unittest.TestCase):
     def test_psd(self):
-        tod = get_tod("white")
-        f, Pxx = tod_ops.fft_ops.calc_psd(tod, nperseg=256)
-        self.assertEqual(len(f), 129) # nperseg/2 + 1
-        f, Pxx = tod_ops.fft_ops.calc_psd(tod, freq_spacing=.1)
-        self.assertEqual(np.round(np.median(np.diff(f)), 1), .1)
+        fs = 200.
+        dets = core.LabelAxis('dets', [f'det{di:003}' for di in range(20)])
+        nsamps = 200*3600
+
+        aman = core.AxisManager(dets)
+        ndets = aman.dets.count
+
+        white_noise_amp_array_input = 50 + np.random.randn(ndets) #W/sqrt{Hz}
+        fknee_array_input = 1 + 0.1*np.random.randn(ndets)
+        alpha_array_input = 3 + 0.2*np.random.randn(ndets)
+
+        freqs = rfftfreq(nsamps, d=1/fs)
+        params = [white_noise_amp_array_input[:, np.newaxis], 
+                  fknee_array_input[:, np.newaxis], 
+                  alpha_array_input[:, np.newaxis]]
+        pxx_input = tod_ops.fft_ops.noise_model(freqs, params)
+
+        pxx_input[:, 0] = 0
+        nusamps_input = core.OffsetAxis('nusamps_input', len(freqs))
+
+        T = nsamps/fs
+        ft_amps = np.sqrt(pxx_input * T * fs**2 / 2)
+
+        ft_phases = np.random.uniform(0, 2*np.pi, size=ft_amps.shape)
+        ft_coefs = ft_amps * np.exp(1.0j*ft_phases)
+        realized_noise = irfft(ft_coefs)
+        timestamps = 1700000000 + np.arange(0, realized_noise.shape[1])/fs
+        aman.wrap('timestamps', timestamps, [(0, core.OffsetAxis('samps', len(timestamps)))])
+        aman.wrap('signal', realized_noise, [(0, 'dets'), (1, 'samps')])
+        
+        tod_ops.detrend_tod(aman)
+        freqs_output, Pxx_output = tod_ops.fft_ops.calc_psd(aman, nperseg=200*100)
+        fit_result = tod_ops.fft_ops.fit_noise_model(aman, wn_est=50, fknee_est=1.0, alpha_est=3.3, f_min=0.05, f_max=5,
+                                            binning=True, psdargs={'nperseg':200*1000})
+        wnl_fit = fit_result.fit[:, 0]
+        fk_fit = fit_result.fit[:, 1]
+        alpha_fit = fit_result.fit[:, 2]
+        
+        self.assertTrue(np.abs(np.median(white_noise_amp_array_input - wnl_fit)) < 1)
+        self.assertTrue(np.abs(np.median(fknee_array_input - fk_fit)) < 0.1)
+        self.assertTrue(np.abs(np.median(alpha_array_input - alpha_fit)) < 0.1)
 
 if __name__ == '__main__':
     unittest.main()
