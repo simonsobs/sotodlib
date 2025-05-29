@@ -1246,7 +1246,7 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-
+    
     def calc_and_save(self, aman, proc_aman):
         source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
         if source_list == ['planet']:
@@ -1418,6 +1418,11 @@ class FourierFilter(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
+
+class ReduceFlags(_Preprocess):
+    name = 'reduce_flags'
+    def process(self, aman, proc_aman):
+        aman.flags.reduce(**self.process_cfgs)       
 
 class PCARelCal(_Preprocess):
     """
