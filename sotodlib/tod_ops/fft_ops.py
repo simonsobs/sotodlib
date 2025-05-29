@@ -312,11 +312,13 @@ def calc_psd(
     if signal is None:
         signal = aman.signal
 
-    if "noverlap" in kwargs and kwargs["noverlap"] != 0:
-        logger.warning('noverlap argument of welch is not 0. '
-                       'calc_wn will be biased.')
-    else:
-        kwargs["noverlap"] = 0
+    if ("noverlap" not in kwargs) or \
+            ("noverlap" in kwargs and kwargs["noverlap"] != 0):
+        logger.warning('calc_wn will be biased. noverlap argument of welch '
+                       'needs to be 0 to bet unbiased median white noise estimate.')
+    if not full_output:
+        logger.warning('calc_wn will be biased. full output argument of calc_psd '
+                       'needs to be True to get unbiased median white noise estimate.')
 
     if subscan:
         if full_output:
@@ -455,7 +457,7 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
         freqs (1d Float array):
             frequency information related to the psd. Defaults to aman.freqs
 
-        nseg (int or 1d float array):
+        nseg (Int or 1d Int array):
             number of segmnents used for welch. Defaults to aman.nseg. This is
             necessary for debiasing median white noise estimation. welch PSD with
             non-overlapping n segments follows chi square distribution with
@@ -483,8 +485,9 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
 
     if nseg is None:
         logger.warning('white noise level estimated by median PSD is biased. '
-                       'nseg is necessary to debias. Make full_output argument '
-                       'of calc_psd True to get nseg.')
+                       'nseg is necessary to debias. Need to use following '
+                       'argements in calc_psd to get correct nseg. '
+                       '`noverlap=0, full_output=True`')
         debias = None
     else:
         debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)
