@@ -496,8 +496,8 @@ class Noise(_Preprocess):
       fit: False
       subscan: False
       calc:
-        wn_f_low: 5
-        wn_f_high: 10
+        fwhite: (5, 20)
+        lowf: 1
         f_max: 25
         mask: True
         wn_est: noise
@@ -542,15 +542,14 @@ class Noise(_Preprocess):
                 else:
                     calc_wn = True
             if calc_wn or wn_est is None:
-                wn_f_low = self.calc_cfgs.get("wn_f_low", 5)
-                wn_f_high = self.calc_cfgs.get("wn_f_high", 10)
+                wn_f_low, wn_f_high = my_dict.get('fwhite', (5, 10))
                 self.calc_cfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    low_f=wn_f_low,
                                                                    high_f=wn_f_high)
-
             if self.calc_cfgs.get('subscan') is None:
                 self.calc_cfgs['subscan'] = self.subscan
+            self.calc_cfgs.pop('fwhite', None)
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
@@ -561,8 +560,8 @@ class Noise(_Preprocess):
                 else:
                     calc_aman.wrap("white_noise", self.calc_cfgs['wn_est'], [(0,"dets"), (1,"subscans")])
         else:
-            wn_f_low = self.calc_cfgs.get("wn_f_low", 5)
-            wn_f_high = self.calc_cfgs.get("wn_f_high", 10)
+            wn_f_low = self.calc_cfgs.get("low_f", 5)
+            wn_f_high = self.calc_cfgs.get("high_f", 10)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          low_f=wn_f_low,
