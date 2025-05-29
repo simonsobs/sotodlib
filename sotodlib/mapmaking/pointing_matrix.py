@@ -1,7 +1,6 @@
 import numpy as np
 import so3g
 
-
 class PmatCut:
     """Implementation of cuts-as-extra-degrees-of-freedom for a single obs."""
     def __init__(self, cuts, model=None, params={"resolution":100, "nmax":100}):

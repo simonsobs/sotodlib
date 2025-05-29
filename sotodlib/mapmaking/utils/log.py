@@ -6,20 +6,15 @@
 
 """This module provids a simple logging/output interface."""
 import time
-from logging import (DEBUG, ERROR, INFO, FileHandler, Filter, Formatter,
-                     StreamHandler, getLogger)
-
-from pixell import colors, memory, mpi
-
+from logging import *
+from pixell import memory, colors, mpi
 
 class EnFilter(Filter):
     def __init__(self, rank=0):
         self.rank = rank
         try:
             # Try to get actual time since task start if possible
-            import os
-
-            import psutil
+            import os, psutil
             p = psutil.Process(os.getpid())
             self.t0 = p.create_time()
         except ImportError:
@@ -67,7 +62,7 @@ def init(level=INFO, rank=mpi.COMM_WORLD.rank, file=None, fmt=default_format, co
     The console level threshold is set by the level argument, which must be a
     python logging module level. The threshold does not apply to file output, where
     everything is output."""
-    logger  = getLogger("sotodlib")
+    logger  = getLogger("enlib")
     logger.setLevel(DEBUG)
     if file:
         try:

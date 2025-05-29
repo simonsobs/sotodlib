@@ -33,12 +33,19 @@ def get_parser(parser=None):
     return parser
 
 def main(**args):
-    import numpy as np, sys, time, warnings, os, so3g
+    import numpy as np
+    import sys
+    import time
+    import warnings
+    import os
+    import so3g
+
+    from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench, resample
+
+
     from sotodlib.core import Context
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
-    from sotodlib.mapmaking import log
-    from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
 
     #try: import moby2.analysis.socompat
     #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
@@ -66,19 +73,19 @@ def main(**args):
     prefix= args.odir + "/"
     if args.prefix: prefix += args.prefix + "_"
     utils.mkdir(args.odir)
-    L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
+    L = mapmaking.utils.init(level=mapmaking.utils.DEBUG, rank=comm.rank)
 
     recenter = None
     if args.center_at:
-        recenter = mapmaking.parse_recentering(args.center_at)
+        recenter = mapmaking.utils.parse_recentering(args.center_at)
 
     with bench.mark('context'):
         context = Context(args.context)
 
     wafers  = args.wafers.split(",") if args.wafers else None
     bands   = args.bands .split(",") if args.bands  else None
-    sub_ids = mapmaking.get_subids(args.query, context=context)
-    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands)
+    sub_ids = mapmaking.utils.get_subids(args.query, context=context)
+    sub_ids = mapmaking.utils.filter_subids(sub_ids, wafers=wafers, bands=bands)
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if args.tods:
@@ -98,7 +105,7 @@ def main(**args):
     if args.srcsamp:
         srcsamp_mask  = enmap.read_map(args.srcsamp)
 
-    passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
+    passes = mapmaking.utils.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
         pass_prefix = prefix + "pass%d_" % (ipass+1)
@@ -176,7 +183,7 @@ def main(**args):
                     obs = context.get_obs(sub_id, meta=meta)
 
                 # Fix boresight
-                mapmaking.fix_boresight_glitches(obs)
+                mapmaking.utils.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
                 srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
 
@@ -205,7 +212,7 @@ def main(**args):
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.utils.find_usable_detectors(obs)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
@@ -242,11 +249,11 @@ def main(**args):
                 # Might want to make the interpol used here separate from the one in
                 # the main mapmaking.
                 if args.inject:
-                    mapmaking.inject_map(obs, map_to_inject, recenter=recenter, interpol=args.interpol)
+                    mapmaking.utils.inject_map(obs, map_to_inject, recenter=recenter, interpol=args.interpol)
                 utils.deslope(obs.signal, w=5, inplace=True)
 
                 if passinfo.downsample != 1:
-                    obs = mapmaking.downsample_obs(obs, passinfo.downsample)
+                    obs = mapmaking.utils.downsample_obs(obs, passinfo.downsample)
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
@@ -263,7 +270,7 @@ def main(**args):
                         # for this observation.
                         signal_estimate = eval_prev.evaluate(mapmaker_prev.data[len(mapmaker.data)])
                         # Resample this to the current downsampling level
-                        signal_estimate = mapmaking.resample.resample_fft_simple(signal_estimate, obs.samps.count)
+                        signal_estimate = resample.resample_fft_simple(signal_estimate, obs.samps.count)
                     else: signal_estimate = None
                     mapmaker.add_obs(sub_id, obs, noise_model=nmat, signal_estimate=signal_estimate)
                     del signal_estimate
