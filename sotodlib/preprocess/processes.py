@@ -542,7 +542,7 @@ class Noise(_Preprocess):
                 else:
                     calc_wn = True
             if calc_wn or wn_est is None:
-                wn_f_low, wn_f_high = my_dict.get('fwhite', (5, 10))
+                wn_f_low, wn_f_high = self.calc_cgs.get('fwhite', (5, 10))
                 self.calc_cfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    low_f=wn_f_low,
