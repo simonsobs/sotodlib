@@ -362,8 +362,8 @@ class PSDCalc(_Preprocess):
         "signal: "signal" # optional
         "wrap": "psd" # optional
         "calc":
-          "nperseg": 1024
-          "noverlap": 0
+          "nperseg": 1024 # optional
+          "noverlap": 0 # optional
           "wrap_name": "psd" # optional
           "subscan": False
           "full_output": True
@@ -381,8 +381,6 @@ class PSDCalc(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         # make sure full_output is True
-        if 'full_output' not in self.calc_cfgs:
-            self.calc_cfgs['full_output'] = True
         self.calc_cfgs['full_output'] = True
 
         freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
