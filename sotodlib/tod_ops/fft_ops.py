@@ -281,7 +281,7 @@ def calc_psd(
         axis_map_pxx = [(0, aman.dets), (1, "nusamps")]
 
     if merge:
-        if 'nusamps' not in list(aman._axes.keys()):
+        if 'nusamps' not in aman:
             aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
             aman.wrap("freqs", freqs, [(0,"nusamps")])
         else:
@@ -530,11 +530,11 @@ def get_binned_psd(
     if merge:
         aman.merge(core.AxisManager(core.OffsetAxis("nusamps_bin", len(f_bin))))
         if overwrite:
-            if "freqs_bin" in aman._fields:
+            if "freqs_bin" in aman:
                 aman.move("freqs_bin", None)
-            if "Pxx_bin" in aman._fields:
+            if "Pxx_bin" in aman:
                 aman.move("Pxx_bin", None)
-            if "bin_size" in aman._fields:
+            if "bin_size" in aman:
                 aman.move("bin_size", None)
         aman.wrap("freqs_bin", f_bin, [(0,"nusamps_bin")])
         aman.wrap("bin_size", bin_size, [(0,"nusamps_bin")])
