@@ -495,6 +495,7 @@ class Noise(_Preprocess):
 
     - name: "noise"
       fit: False
+      subscan: False
       calc:
         fwhite: (5, 10)
         lowf: 1
@@ -511,6 +512,7 @@ class Noise(_Preprocess):
 
     - name: "noise"
       fit: False
+      subscan: False
       calc:
         low_f: 5
         high_f: 20
