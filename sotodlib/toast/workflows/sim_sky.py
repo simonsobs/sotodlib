@@ -43,6 +43,7 @@ def setup_simulate_sky_map_signal(operators):
         )
     )
     operators.append(toast.ops.ScanWCSMap(name="scan_wcs_map", enabled=False))
+    operators.append(toast.ops.ScanWCSDetectorMap(name="scan_wcs_detector_map", enabled=False))
     operators.append(
         toast.ops.StokesWeights(
             name="scan_wcs_map_weights",
@@ -91,7 +92,9 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
     job_ops = job.operators
 
     scan_healpix = job_ops.scan_map.enabled or job_ops.scan_detector_map.enabled
-    scan_wcs = job_ops.scan_wcs_map.enabled
+    scan_wcs = (
+        job_ops.scan_wcs_map.enabled or job_ops.scan_wcs_detector_map.enabled
+    )
     scan_map = scan_healpix or scan_wcs
 
     # Check for conflicting options
@@ -147,34 +150,35 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
 
     # Scan signal from WCS maps
 
-    if scan_wcs:
-        if job_ops.scan_wcs_map_pixels.enabled:
-            # We are using a custom pointing matrix
-            job_ops.scan_wcs_map_pixels.detector_pointing = job_ops.det_pointing_radec_sim
-            job_ops.scan_wcs_map.pixel_dist = "scan_wcs_map_pixel_dist"
-            job_ops.scan_wcs_map.pixel_pointing = job_ops.scan_wcs_map_pixels
-        else:
-            # We are using the same pointing matrix as the mapmaking
-            job_ops.scan_wcs_map.pixel_dist = job_ops.binner_final.pixel_dist
-            job_ops.scan_wcs_map.pixel_pointing = job.pixels_final
-        if job_ops.scan_wcs_map_weights.enabled:
-            job_ops.scan_wcs_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
-            job_ops.scan_wcs_map.stokes_weights = job_ops.scan_wcs_map_weights
-        else:
-            job_ops.scan_wcs_map.stokes_weights = job_ops.weights_radec
-        job_ops.scan_wcs_map.save_pointing = otherargs.full_pointing
-        job_ops.scan_wcs_map.apply(data)
-        if job_ops.scan_wcs_map_pixels.enabled:
-            # Clean up our custom pointing
-            toast.ops.Delete(detdata=[
-                job_ops.scan_wcs_map_pixels.pixels,
-                job_ops.det_pointing_radec_sim.quats,
-            ]).apply(data)
-        if job_ops.scan_wcs_map_weights.enabled:
-            # Clean up our custom pointing
-            toast.ops.Delete(detdata=[
-                job_ops.scan_wcs_map_weights.weights,
-            ]).apply(data)
+    for scan_op in job_ops.scan_wcs_map, job_ops.scan_wcs_detector_map:
+        if scan_op.enabled:
+            if job_ops.scan_wcs_map_pixels.enabled:
+                # We are using a custom pointing matrix
+                job_ops.scan_wcs_map_pixels.detector_pointing = job_ops.det_pointing_radec_sim
+                scan_op.pixel_dist = "scan_wcs_map_pixel_dist"
+                scan_op.pixel_pointing = job_ops.scan_wcs_map_pixels
+            else:
+                # We are using the same pointing matrix as the mapmaking
+                scan_op.pixel_dist = job_ops.binner_final.pixel_dist
+                scan_op.pixel_pointing = job.pixels_final
+            if job_ops.scan_wcs_map_weights.enabled:
+                job_ops.scan_wcs_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
+                scan_op.stokes_weights = job_ops.scan_wcs_map_weights
+            else:
+                scan_op.stokes_weights = job_ops.weights_radec
+            scan_op.save_pointing = otherargs.full_pointing
+            scan_op.apply(data)
+            if job_ops.scan_wcs_map_pixels.enabled:
+                # Clean up our custom pointing
+                toast.ops.Delete(detdata=[
+                    job_ops.scan_wcs_map_pixels.pixels,
+                    job_ops.det_pointing_radec_sim.quats,
+                ]).apply(data)
+            if job_ops.scan_wcs_map_weights.enabled:
+                # Clean up our custom pointing
+                toast.ops.Delete(detdata=[
+                    job_ops.scan_wcs_map_weights.weights,
+                ]).apply(data)
 
 
 def setup_simulate_conviqt_signal(operators):
