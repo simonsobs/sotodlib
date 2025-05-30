@@ -4,20 +4,17 @@ from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from typing_extensions import Callable
 from numpy.typing import NDArray
-import sys
+import warnings
 import numdifftools as ndt
 import numpy as np
 import pyfftw
-import logging
 import so3g
-from so3g.proj import Ranges, RangesMatrix
+from so3g.proj import Ranges
 from scipy.optimize import minimize
 from scipy.signal import welch
 from scipy.stats import chi2
 from sotodlib import core, hwp
 from sotodlib.tod_ops import detrend_tod
-
-logger = logging.getLogger(__name__)
 
 
 def _get_num_threads():
@@ -314,11 +311,11 @@ def calc_psd(
 
     if ("noverlap" not in kwargs) or \
             ("noverlap" in kwargs and kwargs["noverlap"] != 0):
-        logger.warning('calc_wn will be biased. noverlap argument of welch '
-                       'needs to be 0 to get unbiased median white noise estimate.')
+        warnings.warn('calc_wn will be biased. noverlap argument of welch '
+                      'needs to be 0 to get unbiased median white noise estimate.')
     if not full_output:
-        logger.warning('calc_wn will be biased. full_output argument of calc_psd '
-                       'needs to be True to get unbiased median white noise estimate.')
+        warnings.warn('calc_wn will be biased. full_output argument of calc_psd '
+                      'needs to be True to get unbiased median white noise estimate.')
 
     if subscan:
         if full_output:
@@ -484,10 +481,10 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
         nseg = aman.get('nseg')
 
     if nseg is None:
-        logger.warning('white noise level estimated by median PSD is biased. '
-                       'nseg is necessary to debias. Need to use following '
-                       'argements in calc_psd to get correct nseg. '
-                       '`noverlap=0, full_output=True`')
+        warnings.warn('white noise level estimated by median PSD is biased. '
+                      'nseg is necessary to debias. Need to use following '
+                      'arguments in calc_psd to get correct nseg. '
+                      '`noverlap=0, full_output=True`')
         debias = None
     else:
         debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)

@@ -383,7 +383,7 @@ class PSDCalc(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        full_output = 'full_output' in self.calc_cfgs and self.calc_cfgs['full_output']
+        full_output = self.calc_cfgs.get('full_output')
         if full_output:
             freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
                                                         **self.calc_cfgs)
@@ -396,9 +396,9 @@ class PSDCalc(_Preprocess):
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
         if self.calc_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
-            fft_aman.wrap("nseg_ss", Pxx, [(0, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
             if full_output:
+                fft_aman.wrap("nseg_ss", nseg, [(0, aman.subscans)])
                 nseg = np.nansum(nseg)
 
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
