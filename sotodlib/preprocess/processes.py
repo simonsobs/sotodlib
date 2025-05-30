@@ -638,15 +638,17 @@ class Noise(_Preprocess):
             proc_aman = meta.preprocess
 
         if 'wrap_name' in self.save_cfgs:
-            self.select_cfgs['name'] = self.select_cfgs.get('name', self.save_cfgs['wrap_name'])
+            noise_aman = proc_aman[self.select_cfgs.get('name', self.save_cfgs['wrap_name'])]
         else:
-            self.select_cfgs['name'] = self.select_cfgs.get('name', 'noise')
+            noise_aman = proc_aman[self.select_cfgs.get('name', 'noise')]
 
         if self.fit:
-            wn = proc_aman[self.select_cfgs['name']].fit[:,1]
-            fk = proc_aman[self.select_cfgs['name']].fit[:,0]
+            wnix = np.where(noise_aman.noise_model_coeffs.vals == 'white_noise')[0][0]
+            wn = noise_aman.fit[:,wnix]
+            fkix = np.where(noise_aman.noise_model_coeffs.vals == 'fknee')[0][0]
+            fk = noise_aman.fit[:,fkix]
         else:
-            wn = proc_aman[self.select_cfgs['name']].white_noise
+            wn = noise_aman.white_noise
             fk = None 
         if self.subscan:
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
