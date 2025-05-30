@@ -356,22 +356,26 @@ class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
     "psd" field.
 
+    Note: noverlap = 0 amd full_output = True are recommended to get unbiased
+        median white noise estimation by Noise.
+
     Example config block::
 
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
         "calc":
-          "psd_cfgs": # optional, kwargs to scipy.welch
-            "nperseg": 1024
+          "nperseg": 1024 # optional
+          "noverlap": 0 # optional
           "wrap_name": "psd" # optional
-          "subscan": False
+          "subscan": False # optional
+          "full_output": True # optional
         "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
-    
+
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
@@ -379,8 +383,13 @@ class PSDCalc(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **self.calc_cfgs)
+        full_output = self.calc_cfgs.get('full_output')
+        if full_output:
+            freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                        **self.calc_cfgs)
+        else:
+            freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                  **self.calc_cfgs)
 
         fft_aman = core.AxisManager(aman.dets,
                                     core.OffsetAxis("nusamps", len(freqs)))
@@ -388,9 +397,14 @@ class PSDCalc(_Preprocess):
         if self.calc_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
+            if full_output:
+                fft_aman.wrap("nseg_ss", nseg, [(0, aman.subscans)])
+                nseg = np.nansum(nseg)
 
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
+        if full_output:
+            fft_aman.wrap("nseg", nseg)
 
         self.save(proc_aman, fft_aman)
 
@@ -559,6 +573,7 @@ class Noise(_Preprocess):
                 wn_f_low, wn_f_high = self.calc_cfgs.get('fwhite', (5, 10))
                 self.calc_cfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
+                                                                   nseg=psd.get('nseg'),
                                                                    low_f=wn_f_low,
                                                                    high_f=wn_f_high)
             if self.calc_cfgs.get('subscan') is None:
@@ -578,6 +593,7 @@ class Noise(_Preprocess):
             wn_f_high = self.calc_cfgs.get("high_f", 10)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
+                                         nseg=psd.get('nseg'),
                                          low_f=wn_f_low,
                                          high_f=wn_f_high)
             if not self.subscan:
