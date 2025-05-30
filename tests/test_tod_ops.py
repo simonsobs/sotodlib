@@ -352,7 +352,7 @@ class FFTTest(unittest.TestCase):
         
         tod_ops.detrend_tod(aman)
         freqs_output, Pxx_output = tod_ops.fft_ops.calc_psd(aman, nperseg=200*100)
-        fit_result = tod_ops.fft_ops.fit_noise_model(aman, wn_est=50, fknee_est=1.0, alpha_est=3.3, f_min=0.05, f_max=5,
+        fit_result = tod_ops.fft_ops.fit_noise_model(aman, wn_est=50, fknee_est=1.0, alpha_est=3.3, lowf=0.05, f_max=5,
                                             binning=True, psdargs={'nperseg':200*1000})
         wnl_fit = fit_result.fit[:, 0]
         fk_fit = fit_result.fit[:, 1]
