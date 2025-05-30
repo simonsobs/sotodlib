@@ -52,7 +52,7 @@ class PSDTest(unittest.TestCase):
         detrend_tod(aman)
         freqs_output, Pxx_output = calc_psd(aman, nperseg=200*100)
         fit_result = fit_noise_model(aman, wn_est=50, fknee_est=1.0,
-                                     alpha_est=3.3, f_min=0.05,
+                                     alpha_est=3.3, lowf=0.05,
                                      f_max=5, binning=True,
                                      psdargs={'nperseg': 200*1000})
         wnl_fit = fit_result.fit[:, 0]

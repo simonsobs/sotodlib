@@ -685,7 +685,7 @@ def fit_noise_model(
     wn_est=4E-5,
     alpha_est=3.4,
     merge_fit=False,
-    f_min=None,
+    lowf=None,
     f_max=100,
     merge_name="noise_fit_stats",
     merge_psd=True,
@@ -728,9 +728,9 @@ def fit_noise_model(
         initial values are applied for each detector.
     merge_fit : bool
         Merges fit and fit statistics into input axis manager.
-    f_min : float
+    lowf : float
         Minimum frequency to include in the fitting.
-        Default is None which selects f_min as the second index of f.
+        Default is None which selects lowf as the second index of f.
     f_max : float
         Maximum frequency to include in the fitting. This is particularly
         important for lowpass filtered data such as that post demodulation
@@ -795,7 +795,7 @@ def fit_noise_model(
 
     if subscan:
         fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
-                                  "f_min": f_min, "f_max": f_max, "fixed_param": fixed_param,
+                                  "lowf": lowf, "f_max": f_max, "fixed_param": fixed_param,
                                   "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
                                   "freq_spacing": freq_spacing}
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
@@ -803,10 +803,10 @@ def fit_noise_model(
         axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
     else:
         eix = np.argmin(np.abs(f - f_max))
-        if f_min is None:
+        if lowf is None:
             six = 1
         else:
-            six = np.argmin(np.abs(f - f_min))
+            six = np.argmin(np.abs(f - lowf))
         f = f[six:eix]
         pxx = pxx[:, six:eix]
         bin_size = 1
