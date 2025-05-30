@@ -12,6 +12,7 @@ from .utils import (
     resample,  # noqa: F401
     MultiZipper,  # noqa: F401
     ArrayZipper,  # noqa: F401
+    TileMapZipper,  # noqa: F401
     MapZipper,  # noqa: F401
     unarr,  # noqa: F401
     safe_invert_div,  # noqa: F401
