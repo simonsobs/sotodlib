@@ -445,7 +445,7 @@ class MLMapmaker(Operator):
             utils.deslope(axobs.signal, w=5, inplace=True)
 
         if self.downsample != 1:
-            axobs = mm.downsample_obs(axobs, passinfo.downsample)
+            axobs = mm.utils.downsample_obs(axobs, passinfo.downsample)
 
         # NOTE:  Expected contents look like:
         # >>> tod

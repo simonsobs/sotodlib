@@ -3,9 +3,9 @@
 ################################
 import numpy as np
 import so3g
-from pixell import fft, utils, bunch
+from pixell import fft, utils as putils, bunch
 
-from .utils import *
+from .utils import apply_window, makebins, measure_detvecs, find_modes_jon, woodbury_invert
 
 class Nmat:
     def __init__(self):
@@ -77,7 +77,7 @@ class NmatUncorr(Nmat):
 
     def build(self, tod, srate, **kwargs):
         # Apply window while taking fft
-        nwin  = utils.nint(self.window*srate)
+        nwin  = putils.nint(self.window*srate)
         apply_window(tod, nwin)
         ft    = fft.rfft(tod)
         # Unapply window again
@@ -87,10 +87,10 @@ class NmatUncorr(Nmat):
     def build_fourier(self, ftod, nsamp, srate, nwin=0):
         ps = np.abs(ftod)**2
         del ftod
-        if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
-        elif self.spacing == "lin": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
+        if   self.spacing == "exp": bins = putils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
+        elif self.spacing == "lin": bins = putils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
         else: raise ValueError("Unrecognized spacing '%s'" % str(self.spacing))
-        ps_binned  = utils.bin_data(bins, ps) / nsamp
+        ps_binned  = putils.bin_data(bins, ps) / nsamp
         ips_binned = 1/ps_binned
         # Compute the representative inverse variance per sample
         ivar = np.zeros(len(ps))
@@ -166,7 +166,7 @@ class NmatDetvecs(Nmat):
 
     def build(self, tod, srate, **kwargs):
         # Apply window before measuring noise model
-        nwin  = utils.nint(self.window*srate)
+        nwin  = putils.nint(self.window*srate)
         apply_window(tod, nwin)
         ftod  = fft.rfft(tod)
         # Unapply window again
@@ -175,7 +175,7 @@ class NmatDetvecs(Nmat):
 
     def build_fourier(self, ftod, nsamp, srate, nwin=0, **kwargs):
         ndet, nfreq = ftod.shape
-        dtype       = utils.real_dtype(ftod.dtype)
+        dtype       = putils.real_dtype(ftod.dtype)
         # First build our set of eigenvectors in two bins. The first goes from
         # 0.25 to 4 Hz the second from 4Hz and up
         mode_bins = makebins(self.mode_bins, srate, nfreq, nmin=self.bmin_eigvec, rfun=np.ceil, cap=False)
@@ -241,7 +241,7 @@ class NmatDetvecs(Nmat):
 
     def apply_fourier(self, ftod, nsamp, slow=False):
         self.check_ready()
-        dtype= utils.real_dtype(ftod.dtype)
+        dtype= putils.real_dtype(ftod.dtype)
         if slow:
             for bi, b in enumerate(self.bins):
                 # Want to multiply by iD + siViV'
@@ -295,7 +295,7 @@ class NmatScaledvecs(Nmat):
     def build(self, tod, srate, **kwargs):
         # Apply window before measuring noise model
         nsamp = tod.shape[1]
-        nwin  = utils.nint(self.window*srate)
+        nwin  = putils.nint(self.window*srate)
         apply_window(tod, nwin)
         ftod  = fft.rfft(tod)
         nmat_uncorr = self.nmat_uncorr.build_fourier(ftod, nsamp, srate)
@@ -363,7 +363,7 @@ class NmatWhite(Nmat):
         self.ready = ivar is not None
     def build(self, tod, srate, **kwargs):
         #ndet, nsamps = tod.shape
-        nwin  = utils.nint(self.window*srate)
+        nwin  = putils.nint(self.window*srate)
         if np.any(np.logical_not(np.isfinite(tod))):
             raise ValueError(f"There is a nan when calculating the white noise !!!")
         ivar = 1.0/np.var(tod, 1)

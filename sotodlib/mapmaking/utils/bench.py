@@ -25,11 +25,14 @@ a dictionary: stats["foo"]["time"].mean, .std, .n, .last
 return the mean, standard deviation, number of hits and
 last value for the execution time for category "foo", for example.
 """
-import time, numpy as np
+import time
+import numpy as np
 from collections import defaultdict
 from pixell import memory
-try: clockfun = time.clock
-except: clockfun = time.process_time
+try:
+    clockfun = time.clock
+except ImportError:
+    clockfun = time.process_time
 
 class Value:
     def __init__(self, n=0, v=0, vv=0):

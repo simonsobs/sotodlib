@@ -4,7 +4,7 @@ import warnings
 import numpy as np
 import h5py
 import so3g
-from typing import Optional
+
 from pixell import bunch, enmap, tilemap
 from pixell import utils as putils
 
