@@ -717,6 +717,18 @@ Examples:
     p.add_argument('--dry-run', action='store_true', help=
                    "Run the conversion steps but do not write the results anywhere.")
 
+    # "diff"
+    p = cmdsubp.add_parser(
+        'diff', help=
+        "Check database against some upstream target; report diff/patchability.",
+        usage="""Syntax:
+
+    %(prog)s [output options]
+        """)
+    p.add_argument('upstream_db')
+    p.add_argument('--patch', action='store_true', help=
+                   "If possible, patch target to match the upstream.")
+
     # "fix-db"
     p = cmdsubp.add_parser(
         'fix-db', help=
@@ -813,6 +825,26 @@ def main(args=None, parser=None):
             db.conn.commit()
             c.execute('vacuum')
             db.to_file(args.output_db)
+
+    elif args.mode == 'diff':
+        print(f'Comparing to {args.upstream_db} ...')
+        db = ObsFileDb(args.filename)
+        db_right = ObsFileDb(args.upstream_db)
+        report = diff_obsfiledbs(db, db_right)
+        if not report['different']:
+            print(' ... databases are in sync.')
+        elif report['patchable']:
+            print(' ... upstream is different, but the target db can be patched to match.')
+        else:
+            print(' ... upstream and target have irreconcilable differences.')
+            parser.exit(1)
+
+        if args.patch and report['different']:
+            print()
+            print('Patching ...')
+            patch_obsfiledb(report['patch_data'], db)
+            print(' ... done')
+            print()
 
     elif args.mode == 'fix-db':
         # Reconnect with write?
