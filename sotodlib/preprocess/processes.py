@@ -1282,7 +1282,7 @@ class SourceFlags(_Preprocess):
             if len(source_list) == 0:
                 raise ValueError("No tags match source list")
 
-        keep_all = np.ones(meta.dets.count)
+        keep_all = np.ones(meta.dets.count, dtype=bool)
 
         for source in source_list:
             if source in source_flags._fields:
@@ -1291,7 +1291,7 @@ class SourceFlags(_Preprocess):
                     meta.restrict("dets", meta.dets.vals[keep])
                     source_flags.restrict("dets", source_flags.dets.vals[keep])
                 else:
-                   keep_all &= keep
+                    keep_all &= keep
         if in_place:
             return meta
         else:
