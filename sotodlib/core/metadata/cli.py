@@ -53,6 +53,13 @@ def get_parser():
     sp.add_argument('obs_id', nargs='?')
 
     # obsfiledb
+    sp = sps.add_parser('obsdb-diff', description=
+                        'Compare obsdb to an upstream copy and maybe patch it to match.')
+    sp.add_argument('db_file', help='Path to sqlite3 obsdb.')
+    sp.add_argument('upstream_db')
+    sp.add_argument('--patch', action='store_true')
+
+    # obsfiledb
     sp = sps.add_parser('obsfiledb', description=
                         'Inspect an ObsFileDb.  This can be used to list all files, '
                         'and to perform batch updates of filenames.')
@@ -170,6 +177,26 @@ def main(args=None):
             else:
                 for k, v in db.get(args.obs_id, tags=True).items():
                     print(f'  {k:<20}: {v}')
+
+    elif args._subcmd == 'obsdb-diff':
+        print(f'Comparing to {args.upstream_db} ...')
+        db = ObsDb(args.db_file)
+        db_right = ObsDb(args.upstream_db)
+        report = obsdb.diff_obsdbs(db, db_right)
+        if not report['different']:
+            print(' ... databases are in sync.')
+        elif report['patchable']:
+            print(' ... upstream is different, but the target db can be patched to match.')
+        else:
+            print(' ... upstream and target have irreconcilable differences.')
+            parser.exit(1)
+
+        if args.patch and report['different']:
+            print()
+            print('Patching ...')
+            obsdb.patch_obsdb(report['patch_data'], db)
+            print(' ... done')
+            print()
 
     elif args._subcmd == 'obsfiledb':
         obsfiledb.main(args, parser=parser)
