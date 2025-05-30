@@ -486,18 +486,19 @@ class Noise(_Preprocess):
     Can run data selection of a "max_noise" value.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
-    axis manager containing an array named ``white_noise``.  If not specified and
-    white noise is fixed, the white noise is calculated with ``calc_wn()`` and used
-    for ``wn_est``.  The calculated white noise is not stored.
+    axis manager containing an array named ``white_noise``.  If not specified
+    the white noise is calculated with ``calc_wn()`` and used
+    for ``wn_est``.  The calculated white noise will be stored in the noise fit
+    axis manager.
 
-    Example config block::
+    Example config block for fitting PSD::
 
-    - name: "noise
+    - name: "noise"
       fit: False
       subscan: False
       calc:
-        wn_f_low: 5
-        wn_f_high: 10
+        fwhite: (5, 10)
+        lowf: 1
         f_max: 25
         mask: True
         wn_est: noise
@@ -506,6 +507,19 @@ class Noise(_Preprocess):
       save: True
       select:
         max_noise: 2000
+
+    Example config block for calculating white noise only::
+
+    - name: "noise"
+      fit: False
+      subscan: False
+      calc:
+        low_f: 5
+        high_f: 20
+      save: True
+      select:
+        min_noise: 18e-6
+        max_noise: 80e-6
 
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
@@ -542,15 +556,14 @@ class Noise(_Preprocess):
                 else:
                     calc_wn = True
             if calc_wn or wn_est is None:
-                wn_f_low = self.calc_cfgs.get("wn_f_low", 5)
-                wn_f_high = self.calc_cfgs.get("wn_f_high", 10)
+                wn_f_low, wn_f_high = self.calc_cfgs.get('fwhite', (5, 10))
                 self.calc_cfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    low_f=wn_f_low,
                                                                    high_f=wn_f_high)
-
             if self.calc_cfgs.get('subscan') is None:
                 self.calc_cfgs['subscan'] = self.subscan
+            self.calc_cfgs.pop('fwhite', None)
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
@@ -561,8 +574,8 @@ class Noise(_Preprocess):
                 else:
                     calc_aman.wrap("white_noise", self.calc_cfgs['wn_est'], [(0,"dets"), (1,"subscans")])
         else:
-            wn_f_low = self.calc_cfgs.get("wn_f_low", 5)
-            wn_f_high = self.calc_cfgs.get("wn_f_high", 10)
+            wn_f_low = self.calc_cfgs.get("low_f", 5)
+            wn_f_high = self.calc_cfgs.get("high_f", 10)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          low_f=wn_f_low,
