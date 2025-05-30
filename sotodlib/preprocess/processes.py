@@ -2027,15 +2027,16 @@ class BadSubscanFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(name, calc_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        if hasattr(proc_aman.noisy_dets_flags, "valid_dets"):
-            keep = proc_aman.noisy_dets_flags.valid_dets
+        keep = proc_aman.noisy_dets_flags.valid_dets
+        if in_place:
             meta.restrict('dets', proc_aman.dets.vals[keep])
-        return meta
+            return meta
+        return keep
 
 class CorrectIIRParams(_Preprocess):
     """Correct missing iir_params by default values.
