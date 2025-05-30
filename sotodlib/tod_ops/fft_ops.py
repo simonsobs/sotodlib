@@ -315,9 +315,9 @@ def calc_psd(
     if ("noverlap" not in kwargs) or \
             ("noverlap" in kwargs and kwargs["noverlap"] != 0):
         logger.warning('calc_wn will be biased. noverlap argument of welch '
-                       'needs to be 0 to bet unbiased median white noise estimate.')
+                       'needs to be 0 to get unbiased median white noise estimate.')
     if not full_output:
-        logger.warning('calc_wn will be biased. full output argument of calc_psd '
+        logger.warning('calc_wn will be biased. full_output argument of calc_psd '
                        'needs to be True to get unbiased median white noise estimate.')
 
     if subscan:

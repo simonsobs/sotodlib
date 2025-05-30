@@ -595,8 +595,7 @@ class Noise(_Preprocess):
                                          freqs=psd.freqs,
                                          nseg=psd.get('nseg'),
                                          low_f=wn_f_low,
-                                         high_f=wn_f_high,
-                                         **self.calc_cfgs)
+                                         high_f=wn_f_high)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
                 calc_aman.wrap("white_noise", wn, [(0,"dets")])
