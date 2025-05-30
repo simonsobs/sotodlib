@@ -491,11 +491,10 @@ class Noise(_Preprocess):
     for ``wn_est``.  The calculated white noise will be stored in the noise fit
     axis manager.
 
-    Example config block::
+    Example config block for fitting PSD::
 
     - name: "noise"
       fit: False
-      subscan: False
       calc:
         fwhite: (5, 10)
         lowf: 1
@@ -507,6 +506,18 @@ class Noise(_Preprocess):
       save: True
       select:
         max_noise: 2000
+
+    Example config block for calculating white noise only::
+
+    - name: "noise"
+      fit: False
+      calc:
+        low_f: 5
+        high_f: 20
+      save: True
+      select:
+        min_noise: 18e-6
+        max_noise: 80e-6
 
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
