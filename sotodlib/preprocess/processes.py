@@ -486,17 +486,18 @@ class Noise(_Preprocess):
     Can run data selection of a "max_noise" value.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
-    axis manager containing an array named ``white_noise``.  If not specified and
-    white noise is fixed, the white noise is calculated with ``calc_wn()`` and used
-    for ``wn_est``.  The calculated white noise is not stored.
+    axis manager containing an array named ``white_noise``.  If not specified
+    the white noise is calculated with ``calc_wn()`` and used
+    for ``wn_est``.  The calculated white noise will be stored in the noise fit
+    axis manager.
 
     Example config block::
 
-    - name: "noise
+    - name: "noise"
       fit: False
       subscan: False
       calc:
-        fwhite: (5, 20)
+        fwhite: (5, 10)
         lowf: 1
         f_max: 25
         mask: True
