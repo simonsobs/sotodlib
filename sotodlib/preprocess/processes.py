@@ -637,7 +637,7 @@ class Noise(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if 'wrap_name' in self.save_cfgs:
+        if self.save_cfgs.get('wrap_name'):
             noise_aman = proc_aman[self.select_cfgs.get('name', self.save_cfgs['wrap_name'])]
         else:
             noise_aman = proc_aman[self.select_cfgs.get('name', 'noise')]
