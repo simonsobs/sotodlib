@@ -1518,8 +1518,6 @@ class PCARelCal(_Preprocess):
 
             if self.calc_cfgs.get("trim_samps") is not None:
                 trim = self.calc_cfgs["trim_samps"]
-                proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
-                                             proc_aman.samps.offset + proc_aman.samps.count - trim))
                 filt_aman.restrict('samps', (filt_aman.samps.offset + trim,
                                              filt_aman.samps.offset + filt_aman.samps.count - trim))
             if self.plot_cfgs:
