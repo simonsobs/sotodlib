@@ -770,6 +770,7 @@ def fit_noise_model(
         signal = aman.signal
 
     if f is None or pxx is None:
+        psdargs['noverlap'] = psdargs.get('noverlap', 0)
         f, pxx = calc_psd(
             aman,
             signal=signal,
@@ -777,6 +778,7 @@ def fit_noise_model(
             freq_spacing=freq_spacing,
             merge=merge_psd,
             subscan=subscan,
+            full_output=True,
             **psdargs,
         )
     if np.any(mask):
