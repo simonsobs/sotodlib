@@ -9,6 +9,7 @@ import numdifftools as ndt
 import numpy as np
 import pyfftw
 import so3g
+import sys
 from so3g.proj import Ranges
 from scipy.optimize import minimize
 from scipy.signal import welch
@@ -762,17 +763,22 @@ def fit_noise_model(
         is returned otherwise nothing is returned and axis manager is wrapped
         into input aman.
     """
+    import warnings
+    warnings.filterwarnings("error")
+
     if signal is None:
         signal = aman.signal
 
     if f is None or pxx is None:
-        f, pxx = calc_psd(
+        psdargs['noverlap'] = psdargs.get('noverlap', 0)
+        f, pxx, nseg = calc_psd(
             aman,
             signal=signal,
             timestamps=aman.timestamps,
             freq_spacing=freq_spacing,
             merge=merge_psd,
             subscan=subscan,
+            full_output=True,
             **psdargs,
         )
     if np.any(mask):
@@ -831,21 +837,25 @@ def fit_noise_model(
             return
         if fixed_param == None:
             initial_params = np.array([wn_est, fknee_est, alpha_est])
+            bounds= [(sys.float_info.min, None), (sys.float_info.min, None), (0, 10)]
         if fixed_param == "wn":
             initial_params = np.array([fknee_est, alpha_est])
             fixed = wn_est
+            bounds= [(sys.float_info.min, None), (0, 10)]
         if fixed_param == "alpha":
             initial_params = np.array([wn_est, fknee_est])
             fixed = alpha_est
+            bounds= [(sys.float_info.min, None), (sys.float_info.min, None)]
 
         for i in range(len(pxx)):
             p = pxx[i]
             p0 = initial_params.T[i]
             _fixed = {}
             if fixed_param != None:
-                _fixed = {fixed_param: fixed[i]}            
-            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), 
-                   p0, method="Nelder-Mead")
+                _fixed = {fixed_param: fixed[i]}
+            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                           p0, bounds=bounds, method="Nelder-Mead")
+
             try:
                 Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
                 hessian_ndt, _ = Hfun(res["x"])
@@ -862,6 +872,9 @@ def fit_noise_model(
                     f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
                 )
                 covout_i = np.full((len(p0), len(p0)), np.nan)
+            except RuntimeWarning as e:
+                covout_i = np.full((len(p0), len(p0)), np.nan)
+                print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman.dets.vals[i]}')
             fitout_i = res.x
             if fixed_param == "wn":
                 covout_i = np.insert(covout_i, 0, 0, axis=0)
