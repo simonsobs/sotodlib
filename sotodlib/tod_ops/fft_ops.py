@@ -851,11 +851,8 @@ def fit_noise_model(
             _fixed = {}
             if fixed_param != None:
                 _fixed = {fixed_param: fixed[i]}
-            try:
-                res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
-                               p0, bounds=bounds, method="Nelder-Mead")
-            except RuntimeWarning as e:
-                print(f"Caught warning {e} for detector {aman.dets.vals[i]}, {p0}")
+            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                           p0, bounds=bounds, method="Nelder-Mead")
 
             try:
                 Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
