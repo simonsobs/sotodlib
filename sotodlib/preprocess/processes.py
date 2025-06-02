@@ -1631,7 +1631,7 @@ class PCAFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         if aman.dets.count < n_modes:
@@ -1691,7 +1691,7 @@ class FilterForSources(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
