@@ -843,9 +843,11 @@ def fit_noise_model(
             p0 = initial_params.T[i]
             _fixed = {}
             if fixed_param != None:
-                _fixed = {fixed_param: fixed[i]}            
-            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), 
-                   p0, method="Nelder-Mead")
+                _fixed = {fixed_param: fixed[i]}
+            bounds= [(sys.float_info.min, None), (0, None), (None, None)]
+            res = minimize(lambda params: neglnlike(params, f, p, bounds=bounds, 
+                                                    bin_size=bin_size, **_fixed), 
+                                                    p0, method="Nelder-Mead")
             try:
                 Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
                 hessian_ndt, _ = Hfun(res["x"])
