@@ -307,7 +307,7 @@ class NmatScaledvecs(Nmat):
         raise NotImplementedError
 
 class NmatWhite(Nmat):
-    def __init__(self, window=2, ivar=None, nwin=None):
+    def __init__(self, ivar=None):
         """
         This is a white noise model for the mapmaker.
         The white noise model is characterized by 
@@ -318,50 +318,37 @@ class NmatWhite(Nmat):
 
         Parameters
         ----------
-        window : float, optional
-            Size of the window in seconds to apply before taking the FFT and applying the model 
-            in harmonic space
         ivar : numpy.ndarray or None, optional
             Overwrite the inverse variance per detector
-        nwin: int or None, optional
-            Overwrite the window size in number of samples
 
         Returns
         -------
         noise_model : An Nmat object with the noise model
 
         """
-
-        self.ivar     = ivar
-        self.window   = window
-        self.nwin     = nwin
+        self.ivar = ivar
     def build(self, tod, srate, **kwargs):
-        #ndet, nsamps = tod.shape
-        nwin  = utils.nint(self.window*srate)
         if np.any(np.logical_not(np.isfinite(tod))):
             raise ValueError(f"There is a nan when calculating the white noise !!!")
-        ivar = 1.0/np.var(tod, 1)
-        return NmatWhite(ivar=ivar, window=self.window, nwin=nwin)
-    def apply(self, tod, inplace=True):
+        ivar = 1/np.var(tod,1)
+        return NmatWhite(ivar)
+    def apply(self, tod, inplace=False):
         self.check_ready()
-        if not inplace: tod = np.array(tod)
-        apply_window(tod, self.nwin)
+        if inplace: tod = np.array(tod)
         tod *= self.ivar[:,None]
-        apply_window(tod, self.nwin)
         return tod
     def white(self, tod, inplace=True):
         self.check_ready()
-        if not inplace: tod = np.array(tod)
-        apply_window(tod, self.nwin)
-        tod *= self.ivar[:,None]
-        apply_window(tod, self.nwin)
-        return tod
+        return self.apply(tod, inplace=inplace)
     def write(self, fname):
         self.check_ready()
-        bunch.write(fname, bunch.Bunch(type="NmatWhite"))
+        data = bunch.Bunch(type="NmatWhite")
+        for field in ["ivar"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
     @staticmethod
-    def from_bunch(data): 
-        return NmatWhite(ivar=data.ivar, window=window, nwin=nwin)
+    def from_bunch(data):
+        return NmatWhite(ivar=data.ivar)
     @property
     def ready(self):
         return self.ivar is not None
