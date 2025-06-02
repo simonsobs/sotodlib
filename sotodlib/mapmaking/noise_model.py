@@ -332,10 +332,9 @@ class NmatWhite(Nmat):
 
         """
 
-        self.ivar  = ivar
-        self.window     = window
-        self.nwin       = nwin
-        self.ready = self.check_ready()
+        self.ivar     = ivar
+        self.window   = window
+        self.nwin     = nwin
     def build(self, tod, srate, **kwargs):
         #ndet, nsamps = tod.shape
         nwin  = utils.nint(self.window*srate)
@@ -360,13 +359,12 @@ class NmatWhite(Nmat):
     def write(self, fname):
         self.check_ready()
         bunch.write(fname, bunch.Bunch(type="NmatWhite"))
-
-    def check_ready(self):
-        return self.ivar is not None
-
     @staticmethod
     def from_bunch(data): 
         return NmatWhite(ivar=data.ivar, window=window, nwin=nwin)
+    @property
+    def ready(self):
+        return self.ivar is not None
 
 class NmatUnit(Nmat):
     """

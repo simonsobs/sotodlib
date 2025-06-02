@@ -108,7 +108,7 @@ class DemodMapmaker:
             except:
                 msg = f"use_psd is True but '{wn_label}' does not contain the white noise estimated on the preprocessing"
                 raise RuntimeError(msg)
-        if noise_model.check_ready():
+        if noise_model.ready:
             nmat = noise_model
         else:
             try:
