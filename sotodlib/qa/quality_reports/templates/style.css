@@ -1,0 +1,73 @@
+body {
+    padding: 10px;
+}
+
+h1 {
+    color: rgb(0, 100, 136);
+    font-size: 32pt;
+}
+
+h2 {
+    margin-top: 80px;
+    color: rgb(0, 100, 136);
+    font-size: 18pt;
+}
+
+.general-stats {
+    margin: 30px;
+    font-size: 16pt;
+}
+
+.general-stats td{
+    padding-right: 30px;
+}
+
+.obs-efficiency-plots {
+    padding-left: 50px;
+    padding-right: 50px;
+    height: 200px;
+    display: flex;
+    align-items: center;
+}
+
+.pwv-plots {
+    display: flex;
+    padding: 0px 50px;
+}
+
+.pwv-yield-vs-time {
+    width: 50%;
+    /* min-width: 400px; */
+}
+
+.yield-vs-pwv {
+    width: 40%;
+    /* min-width: 400px; */
+    margin-left: auto;
+    margin-right: auto;
+}
+
+
+.heatmap {
+    width: 80%;
+    height: 200px;
+    padding-top: 50px;
+}
+
+.pie {
+    width: 20%;
+    margin-left: auto;
+}
+
+.cal-source-plots {
+    display: flex;
+}
+
+.cal-footprints {
+    width: 700px;
+    height: 700px;
+    margin-top: 40px;
+    margin-left: auto;
+    margin-right: auto
+    /* aspect-ratio: 1/1; */
+}
