@@ -1,3 +1,5 @@
+import inspect
+from functools import partial
 import so3g
 import numpy as np
 import json
@@ -12,6 +14,11 @@ import astropy.units as u
 
 from .axisman import *
 from .flagman import FlagManager
+
+# Backwards compatibility for before skip_shape_check was added
+RangesMatrix = so3g.proj.RangesMatrix
+if "skip_shape_check" in inspect.signature(so3g.proj.RangesMatrix).parameters:
+    RangesMatrix = partial(so3g.proj.RangesMatrix, skip_shape_check=True)
 
 # Flatten / expand RangesMatrix
 
@@ -63,7 +70,7 @@ def expand_RangesMatrix(flat_rm):
         return so3g.proj.Ranges.from_array(r, shape[0])
     ranges = []
     if shape[0] == 0:
-        return so3g.proj.RangesMatrix([], child_shape=shape[1:])
+        return RangesMatrix([], child_shape=shape[1:])
     # Otherwise non-trivial
     count = np.prod(shape[:-1])
     start, stride = 0, count // shape[0]
@@ -73,7 +80,7 @@ def expand_RangesMatrix(flat_rm):
         ranges.append(expand_RangesMatrix(
             {'shape': shape[1:], 'intervals': _i, 'ends': _e}))
         start = ends[i+stride-1]
-    return so3g.proj.RangesMatrix(ranges, child_shape=shape[1:])
+    return RangesMatrix(ranges, child_shape=shape[1:])
 
 ## Flatten and Expand sparse arrays
 def flatten_csr_array(arr):
