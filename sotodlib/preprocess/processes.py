@@ -570,35 +570,36 @@ class Noise(_Preprocess):
             self.calc_cfgs = {}
 
         if self.fit:
-            fixed_param = self.calc_cfgs.get('fixed_param', [])
-            wn_est = self.calc_cfgs.get('wn_est', None)
+            fcfgs = copy.deepcopy(self.calc_cfgs)
+            fixed_param = fcfgs.get('fixed_param', [])
+            wn_est = fcfgs.get('wn_est', None)
 
             calc_wn = False
 
             if isinstance(wn_est, str):
                 if wn_est in proc_aman:
-                    self.calc_cfgs['wn_est'] = proc_aman[wn_est].white_noise
+                    fcfgs['wn_est'] = proc_aman[wn_est].white_noise
                 else:
                     calc_wn = True
             if calc_wn or wn_est is None:
-                wn_f_low, wn_f_high = self.calc_cfgs.get('fwhite', (5, 10))
-                self.calc_cfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
+                wn_f_low, wn_f_high = fcfgs.get('fwhite', (5, 10))
+                fcfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    nseg=psd.get('nseg'),
                                                                    low_f=wn_f_low,
                                                                    high_f=wn_f_high)
-            if self.calc_cfgs.get('subscan') is None:
-                self.calc_cfgs['subscan'] = self.subscan
-            self.calc_cfgs.pop('fwhite', None)
+            if fcfgs.get('subscan') is None:
+                fcfgs['subscan'] = self.subscan
+            fcfgs.pop('fwhite', None)
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
-                                                        **self.calc_cfgs)
+                                                        **fcfgs)
             if calc_wn or wn_est is None:
                 if not self.subscan:
-                    calc_aman.wrap("white_noise", self.calc_cfgs['wn_est'], [(0,"dets")])
+                    calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets")])
                 else:
-                    calc_aman.wrap("white_noise", self.calc_cfgs['wn_est'], [(0,"dets"), (1,"subscans")])
+                    calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets"), (1,"subscans")])
         else:
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
@@ -1477,6 +1478,18 @@ class FourierFilter(_Preprocess):
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
 
+    def select(self, meta, proc_aman, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        keep = ~np.all(np.isnan(meta.signal), axis=1)
+        if in_place:
+            meta.restrict('dets', meta.dets.vals[keep])
+        else:
+            return keep
+
 class PCARelCal(_Preprocess):
     """
     Estimate the relcal factor from the atmosphere using PCA.
@@ -1631,7 +1644,7 @@ class PCAFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         if aman.dets.count < n_modes:
@@ -1691,7 +1704,7 @@ class FilterForSources(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
@@ -2148,7 +2161,7 @@ class CorrectIIRParams(_Preprocess):
     """
     name = "correct_iir_params"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
