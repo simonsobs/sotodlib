@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader
 import sys
 import yaml
+import argparse
 import traceback
 from tqdm.auto import tqdm
 from dateutil.relativedelta import relativedelta
@@ -166,5 +167,25 @@ def render_report(
 
 if __name__ == '__main__':
     cfg_file = sys.argv[1]
+    cfg = GenerateReportConfig.from_yaml(cfg_file)
+    main(cfg)
+
+
+def get_parser(
+    parser: Optional[argparse.ArgumentParser] = None,
+) -> argparse.ArgumentParser:
+    if parser is None:
+        p = argparse.ArgumentParser()
+    else:
+        p = parser
+    p.add_argument(
+        "config_file", type=str, help="yaml file with configuration for update script."
+    )
+    return p
+
+
+if __name__ == "__main__":
+    parser = get_parser()
+    args = parser.parse_args()
     cfg = GenerateReportConfig.from_yaml(cfg_file)
     main(cfg)

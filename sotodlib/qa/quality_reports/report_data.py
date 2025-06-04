@@ -15,9 +15,10 @@ from influxdb import InfluxDBClient
 from sotodlib.io import hkdb
 from sotodlib.io.hkdb import HkConfig
 from sotodlib.core import Context
+from sotodlib.core.metadata import ManifestDb
 
 logging.basicConfig(
-    format="%(asctime)s %(levelname)-8s %(message)s", level=logging.DEBUG
+    format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class ReportDataConfig:
         self.show_hk_pb: bool = show_hk_pb
 
         if cal_targets is None:
-            self.cal_targets = ["jupiter", "saturn", "tua_A", "tauA", "cenA"]
+            self.cal_targets = ["jupiter", "saturn", "tau_A", "tauA", "cenA"]
 
         if isinstance(start_time, float):
             self.start_time: dt.datetime = dt.datetime.fromtimestamp(start_time)
@@ -143,6 +144,7 @@ def obs_list_to_arr(obs_list: List[ObsInfo]) -> np.ndarray:
     for obs in obs_list:
         data.append(tuple(getattr(obs, name) for name, _ in dtype))
     return np.array(data, dtype=dtype)
+
 
 def get_apex_data(cfg: ReportDataConfig):
     APEX_DATA_URL = 'http://archive.eso.org/wdb/wdb/eso/meteo_apex/query'
@@ -240,7 +242,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
             AND time <= '{t1_str}'
         )
     """
-    logger.info(query)
+
     result = client.query(query)
     df = pd.DataFrame(result.get_points())
     missing_keys = [key for key in keys if key not in df]
@@ -379,6 +381,8 @@ class ReportData:
         if qds_df is not None:
             logger.info("Merging PWV and QDS data with obs list")
             merge_qds_and_obs_list(qds_df, obs_list)
+        else:
+            logger.warn("QDS data not found, skipping")
 
         # Add PWV data to obs_list
         for o in obs_list:
@@ -448,28 +452,36 @@ class ReportData:
 
 
 def get_cal_footprints(d: ReportData) -> List[Footprint]:
-    f = h5py.File(d.cfg.preprocess_archive_path)
     fps: List[Footprint] = []
+    ctx = Context(d.cfg.ctx_path)
     for o in d.obs_list:
-        if o.obs_id not in f:
-            continue
-        for key, fp in f[o.obs_id]["sso_footprint"].items():
-            if key not in d.cfg.cal_targets:
-                continue
+        if o.obs_type == "obs" and o.obs_subtype == "cmb":
             try:
-                shape = alphashape.alphashape(
-                    np.vstack([fp["xi_p"], fp["eta_p"]]).T, alpha=5,
-                )
-                bounds = np.array(shape.boundary.coords)
-            except:
-                bounds = None
-            fps.append(
-                Footprint(
-                    obs_id=o.obs_id,
-                    target=key,
-                    xi_p=np.array(fp["xi_p"]),
-                    eta_p=np.array(fp["eta_p"]),
-                    bounds=bounds,
-                )
-            )
+                meta = ctx.get_meta(o.obs_id)
+            except Exception as e:
+                logger.error(f"{o.obs_id}: {e}")
+                continue
+            if meta.dets.count == 0:
+                continue
+            if 'sso_footprint' not in meta.preprocess:
+                    continue
+            for cal_target in d.cfg.cal_targets:
+                if cal_target in meta.preprocess.sso_footprint:
+                    fp = meta.preprocess.sso_footprint[cal_target]
+                    try:
+                        shape = alphashape.alphashape(
+                            np.vstack([fp["xi_p"], fp["eta_p"]]).T, alpha=5,
+                        )
+                        bounds = np.array(shape.boundary.coords)
+                    except:
+                        bounds = None
+                    fps.append(
+                        Footprint(
+                            obs_id=o.obs_id,
+                            target=cal_target,
+                            xi_p=np.array(fp["xi_p"]),
+                            eta_p=np.array(fp["eta_p"]),
+                            bounds=bounds,
+                        )
+                    )
     return fps
