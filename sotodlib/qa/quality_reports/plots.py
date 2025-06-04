@@ -186,8 +186,26 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
 
 
 def cal_footprints(d: "ReportData") -> go.Figure:
-    wafer_rad = 0.10488
-    wafer_sep = 0.219911
+
+    if d.cfg.platform in ["satp1", "satp2", "satp3"]:
+        wafer_rad = 0.10488
+        wafer_sep = 0.219911
+
+        angs = np.arange(-np.pi / 2, 3 * np.pi / 2, np.pi / 3)
+        x0s = [0] + [np.cos(a) * wafer_sep for a in angs]
+        y0s = [0] + [np.sin(a) * wafer_sep for a in angs]
+
+    elif d.cfg.platform == "lat":
+        wafer_rad = 0.005236
+        x0s = [-0.00647517,  0.00316777,  0.00316777, -0.03335673, -0.02370855,
+               -0.02371379,  0.02070833,  0.03023957,  0.03025179,  0.0204762 ,
+                0.03025005,  0.03023957, -0.00637918,  0.00327947,  0.00325853,
+               -0.03330437, -0.02369634, -0.02370855]
+
+        y0s = [ 0.        ,  0.00560425, -0.00560425, -0.01579872, -0.00995536,
+               -0.02117608, -0.01556659, -0.0099571 , -0.02117957,  0.01579872,
+                0.02117957,  0.0099571 ,  0.03112446,  0.03673045,  0.02551671,
+                0.01556834,  0.02117608,  0.01021716]
 
     def hex(x0, y0):
         angs = np.linspace(0, 2 * np.pi, 7)
@@ -198,10 +216,6 @@ def cal_footprints(d: "ReportData") -> go.Figure:
             ]
         )
         return pts
-
-    angs = np.arange(-np.pi / 2, 3 * np.pi / 2, np.pi / 3)
-    x0s = [0] + [np.cos(a) * wafer_sep for a in angs]
-    y0s = [0] + [np.sin(a) * wafer_sep for a in angs]
 
     fig = go.Figure()
 
@@ -221,7 +235,6 @@ def cal_footprints(d: "ReportData") -> go.Figure:
             )
         )
 
-    # target_bounds: Dict[str, List[List[float]]] = {}
     ntargets = 0
     target_colors = {}
     if d.cal_footprints is not None:
