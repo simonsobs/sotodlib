@@ -12,7 +12,7 @@ from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
-                                   count_cuts,
+                                   count_cuts, flag_cut_select,
                                    sparse_to_ranges_matrix)
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
@@ -244,7 +244,6 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
             plot_signal_diff(aman, proc_aman[self.glitch_name], flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
             plot_flag_stats(aman, proc_aman[self.glitch_name], flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
-
 
 class FixJumps(_Preprocess):
     """
@@ -1284,6 +1283,7 @@ class SourceFlags(_Preprocess):
      Example config block::
 
         - name : "source_flags"
+          source_flags_name: "my_source_flags"
           calc:
             mask: {'shape': 'circle',
                    'xyr': [0, 0, 1.]}
@@ -1293,41 +1293,64 @@ class SourceFlags(_Preprocess):
             distance: 0 # max distance of footprint from source in degrees
           save: True
           select: True # optional
+            select_source: 'jupiter' # list of str or str. If not provided, all sources from center_on are selected.
+            kind: 'any' # 'any', 'all', or float (0.0 < kind < 1.0)
+            intert: False # optional, if True logic is filipped.
+            Examples:
+                1. intert=False, kind='any' → Select detectors with **no** True flags (e.g., for Moon cut).
+                2. intert=True, kind='any' → Select detectors with **any** True flags (e.g., for planet selection).
+                3. intert=False, kind=0.4 → Select detectors with <40% of True flags.
 
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
+    def __init__(self, step_cfgs):
+        self.source_flags_name = step_cfgs.get('source_flags_name', 'source_flags')
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
-        if source_list == ['planet']:
-            from sotodlib.coords.planets import SOURCE_LIST
+        from sotodlib.coords.planets import SOURCE_LIST
+        source_name = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+        if 'planet' in source_name:
             source_list = [x for x in aman.tags if x in SOURCE_LIST]
             if len(source_list) == 0:
                 raise ValueError("No tags match source list")
+        else:
+            source_list = [planets.get_source_list_fromstr(isource) for isource in source_name]
 
         # find if source is within footprint + distance
         positions = planets.get_nearby_sources(tod=aman, source_list=source_list,
                                                distance=self.calc_cfgs.get('distance', 0))
-
         source_aman = core.AxisManager(aman.dets, aman.samps)
         for p in positions:
+            center_on = planets.get_source_list_fromstr(p[0])
             source_flags = tod_ops.flags.get_source_flags(aman,
                                                           merge=self.calc_cfgs.get('merge', False),
                                                           overwrite=self.calc_cfgs.get('overwrite', True),
                                                           source_flags_name=self.calc_cfgs.get('source_flags_name', None),
                                                           mask=self.calc_cfgs.get('mask', None),
-                                                          center_on=p[0],
+                                                          center_on=center_on,
                                                           res=self.calc_cfgs.get('res', None),
                                                           max_pix=self.calc_cfgs.get('max_pix', None))
 
             source_aman.wrap(p[0], source_flags, [(0, 'dets'), (1, 'samps')])
 
+            # if inv_flag is set, add inverse of source flags
+            if self.calc_cfgs.get('inv_flag'):
+                source_aman.wrap(p[0]+ '_inv',
+                                RangesMatrix.from_mask(~source_flags.mask()),
+                                [(0, 'dets'), (1, 'samps')])
+
         # add sources that were not nearby from source list
-        for source in source_list:
+        for source in source_name:
             if source not in source_aman._fields:
                 source_aman.wrap(source, RangesMatrix.zeros([aman.dets.count, aman.samps.count]),
                                  [(0, 'dets'), (1, 'samps')])
+                
+                if self.calc_cfgs.get('inv_flag'):
+                    source_aman.wrap(source + '_inv',
+                                    RangesMatrix.ones([aman.dets.count, aman.samps.count]),
+                                    [(0, 'dets'), (1, 'samps')])
 
         self.save(proc_aman, source_aman)
 
@@ -1335,7 +1358,7 @@ class SourceFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("source_flags", source_aman)
+            proc_aman.wrap(self.source_flags_name, source_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -1343,30 +1366,40 @@ class SourceFlags(_Preprocess):
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
         else:
-            source_flags = proc_aman.source_flags
+            source_flags = proc_aman[self.source_flags_name]
 
-        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
-        if source_list == ['planet']:
+        select_list = np.atleast_1d(self.select_cfgs.get("select_source", self.calc_cfgs.get('center_on', 'planet')))
+        if 'planet' in select_list:
             from sotodlib.coords.planets import SOURCE_LIST
-            source_list = [x for x in aman.tags if x in SOURCE_LIST]
-            if len(source_list) == 0:
+            select_list = [x for x in meta.tags if x in SOURCE_LIST]
+            if len(select_list) == 0:
                 raise ValueError("No tags match source list")
+
+        inverts = self.select_cfgs.get("invert", False)
+        if isinstance(inverts, bool):
+            inverts = [inverts]*len(select_list)
+        elif len(inverts) != len(select_list):
+            raise ValueError("Length of intert must match length of select_source, or just bool")
+        
+        kinds = self.select_cfgs.get("kind", 'all') # default of 'all' is for backward compatibility
+        if isinstance(kinds, (str, float)):
+            kinds = [kinds]*len(select_list)
+        elif len(kinds) != len(select_list):
+            raise ValueError("Length of kinds must match length of select_source, or just str")
 
         keep_all = np.ones(meta.dets.count, dtype=bool)
 
-        for source in source_list:
+        for source, kind, invert in zip(select_list, kinds, inverts):
             if source in source_flags._fields:
-                keep = ~has_all_cut(source_flags[source])
-                if in_place:
-                    meta.restrict("dets", meta.dets.vals[keep])
-                    source_flags.restrict("dets", source_flags.dets.vals[keep])
-                else:
-                    keep_all &= keep
+                keep_all &= flag_cut_select(source_flags[source], kind, invert=invert)
+
         if in_place:
+            meta.restrict("dets", meta.dets.vals[keep_all])
+            source_flags.restrict("dets", source_flags.dets.vals[keep_all])
             return meta
         else:
             return keep_all
-
+    
 class HWPAngleModel(_Preprocess):
     """Apply hwp angle model to the TOD.
 
@@ -2177,6 +2210,29 @@ class CorrectIIRParams(_Preprocess):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
+class TrimFlagEdge(_Preprocess):
+    """Trim edge until given flags of all detectors are False
+    To find first and last sample id that has False (i.e., no flags applied) for all detectors.
+    This is for avoiding glitchfill problem for data whose edge has flags of True.
+
+    Example config block::
+    
+        - name: "trim_flag_edge"
+          process:
+            flags: "pca_exclude"
+    
+    .. autofunction:: sotodlib.core.flagman.find_common_edge_idx
+    """
+    name = 'trim_flag_edge'
+
+    def process(self, aman, proc_aman, sim=False):
+        flags = aman.flags.get(self.process_cfgs.get('flags'))
+        trimst, trimen = core.flagman.find_common_edge_idx(flags)
+        aman.restrict('samps', (aman.samps.offset + trimst,
+                                aman.samps.offset + trimen))
+        proc_aman.restrict('samps', (proc_aman.samps.offset + trimst,
+                                     proc_aman.samps.offset + trimen))
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2221,3 +2277,4 @@ _Preprocess.register(PointingModel)
 _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
+_Preprocess.register(TrimFlagEdge)
