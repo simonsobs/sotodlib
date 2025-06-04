@@ -1478,13 +1478,25 @@ class FourierFilter(_Preprocess):
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
 
-    def select(self, meta, proc_aman, in_place=True):
+
+class DetcalNanCuts(_Preprocess):
+    """
+    Remove detectors with NaN values in the det_cal.tau_eff metadata.
+
+    Example config file entry::
+
+      - name: "detcal_nan_cuts"
+        select: True
+    """
+    name = 'detcal_nan_cuts'
+
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        keep = ~np.all(np.isnan(meta.signal), axis=1)
+        keep = ~np.isnan(meta.det_cal.tau_eff)
         if in_place:
             meta.restrict('dets', meta.dets.vals[keep])
         else:
@@ -2208,3 +2220,4 @@ _Preprocess.register(FocalplaneNanFlags)
 _Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
+_Preprocess.register(DetcalNanCuts)
