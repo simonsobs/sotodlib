@@ -1478,7 +1478,7 @@ class FourierFilter(_Preprocess):
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
 
-    def select(self, meta, proc_aman, in_place=True):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
