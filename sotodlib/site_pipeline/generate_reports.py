@@ -165,12 +165,6 @@ def render_report(
         output_file.write(template.render(jinja_data))
 
 
-if __name__ == '__main__':
-    cfg_file = sys.argv[1]
-    cfg = GenerateReportConfig.from_yaml(cfg_file)
-    main(cfg)
-
-
 def get_parser(
     parser: Optional[argparse.ArgumentParser] = None,
 ) -> argparse.ArgumentParser:
