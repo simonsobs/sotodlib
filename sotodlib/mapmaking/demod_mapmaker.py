@@ -276,7 +276,7 @@ class DemodSignalMap(DemodSignal):
                    ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, pdeflect=True):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -308,7 +308,21 @@ class DemodSignalMap(DemodSignal):
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
                     wcs_kernel = None
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True)
+                
+                if pdeflect:
+                    from sotodlib.coords.helpers import get_deflected_sightline
+                    wobble_meta = obs.wobble_params
+                    # Get wobble-corrected sightline
+                    sight = get_deflected_sightline(obs, obs.deflection_amp, obs.deflection_phase,
+                                                    site=smutils.unarr(obs.site),
+                                                    weather=smutils.unarr(obs.weather))
+                    # TODO: use single metadata for amps/phase
+                    #sight = get_deflected_sightline(obs, wobble_meta,
+                    #            site=smutils.unarr(obs.site),
+                    #            weather=smutils.unarr(obs.weather))
+                else:
+                    sight = None
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True, sight=sight)
             else:
                 pmap_local = pmap
 
