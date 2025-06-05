@@ -39,6 +39,17 @@ SOURCE_LIST = ['mercury',
                ('QSO_J2253+1608', 343.4952422, 16.14301323),
                ('galactic_center', -93.5833, -29.0078)]
 
+def get_source_list_fromstr(target_source):
+    """Get a source_list from SOURCE_LIST by name, or raise ValueError if not found.
+    """
+    for isource in SOURCE_LIST:
+        if isinstance(isource, str):
+            isource_name = isource
+        elif isinstance(isource, tuple):
+            isource_name = isource[0]
+        if isource_name.lower() == target_source.lower():
+            return isource
+    raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
 
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
@@ -119,7 +130,11 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
-    if isinstance(planet, str):
+    if isinstance(planet, (list, tuple)):
+        _, ra, dec = planet
+        planet = SlowSource(t, float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+    else:
         planet = SlowSource.for_named_source(planet, t)
 
     def scan_q_model(t, az, el, planet):
