@@ -419,7 +419,7 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        #pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
+        pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
 
         # Save file for data base of atomic maps.
         # We will write an individual file,
@@ -440,7 +440,7 @@ def main(
                 info.prefix_path = str(prefix + '_%s' % split_label)
                 info.elevation = obs_infos[obslist[0][3]].el_center
                 info.azimuth = obs_infos[obslist[0][3]].az_center
-                #info.pwv = float(pwv_atomic)
+                info.pwv = float(pwv_atomic)
                 info.roll_angle = obs_infos[obslist[0][3]].roll_center
                 info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
                 info_list.append(info)
@@ -449,22 +449,6 @@ def main(
             run_list.append([obslist, shape, wcs, info_list, prefix, t, tag])
         elif args.nside is not None:
             run_list.append([obslist, None, None, info_list, prefix, t, tag])
-    r = run_list[0]
-    mapmaking.make_demod_map( args.context, r[0],
-            noise_model, r[3], preprocess_config, r[4],
-            shape=r[1], wcs=r[2], nside=args.nside,
-            comm=FakeCommunicator(), t0=r[5], tag=r[6],
-            recenter=recenter,
-            dtype_map=args.dtype_map,
-            dtype_tod=args.dtype_tod,
-            comps=args.comps,
-            verbose=verbose,
-            split_labels=split_labels,
-            singlestream=args.singlestream,
-            site=args.site, unit=args.unit,
-            use_psd=args.use_psd,
-            wn_label=args.wn_label,)
-    exit()
 
     futures = [executor.submit(
             mapmaking.make_demod_map, args.context, r[0],
