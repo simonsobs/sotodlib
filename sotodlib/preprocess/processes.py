@@ -1295,11 +1295,11 @@ class SourceFlags(_Preprocess):
           select: True # optional
             select_source: 'jupiter' # list of str or str. If not provided, all sources from center_on are selected.
             kind: 'any' # 'any', 'all', or float (0.0 < kind < 1.0)
-            intert: False # optional, if True logic is filipped.
+            invert: False # optional, if True logic is filipped.
             Examples:
-                1. intert=False, kind='any' → Select detectors with **no** True flags (e.g., for Moon cut).
-                2. intert=True, kind='any' → Select detectors with **any** True flags (e.g., for planet selection).
-                3. intert=False, kind=0.4 → Select detectors with <40% of True flags.
+                1. invert=False, kind='any' → Select detectors with **no** True flags (e.g., for Moon cut).
+                2. invert=True, kind='any' → Select detectors with **any** True flags (e.g., for planet selection).
+                3. invert=False, kind=0.4 → Select detectors with <40% of True flags.
 
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
@@ -1368,20 +1368,36 @@ class SourceFlags(_Preprocess):
         else:
             source_flags = proc_aman[self.source_flags_name]
 
-        select_list = np.atleast_1d(self.select_cfgs.get("select_source", self.calc_cfgs.get('center_on', 'planet')))
+        if isinstance(self.select_cfgs, bool):
+            if self.select_cfgs:
+                select_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+            else:
+                if in_place:
+                    return meta
+                else:
+                    return np.ones(meta.dets.count, dtype=bool)
+        else:
+            select_list = np.atleast_1d(self.select_cfgs.get("select_source", self.calc_cfgs.get('center_on', 'planet')))
+
         if 'planet' in select_list:
             from sotodlib.coords.planets import SOURCE_LIST
             select_list = [x for x in meta.tags if x in SOURCE_LIST]
             if len(select_list) == 0:
                 raise ValueError("No tags match source list")
 
-        inverts = self.select_cfgs.get("invert", False)
+        if isinstance(self.select_cfgs, bool):
+            inverts = False
+        else:
+            inverts = self.select_cfgs.get("invert", False)
         if isinstance(inverts, bool):
             inverts = [inverts]*len(select_list)
         elif len(inverts) != len(select_list):
             raise ValueError("Length of intert must match length of select_source, or just bool")
-        
-        kinds = self.select_cfgs.get("kind", 'all') # default of 'all' is for backward compatibility
+
+        if isinstance(self.select_cfgs, bool):
+            kinds = "all"
+        else:
+            kinds = self.select_cfgs.get("kind", 'all') # default of 'all' is for backward compatibility
         if isinstance(kinds, (str, float)):
             kinds = [kinds]*len(select_list)
         elif len(kinds) != len(select_list):
@@ -1514,12 +1530,13 @@ class FourierFilter(_Preprocess):
 
 class DetcalNanCuts(_Preprocess):
     """
-    Remove detectors with NaN values in the det_cal.tau_eff metadata.
+    Remove detectors with NaN values in the specified det_cal metadata fields.
 
     Example config file entry::
 
       - name: "detcal_nan_cuts"
-        select: True
+        select:
+            fields: [tau_eff, phase_to_pW]
     """
     name = 'detcal_nan_cuts'
 
@@ -1529,7 +1546,11 @@ class DetcalNanCuts(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        keep = ~np.isnan(meta.det_cal.tau_eff)
+        select_fields = self.select_cfgs.get("fields")
+
+        keep = np.ones(meta.dets.count, dtype=bool)
+        for field in select_fields:
+            keep &= ~np.isnan(meta.det_cal[field])
         if in_place:
             meta.restrict('dets', meta.dets.vals[keep])
         else:
