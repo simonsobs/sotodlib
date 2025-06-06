@@ -4,7 +4,7 @@ from plotly.colors import DEFAULT_PLOTLY_COLORS
 import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import plotly.express as px
 import datetime as dt
 from copy import deepcopy
@@ -14,19 +14,47 @@ from typing import List, Tuple, TYPE_CHECKING, Dict, Any, Optional
 from .report_data import ReportData, Footprint, obs_list_to_arr
 
 
+def get_discrete_distinct_colors(n, reverse=False):
+    good_color = '#4477AA'
+    bad_color = '#BBBBBB'
+
+    middle_pool = [
+        "#ffe119",
+        "#0082c8",
+        "#f58231",
+        "#911eb4",
+        "#46f0f0",
+        "#f032e6",
+        "#d2f53c",
+        "#fabebe",
+        "#008080",
+        "#e6beff",
+    ]
+
+    colors = [good_color] + middle_pool[:n - 2] + [bad_color]
+
+    if reverse:
+        colors = list(reversed(colors))
+
+    return colors
+
+
 @dataclass
 class Colors:
-    oper: str = DEFAULT_PLOTLY_COLORS[0]
-    obs: str = DEFAULT_PLOTLY_COLORS[1]
-    idle: str = DEFAULT_PLOTLY_COLORS[2]
-    cmb: str =  DEFAULT_PLOTLY_COLORS[3]
-    cal: str =  DEFAULT_PLOTLY_COLORS[4]
+    names: List[str]
+    reverse: bool = False
+    colormap: Dict[str, str] = field(init=False)
 
-    def __getitem__(self, name) -> str:
-        return getattr(self, name)
+    def __post_init__(self):
+        n = len(self.names)
+        discrete_colors = get_discrete_distinct_colors(n, self.reverse)
+        self.colormap = {name: color for name, color in zip(self.names, discrete_colors)}
 
+    def __getitem__(self, name: str) -> str:
+        return self.colormap.get(name, "#CCCCCC")
 
-COLORS = Colors()
+    def __repr__(self):
+        return f"Colors({self.colormap})"
 
 
 @dataclass
@@ -37,52 +65,91 @@ class ObsEfficiencyPlots:
 
 def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     if d.cfg.platform  == "lat":
-        nwafers = 18
+        tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
+        wafer_slots = ["ws0", "ws1", "ws2"]
+        wafers = [f"{x}_{y}" for x in tube_slots for y in wafer_slots]
+    elif d.cfg.platform in ["satp1", "satp2", "satp3"]:
+        wafers = [f"ws{i} " for i in range(7)]
     else:
-        nwafers = 7
-    data = np.zeros((nwafers, nsegs), dtype=int)
+        raise ValueError(f"Uknown platform {d.cfg.platform}")
+
+    nwafers = len(wafers)
+
     times = pd.date_range(d.cfg.start_time, d.cfg.stop_time, nsegs).to_pydatetime()
     tstamps= np.array([t.timestamp() for t in times])
 
-    obs_types = ["idle", "obs", "cmb", "cal", "oper"]
+    obs_types = ["cmb", "obs", "cal", "oper"] + d.cfg.cal_targets + ["idle"]
     obs_values = {k: i for i, k in enumerate(obs_types)}
-    colorscale: List[Tuple[float, str]] = []
-    ntypes = len(obs_types)
-    for i, t in enumerate(obs_types):
-        colorscale.extend([(i / ntypes, COLORS[t]), ((i + 1) / ntypes, COLORS[t])])
+
+    data = np.ones((nwafers, nsegs), dtype=int) * (len(obs_types) - 1)
 
     for o in d.obs_list:
         m = np.logical_and.reduce([tstamps > o.start_time, tstamps < o.stop_time])
-        if d.cfg.platform == "lat":
-            wafer_slots_list = o.stream_ids_list.split(",")
-        else:
-            wafer_slots_list = o.wafer_slots_list.split(",")
+        wafer_slots_list = o.wafer_slots_list.split(",")
         for wafer_slot in wafer_slots_list:
-            idx = int(wafer_slot.strip()[-1])
+            if d.cfg.platform == "lat":
+                idx = np.where(np.array(wafers) == o.obs_tube_slot + "_" + wafer_slot)[0][0]
+            else:
+                idx = int(wafer_slot.strip()[-1])
             if o.obs_type == "obs":
-                if o.obs_subtype in obs_types:
+                if o.obs_subtype == "cmb":
                     data[idx][m] = obs_values[o.obs_subtype]
+                elif o.obs_subtype == "cal":
+                    matches = [item for item in o.obs_tags.split(',') if item in d.cfg.cal_targets]
+                    if matches:
+                        data[idx][m] = obs_values[matches[0]]
+                    else:
+                        data[idx][m] = obs_values[o.obs_subtype]
                 else:
                     data[idx][m] = obs_values[o.obs_type]
             else:
                 data[idx][m] = obs_values[o.obs_type]
+
     # Compile data for pie chart
     unique_vals, counts = np.unique(data, return_counts=True)
     percentages = counts / counts.sum() * 100
     labels = [obs_types[i] for i in unique_vals]
+    COLORS = Colors(names=labels)
+    colorscale: List[Tuple[float, str]] = []
+    ntypes = len(labels)
+    for i, t in enumerate(labels):
+        colorscale.extend([(i / ntypes, COLORS[t]), ((i + 1) / ntypes, COLORS[t])])
     pie_colors = [COLORS[t] for t in labels]
+    colorbar=dict(tickvals=list(range(len(labels))), ticktext=labels,)
 
-    ys = [f"ws{i} " for i in range(7)]
+    unique_sorted = np.sort(np.unique(data))
+    mapping = {v: i for i, v in enumerate(unique_sorted)}
+    vectorized_map = np.vectorize(mapping.get)
+    data = vectorized_map(data)
+
+    value_to_label = {i: lbl for i, lbl in enumerate(labels)}
+    text = np.vectorize(value_to_label.get)(data)
+
+    ys = wafers
+
+    hover_text = []
+    for yi, yval in enumerate(ys):
+        row = []
+        for xi, xval in enumerate(times):
+            label = text[yi, xi]
+            row.append(f"x: {xval}<br>y: {yval}<br>z: {label}")
+        hover_text.append(row)
+
     heatmap = go.Figure(
         data=go.Heatmap(
             z=data,
+            zmin=0,
+            zmax=len(labels) - 1,
             x=times,
             y=ys,
+            text=hover_text,
+            hoverinfo="text",
             colorscale=colorscale,
-            colorbar=dict(tickvals=[0, 1, 2, 3, 4], ticktext=["None", "Obs", "CMB", "Cal", "Oper"]),
+            colorbar=dict(tickvals=list(range(len(labels))), ticktext=labels,),
+            ygap=1,
         ),
     )
-    heatmap.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=150)
+    heatmap.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=300)
 
     pie = go.Figure(
         data=go.Pie(
@@ -92,7 +159,7 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
         ),
     )
     pie.update_traces(marker=dict(colors=pie_colors))
-    pie.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=150)
+    pie.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=300)
 
     return ObsEfficiencyPlots(pie=pie, heatmap=heatmap)
 
@@ -137,7 +204,7 @@ def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"]=None) ->
     fig.update_layout(
         xaxis=dict(title="PWV"),
         yaxis=dict(title="Valid Dets"),
-        # height=500,
+        height=500,
         # width=500,
         margin=dict(l=0, r=0, t=0, b=0),
     )
@@ -176,11 +243,12 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
         ),
         secondary_y=False,
     )
-    margin = {k: 50 for k in ['l', 'r', 't', 'b']}
+    margin = {k: 0 for k in ['l', 'r', 't', 'b']}
     fig.update_yaxes(title_text='Num Valid Dets', secondary_y=False)
     fig.update_yaxes(title_text='PWV', secondary_y=True)
     fig.update_layout(
-        margin=margin
+        margin=margin,
+        height=500
     )
     return fig
 

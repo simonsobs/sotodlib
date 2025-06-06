@@ -4,6 +4,7 @@ import datetime as dt
 import yaml
 import pandas as pd
 import requests
+from tqdm import tqdm
 from io import StringIO
 import json
 import h5py
@@ -49,7 +50,9 @@ class ReportDataConfig:
         self.show_hk_pb: bool = show_hk_pb
 
         if cal_targets is None:
-            self.cal_targets = ["jupiter", "saturn", "tau_A", "tauA", "cenA"]
+            self.cal_targets = ["jupiter", "saturn", "tau_A", "tauA", "cenA", "mars"]
+        else:
+            self.cal_targets = cal_targets
 
         if isinstance(start_time, float):
             self.start_time: dt.datetime = dt.datetime.fromtimestamp(start_time)
@@ -91,6 +94,8 @@ class ObsInfo:
     stream_ids_list: str
     obs_type: str
     obs_subtype: str
+    obs_tube_slot: str
+    obs_tags: str = ""
     pwv: float = np.nan
     num_valid_dets: float = np.nan
 
@@ -104,6 +109,7 @@ class ObsInfo:
             stream_ids_list=data["stream_ids_list"],
             obs_type=data["type"],
             obs_subtype=data["subtype"],
+            obs_tube_slot=data["tube_slot"],
         )
         return obs_info
 
@@ -233,7 +239,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets', '"wafer_slot"::tag', '"wafer.bandpass"::tag']
+    keys = ['time', 'num_valid_dets']#, '"wafer_slot"::tag', '"wafer.bandpass"::tag']
 
     query = f"""
         SELECT """ + ", ".join(keys) +  f""" from "autogen"."preprocesstod" WHERE (
@@ -248,6 +254,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     missing_keys = [key for key in keys if key not in df]
 
     if missing_keys:
+        logger.warn(f"missing keys from qds: {missing_keys}")
         return None
 
     df["time"] = pd.to_datetime(df["time"])
@@ -359,13 +366,17 @@ class ReportData:
     @classmethod
     def build(cls, cfg: ReportDataConfig) -> "ReportData":
         ctx = Context(cfg.ctx_path)
+
         obs_list = [
-            ObsInfo.from_obsdb_entry(d)
-            for d in ctx.obsdb.query(
+            ObsInfo.from_obsdb_entry(o)
+            for o in ctx.obsdb.query(
                 f"start_time >= {cfg.start_time.timestamp()} and "
                 f"start_time <= {cfg.stop_time.timestamp()}"
             )
         ]
+
+        for i, o in tqdm(enumerate(obs_list), total=len(obs_list)):
+            o.obs_tags = ",".join(ctx.obsdb.get(o.obs_id, tags=True)['tags'])
 
         if cfg.longterm_obs_file is not None:
             longterm_obs_df = cls.load(cfg.longterm_obs_file)
