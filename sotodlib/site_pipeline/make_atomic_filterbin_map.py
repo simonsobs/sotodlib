@@ -256,7 +256,7 @@ def future_write_to_log(e, errlog):
 
 def main(
     config_file: str,
-    executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"],
+    executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     as_completed_callable: Callable) -> None:
     args = Cfg.from_yaml(config_file)
 
@@ -419,7 +419,7 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
+        #pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
 
         # Save file for data base of atomic maps.
         # We will write an individual file,
@@ -440,7 +440,7 @@ def main(
                 info.prefix_path = str(prefix + '_%s' % split_label)
                 info.elevation = obs_infos[obslist[0][3]].el_center
                 info.azimuth = obs_infos[obslist[0][3]].az_center
-                info.pwv = float(pwv_atomic)
+                #info.pwv = float(pwv_atomic)
                 info.roll_angle = obs_infos[obslist[0][3]].roll_center
                 info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
                 info_list.append(info)
@@ -464,12 +464,15 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,
-            atomic_db=args.atomic_db,) for r in run_list]
+            wn_label=args.wn_label,) for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:
-            errors, outputs = future.result()
+            errors, outputs, d_ = future.result()
+            for n_split in range(len(split_labels)):
+                info3 = object.__new__(mapmaking.AtomicInfo)
+                info3.__dict__ = d_[n_split]
+                mapmaking.atomic_db_aux(args.atomic_db, info3)
         except Exception as e:
             future_write_to_log(e, errlog)
             continue

@@ -452,24 +452,23 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def write_demod_maps(prefix, data, info, unit='K', split_labels=None, atomic_db=None):
+def write_demod_maps(prefix, data, info, unit='K', split_labels=None,):
     """
     Write maps from data into files
     """
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
         if np.all(data.wmap[n_split] == 0.0):
-            if atomic_db is not None:
-                smutils.atomic_db_aux(atomic_db, info[n_split], valid=False)
+            info[n_split].valid = False
             continue
+        else:
+            info[n_split].valid = True
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split], unit=unit+'^-1')
         data.signal.write(prefix, "%s_weights"%split_labels[n_split],
                           data.weights[n_split], unit=unit+'^2')
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split], unit='hits')
-        if atomic_db is not None:
-            smutils.atomic_db_aux(atomic_db, info[n_split], valid=True)
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
@@ -477,7 +476,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    atomic_db=None, unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
+                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -530,8 +529,6 @@ def make_demod_map(context, obslist, noise_model, info,
         If True, do not perform demodulated filter+bin mapmaking but
         rather regular filter+bin mapmaking, i.e. map from obs.signal
         rather than from obs.dsT, obs.demodQ, obs.demodU.
-    atomic_db : str, optional
-        Path to the atomic map data base. Maps created will be added to it.
     use_psd : bool, optional
         By default True. Use the white noise measured from PSD as mapmaking weights,
         which must be provided in the preprocessing. This is done as opposed to
@@ -608,9 +605,14 @@ def make_demod_map(context, obslist, noise_model, info,
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db, unit=unit)
-
-    return errors, outputs
+    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
+    # we cannot pass a class through the futures loop, so we use the __dict__ method
+    # we will reconstruct the object on the other side
+    d_ = []
+    for info_ in info:
+        d__ = info_.__dict__
+        d_.append(d__)
+    return errors, outputs , d_
 
 def add_weights_to_info(info, weights, split_labels):
     Nsplits = len(split_labels)
@@ -625,9 +627,9 @@ def add_weights_to_info(info, weights, split_labels):
         sumweights = np.sum(mean_qu[positive])
         meanweights = np.mean(mean_qu[positive])
         medianweights = np.median(mean_qu[positive])
-        sub_info.total_weight_qu = sumweights
-        sub_info.mean_weight_qu = meanweights
-        sub_info.median_weight_qu = medianweights
+        sub_info.total_weight_qu = float(sumweights)
+        sub_info.mean_weight_qu = float(meanweights)
+        sub_info.median_weight_qu = float(medianweights)
         info[isplit] = sub_info
     return info
 
