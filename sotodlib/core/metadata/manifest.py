@@ -633,20 +633,24 @@ class ManifestDb:
             self.conn.commit()
 
     def get_entries(self, fields):
-
-        """Return list of all entry names in database
-        that are in the listed fields
+        """Return unique combinations of data fields (endpoint data) in the
+        database.
 
         Arguments
         ---------
         fields: list of strings
-            should correspond to columns in map table made through 
-            ManifestScheme.add_data_field( field_name )
+            Should correspond to columns in map table made through
+            ManifestScheme.add_data_field(field_name). (For 'range'
+            fields, include __lo or __hi.)
 
         Returns
         --------
-        ResultSet with keys equal to field names
+        ResultSet with keys equal to field names.
+
         """
+        # Make sure all fields are quoted.
+        fields = [(f if f[0] in ["`", "'", "'"] else f"`{f}`")
+                  for f in fields]
         if not isinstance(fields, list):
             raise ValueError("fields must be a list")
         q = f"select distinct {','.join(fields)} from map"
