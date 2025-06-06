@@ -17,6 +17,10 @@ TABLE_DEFS = {
         "`tag` varchar(256)",
         "CONSTRAINT one_tag UNIQUE (`obs_id`, `tag`)",
     ],
+    '_indices': {
+        'idx_obs': 'obs(obs_id)',
+        'idx_tags': 'tags(obs_id)',
+    },
 }
 
 
@@ -71,15 +75,19 @@ class ObsDb(object):
         self.conn.row_factory = sqlite3.Row  # access columns by name
         if init_db:
             c = self.conn.cursor()
-            c.execute("SELECT name FROM sqlite_master "
-                      "WHERE type='table' and name not like 'sqlite_%';")
-            tables = [r[0] for r in c]
+            c.execute("SELECT type, name FROM sqlite_master "
+                      "WHERE type in ('table', 'index') and name not like 'sqlite_%';")
+            tables = [r[1] for r in c]
             changes = False
             for k, v in TABLE_DEFS.items():
-                if k not in tables:
+                if k[0] != '_' and k not in tables:
                     q = ('create table if not exists `%s` (' % k +
                          ','.join(v) + ')')
                     c.execute(q)
+                    changes = True
+            for index, cols in TABLE_DEFS['_indices'].items():
+                if index not in tables:
+                    c.execute(f'CREATE INDEX IF NOT EXISTS {index} on {cols}')
                     changes = True
             if changes:
                 self.conn.commit()
