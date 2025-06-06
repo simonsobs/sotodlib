@@ -14,7 +14,7 @@ from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
 from toast.ops import Operator, FlagIntervals
 from toast.pixels_io_healpix import write_healpix_fits, write_healpix_hdf5
-from toast.pixels_io_wcs import write_wcs_fits
+from toast.pixels_io_wcs import write_wcs_parallel
 from toast import qarray as qa
 
 
@@ -679,8 +679,7 @@ class Splits(Operator):
                     fname = os.path.join(
                         self.output_dir, f"{self.name}_{split_name}_{prod}.fits"
                     )
-                    # FIXME: add single precision option to upstream function
-                    write_wcs_fits(data[mkey], fname)
+                    write_wcs_parallel(data[mkey], fname, single_precision=True)
                 else:
                     if self.mapmaker.write_hdf5:
                         # Non-standard HDF5 output
