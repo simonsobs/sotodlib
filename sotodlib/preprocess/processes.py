@@ -1586,6 +1586,7 @@ class PCARelCal(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.run = step_cfgs.get('pca_run', 'run1')
+        self.bandpass = step_cfgs.get('bandpass_key', 'wafer.bandpass')
         self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
@@ -1606,7 +1607,7 @@ class PCARelCal(_Preprocess):
             if self.plot_cfgs:
                 self.plot_signal = filt_aman[self.signal]
 
-        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = np.unique(aman.det_info[self.bandpass])
         bands = bands[bands != 'NC']
         # align samps w/ proc_aman to include samps restriction when loading back from db.
         rc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
@@ -1614,7 +1615,7 @@ class PCARelCal(_Preprocess):
         relcal = np.zeros(aman.dets.count)
         pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
-            m0 = aman.det_info.wafer.bandpass == band
+            m0 = aman.det_info[self.bandpass] == band
             if self.plot_cfgs is not None:
                 rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
@@ -1673,7 +1674,7 @@ class PCARelCal(_Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
 
-            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = np.unique(aman.det_info[self.bandpass])
             bands = bands[bands != 'NC']
             for band in bands:
                 if f'{band}_pca_mode0' in proc_aman[self.run_name]:
