@@ -457,20 +457,18 @@ def write_demod_maps(prefix, data, info, unit='K', split_labels=None,):
     Write maps from data into files
     """
     Nsplits = len(split_labels)
-    valid = np.zeros(Nsplits, dtype=bool)
     for n_split in range(Nsplits):
         if np.all(data.wmap[n_split] == 0.0):
-            valid[n_split] = False
+            info[n_split].valid = False
             continue
         else:
-            valid[n_split] = True
+            info[n_split].valid = True
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split], unit=unit+'^-1')
         data.signal.write(prefix, "%s_weights"%split_labels[n_split],
                           data.weights[n_split], unit=unit+'^2')
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split], unit='hits')
-    return valid
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
@@ -607,9 +605,14 @@ def make_demod_map(context, obslist, noise_model, info,
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    valid = write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
-
-    return errors, outputs, info, valid
+    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
+    # we cannot pass a class through the futures loop, so we use the __dict__ method
+    # we will reconstruct the object on the other side
+    d_ = []
+    for info_ in info:
+        d__ = info_.__dict__
+        d_.append(d__)
+    return errors, outputs , d_
 
 def add_weights_to_info(info, weights, split_labels):
     Nsplits = len(split_labels)
@@ -624,9 +627,9 @@ def add_weights_to_info(info, weights, split_labels):
         sumweights = np.sum(mean_qu[positive])
         meanweights = np.mean(mean_qu[positive])
         medianweights = np.median(mean_qu[positive])
-        sub_info.total_weight_qu = sumweights
-        sub_info.mean_weight_qu = meanweights
-        sub_info.median_weight_qu = medianweights
+        sub_info.total_weight_qu = float(sumweights)
+        sub_info.mean_weight_qu = float(meanweights)
+        sub_info.median_weight_qu = float(medianweights)
         info[isplit] = sub_info
     return info
 

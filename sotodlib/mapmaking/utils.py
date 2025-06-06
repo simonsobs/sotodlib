@@ -772,8 +772,7 @@ class AtomicInfo(Base):
     def __repr__(self):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
 
-def atomic_db_aux(atomic_db, info, valid = True):
-    info.valid = valid
+def atomic_db_aux(atomic_db, info):
     engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
