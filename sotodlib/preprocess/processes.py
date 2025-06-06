@@ -2012,7 +2012,7 @@ class CombineFlags(_Preprocess):
             elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
                 raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
         elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
-            self.process_cfgs['method'] = len(self.process_cfgs['flag_labels'])*[self.process_cfgs['method']]
+            self.process_cfgs['method'] =  ['+'] + (len(self.process_cfgs['flag_labels']) - 1)*[self.process_cfgs['method']]
         else:
             raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
         
