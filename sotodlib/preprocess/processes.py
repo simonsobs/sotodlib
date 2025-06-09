@@ -1452,33 +1452,40 @@ class HWPAngleModel(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("hwp_angle", hwp_angle_aman)
 
-
 class FourierFilter(_Preprocess):
     """
-    Applies a fourier filter (defined in fft_ops) to the data.
+    Applies a chain of fourier filters (defined in fft_ops) to the data.
 
     Example config file entry::
 
-      - name: "fourier_filter"
-        wrap_name: "lpf_sig"
-        signal_name: "signal"
-        process:
-          filt_function: "low_pass_sine2"
-          trim_samps: 2000
-          filter_params:
-            cutoff: 1
-            width: 0.1
-    
+    - name: "fourier_filter_chain"
+      wrap_name: "lpf_sig"
+      signal_name: "signal"
+      process:
+        filters:
+          - name: "iir_filter"
+            params:
+              invert: True
+          - name: "timeconst_filter"
+            params:
+              timeconst: "det_cal.tau_eff"
+              invert: True
+
     or with params from a noise fit::
 
-      - name: "fourier_filter"
-        wrap_name: "lpf_sig"
-        signal_name: "signal"
-        process:
-          filt_function: "low_pass_sine2"
-          trim_samps: 2000
-          noise_fit_array: "noiseQ_fit"
-
+    - name: "fourier_filter_chain"
+      wrap_name: "lpf_sig"
+      signal_name: "signal"
+      process:
+        noise_fit_array: "noiseQ_fit"
+        filters:
+          - name: "iir_filter"
+            params:
+              invert: True
+          - name: "timeconst_filter"
+            params:
+              timeconst: "det_cal.tau_eff"
+              invert: True
     See :ref:`fourier-filters` documentation for more details.
     """
     name = 'fourier_filter'
@@ -1491,32 +1498,35 @@ class FourierFilter(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False):
-        filt_function = self.process_cfgs.get(
-            "filt_function",
-            "high_pass_butter4"
-        )
-        _f = getattr(
-            tod_ops.filters,
-            filt_function
-        )
-
-        if self.process_cfgs.get("noise_fit_array"):
-            field = self.process_cfgs["noise_fit_array"]
+        field = self.process_cfgs.get("noise_fit_array", None)
+        if field:
             _noise_fit = attrgetter(field)
             noise_fit = _noise_fit(proc_aman)
         else:
             noise_fit = None
-        
-        filter_params = tod_ops.fft_ops.build_hpf_params_dict(
-            filt_function,
-            noise_fit=noise_fit,
-            filter_params=self.process_cfgs.get("filter_params", None)
-        )
 
-        filt = _f(**filter_params)
+        filt_list = self.process_cfgs.get("filters", None)
+        if filt_list is None:
+            filt_list = [{
+                "name": self.process_cfgs.get("filt_function", "high_pass_butter4"),
+                "params": self.process_cfgs.get("filter_params", {})
+            }]
 
-        filt_tod= tod_ops.filters.fourier_filter(aman, filt,
-                                                 signal_name=self.signal_name)
+        filters = []
+        for spec in filt_list:
+            fname = spec.get("name")
+            params = tod_ops.fft_ops.build_hpf_params_dict(
+                fname,
+                noise_fit=noise_fit,
+                filter_params=spec.get("params", {})
+            )
+            ffun = getattr(tod_ops.filters, fname)
+            filters.append(ffun(**params))
+
+        filt = filters[0] if len(filters) == 1 else tod_ops.filters.FilterChain(filters)
+
+        filt_tod = tod_ops.filters.fourier_filter(aman, filt,
+                                                  signal_name=self.signal_name)
         if self.wrap_name in aman._fields:
             aman.move(self.wrap_name, None)
         aman.wrap(self.wrap_name, filt_tod, [(0, 'dets'), (1, 'samps')])
