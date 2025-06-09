@@ -1761,6 +1761,8 @@ class FilterForSources(_Preprocess):
         process:
           n_modes: 10
           source_flags: "source_flags"
+          edge_guard: 10 # Number of samples to make the first and last flags False
+          trim_samps: 100
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -1775,10 +1777,17 @@ class FilterForSources(_Preprocess):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        edge_guard = self.process_cfgs.get('edge_guard')
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard)
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
