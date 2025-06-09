@@ -15,12 +15,23 @@ from .report_data import ReportData, Footprint, obs_list_to_arr
 
 
 def get_discrete_distinct_colors(n, reverse=False):
-    good_color = '#4477AA'
-    bad_color = '#BBBBBB'
+    base_colors = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377', '#BBBBBB']
+    n_base = len(base_colors)
 
-    middle_pool = ['#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377']
-
-    colors = [good_color] + middle_pool[:n - 2] + [bad_color]
+    if n <= n_base:
+        # Use subset with fixed endpoints
+        colors = [base_colors[0]] + base_colors[1:-1][:n - 2] + [base_colors[-1]]
+    else:
+        # Interpolate between base colors
+        base_rgb = [mcolors.to_rgb(c) for c in base_colors]
+        interpolated = np.linspace(0, n_base - 1, n)
+        colors = []
+        for i in interpolated:
+            i_low = int(np.floor(i))
+            i_high = min(i_low + 1, n_base - 1)
+            t = i - i_low
+            rgb = (1 - t) * np.array(base_rgb[i_low]) + t * np.array(base_rgb[i_high])
+            colors.append(mcolors.to_hex(rgb))
 
     if reverse:
         colors = list(reversed(colors))
