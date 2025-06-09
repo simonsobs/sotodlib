@@ -18,18 +18,7 @@ def get_discrete_distinct_colors(n, reverse=False):
     good_color = '#4477AA'
     bad_color = '#BBBBBB'
 
-    middle_pool = [
-        "#ffe119",
-        "#0082c8",
-        "#f58231",
-        "#911eb4",
-        "#46f0f0",
-        "#f032e6",
-        "#d2f53c",
-        "#fabebe",
-        "#008080",
-        "#e6beff",
-    ]
+    middle_pool = ['#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377']
 
     colors = [good_color] + middle_pool[:n - 2] + [bad_color]
 
