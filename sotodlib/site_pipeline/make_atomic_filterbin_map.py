@@ -310,7 +310,9 @@ def main(
     preprocess_config_str = [s.strip() for s in args.preprocess_config.split(",")]
     preprocess_config = [] ; errlog = []
     for preproc_cf in preprocess_config_str:
-        preproc_local = yaml.safe_load(open(preproc_cf, 'r'))
+        ff = open(preproc_cf, 'r')
+        preproc_local = yaml.safe_load(ff)
+        ff.close()
         preprocess_config.append( preproc_local )
         errlog.append( os.path.join(os.path.dirname(
             preproc_local['archive']['index']), 'errlog.txt') )
