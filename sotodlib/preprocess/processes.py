@@ -1509,7 +1509,7 @@ class FourierFilter(_Preprocess):
         if filt_list is None:
             filt_list = [{
                 "name": self.process_cfgs.get("filt_function", "high_pass_butter4"),
-                "params": self.process_cfgs.get("filter_params", {})
+                "params": self.process_cfgs.get("filter_params", None)
             }]
 
         filters = []
@@ -1518,12 +1518,12 @@ class FourierFilter(_Preprocess):
             params = tod_ops.fft_ops.build_hpf_params_dict(
                 fname,
                 noise_fit=noise_fit,
-                filter_params=spec.get("params", {})
+                filter_params=spec.get("params")
             )
             ffun = getattr(tod_ops.filters, fname)
             filters.append(ffun(**params))
 
-        filt = filters[0] if len(filters) == 1 else tod_ops.filters.FilterChain(filters)
+        filt = tod_ops.filters.FilterChain(filters)
 
         filt_tod = tod_ops.filters.fourier_filter(aman, filt,
                                                   signal_name=self.signal_name)
