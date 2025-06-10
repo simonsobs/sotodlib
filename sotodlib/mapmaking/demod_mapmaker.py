@@ -452,17 +452,15 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def write_demod_maps(prefix, data, info, unit='K', split_labels=None,):
+def write_demod_maps(prefix, data, info, unit='K', split_labels=None):
     """
     Write maps from data into files
     """
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
-        if np.all(data.wmap[n_split] == 0.0):
-            info[n_split]['valid'] = False
+        info[n_split]["valid"] = np.any(data.wmap[n_split] != 0.0)
+        if info[n_split]["valid"] == False:
             continue
-        else:
-            info[n_split]['valid'] = True
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split], unit=unit+'^-1')
         data.signal.write(prefix, "%s_weights"%split_labels[n_split],
@@ -542,6 +540,9 @@ def make_demod_map(context, obslist, noise_model, info,
         List of errors from preprocess database. To be used in cleanup_mandb.
     outputs : list
         List of outputs from preprocess database. To be used in cleanup_mandb.
+    info: list
+        List of dictionaries with the info to write into atomic db. It will be
+        the same as the input, but the weights values will be added.
     """
     from ..preprocess import preprocess_util
     #context = core.Context(context)
@@ -651,7 +652,7 @@ def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weights
     rhs_T = to_map(signal=signalT, comps='T', det_weights=det_weightsT)
     rhs_demodQ = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
     rhs_demodU = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
-    rhs_demodQU = zeros(super_shape=(2), comps='QU',)
+    rhs_demodQU = zeros(super_shape=(2), comps='QU')
 
     rhs_demodQU[0][:] = rhs_demodQ[0] - rhs_demodU[1]
     rhs_demodQU[1][:] = rhs_demodQ[1] + rhs_demodU[0]

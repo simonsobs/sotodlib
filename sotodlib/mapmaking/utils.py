@@ -791,7 +791,7 @@ def atomic_db_aux(atomic_db, info):
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
-        session.add(info)
+        session.add_all(info)
         try:
             session.commit()
         except exc.IntegrityError:
