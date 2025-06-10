@@ -1456,7 +1456,18 @@ class FourierFilter(_Preprocess):
     """
     Applies a chain of fourier filters (defined in fft_ops) to the data.
 
-    Example config file entry::
+    Example config file entry for one filter::
+
+    - name: "fourier_filter"
+      wrap_name: "lpf_sig"
+      signal_name: "signal"
+      process:
+        filt_function: "timeconst_filter"
+        filter_params:
+          timeconst: "det_cal.tau_eff"
+          invert: True
+
+    Example config file entry for two filters::
 
     - name: "fourier_filter_chain"
       wrap_name: "lpf_sig"
@@ -1464,10 +1475,10 @@ class FourierFilter(_Preprocess):
       process:
         filters:
           - name: "iir_filter"
-            params:
+            filter_params:
               invert: True
           - name: "timeconst_filter"
-            params:
+            filter_params:
               timeconst: "det_cal.tau_eff"
               invert: True
 
@@ -1480,10 +1491,10 @@ class FourierFilter(_Preprocess):
         noise_fit_array: "noiseQ_fit"
         filters:
           - name: "iir_filter"
-            params:
+            filter_params:
               invert: True
           - name: "timeconst_filter"
-            params:
+            filter_params:
               timeconst: "det_cal.tau_eff"
               invert: True
     See :ref:`fourier-filters` documentation for more details.
@@ -1509,7 +1520,7 @@ class FourierFilter(_Preprocess):
         if filt_list is None:
             filt_list = [{
                 "name": self.process_cfgs.get("filt_function", "high_pass_butter4"),
-                "params": self.process_cfgs.get("filter_params", None)
+                "filter_params": self.process_cfgs.get("filter_params", None)
             }]
 
         filters = []
@@ -1518,7 +1529,7 @@ class FourierFilter(_Preprocess):
             params = tod_ops.fft_ops.build_hpf_params_dict(
                 fname,
                 noise_fit=noise_fit,
-                filter_params=spec.get("params")
+                filter_params=spec.get("filter_params")
             )
             ffun = getattr(tod_ops.filters, fname)
             filters.append(ffun(**params))
