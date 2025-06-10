@@ -428,21 +428,21 @@ def main(
         if not args.only_hits:
             info_list = []
             for split_label in split_labels:
-                info = mapmaking.AtomicInfo(
-                    obs_id=obslist[0][0],
-                    telescope=obs_infos[obslist[0][3]].telescope,
-                    freq_channel=band,
-                    wafer=detset,
-                    ctime=int(t),
-                    split_label=split_label
-                )
-                info.split_detail = ''
-                info.prefix_path = str(prefix + '_%s' % split_label)
-                info.elevation = obs_infos[obslist[0][3]].el_center
-                info.azimuth = obs_infos[obslist[0][3]].az_center
-                #info.pwv = float(pwv_atomic)
-                info.roll_angle = obs_infos[obslist[0][3]].roll_center
-                info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
+                # info is a dictionary now
+                info = {}
+                info['obs_id']=obslist[0][0]
+                info['telescope']=obs_infos[obslist[0][3]].telescope
+                info['freq_channel']=band
+                info['wafer']=detset
+                info['ctime']=int(t)
+                info['split_label']=split_label
+                info['split_detail'] = ''
+                info['prefix_path'] = str(prefix + '_%s' % split_label)
+                info['elevation'] = obs_infos[obslist[0][3]].el_center
+                info['azimuth'] = obs_infos[obslist[0][3]].az_center
+                #info['pwv'] = float(pwv_atomic)
+                info['roll_angle'] = obs_infos[obslist[0][3]].roll_center
+                info['sun_distance'] = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
@@ -473,8 +473,7 @@ def main(
                 # this means the map failed and the function returned early
                 continue
             for n_split in range(len(split_labels)):
-                info3 = object.__new__(mapmaking.AtomicInfo)
-                info3.__dict__ = d_[n_split]
+                info3 = mapmaking.AtomicInfo.from_dict(d_[n_split])
                 mapmaking.atomic_db_aux(args.atomic_db, info3)
         except Exception as e:
             future_write_to_log(e, errlog[0])

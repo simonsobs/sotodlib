@@ -491,7 +491,7 @@ def make_demod_map(context, obslist, noise_model, info,
     noise_model : sotodlib.mapmaking.Nmat
         Noise model to pass to DemodMapmaker.
     info : list
-        Information for the database, will be written as a .hdf file.
+        Information for the database in the form of a list of dictionaries
     preprocess_config : list of dict
         List of dictionaries with the config yaml file for the preprocess database.
         If two, then a multilayer preprocessing is to be used.
@@ -602,20 +602,11 @@ def make_demod_map(context, obslist, noise_model, info,
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
     mapdata = bunch.Bunch(wmap=wmap, weights=weights, signal=mapmaker.signals[0], t0=t0)
-    try:
-        info = add_weights_to_info(info, weights, split_labels)
-    except Exception as e:
-        raise ValueError(f"add_weights_to_info of {name} failed raising {e}")
+    info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
     write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
-    # we cannot pass a class through the futures loop, so we use the __dict__ method
-    # we will reconstruct the object on the other side
-    d_ = []
-    for info_ in info:
-        d__ = info_.__dict__
-        d_.append(d__)
-    return errors, outputs , d_
+    return errors, outputs , info
 
 def add_weights_to_info(info, weights, split_labels):
     Nsplits = len(split_labels)
@@ -632,9 +623,9 @@ def add_weights_to_info(info, weights, split_labels):
         sumweights = np.sum(pweights)
         meanweights = np.mean(pweights)
         medianweights = np.median(pweights)
-        sub_info.total_weight_qu = sumweights
-        sub_info.mean_weight_qu = meanweights
-        sub_info.median_weight_qu = medianweights
+        sub_info['total_weight_qu'] = sumweights
+        sub_info['mean_weight_qu'] = meanweights
+        sub_info['median_weight_qu'] = medianweights
         info[isplit] = sub_info
     return info
 
