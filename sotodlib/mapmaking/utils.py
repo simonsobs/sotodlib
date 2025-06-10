@@ -772,6 +772,20 @@ class AtomicInfo(Base):
     def __repr__(self):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
 
+    @classmethod
+    def from_dict(cls, contents: dict):
+        core = cls(
+            obs_id=contents.pop("obs_id"),
+            telescope=contents.pop("telescope"),
+            freq_channel=contents.pop("freq_channel"),
+            wafer=contents.pop("wafer"),
+            ctime=contents.pop("ctime"),
+            split_label=contents.pop("split_label"),
+        )
+        for k, v in contents.items():
+            setattr(core, k, v)
+        return core
+
 def atomic_db_aux(atomic_db, info):
     engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
     Base.metadata.create_all(bind=engine)

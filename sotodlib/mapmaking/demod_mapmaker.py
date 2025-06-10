@@ -626,13 +626,15 @@ def add_weights_to_info(info, weights, split_labels):
         if sub_weights.shape[0] != 3:
             raise ValueError(f"sub_weights has unexpected shape {sub_weights.shape}. First axis should be (3,) for TT, QQ, UU")
         mean_qu = np.mean(sub_weights[1:], axis=0)
-        positive = np.where(mean_qu > 0)
-        sumweights = np.sum(mean_qu[positive])
-        meanweights = np.mean(mean_qu[positive])
-        medianweights = np.median(mean_qu[positive])
-        sub_info.total_weight_qu = float(sumweights)
-        sub_info.mean_weight_qu = float(meanweights)
-        sub_info.median_weight_qu = float(medianweights)
+        pweights = mean_qu[mean_qu > 0]
+        if pweights.size == 0:
+            pweights = [0]
+        sumweights = np.sum(pweights)
+        meanweights = np.mean(pweights)
+        medianweights = np.median(pweights)
+        sub_info.total_weight_qu = sumweights
+        sub_info.mean_weight_qu = meanweights
+        sub_info.median_weight_qu = medianweights
         info[isplit] = sub_info
     return info
 
