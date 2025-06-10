@@ -471,7 +471,7 @@ def main(
         try:
             errors, outputs = future.result()
         except Exception as e:
-            future_write_to_log(e, errlog)
+            future_write_to_log(e, errlog[-1])
             continue
         futures.remove(future)
         for ii in range(len(errors)):
