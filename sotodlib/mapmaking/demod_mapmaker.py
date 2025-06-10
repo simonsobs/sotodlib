@@ -588,7 +588,7 @@ def make_demod_map(context, obslist, noise_model, info,
     nobs_kept = comm.allreduce(nobs_kept)
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
-        return errors, outputs
+        return errors, outputs, None
 
     for signal in mapmaker.signals:
         signal.prepare()
@@ -602,7 +602,10 @@ def make_demod_map(context, obslist, noise_model, info,
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
     mapdata = bunch.Bunch(wmap=wmap, weights=weights, signal=mapmaker.signals[0], t0=t0)
-    info = add_weights_to_info(info, weights, split_labels)
+    try:
+        info = add_weights_to_info(info, weights, split_labels)
+    except Exception as e:
+        raise ValueError(f"add_weights_to_info of {name} failed raising {e}")
 
     # output to files
     write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
