@@ -1586,6 +1586,7 @@ class PCARelCal(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.run = step_cfgs.get('pca_run', 'run1')
+        self.bandpass = step_cfgs.get('bandpass_key', 'wafer.bandpass')
         self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
@@ -1606,7 +1607,7 @@ class PCARelCal(_Preprocess):
             if self.plot_cfgs:
                 self.plot_signal = filt_aman[self.signal]
 
-        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = np.unique(aman.det_info[self.bandpass])
         bands = bands[bands != 'NC']
         # align samps w/ proc_aman to include samps restriction when loading back from db.
         rc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
@@ -1614,7 +1615,7 @@ class PCARelCal(_Preprocess):
         relcal = np.zeros(aman.dets.count)
         pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
-            m0 = aman.det_info.wafer.bandpass == band
+            m0 = aman.det_info[self.bandpass] == band
             if self.plot_cfgs is not None:
                 rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
@@ -1673,7 +1674,7 @@ class PCARelCal(_Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
 
-            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = np.unique(aman.det_info[self.bandpass])
             bands = bands[bands != 'NC']
             for band in bands:
                 if f'{band}_pca_mode0' in proc_aman[self.run_name]:
@@ -1760,6 +1761,8 @@ class FilterForSources(_Preprocess):
         process:
           n_modes: 10
           source_flags: "source_flags"
+          edge_guard: 10 # Number of samples to make the first and last flags False
+          trim_samps: 100
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -1774,10 +1777,17 @@ class FilterForSources(_Preprocess):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        edge_guard = self.process_cfgs.get('edge_guard')
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard)
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -2012,7 +2022,7 @@ class CombineFlags(_Preprocess):
             elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
                 raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
         elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
-            self.process_cfgs['method'] = len(self.process_cfgs['flag_labels'])*[self.process_cfgs['method']]
+            self.process_cfgs['method'] =  ['+'] + (len(self.process_cfgs['flag_labels']) - 1)*[self.process_cfgs['method']]
         else:
             raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
         

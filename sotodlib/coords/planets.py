@@ -228,7 +228,7 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
-                       wrap=None):
+                       wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -249,6 +249,8 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
+        Default is None. (Nothing happens.)
 
     Returns:
       The filtered signal.
@@ -264,6 +266,16 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         raise ValueError("Must provide signal if tod is None")
     if signal is None:
         raise ValueError("signal somehow still None!")
+    
+    if edge_guard is not None:
+        if isinstance(edge_guard, int):
+            edgebl = np.zeros(source_flags.shape[-1], dtype=bool)
+            edgebl[edge_guard:-edge_guard] = True
+            edgerm = so3g.proj.ranges.RangesMatrix.from_mask(edgebl)
+            for iflag in source_flags:
+                iflag.intersect(edgerm)
+        else:
+            raise ValueError("edge_guard must be an int.")
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
