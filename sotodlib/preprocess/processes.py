@@ -1511,8 +1511,7 @@ class FourierFilter(_Preprocess):
     def process(self, aman, proc_aman, sim=False):
         field = self.process_cfgs.get("noise_fit_array", None)
         if field:
-            _noise_fit = attrgetter(field)
-            noise_fit = _noise_fit(proc_aman)
+            noise_fit = proc_aman[field]
         else:
             noise_fit = None
 
