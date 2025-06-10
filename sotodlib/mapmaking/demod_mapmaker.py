@@ -458,9 +458,11 @@ def write_demod_maps(prefix, data, info, unit='K', split_labels=None):
     """
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
-        info[n_split]["valid"] = np.any(data.wmap[n_split] != 0.0)
-        if info[n_split]["valid"] == False:
+        if np.all(data.wmap[n_split] == 0.0):
+            info[n_split]['valid'] = False
             continue
+        else:
+            info[n_split]['valid'] = True
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split], unit=unit+'^-1')
         data.signal.write(prefix, "%s_weights"%split_labels[n_split],
