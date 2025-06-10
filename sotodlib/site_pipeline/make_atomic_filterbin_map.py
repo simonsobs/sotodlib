@@ -476,7 +476,7 @@ def main(
                 info3 = mapmaking.AtomicInfo.from_dict(d_[n_split])
                 mapmaking.atomic_db_aux(args.atomic_db, info3)
         except Exception as e:
-            future_write_to_log(e, errlog[0])
+            future_write_to_log(e, errlog[-1])
             continue
         futures.remove(future)
         for ii in range(len(errors)):
