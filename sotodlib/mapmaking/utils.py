@@ -786,7 +786,7 @@ class AtomicInfo(Base):
             setattr(core, k, v)
         return core
 
-def atomic_db_aux(atomic_db, info):
+def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
     engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
