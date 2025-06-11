@@ -548,10 +548,10 @@ def _read_cfg(filename=None, envvar=None, default=None):
     filename = os.path.abspath(filename)
     if not os.path.exists(filename):
         return False, filename, odict()
-    file = open(filename, 'r')
-    yaml_file = yaml.safe_load(file)
-    file.close()
-    return True, filename, yaml_file
+    with open(filename, 'r') as file:
+        yaml_file = yaml.safe_load(file)
+        file.close()
+        return True, filename, yaml_file
 
 
 def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
