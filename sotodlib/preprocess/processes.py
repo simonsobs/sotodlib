@@ -1244,32 +1244,45 @@ class DarkDets(_Preprocess):
           calc: True
           save: True
           select: True
-    
+
     .. autofunction:: sotodlib.tod_ops.flags.get_dark_dets
     """
     name = "dark_dets"
 
+    def process(self, aman, proc_aman, sim=False):
+        if 'darks' in proc_aman:
+            darks = set(proc_aman.darks.dark_dets.vals)
+            keep = np.array([det in darks for det in aman.dets.vals], dtype=bool)
+            darks.wrap("dark_signal", aman.signal[keep], [(0, 'dark_dets'), (1, 'samps')])
+
+            aman.restrict("dets", ~keep)
+            proc_aman.restrict("dets", ~keep)
+
     def calc_and_save(self, aman, proc_aman):
         mskdarks = tod_ops.flags.get_dark_dets(aman, merge=False)
-        
-        dark_aman = core.AxisManager(aman.dets, aman.samps)
-        dark_aman.wrap('darks', mskdarks, [(0, 'dets'), (1, 'samps')])
+        darks = has_all_cut(mskdarks)
+        dark_aman = core.AxisManager(
+                core.LabelAxis('dark_dets', [det for det in aman.dets.vals[darks]]),
+                aman.samps,
+            )
+
         self.save(proc_aman, dark_aman)
-    
+
     def save(self, proc_aman, dark_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap("darks", dark_aman)
-    
+
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~has_all_cut(proc_aman.darks.darks)
+        darks = set(proc_aman.darks.dark_dets.vals)
+        keep = np.array([det not in darks for det in meta.dets.vals], dtype=bool)
         if in_place:
-            meta.restrict("dets", meta.dets.vals[keep])
+            meta.restrict("dets", keep)
             return meta
         else:
             return keep
