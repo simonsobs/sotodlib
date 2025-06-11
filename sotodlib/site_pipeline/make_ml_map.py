@@ -189,6 +189,19 @@ def main(**args):
                     #obs = context.get_obs(sub_id, meta=meta)
                     #print(obs_id)
                     obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta, logger=L)
+                #if obs.dets.count < 100:
+                #    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                #    continue
+                # Check nans
+                mask = np.logical_not(np.isfinite(obs.signal))
+                if mask.sum() > 0:
+                    L.debug("Skipped %s (a nan in signal)" % (sub_id))
+                    continue
+                zero_dets = np.sum(obs.signal, axis=1)
+                mask = zero_dets == 0.0
+                if mask.any():
+                    L.debug("%s has all 0s in at least 1 detector" % (sub_id))
+                    obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
 
                 # Cut non-optical dets
                 obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
@@ -200,6 +213,11 @@ def main(**args):
                 pointing_model.apply_pointing_model(obs)
                 # Calibrate to pW
                 obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+                # Calibrate to K_cmb
+                obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
+                if obs.dets.count < 10:
+                    L.debug("Skipped %s (less than 10 detectors)" % (sub_id))
+                    continue
 
                 # Add site and weather, since they're not in obs yet
                 obs.wrap("weather", np.full(1, "typical"))
