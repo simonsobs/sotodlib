@@ -1204,7 +1204,7 @@ def check_cfg_match(ref, loaded, logger=None):
                 logger.warning('Config check fails due to ordered pipeline element names not matching.')
                 return False
             else:
-                if type(ref[ri]) is core.AxisManager:
+                if type(ref[ri]) is core.AxisManager and type(loaded[li]) is core.AxisManager:
                     check_cfg_match(ref[ri], loaded[li], logger)
                 elif ref[ri] == loaded[li]:
                     continue
