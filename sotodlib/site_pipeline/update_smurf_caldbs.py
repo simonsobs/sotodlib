@@ -492,7 +492,7 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                 report['failure'] += 1
 
         except Exception as e:
-            logger.error("Failed on %s: %s", obs_id, e)
+            logger.error("Crashed on %s: %s", obs_id, e)
             if format_exc:
                 logger.error(traceback.format_exc())
             report['crash'] += 1
