@@ -212,12 +212,14 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
 
     all_files = []
     if subdirs is None:
+        log.debug(f"Getting dirs from {hkcfg.hk_root}.")
         subdirs = [os.path.join(hkcfg.hk_root, subdir)
                    for subdir in os.listdir(hkcfg.hk_root)]
     else:
         _root = pathlib.Path(hkcfg.hk_root)
         assert all([_root in pathlib.Path(sdir).parents for sdir in subdirs])
 
+    log.debug(f"Scanning {len(subdirs)} subdirs (min_ctime={min_ctime}).")
     for sdir in subdirs:
         if min_ctime > 0 and min_ctime > os.path.getmtime(sdir):
             continue
@@ -233,6 +235,7 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
     ]
     new_files = sorted(list(set(all_files) - set(existing_files)))
 
+    log.debug(f"Comparing {len(all_files)} to known {len(existing_files)}.")
     files = []
     log.info(f"Adding {len(new_files)} new files to index...")
     for path in new_files:
@@ -246,6 +249,12 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
 
     session.add_all(files)
     session.commit()
+
+    return {
+        'scanned_subdirs': len(subdirs),
+        'total_files': len(all_files),
+        'new_files': len(new_files),
+    }
 
 
 def get_frames_from_file(
@@ -303,8 +312,8 @@ def get_frames_from_file(
         for block in frame['blocks']:
             ts = np.array(block.times) / spt3g_core.G3Units.s
             fields.extend(block.keys())
-            start_time = min(start_time, ts[0])
-            stop_time = max(stop_time, ts[-1])
+            start_time = min(start_time, ts[0].item())
+            stop_time = max(stop_time, ts[-1].item())
 
         fields_hash = hashlib.sha256(','.join(sorted(fields)).encode('ascii')).hexdigest()[:16]
         frames.append(HkFrame(
@@ -321,6 +330,11 @@ def update_frame_index(hkcfg: HkConfig, session=None):
         hkdb = HkDb(hkcfg)
         session = hkdb.Session()
 
+    report = {
+        'new_files_indexed': 0,
+        'new_files_failed': 0,
+    }
+
     files = session.query(HkFile).filter(HkFile.index_status == 'unindexed').all()
     log.info(f"Indexing {len(files)} files")
     for file in tqdm(files, disable=(not hkcfg.show_index_pb), ascii=True):
@@ -335,20 +349,25 @@ def update_frame_index(hkcfg: HkConfig, session=None):
         try:
             session.add_all(frames)
             session.commit()
+            report['new_files_indexed'] += 1
         except Exception as e:
             session.rollback()
             file.index_status = 'failed'
             session.commit()
+            report['new_files_failed'] += 1
+
+    return report
 
 
 def update_index_all(cfg: Union[HkConfig, str], subdirs=None):
-    """Updates all HK index databases"""
+    """Updates all HK index databases, and returns a report."""
     if isinstance(cfg, str):
         cfg = HkConfig.from_yaml(cfg)
     hkdb = HkDb(cfg)
     session = hkdb.Session()
-    update_file_index(cfg, session=session, subdirs=subdirs)
-    update_frame_index(cfg, session=session)
+    report1 = update_file_index(cfg, session=session, subdirs=subdirs)
+    report2 = update_frame_index(cfg, session=session)
+    return report1 | report2
 
 
 def purge_unindexed_files(hkcfg: HkConfig):
@@ -361,6 +380,45 @@ def purge_unindexed_files(hkcfg: HkConfig):
     session.query(HkFile).filter(HkFile.index_status == 'unindexed').delete(
         synchronize_session=False)
     session.commit()
+
+
+def reset_failed_files(hkcfg: HkConfig, pattern=None):
+    """Reset "failed" files to the "unindexed" state.  If pattern is
+    specified, it should be an sql-compatible matching string, which
+    will be matched against the path. Returns the number of changed
+    rows.
+
+    """
+    hkdb = HkDb(hkcfg)
+    session = hkdb.Session()
+    q = session.query(HkFile) \
+               .filter(HkFile.index_status == 'failed')
+    if pattern is not None:
+        q = q.filter(HkFile.path.like(pattern))
+    rowcount = q.update({HkFile.index_status: 'unindexed'},
+                 synchronize_session=False)
+    session.commit()
+    return rowcount
+
+
+def get_files_info(hkcfg: HkConfig, index_status=None, limit=None):
+    """Query file rows; sorted by path.  Optionally filter by index_status
+    (list of str) and limit (int).  Returns list of HkFile.
+
+    """
+    hkdb = HkDb(hkcfg)
+    session = hkdb.Session()
+    q = session.query(HkFile)
+    if index_status is not None:
+        if isinstance(index_status, str):
+            index_status = [index_status]
+        q = q.filter(HkFile.index_status.in_(index_status))
+    q = q.order_by(HkFile.path)
+    if limit:
+        q = q.limit(limit)
+    rows = q.all()
+    session.close()
+    return rows
 
 
 #####################

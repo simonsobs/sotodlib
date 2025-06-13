@@ -52,6 +52,7 @@ from . import (
     make_uncal_beam_map,
     preprocess_tod,
     update_g3tsmurf_db,
+    update_hkdb,
     update_obsdb,
     make_cosamp_hk
 )
@@ -71,6 +72,7 @@ ELEMENTS = {
     'make-uncal-beam-map': make_uncal_beam_map,
     'preprocess-tod': preprocess_tod,
     'update-g3tsmurf-db': update_g3tsmurf_db,
+    'update-hkdb': update_hkdb,
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
 }
