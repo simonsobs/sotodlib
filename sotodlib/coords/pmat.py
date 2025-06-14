@@ -668,19 +668,13 @@ def wrap_geom(geom):
 
 class PmatPtsrc(P):
     """
-    A pure Python Pointing Matrix for Point Sources for the so3g Framework.
+    A pure Python Pointing Matrix for projecting between TOD and 
+    point source amplitudes.
 
-    This class projects between the time-ordered data (TOD) and the
-    amplitudes of a set of point sources. It is a compilation-free
-    alternative to C++/Fortran backends.
-
-    Pointing for every sample is calculated on-the-fly using so3g's
-    Projectionist tools. An efficient source lookup is achieved by
-    pre-computing a distance and domain map with pixell. The
-    performance-critical loops are accelerated with numba.jit.
+    This implementation pre-calculates and caches detector pointing for
+    efficiency. The core projection loops are accelerated with Numba. 
     """
-    def __init__(self, sight, fp, srcs, beam=None, beam_fwhm=None,
-                 rmax_sigma=5, cuts=None,
+    def __init__(self, sight, fp, beam_fwhm, rmax_sigma=5, cuts=None,
                  det_weights=None):
         """
         Initializes the PmatPtsrc projector.
@@ -688,79 +682,37 @@ class PmatPtsrc(P):
         Args:
             sight (so3g.proj.CelestialSightLine): The boresight pointing data.
             fp (so3g.proj.FocalPlane): The focal plane model.
-            srcs (np.ndarray): The source catalog, shape (nsrc, 5+).
-            beam (np.ndarray, optional): The 1D beam profile, shape (2, n_beam_samps).
-                beam[0] contains the radius in radians, and beam[1] contains
-                the corresponding amplitude. Must be provided if `beam_fwhm` is not.
-            beam_fwhm (float, optional): The Full-Width at Half-Maximum of the beam
-                in radians. If provided, a Gaussian beam profile will be generated
-                internally.
-            rmax_sigma (float): The radius in beam standard deviations to which
-                the beam model is evaluated. Sources farther away than this from
-                a detector are ignored.
-            cuts (RangesMatrix, optional): Samples to exclude from projection.
-            det_weights (np.ndarray, optional): Per-detector weights, shape (ndet,).
+            beam_fwhm (float): The FWHM of the Gaussian beam in radians.
+            rmax_sigma (float): The beam evaluation radius in sigmas.
+            cuts (RangesMatrix, optional): Samples to exclude.
+            det_weights (np.ndarray, optional): Per-detector weights.
         """
         super().__init__(sight=sight, fp=fp, geom=None, cuts=cuts, det_weights=det_weights)
 
-        if beam is None and beam_fwhm is None:
-            raise ValueError("Either `beam` or `beam_fwhm` must be provided.")
-        if beam is not None and beam_fwhm is not None:
-            print("Warning: Both `beam` and `beam_fwhm` provided. Using `beam`.")
+        self.det_pos = self._precompute_pointing()
+        self.det_comps = np.ascontiguousarray(self.fp.resps)
 
-        if srcs is None:
-            raise ValueError("`srcs` must be provided for PmatPtsrc")
-            
-        self.srcs = np.ascontiguousarray(srcs)
-        if self.srcs.ndim == 1:
-            self.srcs = self.srcs[None,:]
-
-        if beam is None and beam_fwhm is not None:
-            # Generate beam profile from FWHM
-            sigma = beam_fwhm / (2 * np.sqrt(2 * np.log(2)))
-            self.rmax = rmax_sigma * sigma
-            # Use a fixed number of samples for the generated beam profile
-            self.beam_radii = np.linspace(0, self.rmax, 200, dtype=np.float32)
-            self.beam_vals = np.exp(-self.beam_radii**2 / (2 * sigma**2))
-        else:
-            # Use the provided beam profile
-            self.beam_radii = np.ascontiguousarray(beam[0], dtype=np.float32)
-            self.beam_vals = np.ascontiguousarray(beam[1], dtype=np.float32)
-            # Calculate rmax from rmax_sigma and the provided beam
-            value_lim = np.exp(-0.5 * rmax_sigma**2)
-            valid_indices = np.where(self.beam_vals >= value_lim)[0]
-            self.rmax = self.beam_radii[valid_indices[-1]] if len(valid_indices) > 0 else self.beam_radii[-1]
-
+        sigma = beam_fwhm / (2 * np.sqrt(2 * np.log(2)))
+        self.rmax = rmax_sigma * sigma
+        self.beam_radii = np.linspace(0, self.rmax, 200, dtype=np.float32)
+        self.beam_vals = np.exp(-self.beam_radii**2 / (2 * sigma**2))
         self.beam_step = self.beam_radii[1] - self.beam_radii[0]
 
-        # Pre-calculate pointing and lookup grids
-        self.det_pos, scan_box = self._precompute_pointing()
-        self.det_comps = np.ascontiguousarray(self.fp.resps)
-        self.dist_map, self.domain_map, self.geom = self._build_lookup_maps(scan_box)
-        self.det_pix = self._get_det_pixels()
-
-
     @classmethod
-    def for_tod(cls, tod, srcs, beam=None, beam_fwhm=None, rmax_sigma=4.5,
-                sight=None, fp=None,
-                rot=None, cuts=None, det_weights=None,
+    def for_tod(cls, tod, beam_fwhm, rmax_sigma=5,
+                sight=None, fp=None, rot=None, cuts=None, det_weights=None,
                 timestamps=None, boresight=None,
                 boresight_equ=None, weather='typical',
                 site='so', hwp=False, qp_kwargs={}):
         """
-        Set up a PmatPtsrc for a TOD.
+        A convenient constructor that initializes the Pmat from a TOD object.
 
-        This extracts pointing information from the TOD and combines it
-        with source and beam information to initialize the pointing matrix.
-        
         Args:
             tod (AxisManager): The TOD object, used as a source for
-                sight and fp if they are not provided directly.
-            srcs (np.ndarray): The source catalog, shape (nsrc, 5+).
-            beam (np.ndarray, optional): The 1D beam profile, shape (2, n_beam_samps).
-            beam_fwhm (float, optional): The FWHM of the beam in radians.
+                               pointing and weights if not provided directly.
+            beam_fwhm (float): The FWHM of the beam in radians.
             rmax_sigma (float): Max radius in beam sigmas to evaluate.
-            sight (so3g.proj.CelestialSightLine, optional): Boresight pointing data.
+            sight (so3g.proj.CelestialSightLine, optional): Boresight pointing.
             fp (so3g.proj.FocalPlane, optional): The focal plane model.
             rot (so3g.proj.quat, optional): Additional rotation to apply.
             cuts (RangesMatrix, optional): Samples to exclude.
@@ -772,7 +724,7 @@ class PmatPtsrc(P):
             site (str): Site for pointing calculation.
             hwp (bool): If True, reflect polarization angles.
             qp_kwargs (dict): Extra arguments for qpoint.
-            
+
         Returns:
             PmatPtsrc: An initialized instance of the class.
         """
@@ -786,14 +738,14 @@ class PmatPtsrc(P):
                 sight = so3g.proj.CelestialSightLine.for_lonlat(
                     boresight_equ.ra, boresight_equ.dec, boresight_equ.get('psi'))
             else:
-                timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
+                timestamps = helpers._valid_arg(timestamps, 'timestamps', src=tod)
                 if boresight is None:
                     raise ValueError("Could not find boresight information in tod")
                 sight = so3g.proj.CelestialSightLine.az_el(
                     timestamps, boresight.az, boresight.el, roll=boresight.roll,
                     site=site, weather=weather, **qp_kwargs)
         else:
-            sight = _get_csl(sight)
+            sight = helpers._get_csl(sight)
 
         if rot is not None:
             sight.Q = rot * sight.Q
@@ -801,65 +753,79 @@ class PmatPtsrc(P):
         if fp is None:
             fp = helpers.get_fplane(tod, hwp=hwp)
 
-        return cls(sight=sight, fp=fp, srcs=srcs, beam=beam, beam_fwhm=beam_fwhm,
+        return cls(sight=sight, fp=fp, beam_fwhm=beam_fwhm,
                    rmax_sigma=rmax_sigma, cuts=cuts, det_weights=det_weights)
 
-
-    def to_tod(self, amps, tod=None, dest=None, tmul=1.0, pmul=1.0, wrap=None):
+    def to_tod(self, src_pos, amps, tod=None, dest=None, tmul=1.0, pmul=1.0, wrap=None):
         """
         Projects source amplitudes into a TOD (m -> d).
-        Operation: tod = tod * tmul + P @ amps * pmul.
 
         Args:
+            src_pos (np.ndarray): Source celestial positions, shape (nsrc, 2)
+                                        as [dec, ra] in radians.
             amps (np.ndarray): Source amplitudes, shape (nsrc, 3) for TQU.
-            tod (AxisManager, optional): The container for the output TOD. If
-                provided, `dest` is ignored and the result can be wrapped.
-            dest (np.ndarray, optional): The TOD array, shape (ndet, nsamp),
-                to accumulate results into. If None, a new array is created.
+            tod (AxisManager, optional): The container for the output TOD.
+            dest (np.ndarray, optional): TOD array to accumulate results into.
             tmul (float): Factor to multiply the input TOD by.
-            pmul (float): Factor to multiply source amplitudes by before projecting.
+            pmul (float): Factor to multiply source amplitudes by.
             wrap (str, optional): If provided, the result is wrapped into `tod[wrap]`.
 
         Returns:
             np.ndarray: The resulting TOD array.
         """
+        src_pos = np.ascontiguousarray(src_pos)
+        if src_pos.ndim == 1:
+            src_pos = src_pos[None,:]
+
+        dist_map, domain_map, geom = self._build_lookup_maps(src_pos)
+        det_pix = self._get_det_pixels(geom)
+
         if dest is None and tod is not None and 'signal' in tod:
             dest = tod.signal
         if dest is None:
             dest = np.zeros(self.det_pos.shape[:2], dtype=np.float32)
 
         _pmat_ptsrc_forward(
-            tod=dest, amplitudes=amps, det_pos=self.det_pos, det_pix=self.det_pix,
-            det_comps=self.det_comps, src_pos=self.srcs[:, :2], beam_radii=self.beam_radii,
-            beam_vals=self.beam_vals, beam_step=self.beam_step, dist_map=self.dist_map,
-            domain_map=self.domain_map, rmax=self.rmax, tmul=tmul, pmul=pmul
+            tod=dest, amplitudes=amps, det_pos=self.det_pos, det_pix=det_pix,
+            det_comps=self.det_comps, src_pos=src_pos, beam_radii=self.beam_radii,
+            beam_vals=self.beam_vals, beam_step=self.beam_step, dist_map=dist_map,
+            domain_map=domain_map, rmax=self.rmax, tmul=tmul, pmul=pmul
         )
+
         if wrap and tod is not None:
-            if wrap in tod: del tod[wrap]
+            if wrap in tod:
+                del tod[wrap]
             tod.wrap(wrap, dest, [(0, 'dets'), (1, 'samps')])
         return dest
 
-    def to_srcs(self, tod, amps, tmul=1.0, pmul=1.0):
+    def to_srcs(self, src_pos, tod, amps, tmul=1.0, pmul=1.0):
         """
         Projects a TOD onto source amplitudes (d -> m).
-        Operation: amps = amps * pmul + P.T @ tod * tmul.
 
         Args:
-            tod (np.ndarray): The TOD array to project from, shape (ndet, nsamp).
-            amps (np.ndarray): The array to accumulate source amplitudes into,
-                shape (nsrc, 3) for TQU. This array is modified in-place.
-            tmul (float): Factor to multiply the TOD by before projecting.
+            srcpos (np.ndarray): Source positions, shape (nsrc, 2).
+            tod (np.ndarray): TOD array to project from, shape (ndet, nsamp).
+            amps (np.ndarray): Array to accumulate source amplitudes into,
+                               shape (nsrc, 3). Modified in-place.
+            tmul (float): Factor to multiply the TOD by.
             pmul (float): Factor to multiply the existing amplitudes by.
 
         Returns:
             np.ndarray: The resulting source amplitudes array.
         """
+        src_pos = np.ascontiguousarray(src_pos)
+        if src_pos.ndim == 1:
+            src_pos = src_pos[None,:]
+
+        dist_map, domain_map, geom = self._build_lookup_maps(src_pos)
+        det_pix = self._get_det_pixels(geom)
+
         amp_buffer = np.zeros_like(amps)
         _pmat_ptsrc_backward(
-            tod=tod, amplitudes=amp_buffer, det_pos=self.det_pos, det_pix=self.det_pix,
-            det_comps=self.det_comps, src_pos=self.srcs[:, :2], beam_radii=self.beam_radii,
-            beam_vals=self.beam_vals, beam_step=self.beam_step, dist_map=self.dist_map,
-            domain_map=self.domain_map, rmax=self.rmax, tmul=tmul
+            tod=tod, amplitudes=amp_buffer, det_pos=self.det_pos, det_pix=det_pix,
+            det_comps=self.det_comps, src_pos=src_pos, beam_radii=self.beam_radii,
+            beam_vals=self.beam_vals, beam_step=self.beam_step, dist_map=dist_map,
+            domain_map=domain_map, rmax=self.rmax, tmul=tmul
         )
         amps[:] = amps * pmul + amp_buffer
         return amps
@@ -871,33 +837,38 @@ class PmatPtsrc(P):
         proj = so3g.proj.Projectionist.for_geom(shape=shape, wcs=wcs)
         coords_list = proj.get_coords(self._get_asm())
         det_pos = np.ascontiguousarray(coords_list, dtype=np.float64)
+        det_pos = det_pos[..., [1, 0, 2, 3]]
+        return det_pos
 
-        # Determine the bounding box of the scan in celestial coordinates
-        scan_box = np.array([np.min(det_pos[..., [1,0]], (0,1)), np.max(det_pos[..., [1,0]], (0,1))])
-        
-        # Reorder to [dec, ra, cos(2psi), sin(2psi)] for consistency
-        det_pos = det_pos[..., [1, 0, 2, 3]] 
-        return det_pos, scan_box
-
-    def _build_lookup_maps(self, scan_box):
-        """Internal helper to build the source lookup maps using pixell."""
-        # Use a resolution of 1 arcmin for the lookup grid for good performance
-        res = 1 * utils.arcmin 
-        shape, wcs = enmap.geometry(pos=scan_box, res=res, proj="car")
+    def _build_lookup_maps(self, src_pos):
+        if src_pos.shape[0] == 0:
+            return None, None, (None,None) # Handle empty case
+        src_box = np.array([np.min(src_pos, 0), np.max(src_pos, 0)])
+        res = 1 * utils.arcmin
+        if np.all(src_box[0] == src_box[1]):
+            # If the box has zero area (e.g., from a single source),
+            # manually give it a minimum size of a few pixels
+            min_size = 4 * res 
+            center = src_box[0]
+            src_box = np.array([center - min_size / 2, center + min_size / 2])
+        src_box = utils.widen_box(src_box, self.rmax)
+        shape, wcs = enmap.geometry(pos=src_box, res=res, proj="car")
         geom = (shape, wcs)
         dist_map, domain_map = enmap.distance_from(
-            shape, wcs, points=self.srcs[:, :2].T, domains=True, rmax=self.rmax)
+            shape, wcs, points=src_pos.T, domains=True, rmax=self.rmax)
         return dist_map, domain_map, geom
 
-    def _get_det_pixels(self):
+    def _get_det_pixels(self, geom):
         """Internal helper to pre-compute detector pixel indices on the lookup grid."""
-        shape, wcs = self.geom
+        shape, wcs = geom
+        if shape is None: return None
         ndet, nsamp = self.det_pos.shape[:2]
         # Reshape for efficient processing with enmap.sky2pix
         pos_flat = self.det_pos[:, :, :2].reshape(ndet * nsamp, 2).T
         pix_flat = enmap.sky2pix(shape, wcs, pos_flat, safe=False, corner=False)
         det_pix = pix_flat.T.reshape(ndet, nsamp, 2)
         return np.ascontiguousarray(det_pix, dtype=np.int32)
+
 
 @njit(nogil=True, fastmath=True, parallel=True)
 def _pmat_ptsrc_forward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos, beam_radii,
@@ -908,11 +879,11 @@ def _pmat_ptsrc_forward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos, b
     for i_det in prange(ndet):
         for i_time in range(nsamp):
             y_pix, x_pix = det_pix[i_det, i_time]
-            if y_pix < 0 or y_pix >= dist_map.shape[0] or x_pix < 0 or x_pix >= dist_map.shape[1]: continue
-            
-            # Coarse check using precomputed distance map
+            if y_pix < 0 or y_pix >= dist_map.shape[0] or x_pix < 0 or x_pix >= dist_map.shape[1]:
+                continue
+
             if dist_map[y_pix, x_pix] >= rmax: continue
-            
+
             src_idx = domain_map[y_pix, x_pix]
             if src_idx < 0: continue
 
@@ -922,14 +893,14 @@ def _pmat_ptsrc_forward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos, b
             dlat, dlon = det_dec - src_dec, det_ra - src_ra
             a = np.sin(dlat/2)**2 + np.cos(src_dec) * np.cos(det_dec) * np.sin(dlon/2)**2
             ang_dist = 2 * np.arcsin(np.sqrt(a))
-            
-            # Check against rmax, not the edge of the beam array
+
             if ang_dist >= rmax: continue
 
             # Interpolate beam value
             idx_float = ang_dist / beam_step
             idx0 = int(idx_float)
-            if idx0 >= len(beam_vals) - 1: continue # Should not happen with rmax check
+            if idx0 >= len(beam_vals) - 1:
+                continue
             weight = idx_float - idx0
             beam_val = beam_vals[idx0] * (1 - weight) + beam_vals[idx0 + 1] * weight
 
