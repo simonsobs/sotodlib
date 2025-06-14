@@ -316,9 +316,15 @@ class SimMuMUXCrosstalk(Operator):
                 # explicitly here
                 offset_old = np.median(obs.detdata[self.det_data][det])
                 offset_new = np.median(temp_obs.detdata[self.det_data][det])
+                # Zero TODs of collided resonators
+                if offset_new == 0:
+                    offset_old = 0
+                # Propagate data
                 obs.detdata[self.det_data][det] = (
                     temp_obs.detdata[self.det_data][det] - offset_new + offset_old
                 )
+                # Propagate flags
+                obs.detdata[self.det_flags][det] |= temp_obs.detdata[self.det_flags][det]
 
             # Free data copy
             temp_obs.clear()
