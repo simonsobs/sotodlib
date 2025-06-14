@@ -28,6 +28,7 @@ dependencies = [
   "numdifftools",
   "psycopg2-binary",
   "lmfit",
+  "numba",
 ]
 dynamic=["version"]
 classifiers = [
