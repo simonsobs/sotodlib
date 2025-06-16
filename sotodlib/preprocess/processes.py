@@ -12,7 +12,7 @@ from sotodlib.hwp import hwp, hwp_angle_model
 import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
-                                   count_cuts,
+                                   count_cuts, flag_cut_select,
                                    sparse_to_ranges_matrix)
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
@@ -68,14 +68,17 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("det_bias_flags", dbc_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = ~proc_aman.det_bias_flags.det_bias_flags
-        meta.restrict("dets", meta.dets.vals[has_all_cut(keep)])
-        return meta
+        keep = ~has_all_cut(proc_aman.det_bias_flags.det_bias_flags)
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
     
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -132,7 +135,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("trends", trend_aman)
     
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -144,8 +147,11 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         else:
             raise ValueError(f"Entry '{self.select_cfgs['kind']}' not"
                                 "understood. Expect 'any' or 'all'")
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -210,7 +216,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.glitch_name, glitch_aman)
  
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -220,8 +226,11 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         )
         n_cut = count_cuts(flag)
         keep = n_cut <= self.select_cfgs["max_n_glitch"]
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -235,7 +244,6 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
             plot_signal_diff(aman, proc_aman[self.glitch_name], flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
             plot_flag_stats(aman, proc_aman[self.glitch_name], flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
-
 
 class FixJumps(_Preprocess):
     """
@@ -325,7 +333,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
             name = self.save_cfgs.get('jumps_name', 'jumps')
             proc_aman.wrap(name, jump_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
@@ -334,8 +342,10 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
         n_cut = count_cuts(proc_aman[name].jump_flag)
         keep = n_cut <= self.select_cfgs["max_n_jumps"]
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -356,22 +366,26 @@ class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
     "psd" field.
 
+    Note: noverlap = 0 amd full_output = True are recommended to get unbiased
+        median white noise estimation by Noise.
+
     Example config block::
 
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
         "calc":
-          "psd_cfgs": # optional, kwargs to scipy.welch
-            "nperseg": 1024
+          "nperseg": 1024 # optional
+          "noverlap": 0 # optional
           "wrap_name": "psd" # optional
-          "subscan": False
+          "subscan": False # optional
+          "full_output": True # optional
         "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
     name = "psd"
-    
+
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
@@ -379,8 +393,13 @@ class PSDCalc(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                              **self.calc_cfgs)
+        full_output = self.calc_cfgs.get('full_output')
+        if full_output:
+            freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                        **self.calc_cfgs)
+        else:
+            freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                  **self.calc_cfgs)
 
         fft_aman = core.AxisManager(aman.dets,
                                     core.OffsetAxis("nusamps", len(freqs)))
@@ -388,9 +407,14 @@ class PSDCalc(_Preprocess):
         if self.calc_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
+            if full_output:
+                fft_aman.wrap("nseg_ss", nseg, [(0, aman.subscans)])
+                nseg = np.nansum(nseg)
 
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
+        if full_output:
+            fft_aman.wrap("nseg", nseg)
 
         self.save(proc_aman, fft_aman)
 
@@ -481,21 +505,45 @@ class Noise(_Preprocess):
     """Estimate the white noise levels in the data. Assumes the PSD has been
     wrapped into the preprocessing AxisManager. All calculation configs goes to `calc_wn`.
 
-    Saves the results into the "noise" field of proc_aman. 
+    Saves the results into the "noise" field of proc_aman.
 
-    Can run data selection of a "max_noise" value. 
+    Can run data selection of a "max_noise" value.
 
-    Example config block::
+    When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
+    axis manager containing an array named ``white_noise``.  If not specified
+    the white noise is calculated with ``calc_wn()`` and used
+    for ``wn_est``.  The calculated white noise will be stored in the noise fit
+    axis manager.
 
-     - name: "noise"
-       fit: False
-       subscan: False
-       calc:
-         low_f: 5
-         high_f: 10
-       save: True
-       select:
-         max_noise: 2000
+    Example config block for fitting PSD::
+
+    - name: "noise"
+      fit: False
+      subscan: False
+      calc:
+        fwhite: (5, 10)
+        lowf: 1
+        f_max: 25
+        mask: True
+        wn_est: noise
+        fixed_param: 'wn'
+        binning: True
+      save: True
+      select:
+        max_noise: 2000
+
+    Example config block for calculating white noise only::
+
+    - name: "noise"
+      fit: False
+      subscan: False
+      calc:
+        low_f: 5
+        high_f: 20
+      save: True
+      select:
+        min_noise: 18e-6
+        max_noise: 80e-6
 
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
@@ -521,16 +569,44 @@ class Noise(_Preprocess):
             self.calc_cfgs = {}
 
         if self.fit:
-            if self.calc_cfgs.get('subscan') is None:
-                self.calc_cfgs['subscan'] = self.subscan
+            fcfgs = copy.deepcopy(self.calc_cfgs)
+            fixed_param = fcfgs.get('fixed_param', [])
+            wn_est = fcfgs.get('wn_est', None)
+
+            calc_wn = False
+
+            if isinstance(wn_est, str):
+                if wn_est in proc_aman:
+                    fcfgs['wn_est'] = proc_aman[wn_est].white_noise
+                else:
+                    calc_wn = True
+            if calc_wn or wn_est is None:
+                wn_f_low, wn_f_high = fcfgs.get('fwhite', (5, 10))
+                fcfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
+                                                                   freqs=psd.freqs,
+                                                                   nseg=psd.get('nseg'),
+                                                                   low_f=wn_f_low,
+                                                                   high_f=wn_f_high)
+            if fcfgs.get('subscan') is None:
+                fcfgs['subscan'] = self.subscan
+            fcfgs.pop('fwhite', None)
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
-                                                        f=psd.freqs, 
+                                                        f=psd.freqs,
                                                         merge_fit=True,
-                                                        **self.calc_cfgs)
+                                                        **fcfgs)
+            if calc_wn or wn_est is None:
+                if not self.subscan:
+                    calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets")])
+                else:
+                    calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets"), (1,"subscans")])
         else:
+            wn_f_low = self.calc_cfgs.get("low_f", 5)
+            wn_f_high = self.calc_cfgs.get("high_f", 10)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
-                                         **self.calc_cfgs)
+                                         nseg=psd.get('nseg'),
+                                         low_f=wn_f_low,
+                                         high_f=wn_f_high)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
                 calc_aman.wrap("white_noise", wn, [(0,"dets")])
@@ -554,23 +630,27 @@ class Noise(_Preprocess):
         else:
             proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
 
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        if 'wrap_name' in self.save_cfgs:
-            self.select_cfgs['name'] = self.select_cfgs.get('name', self.save_cfgs['wrap_name'])
+        if isinstance(self.save_cfgs, bool):
+            noise_aman = proc_aman[self.select_cfgs.get('name', 'noise')]
+        elif 'wrap_name' in self.save_cfgs:
+            noise_aman = proc_aman[self.select_cfgs.get('name', self.save_cfgs['wrap_name'])]
         else:
-            self.select_cfgs['name'] = self.select_cfgs.get('name', 'noise')
+            noise_aman = proc_aman[self.select_cfgs.get('name', 'noise')]
 
         if self.fit:
-            wn = proc_aman[self.select_cfgs['name']].fit[:,1]
-            fk = proc_aman[self.select_cfgs['name']].fit[:,0]
+            wnix = np.where(noise_aman.noise_model_coeffs.vals == 'white_noise')[0][0]
+            wn = noise_aman.fit[:,wnix]
+            fkix = np.where(noise_aman.noise_model_coeffs.vals == 'fknee')[0][0]
+            fk = noise_aman.fit[:,fkix]
         else:
-            wn = proc_aman[self.select_cfgs['name']].white_noise
+            wn = noise_aman.white_noise
             fk = None 
         if self.subscan:
             wn = np.nanmean(wn, axis=-1) # Mean over subscans
@@ -583,8 +663,11 @@ class Noise(_Preprocess):
             keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
             keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
     
 class Calibrate(_Preprocess):
     """Calibrate the timestreams based on some provided information.
@@ -1179,14 +1262,17 @@ class DarkDets(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("darks", dark_aman)
     
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.darks.darks)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 class SourceFlags(_Preprocess):
     """Calculate the source flags in the data.
@@ -1197,6 +1283,7 @@ class SourceFlags(_Preprocess):
      Example config block::
 
         - name : "source_flags"
+          source_flags_name: "my_source_flags"
           calc:
             mask: {'shape': 'circle',
                    'xyr': [0, 0, 1.]}
@@ -1206,41 +1293,64 @@ class SourceFlags(_Preprocess):
             distance: 0 # max distance of footprint from source in degrees
           save: True
           select: True # optional
+            select_source: 'jupiter' # list of str or str. If not provided, all sources from center_on are selected.
+            kind: 'any' # 'any', 'all', or float (0.0 < kind < 1.0)
+            invert: False # optional, if True logic is filipped.
+            Examples:
+                1. invert=False, kind='any' → Select detectors with **no** True flags (e.g., for Moon cut).
+                2. invert=True, kind='any' → Select detectors with **any** True flags (e.g., for planet selection).
+                3. invert=False, kind=0.4 → Select detectors with <40% of True flags.
 
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
+    def __init__(self, step_cfgs):
+        self.source_flags_name = step_cfgs.get('source_flags_name', 'source_flags')
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
-        if source_list == ['planet']:
-            from sotodlib.coords.planets import SOURCE_LIST
+        from sotodlib.coords.planets import SOURCE_LIST
+        source_name = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+        if 'planet' in source_name:
             source_list = [x for x in aman.tags if x in SOURCE_LIST]
             if len(source_list) == 0:
                 raise ValueError("No tags match source list")
+        else:
+            source_list = [planets.get_source_list_fromstr(isource) for isource in source_name]
 
         # find if source is within footprint + distance
         positions = planets.get_nearby_sources(tod=aman, source_list=source_list,
                                                distance=self.calc_cfgs.get('distance', 0))
-
         source_aman = core.AxisManager(aman.dets, aman.samps)
         for p in positions:
+            center_on = planets.get_source_list_fromstr(p[0])
             source_flags = tod_ops.flags.get_source_flags(aman,
                                                           merge=self.calc_cfgs.get('merge', False),
                                                           overwrite=self.calc_cfgs.get('overwrite', True),
                                                           source_flags_name=self.calc_cfgs.get('source_flags_name', None),
                                                           mask=self.calc_cfgs.get('mask', None),
-                                                          center_on=p[0],
+                                                          center_on=center_on,
                                                           res=self.calc_cfgs.get('res', None),
                                                           max_pix=self.calc_cfgs.get('max_pix', None))
 
             source_aman.wrap(p[0], source_flags, [(0, 'dets'), (1, 'samps')])
 
+            # if inv_flag is set, add inverse of source flags
+            if self.calc_cfgs.get('inv_flag'):
+                source_aman.wrap(p[0]+ '_inv',
+                                RangesMatrix.from_mask(~source_flags.mask()),
+                                [(0, 'dets'), (1, 'samps')])
+
         # add sources that were not nearby from source list
-        for source in source_list:
+        for source in source_name:
             if source not in source_aman._fields:
                 source_aman.wrap(source, RangesMatrix.zeros([aman.dets.count, aman.samps.count]),
                                  [(0, 'dets'), (1, 'samps')])
+                
+                if self.calc_cfgs.get('inv_flag'):
+                    source_aman.wrap(source + '_inv',
+                                    RangesMatrix.ones([aman.dets.count, aman.samps.count]),
+                                    [(0, 'dets'), (1, 'samps')])
 
         self.save(proc_aman, source_aman)
 
@@ -1248,30 +1358,64 @@ class SourceFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("source_flags", source_aman)
+            proc_aman.wrap(self.source_flags_name, source_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
         else:
-            source_flags = proc_aman.source_flags
+            source_flags = proc_aman[self.source_flags_name]
 
-        source_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
-        if source_list == ['planet']:
+        if isinstance(self.select_cfgs, bool):
+            if self.select_cfgs:
+                select_list = np.atleast_1d(self.calc_cfgs.get('center_on', 'planet'))
+            else:
+                if in_place:
+                    return meta
+                else:
+                    return np.ones(meta.dets.count, dtype=bool)
+        else:
+            select_list = np.atleast_1d(self.select_cfgs.get("select_source", self.calc_cfgs.get('center_on', 'planet')))
+
+        if 'planet' in select_list:
             from sotodlib.coords.planets import SOURCE_LIST
-            source_list = [x for x in aman.tags if x in SOURCE_LIST]
-            if len(source_list) == 0:
+            select_list = [x for x in meta.tags if x in SOURCE_LIST]
+            if len(select_list) == 0:
                 raise ValueError("No tags match source list")
 
-        for source in source_list:
-            if source in source_flags._fields:
-                keep = ~has_all_cut(source_flags[source])
-                meta.restrict("dets", meta.dets.vals[keep])
-                source_flags.restrict("dets", source_flags.dets.vals[keep])
-        return meta
+        if isinstance(self.select_cfgs, bool):
+            inverts = False
+        else:
+            inverts = self.select_cfgs.get("invert", False)
+        if isinstance(inverts, bool):
+            inverts = [inverts]*len(select_list)
+        elif len(inverts) != len(select_list):
+            raise ValueError("Length of intert must match length of select_source, or just bool")
 
+        if isinstance(self.select_cfgs, bool):
+            kinds = "all"
+        else:
+            kinds = self.select_cfgs.get("kind", 'all') # default of 'all' is for backward compatibility
+        if isinstance(kinds, (str, float)):
+            kinds = [kinds]*len(select_list)
+        elif len(kinds) != len(select_list):
+            raise ValueError("Length of kinds must match length of select_source, or just str")
+
+        keep_all = np.ones(meta.dets.count, dtype=bool)
+
+        for source, kind, invert in zip(select_list, kinds, inverts):
+            if source in source_flags._fields:
+                keep_all &= flag_cut_select(source_flags[source], kind, invert=invert)
+
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep_all])
+            source_flags.restrict("dets", source_flags.dets.vals[keep_all])
+            return meta
+        else:
+            return keep_all
+    
 class HWPAngleModel(_Preprocess):
     """Apply hwp angle model to the TOD.
 
@@ -1308,33 +1452,51 @@ class HWPAngleModel(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("hwp_angle", hwp_angle_aman)
 
-
 class FourierFilter(_Preprocess):
     """
-    Applies a fourier filter (defined in fft_ops) to the data.
+    Applies a chain of fourier filters (defined in fft_ops) to the data.
 
-    Example config file entry::
+    Example config file entry for one filter::
 
-      - name: "fourier_filter"
-        wrap_name: "lpf_sig"
-        signal_name: "signal"
-        process:
-          filt_function: "low_pass_sine2"
-          trim_samps: 2000
-          filter_params:
-            cutoff: 1
-            width: 0.1
-    
+    - name: "fourier_filter"
+      wrap_name: "lpf_sig"
+      signal_name: "signal"
+      process:
+        filt_function: "timeconst_filter"
+        filter_params:
+          timeconst: "det_cal.tau_eff"
+          invert: True
+
+    Example config file entry for two filters::
+
+    - name: "fourier_filter_chain"
+      wrap_name: "lpf_sig"
+      signal_name: "signal"
+      process:
+        filters:
+          - name: "iir_filter"
+            filter_params:
+              invert: True
+          - name: "timeconst_filter"
+            filter_params:
+              timeconst: "det_cal.tau_eff"
+              invert: True
+
     or with params from a noise fit::
 
-      - name: "fourier_filter"
-        wrap_name: "lpf_sig"
-        signal_name: "signal"
-        process:
-          filt_function: "low_pass_sine2"
-          trim_samps: 2000
-          noise_fit_array: "noiseQ_fit"
-
+    - name: "fourier_filter_chain"
+      wrap_name: "lpf_sig"
+      signal_name: "signal"
+      process:
+        noise_fit_array: "noiseQ_fit"
+        filters:
+          - name: "iir_filter"
+            filter_params:
+              invert: True
+          - name: "timeconst_filter"
+            filter_params:
+              timeconst: "det_cal.tau_eff"
+              invert: True
     See :ref:`fourier-filters` documentation for more details.
     """
     name = 'fourier_filter'
@@ -1347,32 +1509,34 @@ class FourierFilter(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False):
-        filt_function = self.process_cfgs.get(
-            "filt_function",
-            "high_pass_butter4"
-        )
-        _f = getattr(
-            tod_ops.filters,
-            filt_function
-        )
-
-        if self.process_cfgs.get("noise_fit_array"):
-            field = self.process_cfgs["noise_fit_array"]
-            _noise_fit = attrgetter(field)
-            noise_fit = _noise_fit(proc_aman)
+        field = self.process_cfgs.get("noise_fit_array", None)
+        if field:
+            noise_fit = proc_aman[field]
         else:
             noise_fit = None
-        
-        filter_params = tod_ops.fft_ops.build_hpf_params_dict(
-            filt_function,
-            noise_fit=noise_fit,
-            filter_params=self.process_cfgs.get("filter_params", None)
-        )
 
-        filt = _f(**filter_params)
+        filt_list = self.process_cfgs.get("filters", None)
+        if filt_list is None:
+            filt_list = [{
+                "name": self.process_cfgs.get("filt_function", "high_pass_butter4"),
+                "filter_params": self.process_cfgs.get("filter_params", None)
+            }]
 
-        filt_tod= tod_ops.filters.fourier_filter(aman, filt,
-                                                 signal_name=self.signal_name)
+        filters = []
+        for spec in filt_list:
+            fname = spec.get("name")
+            params = tod_ops.fft_ops.build_hpf_params_dict(
+                fname,
+                noise_fit=noise_fit,
+                filter_params=spec.get("filter_params")
+            )
+            ffun = getattr(tod_ops.filters, fname)
+            filters.append(ffun(**params))
+
+        filt = tod_ops.filters.FilterChain(filters)
+
+        filt_tod = tod_ops.filters.fourier_filter(aman, filt,
+                                                  signal_name=self.signal_name)
         if self.wrap_name in aman._fields:
             aman.move(self.wrap_name, None)
         aman.wrap(self.wrap_name, filt_tod, [(0, 'dets'), (1, 'samps')])
@@ -1382,6 +1546,35 @@ class FourierFilter(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
+
+
+class DetcalNanCuts(_Preprocess):
+    """
+    Remove detectors with NaN values in the specified det_cal metadata fields.
+
+    Example config file entry::
+
+      - name: "detcal_nan_cuts"
+        select:
+            fields: [tau_eff, phase_to_pW]
+    """
+    name = 'detcal_nan_cuts'
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        select_fields = self.select_cfgs.get("fields")
+
+        keep = np.ones(meta.dets.count, dtype=bool)
+        for field in select_fields:
+            keep &= ~np.isnan(meta.det_cal[field])
+        if in_place:
+            meta.restrict('dets', meta.dets.vals[keep])
+        else:
+            return keep
 
 class PCARelCal(_Preprocess):
     """
@@ -1413,6 +1606,7 @@ class PCARelCal(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.run = step_cfgs.get('pca_run', 'run1')
+        self.bandpass = step_cfgs.get('bandpass_key', 'wafer.bandpass')
         self.run_name = f'{self.signal}_{self.run}'
 
         super().__init__(step_cfgs)
@@ -1428,14 +1622,12 @@ class PCARelCal(_Preprocess):
 
             if self.calc_cfgs.get("trim_samps") is not None:
                 trim = self.calc_cfgs["trim_samps"]
-                proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
-                                             proc_aman.samps.offset + proc_aman.samps.count - trim))
                 filt_aman.restrict('samps', (filt_aman.samps.offset + trim,
                                              filt_aman.samps.offset + filt_aman.samps.count - trim))
             if self.plot_cfgs:
                 self.plot_signal = filt_aman[self.signal]
 
-        bands = np.unique(aman.det_info.wafer.bandpass)
+        bands = np.unique(aman.det_info[self.bandpass])
         bands = bands[bands != 'NC']
         # align samps w/ proc_aman to include samps restriction when loading back from db.
         rc_aman = core.AxisManager(proc_aman.dets, proc_aman.samps)
@@ -1443,7 +1635,7 @@ class PCARelCal(_Preprocess):
         relcal = np.zeros(aman.dets.count)
         pca_weight0 = np.zeros(aman.dets.count)
         for band in bands:
-            m0 = aman.det_info.wafer.bandpass == band
+            m0 = aman.det_info[self.bandpass] == band
             if self.plot_cfgs is not None:
                 rc_aman.wrap(f'{band}_idx', m0, [(0, 'dets')])
             band_aman = aman.restrict('dets', aman.dets.vals[m0], in_place=False)
@@ -1480,14 +1672,17 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.run_name, pca_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~proc_aman[self.run_name]['pca_det_mask']
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -1499,7 +1694,7 @@ class PCARelCal(_Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
 
-            bands = np.unique(aman.det_info.wafer.bandpass)
+            bands = np.unique(aman.det_info[self.bandpass])
             bands = bands[bands != 'NC']
             for band in bands:
                 if f'{band}_pca_mode0' in proc_aman[self.run_name]:
@@ -1536,7 +1731,7 @@ class PCAFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         if aman.dets.count < n_modes:
@@ -1544,6 +1739,35 @@ class PCAFilter(_Preprocess):
                              f'larger than the number of detectors {aman.dets.count}.')
         model = tod_ops.pca.get_pca_model(aman, signal=signal, n_modes=n_modes)
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
+
+class GetCommonMode(_Preprocess):
+    """
+    Calculate common mode.
+
+    example config file entry::
+
+      - name: "get_common_mode"
+        calc:
+            signal: "signal"
+            method: "median"
+            wrap: "signal_commonmode"
+        save: True
+
+    .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
+    """
+    name = 'get_common_mode'
+
+    def calc_and_save(self, aman, proc_aman):
+        common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
+        common_aman = core.AxisManager(aman.samps)
+        common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
+        self.save(proc_aman, common_aman)
+
+    def save(self, proc_aman, common_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs['wrap'], common_aman)
 
 class FilterForSources(_Preprocess):
     """
@@ -1557,6 +1781,8 @@ class FilterForSources(_Preprocess):
         process:
           n_modes: 10
           source_flags: "source_flags"
+          edge_guard: 10 # Number of samples to make the first and last flags False
+          trim_samps: 100
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -1567,14 +1793,21 @@ class FilterForSources(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
+        edge_guard = self.process_cfgs.get('edge_guard')
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard)
+        if self.process_cfgs.get("trim_samps"):
+            trim = self.process_cfgs["trim_samps"]
+            proc_aman.restrict('samps', (aman.samps.offset + trim,
+                                         aman.samps.offset + aman.samps.count - trim))
+            aman.restrict('samps', (aman.samps.offset + trim,
+                                    aman.samps.offset + aman.samps.count - trim))
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1607,14 +1840,17 @@ class PTPFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("ptp_flags", ptp_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.ptp_flags.ptp_flags)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 class InvVarFlags(_Preprocess):
     """Find detectors with too high inverse variance.
@@ -1647,14 +1883,16 @@ class InvVarFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("inv_var_flags", inv_var_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.inv_var_flags.inv_var_flags)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
 
 class EstimateT2P(_Preprocess):
     """Estimate T to P leakage coefficients.
@@ -1804,7 +2042,7 @@ class CombineFlags(_Preprocess):
             elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
                 raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
         elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
-            self.process_cfgs['method'] = len(self.process_cfgs['flag_labels'])*[self.process_cfgs['method']]
+            self.process_cfgs['method'] =  ['+'] + (len(self.process_cfgs['flag_labels']) - 1)*[self.process_cfgs['method']]
         else:
             raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
         
@@ -1917,15 +2155,17 @@ class FocalplaneNanFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("fp_flags", fp_aman)
-
-    def select(self, meta, proc_aman=None):
+    
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
         keep = ~has_all_cut(proc_aman.fp_flags.fp_nans)
-        meta.restrict("dets", meta.dets.vals[keep])
-        return meta
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        return keep
 
 class PointingModel(_Preprocess):
     """Apply pointing model to the TOD.
@@ -1992,15 +2232,16 @@ class BadSubscanFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(name, calc_aman)
 
-    def select(self, meta, proc_aman=None):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        if hasattr(proc_aman.noisy_dets_flags, "valid_dets"):
-            keep = proc_aman.noisy_dets_flags.valid_dets
+        keep = proc_aman.noisy_dets_flags.valid_dets
+        if in_place:
             meta.restrict('dets', proc_aman.dets.vals[keep])
-        return meta
+            return meta
+        return keep
 
 class CorrectIIRParams(_Preprocess):
     """Correct missing iir_params by default values.
@@ -2016,9 +2257,32 @@ class CorrectIIRParams(_Preprocess):
     """
     name = "correct_iir_params"
 
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
+
+class TrimFlagEdge(_Preprocess):
+    """Trim edge until given flags of all detectors are False
+    To find first and last sample id that has False (i.e., no flags applied) for all detectors.
+    This is for avoiding glitchfill problem for data whose edge has flags of True.
+
+    Example config block::
+    
+        - name: "trim_flag_edge"
+          process:
+            flags: "pca_exclude"
+    
+    .. autofunction:: sotodlib.core.flagman.find_common_edge_idx
+    """
+    name = 'trim_flag_edge'
+
+    def process(self, aman, proc_aman, sim=False):
+        flags = aman.flags.get(self.process_cfgs.get('flags'))
+        trimst, trimen = core.flagman.find_common_edge_idx(flags)
+        aman.restrict('samps', (aman.samps.offset + trimst,
+                                aman.samps.offset + trimen))
+        proc_aman.restrict('samps', (proc_aman.samps.offset + trimst,
+                                     proc_aman.samps.offset + trimen))
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -2027,6 +2291,7 @@ _Preprocess.register(InvVarFlags)
 _Preprocess.register(PTPFlags)
 _Preprocess.register(PCARelCal)
 _Preprocess.register(PCAFilter)
+_Preprocess.register(GetCommonMode)
 _Preprocess.register(FilterForSources)
 _Preprocess.register(FourierFilter)
 _Preprocess.register(Trends)
@@ -2062,3 +2327,5 @@ _Preprocess.register(FocalplaneNanFlags)
 _Preprocess.register(PointingModel)  
 _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
+_Preprocess.register(DetcalNanCuts)
+_Preprocess.register(TrimFlagEdge)

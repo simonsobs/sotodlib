@@ -292,7 +292,7 @@ def get_ids(query, context=None):
     try:
         with open(query, "r") as fname:
             return [line.split()[0] for line in fname]
-    except IOError:
+    except FileNotFoundError:
         return context.obsdb.query(query or "1")['obs_id']
 
 def get_subids(query, context=None, method="auto"):
@@ -300,7 +300,7 @@ def get_subids(query, context=None, method="auto"):
     unit to use for mapmaking."""
     if method == "auto":
         try: return get_subids_file(query, context=context)
-        except IOError: return get_subids_query(query, context=context)
+        except FileNotFoundError: return get_subids_query(query, context=context)
     elif method == "file":
         return get_subids_file(query, context=context)
     elif method == "query":
