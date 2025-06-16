@@ -109,7 +109,7 @@ def inject_map(obs, map, recenter=None, interpol=None):
     # And perform the actual injection
     pmat.from_map(map.extract(map.shape, map.wcs), dest=obs.signal)
 
-def safe_invert_div(div, lim=1e-2, lim0=np.finfo(np.float32).tiny**0.5):
+def safe_invert_div(div, lim=1e-6, lim0=np.finfo(np.float32).tiny**0.5):
     try:
         # try setting up a context manager that limits the number of threads
         from threadpoolctl import threadpool_limits
@@ -289,6 +289,7 @@ def apply_window(tod, nsamp, exp=1):
 ########################
 
 def get_ids(query, context=None):
+    if query is None: query = "1"
     try:
         with open(query, "r") as fname:
             return [line.split()[0] for line in fname]
@@ -298,6 +299,7 @@ def get_ids(query, context=None):
 def get_subids(query, context=None, method="auto"):
     """A subid has the form obs_id:wafer_slot:band, and is a natural
     unit to use for mapmaking."""
+    if query is None and method == "auto": method = "query"
     if method == "auto":
         try: return get_subids_file(query, context=context)
         except IOError: return get_subids_query(query, context=context)
@@ -308,8 +310,8 @@ def get_subids(query, context=None, method="auto"):
     else:
         raise ValueError("Unrecognized method for get_subids: '%s'" % (str(method)))
 
-def get_subids_query(query, context):
-    obs_ids = context.obsdb.query(query or "1")['obs_id']
+def get_subids_query(query, context, tags=None):
+    obs_ids = context.obsdb.query(query or "1", tags=tags)['obs_id']
     sub_ids = expand_ids(obs_ids, context)
     return sub_ids
 
