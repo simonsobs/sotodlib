@@ -88,7 +88,7 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
     '''
     # Set default set of splits
     default_cfg = {'high_gain': 0.115, 'high_tau': 1.5e-3,
-                   'det_A': 'A', 'pol_angle': 35, 'det_top': 'BL', 'right_focal_plane': 0,
+                   'det_A': 'A', 'pol_angle': 35, 'crossover': 'BL', 'right_focal_plane': 0,
                    'top_focal_plane': 0, 'central_pixels': 0.071 }
     if split_cfg is None:
         split_cfg = default_cfg
@@ -114,9 +114,9 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
     # def pol split
     fm.wrap_dets('high_pol_angle', aman.det_info.wafer.angle > split_cfg['pol_angle'])
     fm.wrap_dets('low_pol_angle', aman.det_info.wafer.angle <= split_cfg['pol_angle'])
-    # det top/bottom split, B and L are cross over, T and R are cross under
-    fm.wrap_dets('det_type_top', [d in split_cfg['det_top'] for d in aman.det_info.wafer.crossover])
-    fm.wrap_dets('det_type_bottom', [d not in split_cfg['det_top'] for d in aman.det_info.wafer.crossover])
+    # crossover split, B and L are cross over, T and R are cross under
+    fm.wrap_dets('crossover', [d in split_cfg['crossover'] for d in aman.det_info.wafer.crossover])
+    fm.wrap_dets('crossunder', [d not in split_cfg['crossover'] for d in aman.det_info.wafer.crossover])
     # Right/left focal plane split
     fm.wrap_dets('det_right', aman.focal_plane.xi > split_cfg['right_focal_plane'])
     fm.wrap_dets('det_left', aman.focal_plane.xi <= split_cfg['right_focal_plane'])

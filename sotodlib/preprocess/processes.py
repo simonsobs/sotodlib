@@ -1961,7 +1961,7 @@ class SplitFlags(_Preprocess):
             high_tau: 1.5e-3
             det_A: A
             pol_angle: 35
-            det_top: B
+            crossover: BL
             high_leakage: 1.0e-3
             high_2f: 1.5e-3
             right_focal_plane: 0
