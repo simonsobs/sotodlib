@@ -668,42 +668,62 @@ def wrap_geom(geom):
 
 class PmatPtsrc(P):
     """
-    A pure Python Pointing Matrix for projecting between TOD and 
+    A pure-python pointing matrix for projecting between TOD and 
     point source amplitudes.
 
     This implementation pre-calculates and caches detector pointing for
     efficiency. The core projection loops are accelerated with Numba. 
     """
-    def __init__(self, sight, fp, beam_fwhm, rmax_sigma=5, cuts=None,
-                 det_weights=None):
+    def __init__(self, sight, fp, beam_fwhm=None, rmax_sigma=5, cuts=None,
+                 det_weights=None, beam_radii=None, beam_vals=None):
         """
-        Initializes the PmatPtsrc projector.
+        Initializes the PmatPtsrc projector. beam can be specified either 
+        by providing a FWHM for a Gaussian, or by passing a custom radial profile.
 
         Args:
             sight (so3g.proj.CelestialSightLine): The boresight pointing data.
             fp (so3g.proj.FocalPlane): The focal plane model.
-            beam_fwhm (float): The FWHM of the Gaussian beam in radians.
-            rmax_sigma (float): The beam evaluation radius in sigmas.
+            beam_fwhm (float, optional): The FWHM of the Gaussian beam in radians.
+                Used if `beam_radii` and `beam_vals` are not provided.
+            rmax_sigma (float): The beam evaluation radius in sigmas. Only
+                applicable if using `beam_fwhm`.
             cuts (RangesMatrix, optional): Samples to exclude.
             det_weights (np.ndarray, optional): Per-detector weights.
+            beam_radii (np.ndarray, optional): A 1D array of radii for a
+                custom beam profile. If provided, `beam_vals` must also be given.
+            beam_vals (np.ndarray, optional): A 1D array of amplitudes for a
+                custom beam profile.
         """
         super().__init__(sight=sight, fp=fp, geom=None, cuts=cuts, det_weights=det_weights)
 
         self.det_pos = self._precompute_pointing()
         self.det_comps = np.ascontiguousarray(self.fp.resps)
+        if beam_radii is not None and beam_vals is not None:
+            if len(beam_radii) != len(beam_vals):
+                raise ValueError("beam_radii and beam_vals must have the same length.")
+            self.beam_radii = np.ascontiguousarray(beam_radii, dtype=np.float32)
+            self.beam_vals = np.ascontiguousarray(beam_vals, dtype=np.float32)
+            self.rmax = self.beam_radii[-1]
+        elif beam_fwhm is not None:
+            sigma = beam_fwhm / (2 * np.sqrt(2 * np.log(2)))
+            self.rmax = rmax_sigma * sigma
+            self.beam_radii = np.linspace(0, self.rmax, 200, dtype=np.float32)
+            self.beam_vals = np.exp(-self.beam_radii**2 / (2 * sigma**2))
+        else:
+            raise ValueError("Must provide either beam_fwhm or both beam_radii and beam_vals.")
 
-        sigma = beam_fwhm / (2 * np.sqrt(2 * np.log(2)))
-        self.rmax = rmax_sigma * sigma
-        self.beam_radii = np.linspace(0, self.rmax, 200, dtype=np.float32)
-        self.beam_vals = np.exp(-self.beam_radii**2 / (2 * sigma**2))
-        self.beam_step = self.beam_radii[1] - self.beam_radii[0]
+        if len(self.beam_radii) > 1:
+            self.beam_step = self.beam_radii[1] - self.beam_radii[0]
+        else:
+            self.beam_step = 0  # Avoid division by zero for a single-point beam
 
     @classmethod
-    def for_tod(cls, tod, beam_fwhm, rmax_sigma=5,
+    def for_tod(cls, tod, beam_fwhm=None, rmax_sigma=5,
                 sight=None, fp=None, rot=None, cuts=None, det_weights=None,
                 timestamps=None, boresight=None,
                 boresight_equ=None, weather='typical',
-                site='so', hwp=False, qp_kwargs={}):
+                site='so', hwp=False, qp_kwargs={},
+                beam_radii=None, beam_vals=None):
         """
         A convenient constructor that initializes the Pmat from a TOD object.
 
@@ -724,6 +744,8 @@ class PmatPtsrc(P):
             site (str): Site for pointing calculation.
             hwp (bool): If True, reflect polarization angles.
             qp_kwargs (dict): Extra arguments for qpoint.
+            beam_radii (np.ndarray, optional): Custom beam radii.
+            beam_vals (np.ndarray, optional): Custom beam values.
 
         Returns:
             PmatPtsrc: An initialized instance of the class.
@@ -738,14 +760,14 @@ class PmatPtsrc(P):
                 sight = so3g.proj.CelestialSightLine.for_lonlat(
                     boresight_equ.ra, boresight_equ.dec, boresight_equ.get('psi'))
             else:
-                timestamps = helpers._valid_arg(timestamps, 'timestamps', src=tod)
+                timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
                 if boresight is None:
                     raise ValueError("Could not find boresight information in tod")
                 sight = so3g.proj.CelestialSightLine.az_el(
                     timestamps, boresight.az, boresight.el, roll=boresight.roll,
                     site=site, weather=weather, **qp_kwargs)
         else:
-            sight = helpers._get_csl(sight)
+            sight = _get_csl(sight)
 
         if rot is not None:
             sight.Q = rot * sight.Q
@@ -754,7 +776,8 @@ class PmatPtsrc(P):
             fp = helpers.get_fplane(tod, hwp=hwp)
 
         return cls(sight=sight, fp=fp, beam_fwhm=beam_fwhm,
-                   rmax_sigma=rmax_sigma, cuts=cuts, det_weights=det_weights)
+                   rmax_sigma=rmax_sigma, cuts=cuts, det_weights=det_weights,
+                   beam_radii=beam_radii, beam_vals=beam_vals)
 
     def to_tod(self, src_pos, amps, tod=None, dest=None, tmul=1.0, pmul=1.0, wrap=None):
         """
@@ -881,15 +904,18 @@ class PmatPtsrcPersamp(PmatPtsrc):
     the core projection loops.
 
     """
-    def __init__(self, sight, fp, beam_fwhm, rmax_sigma=5, cuts=None,
-                 det_weights=None):
+    def __init__(self, sight, fp, beam_fwhm=None, rmax_sigma=5, cuts=None,
+                 det_weights=None, beam_radii=None, beam_vals=None):
         """
         Initializes the PmatPtsrcPersamp projector.
         
         This simply calls the parent class's initializer, as the setup
         logic is identical.
         """
-        super().__init__(sight, fp, beam_fwhm, rmax_sigma, cuts, det_weights)
+        super().__init__(sight=sight, fp=fp, beam_fwhm=beam_fwhm,
+                         rmax_sigma=rmax_sigma, cuts=cuts,
+                         det_weights=det_weights, beam_radii=beam_radii,
+                         beam_vals=beam_vals)
 
     def to_tod(self, src_pos, amps_tod, tod=None, dest=None, tmul=1.0, pmul=1.0, wrap=None):
         """
