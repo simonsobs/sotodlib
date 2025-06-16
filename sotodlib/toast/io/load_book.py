@@ -525,8 +525,8 @@ def read_book(
                     weather=weather,
                 )
             except KeyError:
-                msg = f"Book {book_name} toast sim info does not have valid site "
-                msg += f" information.  Will use nominal values."
+                msg = f"Book {book_name} toast sim info does not have valid "
+                msg += f"site information.  Will use nominal values."
                 log.warning_rank(msg, comm=comm.comm_group)
                 book_session = True
         else:

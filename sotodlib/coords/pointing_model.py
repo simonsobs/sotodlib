@@ -72,28 +72,33 @@ def apply_pointing_model(tod, pointing_model=None, ancil=None,
       AxisManager: the corrected boresight.
 
     """
-    if pointing_model is None and 'pointing_model' not in tod:
-        logger.warning('No pointing_model found -- applying basic model.')
-        assert wrap in (None, 'boresight'), \
-            'When using naive pointing model, wrap=... not supported'
+    if pointing_model is None and "pointing_model" not in tod:
+        logger.warning("No pointing_model found -- applying basic model.")
+        assert wrap in (
+            None,
+            "boresight",
+        ), "When using naive pointing model, wrap=... not supported"
         return apply_basic_pointing_model(tod)
 
-    pointing_model = _valid_arg(pointing_model, 'pointing_model',
-                                src=tod)
-    ancil = _valid_arg(ancil, 'ancil', src=tod)
+    pointing_model = _valid_arg(pointing_model, "pointing_model", src=tod)
+    ancil = _valid_arg(ancil, "ancil", src=tod)
 
     # Encoder values, to radians.
-    vers = pointing_model['version']
-    tel_type = vers.split('_')[0]
-    if tel_type == 'sat':
+    if pointing_model is None:
+        raise ValueError("No pointing_model specified")
+    if "version" not in pointing_model:
+        raise ValueError("Pointing model version not specified")
+    vers = pointing_model["version"]
+    tel_type = vers.split("_")[0]
+    if tel_type == "sat":
         boresight = apply_pointing_model_sat(vers, pointing_model, tod, ancil)
-    elif tel_type == 'lat':
-        boresight = apply_pointing_model_lat(vers, pointing_model, tod, ancil)
+    elif tel_type == "lat":
+        boresight = apply_pointing_model_lat(vers, pointing_model, ancil)
     else:
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
     if wrap is None:
-        wrap = 'boresight'
+        wrap = "boresight"
     if wrap is not False:
         if wrap in tod._fields:
             del tod[wrap]
@@ -115,8 +120,75 @@ def apply_pointing_model_sat(vers, params, tod, ancil):
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
 
-def apply_pointing_model_lat(vers, tod, pointing_model, ancil):
-    raise ValueError(f'Unimplemented pointing model "{vers}"')
+def apply_pointing_model_lat(vers, params, ancil):
+    az, el, roll = _get_lat_enc_radians(ancil)
+    if vers == "lat_v1":
+        az1, el1, roll1 = model_lat_v1(params, az, el, roll)
+        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
+
+    else:
+        raise ValueError(f'Unimplemented pointing model "{vers}"')
+
+
+#
+# LAT model(s)
+#
+def model_lat_v1(params, az, el, roll):
+    """Applies pointing model to (az, el, roll).
+
+    Args:
+      params: AxisManager (or dict) of pointing parameters.
+      az, el, roll: naive horizon coordinates, in radians, of the
+        boresight.
+
+    The implemented model parameters are:
+
+    - rx_{xi, eta}_offset: The offset between the LATR center and the axis
+      of the corotator.
+    - cr_offset: The corotator encoder offset.
+    - el_{xi, eta}_offset: The offset between the elevation exis and the
+      corotator axis.
+    - mir_{xi, eta}_offset: The offset between the mirror's axis and the elevation
+      axis (ie: a tilt in the mirrors).
+    - az_offset: The azimuth encoder offset.
+    - el_offset: The elevation encoder offset.
+    """
+    _params = {
+        "az_offset": 0,
+        "el_offset": 0,
+        "cr_offset": 0,
+        "el_xi_offset": 0,
+        "el_eta_offset": 0,
+        "rx_xi_offset": 0,
+        "rx_eta_offset": 0,
+        "mir_xi_offset": 0,
+        "mir_eta_offset": 0,
+    }
+    _params = _params.copy()
+    _params.update(params)
+    params = _params
+    cr = el - roll - np.deg2rad(60)
+    for key, val in params.items():
+        if not isinstance(val, (float, int)):
+            continue
+        params[key] = np.deg2rad(val)
+    q_enc = quat.rotation_lonlat(
+        -1 * (az.copy() + params["az_offset"]), el.copy() + params["el_offset"]
+    )
+    q_mir = quat.rotation_xieta(params["mir_xi_offset"], params["mir_eta_offset"])
+    q_el_roll = quat.euler(2, el.copy() + params["el_offset"] - np.deg2rad(60))
+    q_tel = quat.rotation_xieta(params["el_xi_offset"], params["el_eta_offset"])
+    q_cr_roll = quat.euler(2, -1 * cr - params["cr_offset"])
+    q_rx = quat.rotation_xieta(params["rx_xi_offset"], params["rx_eta_offset"])
+    new_az, el, roll = (
+        quat.decompose_lonlat(q_enc * q_mir * q_el_roll * q_tel * q_cr_roll * q_rx)
+        * np.array([-1, 1, 1])[..., None]
+    )
+
+    change = ((new_az - az) + np.pi) % (2 * np.pi) - np.pi
+    az = az.copy() + change
+
+    return az, el, roll
 
 
 #
@@ -218,6 +290,15 @@ def _get_sat_enc_radians(ancil):
     return (ancil.az_enc * DEG,
             ancil.el_enc * DEG,
             -ancil.boresight_enc * DEG)
+
+def _get_lat_enc_radians(ancil):
+    az = ancil.az_enc * DEG
+    el = ancil.el_enc * DEG
+    if "roll_enc" in ancil:
+        roll = ancil.roll_enc * DEG
+    else:
+        roll = (ancil.el_enc - ancil.corotator_enc - 60) * DEG
+    return (az, el, roll)
 
 def get_base_tilt_q(c, s):
     """Returns the quaternion rotation that applies base tilt, taking
