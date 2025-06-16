@@ -705,8 +705,8 @@ class Noise(_Preprocess):
                 vals.append(np.nanmean(white_noise))
 
                 tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                    }
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
                 tags_base["telescope"] = meta.obs_info.telescope
 
                 tags.append(tag_base)
