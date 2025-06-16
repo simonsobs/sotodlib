@@ -870,6 +870,108 @@ class PmatPtsrc(P):
         return np.ascontiguousarray(det_pix, dtype=np.int32)
 
 
+class PmatPtsrcPersamp(PmatPtsrc):
+    """
+    A pointing matrix for projecting between TOD and per-sample point source 
+    amplitudes.
+
+    This is useful for sources with time-variable brightness or for modeling
+    other time-dependent effects as an amplitude modulation. This implementation
+    pre-calculates and caches detector pointing and uses Numba to accelerate
+    the core projection loops.
+
+    """
+    def __init__(self, sight, fp, beam_fwhm, rmax_sigma=5, cuts=None,
+                 det_weights=None):
+        """
+        Initializes the PmatPtsrcPersamp projector.
+        
+        This simply calls the parent class's initializer, as the setup
+        logic is identical.
+        """
+        super().__init__(sight, fp, beam_fwhm, rmax_sigma, cuts, det_weights)
+
+    def to_tod(self, src_pos, amps_tod, tod=None, dest=None, tmul=1.0, pmul=1.0, wrap=None):
+        """
+        Projects per-sample source amplitudes into a TOD (m(t) -> d(t)).
+
+        Operation: tod = tod * tmul + P @ amps_tod * pmul.
+
+        Args:
+            src_pos (np.ndarray): Source celestial positions, shape (nsrc, 2)
+                                  as [dec, ra] in radians.
+            amps_tod (np.ndarray): Time-variable source amplitudes, shape
+                                   (nsrc, nsamp, 3) for TQU.
+            tod (AxisManager, optional): The container for the output TOD.
+            dest (np.ndarray, optional): TOD array to accumulate results into.
+            tmul (float): Factor to multiply the input TOD by.
+            pmul (float): Factor to multiply source amplitudes by.
+            wrap (str, optional): If provided, the result is wrapped into `tod[wrap]`.
+
+        Returns:
+            np.ndarray: The resulting TOD array.
+        """
+        src_pos = np.ascontiguousarray(src_pos)
+        if src_pos.ndim == 1:
+            src_pos = src_pos[None,:]
+
+        dist_map, domain_map, geom = self._build_lookup_maps(src_pos)
+        det_pix = self._get_det_pixels(geom)
+
+        if dest is None and tod is not None and 'signal' in tod:
+            dest = tod.signal
+        if dest is None:
+            dest = np.zeros(self.det_pos.shape[:2], dtype=np.float32)
+
+        _pmat_ptsrc_persamp_forward(
+            tod=dest, amplitudes=amps_tod, det_pos=self.det_pos, det_pix=det_pix,
+            det_comps=self.det_comps, src_pos=src_pos, beam_radii=self.beam_radii,
+            beam_vals=self.beam_vals, beam_step=self.beam_step, dist_map=dist_map,
+            domain_map=domain_map, rmax=self.rmax, tmul=tmul, pmul=pmul
+        )
+
+        if wrap and tod is not None:
+            if wrap in tod:
+                del tod[wrap]
+            tod.wrap(wrap, dest, [(0, 'dets'), (1, 'samps')])
+        return dest
+
+    def to_srcs(self, src_pos, tod, amps_tod, tmul=1.0, pmul=1.0):
+        """
+        Projects a TOD onto per-sample source amplitudes (d(t) -> m(t)).
+
+        Operation: amps_tod = amps_tod * pmul + P.T @ tod * tmul.
+
+        Args:
+            src_pos (np.ndarray): Source positions, shape (nsrc, 2).
+            tod (np.ndarray): TOD array to project from, shape (ndet, nsamp).
+            amps_tod (np.ndarray): Array to accumulate source amplitudes into,
+                                   shape (nsrc, nsamp, 3). Modified in-place.
+            tmul (float): Factor to multiply the TOD by.
+            pmul (float): Factor to multiply the existing amplitudes by.
+
+        Returns:
+            np.ndarray: The resulting source amplitudes array.
+        """
+        src_pos = np.ascontiguousarray(src_pos)
+        if src_pos.ndim == 1:
+            src_pos = src_pos[None,:]
+            
+        dist_map, domain_map, geom = self._build_lookup_maps(src_pos)
+        det_pix = self._get_det_pixels(geom)
+
+        # The Numba kernel will return the projected TOD, which we then add
+        amp_buffer = np.zeros_like(amps_tod)
+        _pmat_ptsrc_persamp_backward(
+            tod=tod, amplitudes=amp_buffer, det_pos=self.det_pos, det_pix=det_pix,
+            det_comps=self.det_comps, src_pos=src_pos, beam_radii=self.beam_radii,
+            beam_vals=self.beam_vals, beam_step=self.beam_step, dist_map=dist_map,
+            domain_map=domain_map, rmax=self.rmax, tmul=tmul
+        )
+        amps_tod[:] = amps_tod * pmul + amp_buffer
+        return amps_tod
+
+
 @njit(nogil=True, fastmath=True, parallel=True)
 def _pmat_ptsrc_forward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos, beam_radii,
                         beam_vals, beam_step, dist_map, domain_map, rmax, tmul, pmul):
@@ -963,6 +1065,111 @@ def _pmat_ptsrc_backward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos,
             amp_buf[src_idx, 2] += tod_val * phase_U
 
     # Reduction step: sum the buffers from all threads into the final output
+    for i in range(n_threads):
+        amplitudes += amp_buffers[i]
+
+
+@njit(nogil=True, fastmath=True, parallel=True)
+def _pmat_ptsrc_persamp_forward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos, beam_radii,
+                                beam_vals, beam_step, dist_map, domain_map, rmax, tmul, pmul):
+    """Numba kernel for per-sample forward projection (sources -> TOD)."""
+    ndet, nsamp = tod.shape
+    nsrc = src_pos.shape[0]
+    
+    if nsrc == 0:
+        tod *= tmul
+        return
+
+    tod *= tmul
+    for i_det in prange(ndet):
+        for i_time in range(nsamp):
+            y_pix, x_pix = det_pix[i_det, i_time]
+            if y_pix < 0 or y_pix >= dist_map.shape[0] or x_pix < 0 or x_pix >= dist_map.shape[1]:
+                continue
+            if dist_map[y_pix, x_pix] >= rmax: continue
+            src_idx = domain_map[y_pix, x_pix]
+            if src_idx < 0: continue
+            
+            # Fine-grained distance check
+            det_dec, det_ra = det_pos[i_det, i_time, 0], det_pos[i_det, i_time, 1]
+            src_dec, src_ra = src_pos[src_idx, 0], src_pos[src_idx, 1]
+            dlat, dlon = det_dec - src_dec, det_ra - src_ra
+            a = np.sin(dlat/2)**2 + np.cos(src_dec) * np.cos(det_dec) * np.sin(dlon/2)**2
+            ang_dist = 2 * np.arcsin(np.sqrt(a))
+            
+            if ang_dist >= rmax: continue
+            
+            # Interpolate beam value
+            idx_float = ang_dist / beam_step
+            idx0 = int(idx_float)
+            if idx0 >= len(beam_vals) - 1: continue
+            weight = idx_float - idx0
+            beam_val = beam_vals[idx0] * (1 - weight) + beam_vals[idx0 + 1] * weight
+            
+            # Project using time-variable amplitude for this source and sample
+            det_cos2psi, det_sin2psi = det_pos[i_det, i_time, 2], det_pos[i_det, i_time, 3]
+            resp_T, resp_P = det_comps[i_det, 0], det_comps[i_det, 1]
+            phase_T, phase_Q, phase_U = resp_T, resp_P * det_cos2psi, resp_P * det_sin2psi
+            
+            amp_T = amplitudes[src_idx, i_time, 0]
+            amp_Q = amplitudes[src_idx, i_time, 1]
+            amp_U = amplitudes[src_idx, i_time, 2]
+            
+            signal = (amp_T * phase_T + amp_Q * phase_Q + amp_U * phase_U) * beam_val * pmul
+            tod[i_det, i_time] += signal
+
+@njit(nogil=True, fastmath=True, parallel=True)
+def _pmat_ptsrc_persamp_backward(tod, amplitudes, det_pos, det_pix, det_comps, src_pos,
+                                 beam_radii, beam_vals, beam_step, dist_map,
+                                 domain_map, rmax, tmul):
+    """Numba kernel for per-sample backward projection (TOD -> sources)."""
+    ndet, nsamp = tod.shape
+    nsrc = src_pos.shape[0]
+    n_threads = nb.get_num_threads()
+    
+    if nsrc == 0:
+        return
+
+    # Thread-local buffers to avoid race conditions during accumulation
+    amp_buffers = np.zeros((n_threads, nsrc, nsamp, 3), dtype=amplitudes.dtype)
+
+    for i_det in prange(ndet):
+        thread_id = nb.get_thread_id()
+        amp_buf = amp_buffers[thread_id]
+        
+        for i_time in range(nsamp):
+            y_pix, x_pix = det_pix[i_det, i_time]
+            if y_pix < 0 or y_pix >= dist_map.shape[0] or x_pix < 0 or x_pix >= dist_map.shape[1]: continue
+            if dist_map[y_pix, x_pix] >= rmax: continue
+            src_idx = domain_map[y_pix, x_pix]
+            if src_idx < 0: continue
+
+            # Fine-grained check
+            det_dec, det_ra = det_pos[i_det, i_time, 0], det_pos[i_det, i_time, 1]
+            src_dec, src_ra = src_pos[src_idx, 0], src_pos[src_idx, 1]
+            dlat, dlon = det_dec - src_dec, det_ra - src_ra
+            a = np.sin(dlat/2)**2 + np.cos(src_dec) * np.cos(det_dec) * np.sin(dlon/2)**2
+            ang_dist = 2 * np.arcsin(np.sqrt(a))
+            if ang_dist >= rmax: continue
+
+            # Interpolate beam
+            idx_float = ang_dist / beam_step
+            idx0 = int(idx_float)
+            if idx0 >= len(beam_vals) - 1: continue
+            weight = idx_float - idx0
+            beam_val = beam_vals[idx0] * (1 - weight) + beam_vals[idx0 + 1] * weight
+
+            # Project
+            det_cos2psi, det_sin2psi = det_pos[i_det, i_time, 2], det_pos[i_det, i_time, 3]
+            resp_T, resp_P = det_comps[i_det, 0], det_comps[i_det, 1]
+            phase_T, phase_Q, phase_U = resp_T, resp_P * det_cos2psi, resp_P * det_sin2psi
+            tod_val = tod[i_det, i_time] * tmul * beam_val
+
+            amp_buf[src_idx, i_time, 0] += tod_val * phase_T
+            amp_buf[src_idx, i_time, 1] += tod_val * phase_Q
+            amp_buf[src_idx, i_time, 2] += tod_val * phase_U
+
+    # Reduction step: sum the buffers from all threads
     for i in range(n_threads):
         amplitudes += amp_buffers[i]
 
