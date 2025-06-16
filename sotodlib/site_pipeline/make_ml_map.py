@@ -244,7 +244,7 @@ def main(**args):
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.find_usable_detectors(obs,maxcut=0.5)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
