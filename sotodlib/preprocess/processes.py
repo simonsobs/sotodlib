@@ -704,12 +704,12 @@ class Noise(_Preprocess):
                 white_noise = proc_aman[noise_aman].white_noise[subset]
                 vals.append(np.nanmean(white_noise))
 
-            tags_base = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_base["telescope"] = meta.obs_info.telescope
+                tags_base = {
+                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
 
-            tags.append(tag_base)
+                tags.append(tag_base)
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
