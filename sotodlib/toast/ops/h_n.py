@@ -180,7 +180,11 @@ class Hn(Operator):
     @function_timer
     def _get_covariance(self, data, det):
         self.pixel_pointing.apply(data, detectors=[det])
-
+        if self.covariance in data:
+            data[self.covariance].reset()
+            inv_cov_units = (1.0 / defaults.det_data_units**2)
+            print(inv_cov_units)
+            data[self.covariance].update_units(inv_cov_units)
         BuildInverseCovariance(
             pixel_dist=self.pixel_dist,
             inverse_covariance=self.covariance,
