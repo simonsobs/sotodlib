@@ -551,6 +551,7 @@ class Noise(_Preprocess):
 
     """
     name = "noise"
+    _influx_field = "median_white_noise"
 
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
