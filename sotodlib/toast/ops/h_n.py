@@ -11,8 +11,6 @@ from toast.mpi import MPI
 import toast.qarray as qa
 from toast.traits import trait_docs, Int, Unicode, Bool, Float, Instance
 from toast.timing import function_timer, Timer
-from toast.pixels import PixelDistribution, PixelData
-from toast.pixels_io_healpix import write_healpix_fits
 from toast.covariance import covariance_invert, covariance_apply
 from toast.observation import default_values as defaults
 from toast.ops import (
@@ -236,7 +234,7 @@ class Hn(Operator):
             )
 
             fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
-            write_healpix_fits(data[self.h_n_map], fname, nest=self.pixel_pointing.nest)
+            data[self.h_n_map].write(fname, healpix_nest=self.pixel_pointing.nest)
             log.info_rank(f"Wrote h_n map to {fname}", comm=data.comm.comm_world)
 
         return

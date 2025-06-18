@@ -13,8 +13,6 @@ from toast.timing import function_timer
 from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
 from toast.ops import Operator
-from toast.pixels_io_healpix import write_healpix_fits, write_healpix_hdf5
-from toast.pixels_io_wcs import write_wcs_fits
 from toast import qarray as qa
 
 
@@ -37,6 +35,7 @@ class Split(object):
     and the detector flags restored.
 
     """
+
     def __init__(self, name="N/A"):
         self._name = name
         self._split_intervals = "split"
@@ -155,6 +154,7 @@ class SplitAll(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(self, name, interval=defaults.scanning_interval):
         super().__init__(name)
         self._interval = interval
@@ -175,6 +175,7 @@ class SplitLeftGoing(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(self, name, interval=defaults.scan_rightleft_interval):
         super().__init__(name)
         self._interval = interval
@@ -195,6 +196,7 @@ class SplitRightGoing(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(self, name, interval=defaults.scan_leftright_interval):
         super().__init__(name)
         self._interval = interval
@@ -217,6 +219,7 @@ class SplitOuterDetectors(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(
         self,
         name,
@@ -260,6 +263,7 @@ class SplitInnerDetectors(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(
         self,
         name,
@@ -304,6 +308,7 @@ class SplitByList(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(
         self,
         name,
@@ -351,6 +356,7 @@ class SplitPolA(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(self, name, interval=defaults.scanning_interval):
         super().__init__(name)
         self._interval = interval
@@ -383,6 +389,7 @@ class SplitPolB(Split):
         interval (str):  Name of the interval to use.
 
     """
+
     def __init__(self, name, interval=defaults.scanning_interval):
         super().__init__(name)
         self._interval = interval
@@ -582,7 +589,7 @@ class Splits(Operator):
             raise RuntimeError(msg)
 
         is_pix_wcs = hasattr(self.mapmaker.map_binning.pixel_pointing, "wcs")
-        is_hpix_nest = None
+        is_hpix_nest = True
         if not is_pix_wcs:
             is_hpix_nest = self.mapmaker.map_binning.pixel_pointing.nest
 
@@ -591,40 +598,24 @@ class Splits(Operator):
         else:
             to_write = {split_name: self._split_obj[split_name]}
 
+        if self.mapmaker.write_hdf5:
+            fname_suffix = "h5"
+        else:
+            fname_suffix = "fits"
+
         for spname, spl in to_write.items():
             mname = f"{self.name}_{split_name}"
             for prod in ["hits", "map", "invcov", "noiseweighted_map"]:
                 mkey = f"{mname}_{prod}"
-                if is_pix_wcs:
-                    fname = os.path.join(
-                        self.output_dir, f"{self.name}_{split_name}_{prod}.fits"
-                    )
-                    # FIXME: add single precision option to upstream function
-                    write_wcs_fits(data[mkey], fname)
-                else:
-                    if self.mapmaker.write_hdf5:
-                        # Non-standard HDF5 output
-                        fname = os.path.join(
-                            self.output_dir, f"{self.name}_{split_name}_{prod}.h5"
-                        )
-                        write_healpix_hdf5(
-                            data[mkey],
-                            fname,
-                            nest=is_hpix_nest,
-                            single_precision=True,
-                            force_serial=self.mapmaker.write_hdf5_serial,
-                        )
-                    else:
-                        # Standard FITS output
-                        fname = os.path.join(
-                            self.output_dir, f"{self.name}_{split_name}_{prod}.fits"
-                        )
-                        write_healpix_fits(
-                            data[mkey],
-                            fname,
-                            nest=is_hpix_nest,
-                            single_precision=True,
-                        )
+                fname = os.path.join(
+                    self.output_dir, f"{self.name}_{split_name}_{prod}.{fname_suffix}"
+                )
+                data[mkey].write(
+                    fname,
+                    healpix_nest=is_hpix_nest,
+                    hdf5_force_serial=self.mapmaker.write_hdf5_serial,
+                    single_precision=True,
+                )
             # Clean up all products for this split
             for prod in [
                 "hits",
