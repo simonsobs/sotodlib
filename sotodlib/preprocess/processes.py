@@ -710,7 +710,7 @@ class Noise(_Preprocess):
                     k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
                 }
                 tags_base["telescope"] = meta.obs_info.telescope
-                tags.append(tag_base)
+                tags.append(tags_base)
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
