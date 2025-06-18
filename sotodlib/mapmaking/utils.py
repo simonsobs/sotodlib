@@ -760,6 +760,7 @@ class AtomicInfo(Base):
     uv: Mapped[Optional[float]]
     ra_center: Mapped[Optional[float]]
     dec_center: Mapped[Optional[float]]
+    number_dets: Mapped[Optional[int]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id

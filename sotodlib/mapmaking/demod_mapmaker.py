@@ -582,7 +582,7 @@ def make_demod_map(context, obslist, noise_model, info,
     else:
         preproc_init = preprocess_config[0]
         preproc_proc = preprocess_config[1]
-
+    n_dets = 0
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
@@ -601,7 +601,10 @@ def make_demod_map(context, obslist, noise_model, info,
         mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
+        n_dets += obs.dets.count
     nobs_kept = comm.allreduce(nobs_kept)
+    n_dets = comm.allreduce(n_dets)
+    info['number_dets'] = n_dets
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
         return errors, outputs, None
