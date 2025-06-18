@@ -471,13 +471,11 @@ def main(
         L.info('New future as_completed result')
         try:
             errors, outputs, d_ = future.result()
-            if d_ is None:
-                # this means the map failed and the function returned early
-                continue
-            list_infos = []
-            for n_split in range(len(split_labels)):
-                list_infos.append(mapmaking.AtomicInfo.from_dict(d_[n_split]))
-            mapmaking.atomic_db_aux(args.atomic_db, list_infos)
+            if d_ is not None:
+                list_infos = []
+                for n_split in range(len(split_labels)):
+                    list_infos.append(mapmaking.AtomicInfo.from_dict(d_[n_split]))
+                mapmaking.atomic_db_aux(args.atomic_db, list_infos)
         except Exception as e:
             future_write_to_log(e, errlog[-1])
             continue
