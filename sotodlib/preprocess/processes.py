@@ -696,7 +696,6 @@ class Noise(_Preprocess):
         tags = []
         vals = []
         from ..qa.metrics import _get_tag, _has_tag
-        import re
         for bp in np.unique(meta.det_info.wafer.bandpass):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
