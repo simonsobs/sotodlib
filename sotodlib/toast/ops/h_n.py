@@ -234,7 +234,7 @@ class Hn(Operator):
             )
 
             fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
-            data[self.h_n_map].write(fname, healpix_nest=self.pixel_pointing.nest)
+            data[self.h_n_map].write(fname)
             log.info_rank(f"Wrote h_n map to {fname}", comm=data.comm.comm_world)
 
         return

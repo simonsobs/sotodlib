@@ -588,11 +588,6 @@ class Splits(Operator):
             msg = "No splits have been created yet, cannot write"
             raise RuntimeError(msg)
 
-        is_pix_wcs = hasattr(self.mapmaker.map_binning.pixel_pointing, "wcs")
-        is_hpix_nest = True
-        if not is_pix_wcs:
-            is_hpix_nest = self.mapmaker.map_binning.pixel_pointing.nest
-
         if split_name is None:
             to_write = dict(self._split_obj)
         else:
@@ -608,12 +603,11 @@ class Splits(Operator):
             for prod in ["hits", "map", "invcov", "noiseweighted_map"]:
                 mkey = f"{mname}_{prod}"
                 fname = os.path.join(
-                    self.output_dir, f"{self.name}_{split_name}_{prod}.{fname_suffix}"
+                    self.output_dir, f"{self.name}_{spname}_{prod}.{fname_suffix}"
                 )
                 data[mkey].write(
                     fname,
-                    healpix_nest=is_hpix_nest,
-                    hdf5_force_serial=self.mapmaker.write_hdf5_serial,
+                    force_serial=self.mapmaker.write_hdf5_serial,
                     single_precision=True,
                 )
             # Clean up all products for this split
