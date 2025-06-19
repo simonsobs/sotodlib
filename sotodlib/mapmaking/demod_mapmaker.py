@@ -452,24 +452,36 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def write_demod_maps(prefix, data, info, unit='K', split_labels=None, atomic_db=None):
+def write_demod_maps(prefix, data, info, unit='K', split_labels=['full']):
     """
     Write maps from data into files
+
+    Arguments
+    ---------
+    prefix : str
+        Prefix where to write maps.
+    data : Bunch
+        Bunch object with required maps.
+    info : list
+        List of dictionaries with the info to write into the atomic
+        db. Will be modified in place for valid=[True|False] atomics.
+    unit : str, optional
+        Unit to write into the header of the fits file.
+    split_labels : list, optional
+        List with splits labels.
     """
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
         if np.all(data.wmap[n_split] == 0.0):
-            if atomic_db is not None:
-                smutils.atomic_db_aux(atomic_db, info[n_split], valid=False)
-            continue
-        data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
-                          data.wmap[n_split], unit=unit+'^-1')
-        data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                          data.weights[n_split], unit=unit+'^2')
-        data.signal.write(prefix, "%s_hits"%split_labels[n_split],
-                          data.signal.hits[n_split], unit='hits')
-        if atomic_db is not None:
-            smutils.atomic_db_aux(atomic_db, info[n_split], valid=True)
+            info[n_split]['valid'] = False
+        else:
+            info[n_split]['valid'] = True
+            data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
+                              data.wmap[n_split], unit=unit+'^-1')
+            data.signal.write(prefix, "%s_weights"%split_labels[n_split],
+                              data.weights[n_split], unit=unit+'^2')
+            data.signal.write(prefix, "%s_hits"%split_labels[n_split],
+                              data.signal.hits[n_split], unit='hits')
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
@@ -477,7 +489,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    atomic_db=None, unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
+                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -492,7 +504,7 @@ def make_demod_map(context, obslist, noise_model, info,
     noise_model : sotodlib.mapmaking.Nmat
         Noise model to pass to DemodMapmaker.
     info : list
-        Information for the database, will be written as a .hdf file.
+        Information for the database in the form of a list of dictionaries
     preprocess_config : list of dict
         List of dictionaries with the config yaml file for the preprocess database.
         If two, then a multilayer preprocessing is to be used.
@@ -530,8 +542,6 @@ def make_demod_map(context, obslist, noise_model, info,
         If True, do not perform demodulated filter+bin mapmaking but
         rather regular filter+bin mapmaking, i.e. map from obs.signal
         rather than from obs.dsT, obs.demodQ, obs.demodU.
-    atomic_db : str, optional
-        Path to the atomic map data base. Maps created will be added to it.
     use_psd : bool, optional
         By default True. Use the white noise measured from PSD as mapmaking weights,
         which must be provided in the preprocessing. This is done as opposed to
@@ -545,6 +555,9 @@ def make_demod_map(context, obslist, noise_model, info,
         List of errors from preprocess database. To be used in cleanup_mandb.
     outputs : list
         List of outputs from preprocess database. To be used in cleanup_mandb.
+    info: list
+        List of dictionaries with the info to write into atomic db. It will be
+        the same as the input, but the weights values will be added.
     """
     from ..preprocess import preprocess_util
     #context = core.Context(context)
@@ -569,7 +582,7 @@ def make_demod_map(context, obslist, noise_model, info,
     else:
         preproc_init = preprocess_config[0]
         preproc_proc = preprocess_config[1]
-
+    n_dets = 0
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
@@ -588,10 +601,14 @@ def make_demod_map(context, obslist, noise_model, info,
         mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
+        n_dets += obs.dets.count
     nobs_kept = comm.allreduce(nobs_kept)
+    n_dets = comm.allreduce(n_dets)
+    for subinfo in info:
+        subinfo['number_dets'] = n_dets
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
-        return errors, outputs
+        return errors, outputs, None
 
     for signal in mapmaker.signals:
         signal.prepare()
@@ -608,9 +625,8 @@ def make_demod_map(context, obslist, noise_model, info,
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db, unit=unit)
-
-    return errors, outputs
+    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
+    return errors, outputs , info
 
 def add_weights_to_info(info, weights, split_labels):
     Nsplits = len(split_labels)
@@ -627,9 +643,9 @@ def add_weights_to_info(info, weights, split_labels):
         sumweights = np.sum(pweights)
         meanweights = np.mean(pweights)
         medianweights = np.median(pweights)
-        sub_info.total_weight_qu = sumweights
-        sub_info.mean_weight_qu = meanweights
-        sub_info.median_weight_qu = medianweights
+        sub_info['total_weight_qu'] = sumweights
+        sub_info['mean_weight_qu'] = meanweights
+        sub_info['median_weight_qu'] = medianweights
         info[isplit] = sub_info
     return info
 
@@ -655,7 +671,7 @@ def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weights
     rhs_T = to_map(signal=signalT, comps='T', det_weights=det_weightsT)
     rhs_demodQ = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
     rhs_demodU = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
-    rhs_demodQU = zeros(super_shape=(2), comps='QU',)
+    rhs_demodQU = zeros(super_shape=(2), comps='QU')
 
     rhs_demodQU[0][:] = rhs_demodQ[0] - rhs_demodU[1]
     rhs_demodQU[1][:] = rhs_demodQ[1] + rhs_demodU[0]
