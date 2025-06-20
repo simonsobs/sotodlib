@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional
+import cProfile, pstats, io
 from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
@@ -385,38 +386,38 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     else:
         profile_dir = None
 
-    # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    futures = [executor.submit(pp_util.profile_function,
-                    func=preprocess_tod,
-                    profile_path=os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof') if profile_dir is not None else None,
-                    obs_id=r[0]['obs_id'],
-                    group_list=r[1], verbosity=verbosity,
-                    configs=configs,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
-    for future in as_completed_callable(futures):
-        logger.info('New future as_completed result')
-        try:
-            err, db_datasets = future.result()
-            if err is not None:
-                n_fail += 1
-        except Exception as e:
-            errmsg = f'{type(e)}: {e}'
-            tb = ''.join(traceback.format_tb(e.__traceback__))
-            logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-            f = open(errlog, 'a')
-            f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-            f.close()
-            n_fail+=1
-            continue
-        futures.remove(future)
+    # # Run write_block obs-ids in parallel at once then write all to the sqlite db.
+    # futures = [executor.submit(pp_util.profile_function,
+    #                 func=preprocess_tod,
+    #                 profile_path=os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof') if profile_dir is not None else None,
+    #                 obs_id=r[0]['obs_id'],
+    #                 group_list=r[1], verbosity=verbosity,
+    #                 configs=configs,
+    #                 overwrite=overwrite, run_parallel=True) for r in run_list]
+    # for future in as_completed_callable(futures):
+    #     logger.info('New future as_completed result')
+    #     try:
+    #         err, db_datasets = future.result()
+    #         if err is not None:
+    #             n_fail += 1
+    #     except Exception as e:
+    #         errmsg = f'{type(e)}: {e}'
+    #         tb = ''.join(traceback.format_tb(e.__traceback__))
+    #         logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+    #         f = open(errlog, 'a')
+    #         f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+    #         f.close()
+    #         n_fail+=1
+    #         continue
+    #     futures.remove(future)
 
-        if db_datasets:
-            if err is None:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
-                for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
-            else:
-                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+    #     if db_datasets:
+    #         if err is None:
+    #             logger.info(f'Processing future result db_dataset: {db_datasets}')
+    #             for db_dataset in db_datasets:
+    #                 pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+    #         else:
+    #             pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
     if run_profiling:
         combined_profile_dir = os.path.join(profile_dir, 'combined_profile.prof')
@@ -430,8 +431,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         combined_stats = stats
                     else:
                         combined_stats.add(stats)
-                except:
-                    logger.error(f"cannot get stats for {r[0]['obs_id']}")
+                except Exception as e:
+                    logger.error(f"cannot get stats for {r[0]['obs_id']}: {e}")
         if combined_stats is not None:
             combined_stats.dump_stats(combined_profile_dir)
 

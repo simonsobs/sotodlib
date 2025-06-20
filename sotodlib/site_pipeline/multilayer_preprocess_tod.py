@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional
+import cProfile, pstats, io
 from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
