@@ -19,6 +19,7 @@ from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
 
+
 def dummy_preproc(obs_id, group_list, logger,
                   configs, overwrite, run_parallel):
     """
@@ -305,6 +306,12 @@ def get_parser(parser=None):
         default=4
     )
     parser.add_argument(
+        '--profile',
+        help="Run profiling.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
         '--raise-error',
         help="Raise an error upon completion if any obsids or groups fail.",
         type=bool,
@@ -326,6 +333,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
+          run_profiling: Optional[bool] = False,
           raise_error: Optional[bool] = False):
 
     configs, context = pp_util.get_preprocess_context(configs)
@@ -370,8 +378,18 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     n_fail = 0
 
+    if run_profiling:
+        profile_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), 'prof')
+        if not(os.path.exists(profile_dir)):
+            os.makedirs(profile_dir)
+    else:
+        profile_dir = None
+
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+    futures = [executor.submit(pp_util.profile_function,
+                    func=preprocess_tod,
+                    profile_path=os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof') if profile_dir is not None else None,
+                    obs_id=r[0]['obs_id'],
                     group_list=r[1], verbosity=verbosity,
                     configs=configs,
                     overwrite=overwrite, run_parallel=True) for r in run_list]
@@ -400,6 +418,23 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             else:
                 pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
+    if run_profiling:
+        combined_profile_dir = os.path.join(profile_dir, 'combined_profile.prof')
+        combined_stats = None
+        for r in run_list:
+            profile_file = os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof')
+            if os.path.exists(profile_file):
+                try:
+                    stats = pstats.Stats(profile_file)
+                    if combined_stats is None:
+                        combined_stats = stats
+                    else:
+                        combined_stats.add(stats)
+                except:
+                    logger.error(f"cannot get stats for {r[0]['obs_id']}")
+        if combined_stats is not None:
+            combined_stats.dump_stats(combined_profile_dir)
+
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
 
@@ -414,6 +449,7 @@ def main(configs: str,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,
+         run_profiling: Optional[bool] = False,
          raise_error: Optional[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
@@ -431,6 +467,7 @@ def main(configs: str,
               planet_obs=planet_obs,
               verbosity=verbosity,
               nproc=nproc,
+              run_profiling=run_profiling,
               raise_error=raise_error)
 
 if __name__ == '__main__':
