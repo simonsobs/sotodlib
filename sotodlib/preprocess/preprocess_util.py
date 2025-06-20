@@ -16,6 +16,64 @@ from .. import core
 
 from . import _Preprocess, Pipeline, processes
 
+import cProfile, pstats, io
+
+def cprofile(name):
+    """Decorator to call CProfile on a function.
+    """
+    # Reference: https://stackoverflow.com/questions/5375624/a-decorator-that-profiles-a-method-call-and-logs-the-profiling-result
+    def cprofile_func(func):
+        def wrapper(*args, **kwargs):
+            prof = cProfile.Profile()
+            retval = prof.runcall(func, *args, **kwargs)
+            s = io.StringIO()
+            sortby = 'cumulative' # time spent by function and called subfunctions
+            ps = pstats.Stats(prof, stream=s).sort_stats(sortby)
+            ps.print_stats(20) # print 10 longest calls
+            print(f"{name} {func.__name__}: {s.getvalue()}")
+            return retval
+
+        return wrapper
+    return cprofile_func
+
+def profile_function(func, profile_path, *args, **kwargs):
+    """Runs CProfile on the input function and writes the profile out to a
+    file using pstats.
+
+    Arguments
+    ----------
+    func : function
+        The function to be called
+    profile_path : str
+        The path to the output profile file.
+    *args : tuple
+        Additional positional arguments.
+    **kwargs : dict
+        Additional keyword arguments.
+
+    Returns
+    -------
+    local_vars : Any or None
+        Either the outputs of the function or None if the profile or function
+        call fails.
+    """
+
+    local_vars = None
+
+    def wrapper_func():
+        nonlocal local_vars
+        local_vars = func(*args, **kwargs)
+
+    if profile_path is None:
+        return wrapper_func()
+    else:
+        try:
+            cProfile.runctx('wrapper_func()', globals(), locals(), filename=profile_path)
+            return local_vars
+        except Exception as e:
+            return None
+
+
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
     filename and dataset name for a result.
