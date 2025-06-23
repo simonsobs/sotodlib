@@ -551,6 +551,7 @@ class Noise(_Preprocess):
 
     """
     name = "noise"
+    _influx_field = "median_white_noise"
 
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
@@ -668,7 +669,56 @@ class Noise(_Preprocess):
             return meta
         else:
             return keep
-    
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman, noise_aman="noise"):
+        """ Generate a QA metric for median of the detector white noise
+        values.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+        noise_aman : str
+            Name of the noise axis manager in proc_aman
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                white_noise = proc_aman[noise_aman].white_noise[subset]
+                vals.append(np.nanmedian(white_noise))
+
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+                tags.append(tags_base)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
 class Calibrate(_Preprocess):
     """Calibrate the timestreams based on some provided information.
 
@@ -1961,7 +2011,7 @@ class SplitFlags(_Preprocess):
             high_tau: 1.5e-3
             det_A: A
             pol_angle: 35
-            det_top: B
+            crossover: BL
             high_leakage: 1.0e-3
             high_2f: 1.5e-3
             right_focal_plane: 0
