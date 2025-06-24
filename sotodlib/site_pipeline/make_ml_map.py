@@ -202,7 +202,6 @@ def main(**args):
                 if mask.any():
                     L.debug("%s has all 0s in at least 1 detector" % (sub_id))
                     obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
-
                 # Cut non-optical dets
                 obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
@@ -211,10 +210,8 @@ def main(**args):
                 srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
                 # Apply pointing model
                 pointing_model.apply_pointing_model(obs)
-                # Calibrate to pW
-                obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
-                # Calibrate to K_cmb
-                obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
+                # Calibrate to pW and then K_cmb
+                obs.signal *= obs.det_cal.phase_to_pW[:,None]*obs.abscal.abscal_cmb[:,None]
                 if obs.dets.count < 10:
                     L.debug("Skipped %s (less than 10 detectors)" % (sub_id))
                     continue

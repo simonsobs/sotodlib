@@ -301,12 +301,16 @@ def get_subids(query, context=None, method="auto"):
     unit to use for mapmaking."""
     if query is None and method == "auto": method = "query"
     if method == "auto":
+        if not isinstance(query, str): return query # python list
         try: return get_subids_file(query, context=context)
         except IOError: return get_subids_query(query, context=context)
     elif method == "file":
         return get_subids_file(query, context=context)
     elif method == "query":
         return get_subids_query(query, context=context)
+    elif method == "list":
+        if isinstance(query, str): return query.split(",")
+        else: return query
     else:
         raise ValueError("Unrecognized method for get_subids: '%s'" % (str(method)))
 
