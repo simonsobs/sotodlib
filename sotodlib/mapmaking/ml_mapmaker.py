@@ -189,6 +189,7 @@ class MLEvaluator:
     """Helper for MLMapmaker that represents the action of P in the model d = Px+n."""
     def __init__(self, x_zip, signals, dof, dtype=np.float32):
         self.signals = signals
+        self.x_zip   = x_zip
         self.x       = dof.unzip(x_zip)
         self.dof     = dof
         self.dtype   = dtype
@@ -213,7 +214,8 @@ class MLAccumulator:
     def finish(self):
         """Return the full P'd based on the previous accumulation"""
         self.x = [signal.from_work(w) for signal, w in zip(self.signals, self.owork)]
-        return self.dof.zip(*self.x)
+        self.x_zip = self.dof.zip(*self.x)
+        return self.x_zip
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
