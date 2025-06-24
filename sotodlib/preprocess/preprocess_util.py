@@ -36,6 +36,7 @@ def cprofile(name):
         return wrapper
     return cprofile_func
 
+
 def profile_function(func, profile_path, *args, **kwargs):
     """Runs CProfile on the input function and writes the profile out to a
     file using pstats.
@@ -65,7 +66,8 @@ def profile_function(func, profile_path, *args, **kwargs):
         local_vars = func(*args, **kwargs)
 
     if profile_path is None:
-        return wrapper_func()
+        wrapper_func()
+        return local_vars
     else:
         try:
             cProfile.runctx('wrapper_func()', globals(), locals(), filename=profile_path)
@@ -863,7 +865,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False):
+                          logger=None, overwrite=False, run_tracemalloc=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -1043,7 +1045,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
-            proc_aman, success = pipe_init.run(aman)
+            proc_aman, success, snapshots_process, snapshots_calc = pipe_init.run(aman, run_tracemalloc=run_tracemalloc)
             aman.wrap('preprocess', proc_aman)
         except Exception as e:
             error = f'Failed to run initial pipeline: {obs_id} {dets}'
@@ -1059,7 +1061,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
 
         if configs_proc is None:
-            return error, outputs_init, [obs_id, dets], aman
+            return error, outputs_init, [obs_id, dets], aman, snapshots_process, snapshots_calc
         else:
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')

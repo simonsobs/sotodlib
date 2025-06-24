@@ -400,7 +400,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     if run_profiling:
         combined_profile_dir = os.path.join(profile_dir, 'combined_profile.prof')
-        combined_stats = None
+        if os.path.exists(combined_profile_dir):
+            combined_stats = pstats.Stats(combined_profile_dir)
+        else:
+            combined_stats = None
         for r in run_list:
             profile_file = os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof')
             if os.path.exists(profile_file):
