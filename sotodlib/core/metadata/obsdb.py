@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import numpy as np
+import warnings
 
 from .resultset import ResultSet
 from . import common
@@ -302,6 +303,11 @@ class ObsDb(object):
         sort_text = ''
         if sort is not None and len(sort):
             sort_text = ' ORDER BY ' + ','.join(sort)
+        if '"' in query_text:
+            warnings.warn('obsdb.query text contains double quotes (") -- '
+                          'replacing with single quotes (\').')
+            query_text = query_text.replace('"', "'")
+
         joins = ''
         extra_fields = []
         if tags is not None and len(tags):

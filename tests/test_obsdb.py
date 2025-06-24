@@ -51,6 +51,10 @@ class TestObsDb(unittest.TestCase):
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
 
+        # Grumbles about double quotes?
+        with self.assertWarns(UserWarning):
+            r1 = db.query('drift == "setting"')
+
     def test_tags(self):
         db = get_example()
         r0 = db.query(tags=['planet=1', 'cryo_problem', 'not_a_tag'])
