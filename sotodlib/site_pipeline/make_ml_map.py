@@ -36,14 +36,16 @@ def get_parser(parser=None):
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
     from sotodlib.core import Context, AxisManager, IndexAxis
-    from sotodlib.io import metadata   # PerDetectorHdf5 work-around
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
     from sotodlib.coords import pointing_model
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
+    from sotodlib.core import metadata
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
+
+    LoaderError = metadata.loader.LoaderError
 
     #try: import moby2.analysis.socompat
     #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
@@ -202,7 +204,6 @@ def main(**args):
                 if mask.any():
                     L.debug("%s has all 0s in at least 1 detector" % (sub_id))
                     obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
-
                 # Cut non-optical dets
                 obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
@@ -237,9 +238,9 @@ def main(**args):
                     # Apply pointing model
                     pointing_model.apply_pointing_model(obs)
                     # Calibrate to pW
-                    obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+                    #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
                     # Calibrate to K_cmb
-                    obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
+                    #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
                     good_dets = mapmaking.find_usable_detectors(obs,maxcut=0.5)
                     obs.restrict("dets", good_dets)
@@ -249,21 +250,21 @@ def main(**args):
                     # Gapfill glitches. This function name isn't the clearest
                     #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                     # Gain calibration
-                    gain  = 1
+                    #gain  = 1
                     #for gtype in ["relcal","abscal"]:
                     #    gain *= obs[gtype][:,None]
-                    obs.signal *= gain
+                    #obs.signal *= gain
                     # Fourier-space calibration
-                    fsig  = fft.rfft(obs.signal)
-                    freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    #fsig  = fft.rfft(obs.signal)
+                    #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
                     # iir and timeconstant will be applied in the preprocessing eventually
                     # iir filter
-                    iir_filter  = filters.iir_filter()(freq, obs)
-                    fsig       /= iir_filter
-                    gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
-                    fft.irfft(fsig, obs.signal, normalize=True)
-                    del fsig
+                    #iir_filter  = filters.iir_filter()(freq, obs)
+                    #fsig       /= iir_filter
+                    #gain       /= iir_filter[0].real # keep track of total gain for our record
+                    #fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
+                    #fft.irfft(fsig, obs.signal, normalize=True)
+                    #del fsig
 
                     # Apply pointing correction.
                     #obs.focal_plane.xi    += obs.boresight_offset.xi
@@ -313,7 +314,7 @@ def main(**args):
                     print("Writing noise model %s" % nmat_file)
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-            except (DataMissing,IndexError,ValueError) as e:
+            except (DataMissing,IndexError,ValueError,LoaderError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
                 continue
 
