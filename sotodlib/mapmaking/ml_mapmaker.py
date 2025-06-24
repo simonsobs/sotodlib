@@ -116,7 +116,9 @@ class MLMapmaker:
             tod = evaluator.evaluate(data)
             data.nmat.apply(tod)
             accumulator.accumulate(data, tod)
-        return accumulator.finish()
+        accumulator.finish()
+        self.prior(evaluator.x, accumulator.x)
+        return self.dof.zip(*accumulator.x)
 
     def M(self, x_zip):
         iwork = self.dof.unzip(x_zip)
@@ -167,6 +169,10 @@ class MLMapmaker:
             # x_zip is the raw solution, as a 1d vector.
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x), x_zip=solver.x)
 
+    def prior(self, xins, xouts):
+        for signal, xin, xout in zip(self.signals, xins, xouts):
+            signal.prior(xin, xout)
+
     def translate(self, other, x_zip):
         """Translate degrees of freedom x from some other mapamaker to the current one.
         The other mapmaker must have the same list of signals, except that they can have
@@ -183,10 +189,10 @@ class MLEvaluator:
     """Helper for MLMapmaker that represents the action of P in the model d = Px+n."""
     def __init__(self, x_zip, signals, dof, dtype=np.float32):
         self.signals = signals
-        self.x_zip   = x_zip
+        self.x       = dof.unzip(x_zip)
         self.dof     = dof
         self.dtype   = dtype
-        self.iwork = [signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x_zip))]
+        self.iwork = [signal.to_work(m) for signal, m in zip(self.signals, self.x)]
     def evaluate(self, data, tod=None):
         """Evaluate Px for one tod"""
         if tod is None: tod = np.zeros([data.ndet, data.nsamp], self.dtype)
@@ -206,9 +212,8 @@ class MLAccumulator:
             signal.backward(data.id, tod, self.owork[si])
     def finish(self):
         """Return the full P'd based on the previous accumulation"""
-        return self.dof.zip(
-            *[signal.from_work(w) for signal, w in zip(self.signals, self.owork)]
-        )
+        self.x = [signal.from_work(w) for signal, w in zip(self.signals, self.owork)]
+        return self.dof.zip(*self.x)
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
