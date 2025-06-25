@@ -1045,7 +1045,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
-            proc_aman, success, snapshots_process, snapshots_calc = pipe_init.run(aman, run_tracemalloc=run_tracemalloc)
+            if run_tracemalloc:
+                proc_aman, success, snapshots_process, snapshots_calc = pipe_init.run(aman, run_tracemalloc=run_tracemalloc)
+            else:
+                 proc_aman, success = pipe_init.run(aman)
             aman.wrap('preprocess', proc_aman)
         except Exception as e:
             error = f'Failed to run initial pipeline: {obs_id} {dets}'

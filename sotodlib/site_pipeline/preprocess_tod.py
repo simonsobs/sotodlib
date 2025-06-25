@@ -156,9 +156,9 @@ def preprocess_tod(obs_id,
                         dest_dataset += "_" + gb + "_" + str(g)
                 trace_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), "trace")
                 for i, snap in enumerate(snapshots_process):
-                    snap[1].dump(os.path.join(trace_dir, f"{dest_dataset}_snapshot_process_{snap[0]}.pkl"))
+                    snap[1].dump(os.path.join(trace_dir, f"{dest_dataset}_snapshot_process_{snap[0]}_{i}.pkl"))
                 for i, snap in enumerate(snapshots_calc):
-                    snap[1].dump(os.path.join(trace_dir, f"{dest_dataset}_snapshot_calc_{snap[0]}.pkl"))
+                    snap[1].dump(os.path.join(trace_dir, f"{dest_dataset}_snapshot_calc_{snap[0]}_{i}.pkl"))
             else:
                 proc_aman, success = pipe.run(aman, run_tracemalloc=run_tracemalloc)
 
