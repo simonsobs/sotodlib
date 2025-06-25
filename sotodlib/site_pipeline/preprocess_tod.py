@@ -8,6 +8,7 @@ import argparse
 import traceback
 from typing import Optional
 import cProfile, pstats, io
+import tracemalloc
 from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
@@ -142,11 +143,19 @@ def preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         dets = {gb:gg for gb, gg in zip(group_by, group)}
         try:
+            if run_tracemalloc:
+                tracemalloc.start()
+
             aman = context.get_obs(obs_id, dets=dets)
+            if run_tracemalloc:
+                snapshot = tracemalloc.take_snapshot()
+                tracemalloc.stop()
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             if run_tracemalloc:
                 proc_aman, success, snapshots_process, snapshots_calc = pipe.run(aman, run_tracemalloc=run_tracemalloc)
+                snapshots_process = [snapshots] + snapshots_process
+                snapshots_calc = [snapshots] + snapshots_calc
 
                 dest_dataset = obs_id
                 for gb, g in zip(group_by, group):
