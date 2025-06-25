@@ -913,7 +913,7 @@ class LoadContext(Operator):
             gcomm,
             wafer_readers,
             wafer_dets,
-            pconf=pconf,
+            preconfig=pconf,
             context=self.context,
             context_file=self.context_file,
         )

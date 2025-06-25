@@ -69,6 +69,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
 
 def setup_preprocess(parser, operators):
     wrk.setup_filter_hwpss(operators)
+    wrk.setup_filter_hwpss_model(operators)
     wrk.setup_simple_jumpcorrect(operators)
     wrk.setup_simple_deglitch(operators)
     wrk.setup_flag_diff_noise_outliers(operators)
