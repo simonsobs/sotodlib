@@ -148,14 +148,14 @@ def preprocess_tod(obs_id,
 
             aman = context.get_obs(obs_id, dets=dets)
             if run_tracemalloc:
-                snapshot = tracemalloc.take_snapshot()
+                init_snapshot = ('aman', tracemalloc.take_snapshot())
                 tracemalloc.stop()
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
             if run_tracemalloc:
                 proc_aman, success, snapshots_process, snapshots_calc = pipe.run(aman, run_tracemalloc=run_tracemalloc)
-                snapshots_process = [snapshots] + snapshots_process
-                snapshots_calc = [snapshots] + snapshots_calc
+                snapshots_process = [init_snapshot] + snapshots_process
+                snapshots_calc = [init_snapshot] + snapshots_calc
 
                 dest_dataset = obs_id
                 for gb, g in zip(group_by, group):
