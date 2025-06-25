@@ -31,6 +31,8 @@ def get_parser(parser=None):
     sp.add_argument('--lookback-days', type=float, help=
                     "Set the lookback time window in days; overrides any "
                     "file_idx_lookback_time setting in config file.")
+    sp.add_argument('--retry-failed', action='store_true', default=False,
+                    help="Also retry any files that are known, but 'failed'.")
 
     # reset-files
     sp = sps.add_parser('reset-files', help="Mark all 'failed' files as "
@@ -84,7 +86,7 @@ def cli_main(**kw):
     elif cmd == 'update':
         if kw.get('lookback_days'):
             cfg.file_idx_lookback_time = kw['lookback_days'] * 86400
-        report = hkdb.update_index_all(cfg)
+        report = hkdb.update_index_all(cfg, retry_failed=kw.get('retry_failed'))
         print('Report')
         for k, v in report.items():
             print(f'  {k}: {v}')
@@ -94,10 +96,13 @@ def cli_main(**kw):
         print(f'Changed {n} entries.')
 
 
-def simple_update(cfg_file: str):
+def simple_update(cfg_file: str, retry_failed: bool=False):
     """Updates hkdb index databases"""
     util.init_logger('', logger=hkdb.log, verbosity=3)
-    stats = hkdb.update_index_all(cfg_file)
+    stats = hkdb.update_index_all(cfg_file, retry_failed=retry_failed)
+    hkdb.log.info(f'hkdb update summary: {stats}')
+    if stats['new_files_failed']:
+        raise RuntimeError('Some indexing failures encountered.')
 
 
 # For prefect, map main to simple_update.

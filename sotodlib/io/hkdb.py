@@ -190,7 +190,8 @@ class HkDb:
         Base.metadata.create_all(self.engine)
 
 
-def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
+def update_file_index(hkcfg: HkConfig, session=None, subdirs=None,
+                      retry_failed=False):
     """Updates HkFiles database with new files on disk.
 
     If subdirs is specified, it must be a list of (full path)
@@ -229,13 +230,23 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None):
             if f.endswith('.g3')
         ])
 
-    existing_files = [
-        os.path.join(hkcfg.hk_root, path)
-        for path, in session.query(HkFile.path).all()
-    ]
-    new_files = sorted(list(set(all_files) - set(existing_files)))
+    existing_files = {'all': []}
+    for k in ['failed', 'indexed', 'unindexed']:
+        existing_files[k] = [
+            os.path.join(hkcfg.hk_root, path)
+            for path, in session.query(HkFile.path).filter(HkFile.index_status == k).all()
+        ]
+        existing_files['all'].extend(existing_files[k])
 
-    log.debug(f"Comparing {len(all_files)} to known {len(existing_files)}.")
+    if retry_failed:
+        retry_files = sorted(list(set(all_files).intersection(existing_files['failed'])))
+        log.info(f"Clearing {len(retry_files)} for retry...")
+        for f in retry_files:
+            relpath = os.path.relpath(f, hkcfg.hk_root)
+            session.query(HkFile).filter(HkFile.path == relpath) \
+                                 .update({HkFile.index_status: 'unindexed'})
+
+    new_files = sorted(list(set(all_files) - set(existing_files['all'])))
     files = []
     log.info(f"Adding {len(new_files)} new files to index...")
     for path in new_files:
@@ -350,7 +361,9 @@ def update_frame_index(hkcfg: HkConfig, session=None):
             session.add_all(frames)
             session.commit()
             report['new_files_indexed'] += 1
+            log.debug(f"Committed index for {file.path}.")
         except Exception as e:
+            log.error(f"Failed to commit frames from {file.path}.")
             session.rollback()
             file.index_status = 'failed'
             session.commit()
@@ -359,13 +372,15 @@ def update_frame_index(hkcfg: HkConfig, session=None):
     return report
 
 
-def update_index_all(cfg: Union[HkConfig, str], subdirs=None):
+def update_index_all(cfg: Union[HkConfig, str], subdirs=None,
+                     retry_failed: bool=False):
     """Updates all HK index databases, and returns a report."""
     if isinstance(cfg, str):
         cfg = HkConfig.from_yaml(cfg)
     hkdb = HkDb(cfg)
     session = hkdb.Session()
-    report1 = update_file_index(cfg, session=session, subdirs=subdirs)
+    report1 = update_file_index(cfg, session=session, subdirs=subdirs,
+                                retry_failed=retry_failed)
     report2 = update_frame_index(cfg, session=session)
     return report1 | report2
 
