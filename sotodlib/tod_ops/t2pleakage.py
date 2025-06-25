@@ -246,8 +246,9 @@ def get_t2p_coeffs(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demo
     joint_fit : bool
         Whether to fit Q and U leakage coefficients as parameters in a single model or
         fit independently. Default is True.
-    wn_demod : float or None
+    wn_demod : float or str or None
         Precomputed white noise level for demodulated signals. If None, it will be calculated.
+        If provided by a string, `aman.get(wn_demod)` is used.
     f_lpf_cutoff : float
         Cutoff frequency of low pass filter in demodulation. Used for error bar estimation by
         combination with wn_demod. Default is 2.0.
@@ -271,9 +272,12 @@ def get_t2p_coeffs(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demo
     """
 
     # get white noise level of demod for error estimation
+    if isinstance(wn_demod, str):
+        wn_demod = aman.get(wn_demod)
     if wn_demod is None:
-        freqs, Pxx_demod = calc_psd(aman, signal=aman[Q_sig_name], merge=False)
-        wn_demod = calc_wn(aman, pxx=Pxx_demod, freqs=freqs, low_f=0.5, high_f=1.5)
+        freqs, Pxx_demod, nseg = calc_psd(aman, signal=aman[Q_sig_name], merge=False,
+                                          full_output=True, noverlap=0)
+        wn_demod = calc_wn(aman, pxx=Pxx_demod, freqs=freqs, nseg=nseg, low_f=0.5, high_f=1.5)
 
     # integrate the white noise level over frequencies to get error bar of each point
     sigma_demod = wn_demod * np.sqrt(f_lpf_cutoff)
