@@ -18,7 +18,7 @@ from toast.observation import default_values as defaults
 from toast.ops import (
     Operator, BuildPixelDistribution, BuildInverseCovariance, BuildNoiseWeighted
 )
-
+from astropy import units as u
 
 @trait_docs
 class Hn(Operator):
@@ -153,7 +153,10 @@ class Hn(Operator):
                     self.cos_n_name,
                     self.sin_n_name,
                 ]:
-                    obs.detdata.ensure(name, detectors=[det])
+                    psd_units = obs[self.noise_model].psd(det).unit
+                    rate_units = obs[self.noise_model].rate(det).unit
+                    tod_units = (psd_units * rate_units) ** 0.5
+                    obs.detdata.ensure(name, detectors=[det], create_units=tod_units)
                 # Compute detector quaternions
                 obs_data = data.select(obs_uid=obs.uid)
                 self.pixel_pointing.detector_pointing.apply(obs_data, detectors=[det])
@@ -161,8 +164,8 @@ class Hn(Operator):
                 theta, phi, psi = qa.to_iso_angles(quats)
                 cos_n_new = np.cos(psi)
                 sin_n_new = np.sin(psi)
-                obs.detdata[self.cos_1_name][det] = cos_n_new
-                obs.detdata[self.sin_1_name][det] = sin_n_new
+                obs.detdata[self.cos_1_name][det] = cos_n_new*u.K
+                obs.detdata[self.sin_1_name][det] = sin_n_new*u.K
                 obs.detdata[self.hweight_name][det] = 1
             else:
                 # Use the angle sum identities to evaluate the
@@ -171,8 +174,8 @@ class Hn(Operator):
                 sin_1 = obs.detdata[self.sin_1_name][det]
                 cos_n_old = obs.detdata[self.cos_n_name][det].copy()
                 sin_n_old = obs.detdata[self.sin_n_name][det].copy()
-                cos_n_new = cos_n_old * cos_1 - sin_n_old * sin_1
-                sin_n_new = sin_n_old * cos_1 + cos_n_old * sin_1
+                cos_n_new = cos_n_old * cos_1*u.K - sin_n_old * sin_1*u.K
+                sin_n_new = sin_n_old * cos_1*u.K + cos_n_old * sin_1*u.K
             obs.detdata[self.cos_n_name][det] = cos_n_new
             obs.detdata[self.sin_n_name][det] = sin_n_new
         return
@@ -183,7 +186,6 @@ class Hn(Operator):
         if self.covariance in data:
             data[self.covariance].reset()
             inv_cov_units = (1.0 / defaults.det_data_units**2)
-            print(inv_cov_units)
             data[self.covariance].update_units(inv_cov_units)
         BuildInverseCovariance(
             pixel_dist=self.pixel_dist,
@@ -217,6 +219,11 @@ class Hn(Operator):
         log = Logger.get()
 
         for name, det_data in ("cos", self.cos_n_name), ("sin", self.sin_n_name):
+            if self.h_n_map in data:
+                data[self.h_n_map].reset()
+                h_n_map_units = (1.0 / defaults.det_data_units)
+                data[self.h_n_map].update_units(h_n_map_units)
+
             build_zmap = BuildNoiseWeighted(
                 pixel_dist=self.pixel_dist,
                 zmap=self.h_n_map,
