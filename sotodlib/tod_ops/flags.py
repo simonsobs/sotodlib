@@ -1127,3 +1127,33 @@ def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
         aman.flags.wrap(name, noisy_subscan_flags)
 
     return noisy_subscan_flags, ~noisy_detector_flags
+
+
+def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
+    """
+    Expand smurfgaps flag of each stream_id to all detectors.
+
+    Parameters
+    ----------
+    aman: AxisManager
+        Input AxisManager
+    buffer: int
+        Amount of buffer to apply on smurfgaps
+    name: str
+        Name of flag to add to aman.flags if merge is True.
+    merge: bool
+        If true, merges the generated flag into aman.
+
+    Returns
+    -------
+    smurfgaps: RangesMatrix
+        smurfgaps flag with 'dets' and 'samps' axis
+
+    """
+
+    smurfgaps = RangesMatrix([aman.flags.get('smurfgaps_' + ufm) for ufm in aman.det_info.stream_id])
+    if buffer:
+        smurfgaps = smurfgaps.buffer(buffer)
+    if merge:
+        aman.flags.wrap('smurfgaps', smurfgaps, [(0, 'dets'), (1, 'samps')])
+    return smurfgaps
