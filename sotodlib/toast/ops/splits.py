@@ -449,6 +449,12 @@ class Splits(Operator):
         "interval.",
     )
 
+    skip_existing = Bool(
+        False,
+        help="If the mapmaker reports that all requested output files exist "
+        "for a split, skip the mapmaking step."
+    )
+
     shared_flags = Unicode(
         defaults.shared_flags,
         allow_none=True,
@@ -586,49 +592,57 @@ class Splits(Operator):
 
         # Loop over splits
         for split_name, spl in self._split_obj.items():
-            log.info_rank(f"Running Split '{split_name}'", comm=data.comm.comm_world)
             # Set mapmaker name based on split and the name of this
             # Splits operator.
             mname = f"{self.name}_{split_name}"
             self.mapmaker.name = mname
+            log.info_rank(
+                f"Running Split '{split_name}'", comm=data.comm.comm_world
+            )
 
             # Apply this split
             for ob in data.obs:
                 spl.create_split(ob)
 
-            if self.splits_as_flags:
-                # Split is applied through flagging, not as a view
-                # Flag samples outside the intervals by prefixing '~'
-                # to the view name
-                FlagIntervals(
-                    shared_flags=self.shared_flags,
-                    shared_flag_bytes=1,
-                    view_mask=[
-                        (f"~{spl.split_intervals}", np.uint8(self.shared_flag_mask))
-                    ],
-                    reset=True,
-                ).apply(data)
-                map_binner.shared_flag_mask |= self.shared_flag_mask
+            if self.skip_existing and self.splits_exist(data, split_name=split_name):
+                log.info_rank(
+                    f"All outputs for split '{split_name}' exist, skipping...",
+                    comm=data.comm.comm_world,
+                )
             else:
-                # Set mapmaking tools to use the current split interval list
-                map_binner.pixel_pointing.view = spl.split_intervals
+                if self.splits_as_flags:
+                    # Split is applied through flagging, not as a view
+                    # Flag samples outside the intervals by prefixing '~'
+                    # to the view name
+                    FlagIntervals(
+                        shared_flags=self.shared_flags,
+                        shared_flag_bytes=1,
+                        view_mask=[
+                            (f"~{spl.split_intervals}", np.uint8(self.shared_flag_mask))
+                        ],
+                        reset=True,
+                    ).apply(data)
+                    map_binner.shared_flag_mask |= self.shared_flag_mask
+                else:
+                    # Set mapmaking tools to use the current split interval list
+                    map_binner.pixel_pointing.view = spl.split_intervals
 
-            if not map_binner.full_pointing:
-                # We are not using full pointing and so we clear the
-                # residual pointing for this split
-                toast.ops.Delete(
-                    detdata=[
-                        map_binner.pixel_pointing.pixels,
-                        map_binner.stokes_weights.weights,
-                        map_binner.pixel_pointing.detector_pointing.quats,
-                    ],
-                ).apply(data)
+                if not map_binner.full_pointing:
+                    # We are not using full pointing and so we clear the
+                    # residual pointing for this split
+                    toast.ops.Delete(
+                        detdata=[
+                            map_binner.pixel_pointing.pixels,
+                            map_binner.stokes_weights.weights,
+                            map_binner.pixel_pointing.detector_pointing.quats,
+                        ],
+                    ).apply(data)
 
-            # Run mapmaking
-            self.mapmaker.apply(data)
+                # Run mapmaking
+                self.mapmaker.apply(data)
 
-            # Write
-            self.write_splits(data, split_name=split_name)
+                # Write
+                self.write_splits(data, split_name=split_name)
 
             # Remove split
             for ob in data.obs:
@@ -639,6 +653,56 @@ class Splits(Operator):
             setattr(self.mapmaker, k, v)
         map_binner.pixel_pointing.view = pointing_view_save
         map_binner.pixel_pointing.shared_flag_mask = shared_flag_mask_save
+
+    def splits_exist(self, data, split_name=None):
+        """Write out all split products."""
+        if not hasattr(self, "_split_obj"):
+            msg = "No splits have been created yet, cannot check existence"
+            raise RuntimeError(msg)
+
+        if hasattr(self.mapmaker, "map_binning"):
+            pixel_pointing = self.mapmaker.map_binning.pixel_pointing
+        else:
+            pixel_pointing = self.mapmaker.binning.pixel_pointing
+
+        if split_name is None:
+            to_write = dict(self._split_obj)
+        else:
+            to_write = {split_name: self._split_obj[split_name]}
+
+        if self.mapmaker.write_hdf5:
+            fname_suffix = "h5"
+        else:
+            fname_suffix = "fits"
+
+        all_exist = True
+        for spname, spl in to_write.items():
+            mname = f"{self.name}_{split_name}"
+            for prod, binner_key, write in [
+                    ("hits", None, self.write_hits),
+                    ("cov", None, self.write_cov),
+                    ("invcov", None, self.write_invcov),
+                    ("rcond", None, self.write_rcond),
+                    ("map", "binned", self.write_map),
+                    ("noiseweighted_map", "noiseweighted", self.write_noiseweighted_map),
+            ]:
+                if not write:
+                    continue
+                if binner_key is not None:
+                    # get the product name from BinMap
+                    mkey = getattr(self.mapmaker.binning, binner_key)
+                else:
+                    # hits and covariance are not made by BinMap.
+                    # Try synthesizing the product name
+                    mkey = f"{mname}_{prod}"
+                fname = os.path.join(
+                    self.output_dir,
+                    f"{self.name}_{spname}_{prod}.{fname_suffix}"
+                )
+                if not os.path.isfile(fname):
+                    all_exist = False
+                    break
+        return all_exist
 
     def write_splits(self, data, split_name=None):
         """Write out all split products."""
@@ -682,7 +746,7 @@ class Splits(Operator):
                     mkey = f"{mname}_{prod}"
                 if mkey not in data:
                     msg = f"'{mkey}' not found in data. "
-                    smg += f"Available keys are {data.keys()}"
+                    msg += f"Available keys are {data.keys()}"
                     raise RuntimeError(msg)
                 fname = os.path.join(
                     self.output_dir,
