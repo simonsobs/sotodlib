@@ -38,13 +38,16 @@ def read_and_preprocess_wafers(
     gcomm,
     wafer_readers,
     wafer_dets,
-    pconf=None,
+    preconfig=None,
     context=None,
     context_file=None,
 ):
     """Read the wafer data.
 
     Each process reads zero or more wafers and applies preprocessing.
+
+    If the preprocessing config is specified, it should include the archive stanza,
+    which will be inserted into the context dictionary.
 
     Args:
         obs_name (str):  The observation name.
@@ -53,7 +56,7 @@ def read_and_preprocess_wafers(
         wafer_readers (dict):  For each wafer name, the group rank assigned
             to read this wafer.
         wafer_dets (dict):  For each wafer name, the list of detectors.
-        pconf (dict):  The preprocessing configuration to apply (or None).
+        preconfig (dict):  The preprocessing configuration to apply (or None).
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
 
@@ -73,6 +76,36 @@ def read_and_preprocess_wafers(
     for wf, reader in wafer_readers.items():
         if reader == rank:
             ctx = open_context(context=context, context_file=context_file)
+            if preconfig is not None:
+                # Ensure that the preprocessing archive is defined.  First
+                # check if it already exists in the context.
+                have_ctx_archive = False
+                if ctx.get("metadata") is None:
+                    ctx["metadata"] = []
+                for key in ctx.get("metadata"):
+                    if key.get("name") == "preprocess":
+                        have_ctx_archive = True
+                        break
+                # Check if the archive exists in the preprocess config
+                if "archive" in preconfig:
+                    have_pre_archive = True
+                else:
+                    have_pre_archive = False
+                # The archive should only be defined in one place...
+                if have_ctx_archive and have_pre_archive:
+                    msg = "Both the context file AND the preprocess config define"
+                    msg += " a preprocess archive.  There can be only one."
+                    raise RuntimeError(msg)
+                if not have_ctx_archive:
+                    if not have_pre_archive:
+                        msg = "Either the context or the preprocess config must "
+                        msg += "specify the preprocess archive."
+                        raise RuntimeError(msg)
+                    else:
+                        ctx["metadata"].append(
+                            {"db": preconfig["archive"]["index"], "name": "preprocess"}
+                        )
+            # Load the data and immediately close context
             axtod = ctx.get_obs(session_name, dets=wafer_dets[wf])
             if context_file is not None:
                 del ctx
@@ -85,16 +118,21 @@ def read_and_preprocess_wafers(
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
-                axtod = apply_hwp_angle_model(axtod)
-                timer.stop()
-                elapsed = timer.seconds()
-                timer.start()
-                log.debug(
-                    f"LoadContext {obs_name} HWP model wafer {wf} in {elapsed} seconds",
-                )
+                # Did we already apply it in the preprocessing?
+                if (
+                    preconfig is None
+                    or "hwp_angle_model" not in preconfig["process_pipe"]
+                ):
+                    axtod = apply_hwp_angle_model(axtod)
+                    timer.stop()
+                    elapsed = timer.seconds()
+                    timer.start()
+                    log.debug(
+                        f"LoadContext {obs_name} HWP model wafer {wf} in {elapsed} seconds",
+                    )
 
-            if pconf is not None:
-                prepipe = PreProcPipe(pconf["process_pipe"], logger=log)
+            if preconfig is not None:
+                prepipe = PreProcPipe(preconfig["process_pipe"], logger=log)
                 prepipe.run(axtod, axtod.preprocess)
                 timer.stop()
                 elapsed = timer.seconds()
