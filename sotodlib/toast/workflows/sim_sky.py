@@ -166,7 +166,8 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
                 scan_op.stokes_weights = job_ops.scan_wcs_map_weights
             else:
                 scan_op.stokes_weights = job_ops.weights_radec
-            scan_op.save_pointing |= otherargs.full_pointing
+            if hasattr(scan_op, "save_pointing"):
+                scan_op.save_pointing |= otherargs.full_pointing
             scan_op.apply(data)
             if job_ops.scan_wcs_map_pixels.enabled:
                 # Clean up our custom pointing
