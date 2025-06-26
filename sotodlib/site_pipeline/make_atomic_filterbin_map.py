@@ -430,7 +430,8 @@ def main(
         if not args.only_hits:
             info_list = []
             for split_label in split_labels:
-                # info is a dictionary now
+                # info is a dictionary that is used to create an AtomicInfo object
+                # to write into sqlite with sqlalchemy
                 info = {}
                 info['obs_id']=obslist[0][0]
                 info['telescope']=obs_infos[obslist[0][3]].telescope
