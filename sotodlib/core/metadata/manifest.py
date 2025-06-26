@@ -649,7 +649,7 @@ class ManifestDb:
 
         """
         # Make sure all fields are quoted.
-        fields = [(f if f[0] in ["`", "'", "'"] else f"`{f}`")
+        fields = [(f if f[0] in ["`", "'", '"'] else f"`{f}`")
                   for f in fields]
         if not isinstance(fields, list):
             raise ValueError("fields must be a list")
