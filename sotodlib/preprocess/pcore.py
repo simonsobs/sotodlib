@@ -7,6 +7,7 @@ from .. import core
 from so3g.proj import Ranges, RangesMatrix
 from scipy.sparse import csr_array
 from matplotlib import pyplot as plt
+import tracemalloc
 
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
@@ -408,7 +409,7 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
+    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False, run_tracemalloc=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -469,15 +470,26 @@ class Pipeline(list):
                 proc_aman.restrict('dets', det_list)
             full = proc_aman.copy()
             run_calc = False
-        
+
+        tracemalloc.start()
+
+        snapshots_process = []
+        snapshots_calc = []
+
         success = 'end'
         for step, process in enumerate(self):
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
             process.process(aman, proc_aman, sim)
+            if run_tracemalloc:
+                snapshot = tracemalloc.take_snapshot()
+                snapshots_process.append((process.name, snapshot))
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
+                if run_tracemalloc:
+                    snapshot = tracemalloc.take_snapshot()
+                    snapshots_calc.append((process.name, snapshot))
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full, self.wrap_valid)
             if update_plot:
@@ -491,8 +503,11 @@ class Pipeline(list):
             if aman.dets.count == 0:
                 success = process.name
                 break
-        
-        return full, success
+        tracemalloc.stop()
+        if run_tracemalloc:
+            return full, success, snapshots_process, snapshots_calc
+        else:
+            return full, success
         
 
 class _FracFlaggedMixIn(object):
