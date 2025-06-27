@@ -64,7 +64,8 @@ class DemodMapmaker:
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None,
+                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -81,7 +82,13 @@ class DemodMapmaker:
             if None, the default model defined in the Demodmapmaker object is used.
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
-            i.e. we will produce one map 
+            i.e. we will produce one map
+        use_psd : bool, optional
+            By default True. Use the white noise measured from PSD as mapmaking weights,
+            which must be provided in the preprocessing. This is done as opposed to
+            build the ivar locally from the std of the TOD.
+        wn_label : str, optional
+            Path where to find the white noise per det estimated by the preprocessing.
 
         """
         ctime  = obs.timestamps
@@ -95,11 +102,17 @@ class DemodMapmaker:
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
+        if use_psd:
+            try:
+                noise_model.ivar = 1.0 / obs[wn_label]**2
+            except:
+                msg = f"use_psd is True but '{wn_label}' does not contain the white noise estimated on the preprocessing"
+                raise RuntimeError(msg)
         if noise_model.ready:
             nmat = noise_model
         else:
             try:
-                if not(self.singlestream):               
+                if not(self.singlestream):
                     nmat = noise_model.build(tod[1], srate=srate) # Here we are building the model from demodQ
                 else:
                     nmat = noise_model.build(tod, srate=srate)
@@ -464,7 +477,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    atomic_db=None, unit='K'):
+                    atomic_db=None, unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -519,6 +532,12 @@ def make_demod_map(context, obslist, noise_model, info,
         rather than from obs.dsT, obs.demodQ, obs.demodU.
     atomic_db : str, optional
         Path to the atomic map data base. Maps created will be added to it.
+    use_psd : bool, optional
+        By default True. Use the white noise measured from PSD as mapmaking weights,
+        which must be provided in the preprocessing. This is done as opposed to
+        build the ivar locally from the std of the TOD.
+    wn_label : str, optional
+        Path where to find the white noise per det estimated by the preprocessing.
 
     Returns
     -------
@@ -566,7 +585,7 @@ def make_demod_map(context, obslist, noise_model, info,
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        mapmaker.add_obs(name, obs, split_labels=split_labels)
+        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
     nobs_kept = comm.allreduce(nobs_kept)
@@ -602,10 +621,12 @@ def add_weights_to_info(info, weights, split_labels):
         if sub_weights.shape[0] != 3:
             raise ValueError(f"sub_weights has unexpected shape {sub_weights.shape}. First axis should be (3,) for TT, QQ, UU")
         mean_qu = np.mean(sub_weights[1:], axis=0)
-        positive = np.where(mean_qu > 0)
-        sumweights = np.sum(mean_qu[positive])
-        meanweights = np.mean(mean_qu[positive])
-        medianweights = np.median(mean_qu[positive])
+        pweights = mean_qu[mean_qu > 0]
+        if pweights.size == 0:
+            pweights = [0]
+        sumweights = np.sum(pweights)
+        meanweights = np.mean(pweights)
+        medianweights = np.median(pweights)
         sub_info.total_weight_qu = sumweights
         sub_info.mean_weight_qu = meanweights
         sub_info.median_weight_qu = medianweights

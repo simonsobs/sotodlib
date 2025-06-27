@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters, apodize
+from sotodlib.tod_ops import filters, apodize
 import logging
 
 logger = logging.getLogger(__name__)
@@ -264,7 +264,7 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
             else:
                 weight_for_signal = None
     
-    binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
+    binning_dict = tod_ops.bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
@@ -568,6 +568,20 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
     if remove_template:
         aman.move(hwpss_template_name, None)
 
+def get_hwp_freq(timestamps, hwp_angle):
+    """
+    Calculate the frequency of HWP rotation.
+
+    Parameters:
+    timestamps (array-like): An array of timestamps.
+    hwp_angle (array-like): An array of HWP angles in radian
+
+    Returns:
+    float: The frequency of the HWP rotation in Hz.
+    """
+    hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
+            (timestamps[-1] - timestamps[0])) / (2 * np.pi)
+    return hwp_freq
 
 def demod_tod(aman, signal=None, demod_mode=4,
               bpf_cfg=None, lpf_cfg=None, wrap=True):
@@ -622,8 +636,7 @@ def demod_tod(aman, signal=None, demod_mode=4,
         raise TypeError("Signal must be None, str, or ndarray")
     
     # HWP speed in Hz
-    speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-            (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+    speed = get_hwp_freq(timestamps=aman.timestamps, hwp_angle=aman.hwp_angle)
     
     if bpf_cfg is None:
         bpf_center = demod_mode * speed

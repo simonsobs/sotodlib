@@ -86,6 +86,13 @@ class Cfg:
         Run a specific frequency band
     unit: str
         Unit of data. Default is K
+    use_psd: bool
+        True by default. Use white noise measured by PSD
+        as the weights for mapmaking. Must be provided by
+        the preprocessing
+    wn_label: str
+        Path where to find the white noise per det by the
+        preprocessing
     center_at: str
     max_dets: int
     fixed_time: int
@@ -133,7 +140,9 @@ class Cfg:
         window: Optional[float] = None,
         dtype_tod: str = 'float32',
         dtype_map: str = 'float64',
-        unit: str = 'K'
+        unit: str = 'K',
+        use_psd: bool = True,
+        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise'
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -169,6 +178,8 @@ class Cfg:
         self.dtype_tod = dtype_tod
         self.dtype_map = dtype_map
         self.unit = unit
+        self.use_psd = use_psd
+        self.wn_label = wn_label
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -439,7 +450,6 @@ def main(
         elif args.nside is not None:
             run_list.append([obslist, None, None, info_list, prefix, t, tag])
 
-    
     futures = [executor.submit(
             mapmaking.make_demod_map, args.context, r[0],
             noise_model, r[3], preprocess_config, r[4],
@@ -453,13 +463,15 @@ def main(
             split_labels=split_labels,
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
-            atomic_db=args.atomic_db) for r in run_list]
+            use_psd=args.use_psd,
+            wn_label=args.wn_label,
+            atomic_db=args.atomic_db,) for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:
             errors, outputs = future.result()
         except Exception as e:
-            future_write_to_log(e, errlog)
+            future_write_to_log(e, errlog[-1])
             continue
         futures.remove(future)
         for ii in range(len(errors)):
