@@ -1095,7 +1095,7 @@ class AzSS(_Preprocess):
         if self.process_cfgs is None:
             # This handles the case if no process configs are passed.
             return
-            
+
         if self.process_cfgs.get("subtract"):
             if self.calc_cfgs.get('azss_stats_name') in proc_aman:
                 if sim:
@@ -1138,7 +1138,11 @@ class SubtractAzSSTemplate(_Preprocess):
     name = "subtract_azss_template"
 
     def process(self, aman, proc_aman, sim=False):
-        tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
+        process_cfgs = copy.deepcopy(self.process_cfgs)
+        if sim:
+            process_cfgs["azss"] = proc_aman.get(process_cfgs["azss"])
+        tod_ops.azss.subtract_azss_template(aman, **process_cfgs)
+
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
