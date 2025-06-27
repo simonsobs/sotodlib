@@ -109,7 +109,7 @@ class NmatUncorr(Nmat):
 
     @staticmethod
     def from_bunch(data):
-        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=window, nwin=nwin)
+        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=data.window, nwin=data.nwin)
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
