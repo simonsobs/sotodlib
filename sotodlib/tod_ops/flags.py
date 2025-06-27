@@ -1131,7 +1131,11 @@ def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
 
 def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
     """
-    Expand smurfgaps flag of each stream_id to all detectors.
+    smurfgaps flags indicates the samples of each stream_id where the
+    lost frames are filled in the bookbinding process.
+    See `sotodlib.io.bookbinder.bind`.
+
+    This function expands smurfgaps flags of each stream_id to all detectors.
 
     Parameters
     ----------

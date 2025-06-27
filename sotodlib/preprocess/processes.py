@@ -2336,6 +2336,8 @@ class TrimFlagEdge(_Preprocess):
 
 class SmurfGapsFlags(_Preprocess):
     """Expand smurfgaps flag of each stream_id to all detectors
+    smurfgaps flags indicates the samples of each stream_id where the
+    lost frames are filled in the bookbinding process.
 
     Example config block::
 
