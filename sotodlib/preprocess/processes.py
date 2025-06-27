@@ -1138,7 +1138,7 @@ class SubtractAzSSTemplate(_Preprocess):
     name = "subtract_azss_template"
 
     def process(self, aman, proc_aman, sim=False):
-        process_cfgs = self.process_cfgs
+        process_cfgs = self.process_cfgs.copy()
         if sim:    
             process_cfgs["azss"] = proc_aman.get(process_cfgs["azss"])
         tod_ops.azss.subtract_azss_template(aman, **process_cfgs)
