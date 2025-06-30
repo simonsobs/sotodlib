@@ -304,23 +304,30 @@ def get_parser(parser=None):
         type=int,
         default=4
     )
+    parser.add_argument(
+        '--raise-error',
+        help="Raise an error upon completion if any obsids or groups fail.",
+        type=bool,
+        default=False
+    )
     return parser
 
 
-def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
-        as_completed_callable: Callable,
-        configs: str,
-        query: Optional[str] = None,
-        obs_id: Optional[str] = None,
-        overwrite: bool = False,
-        min_ctime: Optional[int] = None,
-        max_ctime: Optional[int] = None,
-        update_delay: Optional[int] = None,
-        tags: Optional[str] = None,
-        planet_obs: bool = False,
-        verbosity: Optional[int] = None,
-        nproc: Optional[int] = 4
- ):
+def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+          as_completed_callable: Callable,
+          configs: str,
+          query: Optional[str] = None,
+          obs_id: Optional[str] = None,
+          overwrite: bool = False,
+          min_ctime: Optional[int] = None,
+          max_ctime: Optional[int] = None,
+          update_delay: Optional[int] = None,
+          tags: Optional[str] = None,
+          planet_obs: bool = False,
+          verbosity: Optional[int] = None,
+          nproc: Optional[int] = 4,
+          raise_error: Optional[bool] = False):
+
     configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -361,6 +368,8 @@ def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     logger.info(f'Run list created with {len(run_list)} obsids')
 
+    n_fail = 0
+
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                     group_list=r[1], verbosity=verbosity,
@@ -370,6 +379,8 @@ def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         logger.info('New future as_completed result')
         try:
             err, db_datasets = future.result()
+            if err is not None:
+                n_fail += 1
         except Exception as e:
             errmsg = f'{type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
@@ -377,6 +388,7 @@ def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             f = open(errlog, 'a')
             f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
             f.close()
+            n_fail+=1
             continue
         futures.remove(future)
 
@@ -388,8 +400,38 @@ def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             else:
                 pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
-if __name__ == '__main__':
-    args = get_parser().parse_args()
-    rank, executor, as_completed_callable = get_exec_env(args.nproc)
+    if raise_error and n_fail > 0:
+        raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
+
+def main(configs: str,
+         query: Optional[str] = None,
+         obs_id: Optional[str] = None,
+         overwrite: bool = False,
+         min_ctime: Optional[int] = None,
+         max_ctime: Optional[int] = None,
+         update_delay: Optional[int] = None,
+         tags: Optional[str] = None,
+         planet_obs: bool = False,
+         verbosity: Optional[int] = None,
+         nproc: Optional[int] = 4,
+         raise_error: Optional[bool] = False):
+
+    rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
-        main(executor=executor, as_completed_callable=as_completed_callable, **vars(args))
+        _main(executor=executor,
+              as_completed_callable=as_completed_callable,
+              configs=configs,
+              query=query,
+              obs_id=obs_id,
+              overwrite=overwrite,
+              min_ctime=min_ctime,
+              max_ctime=max_ctime,
+              update_delay=update_delay,
+              tags=tags,
+              planet_obs=planet_obs,
+              verbosity=verbosity,
+              nproc=nproc,
+              raise_error=raise_error)
+
+if __name__ == '__main__':
+    sp_util.main_launcher(main, get_parser)

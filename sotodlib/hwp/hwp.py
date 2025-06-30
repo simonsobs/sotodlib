@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters, apodize
+from sotodlib.tod_ops import filters, apodize
 import logging
 
 logger = logging.getLogger(__name__)
@@ -264,7 +264,7 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
             else:
                 weight_for_signal = None
     
-    binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
+    binning_dict = tod_ops.bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
@@ -568,9 +568,23 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
     if remove_template:
         aman.move(hwpss_template_name, None)
 
+def get_hwp_freq(timestamps, hwp_angle):
+    """
+    Calculate the frequency of HWP rotation.
+
+    Parameters:
+    timestamps (array-like): An array of timestamps.
+    hwp_angle (array-like): An array of HWP angles in radian
+
+    Returns:
+    float: The frequency of the HWP rotation in Hz.
+    """
+    hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
+            (timestamps[-1] - timestamps[0])) / (2 * np.pi)
+    return hwp_freq
 
 def demod_tod(aman, signal=None, demod_mode=4,
-              bpf_cfg=None, lpf_cfg=None):
+              bpf_cfg=None, lpf_cfg=None, wrap=True):
     """
     Demodulate TOD based on HWP angle
 
@@ -587,13 +601,18 @@ def demod_tod(aman, signal=None, demod_mode=4,
         If not specified, a sine-squared bandwidth filter of
         (demod_mode * HWP speed) +/- 0.95*(HWP speed) is used with transition width 0.1.
         Example) bpf_cfg = {'type': 'sine2', 'center': 8.0, 'width': 3.8, 'trans_width': 0.1}
+        or bpf_cfg = {'type': 'sine2', 'center': '4*f_HWP', 'width': '1.9*f_HWP', 'trans_width': 0.1}
         See filters.get_bpf for details.
     lpf_cfg : dict
         Configuration for Low-pass filter applied to the demodulated TOD data. If not specified,
         a sine-squared filter with a cutoff frequency of 0.95*(HWP speed) and transition width
         0.1 is used.
         Example) lpf_cfg = {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
+        or lpf_cfg = {'type': 'sine2', 'cutoff': '0.95*f_HWP', 'trans_width': 0.1}
         See filters.get_lpf for details.
+    wrap : bool, optional
+        If True, the demodulated signal is wrapped and stored in the input aman container.
+        If False, the demodulated signal is returned.
 
     Returns
     -------
@@ -617,8 +636,7 @@ def demod_tod(aman, signal=None, demod_mode=4,
         raise TypeError("Signal must be None, str, or ndarray")
     
     # HWP speed in Hz
-    speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-            (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+    speed = get_hwp_freq(timestamps=aman.timestamps, hwp_angle=aman.hwp_angle)
     
     if bpf_cfg is None:
         bpf_center = demod_mode * speed
@@ -627,6 +645,12 @@ def demod_tod(aman, signal=None, demod_mode=4,
                    'center': bpf_center,
                    'width': bpf_width,
                    'trans_width': 0.1}
+    
+    for k, v in bpf_cfg.items():
+        if isinstance(v, str):
+            if k in ['center', 'width']:
+                bpf_cfg[k] = speed*float(v.split('*')[0])
+
     bpf = filters.get_bpf(bpf_cfg)
     
     if lpf_cfg is None:
@@ -634,24 +658,31 @@ def demod_tod(aman, signal=None, demod_mode=4,
         lpf_cfg = {'type': 'sine2',
                    'cutoff': lpf_cutoff,
                    'trans_width': 0.1}
+    
+    for k, v in lpf_cfg.items():
+        if isinstance(v, str):
+            if k == 'cutoff':
+                lpf_cfg[k] = speed*float(v.split('*')[0])
+
     lpf = filters.get_lpf(lpf_cfg)
         
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
                                    signal_name=signal_name) * phasor
-    
-    # dsT
-    aman.wrap_new('dsT', dtype='float32', shape=('dets', 'samps'))
-    aman.dsT = aman[signal_name]
-    aman['dsT'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='dsT', detrend=None)
-    # demodQ
-    aman.wrap_new('demodQ', dtype='float32', shape=('dets', 'samps'))
-    aman['demodQ'] = demod.real
-    aman['demodQ'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='demodQ', detrend=None) * 2.
-    # demodU
-    aman.wrap_new('demodU', dtype='float32', shape=('dets', 'samps'))
-    aman['demodU'] = demod.imag
-    aman['demodU'] = tod_ops.fourier_filter(
-        aman, lpf, signal_name='demodU', detrend=None) * 2.
+
+    # Filter the demodulated signal
+    demod_aman = core.AxisManager(aman.dets, aman.samps)
+    demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
+    demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None)
+    demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None) * 2.
+    demod_aman.wrap("demodU", demod.imag, axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None) * 2.
+    # Either wrap or return the demodulated signal
+    if wrap:
+        for fld in ['dsT', 'demodQ', 'demodU']:
+            aman.wrap(fld, demod_aman[fld], axis_map=[(0, 'dets'), (1, 'samps')])
+        del demod_aman
+    else:
+        return demod_aman['dsT'], demod_aman['demodQ'], demod_aman['demodU']

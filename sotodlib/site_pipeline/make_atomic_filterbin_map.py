@@ -86,6 +86,13 @@ class Cfg:
         Run a specific frequency band
     unit: str
         Unit of data. Default is K
+    use_psd: bool
+        True by default. Use white noise measured by PSD
+        as the weights for mapmaking. Must be provided by
+        the preprocessing
+    wn_label: str
+        Path where to find the white noise per det by the
+        preprocessing
     center_at: str
     max_dets: int
     fixed_time: int
@@ -133,7 +140,9 @@ class Cfg:
         window: Optional[float] = None,
         dtype_tod: str = 'float32',
         dtype_map: str = 'float64',
-        unit: str = 'K'
+        unit: str = 'K',
+        use_psd: bool = True,
+        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise'
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -169,6 +178,8 @@ class Cfg:
         self.dtype_tod = dtype_tod
         self.dtype_map = dtype_map
         self.unit = unit
+        self.use_psd = use_psd
+        self.wn_label = wn_label
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -245,7 +256,7 @@ def future_write_to_log(e, errlog):
 
 def main(
     config_file: str,
-    executor: Union["MPIPoolExecutor", "ProcessPoolExecutor"],
+    executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     as_completed_callable: Callable) -> None:
     args = Cfg.from_yaml(config_file)
 
@@ -299,7 +310,9 @@ def main(
     preprocess_config_str = [s.strip() for s in args.preprocess_config.split(",")]
     preprocess_config = [] ; errlog = []
     for preproc_cf in preprocess_config_str:
-        preproc_local = yaml.safe_load(open(preproc_cf, 'r'))
+        ff = open(preproc_cf, 'r')
+        preproc_local = yaml.safe_load(ff)
+        ff.close()
         preprocess_config.append( preproc_local )
         errlog.append( os.path.join(os.path.dirname(
             preproc_local['archive']['index']), 'errlog.txt') )
@@ -408,7 +421,7 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
+        #pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
 
         # Save file for data base of atomic maps.
         # We will write an individual file,
@@ -417,21 +430,22 @@ def main(
         if not args.only_hits:
             info_list = []
             for split_label in split_labels:
-                info = mapmaking.AtomicInfo(
-                    obs_id=obslist[0][0],
-                    telescope=obs_infos[obslist[0][3]].telescope,
-                    freq_channel=band,
-                    wafer=detset,
-                    ctime=int(t),
-                    split_label=split_label
-                )
-                info.split_detail = ''
-                info.prefix_path = str(prefix + '_%s' % split_label)
-                info.elevation = obs_infos[obslist[0][3]].el_center
-                info.azimuth = obs_infos[obslist[0][3]].az_center
-                info.pwv = float(pwv_atomic)
-                info.roll_angle = obs_infos[obslist[0][3]].roll_center
-                info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
+                # info is a dictionary that is used to create an AtomicInfo object
+                # to write into sqlite with sqlalchemy
+                info = {}
+                info['obs_id']=obslist[0][0]
+                info['telescope']=obs_infos[obslist[0][3]].telescope
+                info['freq_channel']=band
+                info['wafer']=detset
+                info['ctime']=int(t)
+                info['split_label']=split_label
+                info['split_detail'] = ''
+                info['prefix_path'] = str(prefix + '_%s' % split_label)
+                info['elevation'] = obs_infos[obslist[0][3]].el_center
+                info['azimuth'] = obs_infos[obslist[0][3]].az_center
+                #info['pwv'] = float(pwv_atomic)
+                info['roll_angle'] = obs_infos[obslist[0][3]].roll_center
+                info['sun_distance'] = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
@@ -439,7 +453,6 @@ def main(
         elif args.nside is not None:
             run_list.append([obslist, None, None, info_list, prefix, t, tag])
 
-    
     futures = [executor.submit(
             mapmaking.make_demod_map, args.context, r[0],
             noise_model, r[3], preprocess_config, r[4],
@@ -453,13 +466,19 @@ def main(
             split_labels=split_labels,
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
-            atomic_db=args.atomic_db) for r in run_list]
+            use_psd=args.use_psd,
+            wn_label=args.wn_label,) for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:
-            errors, outputs = future.result()
+            errors, outputs, d_ = future.result()
+            if d_ is not None:
+                list_infos = []
+                for n_split in range(len(split_labels)):
+                    list_infos.append(mapmaking.AtomicInfo.from_dict(d_[n_split]))
+                mapmaking.atomic_db_aux(args.atomic_db, list_infos)
         except Exception as e:
-            future_write_to_log(e, errlog)
+            future_write_to_log(e, errlog[-1])
             continue
         futures.remove(future)
         for ii in range(len(errors)):

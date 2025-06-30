@@ -319,8 +319,13 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    logger.info(f"Cutting on the last process: {pipe[-1].name}")
-    pipe[-1].select(meta)
+    logger.info("Restricting detectors on all processes")
+    keep_all = np.ones(meta.dets.count,dtype=bool)
+    for process in pipe[:]:
+        keep = process.select(meta, in_place=False)
+        if isinstance(keep, np.ndarray):
+            keep_all &= keep
+    meta.restrict("dets", meta.dets.vals[keep_all])
     return meta
 
 
@@ -367,7 +372,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
-        pipe.run(aman, aman.preprocess)
+        pipe.run(aman, aman.preprocess, select=False)
         return aman
 
 
@@ -436,21 +441,29 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
+            logger.info("Restricting detectors on all proc pipeline processes")
+            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+            for process in pipe_proc[:]:
+                keep = process.select(meta_proc, in_place=False)
+                if isinstance(keep, np.ndarray):
+                    keep_all &= keep
+            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
+
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess)
+            pipe_init.run(aman, aman.preprocess, select=False)
             if init_only:
                 return aman
 
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
             aman.preprocess.merge(proc_aman.preprocess)
 
-            pipe_proc.run(aman, aman.preprocess)
+            pipe_proc.run(aman, aman.preprocess, select=False)
 
             return aman
         else:
@@ -557,9 +570,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
-            proc_aman.preprocess.noisy_dets_flags.move("valid_dets", None)
             aman.preprocess.merge(proc_aman.preprocess)
-
             pipe_proc.run(aman, aman.preprocess, sim=True)
 
             return aman
@@ -709,6 +720,12 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     group_by, groups, error = get_groups(obs_id, configs, context)
 
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        x = db.inspect({'obs:obs_id': obs_id})
+    else:
+        x = None
+
     all_groups = groups.copy()
     for g in all_groups:
         if 'wafer.bandpass' in group_by:
@@ -716,16 +733,26 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                 groups.remove(g)
                 continue
 
+    # get groups in db
+    db_groups = []
+    if x is not None and len(x) > 0:
+        [db_groups.append([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+
     for g in groups:
         dets = {gb:gg for gb, gg in zip(group_by, g)}
         outputs_grp = save_group(obs_id, configs, dets, context, subdir)
 
         if os.path.exists(outputs_grp['temp_file']):
             try:
-                if not remove:
+                if not remove and g not in db_groups:
                     cleanup_mandb(None, outputs_grp, configs, logger)
                 else:
-                    # if we're overwriting, remove file so it will re-run
+                    # if we're overwriting
+                    if remove:
+                        logger.info(f"remove={remove}: removing {outputs_grp['temp_file']}")
+                    # if found in database already
+                    elif g in db_groups:
+                        logger.info(f"{outputs_grp['temp_file']} found in db, removing")
                     os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
@@ -1175,7 +1202,7 @@ def check_cfg_match(ref, loaded, logger=None):
                 logger.warning('Config check fails due to ordered pipeline element names not matching.')
                 return False
             else:
-                if type(ref[ri]) is core.AxisManager:
+                if type(ref[ri]) is core.AxisManager and type(loaded[li]) is core.AxisManager:
                     check_cfg_match(ref[ri], loaded[li], logger)
                 elif ref[ri] == loaded[li]:
                     continue

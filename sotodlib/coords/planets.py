@@ -39,6 +39,17 @@ SOURCE_LIST = ['mercury',
                ('QSO_J2253+1608', 343.4952422, 16.14301323),
                ('galactic_center', -93.5833, -29.0078)]
 
+def get_source_list_fromstr(target_source):
+    """Get a source_list from SOURCE_LIST by name, or raise ValueError if not found.
+    """
+    for isource in SOURCE_LIST:
+        if isinstance(isource, str):
+            isource_name = isource
+        elif isinstance(isource, tuple):
+            isource_name = isource[0]
+        if isource_name.lower() == target_source.lower():
+            return isource
+    raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
 
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
@@ -119,7 +130,11 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
-    if isinstance(planet, str):
+    if isinstance(planet, (list, tuple)):
+        _, ra, dec = planet
+        planet = SlowSource(t, float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+    else:
         planet = SlowSource.for_named_source(planet, t)
 
     def scan_q_model(t, az, el, planet):
@@ -213,7 +228,7 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
-                       wrap=None):
+                       wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -234,15 +249,33 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
+        Default is None. (Nothing happens.)
 
     Returns:
       The filtered signal.
 
     """
-    if source_flags is None:
+    if source_flags is None and tod is not None:
         source_flags = tod.source_flags
-    if signal is None:
+    elif source_flags is None and tod is None:
+        raise ValueError("Must provide source_flags if tod is None")
+    if signal is None and tod is not None:
         signal = tod.signal
+    elif signal is None and tod is None:
+        raise ValueError("Must provide signal if tod is None")
+    if signal is None:
+        raise ValueError("signal somehow still None!")
+    
+    if edge_guard is not None:
+        if isinstance(edge_guard, int):
+            edgebl = np.zeros(source_flags.shape[-1], dtype=bool)
+            edgebl[edge_guard:-edge_guard] = True
+            edgerm = so3g.proj.ranges.RangesMatrix.from_mask(edgebl)
+            for iflag in source_flags:
+                iflag.intersect(edgerm)
+        else:
+            raise ValueError("edge_guard must be an int.")
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
@@ -251,21 +284,23 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
     # Low pass filter?
     if low_pass is not None:
+        if tod is None:
+            raise ValueError("tod cannot be None when lowpassing")
         if isinstance(low_pass, tod_ops.filters._chainable):
             filt = low_pass
         else:
             filt = tod_ops.filters.low_pass_butter4(low_pass)
 
         n_det, n = signal.shape
-        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, 'BOTH')
-        a[:] = signal_pca
-        t_1()
+        rfft = tod_ops.fft_ops.RFFTObj.for_shape(n_det, n, 'BOTH')
+        rfft.a[:] = signal_pca
+        rfft.t_forward()
         times = tod.timestamps
         delta_t = (times[-1]-times[0])/(tod.samps.count - 1)
         freqs = np.fft.rfftfreq(n, delta_t)
-        filt.apply(freqs, tod, target=b)
-        signal_pca = t_2()
-        del a, b
+        filt.apply(freqs, tod, target=rfft.b)
+        signal_pca = rfft.t_backward()
+        del rfft
 
     # Measure TOD means (after gap fill, low pass, etc).
     if isinstance(n_modes, str) and n_modes == 'all':
@@ -288,7 +323,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
-    if wrap:
+    if wrap and tod is not None:
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
