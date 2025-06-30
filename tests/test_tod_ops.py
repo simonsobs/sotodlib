@@ -7,10 +7,9 @@
 
 import unittest
 import numpy as np
-import pylab as pl
 import scipy.signal
-
-from numpy.testing import assert_array_equal, assert_allclose
+from numpy.fft import rfftfreq,irfft
+from numpy.testing import assert_allclose
 
 from sotodlib import core, tod_ops, sim_flags
 import so3g
@@ -284,6 +283,7 @@ class JumpfindTest(unittest.TestCase):
         """Test that jumpfinder finds jumps in white noise."""
         np.random.seed(0)
         tod = get_tod('white')
+        ptp_orig = np.ptp(tod.signal)
         sig_jumps = tod.signal[0]
         jump_locs = np.array([200, 400, 700])
         sig_jumps[jump_locs[0]:] += 10
@@ -293,8 +293,8 @@ class JumpfindTest(unittest.TestCase):
         tod.wrap('sig_jumps', sig_jumps, [(0, 'samps')])
 
         # Find jumps without filtering
-        jumps_nf, _ = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5, win_size=23)
-        jumps_nf = jumps_nf.ranges().flatten()
+        jumps, _, fixed = tod_ops.jumps.find_jumps(tod, signal=tod.sig_jumps, min_size=5, win_size=23, fix=True)
+        jumps_nf = jumps.ranges().flatten()
         
         # Remove double counted jumps and round to remove uncertainty
         jumps_nf = np.unique(np.round(jumps_nf, -2))
@@ -310,14 +310,10 @@ class JumpfindTest(unittest.TestCase):
         heights = heights[heights.nonzero()].ravel()
         self.assertTrue(np.all(np.abs(np.array([10, -13, -8]) - np.round(heights)) < 3))
 
+        # Check fixing
+        ptp_fix = np.ptp(fixed.ravel()[~jumps.buffer(10).mask().ravel()])
+        self.assertTrue(ptp_fix < 1.1*ptp_orig)
 
-class FFTTest(unittest.TestCase):
-    def test_psd(self):
-        tod = get_tod("white")
-        f, Pxx = tod_ops.fft_ops.calc_psd(tod, nperseg=256)
-        self.assertEqual(len(f), 129) # nperseg/2 + 1
-        f, Pxx = tod_ops.fft_ops.calc_psd(tod, freq_spacing=.1)
-        self.assertEqual(np.round(np.median(np.diff(f)), 1), .1)
 
 if __name__ == '__main__':
     unittest.main()

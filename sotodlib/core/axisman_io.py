@@ -1,3 +1,4 @@
+import inspect
 import so3g
 import numpy as np
 import json
@@ -12,6 +13,11 @@ import astropy.units as u
 
 from .axisman import *
 from .flagman import FlagManager
+
+# Backwards compatibility for before skip_shape_check was added
+_rm_fast_kwargs = {}
+if "skip_shape_check" in inspect.signature(so3g.proj.RangesMatrix).parameters:
+    _rm_fast_kwargs = {'skip_shape_check': True}
 
 # Flatten / expand RangesMatrix
 
@@ -63,7 +69,7 @@ def expand_RangesMatrix(flat_rm):
         return so3g.proj.Ranges.from_array(r, shape[0])
     ranges = []
     if shape[0] == 0:
-        return so3g.proj.RangesMatrix([], child_shape=shape[1:])
+        return so3g.proj.RangesMatrix([], child_shape=shape[1:], **_rm_fast_kwargs)
     # Otherwise non-trivial
     count = np.prod(shape[:-1])
     start, stride = 0, count // shape[0]
@@ -73,7 +79,7 @@ def expand_RangesMatrix(flat_rm):
         ranges.append(expand_RangesMatrix(
             {'shape': shape[1:], 'intervals': _i, 'ends': _e}))
         start = ends[i+stride-1]
-    return so3g.proj.RangesMatrix(ranges, child_shape=shape[1:])
+    return so3g.proj.RangesMatrix(ranges, child_shape=shape[1:], **_rm_fast_kwargs)
 
 ## Flatten and Expand sparse arrays
 def flatten_csr_array(arr):
@@ -329,7 +335,7 @@ def _load_axisman(src, group=None, cls=None, fields=None):
             x = _load_axisman(src[item['name']], fields=subfields)
             if item['subclass'] == 'FlagManager':
                 x = FlagManager.promote(x, *item['special_axes'])
-            axisman.wrap(item['name'], x)
+            axisman.wrap(item['name'], x, restrict_in_place=True)
         elif item['encoding'] == 'rangesmatrix':
             x = src[item['name']]
             rm_flat = {k: x[k][:] for k in ['shape', 'intervals', 'ends']}

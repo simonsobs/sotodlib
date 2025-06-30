@@ -1,0 +1,32 @@
+name: SOTODLIB Monthly Release
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Bump Patch Version and create body
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 || echo "v0.0.0")
+          version=${latest_tag#v}  # Remove 'v' prefix
+          echo "Latest tag: $latest_tag, latest version: $version"
+          IFS='.' read -r major minor patch <<< "$version"
+          new_patch=$((patch + 1))
+          new_version="v$major.$minor.$new_patch"
+          echo "New version: $new_version"
+          gh release create $new_version --generate-notes

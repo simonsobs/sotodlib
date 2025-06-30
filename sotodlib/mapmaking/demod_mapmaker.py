@@ -6,18 +6,15 @@ you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
 __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
-import numpy as np, os
+import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
-import so3g.proj
 
-from .. import core
 from .. import coords
-from .utilities import recentering_to_quat_lonlat, evaluate_recentering, MultiZipper, unarr, safe_invert_div
-from .utilities import import_optional
+from . import utils as smutils
 from .noise_model import NmatWhite
 
-hp = import_optional('healpy')
-h5py = import_optional('h5py')
+hp = smutils.import_optional('healpy')
+h5py = smutils.import_optional('h5py')
 
 class DemodMapmaker:
     def __init__(self, signals=[], noise_model=None, dtype=np.float32, verbose=False, comps='TQU', singlestream=False):
@@ -34,15 +31,15 @@ class DemodMapmaker:
             noise model for each observation. Can be overriden in add_obs.
             Noises other than NmatWhite not implemented. If None, a white 
             noise model is used.
-        dtype : numpy.dtype
+        dtype : numpy.dtype, optional
             The data type to use for the time-ordered data. Only tested
             with float32
-        verbose : Bool
+        verbose : Bool, optional
             Whether to print progress messages. Not implemented
-        comps : str
+        comps : str, optional
             String with the components to solve for. Not implemented for 
             anything other than TQU
-        singlestream : Bool
+        singlestream : Bool, optional
             If True, do not perform demodulated filter+bin mapmaking but 
             rather regular filter+bin mapmaking, i.e. map from obs.signal
             rather than from obs.dsT, obs.demodQ, obs.demodU
@@ -62,12 +59,13 @@ class DemodMapmaker:
         self.verbose      = verbose
         self.noise_model  = noise_model
         self.data         = []
-        self.dof          = MultiZipper()
+        self.dof          = smutils.MultiZipper()
         self.ready        = False
         self.ncomp        = len(comps)
         self.singlestream = singlestream
 
-    def add_obs(self, id, obs, noise_model=None, split_labels=None):
+    def add_obs(self, id, obs, noise_model=None, split_labels=None,
+                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -84,7 +82,13 @@ class DemodMapmaker:
             if None, the default model defined in the Demodmapmaker object is used.
         split_labels: list or None, optional
             A list of strings with the splits requested. If None then no splits were asked for,
-            i.e. we will produce one map 
+            i.e. we will produce one map
+        use_psd : bool, optional
+            By default True. Use the white noise measured from PSD as mapmaking weights,
+            which must be provided in the preprocessing. This is done as opposed to
+            build the ivar locally from the std of the TOD.
+        wn_label : str, optional
+            Path where to find the white noise per det estimated by the preprocessing.
 
         """
         ctime  = obs.timestamps
@@ -98,11 +102,17 @@ class DemodMapmaker:
         if noise_model is None: noise_model = self.noise_model
         # Build the noise model from the obs unless a fully
         # initialized noise model was passed
+        if use_psd:
+            try:
+                noise_model.ivar = 1.0 / obs[wn_label]**2
+            except:
+                msg = f"use_psd is True but '{wn_label}' does not contain the white noise estimated on the preprocessing"
+                raise RuntimeError(msg)
         if noise_model.ready:
             nmat = noise_model
         else:
             try:
-                if not(self.singlestream):               
+                if not(self.singlestream):
                     nmat = noise_model.build(tod[1], srate=srate) # Here we are building the model from demodQ
                 else:
                     nmat = noise_model.build(tod, srate=srate)
@@ -146,7 +156,7 @@ class DemodSignal:
 
 class DemodSignalMap(DemodSignal):
     def __init__(self, shape=None, wcs=None, comm=None, comps="TQU", name="sky", ofmt="{name}", output=True,
-                 ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False,
+                 ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False,
                  nside=None, nside_tile=None):
         """
         Parent constructor; use for_rectpix or for_healpix instead. Args described there.
@@ -156,40 +166,40 @@ class DemodSignalMap(DemodSignal):
         self.comps = comps
         self.sys   = sys
         self.recenter = recenter
-        self.dtype = dtype
+        self.dtype_map = dtype_map
+        self.dtype_tod = dtype_tod
+        self.tile_shape = tile_shape        
         self.tiled = tiled
         self.data  = {}
         self.Nsplits = Nsplits
         self.singlestream = singlestream
         self.wrapper = lambda x : x
+        self.wcs = wcs
         ncomp      = len(comps)
 
-        self.pix_scheme = "rectpix" if (shape is not None) else "healpix"
+        self.pix_scheme = "rectpix" if (wcs is not None) else "healpix"
         if self.pix_scheme == "healpix":
             self.tiled = (nside_tile is not None)
             self.hp_geom = coords.healpix_utils.get_geometry(nside, nside_tile, ordering='NEST')
             npix = 12 * nside**2
-            self.rhs = np.zeros((Nsplits, ncomp, npix), dtype=dtype)
-            self.div = np.zeros((Nsplits, ncomp, ncomp, npix), dtype=dtype)
-            self.hits = np.zeros((Nsplits, npix), dtype=dtype)
+            self.rhs = np.zeros((Nsplits, ncomp, npix), dtype=dtype_map)
+            self.div = np.zeros((Nsplits, ncomp, ncomp, npix), dtype=dtype_map)
+            self.hits = np.zeros((Nsplits, npix), dtype=dtype_map)
 
             if self.tiled:
                 self.wrapper = coords.healpix_utils.tiled_to_full
         else:
-            shape = tuple(shape[-2:])
-            if tiled:
-                geo = tilemap.geometry(shape, wcs, tile_shape=tile_shape)
-                self.rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=dtype)
-                self.div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=dtype)
-                self.hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=dtype)
+            if shape is None:
+                # We will set shape, wcs from wcs_kernel on loading the first obs                
+                self.rhs = None
+                self.div = None
+                self.hits = None
             else:
-                self.rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=dtype)
-                self.div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=dtype)
-                self.hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=dtype)
+                self.init_maps_rectpix(shape, wcs)
 
     @classmethod
     def for_rectpix(cls, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
+            ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
         """
         Signal describing a non-distributed sky map. Signal describing a sky map in the coordinate 
         system given by "sys", which defaults to equatorial coordinates. If tiled==True, then this 
@@ -198,9 +208,9 @@ class DemodSignalMap(DemodSignal):
         Arguments
         ---------
         shape : numpy.ndarray
-            Shape of the output map geometry
+            Shape of the output map geometry. If None, computed from coords.get_footprint on first add_obs.
         wcs : wcs
-            WCS of the output map geometry
+            WCS of the output map geometry (or wcs kernel).
         comm : MPI.comm
             MPI communicator
         comps : str, optional
@@ -213,8 +223,10 @@ class DemodSignalMap(DemodSignal):
             Whether this signal should be part of the output or not.
         ext : str, optional
             The extension used for the files.
-        dtype : numpy.dtype
+        dtype_map : numpy.dtype, optional
             The data type to use for the maps.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time ordered data
         sys : str or None, optional
             The coordinate system to map. Defaults to equatorial
         recenter : str or None
@@ -234,12 +246,12 @@ class DemodSignalMap(DemodSignal):
         
         """
         return cls(shape=shape, wcs=wcs, comm=comm, comps=comps, name=name, ofmt=ofmt, output=output,
-                   ext=ext, dtype=dtype, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
+                   ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
                    Nsplits=Nsplits, singlestream=singlestream, nside=None, nside_tile=None)
 
     @classmethod
     def for_healpix(cls, nside, nside_tile=None, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits.gz", dtype=np.float32, Nsplits=1, singlestream=False):
+            ext="fits.gz", dtype_map=np.float64, dtype_tod=np.float32, Nsplits=1, singlestream=False):
         """
         Signal describing a sky map in healpix pixelization, NEST ordering.
 
@@ -261,8 +273,10 @@ class DemodSignalMap(DemodSignal):
         ext : str, optional
             The extension used for the files.
             May be 'fits', 'fits.gz', 'h5', 'h5py', or 'npy'.
-        dtype : numpy.dtype
-            The data type to use for the time-ordered data.
+        dtype_map : numpy.dtype, optional
+            The data type to use for the maps.
+        dtype_tod : numpy.dtype, optional
+            The data type to use for the time ordered data
         Nsplits : int, optional
             Number of splits that you will map simultaneously. By default is 1 when no
             splits are requested.
@@ -272,7 +286,7 @@ class DemodSignalMap(DemodSignal):
             obs.demodQ, obs.demodU
         """
         return cls(shape=None, wcs=None, comm=None, comps=comps, name=name, ofmt=ofmt, output=output,
-                   ext=ext, dtype=dtype, sys=None, recenter=None, tile_shape=None, tiled=False,
+                   ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
     def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None):
@@ -287,7 +301,7 @@ class DemodSignalMap(DemodSignal):
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
                 if self.recenter:
-                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+                    rot = smutils.recentering_to_quat_lonlat(*smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=smutils.unarr(obs.site)))
                 else: rot = None
                 if self.Nsplits == 1:
                     # this is the case with no splits
@@ -297,16 +311,27 @@ class DemodSignalMap(DemodSignal):
                     cuts = obs.flags.glitch_flags + ~obs.preprocess.split_flags.cuts[split_labels[n_split]]
                 if self.pix_scheme == "rectpix":
                     threads='domdir'
-                    geom = self.rhs.geometry
+                    if self.rhs is None: # Still need to initialize the geometry
+                        geom = None
+                        wcs_kernel = self.wcs
+                    else:
+                        geom = self.rhs.geometry
+                        wcs_kernel = None
                 else:
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, threads=threads, weather=unarr(obs.weather), site=unarr(obs.site), cuts=cuts, hwp=True)
+                    wcs_kernel = None
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True)
             else:
                 pmap_local = pmap
 
+            if self.rhs is None: # Set the geometry now from the pmat
+                shape, wcs = pmap_local.geom
+                self.init_maps_rectpix(shape, wcs)
+                self.wcs = wcs
+
             if not(self.singlestream):
-                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT, signalQ=obs.demodQ, signalU=obs.demodU,
+                obs_rhs, obs_div, obs_hits = project_all_demod(pmap=pmap_local, signalT=obs.dsT.astype(self.dtype_tod), signalQ=obs.demodQ.astype(self.dtype_tod), signalU=obs.demodU.astype(self.dtype_tod),
                                                                det_weightsT=2*nmat.ivar, det_weightsQU=nmat.ivar, ncomp=self.ncomp, wrapper=self.wrapper)
             else:
                 obs_rhs, obs_div, obs_hits = project_all_single(pmap=pmap_local, Nd=Nd, det_weights=nmat.ivar, comps='TQU', wrapper=self.wrapper)
@@ -347,30 +372,30 @@ class DemodSignalMap(DemodSignal):
     @property
     def ncomp(self): return len(self.comps)
 
-    def write(self, prefix, tag, m):
+    def write(self, prefix, tag, m, unit='K'):
         if not self.output: return
         oname = self.ofmt.format(name=self.name)
         oname = "%s%s_%s.%s" % (prefix, oname, tag, self.ext)
         if self.pix_scheme == "rectpix":
             if self.tiled:
-                tilemap.write_map(oname, m, self.comm)
+                tilemap.write_map(oname, m, self.comm, extra={'BUNIT':unit})
             else:
                 if self.comm is None or self.comm.rank == 0:
-                    enmap.write_map(oname, m)
+                    enmap.write_map(oname, m, extra={'BUNIT':unit})
         else:
             if self.ext in ["fits", "fits.gz"]:
                 if hp is None:
                     raise ImportError("Cannot save healpix map as fits; healpy could not be imported. Install healpy or save as npy or h5")
                 if m.ndim > 2:
                     m = np.reshape(m, (np.prod(m.shape[:-1]), m.shape[-1]), order='C') # Flatten wrapping axes; healpy.write_map can't handle >2d array
-                hp.write_map(oname, m.view(self.dtype), nest=(self.hp_geom.ordering=='NEST'), overwrite=True)
+                hp.write_map(oname, m.view(self.dtype_map), nest=(self.hp_geom.ordering=='NEST'), overwrite=True, column_units=unit)
             elif self.ext == "npy":
-                np.save(oname, {'nside': self.hp_geom.nside, 'ordering':self.hp_geom.ordering, 'data':m.view(self.dtype)}, allow_pickle=True)
+                np.save(oname, {'nside': self.hp_geom.nside, 'ordering':self.hp_geom.ordering, 'data':m.view(self.dtype_map)}, allow_pickle=True)
             elif self.ext in ['h5', 'hdf5']:
                 if h5py is None:
                     raise ValueError("Cannot save healpix map as hdf5; h5py could not be imported. Install h5py or save as npy or fits")
                 with h5py.File(oname, 'w') as f:
-                    dset = f.create_dataset("data", m.shape, dtype=self.dtype, data=m)
+                    dset = f.create_dataset("data", m.shape, dtype=self.dtype_map, data=m)
                     dset.attrs['ordering'] = self.hp_geom.ordering
                     dset.attrs['nside'] = self.hp_geom.nside
             else:
@@ -378,25 +403,45 @@ class DemodSignalMap(DemodSignal):
 
         return oname
 
+    def init_maps_rectpix(self, shape, wcs):
+        """ Initialize tilemaps or enmaps rhs, div, hits for given shape and wcs"""
+        shape = tuple(shape[-2:])
+        Nsplits, ncomp, dtype = self.Nsplits, self.ncomp, self.dtype_map
+        
+        if self.tiled:
+            geo = tilemap.geometry(shape, wcs, tile_shape=self.tile_shape)
+            rhs = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,)),      dtype=self.dtype_map)
+            div = tilemap.zeros(geo.copy(pre=(Nsplits,ncomp,ncomp)), dtype=self.dtype_map)
+            hits= tilemap.zeros(geo.copy(pre=(Nsplits,)),            dtype=self.dtype_map)
+        else:
+            rhs = enmap.zeros((Nsplits, ncomp)     +shape, wcs, dtype=self.dtype_map)
+            div = enmap.zeros((Nsplits,ncomp,ncomp)+shape, wcs, dtype=self.dtype_map)
+            hits= enmap.zeros((Nsplits,)+shape, wcs, dtype=self.dtype_map)
+        self.rhs = rhs
+        self.div = div
+        self.hits = hits
+        return rhs, div, hits
+    
+
 def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                     comm=mpi.COMM_WORLD, comps='TQU', split_labels=None,
                     singlestream=False, dtype_tod=np.float32,
-                    dtype_map=np.float32, recenter=None, verbose=0):
+                    dtype_map=np.float64, recenter=None, verbose=0):
     """
     Setup the classes for demod mapmaking and return
     a DemodMapmmaker object
     """
-    if shape is not None and wcs is not None:
+    if wcs is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_rectpix(shape, wcs, comm, comps=comps,
-                                              dtype=dtype_map, tiled=False,
+                                              dtype_map=dtype_map, dtype_tod=dtype_tod, tiled=False,
                                               ofmt="", Nsplits=Nsplits,
                                               singlestream=singlestream,
                                               recenter=recenter)
     elif nside is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
-                                    comps=comps, dtype=dtype_map,
+                                    comps=comps, dtype_map=dtype_map, dtype_tod=dtype_tod,
                                     ofmt="", Nsplits=Nsplits,
                                     singlestream=singlestream,
                                     ext="fits.gz")
@@ -407,31 +452,44 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                          singlestream=singlestream)
     return mapmaker
 
-def write_demod_maps(prefix, data, split_labels=None):
+def write_demod_maps(prefix, data, info, unit='K', split_labels=['full']):
     """
     Write maps from data into files
+
+    Arguments
+    ---------
+    prefix : str
+        Prefix where to write maps.
+    data : Bunch
+        Bunch object with required maps.
+    info : list
+        List of dictionaries with the info to write into the atomic
+        db. Will be modified in place for valid=[True|False] atomics.
+    unit : str, optional
+        Unit to write into the header of the fits file.
+    split_labels : list, optional
+        List with splits labels.
     """
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
-        data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
-                          data.wmap[n_split])
-        data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                          data.weights[n_split])
-        data.signal.write(prefix, "%s_hits"%split_labels[n_split],
-                          data.signal.hits[n_split])
-
-def write_demod_info(oname, info, split_labels=None):
-    putils.mkdir(os.path.dirname(oname))
-    Nsplits = len(split_labels)
-    for n_split in range(Nsplits):
-        bunch.write(oname+'_%s_info.hdf'%split_labels[n_split], info[n_split])
+        if np.all(data.wmap[n_split] == 0.0):
+            info[n_split]['valid'] = False
+        else:
+            info[n_split]['valid'] = True
+            data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
+                              data.wmap[n_split], unit=unit+'^-1')
+            data.signal.write(prefix, "%s_weights"%split_labels[n_split],
+                              data.weights[n_split], unit=unit+'^2')
+            data.signal.write(prefix, "%s_hits"%split_labels[n_split],
+                              data.signal.hits[n_split], unit='hits')
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
                     nside=None, comm=mpi.COMM_WORLD, comps="TQU", t0=0,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=None, L=None,
-                    site='so_sat3', recenter=None, singlestream=False):
+                    site='so_sat3', recenter=None, singlestream=False,
+                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -446,7 +504,7 @@ def make_demod_map(context, obslist, noise_model, info,
     noise_model : sotodlib.mapmaking.Nmat
         Noise model to pass to DemodMapmaker.
     info : list
-        Information for the database, will be written as a .hdf file.
+        Information for the database in the form of a list of dictionaries
     preprocess_config : list of dict
         List of dictionaries with the config yaml file for the preprocess database.
         If two, then a multilayer preprocessing is to be used.
@@ -484,6 +542,12 @@ def make_demod_map(context, obslist, noise_model, info,
         If True, do not perform demodulated filter+bin mapmaking but
         rather regular filter+bin mapmaking, i.e. map from obs.signal
         rather than from obs.dsT, obs.demodQ, obs.demodU.
+    use_psd : bool, optional
+        By default True. Use the white noise measured from PSD as mapmaking weights,
+        which must be provided in the preprocessing. This is done as opposed to
+        build the ivar locally from the std of the TOD.
+    wn_label : str, optional
+        Path where to find the white noise per det estimated by the preprocessing.
 
     Returns
     -------
@@ -491,6 +555,9 @@ def make_demod_map(context, obslist, noise_model, info,
         List of errors from preprocess database. To be used in cleanup_mandb.
     outputs : list
         List of outputs from preprocess database. To be used in cleanup_mandb.
+    info: list
+        List of dictionaries with the info to write into atomic db. It will be
+        the same as the input, but the weights values will be added.
     """
     from ..preprocess import preprocess_util
     #context = core.Context(context)
@@ -515,7 +582,7 @@ def make_demod_map(context, obslist, noise_model, info,
     else:
         preproc_init = preprocess_config[0]
         preproc_proc = preprocess_config[1]
-
+    n_dets = 0
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
@@ -527,17 +594,21 @@ def make_demod_map(context, obslist, noise_model, info,
                                                 overwrite=False)
         errors.append(error) ; outputs.append((output_init, output_proc)) ;
         if error not in [None,'load_success']:
-            L.info('tod %s:%s:%s failed in the prepoc database'%(obs_id,detset,band))
+            L.info('tod %s:%s:%s failed in the preproc database'%(obs_id,detset,band))
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        mapmaker.add_obs(name, obs, split_labels=split_labels)
+        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
+        n_dets += obs.dets.count
     nobs_kept = comm.allreduce(nobs_kept)
+    n_dets = comm.allreduce(n_dets)
+    for subinfo in info:
+        subinfo['number_dets'] = n_dets
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
-        return errors, outputs
+        return errors, outputs, None
 
     for signal in mapmaker.signals:
         signal.prepare()
@@ -551,13 +622,11 @@ def make_demod_map(context, obslist, noise_model, info,
         div = np.moveaxis(div, -1, 0) # this moves the last axis to the 0th position
         weights.append(div)
     mapdata = bunch.Bunch(wmap=wmap, weights=weights, signal=mapmaker.signals[0], t0=t0)
-
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    write_demod_maps(prefix, mapdata, split_labels=split_labels, )
-    write_demod_info(prefix, info, split_labels=split_labels )
-    return errors, outputs
+    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, unit=unit)
+    return errors, outputs , info
 
 def add_weights_to_info(info, weights, split_labels):
     Nsplits = len(split_labels)
@@ -568,10 +637,12 @@ def add_weights_to_info(info, weights, split_labels):
         if sub_weights.shape[0] != 3:
             raise ValueError(f"sub_weights has unexpected shape {sub_weights.shape}. First axis should be (3,) for TT, QQ, UU")
         mean_qu = np.mean(sub_weights[1:], axis=0)
-        positive = np.where(mean_qu > 0)
-        sumweights = np.sum(mean_qu[positive])
-        meanweights = np.mean(mean_qu[positive])
-        medianweights = np.median(mean_qu[positive])
+        pweights = mean_qu[mean_qu > 0]
+        if pweights.size == 0:
+            pweights = [0]
+        sumweights = np.sum(pweights)
+        meanweights = np.mean(pweights)
+        medianweights = np.median(pweights)
         sub_info['total_weight_qu'] = sumweights
         sub_info['mean_weight_qu'] = meanweights
         sub_info['median_weight_qu'] = medianweights
@@ -600,7 +671,7 @@ def project_rhs_demod(pmap, signalT, signalQ, signalU, det_weightsT, det_weights
     rhs_T = to_map(signal=signalT, comps='T', det_weights=det_weightsT)
     rhs_demodQ = to_map(signal=signalQ, comps='QU', det_weights=det_weightsQU)
     rhs_demodU = to_map(signal=signalU, comps='QU', det_weights=det_weightsQU)
-    rhs_demodQU = zeros(super_shape=(2), comps='QU',)
+    rhs_demodQU = zeros(super_shape=(2), comps='QU')
 
     rhs_demodQU[0][:] = rhs_demodQ[0] - rhs_demodU[1]
     rhs_demodQU[1][:] = rhs_demodQ[1] + rhs_demodU[0]
