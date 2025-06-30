@@ -356,7 +356,7 @@ def harms_func(x, modes, coeffs):
     if coeffs is None:
         return vects
     else:
-        harmonics = np.matmul(coeffs, vects)
+        harmonics = np.matmul(coeffs, vects, casting='no')
         return harmonics
 
 
