@@ -463,7 +463,24 @@ class Pipeline(list):
                 proc_aman.restrict('dets', det_list)
             full = proc_aman.copy()
             run_calc = False
-        
+
+        if 'frequency_cutoffs' not in proc_aman:
+            proc_aman.wrap('frequency_cutoffs', core.AxisManager())
+            if aman['iir_params']['a'] is not None:
+                from ..import tod_ops.filters
+                n = len(aman.timestamps)
+                delta_t = (aman.timestamps[-1] - aman.timestamps[0])/n
+                freqs = np.fft.rfftfreq(n, delta_t)
+                iir = filters.iir_filter(freqs, aman)
+
+                mag = np.abs(iir_filter) / np.max(np.abs(iir_filter))
+                # 3dB scale
+                scale = 10 ** (-3. / 20)
+                freq_cutoff = freqs[np.min(np.where(np.array(mag < scale * np.max(mag)))[0])]
+            else:
+                freq_cutoff = 63.0 # default to 63 Hz
+            proc_aman['frequency_cutoffs'].wrap('signal', freq_cutoff)
+
         success = 'end'
         for step, process in enumerate(self):
             if sim and process.skip_on_sim:

@@ -385,6 +385,9 @@ class PSDCalc(_Preprocess):
         fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
 
+        if "frequency_cutoffs" in proc_aman and self.signal in proc_aman["frequency_cutoffs"]:
+            proc_aman["frequency_cutoffs"].wrap(self.wrap, proc_aman["frequency_cutoffs"][self.signal])
+
         self.save(proc_aman, fft_aman)
 
     def save(self, proc_aman, fft_aman):
@@ -510,6 +513,11 @@ class Noise(_Preprocess):
         psd = proc_aman[self.psd]
         pxx = psd.Pxx_ss if self.subscan else psd.Pxx
 
+        if "frequency_cutoffs" in proc_aman:
+            frequency_cutoff = proc_aman["frequency_cutoffs"][self.psd]
+        else:
+            frequency_cutoff=None
+
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
 
@@ -519,10 +527,12 @@ class Noise(_Preprocess):
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs, 
                                                         merge_fit=True,
+                                                        frequency_cutoff=frequency_cutoff,
                                                         **self.calc_cfgs)
         else:
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
+                                         frequency_cutoff=frequency_cutoff,
                                          **self.calc_cfgs)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
@@ -818,6 +828,13 @@ class Demodulate(_Preprocess):
                                          aman.samps.offset + aman.samps.count - trim))
             aman.restrict('samps', (aman.samps.offset + trim,
                                     aman.samps.offset + aman.samps.count - trim))
+
+        if 'frequency_cutoffs' in proc_aman:
+            hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+            proc_aman['frequency_cutoffs'].wrap('dsT', 0.95*hwp_freq)
+            proc_aman['frequency_cutoffs'].wrap('demodQ', 0.95*hwp_freq)
+            proc_aman['frequency_cutoffs'].wrap('demodU', 0.95*hwp_freq)
 
 
 class AzSS(_Preprocess):

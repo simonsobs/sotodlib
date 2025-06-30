@@ -326,7 +326,7 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, **kwargs):
     Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
     return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
+def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10, frequency_cutoff=None):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
@@ -360,16 +360,13 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10):
         pxx = aman.Pxx
 
     # limit upper frequency cutoffs to hwp freq
-    if 'hwp_angle' in aman._fields:
-        hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-                     (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-        hwp_freq_limit = 0.95 * hwp_freq
-        if high_f >= hwp_freq and hwp_freq > 0:
+    if 'hwp_angle' in aman._fields and frequency_cutoff is not None
+        if high_f >= frequency_cutoff:
             logger.warning(f"high frequency cutoff={high_f} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
             high_f = hwp_freq_limit
             # make sure low_f < high_f
-            if low_f >= hwp_freq_limit:
-                raise ValueError(f"lower frequency cutoff={low_f} >= lpf freq limit={hwp_freq_limit}")
+            if low_f >= frequency_cutoff:
+                raise ValueError(f"lower frequency cutoff={low_f} >= lpf freq limit={frequency_cutoff}")
 
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0)
     if pxx.ndim == 1:
@@ -410,7 +407,8 @@ def fit_noise_model(
     merge_name="noise_fit_stats",
     merge_psd=True,
     freq_spacing=None,
-    subscan=False
+    subscan=False,
+    frequency_cutoff=None
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of signal.
@@ -476,20 +474,18 @@ def fit_noise_model(
         )
 
     # limit upper frequency cutoffs to hwp freq
-    if 'hwp_angle' in aman._fields:
+    if 'hwp_angle' in aman._fields and frequency_cutoff is not None:
         hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                      (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-        if hwp_freq > 0:
-            hwp_freq_limit = 0.95 * hwp_freq
-            if f_max >= hwp_freq:
-                logger.warning(f"f_max={f_max} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
-                f_max = hwp_freq_limit
-            if fwhite[1] >= hwp_freq:
-                logger.warning(f"upper white noise freq={fwhite[1]} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
-                fwhite[1] = hwp_freq_limit
-                # make sure fwhite[0] < fwhite[1]
-                if fwhite[0] >= hwp_freq_limit:
-                    raise ValueError(f"lower white noise freq={fwhite[0]} >= lpf freq={hwp_freq_limit}")
+        if f_max >= frequency_cutoff:
+            logger.warning(f"f_max={f_max} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
+            f_max = frequency_cutoff
+        if fwhite[1] >= frequency_cutoff:
+            logger.warning(f"upper white noise freq={fwhite[1]} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
+            fwhite[1] = frequency_cutoff
+            # make sure fwhite[0] < fwhite[1]
+            if fwhite[0] >= frequency_cutoff:
+                raise ValueError(f"lower white noise freq={fwhite[0]} >= lpf freq={frequency_cutoff}")
     if subscan:
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, psdargs=psdargs,
                                                   fwhite=fwhite, lowf=lowf, f_max=f_max,
