@@ -2,7 +2,6 @@ from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
-from sotodlib.io import metadata   # PerDetectorHdf5 work-around
 from sotodlib.tod_ops import filters, detrend_tod
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory
 import yaml
@@ -227,14 +226,17 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
         obs.focal_plane.gamma += obs.boresight_offset.gamma
     return obs
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
     signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
-    signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=tiled > 0, ofmt="")
+    signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=tiled>0, interpol=interpol, ofmt="")
     signals    = [signal_cut, signal_map]
-    mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+    if srcsamp_mask is not None:
+        signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
+        signals.append(signal_srcsamp)
+        mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
     if comm.rank == 0: L.info(pre + "Building RHS")
     time_rhs   = signal_map.rhs*0
     # And feed it with our observations
