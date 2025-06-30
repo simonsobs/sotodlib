@@ -360,10 +360,12 @@ def calc_wn(aman, pxx=None, freqs=None, low_f=5, high_f=10, frequency_cutoff=Non
         pxx = aman.Pxx
 
     # limit upper frequency cutoffs to hwp freq
-    if 'hwp_angle' in aman._fields and frequency_cutoff is not None
+    if 'hwp_angle' in aman and frequency_cutoff is not None:
+        hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                     (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
         if high_f >= frequency_cutoff:
             logger.warning(f"high frequency cutoff={high_f} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
-            high_f = hwp_freq_limit
+            high_f = frequency_cutoff
             # make sure low_f < high_f
             if low_f >= frequency_cutoff:
                 raise ValueError(f"lower frequency cutoff={low_f} >= lpf freq limit={frequency_cutoff}")
@@ -474,7 +476,7 @@ def fit_noise_model(
         )
 
     # limit upper frequency cutoffs to hwp freq
-    if 'hwp_angle' in aman._fields and frequency_cutoff is not None:
+    if 'hwp_angle' in aman and frequency_cutoff is not None:
         hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                      (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
         if f_max >= frequency_cutoff:
