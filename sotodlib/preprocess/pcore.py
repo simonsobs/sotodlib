@@ -473,7 +473,7 @@ class Pipeline(list):
         if 'frequency_cutoffs' not in proc_aman:
             proc_aman.wrap('frequency_cutoffs', core.AxisManager())
             if aman['iir_params']['a'] is not None:
-                from ..import tod_ops.filters
+                from ..tod_ops import filters
                 n = len(aman.timestamps)
                 delta_t = (aman.timestamps[-1] - aman.timestamps[0])/n
                 freqs = np.fft.rfftfreq(n, delta_t)
