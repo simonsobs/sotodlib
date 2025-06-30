@@ -975,13 +975,6 @@ def fit_noise_model(
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
-    return noise_fit_stats
-        noise_fit_stats.wrap("fit", fitout, axis_map_fit)
-        noise_fit_stats.wrap("cov", covout, axis_map_cov)
-
-        if merge_fit:
-            aman.wrap(merge_name, noise_fit_stats)
-        return noise_fit_stats
 
 def get_mask_for_hwpss(freq, hwp_freq, max_mode=10, width=((-0.4, 0.6), (-0.2, 0.2))):
     """

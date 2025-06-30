@@ -595,7 +595,8 @@ class Noise(_Preprocess):
                                                                    freqs=psd.freqs,
                                                                    nseg=psd.get('nseg'),
                                                                    low_f=wn_f_low,
-                                                                   high_f=wn_f_high)
+                                                                   high_f=wn_f_high,
+                                                                   frequency_cutoff=frequency_cutoff,)
             if fcfgs.get('subscan') is None:
                 fcfgs['subscan'] = self.subscan
             fcfgs.pop('fwhite', None)
