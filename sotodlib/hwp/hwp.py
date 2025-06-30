@@ -348,7 +348,7 @@ def harms_func(x, modes, coeffs):
     -------
     numpy.ndarray: The calculated harmonics function.
     """
-    vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
+    vects = np.zeros([2*len(modes), x.shape[0]], dtype=coeffs.dtype if coeffs is not None else 'float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
