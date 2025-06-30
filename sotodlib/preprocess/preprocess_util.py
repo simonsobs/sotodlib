@@ -16,6 +16,49 @@ from .. import core
 
 from . import _Preprocess, Pipeline, processes
 
+import cProfile, pstats, io
+
+
+
+def profile_function(func, profile_path, *args, **kwargs):
+    """Runs CProfile on the input function and writes the profile out to a
+    file using pstats.
+
+    Arguments
+    ----------
+    func : function
+        The function to be called
+    profile_path : str
+        The path to the output profile file.
+    *args : tuple
+        Additional positional arguments.
+    **kwargs : dict
+        Additional keyword arguments.
+
+    Returns
+    -------
+    local_vars : Any or None
+        Either the outputs of the function or None if the profile or function
+        call fails.
+    """
+
+    local_vars = None
+
+    def wrapper_func():
+        nonlocal local_vars
+        local_vars = func(*args, **kwargs)
+
+    if profile_path is None:
+        wrapper_func()
+        return local_vars
+    else:
+        try:
+            cProfile.runctx('wrapper_func()', globals(), locals(), filename=profile_path)
+            return local_vars
+        except Exception as e:
+            return None
+
+
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
     filename and dataset name for a result.
@@ -803,7 +846,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False):
+                          logger=None, overwrite=False, run_tracemalloc=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -983,7 +1026,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
-            proc_aman, success = pipe_init.run(aman)
+            if run_tracemalloc:
+                proc_aman, success, snapshots_process, snapshots_calc = pipe_init.run(aman, run_tracemalloc=run_tracemalloc)
+            else:
+                 proc_aman, success = pipe_init.run(aman)
             aman.wrap('preprocess', proc_aman)
         except Exception as e:
             error = f'Failed to run initial pipeline: {obs_id} {dets}'
@@ -999,7 +1045,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
 
         if configs_proc is None:
-            return error, outputs_init, [obs_id, dets], aman
+            return error, outputs_init, [obs_id, dets], aman, snapshots_process, snapshots_calc
         else:
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')

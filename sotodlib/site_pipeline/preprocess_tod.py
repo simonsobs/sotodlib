@@ -7,6 +7,8 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional
+import cProfile, pstats, io
+import tracemalloc
 from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
@@ -18,6 +20,7 @@ from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
+
 
 def dummy_preproc(obs_id, group_list, logger,
                   configs, overwrite, run_parallel):
@@ -55,7 +58,8 @@ def preprocess_tod(obs_id,
                    verbosity=0,
                    group_list=None,
                    overwrite=False,
-                   run_parallel=False):
+                   run_parallel=False,
+                   run_tracemalloc=False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
     the ManifestDb specified in the configs.
@@ -139,10 +143,33 @@ def preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         dets = {gb:gg for gb, gg in zip(group_by, group)}
         try:
+            if run_tracemalloc:
+                tracemalloc.start()
+
             aman = context.get_obs(obs_id, dets=dets)
+            if run_tracemalloc:
+                init_snapshot = ('aman', tracemalloc.take_snapshot())
+                tracemalloc.stop()
             tags = np.array(context.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
-            proc_aman, success = pipe.run(aman)
+            if run_tracemalloc:
+                proc_aman, success, snapshots_process, snapshots_calc = pipe.run(aman, run_tracemalloc=run_tracemalloc)
+                snapshots_process = [init_snapshot] + snapshots_process
+                snapshots_calc = [init_snapshot] + snapshots_calc
+
+                dest_dataset = obs_id
+                for gb, g in zip(group_by, group):
+                    if gb == 'detset':
+                        dest_dataset += "_" + g
+                    else:
+                        dest_dataset += "_" + gb + "_" + str(g)
+                trace_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), "trace")
+                for i, snap in enumerate(snapshots_process):
+                    snap[1].dump(os.path.join(trace_dir, f"{dest_dataset}_snapshot_process_{snap[0]}_{i}.pkl"))
+                for i, snap in enumerate(snapshots_calc):
+                    snap[1].dump(os.path.join(trace_dir, f"{dest_dataset}_snapshot_calc_{snap[0]}_{i}.pkl"))
+            else:
+                proc_aman, success = pipe.run(aman, run_tracemalloc=run_tracemalloc)
 
             if make_lmsi:
                 new_plots = os.path.join(configs["plot_dir"],
@@ -305,6 +332,18 @@ def get_parser(parser=None):
         default=4
     )
     parser.add_argument(
+        '--profile',
+        help="Run profiling.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
+        '--tracemalloc',
+        help="Run tracemalloc.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
         '--raise-error',
         help="Raise an error upon completion if any obsids or groups fail.",
         type=bool,
@@ -326,6 +365,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
+          run_profiling: Optional[bool] = False,
+          run_tracemalloc: Optional[bool] = False,
           raise_error: Optional[bool] = False):
 
     configs, context = pp_util.get_preprocess_context(configs)
@@ -370,11 +411,28 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     n_fail = 0
 
+    if run_profiling:
+        profile_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), 'prof')
+        if not(os.path.exists(profile_dir)):
+            os.makedirs(profile_dir)
+    else:
+        profile_dir = None
+
+    if run_tracemalloc:
+        trace_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), 'trace')
+        if not(os.path.exists(trace_dir)):
+            os.makedirs(trace_dir)
+
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+    futures = [executor.submit(pp_util.profile_function,
+                    func=preprocess_tod,
+                    profile_path=os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof') if profile_dir is not None else None,
+                    obs_id=r[0]['obs_id'],
                     group_list=r[1], verbosity=verbosity,
                     configs=configs,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
+                    overwrite=overwrite,
+                    run_parallel=True,
+                    run_tracemalloc=run_tracemalloc) for r in run_list]
     for future in as_completed_callable(futures):
         logger.info('New future as_completed result')
         try:
@@ -400,6 +458,26 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             else:
                 pp_util.cleanup_mandb(err, db_datasets, configs, logger)
 
+    if run_profiling:
+        combined_profile_dir = os.path.join(profile_dir, 'combined_profile.prof')
+        if os.path.exists(combined_profile_dir):
+            combined_stats = pstats.Stats(combined_profile_dir)
+        else:
+            combined_stats = None
+        for r in run_list:
+            profile_file = os.path.join(profile_dir, f'{r[0]["obs_id"]}.prof')
+            if os.path.exists(profile_file):
+                try:
+                    stats = pstats.Stats(profile_file)
+                    if combined_stats is None:
+                        combined_stats = stats
+                    else:
+                        combined_stats.add(stats)
+                except Exception as e:
+                    logger.error(f"cannot get stats for {r[0]['obs_id']}: {e}")
+        if combined_stats is not None:
+            combined_stats.dump_stats(combined_profile_dir)
+
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
 
@@ -414,6 +492,8 @@ def main(configs: str,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,
+         run_profiling: Optional[bool] = False,
+         run_tracemalloc: Optional[bool] = False,
          raise_error: Optional[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
@@ -431,6 +511,8 @@ def main(configs: str,
               planet_obs=planet_obs,
               verbosity=verbosity,
               nproc=nproc,
+              run_profiling=run_profiling,
+              run_tracemalloc=run_tracemalloc,
               raise_error=raise_error)
 
 if __name__ == '__main__':
