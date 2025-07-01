@@ -606,7 +606,7 @@ class Noise(_Preprocess):
                     calc_wn = True
             if calc_wn or wn_est is None:
                 wn_f_low, wn_f_high = fcfgs.get('fwhite', (5, 10))
-                wn_f_high = check_frequency_cutoff(wn_f_high, wn_f_high)
+                wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
                 fcfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    nseg=psd.get('nseg'),
