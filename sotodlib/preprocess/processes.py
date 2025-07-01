@@ -577,8 +577,6 @@ class Noise(_Preprocess):
         else:
             frequency_cutoff=None
 
-        print('cutoffs: ', proc_aman["frequency_cutoffs"])
-
         def check_frequency_cutoff(fmin, fmax):
              # limit upper frequency cutoffs to hwp freq
             if 'hwp_angle' in aman and frequency_cutoff is not None:
