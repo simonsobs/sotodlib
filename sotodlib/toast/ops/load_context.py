@@ -423,6 +423,7 @@ class LoadContext(Operator):
                 # If we are using preprocessing, only keep obs_ids and wafer slots that
                 # exist in the preprocessing archive.
                 raw_wafer_slots = list(row["wafer_slots_list"].split(","))
+                raw_stream_ids = list(row["stream_ids_list"].split(","))
                 if preproc_lookup is not None:
                     if obs_id not in preproc_lookup:
                         msg = f"Requested obs_id {obs_id} does not exist in "
@@ -430,15 +431,18 @@ class LoadContext(Operator):
                         log.warning(msg)
                         continue
                     wafer_slots = list()
-                    for ws in raw_wafer_slots:
+                    stream_ids = list()
+                    for ws, sid in zip(raw_wafer_slots, raw_stream_ids):
                         if ws not in preproc_lookup[obs_id]:
                             msg = f"Wafer slot {obs_id}:{ws} not in preprocessing"
                             msg += f" archive {preproc_db}.  Skipping."
                             log.warning(msg)
                         else:
                             wafer_slots.append(ws)
+                            stream_ids.append(sid)
                 else:
                     wafer_slots = raw_wafer_slots
+                    stream_ids = raw_stream_ids
                 sprops = dict()
                 sprops["session_name"] = obs_id
                 sprops["session_start"] = float(row["start_time"])
@@ -447,7 +451,7 @@ class LoadContext(Operator):
                 sprops["tele_name"] = str(row["telescope"])
                 sprops["n_wafers"] = int(row["wafer_count"])
                 sprops["wafer_slots"] = wafer_slots
-                sprops["wafers"] = list(row["stream_ids_list"].split(","))
+                sprops["wafers"] = stream_ids
                 session_props.append(sprops)
 
             # Close the databases
