@@ -419,7 +419,7 @@ class PSDCalc(_Preprocess):
         if full_output:
             fft_aman.wrap("nseg", nseg)
 
-        if "frequency_cutoffs" in proc_aman and self.signal in proc_aman["frequency_cutoffs"]:
+        if "frequency_cutoffs" in proc_aman:
             proc_aman["frequency_cutoffs"].wrap(self.wrap, proc_aman["frequency_cutoffs"][self.signal])
 
         self.save(proc_aman, fft_aman)
