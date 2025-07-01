@@ -2,6 +2,7 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import re
+import sqlite3
 import yaml
 from datetime import datetime, timezone
 
@@ -385,6 +386,26 @@ class LoadContext(Operator):
             else:
                 query_str = "1"
 
+            # If we are using preprocessing, load the archive DB and cut any
+            # observations or wafer slots that do not exist.
+            preproc_lookup = None
+            if preproc_conf is not None:
+                preproc_lookup = dict()
+                preproc_db = preproc_conf["archive"]["index"]
+                con = sqlite3.connect(preproc_db)
+                cur = con.cursor()
+                res = cur.execute('select "obs:obs_id","dets:wafer_slot" from map')
+                for row in res.fetchall():
+                    obid = row[0]
+                    wslot = row[1]
+                    if obid not in preproc_lookup:
+                        preproc_lookup[obid] = set()
+                    preproc_lookup[obid].add(wslot)
+                del res
+                del cur
+                con.close()
+                del con
+
             # Open the databases and query
             ctx = open_context(context=self.context, context_file=self.context_file)
             query_result = ctx.obsdb.query(query_text=query_str, sort=sort_by)
@@ -399,6 +420,25 @@ class LoadContext(Operator):
                 obs_id = str(row["obs_id"])
                 if pat is not None and pat.match(obs_id) is None:
                     continue
+                # If we are using preprocessing, only keep obs_ids and wafer slots that
+                # exist in the preprocessing archive.
+                raw_wafer_slots = list(row["wafer_slots_list"].split(","))
+                if preproc_lookup is not None:
+                    if obs_id not in preproc_lookup:
+                        msg = f"Requested obs_id {obs_id} does not exist in "
+                        msg += f"preprocessing archive {preproc_db}.  Skipping."
+                        log.warning(msg)
+                        continue
+                    wafer_slots = list()
+                    for ws in raw_wafer_slots:
+                        if ws not in preproc_lookup[obs_id]:
+                            msg = f"Wafer slot {obs_id}:{ws} not in preprocessing"
+                            msg += f" archive {preproc_db}.  Skipping."
+                            log.warning(msg)
+                        else:
+                            wafer_slots.append(ws)
+                else:
+                    wafer_slots = raw_wafer_slots
                 sprops = dict()
                 sprops["session_name"] = obs_id
                 sprops["session_start"] = float(row["start_time"])
@@ -406,6 +446,7 @@ class LoadContext(Operator):
                 sprops["n_samples"] = int(row["n_samples"])
                 sprops["tele_name"] = str(row["telescope"])
                 sprops["n_wafers"] = int(row["wafer_count"])
+                sprops["wafer_slots"] = wafer_slots
                 sprops["wafers"] = list(row["stream_ids_list"].split(","))
                 session_props.append(sprops)
 
