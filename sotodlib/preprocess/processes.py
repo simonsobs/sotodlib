@@ -2349,6 +2349,18 @@ class CorrectIIRParams(_Preprocess):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
+        if "frequency_cutoffs" in proc_aman and np.isnan(proc_aman["frequency_cutoffs"]["signal"]):
+            n = len(aman.timestamps)
+            delta_t = (aman.timestamps[-1] - aman.timestamps[0])/n
+            freqs = np.fft.rfftfreq(n, delta_t)
+            iir = tod_ops.filters.iir_filter()(freqs, aman)
+
+            mag = np.abs(iir) / np.max(np.abs(iir))
+            # 3dB scale
+            scale = 10 ** (-3. / 20)
+            freq_cutoff = freqs[np.min(np.where(np.array(mag < scale * np.max(mag)))[0])]
+            proc_aman["frequency_cutoffs"] = freq_cutoff
+
 class TrimFlagEdge(_Preprocess):
     """Trim edge until given flags of all detectors are False
     To find first and last sample id that has False (i.e., no flags applied) for all detectors.
