@@ -585,8 +585,8 @@ class Noise(_Preprocess):
                 if fmax >= frequency_cutoff:
                     logger.warning(f"Upper freq={fmax} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
                     fmax = frequency_cutoff
-                if fmin is not None and fmin >= frequency_cutoff:
-                    raise ValueError(f"lower freq={fmin} >= lpf freq={frequency_cutoff}")
+            if fmin is not None and fmin >= fmax:
+                raise ValueError(f"lower freq={fmin} >= upper freq={fmax}")
             return fmax
 
         if self.calc_cfgs is None:
