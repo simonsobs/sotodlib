@@ -15,10 +15,13 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts, flag_cut_select,
                                    sparse_to_ranges_matrix)
 
+from sotodlib.preprocess import preprocess_util as pp_util
+
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
 
+logger = pp_util.init_logger("preprocess")
 
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
@@ -521,7 +524,7 @@ class Noise(_Preprocess):
     Example config block for fitting PSD::
 
     - name: "noise"
-      fit: False
+      fit: True
       subscan: False
       calc:
         fwhite: (5, 10)
@@ -574,6 +577,18 @@ class Noise(_Preprocess):
         else:
             frequency_cutoff=None
 
+        def check_frequency_cutoff(fmin, fmax):
+             # limit upper frequency cutoffs to hwp freq
+            if 'hwp_angle' in aman and frequency_cutoff is not None:
+                hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+                if fmax >= frequency_cutoff:
+                    logger.warning(f"Upper freq={fmax} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
+                    fmax = frequency_cutoff
+                if fmin is not None and fmin >= frequency_cutoff:
+                    raise ValueError(f"lower freq={fmin} >= lpf freq={frequency_cutoff}")
+            return fmax
+
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
 
@@ -591,19 +606,20 @@ class Noise(_Preprocess):
                     calc_wn = True
             if calc_wn or wn_est is None:
                 wn_f_low, wn_f_high = fcfgs.get('fwhite', (5, 10))
+                wn_f_high = check_frequency_cutoff(wn_f_high, wn_f_high)
                 fcfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    nseg=psd.get('nseg'),
                                                                    low_f=wn_f_low,
-                                                                   high_f=wn_f_high,
-                                                                   frequency_cutoff=frequency_cutoff,)
+                                                                   high_f=wn_f_high)
             if fcfgs.get('subscan') is None:
                 fcfgs['subscan'] = self.subscan
             fcfgs.pop('fwhite', None)
+            f_max = check_frequency_cutoff(fcfgs.get("lowf", None), fcfgs.pop("f_max", 100))
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
-                                                        frequency_cutoff=frequency_cutoff,
+                                                        f_max=f_max,
                                                         **fcfgs)
             if calc_wn or wn_est is None:
                 if not self.subscan:
@@ -613,12 +629,12 @@ class Noise(_Preprocess):
         else:
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
+            wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          nseg=psd.get('nseg'),
                                          low_f=wn_f_low,
-                                         high_f=wn_f_high,
-                                         frequency_cutoff=frequency_cutoff)
+                                         high_f=wn_f_high)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
                 calc_aman.wrap("white_noise", wn, [(0,"dets")])

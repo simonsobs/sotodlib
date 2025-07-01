@@ -8,7 +8,6 @@ import warnings
 import numdifftools as ndt
 import numpy as np
 import pyfftw
-import logging
 import so3g
 import sys
 from so3g.proj import Ranges
@@ -18,8 +17,6 @@ from scipy.stats import chi2
 from sotodlib import core, hwp
 from sotodlib.tod_ops import detrend_tod
 
-
-logger = logging.getLogger(__name__)
 
 def _get_num_threads():
     # Guess how many threads we should be using in FFT ops...
@@ -441,7 +438,7 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, *
     else:
         return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, frequency_cutoff=None):
+def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
@@ -481,16 +478,6 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, frequency
     if pxx is None:
         pxx = aman.Pxx
 
-    # limit upper frequency cutoffs to hwp freq
-    if 'hwp_angle' in aman and frequency_cutoff is not None:
-        hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-                     (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-        if high_f >= frequency_cutoff:
-            logger.warning(f"high frequency cutoff={high_f} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
-            high_f = frequency_cutoff
-            # make sure low_f < high_f
-            if low_f >= frequency_cutoff:
-                raise ValueError(f"lower frequency cutoff={low_f} >= lpf freq limit={frequency_cutoff}")
     if nseg is None:
         nseg = aman.get('nseg')
 
@@ -706,8 +693,7 @@ def fit_noise_model(
     unbinned_mode=3,
     base=1.05,
     freq_spacing=None,
-    subscan=False,
-    frequency_cutoff=None
+    subscan=False
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -810,20 +796,6 @@ def fit_noise_model(
                 raise ValueError("mask should be an ndarray or True")
             f = f[mask]
             pxx = pxx[:, mask]
-            
-        # limit upper frequency cutoffs to hwp freq
-        if 'hwp_angle' in aman and frequency_cutoff is not None:
-            hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-                         (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-            if f_max >= frequency_cutoff:
-                logger.warning(f"f_max={f_max} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
-                f_max = frequency_cutoff
-            if fwhite[1] >= frequency_cutoff:
-                logger.warning(f"upper white noise freq={fwhite[1]} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
-                fwhite[1] = frequency_cutoff
-                # make sure fwhite[0] < fwhite[1]
-                if fwhite[0] >= frequency_cutoff:
-                    raise ValueError(f"lower white noise freq={fwhite[0]} >= lpf freq={frequency_cutoff}")
 
         if subscan:
             fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
@@ -928,53 +900,12 @@ def fit_noise_model(
                 name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
             ),
         )
+        noise_fit_stats.wrap("fit", fitout, axis_map_fit)
+        noise_fit_stats.wrap("cov", covout, axis_map_cov)
 
-    if subscan:
-        fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, psdargs=psdargs,
-                                                  fwhite=fwhite, lowf=lowf, f_max=f_max,
-                                                  freq_spacing=freq_spacing)
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
-    else:
-        eix = np.argmin(np.abs(f - f_max))
-        f = f[1:eix]
-        pxx = pxx[:, 1:eix]
-
-        fitout = np.zeros((aman.dets.count, 3))
-        # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-        covout = np.zeros((aman.dets.count, 3, 3))
-        for i in range(aman.dets.count):
-            p = pxx[i]
-            wnest = np.median(p[((f > fwhite[0]) & (f < fwhite[1]))])
-            pfit = np.polyfit(np.log10(f[f < lowf]), np.log10(p[f < lowf]), 1)
-            fidx = np.argmin(np.abs(10 ** np.polyval(pfit, np.log10(f)) - wnest))
-            p0 = [f[fidx], wnest, -pfit[0]]
-            bounds = [(sys.float_info.min, None), (sys.float_info.min, None), (None, None)]
-            res = minimize(neglnlike, p0, args=(f, p), bounds=bounds, method="Nelder-Mead")
-            try:
-                Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p), full_output=True)
-                hessian_ndt, _ = Hfun(res["x"])
-                # Inverse of the hessian is an estimator of the covariance matrix
-                # sqrt of the diagonals gives you the standard errors.
-                covout[i] = np.linalg.inv(hessian_ndt)
-            except np.linalg.LinAlgError:
-                covout[i] = np.full((3, 3), np.nan)
-            fitout[i] = res.x
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs")]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
-
-    noise_model_coeffs = ["fknee", "white_noise", "alpha"]
-    noise_fit_stats = core.AxisManager(
-        aman.dets,
-        core.LabelAxis(
-            name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U8")
-        ),
-    )
-    noise_fit_stats.wrap("fit", fitout, axis_map_fit)
-    noise_fit_stats.wrap("cov", covout, axis_map_cov)
-
-    if merge_fit:
-        aman.wrap(merge_name, noise_fit_stats)
+        if merge_fit:
+            aman.wrap(merge_name, noise_fit_stats)
+        return noise_fit_stats
 
 def get_mask_for_hwpss(freq, hwp_freq, max_mode=10, width=((-0.4, 0.6), (-0.2, 0.2))):
     """
