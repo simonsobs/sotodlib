@@ -224,7 +224,7 @@ class FocalPlane:
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
         r2 = np.nan + np.zeros_like(eta)
-        if "r2" in aman.pointing:
+        if "R2" in aman.pointing:
             r2 = aman.pointing.R2[msk][srt][mapping]
         if "polarization" in aman:
             # name of field just a placeholder for now
