@@ -15,7 +15,7 @@ cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
         'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist',
         'P Value for Dip Test for X Hist','Dip Test for Y Hist',
         'P Value for Dip Test for Y Hist', 'KS Test for X',
-        'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp']
+        'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp', 'Number of Peaks']
 
 
 def compute_summary_stats(snippet):
@@ -65,6 +65,7 @@ def compute_summary_stats(snippet):
     # stats[12]  # snippet number
     stats[13] = tstart
     stats[14] = tstop
+    stats[15] = func.compute_num_peaks(data)
 
     if det_num > 3:
         dip_x, pval_x, dip_y, pval_y = func.dip_test(x_t, y_t)

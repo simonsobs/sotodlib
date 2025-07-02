@@ -1,4 +1,5 @@
 import numpy as np
+import scipy as sp
 import scipy.stats as ss
 import diptest
 
@@ -197,3 +198,43 @@ def max_and_adjacent_y_pos_ratio(y_pos):
 
     return sum_near/det_num
 
+
+def compute_num_peaks(data):
+
+    '''
+    Computes the number of peaks in the combined TOD from the different detectors.
+
+    Input: data: detector TODs computed using data = snippets[s].data which
+    has been demeaned and detrended where s is the given snippet number
+    Output: the number of peaks
+    '''
+
+    #make a smoothing kernel
+    kernel_size = 3
+    kernel = np.ones(kernel_size) / kernel_size
+
+    #smooth the data
+    max_vals_t = np.convolve(np.max(data, axis = 0), kernel, mode='same')
+
+    mean_vals_t = np.convolve(np.mean(data, axis = 0), kernel, mode='same')
+
+    std_vals_t = np.std(data)
+
+    vals_for_peaks = np.zeros(len(max_vals_t))
+
+    #check if the max value is >= the mean *3std or else use the mean value
+    for i in range(len(max_vals_t)):
+
+        if max_vals_t[i] >= mean_vals_t[i] + 3*std_vals_t:
+            vals_for_peaks[i] = max_vals_t[i]
+
+        else:
+            vals_for_peaks[i] = mean_vals_t[i]
+
+    #find the peaks in the combined TOD
+    prom = np.max([1e-12,  np.abs(np.mean(vals_for_peaks)) + 2.*np.mean(std_vals_t)])
+    peaks_t = sp.signal.find_peaks(vals_for_peaks, prominence = prom)[0]
+
+    num_peaks_t = len(peaks_t)
+
+    return num_peaks_t
