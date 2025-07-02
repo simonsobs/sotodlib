@@ -240,6 +240,140 @@ class PreprocessValidDets(PreprocessQA):
         }
 
 
+# inherit from PreprocessQA to reuse available_obs method
+class PreprocessArrayNET(PreprocessQA):
+    """Generate a QA metric for array NET values for each wafer slot and bandpass.
+
+    The config entry supports a `process_args` block where the following
+    options can be specified:
+
+    tags : list
+        Keys into `metadata.det_info` to record as tags with the Influx line.
+        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    noise_aman : str
+        The name of the axis manager that holds the white noise array.
+        (default 'noise')
+
+    """
+
+    _influx_meas = "preprocesstod"
+    _influx_field = "array_net"
+
+    def __init__(
+        self,
+        *args,
+        process_args={},
+        **kwargs
+    ):
+        # bypass the PreprocessQA __init__
+        super(PreprocessQA, self).__init__(*args, **kwargs)
+        # extract parameters
+        self._tags = process_args.get("tags", [])
+        self._noise_aman = process_args.get("noise_aman", "noise")
+
+    def _process(self, meta):
+
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys += [t for t in self._tags if t not in tag_keys]
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                white_noise = meta.preprocess[self._noise_aman].white_noise[subset]
+                if np.any(~np.isnan(white_noise)):
+                    vals.append(np.sqrt(1.0 / np.nansum( 1.0 / (white_noise)**2)))
+                else:
+                    vals.append(0.0)
+
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+                tags.append(tags_base)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
+# inherit from PreprocessQA to reuse available_obs method
+class PreprocessDetNET(PreprocessQA):
+    """Generate a QA metric for per detector NET values for each wafer slot
+    and bandpass.
+
+    The config entry supports a `process_args` block where the following
+    options can be specified:
+
+    tags : list
+        Keys into `metadata.det_info` to record as tags with the Influx line.
+        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    noise_aman : str
+        The name of the axis manager that holds the white noise array.
+        (default 'noise')
+
+    """
+
+    _influx_meas = "preprocesstod"
+    _influx_field = "det_net"
+
+    def __init__(
+        self,
+        *args,
+        process_args={},
+        **kwargs
+    ):
+        # bypass the PreprocessQA __init__
+        super(PreprocessQA, self).__init__(*args, **kwargs)
+        # extract parameters
+        self._tags = process_args.get("tags", [])
+        self._noise_aman = process_args.get("noise_aman", "noise")
+
+    def _process(self, meta):
+
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys += [t for t in self._tags if t not in tag_keys]
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                white_noise = meta.preprocess[self._noise_aman].white_noise[subset]
+                if np.any(~np.isnan(white_noise)):
+                    vals.append((np.sqrt(1.0 / np.nansum( 1.0 / (white_noise)**2))) * np.sqrt(len(subset)))
+                else:
+                    vals.append(0.0)
+
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+                tags.append(tags_base)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
+
 class HWPSolQA(QAMetric):
     """ Base class for metrics derived from HWP angle solutions. Subclasses should
     implement the `_process` method. Some quantities are derived twice, once for each
