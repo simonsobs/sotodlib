@@ -279,7 +279,6 @@ class PreprocessArrayNET(PreprocessQA):
         tag_keys += [t for t in self._tags if t not in tag_keys]
         tags = []
         vals = []
-        from ..qa.metrics import _get_tag, _has_tag
         for bp in np.unique(meta.det_info.wafer.bandpass):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
@@ -348,7 +347,6 @@ class PreprocessDetNET(PreprocessQA):
         tag_keys += [t for t in self._tags if t not in tag_keys]
         tags = []
         vals = []
-        from ..qa.metrics import _get_tag, _has_tag
         for bp in np.unique(meta.det_info.wafer.bandpass):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
