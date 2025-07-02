@@ -1701,13 +1701,14 @@ class GlitchClassification(_Preprocess):
         snippet_aman.wrap("stats", stats.to_numpy(), [(0, 'snippets'), (1, 'stat_names')])
         snippet_aman.wrap("predictions", predictions, [(0, 'snippets')])
         snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
-        self.save(proc_aman, snippet_aman)
+    #     self.save(proc_aman, snippet_aman)
 
     def save(self, proc_aman, snippet_aman):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
             proc_aman.wrap("glitch_snippets", snippet_aman)
+        # aman.wrap("glitch_snippets", snippet_aman)
 
 
 _Preprocess.register(SplitFlags)
