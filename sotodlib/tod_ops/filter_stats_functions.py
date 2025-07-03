@@ -1,49 +1,7 @@
 import numpy as np
 import scipy as sp
 import scipy.stats as ss
-import diptest
 
-def KS_test(x_pos):
-
-    '''
-    Compute the Kolmogorov–Smirnov test of the x position hisotgram
-    compared to a uniform distribution.
-
-    Input: x_pos: x positions across the focal plane
-    Output: KS test statistic, p-value
-    ''' 
-
-    
-    #compute a uniform distribution with the same x range as the x positions
-    dist_uni_guess = np.random.uniform(low = np.min(x_pos), high = np.max(x_pos), size = len(x_pos))
-
-    #calculate CDF values
-    dist_cdf = 1. * np.arange(len(x_pos)) / (len(x_pos) - 1)
-    
-    dist_uni_guess_cdf = 1. * np.arange(len(dist_uni_guess)) / (len(dist_uni_guess) - 1)
-    
-
-    ks = ss.kstest(x_pos, dist_uni_guess_cdf)
-    
-    return ks
-
-
-def dip_test(x_pos, y_pos):
-
-    '''
-    Compute the dip test of the x position and y position 
-    hisotgrams.
-
-    Input: x_pos: x positions and y_pos: y positions across the focal plane
-    Output: x dip test statistic, p-value for the x dip test statistic,
-    y dip test statistic, p-value for the y dip test statistic
-    ''' 
-
-    # both the dip statistic and p-value
-    dip_x, pval_x = diptest.diptest(x_pos)
-    dip_y, pval_y = diptest.diptest(y_pos)
-
-    return dip_x, pval_x, dip_y, pval_y
 
 def num_of_det(x_pos):
 
