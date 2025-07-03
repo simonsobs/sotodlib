@@ -3,6 +3,8 @@ import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
 from sotodlib.tod_ops import filters, detrend_tod
+from sotodlib.preprocess import preprocess_util as pp_util
+from sotodlib.coords import pointing_model
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory
 import yaml
 
@@ -19,7 +21,6 @@ defaults = {"query": "1",
             "quiet": 0,
             "center_at": None,
             "window": 0.0,
-            "nocal": True,
             "nmat_dir": "/nmats",
             "nmat_mode": "build",
             "downsample": 1,
@@ -31,6 +32,8 @@ defaults = {"query": "1",
             "cont":False,
             "rhs": False,
             "bin": False,
+            "srcsamp": None,
+            "unit": 'K',
            }
 
 def get_parser(parser=None):
@@ -42,6 +45,7 @@ def get_parser(parser=None):
     parser.add_argument("--query", type=str)
     parser.add_argument("--area", type=str, help="Path to FITS file describing the mapping geometry")
     parser.add_argument("--odir", type=str, help="Directory for saving output maps")
+    parser.add_argument("--preprocess_config", type=str, help="Preprocess configuration file")
     parser.add_argument('-C', "--comps",   type=str, help="T,Q, and/or U")
     parser.add_argument("-c", "--context", type=str, help="Context containing TODs")
     parser.add_argument("-n", "--ntod",    type=int, help="Special case of `tods` above. Implemented as follows: [:ntod]")
@@ -55,7 +59,6 @@ def get_parser(parser=None):
     parser.add_argument(      "--cont",  action="store_true", default=False, help="continue a run")
     parser.add_argument("-@", "--center-at", type=str)
     parser.add_argument("-w", "--window",  type=float)
-    parser.add_argument(      "--nocal",   action="store_true", default=True, help="No relcal or abscal")
     parser.add_argument(      "--nmat-dir", type=str, help="Directory to where nmats are loaded from/saved to")
     parser.add_argument(      "--nmat-mode", type=str, help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat-dir, otherwise build and save. 'load': Load from nmat-dir, error if missing. 'save': Build from tod and save.")
     parser.add_argument("-d", "--downsample", type=int, help="Downsample TOD by this factor")
@@ -66,6 +69,8 @@ def get_parser(parser=None):
     parser.add_argument("-g", "--tasks-per-group", type=int, help="number of tasks per group. By default it is 1, but can be higher if you want more than one MPI job working on a depth-1 map, e.g. if you don't have enough memory for so many MPI jobs")
     parser.add_argument("--rhs", action="store_true", default=False, help="Save the rhs maps")
     parser.add_argument("--bin", action="store_true", default=False, help="Save the bin maps")
+    parser.add_argument("--srcsamp", type=str, help="Path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
+    parser.add_argument("--unit", type=str, help="Unit of the maps")
     return parser
 
 def _get_config(config_file):
@@ -157,7 +162,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
     for ind in inds:
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
-            tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band}, no_signal=no_signal)
+            tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
             tod = calibrate_obs(tod, site=site)
             my_tods.append(tod)
             my_inds.append(ind)
@@ -167,66 +172,63 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
 def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
     # The following stuff is very redundant with the normal mapmaker,
     # and should probably be factorized out
-    mapmaking.fix_boresight_glitches(obs)
+    mapmaking.fix_boresight_glitches(obs, )
     srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
     # Add site and weather, since they're not in obs yet
     obs.wrap("weather", np.full(1, "toco"))
     if "site" not in obs:
         obs.wrap("site",    np.full(1, site))
     # Prepare our data. FFT-truncate for faster fft ops
-    obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
+    #obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
 
     # add dummy glitch flags
     if 'flags' not in obs._fields:
         obs.wrap('flags', FlagManager.for_tod(obs))
     if "glitch_flags" not in obs.flags:
         obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape),[(0,'dets'),(1,'samps')])
-
-    try:
-        obs.signal
-        has_signal = True
-    except AttributeError:
-        has_signal = False
     
-    #if obs.signal is not None:
-    if has_signal:
-        detrend_tod(obs, method='linear')
+    if obs.signal is not None:
+        #detrend_tod(obs, method='linear')
         utils.deslope(obs.signal, w=5, inplace=True)
         obs.signal = obs.signal.astype(dtype_tod)
     
-    #if (not nocal) and (obs.signal is not None):
-    if (not nocal) and (has_signal):
+    if (not nocal) and (obs.signal is not None):
+        # apply pointing model (here for now)
+        pointing_model.apply_pointing_model(obs)
         # Disqualify overly cut detectors
-        good_dets = mapmaking.find_usable_detectors(obs)
+        good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
         obs.restrict("dets", good_dets)
-        if len(good_dets) > 0:
+        # Cut non-optical dets
+        obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
+
+        #if len(good_dets) > 0:
             # Gapfill glitches. This function name isn't the clearest
-            tod_ops.get_gap_fill(obs, flags=obs.glitch_flags, swap=True)
+            #tod_ops.get_gap_fill(obs, flags=obs.glitch_flags, swap=True)
             # Gain calibration
-            gain  = 1
-            for gtype in ["relcal","abscal"]:
-                gain *= obs[gtype][:,None]
-            obs.signal *= gain
+            #gain  = 1
+            #for gtype in ["relcal","abscal"]:
+            #    gain *= obs[gtype][:,None]
+            #obs.signal *= gain
             # Fourier-space calibration
-            fsig  = fft.rfft(obs.signal)
-            freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+            #fsig  = fft.rfft(obs.signal)
+            #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
             # iir filter
-            iir_filter  = filters.iir_filter()(freq, obs)
-            fsig       /= iir_filter
-            gain       /= iir_filter[0].real # keep track of total gain for our record
-            fsig       /= filters.timeconst_filter(None)(freq, obs)
-            fft.irfft(fsig, obs.signal, normalize=True)
-            del fsig
+            #iir_filter  = filters.iir_filter()(freq, obs)
+            #fsig       /= iir_filter
+            #gain       /= iir_filter[0].real # keep track of total gain for our record
+            #fsig       /= filters.timeconst_filter(None)(freq, obs)
+            #fft.irfft(fsig, obs.signal, normalize=True)
+            #del fsig
         # Apply pointing correction.
         #obs.focal_plane.xi    += obs.boresight_offset.xi
         #obs.focal_plane.eta   += obs.boresight_offset.eta
         #obs.focal_plane.gamma += obs.boresight_offset.gamma
-        obs.focal_plane.xi    += obs.boresight_offset.dx
-        obs.focal_plane.eta   += obs.boresight_offset.dy
-        obs.focal_plane.gamma += obs.boresight_offset.gamma
+        #obs.focal_plane.xi    += obs.boresight_offset.dx
+        #obs.focal_plane.eta   += obs.boresight_offset.dy
+        #obs.focal_plane.gamma += obs.boresight_offset.gamma
     return obs
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None,):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
@@ -236,7 +238,7 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t
     if srcsamp_mask is not None:
         signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
         signals.append(signal_srcsamp)
-        mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+    mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
     if comm.rank == 0: L.info(pre + "Building RHS")
     time_rhs   = signal_map.rhs*0
     # And feed it with our observations
@@ -246,8 +248,9 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t
         name = "%s:%s:%s" % (obs_id, detset, band)
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time
-        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
-        obs = calibrate_obs(obs, site=site)
+        #obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
+        obs = pp_util.load_and_preprocess(obs_id, preproc, dets={'wafer_slot':detset,'wafer.bandpass':band}, context=context, logger=L)
+        obs = calibrate_obs(obs, site=site, nocal=False)
         #bools, nod_indices, obs = find_el_nods(obs)
 
         if downsample != 1:
@@ -295,14 +298,14 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, comps="TQU", t
     with utils.nowarn(): tmap = utils.remove_nan(time_rhs / ivar)
     return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, bin=bin)
 
-def write_depth1_map(prefix, data, dtype = np.float32, binned=False, rhs=False):
-    data.signal.write(prefix, "map",  data.map.astype(dtype))
-    data.signal.write(prefix, "ivar", data.ivar.astype(dtype))
+def write_depth1_map(prefix, data, dtype = np.float32, binned=False, rhs=False, unit='K'):
+    data.signal.write(prefix, "map",  data.map.astype(dtype), unit=unit)
+    data.signal.write(prefix, "ivar", data.ivar.astype(dtype), unit=unit+'^-2')
     data.signal.write(prefix, "time", data.tmap.astype(dtype))
     if binned:
-        data.signal.write(prefix, "bin", data.bin.astype(dtype))
+        data.signal.write(prefix, "bin", data.bin.astype(dtype), unit=unit)
     if rhs:
-        data.signal.write(prefix, "rhs", data.signal.rhs.astype(dtype))
+        data.signal.write(prefix, "rhs", data.signal.rhs.astype(dtype), unit=unit+'^-1')
 
 def write_depth1_info(oname, info):
     utils.mkdir(os.path.dirname(oname))
@@ -356,6 +359,14 @@ def main(config_file=None, defaults=defaults, **args):
     # Set up logging.
     L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
 
+    # set up the preprocessing
+    try:
+        preproc = yaml.safe_load(open(args['preprocess_config'], 'r'))
+    except:
+        if comm.rank==0:
+            L.info(f"{args['preprocess_config']} is not a valid config")
+        sys.exit(1)
+
     recenter = None
     if args['center_at']:
         recenter = mapmaking.parse_recentering(args['center_at'])
@@ -389,7 +400,7 @@ def main(config_file=None, defaults=defaults, **args):
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
             my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, site=SITE)
-            my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
+            my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod, maxcut=0.3)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
             valid     = np.where(my_costs>0)[0]
             my_tods, my_inds, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
@@ -421,10 +432,11 @@ def main(config_file=None, defaults=defaults, **args):
         try:
             # 5. make the maps
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
-                    subshape, subwcs, noise_model, L, comps=comps, t0=t, comm=comm_good, tag=tag,
-                    niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0, verbose=verbose>0, downsample=args['downsample'] )
+                    subshape, subwcs, noise_model, L, preproc, comps=comps, t0=t, comm=comm_good, tag=tag,
+                    niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0,
+                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=args['srcsamp'] )
             # 6. write them
-            write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'])
+            write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
         except DataMissing as e:
             handle_empty(prefix, tag, comm_good, e)
     return True
