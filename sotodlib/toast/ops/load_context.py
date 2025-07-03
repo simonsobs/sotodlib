@@ -2,6 +2,7 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import re
+import sqlite3
 import yaml
 from datetime import datetime, timezone
 
@@ -41,6 +42,7 @@ from .load_context_utils import (
     open_context,
     distribute_detector_data,
     distribute_detector_props,
+    ax_name_fp_subst,
 )
 
 
@@ -56,8 +58,20 @@ class LoadContext(Operator):
 
     The traits starting with an "ax_*" prefix indicate the axis manager names
     that should be mapped to the standard toast shared and detdata objects.
-    For ax_flags tuples, a negative bit value indicates that the flag data
+    For `ax_flags` tuples, a negative bit value indicates that the flag data
     should first be inverted before combined.
+
+    For all of the "ax_*" traits, the names may additionally include substitution
+    strings enclosed in '{}' that contain the name of a focalplane detector_data
+    key.  For example, the shared smurfgap flags are named after the UFM (array
+    name).  So you can import the correct field name for all observations with:
+
+        ax_flags=[
+            (
+                "smurfgaps_ufm_{det_info:wafer:array}",
+                defaults.shared_mask_invalid
+            ),
+        ]
 
     Additional nested axismanager data is grouped into detdata, shared, or
     metadata objects based on whether they use detector / sample axes.  The
@@ -348,12 +362,14 @@ class LoadContext(Operator):
                             olist.append(line.strip())
             if comm.comm_world is not None:
                 olist = comm.comm_world.bcast(olist, root=0)
-            self.observations = olist
+            self._observations = olist
+        else:
+            self._observations = self.observations
 
         obs_props = None
         preproc_conf = None
         if comm.world_rank == 0:
-            obs_list = list(sorted(self.observations))
+            obs_list = list(sorted(self._observations))
             if self.preprocess_config is not None:
                 with open(self.preprocess_config, "r") as f:
                     preproc_conf = yaml.safe_load(f)
@@ -370,6 +386,26 @@ class LoadContext(Operator):
             else:
                 query_str = "1"
 
+            # If we are using preprocessing, load the archive DB and cut any
+            # observations or wafer slots that do not exist.
+            preproc_lookup = None
+            if preproc_conf is not None:
+                preproc_lookup = dict()
+                preproc_db = preproc_conf["archive"]["index"]
+                con = sqlite3.connect(preproc_db)
+                cur = con.cursor()
+                res = cur.execute('select "obs:obs_id","dets:wafer_slot" from map')
+                for row in res.fetchall():
+                    obid = row[0]
+                    wslot = row[1]
+                    if obid not in preproc_lookup:
+                        preproc_lookup[obid] = set()
+                    preproc_lookup[obid].add(wslot)
+                del res
+                del cur
+                con.close()
+                del con
+
             # Open the databases and query
             ctx = open_context(context=self.context, context_file=self.context_file)
             query_result = ctx.obsdb.query(query_text=query_str, sort=sort_by)
@@ -384,6 +420,29 @@ class LoadContext(Operator):
                 obs_id = str(row["obs_id"])
                 if pat is not None and pat.match(obs_id) is None:
                     continue
+                # If we are using preprocessing, only keep obs_ids and wafer slots that
+                # exist in the preprocessing archive.
+                raw_wafer_slots = list(row["wafer_slots_list"].split(","))
+                raw_stream_ids = list(row["stream_ids_list"].split(","))
+                if preproc_lookup is not None:
+                    if obs_id not in preproc_lookup:
+                        msg = f"Requested obs_id {obs_id} does not exist in "
+                        msg += f"preprocessing archive {preproc_db}.  Skipping."
+                        log.warning(msg)
+                        continue
+                    wafer_slots = list()
+                    stream_ids = list()
+                    for ws, sid in zip(raw_wafer_slots, raw_stream_ids):
+                        if ws not in preproc_lookup[obs_id]:
+                            msg = f"Wafer slot {obs_id}:{ws} not in preprocessing"
+                            msg += f" archive {preproc_db}.  Skipping."
+                            log.warning(msg)
+                        else:
+                            wafer_slots.append(ws)
+                            stream_ids.append(sid)
+                else:
+                    wafer_slots = raw_wafer_slots
+                    stream_ids = raw_stream_ids
                 sprops = dict()
                 sprops["session_name"] = obs_id
                 sprops["session_start"] = float(row["start_time"])
@@ -391,7 +450,8 @@ class LoadContext(Operator):
                 sprops["n_samples"] = int(row["n_samples"])
                 sprops["tele_name"] = str(row["telescope"])
                 sprops["n_wafers"] = int(row["wafer_count"])
-                sprops["wafers"] = list(row["stream_ids_list"].split(","))
+                sprops["wafer_slots"] = wafer_slots
+                sprops["wafers"] = stream_ids
                 session_props.append(sprops)
 
             # Close the databases
@@ -650,6 +710,7 @@ class LoadContext(Operator):
         xi_key = f"focal_plane{self.ax_pathsep}xi"
         eta_key = f"focal_plane{self.ax_pathsep}eta"
         gamma_key = f"focal_plane{self.ax_pathsep}gamma"
+        wafer_type_key = f"det_info{self.ax_pathsep}wafer{self.ax_pathsep}type"
 
         fp_flags = dict()
         if xi_key in det_props.colnames:
@@ -679,6 +740,13 @@ class LoadContext(Operator):
                 np.array([0, 0, 0, 1], dtype=np.float64),
                 len(det_props[f"det_info{self.ax_pathsep}readout_id"]),
             ).reshape((-1, 4))
+
+        # Flag non-optical detectors with the processing mask
+        if wafer_type_key in det_props.colnames:
+            fp_dark = det_props[wafer_type_key] != "OPTC"
+            for dname, dark in zip(det_props["name"], fp_dark):
+                if dark:
+                    fp_flags[dname] |= defaults.det_mask_processing
 
         # Do we have any good detectors left?
         n_good = 0
@@ -779,8 +847,15 @@ class LoadContext(Operator):
             dtype=np.float64,
         )
 
+        fp_array = telescope.focalplane.detector_data
+        ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
+        ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
+        ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
+        ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
+        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
+
         have_pointing = True
-        if self.ax_boresight_az is None:
+        if ax_boresight_az is None:
             have_pointing = False
         else:
             ob.shared.create_column(
@@ -788,7 +863,7 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples,),
                 dtype=np.float64,
             )
-        if self.ax_boresight_el is None:
+        if ax_boresight_el is None:
             have_pointing = False
         else:
             ob.shared.create_column(
@@ -796,7 +871,7 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples,),
                 dtype=np.float64,
             )
-        if self.ax_boresight_roll is None:
+        if ax_boresight_roll is None:
             have_pointing = False
         else:
             ob.shared.create_column(
@@ -816,7 +891,7 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples, 4),
                 dtype=np.float64,
             )
-        if self.hwp_angle is not None and self.ax_hwp_angle is not None:
+        if self.hwp_angle is not None and ax_hwp_angle is not None:
             ob.shared.create_column(
                 self.hwp_angle,
                 shape=(ob.n_local_samples,),
@@ -850,7 +925,7 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples, 3),
                 dtype=np.float64,
             )
-        if self.ax_det_signal is not None:
+        if ax_det_signal is not None:
             ob.detdata.create(
                 self.det_data, dtype=np.float64, units=self.det_data_units
             )
@@ -913,7 +988,7 @@ class LoadContext(Operator):
             gcomm,
             wafer_readers,
             wafer_dets,
-            pconf=pconf,
+            preconfig=pconf,
             context=self.context,
             context_file=self.context_file,
         )
@@ -925,17 +1000,33 @@ class LoadContext(Operator):
         )
 
         # Track the fields we are extracting
-        shared_ax_to_obs = {self.ax_times: self.times}
+        fp_array = ob.telescope.focalplane.detector_data
+        ax_times = ax_name_fp_subst(self.ax_times, fp_array)
+        ax_boresight_az = ax_name_fp_subst(self.ax_boresight_az, fp_array)
+        ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
+        ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
+        ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
+        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
+        ax_flags = list()
+        for axname, bit in self.ax_flags:
+            full_name = ax_name_fp_subst(axname, fp_array)
+            ax_flags.append((full_name, bit))
+        ax_det_flags = list()
+        for axname, bit in self.ax_det_flags:
+            full_name = ax_name_fp_subst(axname, fp_array)
+            ax_det_flags.append((full_name, bit))
+
+        shared_ax_to_obs = {ax_times: self.times}
         if have_pointing:
-            shared_ax_to_obs[self.ax_boresight_az] = self.azimuth
-            shared_ax_to_obs[self.ax_boresight_el] = self.elevation
-            shared_ax_to_obs[self.ax_boresight_roll] = self.roll
-        if self.hwp_angle is not None and self.ax_hwp_angle is not None:
-            shared_ax_to_obs[self.ax_hwp_angle] = self.hwp_angle
-        shared_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_flags}
-        shared_flag_fields = {x[0]: abs(x[1]) for x in self.ax_flags}
-        det_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_det_flags}
-        det_flag_fields = {x[0]: abs(x[1]) for x in self.ax_det_flags}
+            shared_ax_to_obs[ax_boresight_az] = self.azimuth
+            shared_ax_to_obs[ax_boresight_el] = self.elevation
+            shared_ax_to_obs[ax_boresight_roll] = self.roll
+        if self.hwp_angle is not None and ax_hwp_angle is not None:
+            shared_ax_to_obs[ax_hwp_angle] = self.hwp_angle
+        shared_flag_invert = {x[0]: (x[1] < 0) for x in ax_flags}
+        shared_flag_fields = {x[0]: abs(x[1]) for x in ax_flags}
+        det_flag_invert = {x[0]: (x[1] < 0) for x in ax_det_flags}
+        det_flag_fields = {x[0]: abs(x[1]) for x in ax_det_flags}
 
         # The results of the recursive parsing
         extra_meta = dict()
@@ -1056,25 +1147,27 @@ class LoadContext(Operator):
         )
 
         # Distribute detector data
-        for field, (ax_field, ax_dtype, mask) in det_data.items():
-            do_invert = False
-            if ax_field in det_flag_invert:
-                do_invert = det_flag_invert[ax_field]
-            distribute_detector_data(
-                ob,
-                field,
-                axwafers,
-                self.axis_detector,
-                self.axis_sample,
-                ax_field,
-                ax_dtype,
-                wafer_readers,
-                wafer_proc_dets,
-                proc_wafer_dets,
-                is_flag=(mask is not None),
-                flag_invert=do_invert,
-                flag_mask=mask,
-            )
+        for field, merge_list in det_data.items():
+            for ax_field, ax_dtype, mask in merge_list:
+                do_invert = False
+                if ax_field in det_flag_invert:
+                    do_invert = det_flag_invert[ax_field]
+                distribute_detector_data(
+                    ob,
+                    field,
+                    axwafers,
+                    self.axis_detector,
+                    self.axis_sample,
+                    ax_field,
+                    ax_dtype,
+                    wafer_readers,
+                    wafer_proc_dets,
+                    proc_wafer_dets,
+                    str(self.ax_pathsep),
+                    is_flag=(mask is not None),
+                    flag_invert=do_invert,
+                    flag_mask=mask,
+                )
 
         # Original wafer data no longer needed.  AxisManager does not seem to
         # have a clean destructor, so do it manually.
@@ -1145,6 +1238,21 @@ class LoadContext(Operator):
             None
 
         """
+
+        def _valid_meta(obj):
+            # Check that the object is an allowed type before adding it to the metadata
+            if np.isscalar(obj):
+                return True
+            if isinstance(obj, np.ndarray):
+                return True
+            if isinstance(obj, (list, set, dict, tuple, str)):
+                return True
+            return False
+
+        # Find the per-observation names we might be using
+        fp_array = obs.telescope.focalplane.detector_data
+        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
+
         # Some metadata has already been parsed, but some new values
         # may only show up when reading data, so we need to handle those
         # as well.
@@ -1212,7 +1320,7 @@ class LoadContext(Operator):
                 if len(field_axes) == 0:
                     # This data is not associated with an axis.  If it does not
                     # yet exist in the observation metadata, then add it.
-                    if key not in mcur:
+                    if _valid_meta(axman[key]):
                         mext[key] = axman[key]
                 elif field_axes[0] == self.axis_detector:
                     if len(field_axes) == 1:
@@ -1223,7 +1331,8 @@ class LoadContext(Operator):
                         # This must be some per-detector derived data- add to the
                         # observation dictionary
                         if data_key not in mcur:
-                            mext[key] = axman[key]
+                            if _valid_meta(axman[key]):
+                                mext[key] = axman[key]
                     elif field_axes[1] == self.axis_sample:
                         # This is detector data.  See if it is one of the standard
                         # fields we are parsing.
@@ -1233,15 +1342,19 @@ class LoadContext(Operator):
                         else:
                             # This is a RangesMatrix of flags
                             dt = np.dtype(np.uint8)
-                        if data_key == self.ax_det_signal:
+                        if data_key == ax_det_signal:
                             # Detector signal
-                            det_data[self.det_data] = (key, dt, None)
+                            det_data[self.det_data] = [(data_key, dt, None)]
                         elif data_key in det_flag_fields:
                             # One of the flag fields
-                            det_data[self.det_flags] = (
-                                key,
-                                dt,
-                                det_flag_fields[data_key],
+                            if self.det_flags not in det_data:
+                                det_data[self.det_flags] = list()
+                            det_data[self.det_flags].append(
+                                (
+                                    data_key,
+                                    dt,
+                                    det_flag_fields[data_key],
+                                )
                             )
                         else:
                             # Some other kind of detector data.  Ignore this for now,
@@ -1253,7 +1366,8 @@ class LoadContext(Operator):
                     else:
                         # Must be some other type of object...
                         if data_key not in mcur:
-                            mext[key] = axman[key]
+                            if _valid_meta(axman[key]):
+                                mext[key] = axman[key]
                 elif field_axes[0] == self.axis_sample:
                     # This is shared data
                     if isinstance(axman[key], so3g.proj.Ranges):
@@ -1291,7 +1405,8 @@ class LoadContext(Operator):
                 else:
                     # Some other object...
                     if data_key not in mcur:
-                        mext[key] = axman[key]
+                        if _valid_meta(axman[key]):
+                            mext[key] = axman[key]
 
         # Clean up any dictionaries that we created if they were empty
         if created_meta_extra and len(mext) == 0:
