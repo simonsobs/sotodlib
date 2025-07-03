@@ -3,6 +3,5 @@ matplotlib
 toml
 quaternionarray
 pandas
-diptest
 sklearn
 scikit

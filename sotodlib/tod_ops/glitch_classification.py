@@ -12,9 +12,7 @@ from sotodlib.tod_ops import filter_stats_functions as func
 
 cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
         'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist',
-        'P Value for Dip Test for X Hist','Dip Test for Y Hist',
-        'P Value for Dip Test for Y Hist', 'KS Test for X',
+        'Within 0.1 of Y Hist Max/Number of Detectors',
         'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp', 'Number of Peaks']
 
 
@@ -49,8 +47,6 @@ def compute_summary_stats(snippet):
 
     adjacent = func.max_and_adjacent_y_pos_ratio(y_t)
 
-    ks = func.KS_test(x_t)
-
     # Enter the summary statistics into an array
     # Indices correspond those in `cols`
     stats = np.full(len(cols), np.nan)
@@ -60,20 +56,11 @@ def compute_summary_stats(snippet):
     stats[3] = time_lag
     stats[4] = adjacent
     stats[5] = near
-    stats[10] = ks[0]
-    # stats[11]  # obs_id
-    # stats[12]  # snippet number
-    stats[13] = tstart
-    stats[14] = tstop
-    stats[15] = func.compute_num_peaks(data)
-
-    if det_num > 3:
-        dip_x, pval_x, dip_y, pval_y = func.dip_test(x_t, y_t)
-
-        stats[6] = dip_x
-        stats[7] = pval_x
-        stats[8] = dip_y
-        stats[9] = pval_y
+    # stats[6]  # obs_id
+    # stats[7]  # snippet number
+    stats[8] = tstart
+    stats[9] = tstop
+    stats[10] = func.compute_num_peaks(data)
 
     return stats
 
