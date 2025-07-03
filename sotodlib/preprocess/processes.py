@@ -1056,10 +1056,20 @@ class Demodulate(_Preprocess):
 
         if 'frequency_cutoffs' in proc_aman:
             hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-                (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
-            proc_aman['frequency_cutoffs'].wrap('dsT', 0.95*hwp_freq)
-            proc_aman['frequency_cutoffs'].wrap('demodQ', 0.95*hwp_freq)
-            proc_aman['frequency_cutoffs'].wrap('demodU', 0.95*hwp_freq)
+                    (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+            lpf_cfg = self.process_cfgs["demod_cfgs"].get("lpf_cfg", None)
+            if lpf_cfg is not None:
+                for k, v in lpf_cfg.items():
+                    if k == 'cutoff':
+                        if isinstance(v, str):
+                            freq_cutoff = hwp_freq*float(v.split('*')[0])
+                        else:
+                            freq_cutoff = v
+            else:
+                freq_cutoff = 0.95*hwp_freq
+            proc_aman['frequency_cutoffs'].wrap('dsT', freq_cutoff)
+            proc_aman['frequency_cutoffs'].wrap('demodQ', freq_cutoff)
+            proc_aman['frequency_cutoffs'].wrap('demodU', freq_cutoff)
 
 
 class AzSS(_Preprocess):
