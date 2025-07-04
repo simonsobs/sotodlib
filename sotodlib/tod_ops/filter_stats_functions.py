@@ -8,9 +8,9 @@ def num_of_det(x_pos):
     '''
     Compute the number of detectors affected by the glitch
 
-    Input: x_pos: x positions across the focal plane 
+    Input: x_pos: x positions across the focal plane
     Output: number of detectirs affected
-    ''' 
+    '''
 
     return len(x_pos)
 
@@ -18,12 +18,12 @@ def num_of_det(x_pos):
 def x_and_y_histogram_extent_ratio(x_pos, y_pos):
 
     '''
-    Compute the ratio of the extents of the x position and y position 
-    hisotgrams.
+    Compute the ratio of the extents of the x position and y position
+    histograms.
 
     Input: x_pos: x positions and y_pos: y positions across the focal plane
     Output: ratio of the extents of the x and y histograms
-    ''' 
+    '''
 
     hist_ratio = (np.max(y_pos) - np.min(y_pos))/(np.max(x_pos) - np.min(x_pos))
 
@@ -34,11 +34,10 @@ def mean_time_lags(data):
     '''
     Compute the mean of the absolute value of the time lags between detectors.
 
-    Input: data: detector TOD signals (snippets[s].signal
-    where s is the given snippet number, this will work better with detrened 
-    TODs, e.g. using sotodlib.tod_ops.detrend_tod(snippets[s], method = 'median'))
+    Input: data: detector TOD signals (snippet.signal). Works better with
+    detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
     Output: mean of the absolute value of the time lags
-    ''' 
+    '''
 
     lags = np.full((len(data), len(data)), np.nan)
 
@@ -51,7 +50,7 @@ def mean_time_lags(data):
                         #compute the time delays between detector pair
                         time_delay_pos = np.fft.ifft(np.fft.fft(data[i])*np.conjugate(np.fft.fft(data[j])))
 
-                        #find the maixmum time delay which correspond to the time shift required to acheive the maximum correlation 
+                        #find the maximum time delay; corresponds to the time shift required to achieve the maximum correlation
                         max_time_delay_pos = np.max(time_delay_pos)
 
                         time_delay_ind_t = np.where(time_delay_pos == max_time_delay_pos)[0][0]
@@ -59,7 +58,7 @@ def mean_time_lags(data):
                         #determine the difference between the required time shift and the length of the TOD
                         shift_t = time_delay_ind_t - len(data[i])
 
-                        #Take the small between the required time shift and shift defined above. This allows for shifted backwards instead of looping around the TOD.
+                        #Take the smaller value between the required time shift and shift defined above. This allows for shifts backwards instead of looping around the TOD.
                         if np.abs(shift_t) < time_delay_ind_t:
                             lag_t = shift_t
                         else:
@@ -77,11 +76,10 @@ def mean_correlation(data):
     '''
     Compute the mean of the absolute value of the Pearson correlation coefficient between detectors.
 
-    Input: data: detector TOD signals (snippets[s].signal
-    where s is the given snippet number, this will work better with detrened 
-    TODs, e.g. using sotodlib.tod_ops.detrend_tod(snippets[s], method = 'median'))
+    Input: data: detector TOD signals (snippet.signal). Works better with
+    detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
     Output: mean of the absolute value of the correlations
-    ''' 
+    '''
 
     corr_coeff = np.full((len(data), len(data)), np.nan)
 
@@ -132,7 +130,7 @@ def max_and_adjacent_y_pos_ratio(y_pos):
     '''
     Compute the ratio of the maximum and adjacent y hisotgram bins compared to the total number of detectors.
 
-    Input: y_pos: y positions across the focal plane 
+    Input: y_pos: y positions across the focal plane
     Output: sum of maximum and adjacent y hisotgram bins divided by the total number of detectors
     '''
 
@@ -149,9 +147,9 @@ def max_and_adjacent_y_pos_ratio(y_pos):
         sum_near = np.histogram(y_pos)[0][ind_y_max] + np.histogram(y_pos)[0][ind_y_max - 1]
 
     elif ind_y_max + 1 <= len(np.histogram(y_pos)[0]) - 1 and ind_y_max - 1 < 0:
-        sum_near = np.histogram(y_pos)[0][ind_y_max] + np.histogram(y_pos)[0][ind_y_max + 1]   
-    
-    
+        sum_near = np.histogram(y_pos)[0][ind_y_max] + np.histogram(y_pos)[0][ind_y_max + 1]
+
+
     det_num = len(y_pos)
 
     return sum_near/det_num
@@ -162,8 +160,8 @@ def compute_num_peaks(data):
     '''
     Computes the number of peaks in the combined TOD from the different detectors.
 
-    Input: data: detector TODs computed using data = snippets[s].data which
-    has been demeaned and detrended where s is the given snippet number
+    Input: data: detector TODs computed using data = snippet.data that has been
+    demeaned and detrended
     Output: the number of peaks
     '''
 

@@ -1,7 +1,5 @@
-import so3g
 import numpy as np
 from sotodlib.tod_ops import detrend_tod
-from sotodlib.core import AxisManager
 import os, pickle as pk
 
 import pandas as pd
@@ -12,8 +10,8 @@ from sotodlib.tod_ops import filter_stats_functions as func
 
 cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
         'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors',
-        'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp', 'Number of Peaks']
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
+        'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp']
 
 
 def compute_summary_stats(snippet):
@@ -47,6 +45,8 @@ def compute_summary_stats(snippet):
 
     adjacent = func.max_and_adjacent_y_pos_ratio(y_t)
 
+    num_peaks = func.compute_num_peaks(data)
+
     # Enter the summary statistics into an array
     # Indices correspond those in `cols`
     stats = np.full(len(cols), np.nan)
@@ -56,11 +56,11 @@ def compute_summary_stats(snippet):
     stats[3] = time_lag
     stats[4] = adjacent
     stats[5] = near
-    # stats[6]  # obs_id
-    # stats[7]  # snippet number
-    stats[8] = tstart
-    stats[9] = tstop
-    stats[10] = func.compute_num_peaks(data)
+    stats[6] = num_peaks
+    # stats[7]  # obs_id
+    # stats[8]  # snippet number
+    stats[9] = tstart
+    stats[10] = tstop
 
     return stats
 
@@ -121,7 +121,7 @@ def training_forest(df_train, cols, n_trees = 50, max_depth = 15):
     X, Y = df_train[cols], df_train['Train_Lab']
 
     forest = RandomForestClassifier(criterion='entropy', n_estimators = n_trees, random_state=1, n_jobs=2, max_depth = max_depth)
-    
+
     forest.fit(X, Y)
 
     return forest
@@ -203,11 +203,11 @@ def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0'
     '''
 
     acc = accuracy_score(df['Train_Lab'], pred_labs)
-    
+
     plt.rcParams['xtick.labelsize'] = 14
     plt.rcParams['ytick.labelsize'] = 14
     plt.rcParams['font.size'] = 18
-    
+
     leg_labs = ['Point Sources', 'Point Sources + Other', 'Cosmic Rays', 'Other']
 
 
