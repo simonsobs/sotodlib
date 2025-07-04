@@ -189,7 +189,7 @@ def main(**args):
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
-                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta, logger=L)
+                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
                 if obs.dets.count < 10:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     continue
