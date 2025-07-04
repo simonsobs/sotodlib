@@ -249,7 +249,7 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time
         #obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
-        obs = pp_util.load_and_preprocess(obs_id, preproc, dets={'wafer_slot':detset,'wafer.bandpass':band}, context=context, logger=L)
+        obs = pp_util.load_and_preprocess(obs_id, preproc, dets={'wafer_slot':detset,'wafer.bandpass':band}, context=context,)
         obs = calibrate_obs(obs, site=site, nocal=False)
         #bools, nod_indices, obs = find_el_nods(obs)
 
@@ -284,8 +284,8 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
     # mapmaker doesn't know about time_rhs, so handle it manually
     if signal_map.tiled: time_rhs = tilemap.redistribute(time_rhs, comm)
     else:                time_rhs = utils.allreduce     (time_rhs, comm)    
-    if signal_map.tiled: bin = tilemap.map_mul(signal_map.idiv,signal_map.rhs)
-    else: bin = enmap.map_mul(signal_map.idiv,signal_map.rhs)
+    if signal_map.tiled: bin_ = tilemap.map_mul(signal_map.idiv,signal_map.rhs)
+    else: bin_ = enmap.map_mul(signal_map.idiv,signal_map.rhs)
     if comm.rank == 0: L.info(pre + "Solving")
     t1 = time.time()
     for step in mapmaker.solve(maxiter=niter):
@@ -293,10 +293,10 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
         if comm.rank == 0:
             L.info("%s CG step %5d %15.7e %6.1f %6.3f" % (tag, step.i, step.err, (t2-t1), (t2-t1)/nobs_kept))
         t1 = time.time()
-    map  = step.x[1]
+    map_  = step.x[1]
     ivar = signal_map.div[0,0]
     with utils.nowarn(): tmap = utils.remove_nan(time_rhs / ivar)
-    return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, bin=bin)
+    return bunch.Bunch(map=map_, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, bin=bin_)
 
 def write_depth1_map(prefix, data, dtype = np.float32, binned=False, rhs=False, unit='K'):
     data.signal.write(prefix, "map",  data.map.astype(dtype), unit=unit)
