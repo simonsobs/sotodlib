@@ -226,6 +226,7 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
         #obs.focal_plane.xi    += obs.boresight_offset.dx
         #obs.focal_plane.eta   += obs.boresight_offset.dy
         #obs.focal_plane.gamma += obs.boresight_offset.gamma
+        utils.deslope(obs.signal, w=5, inplace=True)
     return obs
 
 def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None,):
