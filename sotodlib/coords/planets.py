@@ -39,6 +39,17 @@ SOURCE_LIST = ['mercury',
                ('QSO_J2253+1608', 343.4952422, 16.14301323),
                ('galactic_center', -93.5833, -29.0078)]
 
+def get_source_list_fromstr(target_source):
+    """Get a source_list from SOURCE_LIST by name, or raise ValueError if not found.
+    """
+    for isource in SOURCE_LIST:
+        if isinstance(isource, str):
+            isource_name = isource
+        elif isinstance(isource, tuple):
+            isource_name = isource[0]
+        if isource_name.lower() == target_source.lower():
+            return isource
+    raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
 
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
@@ -74,7 +85,7 @@ class SlowSource:
         dt = 3600
         ra0, dec0, distance = get_source_pos(name, timestamp)
         ra1, dec1, distance = get_source_pos(name, timestamp + dt)
-        return cls(timestamp, ra0, dec0, ((ra1-ra0+180) % 360 - 180)/dt, (dec1-dec0)/dt)
+        return cls(timestamp, ra0, dec0, ((ra1-ra0+np.pi) % (2*np.pi) - np.pi)/dt, (dec1-dec0)/dt)
 
     def pos(self, timestamps):
         """Get the (approximate) source position at the times given by the
@@ -92,12 +103,16 @@ class SlowSource:
         return self.ra + self.v_ra * dt, self.dec + self.v_dec * dt
 
 
-def get_scan_q(tod, planet, refq=None):
+def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     """Identify the point (in time and azimuth space) at which the
     specified planet crosses the boresight elevation for the
     observation in tod.  The rotation taking boresight coordinates to
     celestial coordinates at that moment in time (and pointing) is
     computed, and its conjugate is returned.
+
+    Boresight_offset is for taking into account off-centered wafer 
+    that have position offset in the focal plane, which is either None
+    or a (xi, eta) tuple in radian.
 
     The returned rotation is useful because it represents a fixed way
     to rotate the celestial such that the target source ends up at
@@ -106,20 +121,27 @@ def get_scan_q(tod, planet, refq=None):
     measuring beam and pointing parameters.
 
     """
+    if boresight_offset is None:
+        boresight_offset = (0, 0)
+    q_xieta = so3g.proj.quat.rotation_xieta(boresight_offset[0], boresight_offset[1])
     if refq is None:
         refq = so3g.proj.quat.rotation_xieta(0, 0)
     # Get reference elevation...
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
-    if isinstance(planet, str):
+    if isinstance(planet, (list, tuple)):
+        _, ra, dec = planet
+        planet = SlowSource(t, float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+    else:
         planet = SlowSource.for_named_source(planet, t)
 
     def scan_q_model(t, az, el, planet):
         csl = so3g.proj.CelestialSightLine.az_el(
             t, az, el, weather='typical', site='so')
         ra0, dec0 = planet.pos(t)
-        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q
+        return csl.Q, ~so3g.proj.quat.rotation_lonlat(ra0, dec0) * csl.Q * q_xieta
 
     def distance(p):
         dt, daz = p
@@ -147,7 +169,7 @@ def get_scan_q(tod, planet, refq=None):
             'planet': planet}
 
 
-def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
+def get_scan_P(tod, planet, boresight_offset=None, refq=None, res=None, size=None, **kw):
     """Get a standard Projection Matrix targeting a planet (or some
     interesting fixed position), in source-scan coordinates.
 
@@ -158,7 +180,7 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
 
     if res is None:
         res = 0.01 * coords.DEG
-    X = get_scan_q(tod, planet)
+    X = get_scan_q(tod, planet, boresight_offset=boresight_offset, refq=refq)
     rot = so3g.proj.quat.rotation_lonlat(0, 0) * X['rot']
     wcs_kernel = coords.get_wcs_kernel('tan', 0., 0., res=res)
 
@@ -171,9 +193,42 @@ def get_scan_P(tod, planet, refq=None, res=None, size=None, **kw):
     return P, X
 
 
+def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
+    """Get a standard Projection Matrix targeting arbitrary source (for example
+    drone) in horizon coordinates.
+
+    Args:
+      tod: AxisManager of the observation
+      az: azimuth of the target source (rad)
+      el: elevation of the target source (rad)
+      receiver_fixed:
+          If true, rotate the source centered coordinate to be receiver fixed.
+          This should be True for receiver fixed beam measurement.
+          This should be False for pol angle calibration with source on drone.
+
+    Return:
+      a Projection Matrix
+
+    """
+    sight = so3g.proj.CelestialSightLine.for_horizon(
+        tod.timestamps,
+        tod.boresight.az,
+        tod.boresight.el,
+        tod.boresight.roll
+    )
+    pq = so3g.proj.quat.rotation_lonlat(-az, el)
+    if receiver_fixed:
+        rot = so3g.proj.quat.euler(2, -tod.boresight.roll)
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * rot * ~pq * sight.Q
+    else:
+        sight.Q = so3g.proj.quat.rotation_lonlat(0, 0) * ~pq * sight.Q
+    P = coords.P.for_tod(tod, sight, **kw)
+    return P
+
+
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
-                       wrap=None):
+                       wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -194,15 +249,33 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
+        Default is None. (Nothing happens.)
 
     Returns:
       The filtered signal.
 
     """
-    if source_flags is None:
+    if source_flags is None and tod is not None:
         source_flags = tod.source_flags
-    if signal is None:
+    elif source_flags is None and tod is None:
+        raise ValueError("Must provide source_flags if tod is None")
+    if signal is None and tod is not None:
         signal = tod.signal
+    elif signal is None and tod is None:
+        raise ValueError("Must provide signal if tod is None")
+    if signal is None:
+        raise ValueError("signal somehow still None!")
+    
+    if edge_guard is not None:
+        if isinstance(edge_guard, int):
+            edgebl = np.zeros(source_flags.shape[-1], dtype=bool)
+            edgebl[edge_guard:-edge_guard] = True
+            edgerm = so3g.proj.ranges.RangesMatrix.from_mask(edgebl)
+            for iflag in source_flags:
+                iflag.intersect(edgerm)
+        else:
+            raise ValueError("edge_guard must be an int.")
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
@@ -211,21 +284,23 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
     # Low pass filter?
     if low_pass is not None:
+        if tod is None:
+            raise ValueError("tod cannot be None when lowpassing")
         if isinstance(low_pass, tod_ops.filters._chainable):
             filt = low_pass
         else:
             filt = tod_ops.filters.low_pass_butter4(low_pass)
 
         n_det, n = signal.shape
-        a, b, t_1, t_2 = tod_ops.fft_ops.build_rfft_object(n_det, n, 'BOTH')
-        a[:] = signal_pca
-        t_1()
+        rfft = tod_ops.fft_ops.RFFTObj.for_shape(n_det, n, 'BOTH')
+        rfft.a[:] = signal_pca
+        rfft.t_forward()
         times = tod.timestamps
         delta_t = (times[-1]-times[0])/(tod.samps.count - 1)
         freqs = np.fft.rfftfreq(n, delta_t)
-        filt.apply(freqs, tod, target=b)
-        signal_pca = t_2()
-        del a, b
+        filt.apply(freqs, tod, target=rfft.b)
+        signal_pca = rfft.t_backward()
+        del rfft
 
     # Measure TOD means (after gap fill, low pass, etc).
     if isinstance(n_modes, str) and n_modes == 'all':
@@ -248,7 +323,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         # Remove the PCA model.
         tod_ops.pca.add_model(tod, pca, -1, signal=signal)
 
-    if wrap:
+    if wrap and tod is not None:
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
@@ -299,6 +374,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
+    planets.close()
     return astrometric
 
 
@@ -324,17 +400,18 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
       Before checking in the ephemeris, the source_name will be
       matched against a regular expression and if it has the format
-      'Jxxx[+-]yyy', where xxx and yyy are decimal numbers, then a
+      'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers, then a
       fixed-position source at RA,Dec = xxx,yyy in degrees will be
       processed.  In that case, the distance is returned as Inf.
 
     """
     # Check against fixed-position template...
     m = re.match(
-        r'J(?P<ra_deg>\d+(\.\d*)?)(?P<dec_deg>[+-]\d+(\.\d*)?)', source_name)
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
     if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
         ra, dec = float(m['ra_deg']) * \
-            coords.DEG, float(m['dec_deg']) * coords.DEG
+            coords.DEG, sign * float(m['dec_deg']) * coords.DEG
         return ra, dec, float('inf')
     
     # Derive from skyfield astrometric object
@@ -399,7 +476,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     # One central detector
     xieta0, R, _ = coords.helpers.get_focal_plane_cover(tod, 0)
-    fp = so3g.proj.FocalPlane.from_xieta(['x'], [xieta0[0]], [xieta0[1]], [0])
+    fp = so3g.proj.FocalPlane.from_xieta([xieta0[0]], [xieta0[1]])
 
     asm = so3g.proj.Assembly.attach(sight, fp)
     p = so3g.proj.Projectionist.for_geom(shape, wcs)

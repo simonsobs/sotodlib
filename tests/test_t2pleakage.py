@@ -42,7 +42,7 @@ def quick_tod(n_det, n_samp, dt=.005, fknee=0.5, fhwp=2.0, t2q=1e-3, t2u=4e-3):
 
 class LeakageSubtractionTest(unittest.TestCase):
     "Test the temperature-to-polarization leakage subtaction"
-    def test_leakage_subtraction(self):
+    def test_leakage_subtraction_joint(self):
         #prepare tod
         n_det = 10
         n_samp = 200*600
@@ -58,7 +58,27 @@ class LeakageSubtractionTest(unittest.TestCase):
         
         hwp.demod_tod(tod)
         oman = t2pleakage.get_t2p_coeffs(tod)
+
+        self.assertTrue(np.all(np.isclose(oman.lamQ, t2q, atol=oman.lamQ_error*5, rtol=0)))
+        self.assertTrue(np.all(np.isclose(oman.lamU, t2u, atol=oman.lamU_error*5, rtol=0)))
+
+    def test_leakage_subtraction(self):
+        #prepare tod
+        n_det = 10
+        n_samp = 200*600
+        dt=.005
+        fknee=0.5
+        fhwp=2.0
+        t2q=1e-3
+        t2u=4e-3
         
+        tod = quick_tod(n_det=n_det, n_samp=n_samp, 
+                        dt=dt, fknee=fknee, fhwp=fhwp,
+                        t2q=t2q, t2u=t2u)
+        
+        hwp.demod_tod(tod)
+        oman = t2pleakage.get_t2p_coeffs(tod, joint_fit=False)
+
         self.assertTrue(np.all(np.isclose(oman.coeffsQ, t2q, atol=oman.errorsQ*5, rtol=0)))
         self.assertTrue(np.all(np.isclose(oman.coeffsU, t2u, atol=oman.errorsU*5, rtol=0)))
         

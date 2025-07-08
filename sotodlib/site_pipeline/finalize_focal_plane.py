@@ -1,17 +1,17 @@
 import argparse as ap
+import datetime as dt
+import logging
 import os
 from copy import deepcopy
 from typing import List, Optional
 
 import h5py
-import matplotlib.pyplot as plt
 import megham.transform as mt
 import megham.utils as mu
 import numpy as np
 import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
-from scipy.stats import binned_statistic
 from sotodlib.coords import optics as op
 from sotodlib.coords.fp_containers import (
     FocalPlane,
@@ -19,6 +19,10 @@ from sotodlib.coords.fp_containers import (
     Receiver,
     Template,
     Transform,
+    plot_by_gamma,
+    plot_ot,
+    plot_receiver,
+    plot_ufm,
 )
 from sotodlib.core import AxisManager, Context, metadata
 from sotodlib.io.metadata import read_dataset
@@ -27,12 +31,15 @@ from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 
-def _create_db(filename, per_obs, obs_id):
-    base = {}
+def _create_db(filename, per_obs, obs_id, start_time, stop_time):
     if per_obs:
         base = {"obs:obs_id": obs_id}
+        group = obs_id
+    else:
+        base = {"obs:timestamp": (start_time, stop_time)}
+        group = str(start_time)
     if os.path.isfile(filename):
-        return metadata.ManifestDb(filename), base
+        return metadata.ManifestDb(filename), base, group
     if not os.path.isdir(os.path.dirname(filename)):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
@@ -40,10 +47,12 @@ def _create_db(filename, per_obs, obs_id):
     scheme.add_exact_match("dets:stream_id")
     if per_obs:
         scheme.add_exact_match("obs:obs_id")
+    else:
+        scheme.add_range_match("obs:timestamp")
     scheme.add_data_field("dataset")
 
     metadata.ManifestDb(scheme=scheme).to_file(filename)
-    return metadata.ManifestDb(filename), base
+    return metadata.ManifestDb(filename), base, group
 
 
 def _avg_focalplane(full_fp, tot_weight):
@@ -81,126 +90,6 @@ def _log_vals(shift, scale, shear, rot, axis):
             )
     logger.info("\tShear param is %f", shear)
     logger.info("\tRotation of the %s-%s plane is %f radians", axis[0], axis[1], rot)
-
-
-def _mk_plot(plot_dir, froot, nominal, measured, transformed):
-    plt.style.use("tableau-colorblind10")
-    # Plot pointing
-    plt.scatter(
-        nominal[:, 0],
-        nominal[:, 1],
-        alpha=0.4,
-        color="blue",
-        label="nominal",
-        marker="P",
-    )
-    plt.scatter(
-        transformed[:, 0],
-        transformed[:, 1],
-        alpha=0.4,
-        color="black",
-        label="transformed",
-        marker="X",
-    )
-    plt.scatter(measured[:, 0], measured[:, 1], alpha=0.4, color="orange", label="fit")
-    plt.xlabel("Xi (rad)")
-    plt.ylabel("Eta (rad)")
-    plt.legend()
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}.png"))
-        plt.cla()
-
-    # Histogram of differences
-    diff = measured - transformed
-    isfinite = np.isfinite(diff[:, 0])
-    dist = np.linalg.norm(diff[isfinite, :2], axis=1)
-    dist_thresh = np.percentile(dist, 97)
-    bins = max(int(len(dist) / 20), 10)
-    plt.hist(dist[dist < dist_thresh], bins=bins)
-    plt.xlabel("Distance Between Measured and Transformed (rad)")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_dist.png"))
-        plt.close()
-
-    # Diffs by gamma
-    gammas = nominal[np.isfinite(diff[:, 0]), 2] % np.pi
-    bins = np.linspace(0, np.pi, 13)
-    medians, *_ = binned_statistic(
-        gammas[dist < dist_thresh],
-        dist[dist < dist_thresh],
-        statistic="median",
-        bins=bins,
-    )
-    plt.scatter(gammas[dist < dist_thresh], dist[dist < dist_thresh], alpha=0.1)
-    plt.scatter(np.arange(7.5, 180, 15) * np.pi / 180.0, medians, color="black")
-    plt.xlabel("Nominal Gamma (rad)")
-    plt.ylabel("Distance Between Measured and Transformed (rad)")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_dist_by_gamma.png"))
-        plt.close()
-
-    fig, axs = plt.subplots(1, 3, figsize=(9, 4), sharey=True)
-    im = None
-    for i, name in enumerate(("xi", "eta", "gamma")):
-        d = diff[isfinite, i][dist < dist_thresh]
-        axs[i].set_title(name)
-        if np.sum(isfinite) == 0:
-            continue
-        medians, *_ = binned_statistic(
-            gammas[dist < dist_thresh], d, statistic="median", bins=bins
-        )
-        axs[i].scatter(gammas[dist < dist_thresh], d, alpha=0.1)
-        axs[i].scatter(np.arange(7.5, 180, 15) * np.pi / 180.0, medians, color="black")
-    axs[0].set_ylabel("Diff (rad)")
-    axs[1].set_xlabel("Nominal Gamma (rad)")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_diff_by_gamma.png"))
-        plt.close()
-
-    # tricontourf of residuals, subplots for xi, eta, gamma
-    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True)
-    flat_diff = np.abs(diff.ravel())
-    max_diff = np.percentile(flat_diff[np.isfinite(flat_diff)], 99)
-    im = None
-    for i, name in enumerate(("xi", "eta", "gamma")):
-        isfinite = np.isfinite(diff[:, i])
-        axs[i].set_title(name)
-        axs[i].set_xlim(np.nanmin(transformed[:, 0]), np.nanmax(transformed[:, 0]))
-        axs[i].set_ylim(np.nanmin(transformed[:, 1]), np.nanmax(transformed[:, 1]))
-        axs[i].set_aspect("equal")
-        if np.sum(isfinite) == 0:
-            continue
-        im = axs[i].tricontourf(
-            transformed[isfinite, 0],
-            transformed[isfinite, 1],
-            diff[isfinite, i],
-            levels=20,
-            vmin=-1 * max_diff,
-            vmax=max_diff,
-        )
-    if im is not None:
-        fig.colorbar(im, ax=axs.ravel().tolist())
-    axs[0].set_ylabel("Eta (rad)")
-    axs[1].set_xlabel("Xi (rad)")
-    fig.suptitle("Residuals from Fit")
-    if plot_dir is None:
-        plt.show()
-    else:
-        os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"{froot}_res.png"), bbox_inches="tight")
-        plt.close()
 
 
 def gamma_fit(src, dst):
@@ -249,23 +138,55 @@ def _load_template(template_path, ufm, pointing_cfg):
     )
 
 
+def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], tags=[]):
+    query_all = query
+    query_obs = []
+    if query is None:
+        query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
+    all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
+    dbs = [
+        metadata.ManifestDb(md["db"])
+        for md in ctx["metadata"]
+        if md.get("name", "") in metalist or md.get("label", "") in metalist
+    ]
+    with_meta = np.unique(
+        np.hstack(
+            [np.array([entry["obs:obs_id"] for entry in db.inspect()]) for db in dbs]
+        )
+    )
+    all_obs = np.intersect1d(all_obs, with_meta)
+
+    if query is not None:
+        query_obs = ctx.obsdb.query(query)["obs_id"]
+    obs_ids += query_obs
+
+    if len(obs_ids) == 0 and query is None:
+        return all_obs
+    return np.intersect1d(obs_ids, all_obs)
+
+
 def _load_ctx(config):
     ctx = Context(config["context"]["path"])
+    if ctx.obsdb is None:
+        raise ValueError("No obsdb!")
     tod_pointing_name = config["context"].get("tod_pointing", "tod_pointing")
     map_pointing_name = config["context"].get("map_pointing", "map_pointing")
     pol_name = config["context"].get("polarization", "polarization")
     dm_name = config["context"].get("detmap", "detmap")
     roll_range = config.get("roll_range", [-1 * np.inf, np.inf])
-    query = []
-    if "query" in config["context"]:
-        query = (ctx.obsdb.query(config["context"]["query"])["obs_id"],)
-    obs_ids = np.append(config["context"].get("obs_ids", []), query)
-    obs_ids = np.unique(obs_ids)
+    obs_ids = _get_obs_ids(
+        ctx,
+        [tod_pointing_name, map_pointing_name, pol_name],
+        config["start_time"],
+        config["stop_time"],
+        config["context"].get("query", None),
+        config["context"].get("obs_ids", []),
+        config["context"].get("tags", ["timing_issues=0"]),
+    )
     if len(obs_ids) == 0:
         raise ValueError("No observations provided in configuration")
-    _config = config.copy()
-    if "query" in _config["context"]:
-        del _config["context"]["query"]
     amans = []
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
@@ -390,9 +311,7 @@ def _load_rset(config):
     return (
         amans,
         obs_ids,
-        [
-            stream_id,
-        ],
+        [stream_id],
     )
 
 
@@ -484,6 +403,40 @@ def main():
     per_obs = config.get("per_obs", args.per_obs)
     include_cm = config.get("include_cm", args.include_cm)
 
+    # Build output path
+    append = config.get("append", "")
+    dbroot = f"db{bool(append)*'_'}{append}"
+    froot = f"focal_plane{bool(append)*'_'}{append}"
+    subdir = config.get("subdir", "")
+    subdir = subdir + (subdir == "") * (
+        per_obs * "per_obs" + (not per_obs) * "combined"
+    )
+    outdir = os.path.join(config["outdir"], subdir)
+    outpath = os.path.abspath(os.path.join(outdir, f"{froot}.h5"))
+    dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
+    logpath = os.path.join(outdir, f"{froot}.log")
+    os.makedirs(outdir, exist_ok=True)
+    plot_dir_base = config.get("plot_dir", None)
+    if plot_dir_base is not None:
+        plot_dir_base = os.path.join(
+            plot_dir_base, subdir + bool(append) * "_" + append
+        )
+        plot_dir_base = os.path.abspath(plot_dir_base)
+        os.makedirs(plot_dir_base, exist_ok=True)
+
+    # Log file
+    logfile = logging.FileHandler(logpath)
+    logger.addHandler(logfile)
+
+    # Time range
+    config["start_time"] = config.get("start_time", 0)
+    config["stop_time"] = config.get("stop_time", 2**32)
+    logger.info(
+        "Running on time range %s to %s",
+        dt.datetime.fromtimestamp(config["start_time"]),
+        dt.datetime.fromtimestamp(config["stop_time"]),
+    )
+
     # Load data
     if "context" in config:
         amans, obs_ids, stream_ids = _load_ctx(config)
@@ -491,17 +444,6 @@ def main():
         amans, obs_ids, stream_ids = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
-
-    # Build output path
-    append = config.get("append", "")
-    dbroot = f"db{bool(append)*'_'}{append}"
-    subdir = config.get("subdir", "")
-    subdir = subdir + (subdir == "") * (
-        per_obs * "per_obs" + (not per_obs) * "combined"
-    )
-    outdir = os.path.join(config["outdir"], subdir)
-    dbpath = os.path.join(outdir, f"{dbroot}.sqlite")
-    os.makedirs(outdir, exist_ok=True)
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
@@ -521,9 +463,12 @@ def main():
     else:
         batches = [(amans, obs_ids)]
     for amans, obs_ids in batches:
-        froot = f"focal_plane{bool(append)*'_'}{append}{per_obs*('_'+obs_ids[0])}"
-        outpath = os.path.join(outdir, f"{froot}.h5")
-        outpath = os.path.abspath(outpath)
+        plot_dir = plot_dir_base
+        if per_obs:
+            plot_dir = os.path.join(plot_dir_base, obs_ids[0])
+        else:
+            plot_dir = os.path.join(plot_dir_base, str(config["start_time"]))
+        os.makedirs(plot_dir, exist_ok=True)
         logger.info("Working on batch containing: %s", str(obs_ids))
         ots = {}
         for stream_id in stream_ids:
@@ -572,7 +517,10 @@ def main():
                     config["wafer_info"], stream_id, **pointing_cfg
                 )
                 template = Template(
-                    template_det_ids, template, is_optical, pointing_cfg
+                    template_det_ids,
+                    template,
+                    is_optical,
+                    pointing_cfg,
                 )
             elif have_template:
                 logger.info("\tLoading template from %s", template_path)
@@ -582,7 +530,7 @@ def main():
                     "No template provided and unable to generate one for some reason"
                 )
 
-            focal_plane = FocalPlane.empty(template, stream_id, len(amans))
+            focal_plane = FocalPlane.empty(template, stream_id, ws, len(amans))
             if focal_plane.template is None:
                 raise ValueError("Template is somehow None")
 
@@ -606,6 +554,7 @@ def main():
 
                 # Mapping to template
                 fp, template_msk = focal_plane.map_by_det_id(aman)
+                focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
                 try:
@@ -650,25 +599,6 @@ def main():
                 logger.error("\tToo few points! Skipping...")
                 continue
 
-            # Compute transformation between the two nominal and measured pointing
-            focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
-            if focal_plane.have_gamma:
-                gamma_scale, gamma_shift = gamma_fit(
-                    focal_plane.template.fp[:, 2], focal_plane.avg_fp[:, 2]
-                )
-                focal_plane.transformed[:, 2] = (
-                    focal_plane.template.fp[:, 2] * gamma_scale + gamma_shift
-                )
-                focal_plane.center_transformed[:, 2] = (
-                    gamma_scale * focal_plane.template.center[:, 2] + gamma_shift
-                )
-            else:
-                logger.warning(
-                    "\tNo polarization data availible, gammas will be filled with the nominal values."
-                )
-                gamma_scale = 1.0
-                gamma_shift = 0.0
-
             try:
                 affine, shift = mt.get_affine_two_stage(
                     focal_plane.template.fp[:, :2],
@@ -686,8 +616,37 @@ def main():
                 focal_plane.template.center[:, :2], affine, shift
             )
 
+            # Compute transformation between the two nominal and measured pointing
+            focal_plane.have_gamma = np.sum(focal_plane.n_gamma) > 0
+            if focal_plane.have_gamma:
+                gamma_scale, gamma_shift = gamma_fit(
+                    focal_plane.template.fp[:, 2], focal_plane.avg_fp[:, 2]
+                )
+            else:
+                logger.warning(
+                    "\tNo polarization data availible, gammas will be based on the nominal values."
+                )
+                logger.warning(
+                    "\tSetting gamma shift to the xi-eta rotation and scale to 1.0"
+                )
+                transform = Transform.from_split(np.array((*shift, 0.0)), affine, 1.0)
+                gamma_scale = 1.0
+                gamma_shift = transform.rot
+            focal_plane.transformed[:, 2] = (
+                focal_plane.template.fp[:, 2] * gamma_scale + gamma_shift
+            )
+            focal_plane.center_transformed[:, 2] = (
+                focal_plane.template.center[:, 2] * gamma_scale + gamma_shift
+            )
+
             rms = np.sqrt(
-                np.nanmean((focal_plane.avg_fp - focal_plane.transformed) ** 2)
+                np.nanmean(
+                    (
+                        focal_plane.avg_fp[:, : (2 + focal_plane.have_gamma)]
+                        - focal_plane.transformed[:, : (2 + focal_plane.have_gamma)]
+                    )
+                    ** 2
+                )
             )
             logger.info("\tRMS after transformation is %f", rms)
 
@@ -702,19 +661,8 @@ def main():
             )
 
             if config.get("plot", False):
-                plot_dir = config.get("plot_dir", None)
-                proot = f"{stream_id}{append}"
-                if plot_dir is not None:
-                    plot_dir = os.path.join(plot_dir, subdir, per_obs * obs_ids[0])
-                    plot_dir = os.path.abspath(plot_dir)
-                    os.makedirs(plot_dir, exist_ok=True)
-                _mk_plot(
-                    plot_dir,
-                    proot,
-                    focal_plane.template.fp,
-                    focal_plane.avg_fp,
-                    focal_plane.transformed,
-                )
+                plot_ufm(focal_plane, plot_dir)
+                plot_by_gamma(focal_plane, plot_dir)
             ots[ot].focal_planes.append(focal_plane)
 
         # Per OT common mode
@@ -725,6 +673,7 @@ def main():
                 logger.error("\tNo focal planes found! Skipping...")
                 todel.append(name)
                 continue
+            plot_ot(ot, plot_dir)
             centers = np.vstack([fp.template.center for fp in ot.focal_planes])
             centers_transformed = np.vstack(
                 [fp.center_transformed for fp in ot.focal_planes]
@@ -807,6 +756,7 @@ def main():
             recv_transform.rot,
             ("xi", "eta", "gamma"),
         )
+        plot_receiver(receiver, plot_dir)
 
         # Now compute correction only transform for each ufm
         # Transforms are composed as ufm(ot(rx(focal_plane)))
@@ -843,9 +793,18 @@ def main():
         # Make final outputs and save
         logger.info("Saving data to %s", outpath)
         logger.info("Writing to database at %s", dbpath)
-        db, base = _create_db(dbpath, per_obs=per_obs, obs_id=obs_ids[0])
-        with h5py.File(outpath, "w") as f:
-            receiver.save(f, (db, base))
+        db, base, group = _create_db(
+            dbpath,
+            per_obs=per_obs,
+            obs_id=obs_ids[0],
+            start_time=config["start_time"],
+            stop_time=config["stop_time"],
+        )
+        with h5py.File(outpath, "a") as f:
+            if group in f:
+                del f[group]
+            f.create_group(group)
+            receiver.save(f, (db, base), group)
 
 
 if __name__ == "__main__":

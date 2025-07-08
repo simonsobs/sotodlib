@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simulated optical pickup from various sources.
 """
@@ -46,7 +46,8 @@ def simulate_scan_synchronous_signal(job, otherargs, runargs, data):
         job_ops.sim_sss.realization = otherargs.realization
 
     if job_ops.sim_sss.enabled:
-        job_ops.sim_sss.detector_pointing = job_ops.det_pointing_azel
+        job_ops.sim_sss.detector_pointing = job_ops.det_pointing_azel_sim
+        job_ops.sim_sss.stokes_weights = job_ops.weights_azel
         job_ops.sim_sss.apply(data)
 
 

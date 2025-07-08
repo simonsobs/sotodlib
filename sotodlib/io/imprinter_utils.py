@@ -17,6 +17,8 @@ from sotodlib.io.imprinter import (
     BOUND,
     UPLOADED,
     DONE,    
+    ObsSet,
+    G3tObservations,
 )
 
 from .load_smurf import (
@@ -80,7 +82,12 @@ def set_book_rebind(imprint, book, update_level2=False):
 
     if op.exists(book_dir):
         print(f"Removing all files from {book_dir}")
-        shutil.rmtree(book_dir)
+        if os.path.isfile(book_dir):
+            os.remove(book_dir)
+        elif os.path.isdir(book_dir):
+            shutil.rmtree(book_dir)
+        else:
+            print("How is this not a file or directory")
     else: 
         print(f"Found no files in {book_dir} to remove")
 
@@ -93,6 +100,63 @@ def set_book_rebind(imprint, book, update_level2=False):
         print(f"Updating level 2 observations")
         for _, obs in obs_dict.items():
             SMURF.update_observation_files(obs, g3session, force=True)
+
+def delete_level2_obs_and_book(imprint, book, session=None):
+    """When there are certain readout communication errors, smurf will blindly 
+    stream full rate data that is nonsense. For these, we don't want to keep 
+    the data in stray books because it's nonsense and it's massive. Delete the 
+    level 2 files, observation, and the book.
+    """
+    assert book.type == "oper", f"This function is for oper books"
+    set_book_rebind(imprint, book)
+    
+    if session is None:
+        session = imprint.get_session()
+    print(f"Removing Level 2 for {book.bid}")
+    obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+    g3session, SMURF = imprint.get_g3tsmurf_session(
+        return_archive=True
+    )
+    for _, obs in obs_dict.items():
+        SMURF.delete_observation_files(
+            obs, g3session, dry_run=False
+        )  
+    for o in book.obs:
+        session.delete(o)
+    session.delete(book)
+    session.commit()   
+
+
+def remove_level2_obs_from_book(imprint, book, bad_obs_id):
+    """If one level2 observation is problematic, delete that book and re-register without it.
+    """
+    assert book.type == "obs", f"Book should be an 'obs' book"
+
+    # keep staged clean
+    set_book_rebind(imprint, book)
+    odic = imprint.get_g3tsmurf_obs_for_book(book)
+    obs_ids = [k for k in odic.keys()]
+    assert bad_obs_id in obs_ids, f"{bad_obs_id} not in book {book.bid}"
+    
+    new_obs_list = [o for o in obs_ids if o != bad_obs_id]
+    g3session = imprint.get_g3tsmurf_session()
+    olist = [
+        g3session.query(G3tObservations).filter(
+            G3tObservations.obs_id == o
+        ).one() for o in new_obs_list
+    ]
+    oset = ObsSet(
+        olist,
+        mode=book.type, 
+        slots=imprint.tubes[book.tel_tube]['slots'],
+        tel_tube=book.tel_tube
+    )
+    session = imprint.get_session()
+    for o in book.obs:
+        session.delete(o)
+    session.delete(book)
+    session.commit()
+    return imprint.register_book(oset, session=session)
 
 def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     """ helper function for when a level 2 observation could span multiple
@@ -160,6 +224,21 @@ def block_set_rebind(imprint, update_level2=False):
         imprint.logger.info(f"Setting book {book.bid} for rebinding")
         set_book_rebind(imprint, book, update_level2=update_level2)    
 
+def block_fix_bad_timing(imprint):
+    """Run through and try rebinding all books with bad timing"""
+    failed_books = imprint.get_failed_books()
+    fix_list = []
+    for book in failed_books:
+        if "TimingSystemOff" in book.message:
+            fix_list.append(book)
+    for book in fix_list:
+        imprint.logger.info(f"Setting book {book.bid} for rebinding")
+        set_book_rebind(imprint, book)
+        imprint.logger.info(
+            f"Binding book {book.bid} while accepting bad timing"
+        )
+        imprint.bind_book(book, allow_bad_timing=True)
+
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
     smurf or stray book regisitration.
@@ -186,16 +265,17 @@ def get_timecode_final(imprint, time_code, type='all'):
     g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
     session = imprint.get_session()
 
+    # this is another place I was reminded sqlite does not accept
+    # numpy int32s or numpy int64s
+    time_code = int(time_code)
+
     servers = SMURF.finalize["servers"]
     meta_agents = [s["smurf-suprsync"] for s in servers]
     files_agents = [s["timestream-suprsync"] for s in servers]
 
-    meta_query = or_(*[TimeCodes.agent == a for a in meta_agents])
-    files_query = or_(*[TimeCodes.agent == a for a in files_agents])
-
     tcm = g3session.query(TimeCodes.agent).filter(
         TimeCodes.timecode==time_code,
-        meta_query,
+        TimeCodes.agent.in_(meta_agents),
         TimeCodes.suprsync_type == SupRsyncType.META.value,
     ).distinct().all()
 
@@ -209,8 +289,8 @@ def get_timecode_final(imprint, time_code, type='all'):
         return False, 1
 
     tcf = g3session.query(TimeCodes.agent).filter(
-        TimeCodes.timecode==time_code,
-        files_query,
+        TimeCodes.timecode == time_code,
+        TimeCodes.agent.in_(files_agents),
         TimeCodes.suprsync_type == SupRsyncType.FILES.value,
     ).distinct().all()
     
@@ -244,8 +324,10 @@ def set_timecode_final(imprint, time_code):
     """
 
     g3session, SMURF = imprint.get_g3tsmurf_session(return_archive=True)
-
     servers = SMURF.finalize["servers"]
+    # this is another place I was reminded sqlite does not accept
+    # numpy int32s or numpy int64s
+    time_code = int(time_code)
     
     for server in servers:
         tcf = g3session.query(TimeCodes).filter(
@@ -260,7 +342,8 @@ def set_timecode_final(imprint, time_code):
                 timecode=time_code,
                 agent=server["timestream-suprsync"],
             )
-        g3session.add(tcf)
+            g3session.add(tcf)
+            g3session.commit()
 
         tcm = g3session.query(TimeCodes).filter(
             TimeCodes.timecode==time_code,
@@ -274,5 +357,5 @@ def set_timecode_final(imprint, time_code):
                 timecode=time_code,
                 agent=server["smurf-suprsync"],
             )
-        g3session.add(tcm)    
-    g3session.commit()
+            g3session.add(tcm)     
+            g3session.commit()

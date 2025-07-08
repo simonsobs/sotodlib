@@ -151,7 +151,7 @@ class PreprocessQA(QAMetric):
 
     def _get_available_obs(self):
         # find preprocess manifest file
-        man_file = [p["db"] for p in self.context["metadata"] if p.get("label", "") == "preprocess"]
+        man_file = [p["db"] for p in self.context["metadata"] if re.match(".*preprocess", p.get("db", ""))]
         if len(man_file) == 0:
             raise Exception(f"No preprocess metadata block in context {self.context.filename}.")
 
@@ -274,6 +274,17 @@ class HWPSolQA(QAMetric):
         obs_re = re.compile("^obs_*.")
         return [o[0] for o in man_db.get_entries(["\"obs:obs_id\""]).asarray() if obs_re.match(o[0])]
 
+    def _process(self, meta):
+        tags = self._tags.copy()
+        tags.update({"telescope": meta.obs_info.telescope})
+        obs_time = [meta.obs_info.timestamp]
+        return {
+            "field": self._influx_field,
+            "values": [self._gen_value(meta)],
+            "timestamps": obs_time,
+            "tags": [tags],
+        }
+
 
 class HWPSolSuccess(HWPSolQA):
     """ Records success of the HWP angle solution calculation, for each encode."""
@@ -281,15 +292,8 @@ class HWPSolSuccess(HWPSolQA):
     _influx_field = "logger"
     _needs_encoder = True
 
-    def _process(self, meta):
-        success = [meta.hwp_solution[f"logger_{self._encoder}"] == "Angle calculation succeeded"]
-        obs_time = [meta.obs_info.timestamp]
-        return {
-            "field": self._influx_field,
-            "values": success,
-            "timestamps": obs_time,
-            "tags": [self._tags],
-        }
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"logger_{self._encoder}"] == "Angle calculation succeeded"
 
 
 class HWPSolPrimaryEncoder(HWPSolQA):
@@ -297,14 +301,8 @@ class HWPSolPrimaryEncoder(HWPSolQA):
 
     _influx_field = "primary_encoder"
 
-    def _process(self, meta):
-        # no tags for this metric
-        return {
-            "field": self._influx_field,
-            "values": [meta.hwp_solution["primary_encoder"]],
-            "timestamps": [meta.obs_info.timestamp],
-            "tags": [self._tags],
-        }
+    def _gen_value(self, meta):
+        return meta.hwp_solution["primary_encoder"]
 
 
 class HWPSolVersion(HWPSolQA):
@@ -312,14 +310,8 @@ class HWPSolVersion(HWPSolQA):
 
     _influx_field = "version"
 
-    def _process(self, meta):
-        # no tags for this metric
-        return {
-            "field": self._influx_field,
-            "values": [meta.hwp_solution["version"]],
-            "timestamps": [meta.obs_info.timestamp],
-            "tags": [self._tags],
-        }
+    def _gen_value(self, meta):
+        return meta.hwp_solution["version"]
 
 
 class HWPSolOffcenter(HWPSolQA):
@@ -327,14 +319,8 @@ class HWPSolOffcenter(HWPSolQA):
 
     _influx_field = "offcenter"
 
-    def _process(self, meta):
-        # no tags for this metric
-        return {
-            "field": self._influx_field,
-            "values": [meta.hwp_solution["offcenter"][0]],
-            "timestamps": [meta.obs_info.timestamp],
-            "tags": [self._tags],
-        }
+    def _gen_value(self, meta):
+        return meta.hwp_solution["offcenter"][0]
 
 
 class HWPSolOffcenterErr(HWPSolQA):
@@ -342,14 +328,8 @@ class HWPSolOffcenterErr(HWPSolQA):
 
     _influx_field = "offcenter_err"
 
-    def _process(self, meta):
-        # no tags for this metric
-        return {
-            "field": self._influx_field,
-            "values": [meta.hwp_solution["offcenter"][1]],
-            "timestamps": [meta.obs_info.timestamp],
-            "tags": [self._tags],
-        }
+    def _gen_value(self, meta):
+        return meta.hwp_solution["offcenter"][1]
 
 
 class HWPSolNumSamples(HWPSolQA):
@@ -358,16 +338,9 @@ class HWPSolNumSamples(HWPSolQA):
     _influx_field = "num_samples"
     _needs_encoder = True
 
-    def _process(self, meta):
+    def _gen_value(self, meta):
         flag_key = f"filled_flag_{self._encoder}"
-        frac = [meta.hwp_solution[flag_key].size]
-        obs_time = [meta.obs_info.timestamp]
-        return {
-            "field": self._influx_field,
-            "values": frac,
-            "timestamps": obs_time,
-            "tags": [self._tags],
-        }
+        return meta.hwp_solution[flag_key].size
 
 
 class HWPSolNumFlagged(HWPSolQA):
@@ -376,16 +349,9 @@ class HWPSolNumFlagged(HWPSolQA):
     _influx_field = "num_flagged"
     _needs_encoder = True
 
-    def _process(self, meta):
+    def _gen_value(self, meta):
         flag_key = f"filled_flag_{self._encoder}"
-        frac = [meta.hwp_solution[flag_key].sum()]
-        obs_time = [meta.obs_info.timestamp]
-        return {
-            "field": self._influx_field,
-            "values": frac,
-            "timestamps": obs_time,
-            "tags": [self._tags],
-        }
+        return meta.hwp_solution[flag_key].sum()
 
 
 class HWPSolMeanRate(HWPSolQA):
@@ -394,17 +360,11 @@ class HWPSolMeanRate(HWPSolQA):
     _influx_field = "mean_rate"
     _needs_encoder = True
 
-    def _process(self, meta):
+    def _gen_value(self, meta):
         good_samp = ~meta.hwp_solution[f"filled_flag_{self._encoder}"]
         nsamp = good_samp.sum()
         rate = np.nan if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
-        obs_time = [meta.obs_info.timestamp]
-        return {
-            "field": self._influx_field,
-            "values": [rate],
-            "timestamps": obs_time,
-            "tags": [self._tags],
-        }
+        return rate
 
 
 class HWPSolMeanTemplate(HWPSolQA):
@@ -413,11 +373,6 @@ class HWPSolMeanTemplate(HWPSolQA):
     _influx_field = "mean_template"
     _needs_encoder = True
 
-    def _process(self, meta):
+    def _gen_value(self, meta):
         obs_time = [meta.obs_info.timestamp]
-        return {
-            "field": self._influx_field,
-            "values": [np.mean(np.abs(meta.hwp_solution[f"template_{self._encoder}"]))],
-            "timestamps": obs_time,
-            "tags": [self._tags],
-        }
+        return np.mean(np.abs(meta.hwp_solution[f"template_{self._encoder}"]))

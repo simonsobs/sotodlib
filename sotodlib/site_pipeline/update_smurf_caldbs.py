@@ -51,6 +51,7 @@ import sotodlib.site_pipeline.util as sp_util
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
+TES_BIAS_COUNT = 12  # per detset / primary file group
 
 logger = logging.getLogger('smurf_caldbs')
 if not logger.hasHandlers():
@@ -240,7 +241,8 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
     for each detector in the observation
     """
     am = ctx.get_obs(
-            obs_id, samples=(0, 1), ignore_missing=True, no_signal=True,
+            obs_id, samples=(0, 1), ignore_missing=True,
+            no_signal=True, no_headers=False,
             on_missing={'det_cal': 'skip'}
     )
     cals = [CalInfo(rid) for rid in am.det_info.readout_id]
@@ -313,7 +315,10 @@ def get_cal_resset(ctx: core.Context, obs_id) -> CalResult:
 
         for bg, vb_bsa in enumerate(bsa['Vbias']):
             bl_label = f"{bsa['meta']['stream_id']}_b{bg:0>2}"
-            if np.isnan(vb_bsa):
+            # Usually we can count on bias voltages of bias lines >= 12 to be
+            # Nan, however we have seen cases where they're not, so we also
+            # restrict by count.
+            if np.isnan(vb_bsa) or bg >= TES_BIAS_COUNT:
                 bias_line_is_valid[bl_label] = False
                 continue
 
@@ -426,6 +431,12 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
         to the idx_path.
     run_single: bool
         If true, will stop after writing a single entry to the det-cal db
+
+    Returns
+    -------
+    report: dict
+        Counts for how many items were 'success', 'failure', or 'crash'.
+
     """
     if root_dir is not None:
         h5_path = os.path.join(root_dir, h5_path)
@@ -457,6 +468,11 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                               key=(lambda s: s.split('_')[1]))
 
     logger.info("%d datasets to add", len(remaining_obsids))
+    report = {
+        'success': 0,
+        'failure': 0,
+        'crash': 0,
+    }
     for obs_id in tqdm(remaining_obsids, disable=(not show_pb)):
         try:
             result = get_cal_resset(ctx, obs_id)
@@ -468,19 +484,23 @@ def update_det_caldb(ctx, idx_path, detset_idx, h5_path,
                     'obs:obs_id': obs_id,
                     'dataset': obs_id,
                 }, filename=path, replace=overwrite)
+                report['success'] += 1
             else:
                 logger.error("Failed on %s: %s", obs_id, result.fail_msg)
                 if failed_obsid_cache is not None:
                     add_to_failed_cache(obs_id, failed_obsid_cache, result.fail_msg)
+                report['failure'] += 1
 
         except Exception as e:
-            logger.error("Failed on %s: %s", obs_id, e)
+            logger.error("Crashed on %s: %s", obs_id, e)
             if format_exc:
                 logger.error(traceback.format_exc())
+            report['crash'] += 1
 
         if run_single:
             break
 
+    return report
 
 def run_update_det_caldb(config_path, overwrite=False):
     with open(config_path, 'r') as f:
@@ -493,7 +513,7 @@ def run_update_det_caldb(config_path, overwrite=False):
         detset_idx = os.path.join(detset_root_path, detset_idx)
 
     ctx = core.Context(config['archive']['det_cal']['context'])
-    update_det_caldb(
+    report = update_det_caldb(
         ctx, 
         config['archive']['det_cal']['index'],
         detset_idx,
@@ -506,6 +526,9 @@ def run_update_det_caldb(config_path, overwrite=False):
         write_relpath=config['archive']['det_cal'].get('write_relpath', True),
         run_single=config['archive']['det_cal'].get('run_single', False)
     )
+
+    logger.info(f'update_det_caldb summary: {report}')
+    assert (report['crash'] == 0), "Unexpected data processing issues."
 
 
 def get_parser(parser=None):

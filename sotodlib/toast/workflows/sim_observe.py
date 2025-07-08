@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simulated observing / scanning motion of the telescope.
 """
@@ -6,6 +6,7 @@
 import numpy as np
 from astropy import units as u
 import toast
+from toast.observation import default_values as defaults
 import toast.ops
 
 from .. import ops as so_ops
@@ -83,6 +84,14 @@ def setup_simulate_observing(parser, operators):
         "--schedule", required=False, default=None, help="Input observing schedule"
     )
     parser.add_argument(
+        "--sort_schedule",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Sort the observing schedule by mean boresight RA.  "
+        "This can limit the area of sky each process group deals with.",
+    )
+    parser.add_argument(
         "--realization",
         required=False,
         default=None,
@@ -101,6 +110,23 @@ def setup_simulate_observing(parser, operators):
     )
     operators.append(so_ops.CoRotator(name="corotate_lat"))
     operators.append(toast.ops.PerturbHWP(name="perturb_hwp", enabled=False))
+    # Detector quaternion pointing
+    operators.append(
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_azel_sim",
+            boresight=defaults.boresight_azel,
+            quats="quats_azel_sim",
+            enabled=False,
+        )
+    )
+    operators.append(
+        toast.ops.PointingDetectorSimple(
+            name="det_pointing_radec_sim",
+            boresight=defaults.boresight_radec,
+            quats="quats_radec_sim",
+            enabled=False,
+        )
+    )
 
 
 @workflow_timer
@@ -123,10 +149,6 @@ def simulate_observing(job, otherargs, runargs, comm):
 
     # Configured operators for this job
     job_ops = job.operators
-
-    if not job_ops.sim_ground.enabled:
-        log.info_rank("Simulated observing is disabled", comm=comm)
-        return None
 
     # Make sure we have the required bands and schedule.  These might
     # not be set during a dry-run, but if we got this far they need to
@@ -153,11 +175,21 @@ def simulate_observing(job, otherargs, runargs, comm):
         thinfp=otherargs.thinfp,
         comm=comm,
     )
+    ndet = len(telescope.focalplane.detectors)
+    log.info_rank(
+        f"  Simulated focalplane with {ndet} detectors "
+        f"(thinfp = {otherargs.thinfp}) in",
+        comm=comm,
+        timer=timer,
+    )
 
     # Load the schedule file
     schedule = toast.schedule.GroundSchedule()
     schedule.read(otherargs.schedule, comm=comm)
     log.info_rank("  Loaded schedule in", comm=comm, timer=timer)
+    if otherargs.sort_schedule:
+        schedule.sort_by_RA()
+        log.info_rank("  Sorted schedule in", comm=comm, timer=timer)
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"  After loading schedule:  {mem}", comm)
 
@@ -185,12 +217,13 @@ def simulate_observing(job, otherargs, runargs, comm):
     # Simulate the telescope pointing
 
     job_ops.sim_ground.telescope = telescope
+    job_ops.sim_ground.enabled = True
     job_ops.sim_ground.schedule = schedule
     if job_ops.sim_ground.weather is None:
         job_ops.sim_ground.weather = telescope.site.name
     if otherargs.realization is not None:
         job_ops.sim_ground.realization = otherargs.realization
-    log.info_rank("  Running simulated observing...", comm=data.comm.comm_world)
+    log.info_rank("  Running simulated observing...", comm=comm)
     job_ops.sim_ground.apply(data)
     log.info_rank("  Simulated telescope pointing in", comm=comm, timer=timer)
 
@@ -199,17 +232,13 @@ def simulate_observing(job, otherargs, runargs, comm):
 
     # Apply LAT co-rotation
     if job_ops.corotate_lat.enabled:
-        log.info_rank(
-            "  Running simulated LAT corotation...", comm=data.comm.comm_world
-        )
+        log.info_rank("  Running simulated LAT corotation...", comm=comm)
         job_ops.corotate_lat.apply(data)
         log.info_rank("  Apply LAT co-rotation in", comm=comm, timer=timer)
 
     # Perturb HWP spin
     if job_ops.perturb_hwp.enabled:
-        log.info_rank(
-            "  Running simulated HWP perturbation...", comm=data.comm.comm_world
-        )
+        log.info_rank("  Running simulated HWP perturbation...", comm=comm)
         job_ops.perturb_hwp.apply(data)
         log.info_rank("  Perturbed HWP rotation in", comm=comm, timer=timer)
     return data

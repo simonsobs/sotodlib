@@ -8,9 +8,9 @@ system objects, and catalogs of point sources.
 """
 
 import numpy as np
-from astropy import units as u
 import toast
 import toast.ops
+from astropy import units as u
 
 from .. import ops as so_ops
 from .job import workflow_timer
@@ -50,12 +50,7 @@ def simulate_source_signal(job, otherargs, runargs, data):
     job_ops = job.operators
 
     if job_ops.sim_source.enabled:
-        job_ops.sim_source.detector_pointing = job_ops.det_pointing_azel
-        # FIXME: this is not right- the field of view calculation in the
-        # SimSource operator should loop over all observations and get the
-        # maximum extent.
-        # job_ops.sim_source.focalplane = telescope.focalplane
-        raise NotImplementedError("SimSource disabled until FoV fixed.")
+        job_ops.sim_source.detector_pointing = job_ops.det_pointing_azel_sim
         if job_ops.sim_source.polarization_fraction != 0:
             job_ops.sim_source.detector_weights = job_ops.weights_azel
         job_ops.sim_source.apply(data)
@@ -92,7 +87,7 @@ def simulate_sso_signal(job, otherargs, runargs, data):
     job_ops = job.operators
 
     if job_ops.sim_sso.enabled:
-        job_ops.sim_sso.detector_pointing = job_ops.det_pointing_azel
+        job_ops.sim_sso.detector_pointing = job_ops.det_pointing_azel_sim
         job_ops.sim_sso.detector_weights = job_ops.weights_azel
         job_ops.sim_sso.apply(data)
 
@@ -128,5 +123,5 @@ def simulate_catalog_signal(job, otherargs, runargs, data):
     job_ops = job.operators
 
     if job_ops.sim_catalog.enabled:
-        job_ops.sim_catalog.detector_pointing = job_ops.det_pointing_radec
+        job_ops.sim_catalog.detector_pointing = job_ops.det_pointing_radec_sim
         job_ops.sim_catalog.apply(data)

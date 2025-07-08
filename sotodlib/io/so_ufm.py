@@ -11,8 +11,7 @@ def get_wafer_info(array_name, base_config={}, array_config={}, raw=False,
     Args:
       array_name (str): e.g. 'Mv7'.  Capitalization is important, as
         this is used in filenames.
-      base_config (dict): Used to find ``array_info_dir``; if not
-        found then ./ will be used.
+      base_config (dict): Main config dict.  See notes.
       array_config (dict): Used to override names of specific input
         files (see below).  Normally not necessary; see below.
       raw (bool): If True, return all the data dictionaries and the
@@ -31,6 +30,14 @@ def get_wafer_info(array_name, base_config={}, array_config={}, raw=False,
       info.  Each may be overridden in the array_config dict; the
       values can be relative to ``base_config['array_info_dir']`` or
       absolute.  See source code for default filenames.
+
+      The base_config dict items used here are:
+        - ``array_info_dir``: path to where the wiring files can be
+          found.
+        - ``bandpass_remap``: a dict specifying how to translate
+          bandpass center values provided in the copper_layout into
+          values that should be assigned to the dets (and used in
+          det_id).  E.g. {90: 220, 150: 280}.
 
     """
     # Figure out the filenames and read the csv.
@@ -54,6 +61,16 @@ def get_wafer_info(array_name, base_config={}, array_config={}, raw=False,
     ## The "pin in copper_map is hidden in SQUID_PIN string.
     copper_map['_pin'] = np.array(
         [k.split('_')[3] for k in copper_map['SQUID_PIN']])
+
+    # Remap the bandpass field, e.g. 150 -> 280 or whatever.
+    bandpass_remap = base_config.get('bandpass_remap')
+    if bandpass_remap is not None:
+        # Do it in two steps to support swapping, shrug.
+        masks = []
+        for k, v in bandpass_remap.items():
+            masks.append((str(v), copper_layout['bandpass'] == str(k)))
+        for v, s in masks:
+            copper_layout['bandpass'][s] = v
 
     # The umux_map contains all muxable frequencies from 4-8 GHz.  But
     # SO uses 2 chips, and only the 4-6 GHz band from each.  Therefore
@@ -165,7 +182,7 @@ def _process_row(row):
         ('bond_pad', 'bond_pad', int, -1),
         ('mux_band', 'mux_band', int, -1),
         ('mux_channel', 'mux_channel', int, -1),
-        ('mux_subband', 'mux_subband', str, -1),
+        ('mux_subband', 'mux_subband', str, 'NC'),
         ('mux_position', 'mux_pos_num', int, -1),
         ('design_freq_mhz', 'freq_mhz', float, np.nan),
         ('bias_line', 'Bias line', int, -1),

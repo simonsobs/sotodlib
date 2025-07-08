@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools", "versioneer[toml]==0.29"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sotodlib"
+readme = "README.md"
+description = "Simons Observatory TOD Simulation and Processing"
+license = {file = "LICENSE"}
+maintainers = [
+  {name = "Simons Observatory Collaboration"},
+  {email = "so_software@simonsobservatory.org"},
+]
+requires-python = ">=3.9"
+dependencies = [
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "quaternionarray",
+  "PyYAML",
+  "toml",
+  "skyfield",
+  "so3g",
+  "pixell",
+  "pytest",
+  "scikit-image",
+  "pyfftw",
+  "numdifftools",
+  "psycopg2-binary",
+  "lmfit",
+]
+dynamic=["version"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Topic :: Scientific/Engineering :: Astronomy",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+"Source" = "https://github.com/simonsobs/sotodlib"
+"Issue Tracker" = "https://github.com/simonsobs/sotodlib/issues"
+
+[project.optional-dependencies]
+site_pipeline = [
+  "influxdb",
+  "venn",
+  "sodetlib @ git+https://github.com/simonsobs/sodetlib",
+  "let-me-scroll-it",
+]
+tests = [
+  "socs",
+]
+
+[project.scripts]
+so_hardware_sim = "sotodlib.scripts.hardware_sim:main"
+so_hardware_plot = "sotodlib.scripts.hardware_plot:main"
+so_hardware_trim = "sotodlib.scripts.hardware_trim:main"
+so_hardware_info = "sotodlib.scripts.hardware_info:main"
+so_batch_control = "sotodlib.scripts.so_batch_control:main"
+so-metadata = "sotodlib.core.metadata.cli:main"
+so-site-pipeline = "sotodlib.site_pipeline.cli:main"
+so-data-package = "sotodlib.io.imprinter_cli:main"
+toast_so_sim = "sotodlib.toast.scripts.so_sim:cli"
+toast_so_map = "sotodlib.toast.scripts.so_map:cli"
+toast_so_transfer = "sotodlib.toast.scripts.so_transfer:cli"
+toast_so_convert = "sotodlib.toast.scripts.so_convert:cli"
+get_wafer_offset = "sotodlib.toast.scripts.get_wafer_offset:main"
+
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "sotodlib/_version.py"
+versionfile_build = "sotodlib/_version.py"
+tag_prefix = "v"
+parentdir_prefix = "sotodlib-"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]

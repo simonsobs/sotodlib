@@ -3,8 +3,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 def bin_signal(aman, bin_by, signal=None,
-                   range=None, bins=100, flags=None,
-                   weight_for_signal=None):
+               range=None, bins=100, flags=None,
+               weight_for_signal=None):
     """
     Bin time-ordered data by the ``bin_by`` and return the binned signal and its standard deviation.
 
@@ -23,8 +23,9 @@ def bin_signal(aman, bin_by, signal=None,
         If bins is an int, it defines the number of equal-width bins in the given range (100, by default).
         If bins is a sequence, it defines the bin edges, including the rightmost edge, allowing for non-uniform bin widths.
         If `bins` is a sequence, `bins` overwrite `range`.
-    flags : RangesMatrix, optional
+    flags : (str or RangesMatrix or Ranges), optional
         Flag indicating whether to exclude flagged samples when binning the signal.
+        If provided by a string, `aman.flags.get(flags)` is used for the flags.
         Default is no mask applied.
     weight_for_signal : array-like, optional
         Array of weights for the signal values. If None, all weights are assumed to be 1. You can get a apodizing window by
@@ -48,7 +49,7 @@ def bin_signal(aman, bin_by, signal=None,
         weight_for_signal = np.ones(aman.samps.count)
         
     # get bin_edges
-    _, bin_edges = np.histogram(bin_by, bins=bins, range=range,)
+    bin_edges = np.histogram_bin_edges(bin_by, bins=bins, range=range,)
     bin_centers = (bin_edges[1] - bin_edges[0])/2. + bin_edges[:-1] # edge to center
     nbins = len(bin_centers)
     
@@ -56,55 +57,58 @@ def bin_signal(aman, bin_by, signal=None,
     binned_signal = np.full([aman.dets.count, nbins], np.nan)
     binned_signal_squared_mean = np.full([aman.dets.count, nbins], np.nan)
     binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan)
+    
+    # get bin indices
+    bin_indices = np.digitize(bin_by, bin_edges) - 1
+    bin_indices = np.clip(bin_indices, 0, nbins-1)
         
     # bin tod
     if flags is None:
         bin_counts, _ = np.histogram(bin_by, bins=bins, range=range, weights = weight_for_signal)
-        for i, dets in enumerate(aman.dets.vals):
-            # find indexes of bins with non-zero counts
-            mcnts = bin_counts > 0
-            binned_signal[i][mcnts] = np.histogram(bin_by, bins=bins, range=range,
-                                                  weights = signal[i] * weight_for_signal,
-                                                  )[0][mcnts] / bin_counts[mcnts]
-            
-            binned_signal_squared_mean[i][mcnts] = np.histogram(bin_by, bins=bins, range=range,
-                                                           weights=(signal[i] * weight_for_signal)**2)[0][mcnts] / bin_counts[mcnts]
-                                                               
+        mcnts = bin_counts > 0
+        
+        for i, dets in enumerate(aman.dets.vals):      
+            binned_signal[i][mcnts] = np.bincount(bin_indices, weights=signal[i]*weight_for_signal, minlength=nbins
+                                                 )[mcnts]/bin_counts[mcnts]
+            binned_signal_squared_mean[i][mcnts] = np.bincount(bin_indices, weights=(signal[i]*weight_for_signal)**2, minlength=nbins
+                                                 )[mcnts]/bin_counts[mcnts]
             
         binned_signal_sigma[:, mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[:,mcnts] - binned_signal[:,mcnts]**2)
-                                     ) / np.sqrt(bin_counts[mcnts])
+                                      ) / np.sqrt(bin_counts[mcnts])
         bin_counts_dets = np.tile(bin_counts, (aman.dets.count, 1))
-            
+
     else:
         bin_counts_dets = np.full([aman.dets.count, nbins], np.nan)
+        if isinstance(flags, str):
+            flags = aman.flags.get(flags)
+        if flags.shape == (aman.dets.count, aman.samps.count):
+            flag_is_2d = True
+            m_2d = ~flags.mask()
+        elif flags.shape == (aman.samps.count, ):
+            flag_is_2d = False
+            m = ~flags.mask()
+        else:
+            raise ValueError('flags should have shape of (`dets`, `samps`) or (`samps`,)')
+
         for i, dets in enumerate(aman.dets.vals):
-            if flags.shape == (aman.dets.count, aman.samps.count):
-                m = ~flags.mask()[i]
-            elif flags.shape == (aman.samps.count, ):
-                m = ~flags.mask()
-            else:
-                raise ValueError('flags should have shape of (`dets`, `samps`) or (`samps`,)')
-                
+            if flag_is_2d:
+                m = m_2d[i]
+
             if weight_for_signal.shape == (aman.dets.count, aman.samps.count):
                 weight_for_signal_det = weight_for_signal[i]
             elif weight_for_signal.shape == (aman.samps.count, ):
                 weight_for_signal_det = weight_for_signal
             else:
                 raise ValueError('weight_for_signal should have shape of (`dets`, `samps`) or (`samps`,)')
-                
-            
-            bin_counts_masked, _ = np.histogram(bin_by[m], bins=bins, range=range, weights=weight_for_signal_det[m])
-            mcnts_masked = bin_counts_masked > 0
-            
-            bin_counts_dets[i] = bin_counts_masked
-            binned_signal[i][mcnts_masked] = np.histogram(bin_by[m], bins=bins, range=range,
-                                              weights=signal[i][m] * weight_for_signal_det[m])[0][mcnts_masked] / bin_counts_masked[mcnts_masked]
 
-            binned_signal_squared_mean[i][mcnts_masked] = np.histogram(bin_by[m], bins=bins, range=range,
-                                                           weights=(signal[i][m] * weight_for_signal_det[m])**2)[0][mcnts_masked] / bin_counts_masked[mcnts_masked]
-
-            binned_signal_sigma[i, mcnts_masked] = np.sqrt(np.abs(binned_signal_squared_mean[i,mcnts_masked] - binned_signal[i,mcnts_masked]**2)
-                                         ) / np.sqrt(bin_counts_masked[mcnts_masked])
+            bin_counts_dets[i] = np.bincount(bin_indices[m], weights=weight_for_signal_det[m], minlength=nbins)
+            mcnts = bin_counts_dets[i] > 0
+            binned_signal[i][mcnts] = np.bincount(bin_indices[m], weights=signal[i][m]*weight_for_signal_det[m], minlength=nbins
+                                                 )[mcnts]/bin_counts_dets[i][mcnts]
+            binned_signal_squared_mean[i][mcnts] = np.bincount(bin_indices[m], weights=(signal[i][m]*weight_for_signal_det[m])**2, minlength=nbins
+                                                 )[mcnts]/bin_counts_dets[i][mcnts]
+            binned_signal_sigma[i][mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[i,mcnts] - binned_signal[i,mcnts]**2)
+                                                 ) / np.sqrt(bin_counts_dets[i][mcnts])
 
     return {'bin_edges': bin_edges, 'bin_centers': bin_centers, 'bin_counts': bin_counts_dets,
             'binned_signal': binned_signal, 'binned_signal_sigma': binned_signal_sigma}
