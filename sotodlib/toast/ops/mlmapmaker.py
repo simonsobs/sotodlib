@@ -95,6 +95,14 @@ class MLMapmaker(Operator):
         help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr`, `NmatWhite`, `NmatUnit` or `Nmat`",
     )
 
+    downweight = List(
+        [1e-4, 0.25, 0.50],
+        allow_none=True,
+        help="Downweight the lowest frequency bins when using NmatDetvecs noise model."
+        "Set to empty list [] or None would disable downweighting."
+        "This option is ignored when using other noise models.",
+    )
+
     nmat_mode = Unicode(
         "build",
         help="How to initialize the noise matrix.  "
@@ -611,7 +619,7 @@ class MLMapmaker(Operator):
 
         # nmat_type is guaranteed to be a valid Nmat class
         if self.nmat_type == 'NmatDetvecs':
-            noise_model = getattr(mm, self.nmat_type)(downweight=[1e-4, 0.25, 0.50], window=0)
+            noise_model = getattr(mm, self.nmat_type)(downweight=self.downweight)
         else:
             noise_model = getattr(mm, self.nmat_type)()
 
