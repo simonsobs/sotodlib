@@ -198,6 +198,8 @@ def _load_ctx(config):
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
         roll = ctx.obsdb.get(obs_id)["roll_center"]
+        if roll is None:
+            continue
         if roll < roll_range[0] or roll > roll_range[1]:
             logger.info("%s has a roll that is out of range", obs_id)
             continue
