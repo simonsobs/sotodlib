@@ -57,11 +57,11 @@ def preprocess_obs(
             raise ValueError('Invalid style of source')
 
     # Other configurations
-    telescope = configs.get('telescope', 'SAT')
+    telescope = configs.get('telescope', None)
     if telescope == 'SAT':
         wafer_slots = [f'ws{i}' for i in range(7)]
     elif telescope == 'LAT':
-        wafer_slots = [f'ws{i}' for i in range(3)]
+        wafer_slots = configs.get('wafers', None)
     else:
         raise NameError('Only "SAT" or "LAT" is supported.')
  
