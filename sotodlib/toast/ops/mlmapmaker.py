@@ -92,7 +92,7 @@ class MLMapmaker(Operator):
 
     nmat_type = Unicode(
         "NmatDetvecs",
-        help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr` or `Nmat`",
+        help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr`, `NmatWhite`, `NmatUnit` or `Nmat`",
     )
 
     nmat_mode = Unicode(
@@ -288,7 +288,7 @@ class MLMapmaker(Operator):
     @traitlets.validate("nmat_type")
     def _check_nmat_type(self, proposal):
         check = proposal["value"]
-        allowed = ["NmatUncorr", "NmatDetvecs", "Nmat"]
+        allowed = ["NmatUncorr", "NmatDetvecs", "NmatWhite", "NmatUnit", "Nmat"]
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)

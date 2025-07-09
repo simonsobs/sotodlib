@@ -514,7 +514,6 @@ def get_trending_flags(aman,
     # Not modifying inplace since we don't want to touch aman.timestamps
     timestamps = timestamps - timestamps[0]
 
-    slopes = np.zeros((len(signal), 0))
     cut = np.zeros((len(signal), 0), dtype=bool)
     samp_edges = [0]
     
@@ -523,26 +522,37 @@ def get_trending_flags(aman,
     n_samples_per_piece = int(t_piece * fs)
     # How many pieces can timestamps be divided into
     n_pieces = len(timestamps) // n_samples_per_piece
-    
-    for t, s in zip(
-        np.array_split(timestamps, n_pieces), np.array_split(signal, n_pieces, 1)
-    ):
+
+    cut_list = []
+    slope_list = []
+    samp_edges = [0]
+
+    split_ts = np.array_split(timestamps, n_pieces)
+    split_sig = np.array_split(signal, n_pieces, axis=1)
+
+    for t, s in zip(split_ts, split_sig):
         samps = len(t)
-        # Cheap downsampling
-        if len(t) > max_samples:
-            n = len(t) // max_samples
+        if samps > max_samples:
+            n = samps // max_samples
             t = t[::n]
             s = s[:, ::n]
-        _slopes = ((t * s).mean(axis=1) - t.mean() * s.mean(axis=1)) / (
-            (t**2).mean() - (t.mean()) ** 2
-        )
-        cut = np.hstack(
-            (cut, np.tile((np.abs(_slopes) > max_trend)[..., np.newaxis], samps))
-        )
+
+        t_mean = t.mean()
+        t_var = (t ** 2).mean() - t_mean ** 2
+        s_mean = s.mean(axis=1)
+        ts_mean = (t * s).mean(axis=1)
+
+        _slopes = (ts_mean - t_mean * s_mean) / t_var
+        slope_mask = np.abs(_slopes) > max_trend
+
+        cut_chunk = np.broadcast_to(slope_mask[:, np.newaxis], (slope_mask.size, samps))
+        cut_list.append(cut_chunk)
+
         if full_output:
-            slopes = np.hstack((slopes, _slopes[..., np.newaxis]))
+            slope_list.append(_slopes)
             samp_edges.append(samp_edges[-1] + samps)
-    cut = RangesMatrix.from_mask(cut)
+
+    cut = RangesMatrix.from_mask(np.hstack(cut_list))
 
     if merge:
         if name in aman.flags and not overwrite:
@@ -553,7 +563,9 @@ def get_trending_flags(aman,
             aman.flags.wrap(name, cut)
 
     if full_output:
+        slopes = np.stack(slope_list, axis=1)
         samp_edges = np.array(samp_edges)
+
         trends = core.AxisManager(
             aman.dets,
             core.OffsetAxis("samps", len(timestamps)),
@@ -1115,3 +1127,37 @@ def get_noisy_subscan_flags(aman, subscan_stats, nstd_lim=None,
         aman.flags.wrap(name, noisy_subscan_flags)
 
     return noisy_subscan_flags, ~noisy_detector_flags
+
+
+def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
+    """
+    smurfgaps flags indicates the samples of each stream_id where the
+    lost frames are filled in the bookbinding process.
+    See `sotodlib.io.bookbinder.bind`.
+
+    This function expands smurfgaps flags of each stream_id to all detectors.
+
+    Parameters
+    ----------
+    aman: AxisManager
+        Input AxisManager
+    buffer: int
+        Amount of buffer to apply on smurfgaps
+    name: str
+        Name of flag to add to aman.flags if merge is True.
+    merge: bool
+        If true, merges the generated flag into aman.
+
+    Returns
+    -------
+    smurfgaps: RangesMatrix
+        smurfgaps flag with 'dets' and 'samps' axis
+
+    """
+
+    smurfgaps = RangesMatrix([aman.flags.get('smurfgaps_' + ufm) for ufm in aman.det_info.stream_id])
+    if buffer:
+        smurfgaps = smurfgaps.buffer(buffer)
+    if merge:
+        aman.flags.wrap('smurfgaps', smurfgaps, [(0, 'dets'), (1, 'samps')])
+    return smurfgaps

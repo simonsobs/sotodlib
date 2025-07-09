@@ -763,148 +763,149 @@ def fit_noise_model(
         is returned otherwise nothing is returned and axis manager is wrapped
         into input aman.
     """
-    import warnings
-    warnings.filterwarnings("error")
 
-    if signal is None:
-        signal = aman.signal
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error")
 
-    if f is None or pxx is None:
-        psdargs['noverlap'] = psdargs.get('noverlap', 0)
-        f, pxx, nseg = calc_psd(
-            aman,
-            signal=signal,
-            timestamps=aman.timestamps,
-            freq_spacing=freq_spacing,
-            merge=merge_psd,
-            subscan=subscan,
-            full_output=True,
-            **psdargs,
-        )
-    if np.any(mask):
-        if isinstance(mask, np.ndarray):
-            pass
-        elif isinstance(mask, Ranges):
-            mask = ~mask.mask()
-        elif mask == True:
-            if 'psd_mask' in aman:
-                mask = ~aman.psd_mask.mask()
-            else: # Calculate on the fly
-                mask = ~(get_psd_mask(aman, f=f, merge=False).mask())
+        if signal is None:
+            signal = aman.signal
+
+        if f is None or pxx is None:
+            psdargs['noverlap'] = psdargs.get('noverlap', 0)
+            f, pxx, nseg = calc_psd(
+                aman,
+                signal=signal,
+                timestamps=aman.timestamps,
+                freq_spacing=freq_spacing,
+                merge=merge_psd,
+                subscan=subscan,
+                full_output=True,
+                **psdargs,
+            )
+        if np.any(mask):
+            if isinstance(mask, np.ndarray):
+                pass
+            elif isinstance(mask, Ranges):
+                mask = ~mask.mask()
+            elif mask == True:
+                if 'psd_mask' in aman:
+                    mask = ~aman.psd_mask.mask()
+                else: # Calculate on the fly
+                    mask = ~(get_psd_mask(aman, f=f, merge=False).mask())
+            else:
+                raise ValueError("mask should be an ndarray or True")
+            f = f[mask]
+            pxx = pxx[:, mask]
+
+        if subscan:
+            fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
+                                      "lowf": lowf, "f_max": f_max, "fixed_param": fixed_param,
+                                      "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
+                                      "freq_spacing": freq_spacing}
+            fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
+            axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
+            axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
         else:
-            raise ValueError("mask should be an ndarray or True")
-        f = f[mask]
-        pxx = pxx[:, mask]
-
-    if subscan:
-        fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
-                                  "lowf": lowf, "f_max": f_max, "fixed_param": fixed_param,
-                                  "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
-                                  "freq_spacing": freq_spacing}
-        fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
-    else:
-        eix = np.argmin(np.abs(f - f_max))
-        if lowf is None:
-            six = 1
-        else:
-            six = np.argmin(np.abs(f - lowf))
-        f = f[six:eix]
-        pxx = pxx[:, six:eix]
-        bin_size = 1
-        # binning
-        if binning == True:
-            f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
-                                              base=base, merge=False)
-        fitout = np.zeros((aman.dets.count, 3))
-        # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-        covout = np.zeros((aman.dets.count, 3, 3))
-        if isinstance(wn_est, (int, float)):
-            wn_est = np.full(aman.dets.count, wn_est)
-        elif len(wn_est)!=aman.dets.count:
-            print('Size of wn_est must be equal to aman.dets.count or a single value.')
-            return
-        if isinstance(fknee_est, (int, float)):
-            fknee_est = np.full(aman.dets.count, fknee_est)
-        elif len(fknee_est)!=aman.dets.count:
-            print('Size of fknee_est must be equal to aman.dets.count or a single value.')
-            return
-        if isinstance(alpha_est, (int, float)):
-            alpha_est = np.full(aman.dets.count, alpha_est)
-        elif len(alpha_est)!=aman.dets.count:
-            print('Size of alpha_est must be equal to aman.dets.count or a single value.')
-            return
-        if fixed_param == None:
-            initial_params = np.array([wn_est, fknee_est, alpha_est])
-            bounds= [(sys.float_info.min, None), (sys.float_info.min, None), (0, 10)]
-        if fixed_param == "wn":
-            initial_params = np.array([fknee_est, alpha_est])
-            fixed = wn_est
-            bounds= [(sys.float_info.min, None), (0, 10)]
-        if fixed_param == "alpha":
-            initial_params = np.array([wn_est, fknee_est])
-            fixed = alpha_est
-            bounds= [(sys.float_info.min, None), (sys.float_info.min, None)]
-
-        for i in range(len(pxx)):
-            p = pxx[i]
-            p0 = initial_params.T[i]
-            _fixed = {}
-            if fixed_param != None:
-                _fixed = {fixed_param: fixed[i]}
-            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
-                           p0, bounds=bounds, method="Nelder-Mead")
-
-            try:
-                Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
-                hessian_ndt, _ = Hfun(res["x"])
-                # Inverse of the hessian is an estimator of the covariance matrix
-                # sqrt of the diagonals gives you the standard errors.
-                covout_i = np.linalg.inv(hessian_ndt)            
-            except np.linalg.LinAlgError:
-                print(
-                    f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
-                )
-                covout_i = np.full((len(p0), len(p0)), np.nan)
-            except IndexError:
-                print(
-                    f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
-                )
-                covout_i = np.full((len(p0), len(p0)), np.nan)
-            except RuntimeWarning as e:
-                covout_i = np.full((len(p0), len(p0)), np.nan)
-                print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman.dets.vals[i]}')
-            fitout_i = res.x
+            eix = np.argmin(np.abs(f - f_max))
+            if lowf is None:
+                six = 1
+            else:
+                six = np.argmin(np.abs(f - lowf))
+            f = f[six:eix]
+            pxx = pxx[:, six:eix]
+            bin_size = 1
+            # binning
+            if binning == True:
+                f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
+                                                  base=base, merge=False)
+            fitout = np.zeros((aman.dets.count, 3))
+            # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
+            covout = np.zeros((aman.dets.count, 3, 3))
+            if isinstance(wn_est, (int, float)):
+                wn_est = np.full(aman.dets.count, wn_est)
+            elif len(wn_est)!=aman.dets.count:
+                print('Size of wn_est must be equal to aman.dets.count or a single value.')
+                return
+            if isinstance(fknee_est, (int, float)):
+                fknee_est = np.full(aman.dets.count, fknee_est)
+            elif len(fknee_est)!=aman.dets.count:
+                print('Size of fknee_est must be equal to aman.dets.count or a single value.')
+                return
+            if isinstance(alpha_est, (int, float)):
+                alpha_est = np.full(aman.dets.count, alpha_est)
+            elif len(alpha_est)!=aman.dets.count:
+                print('Size of alpha_est must be equal to aman.dets.count or a single value.')
+                return
+            if fixed_param == None:
+                initial_params = np.array([wn_est, fknee_est, alpha_est])
+                bounds= [(sys.float_info.min, None), (sys.float_info.min, None), (0, 10)]
             if fixed_param == "wn":
-                covout_i = np.insert(covout_i, 0, 0, axis=0)
-                covout_i = np.insert(covout_i, 0, 0, axis=1)
-                covout_i[0][0] = np.nan
-                fitout_i = np.insert(fitout_i, 0, wn_est[i])
-            elif fixed_param == "alpha":
-                covout_i = np.insert(covout_i, 2, 0, axis=0)
-                covout_i = np.insert(covout_i, 2, 0, axis=1)
-                covout_i[2][2] = np.nan
-                fitout_i = np.insert(fitout_i, 2, alpha_est[i])
-            covout[i] = covout_i
-            fitout[i] = fitout_i
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs")]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
+                initial_params = np.array([fknee_est, alpha_est])
+                fixed = wn_est
+                bounds= [(sys.float_info.min, None), (0, 10)]
+            if fixed_param == "alpha":
+                initial_params = np.array([wn_est, fknee_est])
+                fixed = alpha_est
+                bounds= [(sys.float_info.min, None), (sys.float_info.min, None)]
 
-    noise_model_coeffs = ["white_noise", "fknee", "alpha"]
+            for i in range(len(pxx)):
+                p = pxx[i]
+                p0 = initial_params.T[i]
+                _fixed = {}
+                if fixed_param != None:
+                    _fixed = {fixed_param: fixed[i]}
+                res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                               p0, bounds=bounds, method="Nelder-Mead")
 
-    noise_fit_stats = core.AxisManager(
-        aman.dets,
-        core.LabelAxis(
-            name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
-        ),
-    )
-    noise_fit_stats.wrap("fit", fitout, axis_map_fit)
-    noise_fit_stats.wrap("cov", covout, axis_map_cov)
+                try:
+                    Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
+                    hessian_ndt, _ = Hfun(res["x"])
+                    # Inverse of the hessian is an estimator of the covariance matrix
+                    # sqrt of the diagonals gives you the standard errors.
+                    covout_i = np.linalg.inv(hessian_ndt)            
+                except np.linalg.LinAlgError:
+                    print(
+                        f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
+                    )
+                    covout_i = np.full((len(p0), len(p0)), np.nan)
+                except IndexError:
+                    print(
+                        f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
+                    )
+                    covout_i = np.full((len(p0), len(p0)), np.nan)
+                except RuntimeWarning as e:
+                    covout_i = np.full((len(p0), len(p0)), np.nan)
+                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman.dets.vals[i]}')
+                fitout_i = res.x
+                if fixed_param == "wn":
+                    covout_i = np.insert(covout_i, 0, 0, axis=0)
+                    covout_i = np.insert(covout_i, 0, 0, axis=1)
+                    covout_i[0][0] = np.nan
+                    fitout_i = np.insert(fitout_i, 0, wn_est[i])
+                elif fixed_param == "alpha":
+                    covout_i = np.insert(covout_i, 2, 0, axis=0)
+                    covout_i = np.insert(covout_i, 2, 0, axis=1)
+                    covout_i[2][2] = np.nan
+                    fitout_i = np.insert(fitout_i, 2, alpha_est[i])
+                covout[i] = covout_i
+                fitout[i] = fitout_i
+            axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs")]
+            axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
 
-    if merge_fit:
-        aman.wrap(merge_name, noise_fit_stats)
-    return noise_fit_stats
+        noise_model_coeffs = ["white_noise", "fknee", "alpha"]
+
+        noise_fit_stats = core.AxisManager(
+            aman.dets,
+            core.LabelAxis(
+                name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
+            ),
+        )
+        noise_fit_stats.wrap("fit", fitout, axis_map_fit)
+        noise_fit_stats.wrap("cov", covout, axis_map_cov)
+
+        if merge_fit:
+            aman.wrap(merge_name, noise_fit_stats)
+        return noise_fit_stats
 
 def get_mask_for_hwpss(freq, hwp_freq, max_mode=10, width=((-0.4, 0.6), (-0.2, 0.2))):
     """

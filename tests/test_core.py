@@ -635,5 +635,63 @@ class TestAxisManagerUtil(unittest.TestCase):
         self.assertEqual(am.nested.test, 'answer')
 
 
+class TestResultSet(unittest.TestCase):
+    def test_00_basic(self):
+        keys = ['A', 'B', 'C']
+        dtypes = ['int64', 'float64', 'unicode']
+        rows = [
+            (1, 1., 'a'),
+            (2, 2., 'b'),
+            (3, 3., 'c'),
+            (4, 4., 'd'),
+        ]
+
+        # Test array conversion
+        rs = core.metadata.ResultSet(keys=keys, src=[list(r) for r in rows])
+        for k, dtype in zip(keys, dtypes):
+            assert len(rs[k]) == len(rows)
+            assert np.issubdtype(rs[k].dtype, dtype)
+
+        rsa = rs.asarray()
+        assert len(rsa) == len(rs)
+        for k, dtype in zip(keys, dtypes):
+            assert np.issubdtype(rsa.dtype[k], dtype)
+
+        # Even with nulls
+        for i in range(3):
+            r = list(rs.rows[i])
+            r[i] = None
+            rs.rows[i] = tuple(r)
+
+        for k, dtype in zip(keys, dtypes):
+            assert len(rs[k]) == len(rows)
+            assert np.issubdtype(rs[k].dtype, dtype)
+
+        rsa = rs.asarray()
+        assert len(rsa) == len(rs)
+        for k, dtype in zip(keys, dtypes):
+            assert np.issubdtype(rsa.dtype[k], dtype)
+
+        # Subsetting
+        rs = core.metadata.ResultSet(keys=keys, src=[list(r) for r in rows])
+
+        rs1 = rs.subset(keys=['B', 'A'])
+        assert rs1.rows[0] == (1., 1)
+
+        rs2 = rs.subset(rows=rs['A'] == 1)
+        assert (len(rs2) == 1)
+
+        rs3 = rs.subset(rows=np.array([1, 3]))
+        assert (len(rs3) == 2)
+
+        # Conversion.
+        aman = rs.to_axismanager(axis_key='C')
+
+        # Merge
+        rs2 = core.metadata.ResultSet(keys=['D'], src=[[1], [2], [3], [4]])
+        rs.merge(rs2)
+        assert (rs.keys == ['A', 'B', 'C', 'D'])
+
+
 if __name__ == '__main__':
     unittest.main()

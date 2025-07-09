@@ -551,6 +551,7 @@ class Noise(_Preprocess):
 
     """
     name = "noise"
+    _influx_field = "median_white_noise"
 
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
@@ -668,7 +669,56 @@ class Noise(_Preprocess):
             return meta
         else:
             return keep
-    
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman, noise_aman="noise"):
+        """ Generate a QA metric for median of the detector white noise
+        values.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+        noise_aman : str
+            Name of the noise axis manager in proc_aman
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tags = []
+        vals = []
+        from ..qa.metrics import _get_tag, _has_tag
+        for bp in np.unique(meta.det_info.wafer.bandpass):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                )[0]
+
+                white_noise = proc_aman[noise_aman].white_noise[subset]
+                vals.append(np.nanmedian(white_noise))
+
+                tags_base = {
+                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                }
+                tags_base["telescope"] = meta.obs_info.telescope
+                tags.append(tags_base)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
 class Calibrate(_Preprocess):
     """Calibrate the timestreams based on some provided information.
 
@@ -1045,7 +1095,7 @@ class AzSS(_Preprocess):
         if self.process_cfgs is None:
             # This handles the case if no process configs are passed.
             return
-            
+
         if self.process_cfgs.get("subtract"):
             if self.calc_cfgs.get('azss_stats_name') in proc_aman:
                 if sim:
@@ -1088,7 +1138,11 @@ class SubtractAzSSTemplate(_Preprocess):
     name = "subtract_azss_template"
 
     def process(self, aman, proc_aman, sim=False):
-        tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
+        process_cfgs = copy.deepcopy(self.process_cfgs)
+        if sim:
+            process_cfgs["azss"] = proc_aman.get(process_cfgs["azss"])
+        tod_ops.azss.subtract_azss_template(aman, **process_cfgs)
+
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
@@ -1961,7 +2015,7 @@ class SplitFlags(_Preprocess):
             high_tau: 1.5e-3
             det_A: A
             pol_angle: 35
-            det_top: B
+            crossover: BL
             high_leakage: 1.0e-3
             high_2f: 1.5e-3
             right_focal_plane: 0
@@ -2284,6 +2338,36 @@ class TrimFlagEdge(_Preprocess):
         proc_aman.restrict('samps', (proc_aman.samps.offset + trimst,
                                      proc_aman.samps.offset + trimen))
 
+class SmurfGapsFlags(_Preprocess):
+    """Expand smurfgaps flag of each stream_id to all detectors
+    smurfgaps flags indicates the samples of each stream_id where the
+    lost frames are filled in the bookbinding process.
+
+    Example config block::
+
+        - name: "smurfgaps_flags"
+          calc:
+            buffer: 200
+            name: "smurfgaps"
+            merge: True
+          save: True
+
+    .. autofunction:: sotodlib.tod_ops.flags.expand_smurfgaps_flags
+    """
+    name = "smurfgaps_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        smurfgaps = tod_ops.flags.expand_smurfgaps_flags(aman, **self.calc_cfgs)
+        flag_aman = core.AxisManager(aman.dets, aman.samps)
+        flag_aman.wrap(self.calc_cfgs['name'], smurfgaps, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, flag_aman)
+
+    def save(self, proc_aman, flag_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("smurfgaps", flag_aman)
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2329,3 +2413,4 @@ _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
+_Preprocess.register(SmurfGapsFlags)
