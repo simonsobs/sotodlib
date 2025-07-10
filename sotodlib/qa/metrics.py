@@ -289,7 +289,7 @@ class PreprocessArrayNET(PreprocessQA):
                 mask = (white_noise != 0) & (~np.isnan(white_noise))
                 good_indices = np.nonzero(mask)[0]
                 if good_indices.size > 0:
-                    vals.append(np.sqrt(1.0 / np.sum(1.0 / (white_noise[good_indices])**2)))
+                    vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)))
                 else:
                     vals.append(0.0)
 
@@ -357,7 +357,7 @@ class PreprocessDetNET(PreprocessQA):
                 mask = (white_noise != 0) & (~np.isnan(white_noise))
                 good_indices = np.nonzero(mask)[0]
                 if good_indices.size > 0:
-                    vals.append(np.sqrt(1.0 / np.sum(1.0 / (white_noise[good_indices])**2)) * np.sqrt(len(good_indices)))
+                    vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)) * np.sqrt(len(good_indices)))
                 else:
                     vals.append(0.0)
 
