@@ -559,7 +559,7 @@ def plot_ufm(focal_plane, plot_dir):
         plt.savefig(
             os.path.join(plot_dir, f"{focal_plane.stream_id}.png"), bbox_inches="tight"
         )
-        plt.clf()
+        plt.close()
 
 
 def plot_ot(ot, plot_dir):
@@ -600,7 +600,7 @@ def plot_ot(ot, plot_dir):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{ot.name}.png"), bbox_inches="tight")
-        plt.clf()
+        plt.close()
 
 
 def plot_by_gamma(focal_plane, plot_dir):
@@ -637,7 +637,7 @@ def plot_by_gamma(focal_plane, plot_dir):
             os.path.join(plot_dir, f"{focal_plane.stream_id}_by_gamma.png"),
             bbox_inches="tight",
         )
-        plt.clf()
+        plt.close()
 
 
 def plot_receiver(receiver, plot_dir):
@@ -713,4 +713,4 @@ def plot_receiver(receiver, plot_dir):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"receiver.png"), bbox_inches="tight")
-        plt.clf()
+        plt.close()
