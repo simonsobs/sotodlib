@@ -1095,7 +1095,7 @@ class AzSS(_Preprocess):
         if self.process_cfgs is None:
             # This handles the case if no process configs are passed.
             return
-            
+
         if self.process_cfgs.get("subtract"):
             if self.calc_cfgs.get('azss_stats_name') in proc_aman:
                 if sim:
@@ -1138,7 +1138,11 @@ class SubtractAzSSTemplate(_Preprocess):
     name = "subtract_azss_template"
 
     def process(self, aman, proc_aman, sim=False):
-        tod_ops.azss.subtract_azss_template(aman, **self.process_cfgs)
+        process_cfgs = copy.deepcopy(self.process_cfgs)
+        if sim:
+            process_cfgs["azss"] = proc_aman.get(process_cfgs["azss"])
+        tod_ops.azss.subtract_azss_template(aman, **process_cfgs)
+
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
@@ -2334,6 +2338,36 @@ class TrimFlagEdge(_Preprocess):
         proc_aman.restrict('samps', (proc_aman.samps.offset + trimst,
                                      proc_aman.samps.offset + trimen))
 
+class SmurfGapsFlags(_Preprocess):
+    """Expand smurfgaps flag of each stream_id to all detectors
+    smurfgaps flags indicates the samples of each stream_id where the
+    lost frames are filled in the bookbinding process.
+
+    Example config block::
+
+        - name: "smurfgaps_flags"
+          calc:
+            buffer: 200
+            name: "smurfgaps"
+            merge: True
+          save: True
+
+    .. autofunction:: sotodlib.tod_ops.flags.expand_smurfgaps_flags
+    """
+    name = "smurfgaps_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        smurfgaps = tod_ops.flags.expand_smurfgaps_flags(aman, **self.calc_cfgs)
+        flag_aman = core.AxisManager(aman.dets, aman.samps)
+        flag_aman.wrap(self.calc_cfgs['name'], smurfgaps, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, flag_aman)
+
+    def save(self, proc_aman, flag_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("smurfgaps", flag_aman)
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2379,3 +2413,4 @@ _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
+_Preprocess.register(SmurfGapsFlags)
