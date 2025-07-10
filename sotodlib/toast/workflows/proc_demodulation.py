@@ -91,8 +91,9 @@ def demodulate(job, otherargs, runargs, data):
         comm=data.comm.comm_world,
         timer=timer,
     )
-    stokes_mode = "QU" if job_ops.demodulate.pol_only else "IQU"
-    demod_weights = toast.ops.StokesWeightsDemod(mode=stokes_mode)
+    demod_weights = toast.ops.StokesWeightsDemod(
+        mode=job_ops.demodulate.mode
+    )
     job_ops.weights_radec = demod_weights
     if hasattr(job_ops, "binner"):
         job_ops.binner.stokes_weights = demod_weights
