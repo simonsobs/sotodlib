@@ -11,6 +11,8 @@ except ImportError:
     from scipy.sparse import csr_matrix as csr_array
 import astropy.units as u
 
+import flacarray
+
 from .axisman import *
 from .flagman import FlagManager
 
@@ -137,10 +139,18 @@ def _safe_scalars(x):
     # Must be fine then!
     return x
 
-def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
+
+def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None,
+                  encodings=None):
     """
     See AxisManager.save.
     """
+    if encodings is None:
+        encodings = {}
+    for k, e in encodings.items():
+        if k not in axisman._assignments:
+            raise ValueError(f"Encoding {e} specified for non-existent field {k}.")
+
     # Scheme it out...
     schema = []
     for k, assign in axisman._assignments.items():
@@ -149,6 +159,8 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 'encoding': 'unknown',
                 }
         v = axisman[k]
+        e = encodings.get(k, {})   # Mark as None once consumed.
+
         if v is None or np.isscalar(v):
             item['encoding'] = 'scalar'
         elif isinstance(v, u.quantity.Quantity):
@@ -158,6 +170,11 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 item['encoding'] = 'quantity'
         elif isinstance(v, np.ndarray):
             item['encoding'] = 'ndarray'
+            if e.get('type') is None:
+                e = None
+            elif e.get('type') == 'flacarray':
+                item['encoding'] = 'flacarray'
+                e = None
         elif isinstance(v, AxisInterface):
             item['encoding'] = 'axis'
         elif isinstance(v, AxisManager):
@@ -169,12 +186,16 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 item['special_axes'] = v._dets_name, v._samps_name
             else:
                 raise ValueError(f"No encoder system for {k}={v.__class__}")
+            e = None
         elif isinstance(v, (so3g.RangesInt32, so3g.proj.RangesMatrix)):
             item['encoding'] = 'rangesmatrix'
         elif isinstance(v, csr_array):
             item['encoding'] = 'csrarray'
         else:
             print(v.__class__)
+
+        if e:
+            raise ValueError(f"Unhandled encoding {e} for field {k}")
         schema.append(item)
 
     for k, v in axisman._axes.items():
@@ -235,6 +256,9 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
             scalars[item['name']] = data
         elif item['encoding'] == 'ndarray':
             dest.create_dataset(item['name'], data=_retype_for_write(data), compression=compression)
+        elif item['encoding'] == 'flacarray':
+            g = dest.create_group(item['name'])
+            fa = flacarray.hdf5.write_array(data, g, **encodings[item['name']].get('args', {}))
         elif item['encoding'] == 'quantity':
             dest.create_dataset(item['name'], data=_retype_for_write(data), compression=compression)
             units[item['name']] = data.unit.to_string()
@@ -251,7 +275,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None):
                 g.create_dataset(k, data=v, compression=compression)
         elif item['encoding'] == 'axisman':
             g = dest.create_group(item['name'])
-            _save_axisman(data, g, compression=compression)
+            _save_axisman(data, g, compression=compression, encodings=encodings.get(item['name']))
         elif item['encoding'] == 'axis':
             pass #
         else:
@@ -327,6 +351,9 @@ def _load_axisman(src, group=None, cls=None, fields=None):
             axisman.wrap(item['name'], scalars[item['name']])
         elif item['encoding'] == 'ndarray':
             axisman.wrap(item['name'], _retype_for_read(src[item['name']][:]), assign)
+        elif item['encoding'] == 'flacarray':
+            d = flacarray.hdf5.read_array(src[item['name']])
+            axisman.wrap(item['name'], d, assign)
         elif item['encoding'] == 'quantity':
             axisman.wrap(item['name'], _retype_for_read(src[item['name']][:]) << u.Unit(units[item['name']]), assign)
         elif item['encoding'] == 'scalar_quantity':
