@@ -301,7 +301,7 @@ class PreprocessArrayNET(PreprocessQA):
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
-            "field": cls._influx_field,
+            "field": self._influx_field,
             "values": vals,
             "timestamps": obs_time,
             "tags": tags,
@@ -369,7 +369,7 @@ class PreprocessDetNET(PreprocessQA):
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
-            "field": cls._influx_field,
+            "field": self._influx_field,
             "values": vals,
             "timestamps": obs_time,
             "tags": tags,
