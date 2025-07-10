@@ -568,7 +568,7 @@ def main():
     #     if not have_template:
     #         logger.warning("\tNo template provided, arrays not found in any observations will be missing")
     #     with h5py.File(template_path) as f:
-    #         stream_ids = list(f.keys()) 
+    #         stream_ids = list(f.keys())
 
     # Split up into batches
     # Right now either per_obs or all at once
@@ -812,16 +812,32 @@ def main():
         todel = []
         for name, ot in ots.items():
             logger.info("Fitting common mode for %s", ot.name)
-            if ot.num_fps == 0:
+            centers = np.atleast_2d(
+                np.array(
+                    [
+                        fp.template.center
+                        for fp in ot.focal_planes
+                        if fp.tot_weight is not None
+                    ]
+                )
+            )
+            centers_transformed = np.atleast_2d(
+                np.array(
+                    [
+                        fp.center_transformed
+                        for fp in ot.focal_planes
+                        if fp.tot_weight is not None
+                    ]
+                )
+            )
+            if ot.num_fps == 0 or centers.size == 0 or centers_transformed.size == 0:
                 logger.error("\tNo focal planes found! Skipping...")
                 if not config.get("pad", False):
                     todel.append(name)
                 continue
-            centers = np.vstack([fp.template.center for fp in ot.focal_planes if fp.tot_weight is not None])
-            centers_transformed = np.vstack(
-                [fp.center_transformed for fp in ot.focal_planes if fp.tot_weight is not None]
-            )
             plot_ot(ot, plot_dir)
+            centers = centers.reshape((-1, 3))
+            centers_transformed = centers_transformed.reshape((-1, 3))
             if centers.shape[0] < 3:
                 logger.warning(
                     "\tToo few wafers fit to compute common mode, transform will be approximated"
@@ -856,7 +872,13 @@ def main():
 
         # Full receiver common mode
         logger.info("Fitting receiver common mode")
-        if len(ots) == 0:
+        centers = np.atleast_2d(
+            np.array([ot.center for ot in ots.values() if ot.num_fps > 0])
+        )
+        centers_transformed = np.atleast_2d(
+            np.array([ot.center_transformed for ot in ots.values() if ot.num_fps > 0])
+        )
+        if len(ots) == 0 or centers.size == 0 or centers_transformed.size == 0:
             logger.error("\tNo optics tubes found! Skipping...")
             continue
         elif len(ots) == 1:
@@ -865,10 +887,8 @@ def main():
             )
             recv_transform = deepcopy(tuple(ots.values())[0].transform_fullcm)
         else:
-            centers = np.vstack([ot.center for ot in ots.values() if ot.num_fps > 0])
-            centers_transformed = np.vstack(
-                [ot.center_transformed for ot in ots.values() if ot.num_fps > 0]
-            )
+            centers = centers.reshape((-1, 3))
+            centers_transformed = centers_transformed.reshape((-1, 3))
             if len(ots) < 3:
                 logger.info(
                     "\tNot enough OTs to fit receiver common mode, transform will be approximated"
