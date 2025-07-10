@@ -136,7 +136,7 @@ def apply_pointing_model_lat(vers, params, ancil):
 
 #
 # LAT model(s)
-#       
+#
 def model_lat_v1(params, az, el, roll):
     """Applies pointing model to (az, el, roll).
 
@@ -145,8 +145,8 @@ def model_lat_v1(params, az, el, roll):
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
 
-    The implemented model parameters are all in Radians:
-    - enc_offset_{az, el, cr}: Encoder offsets in Radians.
+    The implemented model parameters are all in radians:
+    - enc_offset_{az, el, cr}: Encoder offsets in radians.
       Sign convention: True = Encoder + Offset
     - cr_center_{xi,eta}0: The (xi,eta) coordinate in the LATR-centered 
       focal plane that remains fixed under corotation. 
@@ -154,7 +154,8 @@ def model_lat_v1(params, az, el, roll):
       focal plane that appears fixed when the elevation structure is rotated 
       about its axis.
     - mir_center_{xi,eta}0: The (xi,eta) coordinate in the El-structure-centered
-      focal plane about which any mirror misalignment rotates.
+      focal plane that appears fixed when the mirrors are rotated about the ray from
+      sky that kits the center of both mirrors.
 
     """
     _p = dict(param_defaults['lat_v1'])
@@ -193,8 +194,8 @@ def model_lat_v1(params, az, el, roll):
     # Elevation component of roll motion
     q_el_roll = quat.euler(2, el - np.deg2rad(60))
     
-    # Rotation that takes a vector in telescope's elevation-hub centered 
-    # coordinates to mirror-centered coordinates
+    # Rotation that takes a vector in telescope's corotator-centered
+    # coordinates to el-hub-centered coordinates
     q_el_axis_center = ~quat.rotation_xieta(
         params['el_axis_center_xi0'],
         params['el_axis_center_eta0']
@@ -210,7 +211,7 @@ def model_lat_v1(params, az, el, roll):
         params['cr_center_eta0']
     )
 
-    # Horizon Coordiantes
+    # Horizon Coordinates
     q_hs = (
         q_lonlat * q_mir_center
         * q_el_roll * q_el_axis_center
