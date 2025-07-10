@@ -285,12 +285,13 @@ class SimMuMUXCrosstalk(Operator):
                         Phi0[det_source],
                         dPhi0dT[det_source],
                     )
-                    crosstalk += chi * np.sin(
-                        source_squid_phase - target_squid_phase
-                    )
-
-                    # Check if collided resonator; disable channel if so
-                    if np.isnan(chi):
+                    # Add crosstalk if not collided resonator
+                    if not np.isnan(chi):
+                        crosstalk += chi * np.sin(
+                            source_squid_phase - target_squid_phase
+                        )
+                    else:
+                        # Otherwise flag
                         temp_obs.detdata[self.det_flags][det_source] |= self.det_flag_mask
                         temp_obs.detdata[self.det_flags][det_target] |= self.det_flag_mask
 
@@ -299,9 +300,6 @@ class SimMuMUXCrosstalk(Operator):
                 output_data[row_target] += self._squid_phase_to_temperature(
                     crosstalk, dPhi0dT[det_target]
                 ) / det_scale
-
-                # Send nans to zero to remove TODs from collided resonators
-                output_data[row_target][np.isnan(output_data[row_target])] = 0
 
             # Redistribute back
             temp_obs.redistribute(
@@ -316,9 +314,6 @@ class SimMuMUXCrosstalk(Operator):
                 # explicitly here
                 offset_old = np.median(obs.detdata[self.det_data][det])
                 offset_new = np.median(temp_obs.detdata[self.det_data][det])
-                # Zero TODs of collided resonators
-                if offset_new == 0:
-                    offset_old = 0
                 # Propagate data
                 obs.detdata[self.det_data][det] = (
                     temp_obs.detdata[self.det_data][det] - offset_new + offset_old
