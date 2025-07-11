@@ -6,6 +6,7 @@ def get_parser(parser=None):
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
+    parser.add_argument("preprocess_config", help="Preprocess configuration file")
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
@@ -35,12 +36,16 @@ def get_parser(parser=None):
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
     from sotodlib.core import Context, AxisManager, IndexAxis
-    from sotodlib.io import metadata   # PerDetectorHdf5 work-around
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
+    from sotodlib.coords import pointing_model
     from sotodlib.mapmaking import log
+    from sotodlib.preprocess import preprocess_util as pp_util
+    from sotodlib.core import metadata
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
+
+    LoaderError = metadata.loader.LoaderError
 
     #try: import moby2.analysis.socompat
     #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
@@ -99,6 +104,14 @@ def main(**args):
 
     if args.srcsamp:
         srcsamp_mask  = enmap.read_map(args.srcsamp)
+
+    # set up the preprocessing
+    try:
+        preproc = yaml.safe_load(open(args.preprocess_config, 'r'))
+    except:
+        if comm.rank==0:
+            L.info(f"{args.preprocess_config} is not a valid config")
+        sys.exit(1)
 
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
     for ipass, passinfo in enumerate(passes):
@@ -175,8 +188,24 @@ def main(**args):
                 if len(my_dets) == 0: raise DataMissing("no dets left")
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
-                    obs = context.get_obs(sub_id, meta=meta)
-
+                    #obs = context.get_obs(sub_id, meta=meta)
+                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                if obs.dets.count < 10:
+                    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                    continue
+                # Check nans
+                mask = np.logical_not(np.isfinite(obs.signal))
+                if mask.sum() > 0:
+                    L.debug("Skipped %s (a nan in signal)" % (sub_id))
+                    continue
+                # Check all 0s
+                zero_dets = np.sum(obs.signal, axis=1)
+                mask = zero_dets == 0.0
+                if mask.any():
+                    L.debug("%s has all 0s in at least 1 detector" % (sub_id))
+                    obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
+                # Cut non-optical dets
+                obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
@@ -187,7 +216,7 @@ def main(**args):
                 obs.wrap("site",    np.full(1, SITE))
 
                 # Prepare our data. FFT-truncate for faster fft ops
-                obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
+                #obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
 
                 # Desolope to make it periodic. This should be done *before*
                 # dropping to single precision, to avoid unnecessary loss of precision due
@@ -206,37 +235,44 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
+                    # Apply pointing model
+                    pointing_model.apply_pointing_model(obs)
+                    # Calibrate to pW
+                    #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+                    # Calibrate to K_cmb
+                    #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.find_usable_detectors(obs,maxcut=0.5)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
                         continue
                     # Gapfill glitches. This function name isn't the clearest
-                    tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
+                    #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                     # Gain calibration
-                    gain  = 1
-                    for gtype in ["relcal","abscal"]:
-                        gain *= obs[gtype][:,None]
-                    obs.signal *= gain
+                    #gain  = 1
+                    #for gtype in ["relcal","abscal"]:
+                    #    gain *= obs[gtype][:,None]
+                    #obs.signal *= gain
                     # Fourier-space calibration
-                    fsig  = fft.rfft(obs.signal)
-                    freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    #fsig  = fft.rfft(obs.signal)
+                    #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    # iir and timeconstant will be applied in the preprocessing eventually
                     # iir filter
-                    iir_filter  = filters.iir_filter()(freq, obs)
-                    fsig       /= iir_filter
-                    gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= filters.timeconst_filter(None)(freq, obs)
-                    fft.irfft(fsig, obs.signal, normalize=True)
-                    del fsig
+                    #iir_filter  = filters.iir_filter()(freq, obs)
+                    #fsig       /= iir_filter
+                    #gain       /= iir_filter[0].real # keep track of total gain for our record
+                    #fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
+                    #fft.irfft(fsig, obs.signal, normalize=True)
+                    #del fsig
 
                     # Apply pointing correction.
                     #obs.focal_plane.xi    += obs.boresight_offset.xi
                     #obs.focal_plane.eta   += obs.boresight_offset.eta
                     #obs.focal_plane.gamma += obs.boresight_offset.gamma
-                    obs.focal_plane.xi    += obs.boresight_offset.dx
-                    obs.focal_plane.eta   += obs.boresight_offset.dy
-                    obs.focal_plane.gamma += obs.boresight_offset.gamma
+                    #obs.focal_plane.xi    += obs.boresight_offset.dx
+                    #obs.focal_plane.eta   += obs.boresight_offset.dy
+                    #obs.focal_plane.gamma += obs.boresight_offset.gamma
 
                 # Injecting at this point makes us insensitive to any bias introduced
                 # in the earlier steps (mainly from gapfilling). The alternative is
@@ -278,7 +314,7 @@ def main(**args):
                     print("Writing noise model %s" % nmat_file)
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-            except (DataMissing,IndexError,ValueError) as e:
+            except (DataMissing,IndexError,ValueError,LoaderError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
                 continue
 

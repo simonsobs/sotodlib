@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import os
 from copy import deepcopy
+from importlib import import_module
 from typing import List, Optional
 
 import h5py
@@ -12,6 +13,7 @@ import numpy as np
 import yaml
 from scipy.cluster import vq
 from scipy.optimize import minimize
+from so3g.proj import quat
 from sotodlib.coords import optics as op
 from sotodlib.coords.fp_containers import (
     FocalPlane,
@@ -24,7 +26,8 @@ from sotodlib.coords.fp_containers import (
     plot_receiver,
     plot_ufm,
 )
-from sotodlib.core import AxisManager, Context, metadata
+from sotodlib.coords.pointing_model import apply_pointing_model
+from sotodlib.core import AxisManager, Context, IndexAxis, metadata
 from sotodlib.io.metadata import read_dataset
 from sotodlib.site_pipeline import util
 
@@ -60,9 +63,9 @@ def _avg_focalplane(full_fp, tot_weight):
     msk = np.isfinite(full_fp)
     n_obs = np.sum(np.any(msk, axis=1), axis=-1)
     n_point, _, n_gamma = tuple(np.sum(msk, axis=-1).T)
-    tot_weight[tot_weight == 0] = np.nan
-    avg_fp = np.nansum(full_fp, axis=-1) / tot_weight[..., None]
-    avg_weight = tot_weight / n_obs
+    tot_weight[tot_weight[:, 0] == 0] = np.nan
+    avg_fp = np.nansum(full_fp, axis=-1) / tot_weight[:, 0][..., None]
+    avg_weight = tot_weight / n_obs[..., None]
 
     # nansum all all nans is 0, addressing that case here
     all_nan = ~np.any(
@@ -139,13 +142,17 @@ def _load_template(template_path, ufm, pointing_cfg):
 
 
 def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], tags=[]):
-    query_all = query
+    all_obs = obs_ids
     query_obs = []
-    if query is None:
-        query_all = f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
-    if ctx.obsdb is None:
-        raise ValueError("No obsdb!")
-    all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
+    if len(obs_ids) == 0:
+        query_all = query
+        if query is None:
+            query_all = (
+                f"type=='obs' and start_time>{start_time} and stop_time<{stop_time}"
+            )
+        if ctx.obsdb is None:
+            raise ValueError("No obsdb!")
+        all_obs = ctx.obsdb.query(query_all, tags=tags)["obs_id"]
     dbs = [
         metadata.ManifestDb(md["db"])
         for md in ctx["metadata"]
@@ -194,7 +201,11 @@ def _load_ctx(config):
         if roll < roll_range[0] or roll > roll_range[1]:
             logger.info("%s has a roll that is out of range", obs_id)
             continue
-        aman = ctx.get_meta(obs_id, dets=dets)
+        try:
+            aman = ctx.get_meta(obs_id, dets=dets)
+        except metadata.loader.LoaderError:
+            logger.error("Failed to load %s, skipping", obs_id)
+            continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
         if "det_info" not in aman:
@@ -334,7 +345,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
 def _restrict_inliers(aman, focal_plane):
     # TODO: Use gamma as well
     # Map to template
-    fp, template_msk = focal_plane.map_by_det_id(aman)
+    fp, _, template_msk = focal_plane.map_by_det_id(aman)
     fp = fp[:, :2]
     inliers = np.ones(len(fp), dtype=bool)
 
@@ -380,6 +391,101 @@ def _restrict_inliers(aman, focal_plane):
     return aman.restrict(
         "dets", aman.dets.vals[np.isin(aman.det_info.det_id, inlier_det_ids)]
     )
+
+
+def _apply_pointing_model(config, aman):
+    if "pointing_model" not in config:
+        logger.info("\t\tNo pointing model specified!")
+        return aman
+    if not config["pointing_model"].get("apply", False):
+        logger.info("\t\tNot applying pointing model")
+        return aman
+    if "function" not in config["pointing_model"]:
+        logger.info("\t\tUsing default pointing model function")
+        func = apply_pointing_model
+    else:
+        func = getattr(
+            import_module(config["pointing_model"]["function"][0]),
+            config["pointing_model"]["function"][1],
+        )
+    if "az" not in aman.pointing:
+        raise ValueError("Need to have az in pointing fits to apply pointing model")
+    if "el" not in aman.pointing:
+        raise ValueError("Need to have el in pointing fits to apply pointing model")
+    if "roll" not in aman.pointing:
+        raise ValueError("Need to have roll in pointing fits to apply pointing model")
+
+    params = config["pointing_model"].get("params", {})
+    if "pointing_model" in aman:
+        for key, val in params.items():
+            if key in aman.pointing_model:
+                aman.pointing_model[key] = val
+            else:
+                aman.pointing_model.wrap(key, val)
+        params = aman.pointing_model
+    ancil = AxisManager(IndexAxis("samps", aman.dets.count))
+    ancil.wrap("az_enc", np.rad2deg(aman.pointing.az))
+    ancil.wrap("el_enc", np.rad2deg(aman.pointing.el))
+    ancil.wrap("roll_enc", np.rad2deg(aman.pointing.roll))
+    bs = func(aman, params, ancil, False)
+    q_fp = quat.rotation_xieta(aman.pointing.xi, aman.pointing.eta)
+    have_gamma = False
+    if "gamma" in aman.pointing:
+        if np.any(np.isnan(aman.pointing.gamma)):
+            logger.warning(
+                "\t\tnans in gamma, not including in pointing model correction"
+            )
+        else:
+            q_fp = quat.rotation_xieta(
+                aman.pointing.xi, aman.pointing.eta, aman.pointing.gamma
+            )
+            have_gamma = True
+
+    xi, eta, gamma = quat.decompose_xieta(
+        ~quat.euler(2, bs.roll)
+        * ~quat.rotation_lonlat(-bs.az, bs.el)
+        * quat.rotation_lonlat(-1 * aman.pointing.az, aman.pointing.el)
+        * quat.euler(2, aman.pointing.roll)
+        * q_fp
+    )
+
+    aman.pointing.xi[:] = xi
+    aman.pointing.eta[:] = eta
+    if have_gamma:
+        aman.pointing.gamma[:] = gamma
+
+    return aman
+
+
+def _reverse_roll(fp, aff, sft, aman):
+    if "obs_info" not in aman:
+        raise ValueError("Can't reverse roll without obs information")
+    if "roll_center" not in aman.obs_info:
+        raise ValueError("Can't reverse roll without roll information")
+    roll = -1 * np.deg2rad(aman.obs_info.roll_center)
+
+    # We want to shift so we rotating about the origin
+    # To get to nominal we do fp@aff + sft
+    # So if we just want to recenter we do fp + sft@aff^-1
+    inv_aff, _ = mt.invert_transform(aff, np.zeros_like(sft))
+    sft_adj = sft @ inv_aff
+    fp_sft = fp[:, :2] + sft_adj
+
+    # Now lets reverse the roll
+    # The transpose is the inverse
+    rot = np.array([[np.cos(roll), -1 * np.sin(roll)], [np.sin(roll), np.cos(roll)]])
+    fp_rot = fp_sft @ rot
+
+    # And undo the shift, keeping track of rotations
+    fp_rot -= sft_adj @ rot
+
+    # Make sure its set
+    fp[:, :2] = fp_rot
+
+    # For gamma lets just shift by the roll
+    fp[:, 2] -= roll
+
+    return fp
 
 
 def main():
@@ -453,6 +559,14 @@ def main():
     if not gen_template and not have_template:
         logger.error("Provided template doesn't exist, trying to generate one")
         gen_template = True
+
+    # Need to move installed OT and WS of array to templace for this
+    # if config.get("pad", False):
+    #     logger.info("Padding missing arrays with template, getting complete list of arrays from template")
+    #     if not have_template:
+    #         logger.warning("\tNo template provided, arrays not found in any observations will be missing")
+    #     with h5py.File(template_path) as f:
+    #         stream_ids = list(f.keys()) 
 
     # Split up into batches
     # Right now either per_obs or all at once
@@ -536,9 +650,12 @@ def main():
 
             for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
                 logger.info("\tWorking on %s", obs_id)
-                if aman.dets.count == 0:
-                    logger.info("\t\tNo dets found, skipping")
+                if aman.dets.count < min_points:
+                    logger.info("\t\tToo few dets found, skipping")
                     continue
+
+                if config.get("faked_gamma", False):
+                    aman.pointing.gamma[:] = np.nan
 
                 # Restrict to optical dets
                 optical = np.isin(
@@ -546,14 +663,27 @@ def main():
                 )
                 aman.restrict("dets", aman.dets.vals[optical])
                 if aman.dets.count == 0:
-                    logger.info("\t\tNo optical dets, skipping", stream_id)
+                    logger.info("\t\tNo optical dets, skipping...")
                     continue
 
+                # Apply pointing model if we want to
+                aman = _apply_pointing_model(config, aman)
+
                 # Do some outlier cuts
+                if "hits" in aman.pointing:
+                    aman.restrict(
+                        "dets", aman.pointing.hits > config.get("min_hits", 5)
+                    )
+                    if aman.dets.count == 0:
+                        logger.info("\t\tNo high hits dets, skipping...")
+                        continue
+                if aman.dets.count < min_points:
+                    logger.info("\t\tToo few dets found, skipping")
+                    continue
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
-                fp, template_msk = focal_plane.map_by_det_id(aman)
+                fp, r2, template_msk = focal_plane.map_by_det_id(aman)
                 focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
@@ -565,6 +695,9 @@ def main():
                     logger.error("\t\t%s", e)
                     continue
                 aligned = mt.apply_transform(fp[:, :2], aff, sft)
+
+                if config.get("reverse_roll", False):
+                    fp = _reverse_roll(fp, aff, sft, aman)
                 if np.any(np.isfinite(fp[:, 2])):
                     gscale, gsft = gamma_fit(
                         fp[:, 2], focal_plane.template.fp[template_msk, 2]
@@ -582,8 +715,11 @@ def main():
                     )
                 # ~1 sigma cut
                 weights[weights < 0.61] = np.nan
+                if np.sum(np.isfinite(weights)) < min_points / 2:
+                    logger.error("\t\tToo few points! Skipping...")
 
                 # Store weighted values
+                weights = np.column_stack((weights, r2))
                 focal_plane.add_fp(i, fp, weights, template_msk)
 
             # Compute the average focal plane with weights
@@ -597,13 +733,18 @@ def main():
             logger.info("\t%d points in fit", tot_points)
             if tot_points < min_points:
                 logger.error("\tToo few points! Skipping...")
+                if config.get("pad", False):
+                    logger.info("\tPadding output with template")
+                    focal_plane.transformed = focal_plane.template.fp
+                    focal_plane.tot_weight = None
+                    ots[ot].focal_planes.append(focal_plane)
                 continue
 
             try:
                 affine, shift = mt.get_affine_two_stage(
                     focal_plane.template.fp[:, :2],
                     focal_plane.avg_fp[:, :2],
-                    focal_plane.weights,
+                    focal_plane.weights[:, 0],
                 )
             except ValueError as e:
                 logger.error("\t%s", e)
@@ -669,15 +810,16 @@ def main():
         todel = []
         for name, ot in ots.items():
             logger.info("Fitting common mode for %s", ot.name)
-            if len(ot.focal_planes) == 0:
+            centers = np.vstack([fp.template.center for fp in ot.focal_planes if fp.tot_weight is not None])
+            centers_transformed = np.vstack(
+                [fp.center_transformed for fp in ot.focal_planes if fp.tot_weight is not None]
+            )
+            if len(centers) == 0:
                 logger.error("\tNo focal planes found! Skipping...")
-                todel.append(name)
+                if not config.get("pad", False):
+                    todel.append(name)
                 continue
             plot_ot(ot, plot_dir)
-            centers = np.vstack([fp.template.center for fp in ot.focal_planes])
-            centers_transformed = np.vstack(
-                [fp.center_transformed for fp in ot.focal_planes]
-            )
             if centers.shape[0] < 3:
                 logger.warning(
                     "\tToo few wafers fit to compute common mode, transform will be approximated"
@@ -721,9 +863,9 @@ def main():
             )
             recv_transform = deepcopy(tuple(ots.values())[0].transform_fullcm)
         else:
-            centers = np.vstack([ot.center for ot in ots.values()])
+            centers = np.vstack([ot.center for ot in ots.values() if ot.num_fps > 0])
             centers_transformed = np.vstack(
-                [ot.center_transformed for ot in ots.values()]
+                [ot.center_transformed for ot in ots.values() if ot.num_fps > 0]
             )
             if len(ots) < 3:
                 logger.info(
@@ -800,6 +942,8 @@ def main():
             start_time=config["start_time"],
             stop_time=config["stop_time"],
         )
+        if config.get("pad", False):
+            logger.info("Padding missing arrays with values from template")
         with h5py.File(outpath, "a") as f:
             if group in f:
                 del f[group]
