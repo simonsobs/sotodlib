@@ -194,7 +194,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None,
         else:
             print(v.__class__)
 
-        if e:
+        if e:  # not None, not empty {}.
             raise ValueError(f"Unhandled encoding {e} for field {k}")
         schema.append(item)
 

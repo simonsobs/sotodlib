@@ -208,7 +208,7 @@ encodings request is::
                 'quanta': 1e-4
               }
             },
-            'int_field': {
+            'flags': {
               'type': 'flacarray'
             }
          }
