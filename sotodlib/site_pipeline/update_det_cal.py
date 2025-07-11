@@ -33,18 +33,27 @@ DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 TES_BIAS_COUNT = 12  # per detset / primary file group
 
+# For converting bias group to bandpass.
+BGS = {'lb': [0, 1, 4, 5, 8, 9], 'hb': [2, 3, 6, 7, 10, 11]}
+BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
+            'uhf': {'lb': 'f220', 'hb': 'f280'},
+            'lf': {'lb': 'f030', 'hb': 'f040'}}
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
     sp_util.init_logger("det_cal")
 
 
-def get_data_root(ctx: core.Context) -> str:
+def get_data_root(ctx: core.Context, obs_id:str) -> str:
     "Get root data directory based on context file"
     c = ctx.obsfiledb.conn.execute("select name from files limit 1")
     res = [r[0] for r in c][0]
     # split out <data_root>/obs/<timecode>/<obsid>/fname
-    for _ in range(4):
+    for _ in range(5):
         res = os.path.dirname(res)
+    # add telescope str to path
+    tel_str = obs_id.split(('_'))[2]
+    res = os.path.join(res, tel_str)
     return res
 
 
@@ -59,9 +68,6 @@ class DetCalCfg:
         Path to the root of the results directory.
     context_path: str
         Path to the context file to use.
-    data_root: Optional[str]
-        Root path of L3 data. If this is not specified, will automatically
-        determine it based on the context.
     raise_exceptions: bool
         If Exceptions should be raised in the get_cal_resset function.
         Defaults to False.
@@ -106,7 +112,6 @@ class DetCalCfg:
         root_dir: str,
         context_path: str,
         *,
-        data_root: Optional[str] = None,
         raise_exceptions: bool = False,
         apply_cal_correction: bool = True,
         index_path: str = "det_cal.sqlite",
@@ -125,8 +130,6 @@ class DetCalCfg:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
         ctx = core.Context(self.context_path)
-        if data_root is None:
-            self.data_root = get_data_root(ctx)
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
         self.cache_failed_obsids = cache_failed_obsids
@@ -248,6 +251,8 @@ class CalInfo:
         Current responsivity of the TES [1/V] computed using bias steps at the
         bias point. This is based on the naive bias step estimation without
         using any additional corrections.
+    bandpass: str
+        Detector bandpass, computed from bias group information.
     """
 
     readout_id: str = ""
@@ -269,6 +274,7 @@ class CalInfo:
     naive_r_frac: float = np.nan
     naive_p_bias: float = np.nan
     naive_s_i: float = np.nan
+    bandpass: str = "NC"
 
     @classmethod
     def dtype(cls) -> List[Tuple[str, Any]]:
@@ -277,6 +283,9 @@ class CalInfo:
         for field in fields(cls):
             if field.name == "readout_id":
                 dt: Tuple[str, Any] = ("dets:readout_id", "<U40")
+            elif field.name == 'bandpass':
+                # Our bandpass str is max 4 characters
+                dt: Tuple[str, Any] = ("bandpass", "<U4")
             else:
                 dt = (field.name, field.type)
             dtype.append(dt)
@@ -333,6 +342,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             samples=(0, 1),
             ignore_missing=True,
             no_signal=True,
+            no_headers=False,
             on_missing={"det_cal": "skip"},
         )
 
@@ -357,7 +367,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             if oid is not None:
                 timecode = oid.split("_")[1][:5]
                 zsmurf_dir = os.path.join(
-                    cfg.data_root, "oper", timecode, oid, f"Z_smurf"
+                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
                 )
                 for f in os.listdir(zsmurf_dir):
                     if "iv" in f:
@@ -377,7 +387,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             if oid is not None:
                 timecode = oid.split("_")[1][:5]
                 zsmurf_dir = os.path.join(
-                    cfg.data_root, "oper", timecode, oid, f"Z_smurf"
+                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
                 )
                 for f in os.listdir(zsmurf_dir):
                     if "bias_step" in f:
@@ -617,6 +627,13 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             else:
                 cal.phase_to_pW = pA_per_phi0 / (2 * np.pi) / cal.s_i * cal.polarity
 
+            # Add bandpass informaton from bias group
+            tube_flavor = am.obs_info.tube_flavor
+            if cal.bg in BGS['lb']:
+                cal.bandpass = BAND_STR[tube_flavor]['lb']
+            elif cal.bg in BGS['hb']:
+                cal.bandpass = BAND_STR[tube_flavor]['hb']
+
         res.result_set = np.array([astuple(c) for c in cals], dtype=CalInfo.dtype())
         res.success = True
     except Exception as e:
@@ -716,7 +733,6 @@ def run_update_site(cfg: DetCalCfg) -> None:
 
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
-    mp.set_start_method(cfg.multiprocess_start_method)
     with mp.Pool(cfg.nprocs_result_set) as pool:
         for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
             res = get_obs_info(cfg, oid)
@@ -754,6 +770,7 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     obs_ids = get_obsids_to_run(cfg)
     # obs_ids = ['obs_1713962395_satp1_0000100']
     # obs_ids = ['obs_1713758716_satp1_1000000']
+    # obs_ids = ['obs_1701383445_satp3_1000000']
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
     pb = tqdm(total=len(obs_ids), disable=(not cfg.show_pb))
@@ -769,7 +786,6 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     # We split into multiple pools because:
     # - we don't want to overload sqlite files with too much concurrent access
     # - we want to be able to continue getting the next obs_info data while ressets are being computed
-    mp.set_start_method(cfg.multiprocess_start_method)
     pool1 = mp.Pool(cfg.nprocs_obs_info)
     pool2 = mp.Pool(cfg.nprocs_result_set)
 
@@ -847,4 +863,8 @@ def get_parser(
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
+    cfg = DetCalCfg.from_yaml(args.config_file)
+    # This needs to be run here in __main__ or else this will throw a "context
+    # has already been set" RuntimeError
+    mp.set_start_method(cfg.multiprocess_start_method)
     main(config_file=args.config_file)

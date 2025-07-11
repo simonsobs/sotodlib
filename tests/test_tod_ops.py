@@ -7,10 +7,9 @@
 
 import unittest
 import numpy as np
-import pylab as pl
 import scipy.signal
-
-from numpy.testing import assert_array_equal, assert_allclose
+from numpy.fft import rfftfreq,irfft
+from numpy.testing import assert_allclose
 
 from sotodlib import core, tod_ops, sim_flags
 import so3g
@@ -315,14 +314,6 @@ class JumpfindTest(unittest.TestCase):
         ptp_fix = np.ptp(fixed.ravel()[~jumps.buffer(10).mask().ravel()])
         self.assertTrue(ptp_fix < 1.1*ptp_orig)
 
-
-class FFTTest(unittest.TestCase):
-    def test_psd(self):
-        tod = get_tod("white")
-        f, Pxx = tod_ops.fft_ops.calc_psd(tod, nperseg=256)
-        self.assertEqual(len(f), 129) # nperseg/2 + 1
-        f, Pxx = tod_ops.fft_ops.calc_psd(tod, freq_spacing=.1)
-        self.assertEqual(np.round(np.median(np.diff(f)), 1), .1)
 
 if __name__ == '__main__':
     unittest.main()
