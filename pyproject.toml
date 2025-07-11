@@ -28,6 +28,7 @@ dependencies = [
   "numdifftools",
   "psycopg2-binary",
   "lmfit",
+  "flacarray>=0.3",
 ]
 dynamic=["version"]
 classifiers = [
