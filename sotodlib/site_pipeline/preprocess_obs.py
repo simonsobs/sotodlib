@@ -55,15 +55,6 @@ def preprocess_obs(
             source_names.append(_s[0])
         else:
             raise ValueError('Invalid style of source')
-
-    # Other configurations
-    telescope = configs.get('telescope', None)
-    if telescope == 'SAT':
-        wafer_slots = [f'ws{i}' for i in range(7)]
-    elif telescope == 'LAT':
-        wafer_slots = configs.get('wafers', None)
-    else:
-        raise NameError('Only "SAT" or "LAT" is supported.')
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -116,11 +107,12 @@ def preprocess_obs(
         distances = []
         for source_name in source_names:
             if source_name in nearby_source_names:
-                for ws in wafer_slots:
-                    if proc_aman.sso_footprint[source_name][ws]:
-                        coverage.append(f"{source_name}:{ws}")
+                for key in proc_aman.sso_footprint[source_name]._assignments.keys():
+                    if 'ws' in key:
+                        if proc_aman.sso_footprint[source_name][key]:
+                            coverage.append(f"{source_name}:{key}")
 
-                distances.append(f"{source_name}:{proc_aman.sso_footprint[source_name]['distance']}")
+                distances.append(f"{source_name}:{proc_aman.sso_footprint[source_name]['mean_distance']}")
         db_data['coverage'] = ','.join(coverage)
         db_data['source_distance'] = ','.join(distances)
     else:

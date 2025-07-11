@@ -1246,12 +1246,23 @@ class SSOFootprint(_Preprocess):
 
         - name: "sso_footprint"
           calc:
-              # source_list: ['jupiter'] # remove to find nearby sources
-              distance: 20
+              # Note: all distances in degrees
+              source_list: ['jupiter', 'moon', 'saturn'] # remove to find nearby sources
+              distance: 20 # distance from boresight center
               nstep: 100
-              telescope: 'SAT'
-              wafer_hit_threshold: 10
+              telescope: 'SAT' # options: ['SAT', 'LAT']
+              wafer_hit_threshold: 10 # number of planet-wafer distances to consider being a source hit
+              # for SATs:
+              wafer_radius: 6
+              wafer_centers: {'ws0': [-0.19791037, 0.08939717],
+                              'ws1': [-0.014455856, -12.528095],
+                              'ws2': [-10.867158, -6.2621593],
+                              'ws3': [-10.835234, 6.2727923],
+                              'ws4': [0.11142064, 12.461107],
+                              'ws5': [10.878714, 6.273904],
+                              'ws6': [10.870621, -6.2822847]}
               # for LAT:
+              wafer_radius: 0.5
               wafer_centers: {'c1_ws0': [-0.36504516, 1.9619369e-05],
                               'c1_ws1': [0.18297304, 0.3164044],
                               'c1_ws2': [0.18297556, -0.31638196],
@@ -1272,6 +1283,7 @@ class SSOFootprint(_Preprocess):
                               'i6_ws2': [-1.3564061, 0.5815026]}
           save: True
           plot:
+              # for SATs:
               wafer_offsets: {'ws0': [-2.5, -0.5],
                               'ws1': [-2.5, -13],
                               'ws2': [-13, -7],
@@ -1280,6 +1292,26 @@ class SSOFootprint(_Preprocess):
                               'ws5': [8.5, 5],
                               'ws6': [8.5, -7]}
               focal_plane: '/so/home/msilvafe/shared_files/sat_hw_positions.npz'
+              # for LAT:
+              wafer_offsets: {'c1_ws0': [-0.6, 0.0],
+                              'c1_ws1': [-0.0, 0.3],
+                              'c1_ws2': [-0.0, -0.3],
+                              'i1_ws0': [-2.1, -0.9],
+                              'i1_ws1': [-1.6, -0.6],
+                              'i1_ws2': [-1.6, -1.2],
+                              'i3_ws0': [1.0, -0.9],
+                              'i3_ws1': [1.5, -0.6],
+                              'i3_ws2': [1.5, -1.2],
+                              'i4_ws0': [1.0, 0.9],
+                              'i4_ws1': [1.5, 1.2],
+                              'i4_ws2': [1.5, 0.6],
+                              'i5_ws0': [-0.6, 1.8],
+                              'i5_ws1': [-0.0, 2.1],
+                              'i5_ws2': [-0.0, 1.5],
+                              'i6_ws0': [-2.1, 0.9],
+                              'i6_ws1': [-1.6, 1.2],
+                              'i6_ws2': [-1.6, 0.6]}
+              focal_plane: '/so/home/dnguyen/repos/scripts/lat_hw_positions.npz'
 
     .. autofunction:: sotodlib.obs_ops.sources.get_sso
     """
@@ -1293,20 +1325,18 @@ class SSOFootprint(_Preprocess):
             if not ssos:
                 raise ValueError("No sources found within footprint")
             ssos = [i[0] for i in ssos]
+
         sso_aman = core.AxisManager()
         nstep = self.calc_cfgs.get("nstep", 100)
         onsamp = (aman.samps.count+nstep-1)//nstep
-        telescope = self.calc_cfgs.get("telescope", None)
-        if telescope == 'SAT':
-            wafer_slots = [f'ws{i}' for i in range(7)]
-            streamed_wafer_slots  = ['ws{}'.format(index) for index, bit in enumerate(aman.obs_info.obs_id.split('_')[-1]) if bit == '1']
-        elif telescope == 'LAT':
-            wafer_centers = self.calc_cfgs.get("wafer_centers", None)
-            if wafer_centers is None:
-                raise ValueError("No wafer centers defined in config")
-            wafer_slots = [key for key in wafer_centers.keys()]
-        else:
+        telescope_flavor = self.calc_cfgs.get("telescope_flavor", None)
+        if telescope_flavor not in ['SAT', 'LAT']:
             raise NameError('Only "SAT" or "LAT" is supported.')
+        wafer_centers = self.calc_cfgs.get("wafer_centers", None)
+        if wafer_centers is None:
+            raise ValueError("No wafer centers defined in config")
+        wafer_slots = [key for key in wafer_centers.keys()]
+
         for sso in ssos:
             planet = sso
             xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
@@ -1316,30 +1346,23 @@ class SSOFootprint(_Preprocess):
             # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
             planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
             planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
-            if telescope == 'SAT':
-                for ws in wafer_slots:
-                    if ws in streamed_wafer_slots:
-                        ws_dets = np.where(aman.det_info.wafer_slot == ws)[0]
-                        ws_xi = aman.focal_plane.xi[ws_dets]
-                        ws_eta = aman.focal_plane.eta[ws_dets]
-                        wafer_hit = np.sum([np.any(np.sqrt((xi_p-xi)**2 + (eta_p-eta)**2) < np.deg2rad(0.5)) for xi, eta in zip(ws_xi, ws_eta)]) > self.calc_cfgs.get("wafer_hit_threshold", 10)
-                        if wafer_hit:
-                            planet_aman.wrap(ws, True)
-                        else:
-                            planet_aman.wrap(ws, False)
-                    else:
-                        planet_aman.wrap(ws, False)
-            elif telescope == 'LAT':
-                for ws in wafer_slots:
-                    ws_center_xi = np.deg2rad(wafer_centers[ws][0])
-                    ws_center_eta = np.deg2rad(wafer_centers[ws][1])
-                    wafer_hit = np.sum([np.sqrt((xi_p-ws_center_xi)**2 + (eta_p-ws_center_eta)**2) < np.deg2rad(0.5)]) > self.calc_cfgs.get("wafer_hit_threshold", 10)
-                    if wafer_hit:
-                        planet_aman.wrap(ws, True)
-                    else:
-                        planet_aman.wrap(ws, False)
+            wafer_radius = self.calc_cfgs.get("wafer_radius", None)
+            if wafer_radius is None:
+                if telescope_flavor == 'SAT':
+                    wafer_radius = 6 # [deg]
+                elif telescope_flavor == 'LAT':
+                    wafer_radius = 0.5 # [deg]
 
-            planet_aman.wrap('distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
+            for ws in wafer_slots:
+                ws_center_xi = np.deg2rad(wafer_centers[ws][0])
+                ws_center_eta = np.deg2rad(wafer_centers[ws][1])
+                wafer_hit = np.sum([np.sqrt((xi_p-ws_center_xi)**2 + (eta_p-ws_center_eta)**2) < np.deg2rad(wafer_radius)]) > self.calc_cfgs.get("wafer_hit_threshold", 10)
+                if wafer_hit:
+                    planet_aman.wrap(ws, True)
+                else:
+                    planet_aman.wrap(ws, False)
+
+            planet_aman.wrap('mean_distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
 
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
