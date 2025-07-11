@@ -702,3 +702,63 @@ class ScalarLastQuat(np.ndarray):
             temp[..., 1:] = self[..., :3]
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
+
+def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
+    """
+    Constructs a deflected CelestialSightLine using HWP-synchronous
+    pointing correction using combined wobble metadata that contains 
+    both amp and phase fields.
+    
+    This function assumes that all detectors in `aman` belong to a single wafer
+    and frequency band. It extracts the corresponding deflection amplitude and 
+    phase from the metadata, computes the wobble correction quaternion, and 
+    applies it to the boresight pointing.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager for the observation, must include hwp_angle, timestamps, 
+        and boresight.az/el, as well as det_info with wafer and band info.
+
+    wobble_meta : AxisManager
+        Metadata tree containing both amp and phase fields under
+        wobble_meta.{wafer_slot}.{band}.{amp, phase}
+
+    site : str
+        Observatory site identifier for sightline generation (default 'so').
+
+    weather : str
+        Atmospheric condition tag for sightline model (default 'typical').
+
+    Returns
+    -------
+    sight : CelestialSightLine
+        The sightline with the wobble correction quaternion applied.
+    """
+    wafer_slots = np.unique(aman.det_info.wafer_slot)
+    bands = np.unique(aman.det_info.wafer.bandpass)
+
+    if len(wafer_slots) != 1 or len(bands) != 1:
+        raise ValueError("Detectors span multiple wafer_slots or bands.")
+
+    ws = wafer_slots[0]
+    band = bands[0]
+
+    # Access amp and phase from combined metadata tree
+    amp = getattr(getattr(wobble_meta, ws), band).amp
+    phase = getattr(getattr(wobble_meta, ws), band).phase
+
+    dxi = amp * np.cos(aman.hwp_angle - phase)
+    deta = -amp * np.sin(aman.hwp_angle - phase)
+    deflq = quat.rotation_xieta(xi=dxi, eta=deta)
+
+    sight = CelestialSightLine.az_el(
+        aman.timestamps,
+        aman.boresight.az,
+        aman.boresight.el,
+        weather=weather,
+        site=site,
+    )
+    sight.Q = sight.Q * ~deflq
+    return sight
+
