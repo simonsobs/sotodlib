@@ -173,14 +173,18 @@ class FocalPlane:
             return np.linalg.norm(self.diff, axis=1)
         return np.linalg.norm(self.diff[:, :2], axis=1)
 
+    @property
+    def padded(self):
+        return self.tot_weight is None 
+
     @classmethod
     def empty(cls, template, stream_id, wafer_slot, n_aman):
         if template is None:
             raise TypeError("template must be an instance of Template, not None")
         full_fp = np.full(template.fp.shape + (n_aman,), np.nan)
-        tot_weight = np.zeros(len(template.det_ids))
+        tot_weight = np.zeros((len(template.det_ids), 2))
         avg_fp = np.full_like(template.fp, np.nan)
-        weight = np.zeros(len(template.det_ids))
+        weight = np.zeros((len(template.det_ids), 2))
         transformed = template.fp.copy()
         center = template.center.copy()
         center_transformed = template.center.copy()
@@ -219,6 +223,9 @@ class FocalPlane:
         srt = np.argsort(aman.det_info.det_id[msk])
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
+        r2 = np.nan + np.zeros_like(eta)
+        if "R2" in aman.pointing:
+            r2 = aman.pointing.R2[msk][srt][mapping]
         if "polarization" in aman:
             # name of field just a placeholder for now
             gamma = aman.polarization.polang[msk][srt][mapping]
@@ -227,12 +234,13 @@ class FocalPlane:
         else:
             gamma = np.full(len(xi), np.nan)
         fp = np.column_stack((xi, eta, gamma))
-        return fp, template_msk
+        return fp, r2, template_msk
 
     def add_fp(self, i, fp, weights, template_msk):
         if self.full_fp is None or self.tot_weight is None:
             raise ValueError("full_fp or tot_weight not initialized")
-        self.full_fp[template_msk, :, i] = fp * weights[..., None]
+        self.full_fp[template_msk, :, i] = fp * weights[:, 0][..., None]
+        weights = np.nan_to_num(weights)
         self.tot_weight[template_msk] += weights
 
     def save(self, f, db_info, group):
@@ -242,9 +250,10 @@ class FocalPlane:
             ("xi", np.float32),
             ("eta", np.float32),
             ("gamma", np.float32),
+            ("padded", np.bool_),
         ]
         fpout = np.fromiter(
-            zip(self.det_ids, *(self.transformed.T)), dtype=outdt, count=ndets
+            zip(self.det_ids, *(self.transformed.T), np.ones(len(self.det_ids), dtype=bool)*(self.padded)), dtype=outdt, count=ndets
         )
         write_dataset(
             metadata.ResultSet.from_friend(fpout),
@@ -269,6 +278,7 @@ class FocalPlane:
             ("eta_m", np.float32),
             ("gamma_m", np.float32),
             ("weights", np.float32),
+            ("r2", np.float32),
             ("n_point", np.int8),
             ("n_gamma", np.int8),
         ]
@@ -277,7 +287,7 @@ class FocalPlane:
                 self.det_ids,
                 *(self.transformed.T),
                 *(self.avg_fp.T),
-                self.weights,
+                *(self.weights.T),
                 self.n_point,
                 self.n_gamma,
             ),
@@ -305,6 +315,8 @@ class FocalPlane:
     def load(cls, group):
         stream_id = group.name.split("/")[-1]
         fp_full = read_dataset(group.file, f"{group.name}/focal_plane_full")
+        if fp_full.keys is None:
+            raise ValueError("fp_full somehow has no keys")
         det_ids = fp_full["dets:det_id"]
         avg_fp = np.column_stack(
             (
@@ -313,7 +325,10 @@ class FocalPlane:
                 np.array(fp_full["gamma_m"]),
             )
         )
-        weights = fp_full["weights"]
+        # For backwards compatibility
+        weights = np.array(fp_full["weights"])
+        if "r2" in fp_full.keys:
+            weights = np.column_stack((weights, np.array(fp_full["r2"])))
         transformed = np.column_stack(
             (
                 np.array(fp_full["xi_t"]),
@@ -366,6 +381,11 @@ class OpticsTube:
         self.center_transformed = mt.apply_transform(
             self.center, self.transform_fullcm.affine, self.transform_fullcm.shift
         )
+
+    @property
+    def num_fps(self):
+        fps = [fp for fp in self.focal_planes if fp.tot_weight is not None]
+        return len(fps)
 
     @classmethod
     def from_pointing_cfg(cls, pointing_cfg):
@@ -539,14 +559,14 @@ def plot_ufm(focal_plane, plot_dir):
         plt.savefig(
             os.path.join(plot_dir, f"{focal_plane.stream_id}.png"), bbox_inches="tight"
         )
-        plt.clf()
+        plt.close()
 
 
 def plot_ot(ot, plot_dir):
     fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
-    dists = [fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi for fp in ot.focal_planes]
-    xis = [fp.transformed[fp.isfinite, 0] for fp in ot.focal_planes]
-    etas = [fp.transformed[fp.isfinite, 1] for fp in ot.focal_planes]
+    dists = [fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi for fp in ot.focal_planes if fp.tot_weight is not None]
+    xis = [fp.transformed[fp.isfinite, 0] for fp in ot.focal_planes if fp.tot_weight is not None]
+    etas = [fp.transformed[fp.isfinite, 1] for fp in ot.focal_planes if fp.tot_weight is not None]
 
     # Plot the radial dist
     r = np.sqrt(np.hstack(xis) ** 2 + np.hstack(etas) ** 2)
@@ -580,7 +600,7 @@ def plot_ot(ot, plot_dir):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"{ot.name}.png"), bbox_inches="tight")
-        plt.clf()
+        plt.close()
 
 
 def plot_by_gamma(focal_plane, plot_dir):
@@ -617,7 +637,7 @@ def plot_by_gamma(focal_plane, plot_dir):
             os.path.join(plot_dir, f"{focal_plane.stream_id}_by_gamma.png"),
             bbox_inches="tight",
         )
-        plt.clf()
+        plt.close()
 
 
 def plot_receiver(receiver, plot_dir):
@@ -633,21 +653,23 @@ def plot_receiver(receiver, plot_dir):
     xlims, ylims = receiver.lims
 
     fig, axs_all = plt.subplots(
-        4, 3, sharex="col", sharey="row", constrained_layout=True
+        len(valid_ids), 3, sharex="col", sharey="row", constrained_layout=True
     )
     axs = axs_all.flat
     axs[0].set_title("Xi")
     axs[1].set_title("Eta")
     axs[2].set_title("Gamma")
     cf = None
-    for i in range(4):
+    for i in range(len(valid_ids)):
         for j in range(3):
             axs[3 * i + j].set_aspect("equal")
             axs[3 * i + j].set_xlim(xlims)
             axs[3 * i + j].set_ylim(ylims)
         for fp in receiver.focal_planes:
+            if fp.tot_weight is None:
+                continue
             msk = (fp.template.id_strs == valid_ids[i]) * fp.isfinite
-            if np.sum(msk) == 0:
+            if np.sum(msk) < 3:
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
             cf = axs[3 * i + 0].tricontourf(
@@ -691,4 +713,4 @@ def plot_receiver(receiver, plot_dir):
     else:
         os.makedirs(plot_dir, exist_ok=True)
         plt.savefig(os.path.join(plot_dir, f"receiver.png"), bbox_inches="tight")
-        plt.clf()
+        plt.close()
