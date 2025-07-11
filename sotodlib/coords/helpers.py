@@ -702,18 +702,13 @@ class ScalarLastQuat(np.ndarray):
             temp[..., 1:] = self[..., :3]
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
-    
-def _deflection_model(hwp_angle, amp_val, phase_val):
-    """Returns quaternion for HWP-synchronous pointing deflection."""
-    dxi = amp_val * np.cos(hwp_angle - phase_val)
-    deta = -amp_val * np.sin(hwp_angle - phase_val)
-    return quat.rotation_xieta(xi=dxi, eta=deta)
 
-def get_deflected_sightline(aman, amp_meta, phase_meta, site='so', weather='typical'):
+def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     """
-    Constructs a deflected CelestialSightLine for mapmaking, using HWP-synchronous
-    pointing correction from separate amp and phase metadata trees.
-
+    Constructs a deflected CelestialSightLine using HWP-synchronous
+    pointing correction using combined wobble metadata that contains 
+    both amp and phase fields.
+    
     This function assumes that all detectors in `aman` belong to a single wafer
     and frequency band. It extracts the corresponding deflection amplitude and 
     phase from the metadata, computes the wobble correction quaternion, and 
@@ -722,16 +717,12 @@ def get_deflected_sightline(aman, amp_meta, phase_meta, site='so', weather='typi
     Parameters
     ----------
     aman : AxisManager
-        AxisManager for the observation, must include `hwp_angle`, `timestamps`, 
-        and `boresight.az/el`, as well as `det_info` with wafer and band info.
+        AxisManager for the observation, must include hwp_angle, timestamps, 
+        and boresight.az/el, as well as det_info with wafer and band info.
 
-    amp_meta : AxisManager
-        Metadata tree containing per-wafer, per-band deflection amplitudes 
-        (in arcmin) under keys like `amp_meta.ws0.f090.amp`.
-
-    phase_meta : AxisManager
-        Metadata tree containing per-wafer, per-band deflection phases 
-        (in radians) under keys like `phase_meta.ws0.f090.phase`.
+    wobble_meta : AxisManager
+        Metadata tree containing both amp and phase fields under
+        wobble_meta.{wafer_slot}.{band}.{amp, phase}
 
     site : str
         Observatory site identifier for sightline generation (default 'so').
@@ -749,60 +740,18 @@ def get_deflected_sightline(aman, amp_meta, phase_meta, site='so', weather='typi
 
     if len(wafer_slots) != 1 or len(bands) != 1:
         raise ValueError("Detectors span multiple wafer_slots or bands.")
-    ws = wafer_slots[0]
-    band = bands[0]
-
-    amp = getattr(getattr(amp_meta, ws), band).amp
-    phase = getattr(getattr(phase_meta, ws), band).phase
-    deflq = _deflection_model(aman.hwp_angle, amp, phase)
-
-    sight = CelestialSightLine.az_el(
-        aman.timestamps,
-        aman.boresight.az,
-        aman.boresight.el,
-        weather=weather,
-        site=site,
-    )
-    sight.Q = sight.Q * ~deflq
-    return sight
-
-
-def extract_wobble_params(wobble_meta, det_info):
-    """
-    Extracts single [amp, phase] values for a group of detectors,
-    asserting they all belong to one wafer_slot and one band.
-    # TODO: assumes wobble_meta has structure wobble_params.{wafer_slot}.{band}.[amp, phase]
-    """
-    wafer_slots = np.unique(det_info.wafer_slot)
-    bands = np.unique(det_info.wafer.bandpass)
-
-    if len(wafer_slots) != 1 or len(bands) != 1:
-        raise ValueError("Detectors span multiple wafer_slots or bands.")
 
     ws = wafer_slots[0]
     band = bands[0]
 
+    # Access amp and phase from combined metadata tree
     amp = getattr(getattr(wobble_meta, ws), band).amp
     phase = getattr(getattr(wobble_meta, ws), band).phase
-    return amp, phase
 
-def get_deflected_sightline_v0(aman, wobble_meta, site='so', weather='typical'):
-    """
-    Constructs deflected sightline from aman using metadata-based wobble correction.
+    dxi = amp * np.cos(aman.hwp_angle - phase)
+    deta = -amp * np.sin(aman.hwp_angle - phase)
+    deflq = quat.rotation_xieta(xi=dxi, eta=deta)
 
-    Parameters:
-        aman : AxisManager (must include hwp_angle and boresight)
-        wobble_meta : AxisManager with structure wobble_params.{wafer_slot}.{band}.[amp, phase] #TODO
-
-    Returns:
-        sight : CelestialSightLine with deflection applied
-    """
-    amp, phase = extract_wobble_params(wobble_meta, aman.det_info)
-
-    # Get deflection quaternion
-    deflq = _deflection_model(aman.hwp_angle, amp, phase)
-
-    # Construct and apply sightline
     sight = CelestialSightLine.az_el(
         aman.timestamps,
         aman.boresight.az,

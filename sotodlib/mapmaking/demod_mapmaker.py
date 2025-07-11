@@ -324,15 +324,15 @@ class DemodSignalMap(DemodSignal):
                 
                 if pdeflect:
                     from sotodlib.coords.helpers import get_deflected_sightline
+                    # Get deflection parameters
                     wobble_meta = obs.wobble_params
                     # Get wobble-corrected sightline
-                    sight = get_deflected_sightline(obs, obs.deflection_amp, obs.deflection_phase,
-                                                    site=smutils.unarr(obs.site),
-                                                    weather=smutils.unarr(obs.weather))
-                    # TODO: use single metadata for amps/phase
-                    #sight = get_deflected_sightline(obs, wobble_meta,
-                    #            site=smutils.unarr(obs.site),
-                    #            weather=smutils.unarr(obs.weather))
+                    sight = get_deflected_sightline(
+                        obs,
+                        wobble_meta,
+                        site=smutils.unarr(obs.site),
+                        weather=smutils.unarr(obs.weather)
+                    )
                 else:
                     sight = None
                 pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True, sight=sight)
