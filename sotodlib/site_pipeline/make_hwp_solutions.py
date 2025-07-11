@@ -20,6 +20,22 @@ from sotodlib.site_pipeline import util
 max_trial = 5
 wait_time = 5
 
+# encodings for flacarray compression
+encodings = {
+    'hwp_angle': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver1_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver2_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver3_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver1_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver2_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver3_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_rate_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_rate_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'timestamps': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 5.0e-5}},
+    'quad_1': {'type': 'flacarray'},
+    'quad_2': {'type': 'flacarray'},
+}
+
 logger = util.init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
 
 
@@ -109,7 +125,7 @@ def make_db(db_filename):
     raise sqlite3.OperationalError(f'{db_filename} is locked, give up.')
 
 
-def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
+def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression, encodings=None):
     """
     Save HDF5 file and add entry to sqlite database
     Return True if save is succeeded, otherwise return False
@@ -119,7 +135,8 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
 
     for i in range(1, max_trial + 1):
         try:
-            aman.save(os.path.join(output_dir, h5_filename), obs_id, overwrite, compression)
+            aman.save(os.path.join(output_dir, h5_filename), obs_id, overwrite,
+                      compression, encodings=encodings)
             logger.info("Saved aman")
             aman_saved = True
             break
@@ -258,7 +275,8 @@ def main(
 
         aman_solution = g3thwp.make_solution(tod)
         logger.info("Saving hwp_angle")
-        success = save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite, 'gzip')
+        success = save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite,
+                       compression='gzip', encodings=encodings)
         if not success:
             logger.warning("Failed to save hwp_angle")
         del aman_solution

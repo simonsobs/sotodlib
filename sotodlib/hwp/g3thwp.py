@@ -845,7 +845,7 @@ class G3tHWP():
             aman.wrap('quad_direction'+suffix, 0)
             aman.wrap_new('stable'+suffix, shape=('samps', ), dtype=bool)
             aman.wrap_new('locked'+suffix, shape=('samps', ), dtype=bool)
-            aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float16)
+            aman.wrap_new('hwp_rate'+suffix, shape=('samps', ), dtype=np.float32)
             aman.wrap_new('template'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('template_t'+suffix, shape=(self._num_edges, ), dtype=np.float64)
             aman.wrap_new('template_t_err'+suffix, shape=(self._num_edges, ), dtype=np.float64)
