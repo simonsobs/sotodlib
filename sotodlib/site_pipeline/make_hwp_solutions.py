@@ -10,13 +10,34 @@ import argparse
 import logging
 import yaml
 import traceback
+import sqlite3
 from typing import Optional
 
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
 
+max_trial = 5
+wait_time = 5
+
+# encodings for flacarray compression
+encodings = {
+    'hwp_angle': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver1_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver2_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver3_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver1_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver2_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_angle_ver3_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_rate_1': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'hwp_rate_2': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 1.0e-8}},
+    'timestamps': {'type': 'flacarray', 'args': {'level': 5, 'quanta': 5.0e-5}},
+    'quad_1': {'type': 'flacarray'},
+    'quad_2': {'type': 'flacarray'},
+}
+
 logger = util.init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -29,8 +50,13 @@ def get_parser(parser=None):
         'HWPconfig',
         help="Path to HWP configuration yaml file.")
     parser.add_argument(
-        '-o', '--output-dir', action='store', default=None, type=str,
-        help='output data directory, overwrite config output_dir')
+        '-o', '--solution-output-dir', action='store', default=None, type=str,
+        help='output directory of solution metadata, \
+        overwrite config solution_output_dir')
+    parser.add_argument(
+        '--encoder-output-dir', action='store', default=None, type=str,
+        help='output directory of encoder metadata, \
+        overwrite config encoder_output_dir')
     parser.add_argument(
         '--verbose', default=2, type=int,
         help="increase output verbosity. \
@@ -62,6 +88,7 @@ def get_parser(parser=None):
     )
     return parser
 
+
 def make_db(db_filename):
     """
     Make sqlite database
@@ -70,52 +97,88 @@ def make_db(db_filename):
     dest_file, dest_dataset = policy.get_dest(obs_id)
     Use 'output_dir' argument for now
     """
-
-    if os.path.exists(db_filename):
-        logger.info(f"Mapping {db_filename} for the "
-                    "archive index.")
-        db = core.metadata.ManifestDb(db_filename)
-    else:
-        logger.info(f"Creating {db_filename} for the "
-                     "archive index.")
-        scheme = core.metadata.ManifestScheme()
-        scheme.add_exact_match('obs:obs_id')
-        scheme.add_data_field('dataset')
-        db = core.metadata.ManifestDb(
-            db_filename,
-            scheme=scheme
-        )
-    return db
-
-def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression):
-    """
-    Save HDF5 file and add entry to sqlite database
-    """
-    max_trial = 5
-    wait_time = 5
     for i in range(1, max_trial + 1):
         try:
-            aman.save(os.path.join(output_dir, h5_filename), obs_id, overwrite, compression)
+            if os.path.exists(db_filename):
+                logger.info(f"Mapping {db_filename} for the "
+                            "archive index.")
+                db = core.metadata.ManifestDb(db_filename)
+            else:
+                logger.info(f"Creating {db_filename} for the "
+                            "archive index.")
+                scheme = core.metadata.ManifestScheme()
+                scheme.add_exact_match('obs:obs_id')
+                scheme.add_data_field('dataset')
+                db = core.metadata.ManifestDb(
+                    db_filename,
+                    scheme=scheme
+                )
+            return db
+        except sqlite3.OperationalError:
+            logger.warning(f"db is temporary locked, try again in {wait_time} seconds, "
+                           f"trial {i}/{max_trial}")
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while making db")
+            print(traceback.format_exc())
+            break
+    raise sqlite3.OperationalError(f'{db_filename} is locked, give up.')
+
+
+def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression, encodings=None):
+    """
+    Save HDF5 file and add entry to sqlite database
+    Return True if save is succeeded, otherwise return False
+    """
+    aman_saved = False
+    db_saved = False
+
+    for i in range(1, max_trial + 1):
+        try:
+            aman.save(os.path.join(output_dir, h5_filename), obs_id, overwrite,
+                      compression, encodings=encodings)
             logger.info("Saved aman")
-            db.add_entry(
-                {'obs:obs_id': obs_id, 'dataset': obs_id}, filename=h5_filename, replace=overwrite,
-            )
-            logger.info("Added entry to db")
-            return
+            aman_saved = True
+            break
         except BlockingIOError:
-            logger.warn(f"Cannot save aman because HDF5 is temporary locked, try again in {wait_time} seconds, trial {i}/{max_trial}")
+            logger.warning("Cannot save aman because HDF5 is temporary locked, "
+                           f"try again in {wait_time} seconds, trial {i}/{max_trial}")
             time.sleep(wait_time)
         except Exception as e:
             logger.error(f"Exception '{e}' thrown while saving aman")
             print(traceback.format_exc())
             break
+    if not aman_saved:
+        logger.error("Cannot save aman, give up.")
+        return False
 
-    logger.error("Cannot save aman, give up.")
+    for i in range(1, max_trial + 1):
+        try:
+            db.add_entry(
+                {'obs:obs_id': obs_id, 'dataset': obs_id}, filename=h5_filename, replace=overwrite,
+            )
+            logger.info("Added entry to db")
+            db_saved = True
+            break
+        except sqlite3.OperationalError:
+            logger.warning(f"Cannot save db, try again in {wait_time} seconds, trial {i}/{max_trial}")
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.error(f"Exception '{e}' thrown while saving aman")
+            print(traceback.format_exc())
+            break
+    if not db_saved:
+        logger.error("Cannot save db, give up.")
+        return False
+
+    return True
+
 
 def main(
     context: str,
     HWPconfig: str,
-    output_dir: Optional[str] = None,
+    solution_output_dir: Optional[str] = None,
+    encoder_output_dir: Optional[str] = None,
     verbose: Optional[int] = 2,
     overwrite: Optional[bool] = False,
     query: Optional[str] = None,
@@ -130,12 +193,17 @@ def main(
     logger.info("Starting make_hwp_solutions")
 
     # Specify output directory
-    if output_dir is None:
-        output_dir = configs["output_dir"]
+    if solution_output_dir is None:
+        solution_output_dir = configs["solution_output_dir"]
+    if encoder_output_dir is None:
+        encoder_output_dir = configs["encoder_output_dir"]
 
-    if not os.path.exists(output_dir):
-        logger.info(f"Making output directory {output_dir}")
-        os.mkdir(output_dir)
+    if not os.path.exists(solution_output_dir):
+        logger.info(f"Making output directory {solution_output_dir}")
+        os.mkdir(solution_output_dir)
+    if not os.path.exists(encoder_output_dir):
+        logger.info(f"Making output directory {encoder_output_dir}")
+        os.mkdir(encoder_output_dir)
 
     # Set verbose
     if verbose == 0:
@@ -149,8 +217,8 @@ def main(
 
     ctx = core.Context(context)
 
-    db_encoder = make_db(os.path.join(output_dir, 'hwp_encoder.sqlite'))
-    db_solution = make_db(os.path.join(output_dir, 'hwp_angle.sqlite'))
+    db_encoder = make_db(os.path.join(encoder_output_dir, 'hwp_encoder.sqlite'))
+    db_solution = make_db(os.path.join(solution_output_dir, 'hwp_angle.sqlite'))
 
     # load observation data
     if obs_id is not None:
@@ -195,20 +263,27 @@ def main(
         g3thwp = G3tHWP(HWPconfig)
 
         if load_h5:
-            aman_encoder = g3thwp.set_data(tod, h5_filename = h5_encoder)
+            aman_encoder = g3thwp.set_data(tod, h5_filename=os.path.join(encoder_output_dir, h5_encoder))
         else:
             aman_encoder = g3thwp.set_data(tod)
-        logger.info("Saving hwp_encoder")
-        save(aman_encoder, db_encoder, h5_encoder, output_dir, obs_id, overwrite, 'gzip')
+            logger.info("Saving hwp_encoder")
+            success = save(aman_encoder, db_encoder, h5_encoder, encoder_output_dir, obs_id, overwrite, 'gzip')
+            if not success:
+                logger.warning("Failed to save hwp_encoder, skip hwp_angle process")
+                continue
         del aman_encoder
 
         aman_solution = g3thwp.make_solution(tod)
         logger.info("Saving hwp_angle")
-        save(aman_solution, db_solution, h5_solution, output_dir, obs_id, overwrite, 'gzip')
+        success = save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite,
+                       compression='gzip', encodings=encodings)
+        if not success:
+            logger.warning("Failed to save hwp_angle")
         del aman_solution
         del g3thwp
 
     return
+
 
 if __name__ == '__main__':
     parser = get_parser(parser=None)
