@@ -172,32 +172,21 @@ def make_db(db_filename):
     dest_file, dest_dataset = policy.get_dest(obs_id)
     Use 'output_dir' argument for now
     """
-    for i in range(1, max_trial + 1):
-        try:
-            if os.path.exists(db_filename):
-                logger.info(f"Mapping {db_filename} for the "
-                            "archive index.")
-                db = core.metadata.ManifestDb(db_filename)
-            else:
-                logger.info(f"Creating {db_filename} for the "
-                            "archive index.")
-                scheme = core.metadata.ManifestScheme()
-                scheme.add_exact_match('obs:obs_id')
-                scheme.add_data_field('dataset')
-                db = core.metadata.ManifestDb(
-                    db_filename,
-                    scheme=scheme
-                )
-            return db
-        except sqlite3.OperationalError:
-            logger.warning(f"db is temporary locked, try again in {wait_time} seconds, "
-                           f"trial {i}/{max_trial}")
-            time.sleep(wait_time)
-        except Exception as e:
-            logger.error(f"Exception '{e}' thrown while making db")
-            print(traceback.format_exc())
-            break
-    raise sqlite3.OperationalError(f'{db_filename} is locked, give up.')
+    if os.path.exists(db_filename):
+        logger.info(f"Mapping {db_filename} for the "
+                    "archive index.")
+        db = core.metadata.ManifestDb(db_filename)
+    else:
+        logger.info(f"Creating {db_filename} for the "
+                    "archive index.")
+        scheme = core.metadata.ManifestScheme()
+        scheme.add_exact_match('obs:obs_id')
+        scheme.add_data_field('dataset')
+        db = core.metadata.ManifestDb(
+            db_filename,
+            scheme=scheme
+        )
+    return db
 
 
 def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression, encodings=None):
