@@ -92,6 +92,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--nprocs', default=20, type=int,
+        help="number of processes to use for parallelized pipeline"
     )
     return parser
 
@@ -239,7 +240,9 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression, enco
 
 
 def main(args):
-    """ main function for site pipeline """
+    """ main function for site pipeline
+    Process serially and calculate hwp_angle from L2 data
+    """
     setup_dir(args)
     run_list = get_obs_to_run(args)
     db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
@@ -285,7 +288,16 @@ def main(args):
 
 
 def L3process(obs_id, args):
-    """ calculate hwp angle solution from L3 data only """
+    """ calculate hwp angle solution from L3 data only
+
+    Return
+        aman_solution: AxisManager
+            axis manager of hwp angle solution
+        obs_id: str
+            obs_id of solution
+        h5_solution: str
+            hdf5 file name to save solution
+    """
     # split h5 file by first 5 digits of unixtime
     unix = obs_id.split('_')[1][:5]
     h5_encoder = os.path.join(args.encoder_output_dir, f'hwp_encoder_{unix}.h5')
@@ -301,7 +313,7 @@ def L3process(obs_id, args):
 
 def main_mpi(executor, as_completed_callable, args):
     """ main function for data center
-    parallelize pipeline and calculate hwp_angle from L3 data only
+    Parallelize process and calculate hwp_angle from L3 data only
     """
     setup_dir(args)
     run_list = get_obs_to_run(args)
