@@ -1250,7 +1250,7 @@ class SSOFootprint(_Preprocess):
               source_list: ['jupiter', 'moon', 'saturn'] # remove to find nearby sources
               distance: 20 # distance from boresight center
               nstep: 100
-              telescope: 'SAT' # options: ['SAT', 'LAT']
+              telescope_flavor: 'sat' # options: ['sat', 'lat']
               wafer_hit_threshold: 10 # number of planet-wafer distances to consider being a source hit
               # for SATs:
               wafer_radius: 6
@@ -1330,8 +1330,8 @@ class SSOFootprint(_Preprocess):
         nstep = self.calc_cfgs.get("nstep", 100)
         onsamp = (aman.samps.count+nstep-1)//nstep
         telescope_flavor = self.calc_cfgs.get("telescope_flavor", None)
-        if telescope_flavor not in ['SAT', 'LAT']:
-            raise NameError('Only "SAT" or "LAT" is supported.')
+        if telescope_flavor not in ['sat', 'lat']:
+            raise NameError('Only "sat" or "lat" is supported.')
         wafer_centers = self.calc_cfgs.get("wafer_centers", None)
         if wafer_centers is None:
             raise ValueError("No wafer centers defined in config")
@@ -1348,9 +1348,9 @@ class SSOFootprint(_Preprocess):
             planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
             wafer_radius = self.calc_cfgs.get("wafer_radius", None)
             if wafer_radius is None:
-                if telescope_flavor == 'SAT':
+                if telescope_flavor == 'sat':
                     wafer_radius = 6 # [deg]
-                elif telescope_flavor == 'LAT':
+                elif telescope_flavor == 'lat':
                     wafer_radius = 0.5 # [deg]
 
             for ws in wafer_slots:
