@@ -97,6 +97,74 @@ def get_parser(parser=None):
     return parser
 
 
+def setup_dir(args):
+    if args.verbose == 0:
+        logger.setLevel(logging.ERROR)
+    elif args.verbose == 1:
+        logger.setLevel(logging.WARNING)
+    elif args.verbose == 2:
+        logger.setLevel(logging.INFO)
+    elif args.verbose == 3:
+        logger.setLevel(logging.DEBUG)
+
+    configs = yaml.safe_load(open(args.HWPconfig, "r"))
+    logger.info("Starting make_hwp_solutions")
+
+    # Specify output directory
+    if args.solution_output_dir is None:
+        args.solution_output_dir = configs["solution_output_dir"]
+    if args.encoder_output_dir is None:
+        args.encoder_output_dir = configs["encoder_output_dir"]
+
+    if not os.path.exists(args.solution_output_dir):
+        logger.info(f"Making output directory {args.solution_output_dir}")
+        os.mkdir(args.solution_output_dir)
+    if not os.path.exists(args.encoder_output_dir):
+        logger.info(f"Making output directory {args.encoder_output_dir}")
+        os.mkdir(args.encoder_output_dir)
+
+
+def get_obs_to_run(args):
+    """ Return list of obs_id to run
+    """
+    ctx = core.Context(args.context)
+
+    # load observation data
+    if args.obs_id is not None:
+        tot_query = ' or '.join([f"(obs_id=='{o}')" for o in args.obs_id])
+    else:
+        tot_query = "and "
+        if args.min_ctime is not None:
+            tot_query += f"start_time>={args.min_ctime} and "
+        if args.max_ctime is not None:
+            tot_query += f"start_time<={args.max_ctime} and "
+        if args.query is not None:
+            tot_query += args.query + " and "
+        tot_query = tot_query[4:-4]
+        if tot_query == "":
+            tot_query = "1"
+
+    logger.debug(f"sending query to obsdb: {tot_query}")
+    obs_list = ctx.obsdb.query(tot_query)
+    obs_list = [obs['obs_id'] for obs in obs_list]
+    run_list = []
+
+    if len(obs_list) == 0:
+        logger.warning(f"no observations returned from query: {args.query}")
+        return []
+
+    if args.overwrite:
+        return obs_list
+
+    db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
+    completed = db_solution.get_entries(['dataset'])['dataset']
+
+    for obs_id in obs_list:
+        if obs_id not in completed:
+            run_list.append(obs_id)
+    return run_list
+
+
 def make_db(db_filename):
     """
     Make sqlite database
@@ -213,16 +281,6 @@ def main(
         logger.info(f"Making output directory {encoder_output_dir}")
         os.mkdir(encoder_output_dir)
 
-    # Set verbose
-    if verbose == 0:
-        logger.setLevel(logging.ERROR)
-    elif verbose == 1:
-        logger.setLevel(logging.WARNING)
-    elif verbose == 2:
-        logger.setLevel(logging.INFO)
-    elif verbose == 3:
-        logger.setLevel(logging.DEBUG)
-
     ctx = core.Context(context)
 
     db_encoder = make_db(os.path.join(encoder_output_dir, 'hwp_encoder.sqlite'))
@@ -256,8 +314,7 @@ def main(
             run_list.append(obs)
 
     # write solutions
-    for obs in run_list:
-        obs_id = obs["obs_id"]
+    for obs_id in run_list:
         logger.info(f"Calculating Angles for {obs_id}")
         ctx = core.Context(context)
         tod = ctx.get_obs(obs, dets=[])
@@ -293,9 +350,7 @@ def main(
     return
 
 
-def process(obs, args):
-    obs_id = obs["obs_id"]
-    logger.info(f"Calculating Angles for {obs_id}")
+def process(obs_id, args):
     # split h5 file by first 5 digits of unixtime
     unix = obs_id.split('_')[1][:5]
     h5_encoder = os.path.join(args.encoder_output_dir, f'hwp_encoder_{unix}.h5')
@@ -303,74 +358,22 @@ def process(obs, args):
     g3thwp = G3tHWP(args.HWPconfig)
 
     # make angle solutions
-    tod = ctx.get_obs(obs, dets=[])
+    tod = ctx.get_obs(obs_id, dets=[])
     g3thwp.set_data(tod, h5_filename=h5_encoder)
     aman_solution = g3thwp.make_solution(tod)
     return aman_solution, obs_id, f'hwp_angle_{unix}.h5'
 
 
 def main_mpi(executor, as_completed_callable, args):
-    configs = yaml.safe_load(open(args.HWPconfig, "r"))
-    logger.info("Starting make_hwp_solutions")
 
-    # Specify output directory
-    if args.solution_output_dir is None:
-        args.solution_output_dir = configs["solution_output_dir"]
-    if args.encoder_output_dir is None:
-        args.encoder_output_dir = configs["encoder_output_dir"]
-
-    if not os.path.exists(args.solution_output_dir):
-        logger.info(f"Making output directory {args.solution_output_dir}")
-        os.mkdir(args.solution_output_dir)
-    if not os.path.exists(args.encoder_output_dir):
-        logger.info(f"Making output directory {args.encoder_output_dir}")
-        os.mkdir(args.encoder_output_dir)
-
-    # Set verbose
-    if args.verbose == 0:
-        logger.setLevel(logging.ERROR)
-    elif args.verbose == 1:
-        logger.setLevel(logging.WARNING)
-    elif args.verbose == 2:
-        logger.setLevel(logging.INFO)
-    elif args.verbose == 3:
-        logger.setLevel(logging.DEBUG)
-
-    ctx = core.Context(args.context)
-
+    setup_dir(args)
+    run_list = get_obs_to_run(args)
     db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
-
-    # load observation data
-    if args.obs_id is not None:
-        tot_query = ' or '.join([f"(obs_id=='{o}')" for o in args.obs_id])
-    else:
-        tot_query = "and "
-        if args.min_ctime is not None:
-            tot_query += f"start_time>={args.min_ctime} and "
-        if args.max_ctime is not None:
-            tot_query += f"start_time<={args.max_ctime} and "
-        if args.query is not None:
-            tot_query += args.query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query == "":
-            tot_query = "1"
-
-    logger.debug(f"Sending query to obsdb: {tot_query}")
-    obs_list = ctx.obsdb.query(tot_query)
-
-    if len(obs_list) == 0:
-        logger.warning(f"No observations returned from query: {args.query}")
-    run_list = []
-    completed = db_solution.get_entries(['dataset'])['dataset']
-
-    for obs in obs_list:
-        if args.overwrite or not obs['obs_id'] in completed:
-            run_list.append(obs)
 
     # write solutions
     futures = []
-    for obs in run_list:
-        futures.append(executor.submit(process, obs, args))
+    for obs_id in run_list:
+        futures.append(executor.submit(process, obs_id, args))
 
     for future in as_completed_callable(futures):
         try:
@@ -392,4 +395,4 @@ if __name__ == '__main__':
         if rank == 0:
             main_mpi(executor, as_completed_callable, args)
     else:
-        main(**vars(args))
+        main(**var(args))
