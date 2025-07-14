@@ -66,10 +66,6 @@ def get_parser(parser=None):
         help="If true, overwrites existing entries in the database",
     )
     parser.add_argument(
-        '--load-h5', action='store_true',
-        help="If true, try to load raw encoder data from h5 file",
-    )
-    parser.add_argument(
         '--query', type=str,
         help="Query to pass to the observation list. Use \\'string\\' to "
              "pass in strings within the query.",
@@ -87,12 +83,14 @@ def get_parser(parser=None):
         help="List of obs-ids of particular observations that you want to run",
     )
     parser.add_argument(
-        '--use-mpi', action='store_true',
-        help="If true, use mpi and parallelize pipeline",
+        '--off-site', action='store_true',
+        help="This must be true when you run this off site. "
+             "If true, this does not try to load L2 data"
     )
     parser.add_argument(
-        '--nprocs', default=20, type=int,
-        help="number of processes to use for parallelized pipeline"
+        '--nprocs', default=1, type=int,
+        help="number of processes to use. We use nprocs=1"
+             " at site computing"
     )
     return parser
 
@@ -239,65 +237,24 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression, enco
     return True
 
 
-def main(args):
-    """ main function for site pipeline
-    Process serially and calculate hwp_angle from L2 data
-    """
-    setup_dir(args)
-    run_list = get_obs_to_run(args)
-    db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
-    db_encoder = make_db(os.path.join(args.encoder_output_dir, 'hwp_encoder.sqlite'))
+def get_solution(obs_id, encoder_completed, args):
+    """ calculate hwp angle solution.
+    Load encoder L3 data if it exists.
+    If this is run off site, load L2 data, otherwise skip it.
 
-    encoder_completed = db_encoder.get_entries(['dataset'])['dataset']
-
-    ctx = core.Context(args.context)
-    # write solutions
-    for obs_id in run_list:
-        logger.info(f"Calculating Angles for {obs_id}")
-        tod = ctx.get_obs(obs_id, dets=[])
-
-        # split h5 file by first 5 digits of unixtime
-        unix = obs_id.split('_')[1][:5]
-        h5_encoder = f'hwp_encoder_{unix}.h5'
-        h5_solution = f'hwp_angle_{unix}.h5'
-
-        # make angle solutions
-        g3thwp = G3tHWP(args.HWPconfig)
-
-        if obs_id in encoder_completed:
-            aman_encoder = g3thwp.set_data(tod, h5_filename=os.path.join(args.encoder_output_dir, h5_encoder))
-        else:
-            aman_encoder = g3thwp.set_data(tod)
-            logger.info("Saving hwp_encoder")
-            success = save(aman_encoder, db_encoder, h5_encoder, args.encoder_output_dir, obs_id, args.overwrite, 'gzip')
-            if not success:
-                logger.warning("Failed to save hwp_encoder, skip hwp_angle process")
-                continue
-        del aman_encoder
-
-        aman_solution = g3thwp.make_solution(tod)
-        logger.info("Saving hwp_angle")
-        success = save(aman_solution, db_solution, h5_solution, args.solution_output_dir, obs_id, args.overwrite,
-                       compression='gzip', encodings=encodings)
-        if not success:
-            logger.warning("Failed to save hwp_angle")
-        del aman_solution
-        del g3thwp
-
-    return
-
-
-def L3process(obs_id, args):
-    """ calculate hwp angle solution from L3 data only
+    Args
+        obs_id: str
+        encoder_completed:
+            list of obs_id which has L3 encoder data
 
     Return
+        obs_id: str
+        aman_encoder: AxisManager
+            axis manager of hwp encoder
         aman_solution: AxisManager
             axis manager of hwp angle solution
-        obs_id: str
-            obs_id of solution
-        h5_solution: str
-            hdf5 file name to save solution
     """
+    logger.info(f"Calculating Angles for {obs_id}")
     # split h5 file by first 5 digits of unixtime
     unix = obs_id.split('_')[1][:5]
     h5_encoder = os.path.join(args.encoder_output_dir, f'hwp_encoder_{unix}.h5')
@@ -306,42 +263,69 @@ def L3process(obs_id, args):
 
     # make angle solutions
     tod = ctx.get_obs(obs_id, dets=[])
-    g3thwp.set_data(tod, h5_filename=h5_encoder)
+    # Load L3 data if it exists
+    if obs_id in encoder_completed:
+        g3thwp.set_data(tod, h5_filename=h5_encoder)
+        aman_encoder = None
+    # Do nothing if L3 data does not exists off-site
+    elif args.off_site:
+        logger.info(f"Skip {obs_id} beause L3 data do not exist off site")
+        return obs_id, None, None
+    # Load L2 data at site
+    else:
+        aman_encoder = g3thwp.set_data(tod)
+
     aman_solution = g3thwp.make_solution(tod)
-    return aman_solution, obs_id, f'hwp_angle_{unix}.h5'
+    return obs_id, aman_encoder, aman_solution
 
 
-def main_mpi(executor, as_completed_callable, args):
-    """ main function for data center
-    Parallelize process and calculate hwp_angle from L3 data only
-    """
+def _main(executor, as_completed_callable, args):
+
     setup_dir(args)
     run_list = get_obs_to_run(args)
     db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
+    db_encoder = make_db(os.path.join(args.encoder_output_dir, 'hwp_encoder.sqlite'))
+    encoder_completed = db_encoder.get_entries(['dataset'])['dataset']
 
     # write solutions
     futures = []
     for obs_id in run_list:
-        futures.append(executor.submit(L3process, obs_id, args))
+        futures.append(executor.submit(get_solution, obs_id, encoder_completed, args))
 
     for future in as_completed_callable(futures):
         try:
-            aman_solution, obs_id, h5_solution = future.result()
-            save(aman_solution, db_solution, h5_solution,
-                 args.solution_output_dir, obs_id, args.overwrite,
-                 compression='gzip', encodings=encodings)
+            obs_id, aman_encoder, aman_solution = future.result()
+            # split h5 file by first 5 digits of unixtime
+            unix = obs_id.split('_')[1][:5]
+            h5_encoder = f'hwp_encoder_{unix}.h5'
+            h5_solution = f'hwp_angle_{unix}.h5'
+            if aman_encoder is not None:
+                logger.info(f"Saving hwp_encoder: {obs_id}")
+                success = save(aman_encoder, db_encoder, h5_encoder,
+                               args.encoder_output_dir,
+                               obs_id, args.overwrite, 'gzip')
+                if not success:
+                    logger.error(f"Failed to save hwp_encoder: {obs_id}, skip saving hwp_angle")
+                    continue
+            if aman_solution is not None:
+                logger.info(f"Saving hwp_angle: {obs_id}")
+                success = save(aman_solution, db_solution, h5_solution,
+                               args.solution_output_dir, obs_id, args.overwrite,
+                               compression='gzip', encodings=encodings)
+                if not success:
+                    logger.error(f"Failed to save hwp_angle: {obs_id}")
         except Exception as e:
             logger.error(e)
     return
 
 
+def main(args):
+    rank, executor, as_completed_callable = get_exec_env(nprocs=args.nprocs)
+    if rank == 0:
+        _main(executor, as_completed_callable, args)
+
+
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
-
-    if args.use_mpi:
-        rank, executor, as_completed_callable = get_exec_env(nprocs=args.nprocs)
-        if rank == 0:
-            main_mpi(executor, as_completed_callable, args)
-    else:
-        main(args)
+    main(args)
