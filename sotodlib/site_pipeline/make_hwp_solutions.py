@@ -11,7 +11,6 @@ import logging
 import yaml
 import traceback
 import sqlite3
-from typing import Optional
 
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
@@ -250,74 +249,20 @@ def save(aman, db, h5_filename, output_dir, obs_id, overwrite, compression, enco
     return True
 
 
-def main(
-    context: str,
-    HWPconfig: str,
-    solution_output_dir: Optional[str] = None,
-    encoder_output_dir: Optional[str] = None,
-    verbose: Optional[int] = 2,
-    overwrite: Optional[bool] = False,
-    query: Optional[str] = None,
-    min_ctime: Optional[float] = None,
-    max_ctime: Optional[float] = None,
-    obs_id: Optional[str] = None,
-    load_h5: Optional[bool] = False,
- ):
-    logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
+def main(args):
+    """ main function for site pipeline """
+    setup_dir(args)
+    run_list = get_obs_to_run(args)
+    db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
+    db_encoder = make_db(os.path.join(args.encoder_output_dir, 'hwp_encoder.sqlite'))
 
-    configs = yaml.safe_load(open(HWPconfig, "r"))
-    logger.info("Starting make_hwp_solutions")
+    encoder_completed = db_encoder.get_entries(['dataset'])['dataset']
 
-    # Specify output directory
-    if solution_output_dir is None:
-        solution_output_dir = configs["solution_output_dir"]
-    if encoder_output_dir is None:
-        encoder_output_dir = configs["encoder_output_dir"]
-
-    if not os.path.exists(solution_output_dir):
-        logger.info(f"Making output directory {solution_output_dir}")
-        os.mkdir(solution_output_dir)
-    if not os.path.exists(encoder_output_dir):
-        logger.info(f"Making output directory {encoder_output_dir}")
-        os.mkdir(encoder_output_dir)
-
-    ctx = core.Context(context)
-
-    db_encoder = make_db(os.path.join(encoder_output_dir, 'hwp_encoder.sqlite'))
-    db_solution = make_db(os.path.join(solution_output_dir, 'hwp_angle.sqlite'))
-
-    # load observation data
-    if obs_id is not None:
-        tot_query = ' or '.join([f"(obs_id=='{o}')" for o in obs_id])
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"start_time>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"start_time<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query == "":
-            tot_query = "1"
-
-    logger.debug(f"Sending query to obsdb: {tot_query}")
-    obs_list = ctx.obsdb.query(tot_query)
-
-    if len(obs_list) == 0:
-        logger.warning(f"No observations returned from query: {query}")
-    run_list = []
-    completed = db_solution.get_entries(['dataset'])['dataset']
-
-    for obs in obs_list:
-        if overwrite or not obs['obs_id'] in completed:
-            run_list.append(obs)
-
+    ctx = core.Context(args.context)
     # write solutions
     for obs_id in run_list:
         logger.info(f"Calculating Angles for {obs_id}")
-        ctx = core.Context(context)
-        tod = ctx.get_obs(obs, dets=[])
+        tod = ctx.get_obs(obs_id, dets=[])
 
         # split h5 file by first 5 digits of unixtime
         unix = obs_id.split('_')[1][:5]
@@ -325,14 +270,14 @@ def main(
         h5_solution = f'hwp_angle_{unix}.h5'
 
         # make angle solutions
-        g3thwp = G3tHWP(HWPconfig)
+        g3thwp = G3tHWP(args.HWPconfig)
 
-        if load_h5:
-            aman_encoder = g3thwp.set_data(tod, h5_filename=os.path.join(encoder_output_dir, h5_encoder))
+        if obs_id in encoder_completed:
+            aman_encoder = g3thwp.set_data(tod, h5_filename=os.path.join(args.encoder_output_dir, h5_encoder))
         else:
             aman_encoder = g3thwp.set_data(tod)
             logger.info("Saving hwp_encoder")
-            success = save(aman_encoder, db_encoder, h5_encoder, encoder_output_dir, obs_id, overwrite, 'gzip')
+            success = save(aman_encoder, db_encoder, h5_encoder, args.encoder_output_dir, obs_id, args.overwrite, 'gzip')
             if not success:
                 logger.warning("Failed to save hwp_encoder, skip hwp_angle process")
                 continue
@@ -340,7 +285,7 @@ def main(
 
         aman_solution = g3thwp.make_solution(tod)
         logger.info("Saving hwp_angle")
-        success = save(aman_solution, db_solution, h5_solution, solution_output_dir, obs_id, overwrite,
+        success = save(aman_solution, db_solution, h5_solution, args.solution_output_dir, obs_id, args.overwrite,
                        compression='gzip', encodings=encodings)
         if not success:
             logger.warning("Failed to save hwp_angle")
@@ -350,7 +295,8 @@ def main(
     return
 
 
-def process(obs_id, args):
+def L3process(obs_id, args):
+    """ calculate hwp angle solution from L3 data only """
     # split h5 file by first 5 digits of unixtime
     unix = obs_id.split('_')[1][:5]
     h5_encoder = os.path.join(args.encoder_output_dir, f'hwp_encoder_{unix}.h5')
@@ -365,7 +311,9 @@ def process(obs_id, args):
 
 
 def main_mpi(executor, as_completed_callable, args):
-
+    """ main function for data center
+    parallelize pipeline and calculate hwp_angle from L3 data only
+    """
     setup_dir(args)
     run_list = get_obs_to_run(args)
     db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
@@ -373,7 +321,7 @@ def main_mpi(executor, as_completed_callable, args):
     # write solutions
     futures = []
     for obs_id in run_list:
-        futures.append(executor.submit(process, obs_id, args))
+        futures.append(executor.submit(L3process, obs_id, args))
 
     for future in as_completed_callable(futures):
         try:
@@ -382,7 +330,7 @@ def main_mpi(executor, as_completed_callable, args):
                  args.solution_output_dir, obs_id, args.overwrite,
                  compression='gzip', encodings=encodings)
         except Exception as e:
-            print(e)
+            logger.error(e)
     return
 
 
@@ -395,4 +343,4 @@ if __name__ == '__main__':
         if rank == 0:
             main_mpi(executor, as_completed_callable, args)
     else:
-        main(**var(args))
+        main(args)
