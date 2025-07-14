@@ -1830,7 +1830,14 @@ class G3tHWP():
         return True
 
     def _calc_angle_linear(self, mod2pi=True):
-        """ Calculate hwp angle of encoder counters for each revolution """
+        """ Calculate hwp angle of encoder counters for each revolution.
+
+        The ref_indexes are at the "rising edge" of reference/missing slit.
+        On the other hand, the actual reference point is the center between
+        the "riging edge" and "falling edge" of the referece/missing slit.
+        Therefore, the angle of ref_indexes should be `2 pi * integer - half of
+        slit width (360 deg / num_edges / 2)`.
+        """
         self._encd_cnt_split = np.split(self._encd_cnt, self._ref_indexes)
         angle_first_revolution = (self._encd_cnt_split[0] - self._ref_cnt[0]) * \
             (2 * np.pi / self._num_edges)
@@ -1843,6 +1850,9 @@ class G3tHWP():
         )
         self._angle = np.concatenate(
             [angle_first_revolution, self._angle.flatten(), angle_last_revolution])
+
+        # Subtract half of slit width
+        self._angle -= np.pi / self._num_edges
 
         if mod2pi:
             self._angle = self._angle % (2 * np.pi)
