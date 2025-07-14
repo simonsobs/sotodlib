@@ -16,6 +16,7 @@ from typing import Optional
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
 from sotodlib.site_pipeline import util
+from sotodlib.utils.procs_pool import get_exec_env
 
 max_trial = 5
 wait_time = 5
@@ -85,6 +86,13 @@ def get_parser(parser=None):
     parser.add_argument(
         '--obs-id', type=str, nargs='+',
         help="List of obs-ids of particular observations that you want to run",
+    )
+    parser.add_argument(
+        '--use-mpi', action='store_true',
+        help="If true, use mpi and parallelize pipeline",
+    )
+    parser.add_argument(
+        '--nprocs', default=20, type=int,
     )
     return parser
 
@@ -285,7 +293,103 @@ def main(
     return
 
 
+def process(obs, args):
+    obs_id = obs["obs_id"]
+    logger.info(f"Calculating Angles for {obs_id}")
+    # split h5 file by first 5 digits of unixtime
+    unix = obs_id.split('_')[1][:5]
+    h5_encoder = os.path.join(args.encoder_output_dir, f'hwp_encoder_{unix}.h5')
+    ctx = core.Context(args.context)
+    g3thwp = G3tHWP(args.HWPconfig)
+
+    # make angle solutions
+    tod = ctx.get_obs(obs, dets=[])
+    g3thwp.set_data(tod, h5_filename=h5_encoder)
+    aman_solution = g3thwp.make_solution(tod)
+    return aman_solution, obs_id, f'hwp_angle_{unix}.h5'
+
+
+def main_mpi(executor, as_completed_callable, args):
+    configs = yaml.safe_load(open(args.HWPconfig, "r"))
+    logger.info("Starting make_hwp_solutions")
+
+    # Specify output directory
+    if args.solution_output_dir is None:
+        args.solution_output_dir = configs["solution_output_dir"]
+    if args.encoder_output_dir is None:
+        args.encoder_output_dir = configs["encoder_output_dir"]
+
+    if not os.path.exists(args.solution_output_dir):
+        logger.info(f"Making output directory {args.solution_output_dir}")
+        os.mkdir(args.solution_output_dir)
+    if not os.path.exists(args.encoder_output_dir):
+        logger.info(f"Making output directory {args.encoder_output_dir}")
+        os.mkdir(args.encoder_output_dir)
+
+    # Set verbose
+    if args.verbose == 0:
+        logger.setLevel(logging.ERROR)
+    elif args.verbose == 1:
+        logger.setLevel(logging.WARNING)
+    elif args.verbose == 2:
+        logger.setLevel(logging.INFO)
+    elif args.verbose == 3:
+        logger.setLevel(logging.DEBUG)
+
+    ctx = core.Context(args.context)
+
+    db_solution = make_db(os.path.join(args.solution_output_dir, 'hwp_angle.sqlite'))
+
+    # load observation data
+    if args.obs_id is not None:
+        tot_query = ' or '.join([f"(obs_id=='{o}')" for o in args.obs_id])
+    else:
+        tot_query = "and "
+        if args.min_ctime is not None:
+            tot_query += f"start_time>={args.min_ctime} and "
+        if args.max_ctime is not None:
+            tot_query += f"start_time<={args.max_ctime} and "
+        if args.query is not None:
+            tot_query += args.query + " and "
+        tot_query = tot_query[4:-4]
+        if tot_query == "":
+            tot_query = "1"
+
+    logger.debug(f"Sending query to obsdb: {tot_query}")
+    obs_list = ctx.obsdb.query(tot_query)
+
+    if len(obs_list) == 0:
+        logger.warning(f"No observations returned from query: {args.query}")
+    run_list = []
+    completed = db_solution.get_entries(['dataset'])['dataset']
+
+    for obs in obs_list:
+        if args.overwrite or not obs['obs_id'] in completed:
+            run_list.append(obs)
+
+    # write solutions
+    futures = []
+    for obs in run_list:
+        futures.append(executor.submit(process, obs, args))
+
+    for future in as_completed_callable(futures):
+        try:
+            aman_solution, obs_id, h5_solution = future.result()
+            save(aman_solution, db_solution, h5_solution,
+                 args.solution_output_dir, obs_id, args.overwrite,
+                 compression='gzip', encodings=encodings)
+        except Exception as e:
+            print(e)
+    return
+
+
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
-    main(**vars(args))
+
+    if args.use_mpi:
+        rank, executor, as_completed_callable = get_exec_env(nprocs=args.nprocs)
+        if rank == 0:
+            main_mpi(executor, as_completed_callable, args)
+    else:
+        main(**vars(args))
