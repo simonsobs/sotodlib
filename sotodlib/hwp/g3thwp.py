@@ -289,7 +289,6 @@ class G3tHWP():
                 'counter', 'counter_index', 'quad', 'quad_time']
         out = {k: data[k+suffix][1] if k+suffix in data.keys() else []
                for k in keys}
-
         # irig part
         if 'irig_time'+suffix not in data.keys():
             logger.warning(
@@ -306,8 +305,12 @@ class G3tHWP():
                 'No encoder data is available for encoder'+suffix)
             return out
 
-        out['quad'] = data['quad'+suffix][1]
-        out['quad_time'] = data['quad'+suffix][0]
+        if 'quad' + suffix in data:
+            out['quad'] = data['quad'+suffix][1]
+            out['quad_time'] = data['quad'+suffix][0]
+        else:
+            out['quad'] = []
+            out['quad_time'] = []
 
         return out
 
@@ -1264,7 +1267,7 @@ class G3tHWP():
         self._num_dead_rots = 0
 
         # if no data, skip analysis
-        if len(self._encd_clk) == 0:
+        if len(self._encd_clk) < self._num_edges:
             return [], []
 
         # check duplication in data
