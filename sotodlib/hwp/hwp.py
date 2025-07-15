@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import filters, apodize
+from sotodlib.tod_ops import filters, apodize, fft_ops
 import logging
 
 logger = logging.getLogger(__name__)
@@ -665,20 +665,28 @@ def demod_tod(aman, signal=None, demod_mode=4,
                 lpf_cfg[k] = speed*float(v.split('*')[0])
 
     lpf = filters.get_lpf(lpf_cfg)
-        
+
+    # Create a RFFT object to reuse
+    n = fft_ops.find_superior_integer(aman.samps.count)
+    rfft = fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
+
     phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
-                                   signal_name=signal_name) * phasor
+                                   signal_name=signal_name, rfft=rfft).copy() * phasor
 
     # Filter the demodulated signal
     demod_aman = core.AxisManager(aman.dets, aman.samps)
     demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
     demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None)
+    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None, rfft=rfft).copy()
     demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None) * 2.
+    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None, rfft=rfft).copy() * 2.
     demod_aman.wrap("demodU", demod.imag, axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None) * 2.
+    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None, rfft=rfft).copy() * 2.
+
+    # Destroy the RFFT object
+    del rfft
+
     # Either wrap or return the demodulated signal
     if wrap:
         for fld in ['dsT', 'demodQ', 'demodU']:
