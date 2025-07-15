@@ -5,7 +5,7 @@ DemodSignalMap creates a signal you want to solve for, over which
 you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
-__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
+__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map','setup_demod_map']
 import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
 
@@ -424,7 +424,7 @@ class DemodSignalMap(DemodSignal):
     
 
 def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
-                    comm=mpi.COMM_WORLD, comps='TQU', split_labels=None,
+                    comm=mpi.COMM_WORLD, comps='TQU', split_labels=['full'],
                     singlestream=False, dtype_tod=np.float32,
                     dtype_map=np.float64, recenter=None, verbose=0):
     """
@@ -487,7 +487,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
                     nside=None, comm=mpi.COMM_WORLD, comps="TQU", t0=0,
                     dtype_tod=np.float32, dtype_map=np.float32,
-                    tag="", verbose=0, split_labels=None, L=None,
+                    tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
                     unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
     """
