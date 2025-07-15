@@ -5,7 +5,7 @@ DemodSignalMap creates a signal you want to solve for, over which
 you accumulate observations into the div and rhs maps. For examples
 how to use look at docstring of DemodMapmaker.
 """
-__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map']
+__all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map','setup_demod_map']
 import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
 
