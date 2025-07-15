@@ -835,15 +835,15 @@ def fit_noise_model(
             return
         if fixed_param == None:
             initial_params = np.array([wn_est, fknee_est, alpha_est])
-            bounds= [(0, None), (0, None), (0, 10)]
+            bounds= ((sys.float_info.min, None), (sys.float_info.min, None), (0, 10))
         if fixed_param == "wn":
             initial_params = np.array([fknee_est, alpha_est])
             fixed = wn_est
-            bounds= [(sys.float_info.min, None), (0, 10)]
+            bounds= ((sys.float_info.min, None), (0, 10))
         if fixed_param == "alpha":
             initial_params = np.array([wn_est, fknee_est])
             fixed = alpha_est
-            bounds= [(sys.float_info.min, None), (sys.float_info.min, None)]
+            bounds= ((sys.float_info.min, None), (sys.float_info.min, None))
 
         for i in range(len(pxx)):
             p = pxx[i]
