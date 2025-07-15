@@ -512,7 +512,11 @@ class Pipeline(list):
             if aman.dets.count == 0:
                 success = process.name
                 break
-        
+
+        # copy updated frequency cutoffs to full
+        full.move("frequency_cutoffs", None)
+        full.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
+
         return full, success
         
 
