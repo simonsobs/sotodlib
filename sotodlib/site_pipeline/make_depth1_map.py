@@ -131,7 +131,11 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     # reference wcs
     pixboxes = []
     for tod in tods:
-        my_shape, my_wcs = coords.get_footprint(tod, ref_wcs)
+        my_shape, my_wcs = coords.get_footprint(tod, ref_wcs, unwrap=True)
+        print("my_shape", my_shape)
+        print("my_wcs", my_wcs)
+        print("box")
+        print(enmap.box(my_shape, my_wcs)/utils.degree)
         my_pixbox = enmap.pixbox_of(ref_wcs, my_shape, my_wcs)
         pixboxes.append(my_pixbox)
     pixboxes = utils.allgatherv(pixboxes, comm)
@@ -141,15 +145,47 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     # Could be done more generally, but would be much more involved, and this should be
     # good enough
     nphi     = utils.nint(np.abs(360/ref_wcs.wcs.cdelt[0]))
-    widths   = pixboxes[:,1,0]-pixboxes[:,0,0]
-    pixboxes[:,0,0] = utils.rewind(pixboxes[:,0,0], ref=pixboxes[0,0,0], period=nphi)
-    pixboxes[:,1,0] = pixboxes[:,0,0] + widths
+    widths   = pixboxes[:,1,1]-pixboxes[:,0,1]
+    pixboxes[:,0,1] = utils.rewind(pixboxes[:,0,1], ref=pixboxes[0,0,1], period=nphi)
+    pixboxes[:,1,1] = pixboxes[:,0,1] + widths
+
+
+    print("pixboxes")
+    print(pixboxes)
+
     # It's now safe to find the total pixel bounding box
     union_pixbox = np.array([np.min(pixboxes[:,0],0)-pad,np.max(pixboxes[:,1],0)+pad])
     # Use this to construct the output geometry
     shape = union_pixbox[1]-union_pixbox[0]
+
+    print("union")
+    print(union_pixbox)
+    print("shape")
+    print(shape)
+
     wcs   = ref_wcs.deepcopy()
     wcs.wcs.crpix -= union_pixbox[0,::-1]
+    # The pointing matrix assumes that all valid pixels are within 180° of
+    # crval. Make that the case by moving crval to the center value
+    print("A")
+    print(enmap.box(shape, wcs)/utils.degree)
+    ra_mid = enmap.pix2sky(shape, wcs, [0,shape[-1]/2])[1]
+    Δra    = ra_mid/utils.degree - wcs.wcs.crval[0]
+    wcs.wcs.crval[0] += Δra
+    wcs.wcs.crpix[0] += Δra/wcs.wcs.cdelt[0]
+    print("B")
+    print(enmap.box(shape, wcs)/utils.degree)
+
+    print("oshape")
+    print(shape)
+    print("owcs")
+    print(wcs)
+
+    print("padding geometry")
+    shape = (shape[-2]+2000,shape[-1]+6000)
+    wcs.wcs.crpix += [3000,1000]
+
+
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
@@ -232,6 +268,15 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
 def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None,):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
+
+    shape, wcs = enmap.band_geometry2([-4,22], deg=True, res=0.5/60)
+    # offset to 180
+    wcs.wcs.crval[0] = 180
+    print("moo")
+    print(shape)
+    print(wcs)
+
+
     # Set up our mapmaking equation
     signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
     signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=tiled>0, interpol=interpol, ofmt="")
@@ -400,6 +445,7 @@ def main(config_file=None, defaults=defaults, **args):
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
+            print("obslist", obslist)
             my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, site=SITE)
             my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod, maxcut=0.3)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
@@ -414,6 +460,9 @@ def main(config_file=None, defaults=defaults, **args):
             #    make it mpi-aware like the footprint stuff
             my_infos = [obs_infos[obslist[ind][3]] for ind in my_inds]
             profile  = find_scan_profile(context, my_tods, my_infos, comm=comm_intra)
+            print("my_tods")
+            print(my_tods)
+            print(my_tods[0].obs_info.obs_id)
             subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
             # 3. Write out the depth1 metadata
             d1info = bunch.Bunch(profile=profile, pid=pid, detset=detset.encode(), band=band.encode(),
@@ -443,4 +492,5 @@ def main(config_file=None, defaults=defaults, **args):
     return True
 
 if __name__ == '__main__':
+    from sotodlib.site_pipeline import util
     util.main_launcher(main, get_parser)

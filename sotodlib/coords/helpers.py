@@ -311,7 +311,7 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
 
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
-                  focal_plane=None, sight=None, rot=None):
+                  focal_plane=None, sight=None, rot=None, unwrap=False):
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
@@ -355,6 +355,14 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
+
+    if unwrap:
+        # Handle sky wrapping, so a tod straddling the wraparound point
+        # doesn't give a 360 degree wide, mostly empty geometry. This
+        # is appropriate for finding the footprint of a few tods or
+        # a small patch, but for a full-width survey it could introduce
+        # more wrapping problems than it solves
+        planar[...,0] = utils.rewind(planar[...,0], ref=planar[0,0,0])
 
     # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
     delts  = wcs_kernel.wcs.cdelt * DEG
