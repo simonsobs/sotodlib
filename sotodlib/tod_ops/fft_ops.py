@@ -529,13 +529,11 @@ def noise_model(f, params, **fixed_param):
             raise ValueError('The number of fit parameters are invalid.')
     else:
         raise ValueError('"alpha" or "wn" can be a fixed parameter.')
-
     return wn**2 * (1 + (fknee / f) ** alpha)
 
 def neglnlike(params, x, y, bin_size=1, **fixed_param):
     model = noise_model(x, params, **fixed_param)
     output = np.sum((np.log(model) + y / model)*bin_size)
-
     if not np.isfinite(output):
         return 1.0e30
     return output
