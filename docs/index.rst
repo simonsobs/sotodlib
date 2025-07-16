@@ -15,6 +15,7 @@ Welcome to SOTODLib's documentation!
    axisman.rst
    flagman.rst
    context.rst
+   obs_info.rst
    g3tsmurf.rst
    hwp.rst
    hkdb.rst
