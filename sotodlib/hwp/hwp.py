@@ -672,7 +672,7 @@ def demod_tod(aman, signal=None, demod_mode=4,
 
     phasor = 2. * np.exp(demod_mode * 1.j * aman.hwp_angle)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
-                                   signal_name=signal_name, rfft=rfft)[:] * phasor
+                                   signal_name=signal_name, rfft=rfft) * phasor
 
     # Filter the demodulated signal
     demod_aman = core.AxisManager(aman.dets, aman.samps)
