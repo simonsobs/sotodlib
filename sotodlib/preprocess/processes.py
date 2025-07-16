@@ -15,10 +15,13 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts, flag_cut_select,
                                    sparse_to_ranges_matrix)
 
+from sotodlib.preprocess import preprocess_util as pp_util
+
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
 
+logger = pp_util.init_logger("preprocess")
 
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
@@ -416,6 +419,9 @@ class PSDCalc(_Preprocess):
         if full_output:
             fft_aman.wrap("nseg", nseg)
 
+        if "frequency_cutoffs" in proc_aman:
+            proc_aman["frequency_cutoffs"].wrap(self.wrap, proc_aman["frequency_cutoffs"][self.signal])
+
         self.save(proc_aman, fft_aman)
 
     def save(self, proc_aman, fft_aman):
@@ -518,7 +524,7 @@ class Noise(_Preprocess):
     Example config block for fitting PSD::
 
     - name: "noise"
-      fit: False
+      fit: True
       subscan: False
       calc:
         fwhite: (5, 10)
@@ -566,6 +572,23 @@ class Noise(_Preprocess):
         psd = proc_aman[self.psd]
         pxx = psd.Pxx_ss if self.subscan else psd.Pxx
 
+        if "frequency_cutoffs" in proc_aman:
+            frequency_cutoff = proc_aman["frequency_cutoffs"][self.psd]
+        else:
+            frequency_cutoff=None
+
+        def check_frequency_cutoff(fmin, fmax):
+             # limit upper frequency cutoffs to hwp freq
+            if 'hwp_angle' in aman and frequency_cutoff is not None:
+                hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+                if fmax >= frequency_cutoff:
+                    logger.warning(f"Upper freq={fmax} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
+                    fmax = frequency_cutoff
+            if fmin is not None and fmin >= fmax:
+                raise ValueError(f"lower freq={fmin} >= upper freq={fmax}")
+            return fmax
+
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
 
@@ -583,6 +606,7 @@ class Noise(_Preprocess):
                     calc_wn = True
             if calc_wn or wn_est is None:
                 wn_f_low, wn_f_high = fcfgs.get('fwhite', (5, 10))
+                wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
                 fcfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    nseg=psd.get('nseg'),
@@ -591,9 +615,11 @@ class Noise(_Preprocess):
             if fcfgs.get('subscan') is None:
                 fcfgs['subscan'] = self.subscan
             fcfgs.pop('fwhite', None)
+            f_max = check_frequency_cutoff(fcfgs.get("lowf", None), fcfgs.pop("f_max", 100))
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
+                                                        f_max=f_max,
                                                         **fcfgs)
             if calc_wn or wn_est is None:
                 if not self.subscan:
@@ -603,6 +629,7 @@ class Noise(_Preprocess):
         else:
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
+            wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          nseg=psd.get('nseg'),
@@ -670,54 +697,6 @@ class Noise(_Preprocess):
         else:
             return keep
 
-    @classmethod
-    def gen_metric(cls, meta, proc_aman, noise_aman="noise"):
-        """ Generate a QA metric for median of the detector white noise
-        values.
-
-        Arguments
-        ---------
-        meta : AxisManager
-            The full metadata container.
-        proc_aman : AxisManager
-            The metadata containing just the output of this process.
-        noise_aman : str
-            Name of the noise axis manager in proc_aman
-
-        Returns
-        -------
-        line : dict
-            InfluxDB line entry elements to be fed to
-            `site_pipeline.monitor.Monitor.record`
-        """
-        # record one metric per wafer_slot per bandpass
-        # extract these tags for the metric
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
-        tags = []
-        vals = []
-        from ..qa.metrics import _get_tag, _has_tag
-        for bp in np.unique(meta.det_info.wafer.bandpass):
-            for ws in np.unique(meta.det_info.wafer_slot):
-                subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
-                )[0]
-
-                white_noise = proc_aman[noise_aman].white_noise[subset]
-                vals.append(np.nanmedian(white_noise))
-
-                tags_base = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_base["telescope"] = meta.obs_info.telescope
-                tags.append(tags_base)
-
-        obs_time = [meta.obs_info.timestamp] * len(tags)
-        return {
-            "field": cls._influx_field,
-            "values": vals,
-            "timestamps": obs_time,
-            "tags": tags,
-        }
 
 class Calibrate(_Preprocess):
     """Calibrate the timestreams based on some provided information.
@@ -1027,6 +1006,23 @@ class Demodulate(_Preprocess):
             aman.restrict('samps', (aman.samps.offset + trim,
                                     aman.samps.offset + aman.samps.count - trim))
 
+        if 'frequency_cutoffs' in proc_aman:
+            hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                    (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+            lpf_cfg = self.process_cfgs["demod_cfgs"].get("lpf_cfg", None)
+            if lpf_cfg is not None:
+                for k, v in lpf_cfg.items():
+                    if k == 'cutoff':
+                        if isinstance(v, str):
+                            freq_cutoff = hwp_freq*float(v.split('*')[0])
+                        else:
+                            freq_cutoff = v
+            else:
+                freq_cutoff = 0.95*hwp_freq
+            proc_aman['frequency_cutoffs'].wrap('dsT', freq_cutoff)
+            proc_aman['frequency_cutoffs'].wrap('demodQ', freq_cutoff)
+            proc_aman['frequency_cutoffs'].wrap('demodU', freq_cutoff)
+
 
 class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight and subtract.
@@ -1242,6 +1238,77 @@ class SSOFootprint(_Preprocess):
     """Find nearby sources within a given distance and get SSO footprint and plot
     each source on the focal plane.
 
+     Example config block::
+
+        - name: "sso_footprint"
+          calc:
+              # Note: all distances in degrees
+              source_list: ['jupiter', 'moon', 'saturn'] # remove to find nearby sources
+              distance: 20 # distance from boresight center
+              nstep: 100
+              telescope_flavor: 'sat' # options: ['sat', 'lat']
+              wafer_hit_threshold: 10 # number of planet-wafer distances to consider being a source hit
+              # for SATs:
+              wafer_radius: 6
+              wafer_centers: {'ws0': [-0.19791037, 0.08939717],
+                              'ws1': [-0.014455856, -12.528095],
+                              'ws2': [-10.867158, -6.2621593],
+                              'ws3': [-10.835234, 6.2727923],
+                              'ws4': [0.11142064, 12.461107],
+                              'ws5': [10.878714, 6.273904],
+                              'ws6': [10.870621, -6.2822847]}
+              # for LAT:
+              wafer_radius: 0.5
+              wafer_centers: {'c1_ws0': [-0.36504516, 1.9619369e-05],
+                              'c1_ws1': [0.18297304, 0.3164044],
+                              'c1_ws2': [0.18297556, -0.31638196],
+                              'i1_ws0': [-1.9073119, -0.8932063],
+                              'i1_ws1': [-1.357702, -0.57522374],
+                              'i1_ws2': [-1.3556796, -1.20838],
+                              'i3_ws0': [1.1854928, -0.8960549],
+                              'i3_ws1': [1.7332374, -0.57540596],
+                              'i3_ws2': [1.7351116, -1.2087585],
+                              'i4_ws0': [1.1789553, 0.89766216],
+                              'i4_ws1': [1.7351091, 1.208781],
+                              'i4_ws2': [1.7332398, 0.5754285],
+                              'i5_ws0': [-0.35970667, 1.7832578],
+                              'i5_ws1': [0.19053483, 2.0997307],
+                              'i5_ws2': [0.1866497, 1.4668859],
+                              'i6_ws0': [-1.9017702, 0.89197767],
+                              'i6_ws1': [-1.3556821, 1.2084025],
+                              'i6_ws2': [-1.3564061, 0.5815026]}
+          save: True
+          plot:
+              # for SATs:
+              wafer_offsets: {'ws0': [-2.5, -0.5],
+                              'ws1': [-2.5, -13],
+                              'ws2': [-13, -7],
+                              'ws3': [-13, 5],
+                              'ws4': [-2.5, 11.5],
+                              'ws5': [8.5, 5],
+                              'ws6': [8.5, -7]}
+              focal_plane: '/so/home/msilvafe/shared_files/sat_hw_positions.npz'
+              # for LAT:
+              wafer_offsets: {'c1_ws0': [-0.6, 0.0],
+                              'c1_ws1': [-0.0, 0.3],
+                              'c1_ws2': [-0.0, -0.3],
+                              'i1_ws0': [-2.1, -0.9],
+                              'i1_ws1': [-1.6, -0.6],
+                              'i1_ws2': [-1.6, -1.2],
+                              'i3_ws0': [1.0, -0.9],
+                              'i3_ws1': [1.5, -0.6],
+                              'i3_ws2': [1.5, -1.2],
+                              'i4_ws0': [1.0, 0.9],
+                              'i4_ws1': [1.5, 1.2],
+                              'i4_ws2': [1.5, 0.6],
+                              'i5_ws0': [-0.6, 1.8],
+                              'i5_ws1': [-0.0, 2.1],
+                              'i5_ws2': [-0.0, 1.5],
+                              'i6_ws0': [-2.1, 0.9],
+                              'i6_ws1': [-1.6, 1.2],
+                              'i6_ws2': [-1.6, 0.6]}
+              focal_plane: '/so/home/dnguyen/repos/scripts/lat_hw_positions.npz'
+
     .. autofunction:: sotodlib.obs_ops.sources.get_sso
     """
     name = 'sso_footprint'
@@ -1254,9 +1321,18 @@ class SSOFootprint(_Preprocess):
             if not ssos:
                 raise ValueError("No sources found within footprint")
             ssos = [i[0] for i in ssos]
+
         sso_aman = core.AxisManager()
         nstep = self.calc_cfgs.get("nstep", 100)
         onsamp = (aman.samps.count+nstep-1)//nstep
+        telescope_flavor = self.calc_cfgs.get("telescope_flavor", None)
+        if telescope_flavor not in ['sat', 'lat']:
+            raise NameError('Only "sat" or "lat" is supported.')
+        wafer_centers = self.calc_cfgs.get("wafer_centers", None)
+        if wafer_centers is None:
+            raise ValueError("No wafer centers defined in config")
+        wafer_slots = [key for key in wafer_centers.keys()]
+
         for sso in ssos:
             planet = sso
             xi_p, eta_p = obs_ops.sources.get_sso(aman, planet, nstep=nstep)
@@ -1266,6 +1342,24 @@ class SSOFootprint(_Preprocess):
             # planet_aman = core.AxisManager(core.OffsetAxis("samps", onsamp))
             planet_aman.wrap("xi_p", xi_p, [(0, "ds_samps")])
             planet_aman.wrap("eta_p", eta_p, [(0, "ds_samps")])
+            wafer_radius = self.calc_cfgs.get("wafer_radius", None)
+            if wafer_radius is None:
+                if telescope_flavor == 'sat':
+                    wafer_radius = 6 # [deg]
+                elif telescope_flavor == 'lat':
+                    wafer_radius = 0.5 # [deg]
+
+            for ws in wafer_slots:
+                ws_center_xi = np.deg2rad(wafer_centers[ws][0])
+                ws_center_eta = np.deg2rad(wafer_centers[ws][1])
+                wafer_hit = np.sum([np.sqrt((xi_p-ws_center_xi)**2 + (eta_p-ws_center_eta)**2) < np.deg2rad(wafer_radius)]) > self.calc_cfgs.get("wafer_hit_threshold", 10)
+                if wafer_hit:
+                    planet_aman.wrap(ws, True)
+                else:
+                    planet_aman.wrap(ws, False)
+
+            planet_aman.wrap('mean_distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
+
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
         
@@ -2314,6 +2408,18 @@ class CorrectIIRParams(_Preprocess):
     def process(self, aman, proc_aman, sim=False):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
+
+        if "frequency_cutoffs" in proc_aman and np.isnan(proc_aman["frequency_cutoffs"]["signal"]):
+            n = len(aman.timestamps)
+            delta_t = (aman.timestamps[-1] - aman.timestamps[0])/n
+            freqs = np.fft.rfftfreq(n, delta_t)
+            iir = tod_ops.filters.iir_filter()(freqs, aman)
+
+            mag = np.abs(iir) / np.max(np.abs(iir))
+            # 3dB scale
+            scale = 10 ** (-3. / 20)
+            freq_cutoff = freqs[np.min(np.where(np.array(mag < scale * np.max(mag)))[0])]
+            proc_aman["frequency_cutoffs"]["signal"] = freq_cutoff
 
 class TrimFlagEdge(_Preprocess):
     """Trim edge until given flags of all detectors are False

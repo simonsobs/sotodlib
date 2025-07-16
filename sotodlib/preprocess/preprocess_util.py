@@ -539,6 +539,16 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+
+            logger.info("Restricting detectors on all proc pipeline processes")
+            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+            for process in pipe_proc[:]:
+                keep = process.select(meta_proc, in_place=False)
+                if isinstance(keep, np.ndarray):
+                    keep_all &= keep
+            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
+            meta_init.restrict('dets', meta_proc.dets.vals)
             aman = context_init.get_obs(meta_proc, no_signal=True)
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
             aman.move("signal", None)
@@ -567,7 +577,6 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                     T_signal=t2ptemplate_aman.dsT
                 )
 
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
             aman.preprocess.merge(proc_aman.preprocess)
