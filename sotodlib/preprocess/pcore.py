@@ -514,7 +514,8 @@ class Pipeline(list):
                 break
 
         # copy updated frequency cutoffs to full
-        full.move("frequency_cutoffs", None)
+        if "frequency_cutoffs" in full:
+            full.move("frequency_cutoffs", None)
         full.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
 
         return full, success
