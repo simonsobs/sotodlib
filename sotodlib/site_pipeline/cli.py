@@ -54,6 +54,7 @@ from . import (
     update_g3tsmurf_db,
     update_hkdb,
     update_obsdb,
+    update_obsdb_ancil,
     make_cosamp_hk
 )
 
@@ -74,6 +75,7 @@ ELEMENTS = {
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-hkdb': update_hkdb,
     'update-obsdb': update_obsdb,
+    'update-obsdb-ancil': update_obsdb_ancil,
     'make-cosamp-hk': make_cosamp_hk,
 }
 
