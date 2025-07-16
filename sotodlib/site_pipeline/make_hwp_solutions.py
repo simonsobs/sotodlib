@@ -323,6 +323,8 @@ def _main(
                     logger.error(f"Failed to save hwp_angle: {obs_id}")
         except Exception as e:
             logger.error(e)
+        del aman_encoder, aman_solution
+        futures.remove(future)
     return
 
 
