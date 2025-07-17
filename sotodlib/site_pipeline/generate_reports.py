@@ -14,6 +14,8 @@ from dateutil.relativedelta import relativedelta
 from importlib import reload
 reload(plots)
 
+import sotodlib.site_pipeline.util as sp_util
+
 
 class GenerateReportConfig:
     def __init__(
@@ -77,7 +79,8 @@ class GenerateReportConfig:
             return GenerateReportConfig(**yaml.safe_load(f))
 
 
-def main(cfg: GenerateReportConfig) -> None:
+def main(cfg: str) -> None:
+    cfg = GenerateReportConfig.from_yaml(cfg)
     base_path = os.path.join(cfg.output_root, cfg.platform, cfg.report_interval)
 
     for start_time, stop_time in tqdm(cfg.time_intervals):
@@ -173,13 +176,10 @@ def get_parser(
     else:
         p = parser
     p.add_argument(
-        "config_file", type=str, help="yaml file with configuration for update script."
+        "cfg", type=str, help="yaml configuration file."
     )
     return p
 
 
-if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
-    cfg = GenerateReportConfig.from_yaml(cfg_file)
-    main(cfg)
+if __name__ == '__main__':
+    sp_util.main_launcher(main, get_parser)
