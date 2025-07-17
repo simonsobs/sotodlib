@@ -114,7 +114,7 @@ def main():
 
     module = ELEMENTS[top_args._pipemod]
     for epoint in ['cli_main', 'main']:
-        _main = getattr(module, epoint)
+        _main = getattr(module, epoint, None)
         if _main is not None:
             _main(**vars(args))
             break
