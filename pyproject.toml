@@ -53,6 +53,9 @@ site_pipeline = [
   "venn",
   "sodetlib @ git+https://github.com/simonsobs/sodetlib",
   "let-me-scroll-it",
+  "plotly",
+  "pandas",
+  "alphashape",
 ]
 tests = [
   "socs",
