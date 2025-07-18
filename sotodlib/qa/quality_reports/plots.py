@@ -111,11 +111,15 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
             else:
                 data[idx][m] = obs_values[o.obs_type]
 
+    reverse = False
+    if (data == (len(obs_types) - 1)).all():
+        reverse = True
+
     # Compile data for pie chart
     unique_vals, counts = np.unique(data, return_counts=True)
     percentages = counts / counts.sum() * 100
     labels = [obs_types[i] for i in unique_vals]
-    COLORS = Colors(names=labels)
+    COLORS = Colors(names=labels, reverse=reverse)
     colorscale: List[Tuple[float, str]] = []
     ntypes = len(labels)
     for i, t in enumerate(labels):

@@ -153,6 +153,9 @@ def obs_list_to_arr(obs_list: List[ObsInfo]) -> np.ndarray:
 
 
 def get_apex_data(cfg: ReportDataConfig):
+    """
+    Load APEX pwv data within the time range in the ReportDataConfig.
+    """
     APEX_DATA_URL = 'http://archive.eso.org/wdb/wdb/eso/meteo_apex/query'
 
     request = requests.post(APEX_DATA_URL, data={
@@ -164,6 +167,18 @@ def get_apex_data(cfg: ReportDataConfig):
             'shutter': 'SHUTTER_OPEN',
             #'tab_shutter': 'on',
         })
+
+    # check if any data was found
+    lines = request.text.splitlines()
+    found_data = False
+    for line in lines:
+        l = line.strip()
+        if l and not l.startswith("#"):
+            found_data = True
+            break
+
+    if not found_data:
+        return None
 
     def date_converter(d):
         naive_dt = dt.datetime.fromisoformat(d)
@@ -179,29 +194,6 @@ def get_apex_data(cfg: ReportDataConfig):
     outdata = {'timestamps':[d.timestamp() for d in data['dates']],
                'pwv':data['pwv']}
     return outdata
-
-
-def get_hk_and_pwv_data(cfg: ReportDataConfig):
-    """
-    Load the pwv from either the CLASS or APEX radiometer.
-    Merge both datasets when available.
-    """
-    result = load_pwv(cfg)
-
-    if hasattr(result, 'pwv'):
-        result_apex = get_apex_data(cfg)
-        result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
-        combined_times = np.concatenate((result.pwv[0], result_apex[0]))
-        combined_data = np.concatenate((result.pwv[1], result_apex[1]))
-
-        sorted_indices = np.argsort(combined_times)
-        sorted_times = combined_times[sorted_indices]
-        sorted_data = combined_data[sorted_indices]
-
-        return (sorted_times, sorted_data)
-    else:
-        result = get_apex_data(cfg)
-        return (np.array(result['timestamps']), np.array(0.03+0.84 * result['pwv']))
 
 
 def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
@@ -227,6 +219,30 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
     )
 
     return result
+
+
+def get_hk_and_pwv_data(cfg: ReportDataConfig):
+    """
+    Load the pwv from either the CLASS or APEX radiometer.
+    Merge both datasets when available.
+    """
+    result = load_pwv(cfg)
+    result_apex = get_apex_data(cfg)
+    if result_apex is not None:
+        result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
+
+    if hasattr(result, 'pwv'):
+        combined_times = np.concatenate((result.pwv[0], result_apex[0]))
+        if result_apex is not None:
+            combined_data = np.concatenate((result.pwv[1], result_apex[1]))
+
+        sorted_indices = np.argsort(combined_times)
+        sorted_times = combined_times[sorted_indices]
+        sorted_data = combined_data[sorted_indices]
+
+        return (sorted_times, sorted_data)
+    else:
+        return result_apex
 
 
 def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
@@ -409,14 +425,19 @@ class ReportData:
             logger.info("Merging PWV and QDS data with obs list")
             merge_qds_and_obs_list(qds_df, obs_list)
         else:
-            logger.warn("QDS data not found, skipping")
+            logger.warn("QDS data not found")
 
         # Add PWV data to obs_list
-        for o in obs_list:
-            m = np.logical_and.reduce([pwv[0] >= o.start_time, pwv[0] <= o.stop_time])
-            _pwv = np.nanmean(pwv[1][m])
-            if -0.1 < _pwv < 3.5:
-                o.pwv = _pwv
+        if pwv is not None:
+            for o in obs_list:
+                m = np.logical_and.reduce([pwv[0] >= o.start_time, pwv[0] <= o.stop_time])
+                _pwv = np.nanmean(pwv[1][m])
+                if -0.1 < _pwv < 3.5:
+                    o.pwv = _pwv
+        else:
+            logger.warn("pwv data not found")
+            for o in obs_list:
+                o.pwv = -9999.
 
         data: "ReportData" = cls(
             cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
