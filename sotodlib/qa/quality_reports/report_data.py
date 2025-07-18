@@ -201,6 +201,11 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
     Load PWV data from the range specified in the ReportDataConfig.
     Uses hk_cfg file or dict specified in the config.
     """
+
+    # don't try and load pwv earlier than 90 days ago
+    if cfg.start_time < dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=90):
+        return None
+
     if isinstance(cfg.hk_cfg, str):
         hk_cfg: HkConfig = HkConfig.from_yaml(cfg.hk_cfg)
     elif isinstance(cfg.hk_cfg, dict):
@@ -241,8 +246,10 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
         sorted_data = combined_data[sorted_indices]
 
         return (sorted_times, sorted_data)
-    else:
+    elif result_apex is not None:
         return result_apex
+    else:
+        return None
 
 
 def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
