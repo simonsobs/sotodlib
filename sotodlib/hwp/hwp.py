@@ -670,9 +670,10 @@ def demod_tod(aman, signal=None, demod_mode=4,
     n = fft_ops.find_superior_integer(aman.samps.count)
     rfft = fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
 
-    phasor = 2. * np.exp(demod_mode * 1.j * aman.hwp_angle)
+    phasor = np.empty_like(aman.hwp_angle, dtype=np.promote_types(signal.dtype, np.complex64))
+    np.exp((demod_mode * 1j * aman.hwp_angle), out=phasor)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
-                                   signal_name=signal_name, rfft=rfft) * phasor
+                                   signal_name=signal_name, rfft=rfft) * 2. * phasor
 
     # Filter the demodulated signal
     demod_aman = core.AxisManager(aman.dets, aman.samps)
