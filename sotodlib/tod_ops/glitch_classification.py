@@ -155,11 +155,9 @@ def classify_data_forest(df_classify, trained_forest):
     predictions[:, 3] = y_pred_forest_probs[:, 2]
     predictions[:, 4] = y_pred_forest_probs[:, 3]
 
-    lab_df = pd.DataFrame(predictions, columns = col_predictions)
+    lab_df = pd.DataFrame(predictions, columns = col_predictions, index=df_classify.index)
 
-    df_w_labs_and_stats = pd.concat([df_classify, lab_df], axis = 1)
-
-    return df_w_labs_and_stats
+    return lab_df
 
 def classify_glitch_stats(stats, trained_forest):
     """
@@ -183,11 +181,20 @@ def classify_glitch_stats(stats, trained_forest):
     if isinstance(trained_forest, str):
         trained_forest = pk.load(open('{}.pkl'.format(trained_forest), 'rb'))
 
-    df_stats = pd.DataFrame(stats, columns = trained_forest.feature_names_in_).dropna()
+    # Remove rows with invalid values
+    df_stats = pd.DataFrame(stats, columns = trained_forest.feature_names_in_) \
+                    .replace([np.inf, -np.inf], np.nan).dropna()
 
-    df_w_predictions = classify_data_forest(df_stats, trained_forest)
+    # Classify
+    df_predictions = classify_data_forest(df_stats, trained_forest)
 
-    return df_w_predictions.to_numpy()[:,-5:]
+    # Insert rows of NaNs for missing indices (assumed to be due to removed rows)
+    missing_idxs = [i for i in range(stats.shape[0]) if i not in df_predictions.index]
+    for i in missing_idxs:
+        df_predictions.loc[i] = np.full(df_predictions.shape[1], np.nan)
+    df_predictions.sort_index(inplace=True)
+
+    return df_predictions.to_numpy()
 
 def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0', '#FFE660'], \
  save = False, save_file_name = 'forest_confusion_matrix', outdir = os.getcwd(), show = True):
