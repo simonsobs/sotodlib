@@ -97,7 +97,7 @@ class ObsInfo:
     obs_tube_slot: str
     obs_tags: str = ""
     pwv: float = np.nan
-    num_valid_dets: float = np.nan
+    num_valid_dets: str = ""
 
     @classmethod
     def from_obsdb_entry(cls, data) -> "ObsInfo":
@@ -166,7 +166,8 @@ def get_apex_data(cfg: ReportDataConfig):
         })
 
     def date_converter(d):
-        return dt.datetime.fromisoformat(d.decode("utf-8"))
+        naive_dt = dt.datetime.fromisoformat(d)
+        return naive_dt.replace(tzinfo=dt.timezone.utc)
 
     data = np.genfromtxt(
         StringIO(request.text),
@@ -239,7 +240,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets']#, '"wafer_slot"::tag', '"wafer.bandpass"::tag']
+    keys = ['time', 'num_valid_dets', 'wafer.bandpass']#, '"wafer_slot"::tag', '"wafer.bandpass"::tag']
 
     query = f"""
         SELECT """ + ", ".join(keys) +  f""" from "autogen"."preprocesstod" WHERE (
@@ -259,6 +260,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
 
     df["time"] = pd.to_datetime(df["time"])
     df["timestamp"] = df["time"].apply(lambda x: x.timestamp())
+
     return df
 
 
@@ -275,12 +277,25 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
 
     df["obs_id"] = df["timestamp"].apply(find_obsid)
 
-    # Sum total valid dets and add those to obs-id list
-    totals = df[["num_valid_dets", "obs_id"]].groupby("obs_id").sum()
-    for obs_id, row in totals.iterrows():
+    totals = (
+        df[["num_valid_dets", "obs_id", "wafer.bandpass"]]
+        .groupby(["obs_id", "wafer.bandpass"])["num_valid_dets"]
+        .sum()
+        .reset_index()
+    )
+
+    totals_dict = (
+        totals.groupby("obs_id")
+              .apply(lambda g: dict(zip(g["wafer.bandpass"], g["num_valid_dets"])))
+              .to_dict()
+    )
+
+    for obs_id, band_totals in totals_dict.items():
+        band_totals.pop("NC", None)
         if not obs_id:
             continue
-        obs_list[obsids.index(obs_id)].num_valid_dets = float(row["num_valid_dets"])
+        obs_entry = obs_list[obsids.index(obs_id)]
+        obs_entry.num_valid_dets = str(band_totals)
 
 
 @dataclass
@@ -375,7 +390,8 @@ class ReportData:
             )
         ]
 
-        for i, o in tqdm(enumerate(obs_list), total=len(obs_list)):
+        #for i, o in tqdm(enumerate(obs_list), total=len(obs_list)):
+        for i, o in enumerate(obs_list):
             o.obs_tags = ",".join(ctx.obsdb.get(o.obs_id, tags=True)['tags'])
 
         if cfg.longterm_obs_file is not None:
