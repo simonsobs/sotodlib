@@ -237,15 +237,16 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
         result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
 
     if hasattr(result, 'pwv'):
-        combined_times = np.concatenate((result.pwv[0], result_apex[0]))
         if result_apex is not None:
+            combined_times = np.concatenate((result.pwv[0], result_apex[0]))
             combined_data = np.concatenate((result.pwv[1], result_apex[1]))
 
-        sorted_indices = np.argsort(combined_times)
-        sorted_times = combined_times[sorted_indices]
-        sorted_data = combined_data[sorted_indices]
-
-        return (sorted_times, sorted_data)
+            sorted_indices = np.argsort(combined_times)
+            sorted_times = combined_times[sorted_indices]
+            sorted_data = combined_data[sorted_indices]
+            return (sorted_times, sorted_data)
+        else:
+            return result
     elif result_apex is not None:
         return result_apex
     else:
