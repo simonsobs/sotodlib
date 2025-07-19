@@ -8,11 +8,17 @@ from dataclasses import dataclass, field
 import plotly.express as px
 import datetime as dt
 from copy import deepcopy
+import ast
+from collections import defaultdict
 
 from typing import List, Tuple, TYPE_CHECKING, Dict, Any, Optional
 
 from .report_data import ReportData, Footprint, obs_list_to_arr
 
+band_colors = [
+    "#D55E00",
+    "#56B4E9",
+]
 
 def get_discrete_distinct_colors(n, reverse=False):
     base_colors = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377', '#BBBBBB']
@@ -105,11 +111,15 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
             else:
                 data[idx][m] = obs_values[o.obs_type]
 
+    reverse = False
+    if (data == (len(obs_types) - 1)).all():
+        reverse = True
+
     # Compile data for pie chart
     unique_vals, counts = np.unique(data, return_counts=True)
     percentages = counts / counts.sum() * 100
     labels = [obs_types[i] for i in unique_vals]
-    COLORS = Colors(names=labels)
+    COLORS = Colors(names=labels, reverse=reverse)
     colorscale: List[Tuple[float, str]] = []
     ntypes = len(labels)
     for i, t in enumerate(labels):
@@ -164,92 +174,134 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     return ObsEfficiencyPlots(pie=pie, heatmap=heatmap)
 
 
-def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"]=None) -> go.Figure():
+def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) -> go.Figure:
     fig = go.Figure()
-    hovertemplate = "<br>".join(
-        [
-            "<b>PWV: </b> %{x}",
-            "<b>Biased Dets: </b> %{y}",
-            "<b>ObsId: </b> %{customdata[0]}",
-            "<b>Datetime: </b> %{customdata[1]}",
-        ]
-    )
+
     if longterm_data is not None:
-        arr = obs_list_to_arr(longterm_data.obs_list)
-        xs = arr["pwv"]
-        ys = arr["num_valid_dets"]
+        band_data = defaultdict(lambda: {"pwv": [], "yield": []})
+
+        for obs in longterm_data.obs_list:
+            if not obs.num_valid_dets:
+                continue
+
+            band_yields = ast.literal_eval(obs.num_valid_dets)
+
+            for band, val in band_yields.items():
+                if np.isfinite(val):
+                    band_data[band]["pwv"].append(obs.pwv)
+                    band_data[band]["yield"].append(val)
+
+        band_index = 0
+        for band, vals in band_data.items():
+            fig.add_trace(
+                go.Histogram2dContour(
+                    x=vals["pwv"],
+                    y=vals["yield"],
+                    colorscale=[[0, band_colors[band_index]], [1, band_colors[band_index]]],
+                    contours_coloring="lines",
+                    showscale=False,
+                    opacity=0.7,
+                    name=f"longterm {band}"
+                )
+            )
+            band_index +=1
+
+    band_index = 0
+    band_data = defaultdict(lambda: {'x': [], 'y': [], 'hover': []})
+
+    for obs in d.obs_list:
+        ts = dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc).isoformat()
+        if obs.num_valid_dets:
+            for band, val in ast.literal_eval(obs.num_valid_dets).items():
+                if not np.isfinite(val):
+                    continue
+                band_data[band]['x'].append(obs.pwv)
+                band_data[band]['y'].append(val)
+                band_data[band]['hover'].append(obs.obs_id)
+
+    for band, data in band_data.items():
+        color = band_colors[band_index % len(band_colors)]
         fig.add_trace(
-            go.Histogram2dContour(
-                x=xs,
-                y=ys,
-                colorscale="Blues",
-                contours_coloring="heatmap",
+            go.Scatter(
+                x=data['x'],
+                y=data['y'],
+                mode="markers",
+                name=f"{band}",
+                marker=dict(color=color),
+                hovertext=data['hover'],
             )
         )
+        band_index += 1
 
-    obs_arr = obs_list_to_arr(d.obs_list)
-    fig.add_trace(
-        go.Scatter(
-            x=obs_arr["pwv"].tolist(),
-            y=obs_arr["num_valid_dets"].tolist(),
-            customdata=np.column_stack([obs_arr["obs_id"].astype(str), obs_arr["start_time"]]),
-            mode="markers",
-            marker=dict(
-                opacity=1,
-                color="red",
-            ),
-            hovertemplate=hovertemplate,
-        )
-    )
     fig.update_layout(
         xaxis=dict(title="PWV"),
         yaxis=dict(title="Valid Dets"),
         height=500,
-        # width=500,
         margin=dict(l=0, r=0, t=0, b=0),
     )
     return fig
 
 
+
 def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    times, yields, htext = [], [], []
-    for obs in d.obs_list:
-        times.append(dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc))
-        yields.append(obs.num_valid_dets)
-        htext.append(obs.obs_id)
 
-    ds_factor=10
+    # Collect yields per band
+    yields_by_band = defaultdict(list)
+    times_by_band = defaultdict(list)
+    hover_by_band = defaultdict(list)
+
+    for obs in d.obs_list:
+        obs_time = dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc)
+        if obs.num_valid_dets:
+            for band, val in ast.literal_eval(obs.num_valid_dets).items():
+                times_by_band[band].append(obs_time)
+                yields_by_band[band].append(val)
+                hover_by_band[band].append(obs.obs_id)
+
+    band_index = 0
+
+    for band in sorted(yields_by_band):
+        color = band_colors[band_index % len(band_colors)]
+        fig.add_trace(
+            go.Scatter(
+                x=times_by_band[band],
+                y=yields_by_band[band],
+                mode='markers',
+                name=f"Valid Dets ({band})",
+                marker=dict(color=color),
+                hovertext=hover_by_band[band],
+            ),
+            secondary_y=False,
+        )
+        band_index += 1
+
+    # Add PWV trace
+    ds_factor = 10
     pwvs = deepcopy(d.pwv[1][::ds_factor])
     pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-    ts = [dt.datetime.fromtimestamp(t) for t in d.pwv[0][::ds_factor]]
+    ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+
     fig.add_trace(
         go.Scatter(
-            x=ts, y=pwvs,
+            x=ts,
+            y=pwvs,
             mode='lines',
             name="PWV",
+            marker=dict(color="#E69F00"),
             opacity=0.5,
         ),
         secondary_y=True
     )
 
-    fig.add_trace(
-        go.Scatter(
-            x=times,
-            y=yields,
-            mode='markers',
-            name="Num Valid Dets",
-            hovertext=htext,
-        ),
-        secondary_y=False,
-    )
-    margin = {k: 0 for k in ['l', 'r', 't', 'b']}
+    # Axis labels and layout
     fig.update_yaxes(title_text='Num Valid Dets', secondary_y=False)
     fig.update_yaxes(title_text='PWV', secondary_y=True)
     fig.update_layout(
-        margin=margin,
+        margin={k: 0 for k in ['l', 'r', 't', 'b']},
         height=500
     )
+
     return fig
 
 

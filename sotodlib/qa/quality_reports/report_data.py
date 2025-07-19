@@ -97,7 +97,7 @@ class ObsInfo:
     obs_tube_slot: str
     obs_tags: str = ""
     pwv: float = np.nan
-    num_valid_dets: float = np.nan
+    num_valid_dets: str = ""
 
     @classmethod
     def from_obsdb_entry(cls, data) -> "ObsInfo":
@@ -153,6 +153,9 @@ def obs_list_to_arr(obs_list: List[ObsInfo]) -> np.ndarray:
 
 
 def get_apex_data(cfg: ReportDataConfig):
+    """
+    Load APEX pwv data within the time range in the ReportDataConfig.
+    """
     APEX_DATA_URL = 'http://archive.eso.org/wdb/wdb/eso/meteo_apex/query'
 
     request = requests.post(APEX_DATA_URL, data={
@@ -165,8 +168,21 @@ def get_apex_data(cfg: ReportDataConfig):
             #'tab_shutter': 'on',
         })
 
+    # check if any data was found
+    lines = request.text.splitlines()
+    found_data = False
+    for line in lines:
+        l = line.strip()
+        if l and not l.startswith("#"):
+            found_data = True
+            break
+
+    if not found_data:
+        return None
+
     def date_converter(d):
-        return dt.datetime.fromisoformat(d.decode("utf-8"))
+        naive_dt = dt.datetime.fromisoformat(d)
+        return naive_dt.replace(tzinfo=dt.timezone.utc)
 
     data = np.genfromtxt(
         StringIO(request.text),
@@ -180,34 +196,16 @@ def get_apex_data(cfg: ReportDataConfig):
     return outdata
 
 
-def get_hk_and_pwv_data(cfg: ReportDataConfig):
-    """
-    Load the pwv from either the CLASS or APEX radiometer.
-    Merge both datasets when available.
-    """
-    result = load_pwv(cfg)
-
-    if hasattr(result, 'pwv'):
-        result_apex = get_apex_data(cfg)
-        result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
-        combined_times = np.concatenate((result.pwv[0], result_apex[0]))
-        combined_data = np.concatenate((result.pwv[1], result_apex[1]))
-
-        sorted_indices = np.argsort(combined_times)
-        sorted_times = combined_times[sorted_indices]
-        sorted_data = combined_data[sorted_indices]
-
-        return (sorted_times, sorted_data)
-    else:
-        result = get_apex_data(cfg)
-        return (np.array(result['timestamps']), np.array(0.03+0.84 * result['pwv']))
-
-
 def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
     """
     Load PWV data from the range specified in the ReportDataConfig.
     Uses hk_cfg file or dict specified in the config.
     """
+
+    # don't try and load pwv earlier than 90 days ago
+    if cfg.start_time < dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=90):
+        return None
+
     if isinstance(cfg.hk_cfg, str):
         hk_cfg: HkConfig = HkConfig.from_yaml(cfg.hk_cfg)
     elif isinstance(cfg.hk_cfg, dict):
@@ -228,6 +226,33 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
     return result
 
 
+def get_hk_and_pwv_data(cfg: ReportDataConfig):
+    """
+    Load the pwv from either the CLASS or APEX radiometer.
+    Merge both datasets when available.
+    """
+    result = load_pwv(cfg)
+    result_apex = get_apex_data(cfg)
+    if result_apex is not None:
+        result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
+
+    if hasattr(result, 'pwv'):
+        if result_apex is not None:
+            combined_times = np.concatenate((result.pwv[0], result_apex[0]))
+            combined_data = np.concatenate((result.pwv[1], result_apex[1]))
+
+            sorted_indices = np.argsort(combined_times)
+            sorted_times = combined_times[sorted_indices]
+            sorted_data = combined_data[sorted_indices]
+            return (sorted_times, sorted_data)
+        else:
+            return result
+    elif result_apex is not None:
+        return result_apex
+    else:
+        return None
+
+
 def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     """
     Loads QDS data from influxdb.
@@ -239,7 +264,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets']#, '"wafer_slot"::tag', '"wafer.bandpass"::tag']
+    keys = ['time', 'num_valid_dets', 'wafer.bandpass']#, '"wafer_slot"::tag', '"wafer.bandpass"::tag']
 
     query = f"""
         SELECT """ + ", ".join(keys) +  f""" from "autogen"."preprocesstod" WHERE (
@@ -259,6 +284,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
 
     df["time"] = pd.to_datetime(df["time"])
     df["timestamp"] = df["time"].apply(lambda x: x.timestamp())
+
     return df
 
 
@@ -275,12 +301,25 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
 
     df["obs_id"] = df["timestamp"].apply(find_obsid)
 
-    # Sum total valid dets and add those to obs-id list
-    totals = df[["num_valid_dets", "obs_id"]].groupby("obs_id").sum()
-    for obs_id, row in totals.iterrows():
+    totals = (
+        df[["num_valid_dets", "obs_id", "wafer.bandpass"]]
+        .groupby(["obs_id", "wafer.bandpass"])["num_valid_dets"]
+        .sum()
+        .reset_index()
+    )
+
+    totals_dict = (
+        totals.groupby("obs_id")
+              .apply(lambda g: dict(zip(g["wafer.bandpass"], g["num_valid_dets"])))
+              .to_dict()
+    )
+
+    for obs_id, band_totals in totals_dict.items():
+        band_totals.pop("NC", None)
         if not obs_id:
             continue
-        obs_list[obsids.index(obs_id)].num_valid_dets = float(row["num_valid_dets"])
+        obs_entry = obs_list[obsids.index(obs_id)]
+        obs_entry.num_valid_dets = str(band_totals)
 
 
 @dataclass
@@ -375,7 +414,8 @@ class ReportData:
             )
         ]
 
-        for i, o in tqdm(enumerate(obs_list), total=len(obs_list)):
+        #for i, o in tqdm(enumerate(obs_list), total=len(obs_list)):
+        for i, o in enumerate(obs_list):
             o.obs_tags = ",".join(ctx.obsdb.get(o.obs_id, tags=True)['tags'])
 
         if cfg.longterm_obs_file is not None:
@@ -393,14 +433,19 @@ class ReportData:
             logger.info("Merging PWV and QDS data with obs list")
             merge_qds_and_obs_list(qds_df, obs_list)
         else:
-            logger.warn("QDS data not found, skipping")
+            logger.warn("QDS data not found")
 
         # Add PWV data to obs_list
-        for o in obs_list:
-            m = np.logical_and.reduce([pwv[0] >= o.start_time, pwv[0] <= o.stop_time])
-            _pwv = np.nanmean(pwv[1][m])
-            if -0.1 < _pwv < 3.5:
-                o.pwv = _pwv
+        if pwv is not None:
+            for o in obs_list:
+                m = np.logical_and.reduce([pwv[0] >= o.start_time, pwv[0] <= o.stop_time])
+                _pwv = np.nanmean(pwv[1][m])
+                if -0.1 < _pwv < 3.5:
+                    o.pwv = _pwv
+        else:
+            logger.warn("pwv data not found")
+            for o in obs_list:
+                o.pwv = -9999.
 
         data: "ReportData" = cls(
             cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
