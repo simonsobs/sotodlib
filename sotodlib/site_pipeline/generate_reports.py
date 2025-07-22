@@ -106,7 +106,7 @@ class GenerateReportConfig:
 
 def main(cfg: str) -> None:
     cfg = GenerateReportConfig.from_yaml(cfg)
-    base_path = os.path.join(cfg.output_root, cfg.platform, cfg.report_interval)
+    base_path = os.path.join(cfg.output_root, cfg.report_interval)
 
     for start_time, stop_time in tqdm(cfg.time_intervals):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
@@ -148,8 +148,7 @@ def main(cfg: str) -> None:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
 
-    platform_path = os.path.join(cfg.output_root, cfg.platform)
-    create_manifest(platform_path, os.path.join(platform_path, "manifest.json"))
+    create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
 
 
 def render_report(
