@@ -148,7 +148,7 @@ def main(cfg: str) -> None:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
 
-    create_manifest(platform_path, os.path.join(cfg.output_root, "manifest.json"))
+    create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
 
 
 def render_report(
