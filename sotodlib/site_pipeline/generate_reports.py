@@ -2,6 +2,8 @@ from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List
 import datetime as dt
 import os
+import json
+from pathlib import Path
 from sotodlib.qa.quality_reports import plots
 import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader
@@ -15,6 +17,29 @@ from importlib import reload
 reload(plots)
 
 import sotodlib.site_pipeline.util as sp_util
+
+
+def create_manifest(base_dir: str, output_file: str):
+    manifest = []
+    for parent in [os.path.join(base_dir, "weekly"), os.path.join(base_dir, "monthly")]:
+        if not os.path.exists(parent):
+            continue
+        for folder_name in os.listdir(parent):
+            folder_path = os.path.join(parent, folder_name)
+            if not os.path.isdir(folder_path):
+                continue
+            index_path = os.path.join(folder_path, "report.html")
+            if os.path.exists(index_path):
+                label = f"{os.path.basename(parent)} / {folder_name}"
+                rel_path = os.path.relpath(index_path, start=base_dir).replace(os.sep, "/")
+                rel_path = f"../../{rel_path}"
+                manifest.append({
+                    "label": label,
+                    "rel_path": rel_path
+                })
+
+    with open(output_file, "w") as f:
+        json.dump(manifest, f, indent=2)
 
 
 class GenerateReportConfig:
@@ -81,7 +106,7 @@ class GenerateReportConfig:
 
 def main(cfg: str) -> None:
     cfg = GenerateReportConfig.from_yaml(cfg)
-    base_path = os.path.join(cfg.output_root, cfg.platform, cfg.report_interval)
+    base_path = os.path.join(cfg.output_root, cfg.report_interval)
 
     for start_time, stop_time in tqdm(cfg.time_intervals):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
@@ -122,6 +147,8 @@ def main(cfg: str) -> None:
         except Exception as e:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
+
+    create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
 
 
 def render_report(

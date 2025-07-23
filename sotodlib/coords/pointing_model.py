@@ -154,7 +154,8 @@ def model_lat_v1(params, az, el, roll):
       focal plane that appears fixed when the elevation structure is rotated 
       about its axis.
     - mir_center_{xi,eta}0: The (xi,eta) coordinate in the El-structure-centered
-      focal plane relative to which any tilts due to mirror misalignment occur.
+      focal plane that appears fixed when the mirrors are rotated about the ray from
+      sky that hits the center of both mirrors.
 
     """
     _p = dict(param_defaults['lat_v1'])
