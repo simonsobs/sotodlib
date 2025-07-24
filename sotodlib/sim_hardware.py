@@ -153,7 +153,7 @@ def sim_nominal():
     bnd["A"] = 0.29
     bnd["C"] = 0.62
     bnd["NET_corr"] = 1.02
-    bands["LAT_f230"] = bnd
+    bands["LAT_f220"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 285.4
@@ -167,7 +167,7 @@ def sim_nominal():
     bnd["A"] = 0.36
     bnd["C"] = 0.53
     bnd["NET_corr"] = 1.00
-    bands["LAT_f290"] = bnd
+    bands["LAT_f280"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 25.7
@@ -239,7 +239,7 @@ def sim_nominal():
     bnd["A"] = 0.35
     bnd["C"] = 0.54
     bnd["NET_corr"] = 1.00
-    bands["SAT_f230"] = bnd
+    bands["SAT_f220"] = bnd
 
     bnd = OrderedDict()
     bnd["center"] = 285.4
@@ -253,7 +253,7 @@ def sim_nominal():
     bnd["A"] = 0.42
     bnd["C"] = 0.45
     bnd["NET_corr"] = 1.00
-    bands["SAT_f290"] = bnd
+    bands["SAT_f280"] = bnd
 
     # Special "band" for dark bolometers
 
@@ -309,10 +309,10 @@ def sim_nominal():
     wbd = {
         "LAT_LF": ["LAT_f030", "LAT_f040"],
         "LAT_MF": ["LAT_f090", "LAT_f150"],
-        "LAT_UHF": ["LAT_f230", "LAT_f290"],
+        "LAT_UHF": ["LAT_f220", "LAT_f280"],
         "SAT_LF": ["SAT_f030", "SAT_f040"],
         "SAT_MF": ["SAT_f090", "SAT_f150"],
-        "SAT_UHF": ["SAT_f230", "SAT_f290"]
+        "SAT_UHF": ["SAT_f220", "SAT_f280"]
     }
     windx = 0
     cardindx = 0
@@ -484,8 +484,8 @@ def sim_nominal():
     fwhm["LAT_f040"] = 5.1
     fwhm["LAT_f090"] = 2.2
     fwhm["LAT_f150"] = 1.4
-    fwhm["LAT_f230"] = 1.0
-    fwhm["LAT_f290"] = 0.9
+    fwhm["LAT_f220"] = 1.0
+    fwhm["LAT_f280"] = 0.9
     tele["fwhm"] = fwhm
     tele["platform_name"] = ""
     telescopes["LAT"] = tele
@@ -495,8 +495,8 @@ def sim_nominal():
     fwhm_sat["SAT_f040"] = 63.0
     fwhm_sat["SAT_f090"] = 30.0
     fwhm_sat["SAT_f150"] = 17.0
-    fwhm_sat["SAT_f230"] = 11.0
-    fwhm_sat["SAT_f290"] = 9.0
+    fwhm_sat["SAT_f220"] = 11.0
+    fwhm_sat["SAT_f280"] = 9.0
 
     tele = OrderedDict()
     tele["tube_slots"] = ["ST1"]
