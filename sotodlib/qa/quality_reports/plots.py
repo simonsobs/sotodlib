@@ -1,5 +1,6 @@
 import plotly
 from plotly.subplots import make_subplots
+import matplotlib.colors as mcolors
 from plotly.colors import DEFAULT_PLOTLY_COLORS
 import plotly.graph_objects as go
 import numpy as np
