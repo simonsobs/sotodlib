@@ -203,8 +203,8 @@ class SimHWPSS(Operator):
                     "SAT_f040" : "039",
                     "SAT_f090" : "093",
                     "SAT_f150" : "145",
-                    "SAT_f230" : "225",
-                    "SAT_f290" : "278",
+                    "SAT_f220" : "225",
+                    "SAT_f280" : "278",
                 }[band]
 
                 # Get incident angle
