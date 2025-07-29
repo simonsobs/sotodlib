@@ -227,7 +227,6 @@ def _main(
     max_ctime: Optional[float] = None,
     obs_id: Optional[str] = None,
     off_site: Optional[bool] = False,
-    nprocs: Optional[int] = 1,
 ):
 
     logger.info(f"Using context {context} and HWPconfig {HWPconfig}")
@@ -328,13 +327,37 @@ def _main(
     return
 
 
-def main(args):
-    rank, executor, as_completed_callable = get_exec_env(nprocs=args.nprocs)
+def main(context: str,
+         HWPconfig: str,
+         solution_output_dir: Optional[str] = None,
+         encoder_output_dir: Optional[str] = None,
+         verbose: Optional[int] = 2,
+         overwrite: Optional[bool] = False,
+         query: Optional[str] = None,
+         min_ctime: Optional[float] = None,
+         max_ctime: Optional[float] = None,
+         obs_id: Optional[str] = None,
+         off_site: Optional[bool] = False,
+         nprocs: Optional[int] = 1):
+
+    rank, executor, as_completed_callable = get_exec_env(nprocs=nprocs)
     if rank == 0:
-        _main(executor, as_completed_callable, **vars(args))
+        _main(executor=executor,
+              as_completed_callable=as_completed_callable,
+              context=context,
+              HWPconfig=HWPconfig,
+              solution_output_dir=solution_output_dir,
+              encoder_output_dir=encoder_output_dir,
+              verbose=verbose,
+              overwrite=overwrite,
+              query=query,
+              min_ctime=min_ctime,
+              max_ctime=max_ctime,
+              obs_id=obs_id,
+              off_site=off_site)
 
 
 if __name__ == '__main__':
     parser = get_parser(parser=None)
     args = parser.parse_args()
-    main(args)
+    main(**vars(args))
