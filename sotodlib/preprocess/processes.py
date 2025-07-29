@@ -2214,6 +2214,26 @@ class CombineFlags(_Preprocess):
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
+class RotateFocalPlane(_Preprocess):
+    """ Interpret the boresight rotation effect as a focal plane rotation
+    and update them accordingly. This applies constant rotation to focal plane.
+    If hwp=True, rotations of gamma are reflected. This updates boresight.roll
+    and focal_plane, in place.
+
+    Example config block::
+
+        - name : "rotate_focal_plane"
+          process:
+            hwp: True
+
+    .. autofunction:: sotodlib.coords.demod.rotate_focal_plane
+    """
+    name = "rotate_focal_plane"
+
+    def process(self, aman, proc_aman, sim=False):
+        from sotodlib.coords import demod
+        demod.rotate_focal_plane(aman, **self.process_cfgs)
+
 class RotateQU(_Preprocess):
     """Rotate Q and U components to/from telescope coordinates.
 
@@ -2221,8 +2241,8 @@ class RotateQU(_Preprocess):
 
         - name : "rotate_qu"
           process:
-            sign: 1 
-            offset: 0 
+            sign: 1
+            offset: 0
             update_focal_plane: True
 
     .. autofunction:: sotodlib.coords.demod.rotate_demodQU
@@ -2511,7 +2531,8 @@ _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
 _Preprocess.register(CombineFlags)
-_Preprocess.register(RotateQU) 
+_Preprocess.register(RotateFocalPlane)
+_Preprocess.register(RotateQU)
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(PointingModel)  
