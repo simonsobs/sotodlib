@@ -113,8 +113,6 @@ class DemodMapmakingTest(unittest.TestCase):
         signal_map[1] += Q_stream
         signal_map[2] += U_stream
 
-        print(signal_map.dtype)
-
         # from_map expects and outputs float64
         _ = coords.demod.from_map(tod, signal_map, modulated=True, wrap=True)
         hwp.demod_tod(tod)
