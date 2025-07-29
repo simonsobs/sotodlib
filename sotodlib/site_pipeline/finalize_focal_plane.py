@@ -6,6 +6,7 @@ from copy import deepcopy
 from importlib import import_module
 from typing import List, Optional
 
+import git
 import h5py
 import megham.transform as mt
 import megham.utils as mu
@@ -34,10 +35,12 @@ from sotodlib.site_pipeline import util
 logger = util.init_logger(__name__, "finalize_focal_plane: ")
 
 
-def _create_db(filename, per_obs, obs_id, start_time, stop_time):
+def _create_db(filename, per_obs, obs_ids, start_time, stop_time):
     if per_obs:
-        base = {"obs:obs_id": obs_id}
-        group = obs_id
+        if len(obs_ids) != 1:
+            raise ValueError(f"Running in per_obs mode but {len(obs_ids)} found!")
+        base = {"obs:obs_id": obs_ids[0]}
+        group = obs_ids[0]
     else:
         base = {"obs:timestamp": (start_time, stop_time)}
         group = str(start_time)
@@ -141,7 +144,17 @@ def _load_template(template_path, ufm, pointing_cfg):
     )
 
 
-def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], tags=[]):
+def _get_obs_ids(
+    ctx,
+    metalist,
+    start_time,
+    stop_time,
+    query=None,
+    obs_ids=[],
+    tags=[],
+    stream_ids=[],
+    min_dets=0,
+):
     all_obs = obs_ids
     query_obs = []
     if len(obs_ids) == 0:
@@ -169,6 +182,24 @@ def _get_obs_ids(ctx, metalist, start_time, stop_time, query=None, obs_ids=[], t
         query_obs = ctx.obsdb.query(query)["obs_id"]
     obs_ids += query_obs
 
+    if len(stream_ids) > 0:
+        all_obs = [
+            obs_id
+            for obs_id in all_obs
+            if len(
+                np.intersect1d(
+                    ctx.obsdb.get(obs_id)["stream_ids_list"].split(","), stream_ids
+                )
+            )
+        ]
+    all_obs = np.array(
+        [
+            obs_id
+            for obs_id in all_obs
+            if len(ctx.obsfiledb.get_det_table(obs_id)) >= min_dets
+        ]
+    )
+
     if len(obs_ids) == 0 and query is None:
         return all_obs
     return np.intersect1d(obs_ids, all_obs)
@@ -191,9 +222,11 @@ def _load_ctx(config):
         config["context"].get("query", None),
         config["context"].get("obs_ids", []),
         config["context"].get("tags", ["timing_issues=0"]),
+        config["context"].get("stream_ids", []),
+        config.get("min_points", 0),
     )
     if len(obs_ids) == 0:
-        raise ValueError("No observations provided in configuration")
+        logger.warning("No observations provided in configuration")
     amans = []
     dets = config["context"].get("dets", {})
     for obs_id in obs_ids:
@@ -240,9 +273,25 @@ def _load_ctx(config):
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
     obs_ids = [aman.obs_info.obs_id for aman in amans]
-    stream_ids = np.unique(np.concatenate([aman.det_info.stream_id for aman in amans]))
 
-    return amans, obs_ids, stream_ids
+    # Figure out stream_ids and OTs
+    query_all = f"type=='obs' and start_time>{config['start_time']} and stop_time<{config['stop_time']}"
+    ot_sid = []
+    for obs in ctx.obsdb.query(query_all):
+        if obs["wafer_slots_list"] is None or obs["stream_ids_list"] is None:
+            continue
+        ot = obs["tube_slot"]
+        if ot == "stp1":
+            ot = "st1"
+        ot_sid += [
+            (obs["telescope_flavor"], ot, ws, sid)
+            for ws, sid in zip(
+                obs["wafer_slots_list"].split(","), obs["stream_ids_list"].split(",")
+            )
+        ]
+    ot_sid = np.unique(np.array(ot_sid), axis=0)
+
+    return amans, obs_ids, ot_sid
 
 
 def _load_rset_single(config):
@@ -307,6 +356,9 @@ def _load_rset_single(config):
 
 def _load_rset(config):
     stream_id = config["stream_id"]
+    telescope_flavor = config["telescope_flavor"].lower()
+    ot = config["tube_slot"].lower()
+    ws = config["wafer_slot"].lower()
     obs = config["resultsets"]
     _config = config.copy()
     obs_ids = np.array(list(obs.keys()))
@@ -324,7 +376,7 @@ def _load_rset(config):
     return (
         amans,
         obs_ids,
-        [stream_id],
+        [(telescope_flavor, ot, ws, stream_id)],
     )
 
 
@@ -547,11 +599,15 @@ def main():
 
     # Load data
     if "context" in config:
-        amans, obs_ids, stream_ids = _load_ctx(config)
+        amans, obs_ids, ot_sids = _load_ctx(config)
     elif "resultsets" in config:
-        amans, obs_ids, stream_ids = _load_rset(config)
+        amans, obs_ids, ot_sids = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
+    if len(ot_sids) == 0:
+        raise ValueError("No stream_ids found!")
+    if np.any(ot_sids[:, 0] != ot_sids[0][0]):
+        raise ValueError("Not all AxisManagers agree on telescope!")
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
@@ -561,6 +617,14 @@ def main():
     if not gen_template and not have_template:
         logger.error("Provided template doesn't exist, trying to generate one")
         gen_template = True
+
+    # Serialize config
+    repo = git.Repo(
+        os.path.abspath(os.path.dirname(__file__)), search_parent_directories=True
+    )
+    sha = f"{repo.head.object.hexsha}{'_dirty'*repo.is_dirty()}"
+    config["git_sha"] = sha
+    cfg_str = str(yaml.dump(config))
 
     # Need to move installed OT and WS of array to templace for this
     # if config.get("pad", False):
@@ -578,6 +642,7 @@ def main():
         batches = [([aman], [obs_id]) for aman, obs_id in zip(amans, obs_ids)]
     else:
         batches = [(amans, obs_ids)]
+    stream_ids = config.get("context", {}).get("stream_ids", [])
     for amans, obs_ids in batches:
         plot_dir = plot_dir_base
         if per_obs:
@@ -586,8 +651,23 @@ def main():
             plot_dir = os.path.join(plot_dir_base, str(config["start_time"]))
         os.makedirs(plot_dir, exist_ok=True)
         logger.info("Working on batch containing: %s", str(obs_ids))
-        ots = {}
-        for stream_id in stream_ids:
+
+        # Setup db and Receiver
+        db, base, group = _create_db(
+            dbpath,
+            per_obs=per_obs,
+            obs_ids=obs_ids,
+            start_time=config["start_time"],
+            stop_time=config["stop_time"],
+        )
+        rx = Receiver()
+        if config.get("in_place", True):
+            with h5py.File(outpath, "a") as f:
+                if group in f:
+                    rx = Receiver.load(f, group)
+        for tel, ot, ws, stream_id in ot_sids:
+            if len(stream_ids) > 0 and stream_id not in stream_ids:
+                continue
             logger.info("Working on %s", stream_id)
 
             # Limit ourselves to amans with this stream_id and restrict
@@ -598,31 +678,29 @@ def main():
                 for aman in amans
                 if aman is not None and stream_id in aman.det_info.stream_id
             ]
+            obs_ids_restrict = [
+                obs_id
+                for aman, obs_id in zip(amans, obs_ids)
+                if aman is not None and stream_id in aman.det_info.stream_id
+            ]
             if len(amans_restrict) == 0:
-                message = "\tSomehow no AxisManagers with stream_id %s, skipping"
+                message = "\tSomehow no AxisManagers with stream_id %s"
                 if per_obs:
                     logger.info(message, stream_id)
+                    continue
                 else:
                     logger.error(message, stream_id)
-                continue
 
-            # Figure out where this UFM is installed and make pointing config
-            tel = np.unique([aman.obs_info.telescope_flavor for aman in amans_restrict])
-            ot = np.unique([aman.obs_info.tube_slot for aman in amans_restrict])
-            ws = np.unique(
-                np.concatenate([aman.det_info.wafer_slot for aman in amans_restrict])
-            )
-            if len(tel) > 1:
-                raise ValueError(f"Multiple telescope flavors found for {stream_id}")
-            if len(ot) > 1:
-                raise ValueError(f"Multible tube slots found for {stream_id}")
-            if len(ws) > 1:
-                raise ValueError(f"Multiple wafer slots for {stream_id}")
-            tel, ot, ws = tel[0], ot[0], ws[0]
+            # Make pointing config
             logger.info("\t%s is in %s %s %s", stream_id, tel, ot, ws)
             pointing_cfg = _mk_pointing_config(tel, ot, ws, config)
-            if ot not in ots.keys():
-                ots[ot] = OpticsTube.from_pointing_cfg(pointing_cfg)
+
+            # Cnstructing the OT if we need to
+            if ot in rx.ot_dict:
+                rx.ot_dict[ot].delete_fp(stream_id)
+            else:
+                optics_tube = OpticsTube.from_pointing_cfg(pointing_cfg)
+                rx.optics_tubes = rx.optics_tubes + [optics_tube]
 
             # If a template is provided load it, otherwise generate one
             if gen_template:
@@ -646,11 +724,14 @@ def main():
                     "No template provided and unable to generate one for some reason"
                 )
 
-            focal_plane = FocalPlane.empty(template, stream_id, ws, len(amans))
+            focal_plane = FocalPlane.empty(
+                template, stream_id, ws, len(amans), config=cfg_str
+            )
             if focal_plane.template is None:
                 raise ValueError("Template is somehow None")
 
-            for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids)):
+            n_obs = 0
+            for i, (aman, obs_id) in enumerate(zip(amans_restrict, obs_ids_restrict)):
                 logger.info("\tWorking on %s", obs_id)
                 if aman.dets.count < min_points:
                     logger.info("\t\tToo few dets found, skipping")
@@ -674,10 +755,15 @@ def main():
                 # Do some outlier cuts
                 if "hits" in aman.pointing:
                     aman.restrict(
-                        "dets", aman.pointing.hits > config.get("min_hits", 5)
+                        "dets", aman.pointing.hits >= config.get("min_hits", 5)
                     )
                     if aman.dets.count == 0:
                         logger.info("\t\tNo high hits dets, skipping...")
+                        continue
+                if "R2" in aman.pointing:
+                    aman.restrict("dets", aman.pointing.R2 > config.get("min_r2", 0.7))
+                    if aman.dets.count == 0:
+                        logger.info("\t\tNo high R2 dets, skipping...")
                         continue
                 if aman.dets.count < min_points:
                     logger.info("\t\tToo few dets found, skipping")
@@ -724,6 +810,8 @@ def main():
                 weights = np.column_stack((weights, r2))
                 focal_plane.add_fp(i, fp, weights, template_msk)
 
+                n_obs += 1
+
             # Compute the average focal plane with weights
             (
                 focal_plane.avg_fp,
@@ -732,14 +820,17 @@ def main():
                 focal_plane.n_gamma,
             ) = _avg_focalplane(focal_plane.full_fp, focal_plane.tot_weight)
             tot_points = np.sum((focal_plane.n_point > 0).astype(int))
-            logger.info("\t%d points in fit", tot_points)
+            focal_plane.id_strs = focal_plane.template.id_strs
+            logger.info("\t%d points from %d obs in fit", tot_points, n_obs)
             if tot_points < min_points:
                 logger.error("\tToo few points! Skipping...")
                 if config.get("pad", False):
                     logger.info("\tPadding output with template")
                     focal_plane.transformed = focal_plane.template.fp
                     focal_plane.tot_weight = None
-                    ots[ot].focal_planes.append(focal_plane)
+                    rx.ot_dict[ot].focal_planes = rx.ot_dict[ot].focal_planes + [
+                        focal_plane
+                    ]
                 continue
 
             try:
@@ -806,16 +897,18 @@ def main():
             if config.get("plot", False):
                 plot_ufm(focal_plane, plot_dir)
                 plot_by_gamma(focal_plane, plot_dir)
-            ots[ot].focal_planes.append(focal_plane)
+
+            # Add to the receiver
+            rx.ot_dict[ot].focal_planes = rx.ot_dict[ot].focal_planes + [focal_plane]
 
         # Per OT common mode
         todel = []
-        for name, ot in ots.items():
+        for name, ot in rx.ot_dict.items():
             logger.info("Fitting common mode for %s", ot.name)
             centers = np.atleast_2d(
                 np.array(
                     [
-                        fp.template.center
+                        fp.template_center
                         for fp in ot.focal_planes
                         if fp.tot_weight is not None
                     ]
@@ -867,29 +960,37 @@ def main():
                 ot.transform_fullcm.rot,
                 ("xi", "eta", "gamma"),
             )
+        logger.info("Deleting OTs: %s", str(todel))
         for ot in todel:
-            del ots[ot]
+            rx.delete_ot(ot)
 
         # Full receiver common mode
         logger.info("Fitting receiver common mode")
         centers = np.atleast_2d(
-            np.array([ot.center for ot in ots.values() if ot.num_fps > 0])
+            np.array([ot.center for ot in rx.optics_tubes if ot.num_fps > 0])
         )
         centers_transformed = np.atleast_2d(
-            np.array([ot.center_transformed for ot in ots.values() if ot.num_fps > 0])
+            np.array(
+                [ot.center_transformed for ot in rx.optics_tubes if ot.num_fps > 0]
+            )
         )
-        if len(ots) == 0 or centers.size == 0 or centers_transformed.size == 0:
+        no_ots = (
+            len(rx.optics_tubes) == 0
+            or centers.size == 0
+            or centers_transformed.size == 0
+        )
+        if no_ots and not config.get("pad", False):
             logger.error("\tNo optics tubes found! Skipping...")
             continue
-        elif len(ots) == 1:
+        elif len(rx.optics_tubes) == 1 or (no_ots and config.get("pad", False)):
             logger.info(
                 "\tOnly one OT found, receiver common mode will be from this tube"
             )
-            recv_transform = deepcopy(tuple(ots.values())[0].transform_fullcm)
+            recv_transform = deepcopy(rx.optics_tubes[0].transform_fullcm)
         else:
             centers = centers.reshape((-1, 3))
             centers_transformed = centers_transformed.reshape((-1, 3))
-            if len(ots) < 3:
+            if len(rx.optics_tubes) < 3:
                 logger.info(
                     "\tNot enough OTs to fit receiver common mode, transform will be approximated"
                 )
@@ -901,26 +1002,31 @@ def main():
                         mt.apply_transform(
                             centers, ot.transform.affine, ot.transform.shift
                         )
-                        for ot in ots.values()
+                        for ot in rx.optics_tubes
                     ],
                 )
-                centers = np.repeat(centers, len(ots), 0)
+                centers = np.repeat(centers, len(rx.optics_tubes), 0)
             rot, sft = mt.get_rigid(centers[:, :2], centers_transformed[:, :2])
             gamma_shift = np.mean(centers_transformed[:, 2] - centers[:, 2])
             recv_transform = Transform.from_split(
                 np.array((*sft.ravel(), gamma_shift)), rot, 1.0
             )
         receiver = Receiver(
-            list(ots.values()), transform=recv_transform, include_cm=include_cm
+            rx.optics_tubes,
+            transform=recv_transform,
+            include_cm=include_cm,
+            valid_ids=np.unique(rx.valid_ids + rx.fp_valid_ids).tolist(),
         )
-        _log_vals(
-            recv_transform.shift,
-            recv_transform.scale,
-            recv_transform.shear,
-            recv_transform.rot,
-            ("xi", "eta", "gamma"),
-        )
-        plot_receiver(receiver, plot_dir)
+
+        if not (no_ots and config.get("pad", False)):
+            _log_vals(
+                recv_transform.shift,
+                recv_transform.scale,
+                recv_transform.shear,
+                recv_transform.rot,
+                ("xi", "eta", "gamma"),
+            )
+            plot_receiver(receiver, plot_dir)
 
         # Now compute correction only transform for each ufm
         # Transforms are composed as ufm(ot(rx(focal_plane)))
@@ -948,8 +1054,9 @@ def main():
                 fp.transform_nocm.decompose()
                 # Remove the common mode if desired
                 if not include_cm and fp.template is not None:
+                    fp.with_cm = False
                     fp.transformed = mt.apply_transform(
-                        fp.template.fp,
+                        fp.template_fp,
                         fp.transform_nocm.affine,
                         fp.transform_nocm.shift,
                     )
@@ -957,13 +1064,6 @@ def main():
         # Make final outputs and save
         logger.info("Saving data to %s", outpath)
         logger.info("Writing to database at %s", dbpath)
-        db, base, group = _create_db(
-            dbpath,
-            per_obs=per_obs,
-            obs_id=obs_ids[0],
-            start_time=config["start_time"],
-            stop_time=config["stop_time"],
-        )
         if config.get("pad", False):
             logger.info("Padding missing arrays with values from template")
         with h5py.File(outpath, "a") as f:
