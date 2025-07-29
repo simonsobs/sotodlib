@@ -429,7 +429,12 @@ class HWPSolSuccess(HWPSolQA):
     _needs_encoder = True
 
     def _gen_value(self, meta):
-        return meta.hwp_solution[f"logger_{self._encoder}"] == "Angle calculation succeeded"
+        if "Angle calculation succeeded" in meta.hwp_solution[f"logger_{self._encoder}"]:
+            return True
+        elif meta.hwp_solution[f"logger_{self._encoder}"] == 'No HWP data':
+            return 'No data'
+        else:
+            return False
 
 
 class HWPSolPrimaryEncoder(HWPSolQA):
@@ -510,5 +515,84 @@ class HWPSolMeanTemplate(HWPSolQA):
     _needs_encoder = True
 
     def _gen_value(self, meta):
-        obs_time = [meta.obs_info.timestamp]
         return np.mean(np.abs(meta.hwp_solution[f"template_{self._encoder}"]))
+
+
+class HWPSolNumDroppedPacketsEncoder(HWPSolQA):
+    """ The number of dropped encoder packets."""
+
+    _influx_field = "num_dropped_packets_encoder"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dropped_packets_{self._encoder}"]
+
+
+class HWPSolNumDroppedPacketsIrig(HWPSolQA):
+    """ The number of dropped IRIG packets."""
+
+    _influx_field = "num_dropped_packets_irig"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dropped_packets_irig_{self._encoder}"]
+
+
+class HWPSolNumDataPointGlitchesEncoder(HWPSolQA):
+    """ The number of data point glitches in encoder data."""
+
+    _influx_field = "num_data_point_glitches_encoder"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_glitches_{self._encoder}"]
+
+
+class HWPSolNumDataPointGlitchesIrig(HWPSolQA):
+    """ The number of data point glitches in IRIG data."""
+
+    _influx_field = "num_data_point_glitches_irig"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_glitches_irig_{self._encoder}"]
+
+
+class HWPSolNumValueGlitchesEncoder(HWPSolQA):
+    """ The number of value glitches in encoder data."""
+
+    _influx_field = "num_value_glitches_encoder"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_value_glitches_{self._encoder}"]
+
+
+class HWPSolNumValueGlitchesIrig(HWPSolQA):
+    """ The number of value glitches in IRIG data."""
+
+    _influx_field = "num_value_glitches_irig"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_value_glitches_irig_{self._encoder}"]
+
+
+class HWPSolDeadRotations(HWPSolQA):
+    """ The number of dead rotations that failed to correct glitches."""
+
+    _influx_field = "num_dead_rots"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dead_rots_{self._encoder}"]
+
+
+class HWPSolDroppedSlits(HWPSolQA):
+    """ The number of dropped slits."""
+
+    _influx_field = "num_dropped_slits"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dropped_slits_{self._encoder}"]
