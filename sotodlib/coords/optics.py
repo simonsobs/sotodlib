@@ -439,7 +439,7 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
     pol_el, pol_xel = LAT_pix2sky(
         pol_x, pol_y, sec2el, sec2xel, array2secx, array2secy, roll
     )
-    pol_xi, pol_eta, _ = quat.decompose_xieta(quat.rotation_lonlat(-pol_xel, pol_el))
+    pol_xi, pol_eta, _ = quat.decompose_xieta(quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(-pol_xel, pol_el))
     gamma = get_gamma(pol_xi, pol_eta)
     if np.isscalar(xi):
         gamma = gamma[0]
