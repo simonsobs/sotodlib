@@ -363,7 +363,3 @@ def get_base_tilt_q(c, s):
     # (encoder) el, at that position.
     amp = (c**2 + s**2)**.5
     return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
-
-
-
-
