@@ -18,8 +18,8 @@ class _Preprocess(object):
     controlled by a specific key in a configuration dictionary passed to the
     module on creation.
 
-    The configuration dictionary has 6 special keys: ``name``, ``process``,
-    ``calc``, ``save``, ``select``, and ``plot``. ``name`` is the name used to
+    The configuration dictionary has 5 special keys: ``name``, ``process``,
+    ``calc``, ``select``, and ``plot``. ``name`` is the name used to
     register the module with the PIPELINE registry. The other four keys are matched
     to functions in the module, if the key is not present then that function will 
     be skipped when the preprocessing pipeline is run.
@@ -66,8 +66,7 @@ class _Preprocess(object):
 
         Ex: Calcuating the white noise of the timestream. This function will use
         any configuration information under the ``calc`` key of the
-        configuration dictionary and can call the save function to make
-        changes to proc_aman.
+        configuration dictionary and will make changes to proc_aman.
 
         Arguments
         ---------
