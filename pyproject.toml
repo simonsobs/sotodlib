@@ -21,7 +21,7 @@ dependencies = [
   "toml",
   "skyfield",
   "so3g",
-  "pixell",
+  "pixell>=0.23.0",
   "pytest",
   "scikit-image",
   "pyfftw",
@@ -32,7 +32,7 @@ dependencies = [
 ]
 dynamic=["version"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: BSD License",
