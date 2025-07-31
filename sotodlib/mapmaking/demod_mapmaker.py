@@ -65,7 +65,8 @@ class DemodMapmaker:
         self.singlestream = singlestream
 
     def add_obs(self, id, obs, noise_model=None, split_labels=None,
-                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
+                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
+                pdeflect=True):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -121,7 +122,7 @@ class DemodMapmaker:
                 raise RuntimeError(msg)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels)
+            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels,pdeflect=pdeflect)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
