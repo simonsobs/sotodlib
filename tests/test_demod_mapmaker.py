@@ -71,9 +71,9 @@ def get_tod(Q_stream, U_stream):
     tod.wrap('weather', np.full(1, 'toco'))
     tod.wrap('site', np.full(1, 'so_sat1'))
     tod.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(tod.shape), [(0, 'dets'), (1, 'samps')])
-    wobble_params = core.AxisManager(core.IndexAxis('dets'))
+    wobble_params = core.AxisManager(core.LabelAxis('dets',tod.dets.vals))
     for k in ['amp','phase']:
-        wobble_params.wrap(k, np.zeros(tod.shape[0]), [(0,'dets')])
+        wobble_params.wrap(k, np.zeros(tod.dets.count), [(0,'dets')])
     tod.wrap('wobble_params', wobble_params)
 
     fp = so3g.proj.FocalPlane.from_xieta(
