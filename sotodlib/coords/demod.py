@@ -208,6 +208,8 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
     place all detectors' Q and U timestreams in a common telescope frame. This updates tod.demodQ
     and tod.demodU, in place.
     To get Qr Ur timestreams, run `rotate_demodQU(tod)` and then `rotate_demodQU(tod, radial=True)`.
+    To restore the Q U timestreams, run `rotate_demodQU(tod, sign=-1, radial=True)`.
+    
 
     Args:
         tod : an axisManager object
