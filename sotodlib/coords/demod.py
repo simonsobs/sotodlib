@@ -197,6 +197,9 @@ def rotate_focal_plane(tod, hwp=True):
     tod.focal_plane.xi = np.float32(xi)
     tod.focal_plane.eta = np.float32(eta)
     tod.focal_plane.gamma = sign * np.float32(gamma)
+    if 'hwp_angle' in tod._fields:
+      tod.hwp_angle += avg_roll
+      tod.hwp_angle = tod.hwp_angle % (2*np.pi)
 
 
 def rotate_demodQU(tod, sign=1, offset=0, update_focal_plane=True):
