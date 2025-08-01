@@ -553,7 +553,7 @@ def distribute_detector_data(
                     else:
                         for idet in range(n_send_det):
                             obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[idet]
-                        # Update per-detector flags
+                    # Update per-detector flags
                     dflags = {
                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
                         for x in range(n_recv_det)
@@ -619,6 +619,17 @@ def distribute_detector_data(
     # Now safe to delete our dictionary of isend buffer handles, which might include
     # temporary buffers of ranges flags.
     del send_data
+
+    # Every process checks its local data for NaN values.  If any are found, a warning
+    # is printed and the detector is cut.
+    dflags = dict()
+    for det in obs.local_detectors:
+        nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+        if nnan > 0:
+            msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
+            log.warning(msg)
+            dflags[det] = defaults.det_mask_invalid
+    obs.update_local_detector_flags(dflags)
 
 
 @function_timer
