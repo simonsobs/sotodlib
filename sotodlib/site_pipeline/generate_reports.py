@@ -1,5 +1,6 @@
 from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List
+import numpy as np
 import datetime as dt
 import os
 import json
@@ -24,7 +25,7 @@ def create_manifest(base_dir: str, output_file: str):
     for parent in [os.path.join(base_dir, "weekly"), os.path.join(base_dir, "monthly")]:
         if not os.path.exists(parent):
             continue
-        for folder_name in os.listdir(parent):
+        for folder_name in np.sort(os.listdir(parent)):
             folder_path = os.path.join(parent, folder_name)
             if not os.path.isdir(folder_path):
                 continue
