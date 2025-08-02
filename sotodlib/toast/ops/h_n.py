@@ -87,6 +87,11 @@ class Hn(Operator):
         False, help="If True, do not clear detector pointing matrices after use"
     )
 
+    include_pol_angle = Bool(
+        False,
+        help="If True, include the polarization angle in the angle used to compute h_n",
+    )
+
     nmin = Int(1, help="Minimum `n` to evaluate.")
     nmax = Int(4, help="Maximum `n` to evaluate.")
 
@@ -152,11 +157,18 @@ class Hn(Operator):
                     self.sin_n_name,
                 ]:
                     obs.detdata.ensure(name, detectors=[det])
+                
                 # Compute detector quaternions
                 obs_data = data.select(obs_uid=obs.uid)
                 self.pixel_pointing.detector_pointing.apply(obs_data, detectors=[det])
                 quats = obs.detdata[self.pixel_pointing.detector_pointing.quats][det]
                 theta, phi, psi = qa.to_iso_angles(quats)
+                if not self.include_pol_angle:
+                    # FIXME: temporary hack until instrument classes are also pre-staged
+                    # to GPU -- taken from derivatives_and_beams toast3 branch 
+                    focalplane = obs.telescope.focalplane
+                    focalplane.detector_data
+                    psi -= focalplane[det]["pol_angle"].value # Removing the polarization angle
                 cos_n_new = np.cos(psi)
                 sin_n_new = np.sin(psi)
                 obs.detdata[self.cos_1_name][det] = cos_n_new
