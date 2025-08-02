@@ -4,7 +4,7 @@
 import numpy as np
 from .. import core
 from .helpers import _valid_arg
-from so3g.proj import quat
+from so3g.proj import quat, CelestialSightLine
 
 import logging
 logger = logging.getLogger(__name__)
@@ -363,4 +363,3 @@ def get_base_tilt_q(c, s):
     # (encoder) el, at that position.
     amp = (c**2 + s**2)**.5
     return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
-
