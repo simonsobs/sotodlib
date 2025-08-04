@@ -301,6 +301,7 @@ def template_subtraction(solved, template1, template2, A, B, phi_mean):
     dchi_dt = spline.derivative()(solved["fast_time_2"])
     omega_hat = moving_average(dchi_dt, window_width)
 
+    E_slow = 0.5 * I_fix * omega_hat**2
     omega_refined = np.sqrt(
         2.0 / I_fix * (E_slow - V_of_chi(A, B, chi_smoothed-phi_mean)))
 

@@ -5,7 +5,7 @@ import os
 import numpy as np
 import scipy.interpolate
 import h5py
-from copy import copy
+from copy import copy, deepcopy
 import so3g
 from spt3g import core
 import logging
@@ -719,8 +719,10 @@ class G3tHWP():
         offcenter_idx2 = solved['offcenter_idx2']
         offset_time = solved['offset_time']
 
-        solved['fast_time_raw_1'] = solved['fast_time_raw_1'][offcenter_idx1]
-        solved['fast_time_raw_2'] = solved['fast_time_raw_2'][offcenter_idx2]
+        if 'fast_time_raw_1' in solved:
+            solved['fast_time_raw_1'] = solved['fast_time_raw_1'][offcenter_idx1]
+        if 'fast_time_raw_2' in solved:
+            solved['fast_time_raw_2'] = solved['fast_time_raw_2'][offcenter_idx2]
         solved['fast_time_1'] = solved['fast_time_1'][offcenter_idx1] - offset_time
         solved['fast_time_2'] = solved['fast_time_2'][offcenter_idx2] + offset_time
         solved['angle_1'] = solved['angle_1'][offcenter_idx1]
@@ -837,12 +839,19 @@ class G3tHWP():
             aman.wrap('offcenter_direction', 0)
             aman.wrap_new('offcenter', shape=(2,), dtype=np.float64)
             aman.wrap('sotodlib_version', sotodlib.__version__)
+            aman.wrap_new('template_sol_0', shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_sol_1', shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap_new('template_residuals', shape=(self._num_edges, ), dtype=np.float64)
+            aman.wrap('A', 0)
+            aman.wrap('B', 0)
         else:
             aman.wrap_new('hwp_angle_ver1'+suffix,
                           shape=('samps', ), dtype=np.float64)
             aman.wrap_new('hwp_angle_ver2'+suffix,
                           shape=('samps', ), dtype=np.float64)
             aman.wrap_new('hwp_angle_ver3'+suffix,
+                          shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('hwp_angle_ver4'+suffix,
                           shape=('samps', ), dtype=np.float64)
             aman.wrap_new('quad'+suffix, shape=('samps', ), dtype=int)
             aman.wrap('quad_direction'+suffix, 0)
@@ -1165,6 +1174,7 @@ class G3tHWP():
             aman['num_dead_rots'+suffix] = solved['num_dead_rots'+suffix]
             aman['num_dropped_slits'+suffix] = solved['num_dropped_slits'+suffix]
 
+        solved_copy = deepcopy(solved)  # this is temporary?
         # version 2
         # calculate template subtracted angle
         for i, suffix in enumerate(self._suffixes):
@@ -1202,6 +1212,46 @@ class G3tHWP():
         else:
             logger.warning(
                 'Offcentering calculation is only available when two encoders are operating. Skipped.')
+
+        # version 4
+        if (aman.version_1 == 3 and aman.version_2 == 3):
+            from . import helper
+            solved = solved_copy
+            helper.update_pattern(solved)
+
+            self.eval_offcentering(solved)
+            phi_mean = helper.eval_offset_angle(solved)
+            # Observable vector and mean energy
+            Rp1, Rp2, E_mean = helper.compute_observables(solved)
+            logger.info('Mean rotation energy: {:.3f} J'.format(E_mean))
+            # coefficients matrix, template difference is taken into account, maximum V mode is 1
+            K = 1
+            L = helper.L_version2(K, phi_mean, E_mean)
+            R = helper.construct_R(Rp1, Rp2, K, ver=2)
+            x, residuals, rank, s = np.linalg.lstsq(L, R, rcond=None)
+            logger.info(f"rank: {rank}, residuals: {residuals}")
+
+            template_common = x[:self._num_edges]
+            template_diff = x[self._num_edges:2*self._num_edges]
+            template_0 = template_common
+            template_1 = template_common + template_diff
+
+            A_est, B_est = helper.get_V_estimation(x, K, ver=2)
+            helper.template_subtraction(solved, template_0, template_1, A_est, B_est, phi_mean)
+
+            self.eval_offcentering(solved)
+            helper.correct_offcentering(solved, A_est, B_est, phi_mean)
+
+            for suffix in self._suffixes:
+                aman['hwp_angle_ver4'+suffix] = np.mod(self._angle_interpolation(
+                    solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
+                aman['version'+suffix] = 4
+
+            aman['A'] = A_est
+            aman['B'] = B_est
+            aman['template_sol_0'] = template_0
+            aman['template_sol_1'] = template_1
+            aman['template_residuals'] = residuals
 
         # make the hwp angle solution with highest version as hwp_angle
         highest_version = int(np.max([aman.version_1, aman.version_2]))
@@ -1721,7 +1771,7 @@ class G3tHWP():
             after_ref = min(_after) if len(_after) > 0 else False
             fill_ref = before_ref if before_ref else after_ref
             if not fill_ref:
-                logger.warning(f'Cannot correct glitches, data might be too short')
+                logger.warning('Cannot correct glitches, data might be too short')
                 continue
             fill_values = (self._encd_clk[ref + self._num_edges] - self._encd_clk[ref]) * \
                           (self._encd_clk[fill_ref:fill_ref + self._num_edges] - self._encd_clk[fill_ref]) / \
