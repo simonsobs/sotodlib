@@ -7,9 +7,11 @@
 
 import itertools
 import unittest
+import time
 import numpy as np
 
 from sotodlib import coords, core
+from sotodlib.coords import optics as co
 import so3g
 from pixell import enmap
 
@@ -183,6 +185,71 @@ class CoordsUtilsTest(unittest.TestCase):
         np.testing.assert_allclose([xi0, eta0, R], [x0, y0, R0],
                                    atol=R*0.05)
         self.assertEqual(len(xi), 16)
+
+        # Works with nans?
+        xy[0,0] = np.nan
+        coords.helpers.get_focal_plane_cover(xieta=xy)
+
+        # Exclude dets using det_weights?
+        det_weights = np.ones(xy.shape[1])
+        det_weights[3:34] = 0.
+        for dtype in ['float', 'int', 'bool']:
+            coords.helpers.get_focal_plane_cover(
+                xieta=xy, det_weights=det_weights.astype(dtype))
+
+        # Works for only a single det?
+        det_weights[2:] = 0.
+        (xi0, eta0), R0, _ = \
+            coords.helpers.get_focal_plane_cover(xieta=xy, det_weights=det_weights)
+
+        # Fails if all dets excluded somehow?
+        det_weights[1] = 0.
+        with self.assertRaises(ValueError):
+            coords.helpers.get_focal_plane_cover(xieta=xy, det_weights=det_weights)
+
+        # Fails with all nans?
+        xy[1,1:] = np.nan
+        with self.assertRaises(ValueError):
+            coords.helpers.get_focal_plane_cover(xieta=xy)
+
+    def test_source_pos_ephem(self):
+        """
+        Test getting the position of a Solar System object.
+        """
+        t = 1.7e9
+        pos1 = coords.planets.get_source_pos('jupiter', t)
+        pos1 = coords.planets.get_source_azel('jupiter', t)
+
+    def test_source_pos_fixed(self):
+        """
+        Test getting the position of a fixed source.
+        """
+        t = time.time()
+
+        pos1 = coords.planets.get_source_pos("J1000+1000", t)
+        pos2 = coords.planets.get_source_pos("j1000p1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        pos1 = coords.planets.get_source_pos("J1000-1000", t)
+        pos2 = coords.planets.get_source_pos("j1000m1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        # This doesn't work but it probably should...
+        #coords.planets.get_source_azel("J1000-1000", t)
+            
+
+class OpticsTest(unittest.TestCase):
+    def test_sat_fp(self):
+        x = np.array([-100, 0, 100]) 
+        y = x.copy()
+        pol = x.copy()
+
+        xi, eta, gamma = co.get_focal_plane(None, x, y, pol, 0, "SAT", "ws1", ufm_to_fp_pars={'theta': 60.0, 'dx': 0.0, 'dy': 128.5})
+        self.assertTrue(np.all(np.isclose(xi, np.array([-6.4406e-02,  0,  5.58489e-02]))))
+        self.assertTrue(np.all(np.isclose(eta, np.array([0.01425728, -0.2207397, -0.404499]))))
+        self.assertTrue(np.all(np.isclose(gamma, np.array([5.409, 3.6846, 1.8156]))))
 
 if __name__ == '__main__':
     unittest.main()

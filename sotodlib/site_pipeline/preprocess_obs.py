@@ -8,44 +8,17 @@ from typing import Optional, List
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
+from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 logger = sp_util.init_logger("preprocess")
-
-def _get_preprocess_context(configs, context=None):
-    if type(configs) == str:
-        configs = yaml.safe_load(open(configs, "r"))
-    
-    if context is None:
-        context = core.Context(configs["context_file"])
-        
-    if type(context) == str:
-        context = core.Context(context)
-    
-    # if context doesn't have the preprocess archive it in add it
-    # allows us to use same context before and after calculations
-    found=False
-    if context.get("metadata") is None:
-        context["metadata"] = []
-
-    for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
-            found=True
-            break
-    if not found:
-        context["metadata"].append( 
-            {
-                "db" : configs["archive"]["index"],
-                "name" : "preprocess"
-            }
-        )
-    return configs, context
 
 def preprocess_obs(
     obs_id, 
     configs,  
     overwrite=False, 
-    logger=None
+    logger=None,
+    obs_group=None
 ):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
@@ -61,6 +34,8 @@ def preprocess_obs(
         if True, overwrite existing entries in ManifestDb
     logger: logging instance
         the logger to print to
+    obs_group: list of strings
+        List of obs_ids within group
     """
 
     if logger is None: 
@@ -70,6 +45,16 @@ def preprocess_obs(
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
+
+    source_list = configs.get('source_list', None)
+    source_names = []
+    for _s in source_list:
+        if isinstance(_s, str):
+            source_names.append(_s)
+        elif len(_s) == 3:
+            source_names.append(_s[0])
+        else:
+            raise ValueError('Invalid style of source')
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -81,6 +66,10 @@ def preprocess_obs(
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
+        scheme.add_data_field('coverage')
+        scheme.add_data_field('source_distance')
+        if obs_group:
+            scheme.add_data_field('obs_group')
         db = core.metadata.ManifestDb(
             configs['archive']['index'],
             scheme=scheme
@@ -95,7 +84,7 @@ def preprocess_obs(
     if success != 'end':
         return
 
-    policy = sp_util.ArchivePolicy.from_params(configs['archive']['policy'])
+    policy = pp_util.ArchivePolicy.from_params(configs['archive']['policy'])
     dest_file, dest_dataset = policy.get_dest(obs_id)
     logger.info(f"Saving data to {dest_file}:{dest_dataset}")
     proc_aman.save(dest_file, dest_dataset, overwrite=overwrite)
@@ -103,6 +92,35 @@ def preprocess_obs(
     # Update the index.
     db_data = {'obs:obs_id': obs_id,
                 'dataset': dest_dataset}
+    
+    sso_footprint_process = False
+    for process in configs['process_pipe']:
+        if 'name' in process and 'sso_footprint' == process['name']:
+            sso_footprint_process = True
+
+    if sso_footprint_process:
+        logger.info(f"Saving per source to database {db_data}")
+        nearby_source_names = []
+        for _source in proc_aman.sso_footprint._assignments.keys():
+            nearby_source_names.append(_source)
+        coverage = []
+        distances = []
+        for source_name in source_names:
+            if source_name in nearby_source_names:
+                for key in proc_aman.sso_footprint[source_name]._assignments.keys():
+                    if 'ws' in key:
+                        if proc_aman.sso_footprint[source_name][key]:
+                            coverage.append(f"{source_name}:{key}")
+
+                distances.append(f"{source_name}:{proc_aman.sso_footprint[source_name]['mean_distance']}")
+        db_data['coverage'] = ','.join(coverage)
+        db_data['source_distance'] = ','.join(distances)
+    else:
+        db_data['coverage'] = None
+        db_data['source_distance'] = None
+
+    if obs_group:
+        db_data['obs_group'] = ','.join(obs_group)
     
     logger.info(f"Saving to database under {db_data}")
     if len(db.inspect(db_data)) == 0:
@@ -121,30 +139,6 @@ def preprocess_obs(
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
-
-def load_preprocess_obs(obs_id, configs="preprocess_obs_configs.yaml", context=None ):
-    """ Loads the saved information from the preprocessing pipeline and runs the
-    processing section of the pipeline. 
-
-    Assumes preprocess_tod has already been run on the requested observation. 
-    
-    Arguments
-    ----------
-    obs_id: multiple
-        passed to `context.get_obs` to load AxisManager, see Notes for 
-        `context.get_obs`
-    configs: string or dictionary
-        config file or loaded config directory
-    """
-
-    configs, context = _get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context)
-    
-    pipe = Pipeline(configs["process_pipe"], logger=logger)
-    aman = context.get_obs(meta, no_signal=True)
-    pipe.run(aman, aman.preprocess)
-    return aman
-
 
 def get_parser(parser=None):
     if parser is None:
@@ -195,6 +189,13 @@ def get_parser(parser=None):
         default=2,
         type=int
     )
+    parser.add_argument(
+        '--lat',
+        help="If true, filter obs list to only keep the first obs_ids of those with \
+              timestamps within 10 seconds, since lat obs_ids are split by optics tube. \
+              We only need one for preprocess_obs loads the entire aman without signal.",
+        action='store_true',
+    )
     return parser
 
 def main(
@@ -208,59 +209,75 @@ def main(
     tags: Optional[List[str]] = None,
     planet_obs: bool = False,
     verbosity: Optional[int] = None,
+    lat: bool = False,
  ):
-    configs, context = _get_preprocess_context(configs)
+    configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
-
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
     
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tags[i].lower()
-            if '=' not in tags[i]:
-                tags[i] += '=1'
-
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
+    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
+                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
+                                   planet_obs=planet_obs)
+    
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
     run_list = []
+    
+    if lat:
+        time_tolerance = 10
+        kept = []
+        seen_ctimes = []
+        obs_groups = []
+        current_group = []
+
+        for s in obs_list:
+            try:
+                ctime_str = s['obs_id'].split('_')[1]
+                ctime = int(ctime_str)
+            except (IndexError, ValueError):
+                continue
+
+            is_close = any(abs(ctime - seen) <= time_tolerance for seen in seen_ctimes)
+
+            if not is_close:
+                if current_group:
+                    obs_groups.append(current_group)
+                current_group = [s['obs_id']]
+                kept.append(s)
+                seen_ctimes = [ctime]
+            else:
+                current_group.append(s['obs_id'])
+                seen_ctimes.append(ctime)
+
+        if current_group:
+            obs_groups.append(current_group)
+
+        obs_list = kept
+    else:
+        obs_groups = None
 
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
         run_list = [o for o in obs_list]
     else:
+        mask = []
         db = core.metadata.ManifestDb(configs['archive']['index'])
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:
                 run_list.append(obs)
+                mask.append(True)
+            else:
+                mask.append(False)
+        
+        if obs_groups:
+            obs_groups = [group for keep, group in zip(mask, obs_groups) if keep]
 
     logger.info(f"Beginning to run preprocessing on {len(run_list)} observations")
-    for obs in run_list:
-        logger.info(f"Processing obs_id: {obs_id}")
+    for i, obs in enumerate(run_list):
+        logger.info(f"Processing obs_id: {obs['obs_id']}")
         try:
-            preprocess_obs(obs["obs_id"], configs, overwrite=overwrite, logger=logger)
+            preprocess_obs(obs["obs_id"], configs, overwrite=overwrite, logger=logger, 
+                           obs_group=None if obs_groups is None else obs_groups[i])
         except Exception as e:
             logger.info(f"{type(e)}: {e}")
             logger.info(''.join(traceback.format_tb(e.__traceback__)))

@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Simons Observatory.
+# Copyright (c) 2023-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """Check that pointing expanded with TOAST is compatible with the MLMapmaker
@@ -26,7 +26,7 @@ except ImportError as e:
 if toast_available:
     import healpy as hp
 
-from ._helpers import calibration_schedule, close_data_and_comm, simulation_test_data
+from . import _helpers as helpers
 
 
 class MapmakerPointingTest(unittest.TestCase):
@@ -44,7 +44,7 @@ class MapmakerPointingTest(unittest.TestCase):
         testdir = tempfile.TemporaryDirectory()
 
         comm, procs, rank = toast.get_world()
-        data = simulation_test_data(
+        data = helpers.simulation_test_data(
             comm,
             telescope_name=None,
             wafer_slot="w00",
@@ -95,7 +95,7 @@ class MapmakerPointingTest(unittest.TestCase):
             stokes_weights=weights,
         )
         scan_hpix.apply(data)
-        
+
         # Bin the map using TOAST
         toast.ops.DefaultNoiseModel(noise_model="noise_model").apply(data)
         binner = toast.ops.BinMap(
@@ -126,7 +126,7 @@ class MapmakerPointingTest(unittest.TestCase):
         res = wpix * utils.arcmin
         shape, wcs = enmap.geometry(box, res=res, proj="car")
         wcs.wcs.crpix[1] -= 0.5
-        enmap.write_map(areafile, enmap.zeros(shape, wcs, np.uint8))
+        enmap.write_map_geometry(areafile, shape, wcs)
 
         mapmaker = so_ops.MLMapmaker(
             area=areafile,
@@ -134,7 +134,7 @@ class MapmakerPointingTest(unittest.TestCase):
             out_dir=testdir.name,
             comps="TQU",
             nmat_type="Nmat",
-            maxiter=3,
+            maxiter=[3],
             truncate_tod=False,
             write_hits=True,
             write_rhs=False,
@@ -147,10 +147,10 @@ class MapmakerPointingTest(unittest.TestCase):
         if rank == 0:
             # Direct comparison of pointing
             obs = data.obs[0]
-            pmap = mapmaker._signal_map.data[obs.name].pmap
-            det_quats = pmap._get_asm().dets
-            coords = np.array(pmap.sight.coords(det_quats))
-            dets = mapmaker._mapmaker.data[0].dets
+            pmap = mapmaker.signal_map.data[obs.name].pmap
+            fplane = pmap._get_asm().fplane
+            coords = np.array(pmap.sight.coords(fplane))
+            dets = mapmaker.mapmaker.data[0].dets
             ndet = len(dets)
 
             pointing.apply(data)
@@ -240,7 +240,7 @@ class MapmakerPointingTest(unittest.TestCase):
             if np.abs(means[2]) > tol:
                 raise RuntimeError("Found non-zero U")
 
-        close_data_and_comm(data)
+        helpers.close_data_and_comm(data)
 
 if __name__ == '__main__':
     unittest.main()

@@ -65,15 +65,16 @@ class ReadoutFilter(Operator):
 
             # Get the rows of the focalplane table containing these dets
             det_table = ob.telescope.focalplane.detector_data
-            fp_rows = np.array(
-                [x for x, y in enumerate(det_table["name"]) if y in local_set_dets]
-            )
+            det_to_row = {
+                y: x for x, y in enumerate(det_table["name"]) if y in local_set_dets
+            }
+            fp_rows = np.array([det_to_row[x] for x in local_dets])
 
             # Get the set of all stream IDs
             all_wafers = set(det_table[self.wafer_key][fp_rows])
 
-            # The IIR filter parameters will either be in a single, top-level dictionary
-            # or they are organized per-UFM.
+            # The IIR filter parameters will either be in a single,
+            # top-level dictionary or they are organized per-UFM.
             if (
                 "per_stream" in ob[self.iir_params] and
                 ob[self.iir_params]["per_stream"]
@@ -93,17 +94,23 @@ class ReadoutFilter(Operator):
                 self._filter_detectors(freq, signal, ob[self.iir_params])
 
     def _filter_detectors(self, freq, det_array, iir_props):
-        ndet, nsample = det_array.shape
+        ndet = len(det_array)
+        nsamp = len(det_array[0])
 
-        # Array of detector ffts
-        fsig = fft.rfft(det_array)
-
-        # Apply iir filter kernel
+        # Get the filter kernels for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
-        fsig /= iir_filter
 
-        # Inverse fft
-        fft.irfft(fsig, det_array, normalize=True)
+        # Re-use the same Fourier domain buffer
+        fsig = np.empty(nsamp // 2 + 1, dtype=np.complex128)
+        for idet in range(ndet):
+            # Forward
+            _ = fft.rfft(det_array[idet], ft=fsig)
+
+            # Apply iir filter kernel
+            fsig /= iir_filter[idet]
+
+            # Inverse fft
+            _ = fft.irfft(fsig, tod=det_array[idet], normalize=True)
 
     def _finalize(self, data, **kwargs):
         return

@@ -24,6 +24,9 @@ Prefect (such as a logger argument).  For example::
     ...
 
 
+(Alternately a special entry point, cli_main, can be defined and that
+will be used instead.)
+
 If you want the submodule to be executable directly as a script (or
 through ``python -m``), add a ``__main__`` handling block like this
 one::
@@ -42,12 +45,14 @@ import argparse
 from . import (
     analyze_bright_ptsrc,
     check_book,
+    make_atomic_filterbin_map,
     make_det_info_wafer,
     make_ml_map,
     make_source_flags,
     make_uncal_beam_map,
     preprocess_tod,
     update_g3tsmurf_db,
+    update_hkdb,
     update_obsdb,
     make_cosamp_hk,
     solve_pointing_model
@@ -55,18 +60,20 @@ from . import (
 
 # Dictionary matching element name to a submodule (which must have
 # been imported above).  Note for these to work, the submodule must
-# have defined a get_parser() and a main() function as described in
-# the module comments above.
+# have defined a get_parser() and a main() or cli_main() function as
+# described in the module comments above.
 
 ELEMENTS = {
     'analyze-bright-ptsrc': analyze_bright_ptsrc,
     'check-book': check_book,
+    'make-atomic-filterbin-map': make_atomic_filterbin_map,
     'make-det-info-wafer': make_det_info_wafer,
     'make-ml-map': make_ml_map,
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
     'preprocess-tod': preprocess_tod,
     'update-g3tsmurf-db': update_g3tsmurf_db,
+    'update-hkdb': update_hkdb,
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
     'solve-pointing-model': solve_pointing_model
@@ -108,4 +115,10 @@ def main():
         parser.error('First argument must be a sub-command.')
 
     module = ELEMENTS[top_args._pipemod]
-    module.main(**vars(args))
+    for epoint in ['cli_main', 'main']:
+        _main = getattr(module, epoint, None)
+        if _main is not None:
+            _main(**vars(args))
+            break
+    else:
+        print('No entry-point function found!')

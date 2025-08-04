@@ -4,11 +4,10 @@ import inspect
 import logging
 import time
 import sys
+import copy
 import argparse
-
-from astropy import units as u
-
-from .. import core
+import yaml
+import copy
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -34,6 +33,43 @@ class ArchivePolicy:
         """
         return self.filename, product_id
 
+class ArgumentParser(argparse.ArgumentParser):
+    """A variant of ArgumentParser that allows the defaults
+    to be overriden by values in a yaml config files. Thus the
+    priority order becomes, from highest to lowest:
+
+    1. Arguments passed on the command line
+    2. The config file
+    3. Defaults defined with add_argument()
+
+    The config file is specified using the --config-file option,
+    which this class adds automatically. It should therefore not
+    be added manually.
+    """
+    def __init__(self, *args, **kwargs):
+        argparse.ArgumentParser.__init__(self, *args, **kwargs)
+        self.add_argument("--config-file", type=str, default=None,
+            help="Optional yaml file containing overrides for the default values")
+    def parse_args(self, argv=None):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--config-file", type=str, default=None)
+        args, _ = parser.parse_known_args()
+        if args.config_file != None:
+            # Ok, we have a config file, parse it and use it to
+            # replace our defaults
+            with open(args.config_file, "r") as ifile:
+                config = yaml.safe_load(ifile)
+            for action in self._actions:
+                try:
+                    action.default  = config[action.dest]
+                    # We mark it as non-required so we can run
+                    # without even normally required arguments
+                    # if they're provided by the config file
+                    action.required = False
+                except (KeyError, AttributeError) as e:
+                    pass
+        # Then parse again, taking into account any default update
+        return argparse.ArgumentParser.parse_args(self, argv)
 
 class DirectoryArchivePolicy:
     """Storage policy for stuff organized directly on the filesystem.
@@ -91,6 +127,11 @@ def parse_quantity(val, default_units=None):
       <Quantity 100. m>
 
     """
+    # Heavy to import, and we want this module to be fast to import
+    # because it provides an ArgumentParser that should inform us
+    # of incorrect arguments with as low latency as possible
+    from astropy import units as u
+
     if default_units is not None:
         default_units = u.Unit(default_units)
 
@@ -244,13 +285,14 @@ class _ReltimeFormatter(logging.Formatter):
             datefmt = '%8.3f'
         return datefmt % (record.created - self.start_time)
 
-def init_logger(name, announce='', verbosity=2):
+def init_logger(name, announce='', verbosity=2, logger=None):
     """Configure and return a logger for site_pipeline elements.  It is
     disconnected from general sotodlib (propagate=False) and displays
     relative instead of absolute timestamps.
 
     """
-    logger = logging.getLogger(name)
+    if logger is None:
+        logger = logging.getLogger(name)
 
     if verbosity == 0:
         level = logging.ERROR
@@ -275,13 +317,12 @@ def init_logger(name, announce='', verbosity=2):
         logger.info(f'{announce}Log timestamps are relative to {text}')
     else:
         for handler in logger.handlers:
-          if isinstance(handler, logging.StreamHandler):
-              handler.setLevel(level)
-              break
+            if isinstance(handler, logging.StreamHandler):
+                handler.setLevel(level)
+                break
 
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
-
 
     return logger
 
@@ -304,3 +345,65 @@ def main_launcher(main_func, parser_func, args=None):
     if args is None:
         args = sys.argv[1:]
     return main_func(**vars(parser_func().parse_args(args=args)))
+
+def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None, 
+                update_delay=None, tags=None, planet_obs=False):
+    """Query the obs database with a given query.
+    
+    Parameters
+    ----------
+    context : core.Context
+        The context to use for the obsdb.
+    query : str, optional
+        A query string for the obsdb.
+    obs_id : str, optional
+        The specific obsid to retrieve.
+    min_ctime : int, optional
+        The minimum ctime of obs to retrieve.
+    max_ctime : int, optional
+        The maximum ctime of obs to retrieve.
+    update_delay : int, optional
+        The number of days to subtract from the current time to set the minimum ctime.
+    tags : list of str, optional
+        A list of tags to use for the query.
+    planet_obs : bool, optional
+        If True, format query and tags for planet obs.
+    
+    Returns
+    -------
+    obs_list : list
+        The list of obs found from the query.
+    """
+    if (min_ctime is None) and (update_delay is not None):
+        # If min_ctime is provided it will use that..
+        # Otherwise it will use update_delay to set min_ctime.
+        min_ctime = int(time.time()) - update_delay*86400
+
+    if obs_id is not None:
+        tot_query = f"obs_id=='{obs_id}'"
+    else:
+        tot_query = "and "
+        if min_ctime is not None:
+            tot_query += f"timestamp>={min_ctime} and "
+        if max_ctime is not None:
+            tot_query += f"timestamp<={max_ctime} and "
+        if query is not None:
+            tot_query += query + " and "
+        tot_query = tot_query[4:-4]
+        if tot_query=="":
+            tot_query="1"
+
+    if not(tags is None):
+        for i, tag in enumerate(tags):
+            tags[i] = tag.lower()
+            if '=' not in tag:
+                tags[i] += '=1'
+
+    if planet_obs:
+        obs_list = []
+        for tag in tags:
+            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+    else:
+        obs_list = context.obsdb.query(tot_query, tags=tags)
+    
+    return obs_list

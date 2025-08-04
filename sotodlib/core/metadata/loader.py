@@ -203,6 +203,10 @@ class SuperLoader:
                 _line.update(subreq)
                 index_lines.append(_line)
 
+        if len(index_lines) == 0:
+            raise LoaderError(
+                f'There were no metadata records found for this observation ({request}).')
+
         # Pre-screen the index_lines for dets:* assignments; plan to
         # skip lines that aren't relevant according to det_info.
         to_skip = []
@@ -633,7 +637,9 @@ def merge_det_info(det_info, new_info, multi=True, on_missing='trim'):
                 f'in the det_id, maybe add {k} to the match_keys?')
 
     if len(det_info) != len(i1) and on_missing != 'trim':
-        raise IncompleteMetadataError('{len(det_info)} -> {len(i1)})')
+        raise IncompleteMetadataError(
+            f"det_info had n_dets={len(det_info)}; After merge it has n_dets={len(i1)}"
+        )
 
     logger.debug(f' ... updating det_info (row count '
                  f'{len(det_info)} -> {len(i1)})')
@@ -839,11 +845,13 @@ class MetadataSpec:
         with fields found in this metadata item.  See notes below.
 
     ``load_fields`` (list of str or None)
-        List of fields to load.  This may include entire child
-        AxisManagers, or fields within them using "." for hierarchical
-        addressing.  This is only for AxisManager metadata.  Default
-        is None, which meaning to load all fields.  Wildcards are not
-        supported.
+        List of fields to load. For AxisManager metadata this may
+        include entire child AxisManagers, or fields within them
+        using "." for hierarchical addressing. For ResultSet metadata,
+        subitems of this list can be specified as dictionaries
+        (original_fieldname -> new_fieldname) which allow the user to
+        change the fieldname of the subitem. Default is None, which
+        means to load all fields. Wildcards are not supported.
 
     ``drop_fields`` (list of str)
         List of fields (which may contain wildcard character ``*``) to
