@@ -305,9 +305,9 @@ def objective_model_func_lmfit(
     return chi_sq(weights_array, dist)
 
 def chi_sq(weights, dist):
-    N = np.identity(len(dist)) * weights
-    chi2 = dist.T * N * dist
+    #N = np.identity(len(dist)) * weights
     #chi2 = dist.T @ N @ dist
+    chi2 = np.nansum(dist ** 2 * weights)
     return chi2
 
 def model_template_xieta(params, pm_version, aman):
@@ -320,16 +320,15 @@ def model_template_xieta(params, pm_version, aman):
     xi_meas = aman.measured_xieta_data[0]
     eta_meas = aman.measured_xieta_data[1]
     params = params.valuesdict() if isinstance(params, Parameters) else params
-    # if type(params) == lmfit.parameter.Parameters:
-    #    params = params.valuesdict()
     params["version"] = pm_version
     if "sat" in pm_version:
         az, el, roll = pm._get_sat_enc_radians(aman.ancil)
+        q_nomodel = quat.rotation_lonlat(-az, el, 0)
     if "lat" in pm_version:
         az, el, roll = pm._get_lat_enc_radians(aman.ancil)
+        q_nomodel = quat.rotation_lonlat(-az, el, roll)
     boresight = pm.apply_pointing_model(aman, pointing_model=params, wrap=False)
     az1, el1, roll1 = boresight.az, boresight.el, boresight.roll
-    q_nomodel = quat.rotation_lonlat(-az, el, 0)
     q_model = quat.rotation_lonlat(-az1, el1, roll1)
     q_det_meas = quat.rotation_xieta(xi_meas, eta_meas, 0)
     xi_mod_true, eta_mod_true, _ = quat.decompose_xieta(
@@ -345,18 +344,17 @@ def model_measured_xieta(params, pm_version, aman):
     q_nomodel * q_det_meas == q_model * q_det_true
     """
     params = params.valuesdict() if isinstance(params, Parameters) else params
-    # if type(params) == lmfit.parameter.Parameters:
-    #    params = params.valuesdict()
     params["version"] = pm_version
     xi_true, eta_true, gam_true = aman.nominal_xieta_locs
     if "sat" in pm_version:
         az, el, roll = pm._get_sat_enc_radians(aman.ancil)
+        q_nomodel = quat.rotation_lonlat(-az, el, 0) 
     if "lat" in pm_version:
         az, el, roll = pm._get_lat_enc_radians(aman.ancil)
+        q_nomodel = quat.rotation_lonlat(-az, el, roll)
+
     boresight = pm.apply_pointing_model(aman, pointing_model=params, wrap=False)
     az1, el1, roll1 = boresight.az, boresight.el, boresight.roll
-
-    q_nomodel = quat.rotation_lonlat(-az, el, 0)
     q_model = quat.rotation_lonlat(-az1, el1, roll1)
     q_det_true = quat.rotation_xieta(xi_true, eta_true, 0)
     xi_mod_meas, eta_mod_meas, _ = quat.decompose_xieta(
@@ -455,7 +453,6 @@ def main(config_path: str):
     os.makedirs(save_dir, exist_ok=True)
     shutil.copy(config_path, os.path.join(save_dir, "config.yaml"))
     
-
     # Initialize Logger
     logger = sp_util.init_logger(__name__, "Solve pointing_model")
     logpath = os.path.join(save_dir, "pointing_model.log")
@@ -488,7 +485,6 @@ def main(config_path: str):
             logger.info("Performing per-detector fits for all UFM data.")
 
         which_data = config.get("use_as_data")
-        # use_weights = False if which_data == 'raw' else config.get("use_weights", True)
         use_weights = config.get("use_weights", True)
 
         #Make axis manager with full detector set.
@@ -519,6 +515,7 @@ def main(config_path: str):
         fitcheck_aman.wrap("obs_index", obs_index, [(0, "samps")])
 
         #Now make axis manager that has down sampled data for computation
+        solver_aman = core.AxisManager(core.IndexAxis("samps"))
         (
             filelist,
             obs_dets_fits,
@@ -527,17 +524,13 @@ def main(config_path: str):
             all_det_ids,
             obs_index,
         ) = load_per_detector_data(config)
-      
         logger.info("Loaded %s data points", len(weights_dets))
         ancil, roll_c = load_obs_boresight_per_detector(config, filelist, obs_index)
 
-        # Build Axis Managers
+        # Build Axis Managers        
+        solver_aman.wrap("ancil", ancil)
         obs_info = core.AxisManager()
         obs_info.wrap("obs_ids", np.array(filelist))
-        
-
-        solver_aman = core.AxisManager(core.IndexAxis("samps"))
-        solver_aman.wrap("ancil", ancil)
         solver_aman.wrap("obs_info", obs_info)
         solver_aman.wrap("roll_c", roll_c, [(0, "samps")])
         solver_aman.wrap(
@@ -554,7 +547,6 @@ def main(config_path: str):
         )
         solver_aman.wrap("weights", weights_dets, [(0, "samps")])
         solver_aman.wrap("obs_index", obs_index)
-        # Make weights/data cuts
         logger.info("Built axis manager")
 
     ###########################################################################
@@ -600,22 +592,16 @@ def main(config_path: str):
         # Make weights/data cuts
         logger.info("Built axis manager")
 
-    ############################
-    # END SPLIT
-    ############################
+    ################################
+    # END of SPLIT: Now fit the parameters
+    ################################
 
     # Initialize Parameters to Fit with Model
     fit_params = _init_fit_params(config)
     logger.info("Initialized fit parameters")
-    """
-    if xieta_model == "measured":
-        model_reference = solver_aman.measured_xieta_data
-    elif xieta_model == "template":
-        model_reference = solver_aman.nominal_xieta_locs
-    """
+
     # Solve for Model Parameters
     # use chosen xieta_model to solve for parameters
-    # use_weights = config.get("use_weights",True)
     model_solved_params = minimize(
         objective_model_func_lmfit,
         fit_params,
@@ -650,8 +636,7 @@ def main(config_path: str):
 
     # Model template and measured points using parameters found above
     modeled_fits, fit_residuals_i1, rms_i1, model_reference = apply_model_params(xieta_model, solver_aman.pointing_model, pm_version, solver_aman)
-    logger.info(
-        "RMS on fit: %f arcmin", rms_i1)
+    logger.info("RMS on fit: %f arcmin", rms_i1)
 
     # Save fit results to the axis manager
     modelfit_aman = core.AxisManager()
@@ -660,7 +645,6 @@ def main(config_path: str):
     solver_aman.wrap("modeled_fits", modelfit_aman, overwrite=True)
     solver_aman.wrap("fit_residuals", fit_residuals_i1, overwrite=True)
     solver_aman.wrap("fit_rms", rms_i1, overwrite=True)
-    
     
     if fit_type == "detector":
         _, fit_residuals_full, rms_full, _ = apply_model_params(xieta_model, solver_aman.pointing_model, pm_version, fitcheck_aman)
@@ -880,25 +864,31 @@ class ModelFitsPlotter:
         roll_c = self.solver_aman.roll_c
         elev = self.solver_aman.ancil.el_enc
         azim = self.solver_aman.ancil.az_enc
+        if platform == 'lat':
+            elmin=10; elmax=90
+        else:
+            elmin=45; elmax=65
         
         plt.figure()
         fig, ax = plt.subplots(2,2,figsize=(11,10))
+        ax[0,0].set_title('color by boresight.roll', fontsize='medium')
         a0 = ax[0,0].scatter(measured_xieta_data[0], measured_xieta_data[1], 
-                           c=roll_c, alpha=0.5, s=10, cmap='jet',vmin=-45,vmax=45)
+                           c=roll_c, alpha=0.5, s=10,
+                           cmap='jet',vmin=-45,vmax=45)
+        ax[1,0].set_title('color by fit Elevation', fontsize='medium')
         a1= ax[1,0].scatter(measured_xieta_data[0], measured_xieta_data[1], 
-                          c=elev, alpha=0.3, s=10, cmap='jet',vmin=45,vmax=65)
+                          c=elev, alpha=0.3, s=10, cmap='jet', vmin=elmin, vmax=elmax)
+        ax[0,1].set_title('color by fit Azimuth', fontsize='medium')
         a2= ax[0,1].scatter(measured_xieta_data[0], measured_xieta_data[1], 
-                          c=azim, alpha=0.3, s=10, cmap='jet', vmin=0,vmax=420)
+                          c=azim, alpha=0.3, s=10, cmap='jet', vmin=0, vmax=420)
+        ax[1,1].set_title('color by fit weights', fontsize='medium')
         a3= ax[1,1].scatter(measured_xieta_data[0], measured_xieta_data[1], 
-                          c=weights, alpha=0.3, s=10, cmap='jet',vmin=0.8, vmax=1)
+                          c=weights, alpha=0.3, s=10, cmap='jet', vmin=0.8, vmax=1)
         c0 = plt.colorbar(a0)
         c1 = plt.colorbar(a1)
         c2 = plt.colorbar(a2)
         c3 = plt.colorbar(a3)
-        ax[0,0].set_title('color by boresight.roll', fontsize='medium')
-        ax[1,0].set_title('color by fit Elevation', fontsize='medium')
-        ax[0,1].set_title('color by fit Azimuth', fontsize='medium')
-        ax[1,1].set_title('color by fit weights', fontsize='medium')
+                
         plt.suptitle('Detectors hit in these observations')
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_dets_in_these_obs.png", dpi=350)
