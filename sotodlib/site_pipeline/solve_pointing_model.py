@@ -18,6 +18,7 @@ import matplotlib
 
 matplotlib.use("agg")
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 from sotodlib.coords.helpers import _valid_arg
 from sotodlib.site_pipeline import util as sp_util
@@ -135,27 +136,37 @@ def create_culling_mask(obs_index, cull_dets):
     return culling_mask 
     
     
-def load_per_detector_data(config, return_all_dets=False):
+def load_per_detector_data(config, no_downsample_set=False, return_all_dets=False):
     per_obs_fps = config.get("per_obs_fps")
     skip_tags = config.get("skip_tags", [])
     t0 = config.get("begin_timerange", 0)
     tf = config.get("end_timerange", int(time.time()))
     rxs = fpc.Receiver.load_file(per_obs_fps)
-    band = config.get("band")
-    if band is not None:
-        band = band.encode("utf-8")
-        
-    cull_dets = config.get("cull_dets", None)
-    cull_twice = config.get("cull_twice", False)
-    even_obs_size = config.get("even_obs_size", False)
 
-    filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
-    filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
-    if config.get("use_these_files") is not None:
-        filelist = [filelist[i] for i in config.get("use_these_files")]
+    if return_all_dets:
+        band = None
+        cull_dets = config.get("cull_dets", None)
+        cull_twice = config.get("cull_twice", False)
+        even_obs_size = False
+        which_ufm = None
+        filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
+        filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
+
+    else:
+        band = config.get("band")
+        if band is not None:
+            band = band.encode("utf-8")  
+        cull_dets = config.get("cull_dets", None)
+        cull_twice = config.get("cull_twice", False)
+        even_obs_size = config.get("even_obs_size", False)
+        which_ufm = config.get("which_ufm", None)
+        filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
+        filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
+        if config.get("use_these_files") is not None:
+            filelist = [filelist[i] for i in config.get("use_these_files")]
 
     weights_dets, obs_dets_fits, stream_id_list, obs_index = [], [], [], []
-    which_ufm = config.get("which_ufm", None)
+    #which_ufm = config.get("which_ufm", None)
     which_data = config.get("use_as_data")
     which_weights = config.get("use_as_weights", None)
     
@@ -181,7 +192,7 @@ def load_per_detector_data(config, return_all_dets=False):
     obs_dets_fits[np.where(weights_dets == 0)] = np.nan
     mask = ~np.isnan(weights_dets)  
     
-    if return_all_dets:
+    if no_downsample_set:
         #plotting use-case to compare subset fits with the entire dataset.
         return (
             filelist,
@@ -497,7 +508,7 @@ def main(config_path: str):
             all_nom_det_array,
             all_det_ids,
             obs_index,
-        ) = load_per_detector_data(config, return_all_dets=True)
+        ) = load_per_detector_data(config, no_downsample_set=True)
         ancil, roll_c = load_obs_boresight_per_detector(config, filelist, obs_index)
         
         fitcheck_aman.wrap("ancil", ancil)
@@ -513,6 +524,7 @@ def main(config_path: str):
         )
         fitcheck_aman.wrap("weights", weights_dets, [(0, "samps")])
         fitcheck_aman.wrap("obs_index", obs_index, [(0, "samps")])
+        logger.info("Loaded %s fit check data points", len(weights_dets))
 
         #Now make axis manager that has down sampled data for computation
         solver_aman = core.AxisManager(core.IndexAxis("samps"))
@@ -772,7 +784,7 @@ def main(config_path: str):
             solver_aman.wrap("fit_rms", rms_i2, overwrite=True)
 
             if fit_type == "detector":
-                _, fit_residuals_full, rms_full, _ = apply_model_params(xieta_model, solver_aman.pointing_model, pm_version, fitcheck_aman)
+                _, fit_residuals_full, rms_full, _ = pm.apply_model_params(xieta_model, solver_aman.pointing_model, pm_version, fitcheck_aman)
                 logger.info("RMS on FULL detector set: %f arcmin", rms_full)
                 solver_aman.move("fit_residuals_full", "fit_residuals_full_i1")
                 solver_aman.move("fit_rms_full", "fit_rms_full_i1")
@@ -825,6 +837,183 @@ def main(config_path: str):
             replace=True,
         )
         db.to_file(os.path.join(save_dir, dbfile))
+
+    #Optional extra plotting
+    if config.get("make_full_analysis_plots", True):
+        #Fill up axis manager with ALL the data (only cuts from culling and time stamps remain)
+        
+        (
+            filelist,
+            obs_dets_fits,
+            weights_dets,
+            all_nom_det_array,
+            all_det_ids,
+            obs_index,
+        ) = load_per_detector_data(config, return_all_dets=True)
+        ancil, roll_c = load_obs_boresight_per_detector(config, filelist, obs_index)
+        ufm_list = [ufm.split("_")[1] for ufm in config.get('ufms')]
+        
+        obs_info = core.AxisManager()
+        obs_info.wrap("obs_ids", np.array(filelist))
+        
+        full_aman = core.AxisManager(core.IndexAxis("samps"))
+        full_aman.wrap("obs_info", obs_info)
+        full_aman.wrap("ancil", ancil)
+        full_aman.wrap(
+            "nominal_xieta_locs", all_nom_det_array.T,
+            [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
+            [(1, "samps")],
+        )
+        full_aman.wrap(
+            "measured_xieta_data", obs_dets_fits.T,
+            [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
+            [(1, "samps")],
+        )
+        full_aman.wrap("weights", weights_dets, [(0, "samps")])
+        full_aman.wrap("obs_index", obs_index)
+        full_aman.wrap("roll_c", roll_c, [(0, "samps")])
+        full_aman.wrap("det_ids", all_det_ids,  [(0, "samps")])
+        full_aman.wrap("radial", 
+                       np.sqrt(full_aman.nominal_xieta_locs[0]**2 + full_aman.nominal_xieta_locs[1]**2)/DEG,
+                       [(0, "samps")])
+        full_aman.wrap("det_ufm", 
+                       np.array([detid.decode('utf-8').split('_')[0].lower() for detid in full_aman.det_ids])
+                       , [(0, "samps")])
+        full_aman.wrap("det_wafer", np.array([ufm_list.index(d) for d in full_aman.det_ufm]), [(0, "samps")])
+        
+        try:
+            full_modeled, full_residuals, rms, _ = apply_model_params("template",
+                                                                    solver_aman.pointing_model_i1,
+                                                                    config.get("pm_version"),
+                                                                    full_aman)
+        except:
+            full_modeled, fit_residuals, rms, _ = apply_model_params("template",
+                                                                    solver_aman.pointing_model,
+                                                                    config.get("pm_version"),
+                                                                    full_aman)
+        
+        full_aman.wrap("full_modeled", np.array(full_modeled),
+                       [(0, core.LabelAxis("xieta", ["xi", "eta"]))],
+                       [(1, "samps")])
+        full_aman.wrap("fit_residuals", fit_residuals, [(0, "samps")])
+        del(full_modeled)
+        del(fit_residuals)
+        
+        (obs_az, obs_el, obs_roll, 
+         obs_resid, obs_dxi, obs_deta,
+         obs_std_xi, obs_std_eta
+        ) = [], [], [], [], [], [], [], []
+        (all_ufm_az, all_ufm_el, all_ufm_roll,
+         all_ufm_resid, all_ufm_dxi, all_ufm_deta,
+         all_ufm_std_xi, all_ufm_std_eta, all_ufm_wafer_num
+        ) = [], [], [], [], [], [], [], [], []
+        for ob in np.unique(full_aman.obs_index):
+            inds = np.where(full_aman.obs_index == ob)[0] 
+            obs_az.append(np.nanmedian(full_aman.ancil.az_enc[inds]))
+            obs_el.append(np.nanmedian(full_aman.ancil.el_enc[inds]))
+            obs_roll.append(np.nanmedian(full_aman.roll_c[inds]))
+            obs_resid.append(np.nanmean(full_aman.fit_residuals[inds]))
+            obs_dxi.append(np.nanmean((full_aman.full_modeled[0] -
+                                       full_aman.nominal_xieta_locs[0])[inds]/DEG*60))
+            obs_deta.append(np.nanmean((full_aman.full_modeled[1] -
+                                        full_aman.nominal_xieta_locs[1])[inds]/DEG*60))
+            obs_std_xi.append(np.nanstd((full_aman.full_modeled[0] -
+                                         full_aman.nominal_xieta_locs[0])[inds]/DEG*60))
+            obs_std_eta.append(np.nanstd((full_aman.full_modeled[1] -
+                                          full_aman.nominal_xieta_locs[1])[inds]/DEG*60))     
+            (ufm_az, ufm_el, ufm_roll, ufm_resid, 
+             ufm_dxi, ufm_deta, ufm_std_xi,
+             ufm_std_eta, ufm_wafer_num
+            )= [], [], [], [], [], [], [], [], []
+            for ufm in ufm_list:
+                ufm_inds = np.where(full_aman.det_ufm[inds] == ufm)[0]    
+                ufm_az.append(np.nanmedian(full_aman.ancil.az_enc[inds][ufm_inds]))
+                ufm_el.append(np.nanmedian(full_aman.ancil.el_enc[inds][ufm_inds]))
+                ufm_roll.append(np.nanmedian(full_aman.roll_c[inds][ufm_inds]))
+                ufm_resid.append(np.nanmean(full_aman.fit_residuals[inds][ufm_inds]))
+                ufm_dxi.append(np.nanmean((full_aman.full_modeled[0] - 
+                                           full_aman.nominal_xieta_locs[0])[inds][ufm_inds]/DEG*60))
+                ufm_deta.append(np.nanmean((full_aman.full_modeled[1] -
+                                            full_aman.nominal_xieta_locs[1])[inds][ufm_inds]/DEG*60))
+                ufm_std_xi.append(np.nanstd((full_aman.full_modeled[0] -
+                                             full_aman.nominal_xieta_locs[0])[inds][ufm_inds]/DEG*60))
+                ufm_std_eta.append(np.nanstd((full_aman.full_modeled[1] -
+                                              full_aman.nominal_xieta_locs[1])[inds][ufm_inds]/DEG*60))
+                ufm_wafer_num.append(np.nanmedian(full_aman.det_wafer[inds][ufm_inds]))           
+            all_ufm_az.append(ufm_az)
+            all_ufm_el.append(ufm_el)
+            all_ufm_roll.append(ufm_roll)
+            all_ufm_resid.append(ufm_resid)  
+            all_ufm_deta.append(ufm_deta)
+            all_ufm_dxi.append(ufm_dxi)
+            all_ufm_std_xi.append(ufm_std_xi)
+            all_ufm_std_eta.append(ufm_std_eta)
+            all_ufm_wafer_num.append(ufm_wafer_num)
+            
+        per_ufm_stats = core.AxisManager()
+        per_obs_stats = core.AxisManager()
+        
+        per_obs_stats.wrap("el", np.array(obs_el))
+        per_obs_stats.wrap("roll", np.array(obs_roll))
+        per_obs_stats.wrap("az", np.array(obs_az))
+        per_obs_stats.wrap("resid", np.array(obs_resid))
+        per_obs_stats.wrap("dxi", np.array(obs_dxi))
+        per_obs_stats.wrap("deta", np.array(obs_deta))
+        per_obs_stats.wrap("std_xi", np.array(obs_std_xi))
+        per_obs_stats.wrap("std_eta", np.array(obs_std_eta))
+
+        per_ufm_stats.wrap("az", np.array(all_ufm_az))
+        per_ufm_stats.wrap("el", np.array(all_ufm_el))
+        per_ufm_stats.wrap("roll", np.array(all_ufm_roll))
+        per_ufm_stats.wrap("resid", np.array(all_ufm_resid))
+        per_ufm_stats.wrap("dxi", np.array(all_ufm_dxi))
+        per_ufm_stats.wrap("deta", np.array(all_ufm_deta))
+        per_ufm_stats.wrap("std_xi", np.array(all_ufm_std_xi))
+        per_ufm_stats.wrap("std_eta", np.array(all_ufm_std_eta))
+        per_ufm_stats.wrap("wafer_num", np.array(all_ufm_wafer_num))
+        
+        if platform == "lat":
+            obs_cr = []
+            all_ufm_cr = []
+            for ob in np.unique(full_aman.obs_index):
+                inds = np.where(full_aman.obs_index == ob)[0]
+                obs_cr.append(np.nanmedian(full_aman.ancil.corotator_enc[inds]))
+                ufm_cr = []
+                for ufm in ufm_list:
+                    ufm_cr.append(np.nanmedian(full_aman.ancil.corotator_enc[inds][ufm_inds]))
+                all_ufm_cr.append(ufm_cr)
+            per_obs_stats.wrap("cr", np.array(obs_cr))
+            per_ufm_stats.wrap("cr", np.array(all_ufm_cr))
+        
+        full_aman.wrap("dxi", (full_aman.full_modeled[0] - 
+                               full_aman.nominal_xieta_locs[0])/DEG*60, [(0, "samps")])
+        full_aman.wrap("deta", (full_aman.full_modeled[1] - 
+                                full_aman.nominal_xieta_locs[1])/DEG*60, [(0, "samps")])
+        
+        #full_dxi_av = np.nanmean(full_dxi)
+        #full_deta_av = np.nanmean(full_deta)
+        obsids=np.array([int(D.split('_')[1]) for D in full_aman.obs_info.obs_ids])
+        per_obs_stats.wrap("obsids", obsids)
+        per_ufm_stats.wrap("obsids", np.repeat(obsids, np.shape(per_ufm_stats["dxi"])[1]))
+        full_aman.wrap("obsids", obsids[full_aman.obs_index])
+        
+        #Calculate RMSs
+        per_obs_stats.wrap("rms", np.sqrt(np.nanmean(per_obs_stats["dxi"]**2 + per_obs_stats["deta"]**2)))
+        per_ufm_stats.wrap("rms", np.sqrt(np.nanmean(per_ufm_stats["dxi"]**2 + per_ufm_stats["deta"]**2)))
+        full_aman.wrap("rms", np.sqrt(np.nanmean(full_aman["dxi"]**2 + full_aman["deta"]**2)))
+        full_aman.wrap("per_ufm_stats", per_ufm_stats)
+        full_aman.wrap("per_obs_stats", per_obs_stats)
+        
+        plotter = ModelFitsPlotter(solver_aman=full_aman,
+                                       config=config,
+                                       save_dir=save_dir,
+                                       iteration_tag="",
+                                       save_figure=True,
+                                       plotlims=plotlims)
+        plotter.plot_full_residuals_across_focalplane()
+        plotter.plot_full_histogram()
+        plotter.plot_full_unmodeled_residuals()
+        
     logger.info("Done")
 
 
@@ -835,7 +1024,7 @@ def main(config_path: str):
 class ModelFitsPlotter:
     def __init__(self, solver_aman, config, save_dir, iteration_tag="", save_figure=True, plotlims=None):
 
-        self.solver_aman = solver_aman
+        self.aman = solver_aman
         self.config = config
         self.tag = iteration_tag
         self.save_figure = save_figure
@@ -854,16 +1043,187 @@ class ModelFitsPlotter:
         self.xieta_model = config.get("xieta_model", "measured")
         self.append_string = config.get("append","")
         self.iterate_cutoff = config.get("iterate_cutoff", None)
+
+    def plot_full_unmodeled_residuals(self):
+        platform = self.platform
+        plot_dir = self.plot_dir
+        tag = self.tag
+        append = self.append_string        
+
+        ancil = self.aman.ancil
+        modeled = self.aman.full_modeled
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        per_ufm_stats = self.aman.per_ufm_stats
+        per_obs_stats = self.aman.per_obs_stats
+        roll_c = self.aman.roll_c
+        full_dxi_av = np.nanmean(self.aman.dxi)
+        full_deta_av = np.nanmean(self.aman.deta)
+        if "sat" in platform:
+            elmin, elmax = 45, 65
+            rollmin, rollmax = -45, 45
+            azmin, azmax = 0, 360
+            if platform=="satp2":
+                plotlim = self.plotlims*0.7
+            else:
+                plotlim = 8
+        else:
+            plotlim = self.plotlims
+            elmin, elmax = None, None
+            rollmin, rollmax = -70, 40
+            azmin, azmax = 0, 360
+            
+        plt.figure(figsize=(7,5))
+        plt.scatter((modeled[0] - nominal_xieta_locs[0])/DEG*60,
+                    (modeled[1] - nominal_xieta_locs[1])/DEG*60,
+                    c=roll_c, s=2.7,
+                    alpha=0.15, marker='.', cmap='jet',
+                    vmin=rollmin, vmax=rollmax)
+        plt.scatter(per_ufm_stats.dxi, per_ufm_stats.deta,
+                    c=per_ufm_stats.roll,
+                    alpha=0.6, marker='o', cmap='jet',
+                    s=25, edgecolor='k', linewidth=0.7,
+                    vmin=rollmin, vmax=rollmax, label='UFM Avg')
+        plt.scatter(per_obs_stats.dxi, per_obs_stats.deta, 
+                    c = per_obs_stats.roll, 
+                    alpha=0.99, marker='X', cmap='jet',
+                    s=45, edgecolor='k', linewidth=0.7,
+                    vmin=rollmin, vmax=rollmax, label='Obs Avg.')
+        plt.colorbar(label='Roll')
+        plt.xlabel('Xi Error (arcmin)')
+        plt.ylabel('Eta Error (arcmin)')
+        plt.axvline(0,0,1, color='k', alpha=0.4)
+        plt.axhline(0,0,1, color='k', alpha=0.4)
+        plt.axhline(0,0,1, color='k', alpha=0.4)
+        plt.xlim(-plotlim,plotlim); plt.ylim(-plotlim,plotlim)
+        plt.scatter(full_dxi_av, full_deta_av, color='r', marker='o', edgecolor='k', label='All Data Avg. Offset')
+        plt.legend(fontsize='small')        
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Roll{tag}.png", dpi=350)
+        plt.close()
+            
+
+        plt.figure(figsize=(7,5))
+        plt.scatter((modeled[0] - nominal_xieta_locs[0])/DEG*60,
+                    (modeled[1] - nominal_xieta_locs[1])/DEG*60,
+                    c=ancil.el_enc, s=2.7,
+                    alpha=0.15, marker='.', cmap='jet',
+                    vmin=elmin, vmax=elmax)
+        plt.scatter(per_ufm_stats.dxi, per_ufm_stats.deta,
+                    c=per_ufm_stats.el,
+                    alpha=0.6, marker='o', cmap='jet',
+                    s=25, edgecolor='k', linewidth=0.7,
+                    vmin=elmin, vmax=elmax, label='UFM Avg')
+        plt.scatter(per_obs_stats.dxi, per_obs_stats.deta, 
+                    c = per_obs_stats.el, 
+                    alpha=0.99, marker='X', cmap='jet',
+                    s=45, edgecolor='k', linewidth=0.7,
+                    vmin=elmin, vmax=elmax, label='Obs Avg.')
+        plt.colorbar(label='Elevation')
+        plt.xlabel('Xi Error (arcmin)')
+        plt.ylabel('Eta Error (arcmin)')
+        plt.axvline(0,0,1, color='k', alpha=0.4)
+        plt.axhline(0,0,1, color='k', alpha=0.4)
+        plt.axhline(0,0,1, color='k', alpha=0.4)
+        plt.xlim(-plotlim,plotlim); plt.ylim(-plotlim,plotlim)
+        plt.scatter(full_dxi_av, full_deta_av, color='r', marker='o', edgecolor='k', label='All Data Avg. Offset')
+        plt.legend(fontsize='small')        
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_El{tag}.png", dpi=350)
+        plt.close()
+
+        plt.figure(figsize=(7,5))
+        plt.scatter((modeled[0] - nominal_xieta_locs[0])/DEG*60,
+                    (modeled[1] - nominal_xieta_locs[1])/DEG*60,
+                    c=ancil.az_enc%360, s=2.7,
+                    alpha=0.15, marker='.', cmap='jet',
+                    vmin=azmin, vmax=azmax)
+        plt.scatter(per_ufm_stats.dxi, per_ufm_stats.deta,
+                    c=per_ufm_stats.az%360,
+                    alpha=0.6, marker='o', cmap='jet',
+                    s=25, edgecolor='k', linewidth=0.7,
+                    vmin=azmin, vmax=azmax, label='UFM Avg')
+        plt.scatter(per_obs_stats.dxi, per_obs_stats.deta, 
+                    c = per_obs_stats.az%360, 
+                    alpha=0.99, marker='X', cmap='jet',
+                    s=45, edgecolor='k', linewidth=0.7,
+                    vmin=azmin, vmax=azmax, label='Obs Avg.')
+        plt.colorbar(label='Azimuth')
+        plt.xlabel('Xi Error (arcmin)')
+        plt.ylabel('Eta Error (arcmin)')
+        plt.axvline(0,0,1, color='k', alpha=0.4)
+        plt.axhline(0,0,1, color='k', alpha=0.4)
+        plt.axhline(0,0,1, color='k', alpha=0.4)
+        plt.xlim(-plotlim,plotlim); plt.ylim(-plotlim,plotlim)
+        plt.scatter(full_dxi_av, full_deta_av, color='r', marker='o', edgecolor='k', label='All Data Avg. Offset')
+        plt.legend(fontsize='small')        
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Az{tag}.png", dpi=350)
+        plt.close()
+   
+            
+    def plot_full_residuals_across_focalplane(self):
+        platform = self.platform
+        plot_dir = self.plot_dir
+        tag = self.tag
+        append = self.append_string
+        ancil = self.aman.ancil
         
-       
+        weights = self.aman.weights
+        fit_residuals = self.aman.fit_residuals
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+
+        fig, ax = plt.subplots()
+        im = ax.scatter(nominal_xieta_locs[0], nominal_xieta_locs[1],
+                        c=fit_residuals, alpha=0.11, cmap='jet',
+                        linewidth=0, s=15, vmax=self.plotlims)
+        sm = cm.ScalarMappable(cmap=im.cmap, norm=im.norm)
+        sm.set_array([])
+        plt.colorbar(sm, ax=ax, label='Fit Residual (arcmin)')
+        ax.set_xlabel('Xi (rad)')
+        ax.set_ylabel('Eta (rad)')
+        plt.title('Fit Residuals across Focal Plane\n(Not averaged per det)')
+        if platform == 'lat':
+            plt.xlim(-.042, .042);plt.ylim(-.042, .042)
+        else:
+            plt.xlim(-.31, .31);plt.ylim(-.31, .31)
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitResiduals{tag}.png", dpi=350)
+
+    def plot_full_histogram(self):
+        platform = self.platform
+        plotlims = self.plotlims
+        plot_dir = self.plot_dir
+        tag = self.tag
+        append = self.append_string
+        
+        det_rms = self.aman.rms
+        ufm_rms = self.aman.per_ufm_stats.rms
+        obs_rms = self.aman.per_obs_stats.rms
+        fit_residuals = self.aman.fit_residuals
+        
+        plt.figure()
+        plt.hist(fit_residuals, bins=50, range=(0, plotlims))
+        plt.axvline(det_rms , 0, 1, color='k',
+                    label=f'Full RMS {det_rms:.2f} arcmin')
+        plt.axvline(obs_rms, 0, 1, color='c',
+                    label = f'Obs RMS {obs_rms:.2f} arcmin')
+        plt.axvline(ufm_rms, 0, 1, color='m',
+                    label=f'UFM RMS {ufm_rms:.2f} arcmin')
+        plt.legend(fontsize='medium')
+        plt.title(platform + ' 1D residuals')
+        plt.xlabel('arcmin')
+            
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png", dpi=350)     
+            
     def plot_dets_in_these_obs(self):  
         platform = self.platform
         plot_dir = self.plot_dir
-        measured_xieta_data = self.solver_aman.measured_xieta_data
-        weights = self.solver_aman.weights
-        roll_c = self.solver_aman.roll_c
-        elev = self.solver_aman.ancil.el_enc
-        azim = self.solver_aman.ancil.az_enc
+        measured_xieta_data = self.aman.measured_xieta_data
+        weights = self.aman.weights
+        roll_c = self.aman.roll_c
+        elev = self.aman.ancil.el_enc
+        azim = self.aman.ancil.az_enc
         if platform == 'lat':
             elmin=10; elmax=90
         else:
@@ -898,12 +1258,12 @@ class ModelFitsPlotter:
         platform = self.platform
         plot_dir = self.plot_dir
         tag = self.tag
-        ancil = self.solver_aman.ancil
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
-        weights = self.solver_aman.weights
-        modeled_fits = self.solver_aman.modeled_fits
-        fit_rms = self.solver_aman.fit_rms
+        ancil = self.aman.ancil
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
+        weights = self.aman.weights
+        modeled_fits = self.aman.modeled_fits
+        fit_rms = self.aman.fit_rms
         if self.which_ufm is not None:
             if isinstance(self.which_ufm, list):
                 ufm_list = self.which_ufm
@@ -996,12 +1356,12 @@ class ModelFitsPlotter:
         plot_dir = self.plot_dir
         xieta_model = self.xieta_model
         tag = self.tag
-        ancil = self.solver_aman.ancil
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
-        weights = self.solver_aman.weights
-        modeled_fits = self.solver_aman.modeled_fits
-        fit_rms = self.solver_aman.fit_rms
+        ancil = self.aman.ancil
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
+        weights = self.aman.weights
+        modeled_fits = self.aman.modeled_fits
+        fit_rms = self.aman.fit_rms
         
         xi_model_fit = modeled_fits.xi
         eta_model_fit = modeled_fits.eta
@@ -1085,25 +1445,25 @@ class ModelFitsPlotter:
         plotlims = self.plotlims
         pm_version = self.pm_version
         tag = self.tag
-        ancil = self.solver_aman.ancil
-        roll_c = self.solver_aman.roll_c
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
-        weights = self.solver_aman.weights      
-        pointing_model = self.solver_aman.pointing_model
-        modeled_fits = self.solver_aman.modeled_fits
-        fit_rms = self.solver_aman.fit_rms    
+        ancil = self.aman.ancil
+        roll_c = self.aman.roll_c
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
+        weights = self.aman.weights      
+        pointing_model = self.aman.pointing_model
+        modeled_fits = self.aman.modeled_fits
+        fit_rms = self.aman.fit_rms    
         
         scale_weights = weights / np.nanmax(weights)
         xi_unmod, eta_unmod = model_template_xieta(
             pointing_model,
             pm_version,
-            self.solver_aman
+            self.aman
         )
         xi0, eta0 = model_template_xieta(
             pm.param_defaults[pm_version],
             pm_version,
-            self.solver_aman
+            self.aman
         )
         #Plot with Elevation as colorbar
         fig, ax = plt.subplots(2, 4, figsize=(9, 6))
@@ -1192,25 +1552,25 @@ class ModelFitsPlotter:
         tag = self.tag
         plotlims = self.plotlims
         pm_version = self.pm_version        
-        ancil = self.solver_aman.ancil
-        roll_c = self.solver_aman.roll_c
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
-        weights = self.solver_aman.weights
-        pointing_model = self.solver_aman.pointing_model
-        modeled_fits = self.solver_aman.modeled_fits
-        fit_rms = self.solver_aman.fit_rms   
+        ancil = self.aman.ancil
+        roll_c = self.aman.roll_c
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
+        weights = self.aman.weights
+        pointing_model = self.aman.pointing_model
+        modeled_fits = self.aman.modeled_fits
+        fit_rms = self.aman.fit_rms   
         
         scale_weights = weights / np.nanmax(weights)
         xi_unmod, eta_unmod = model_template_xieta(
             pointing_model,
             pm_version,
-            self.solver_aman
+            self.aman
         )
         xi0, eta0 = model_template_xieta(
             pm.param_defaults[pm_version],
             pm_version,
-            self.solver_aman
+            self.aman
         )
         #plot with weights as colorbar
         fig, ax = plt.subplots(figsize=(9, 6))
@@ -1223,7 +1583,7 @@ class ModelFitsPlotter:
             edgecolor="gray",
             lw=0.3,
             marker="o",
-            alpha=0.4,
+            alpha=0.2,
             cmap="viridis",
             vmin=self.config.get("weight_cutoff"),
             vmax=1
@@ -1247,7 +1607,7 @@ class ModelFitsPlotter:
             edgecolor="gray",
             lw=0.3,
             marker="o",
-            alpha=0.4,
+            alpha=0.2,
             cmap="jet",
         )
         ax.set_xlim(-1 * plotlims, plotlims)
@@ -1275,7 +1635,7 @@ class ModelFitsPlotter:
             edgecolor="gray",
             lw=0.3,
             marker="o",
-            alpha=0.4,
+            alpha=0.2,
             cmap="jet",
         )
         ax.set_xlim(-1 * plotlims, plotlims)
@@ -1301,7 +1661,7 @@ class ModelFitsPlotter:
                 edgecolor="gray",
                 lw=0.3,
                 marker="o",
-                alpha=0.4,
+                alpha=0.2,
                 cmap="jet",
             )
             ax.set_xlim(-1 * plotlims, plotlims)
@@ -1321,14 +1681,14 @@ class ModelFitsPlotter:
         pm_version = self.pm_version
         xieta_model = self.xieta_model
         plotlims = self.plotlims
-        ancil = self.solver_aman.ancil
-        roll_c = self.solver_aman.roll_c
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
-        weights = self.solver_aman.weights
-        pointing_model = self.solver_aman.pointing_model
-        modeled_fits = self.solver_aman.modeled_fits
-        fit_rms = self.solver_aman.fit_rms   
+        ancil = self.aman.ancil
+        roll_c = self.aman.roll_c
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
+        weights = self.aman.weights
+        pointing_model = self.aman.pointing_model
+        modeled_fits = self.aman.modeled_fits
+        fit_rms = self.aman.fit_rms   
         
         scale_weights = weights / np.nanmax(weights)
         plotmask = np.where(weights)
@@ -1404,25 +1764,25 @@ class ModelFitsPlotter:
         tag = self.tag
         plotlims = self.plotlims
         pm_version = self.pm_version
-        ancil = self.solver_aman.ancil
-        roll_c = self.solver_aman.roll_c
-        weights = self.solver_aman.weights
-        fit_rms = self.solver_aman.fit_rms   
-        obs_index = self.solver_aman.obs_index
+        ancil = self.aman.ancil
+        roll_c = self.aman.roll_c
+        weights = self.aman.weights
+        fit_rms = self.aman.fit_rms   
+        obs_index = self.aman.obs_index
         
         scale_weights = weights / np.nanmax(weights) 
         effobs =np.where(np.diff(np.append(obs_index, obs_index[-1]+1))>0)[0]
         try:
-            two_fits = np.any(_valid_arg("fit_residuals_i1", 'signal', src=self.solver_aman))
+            two_fits = np.any(_valid_arg("fit_residuals_i1", 'signal', src=self.aman))
         except:
             two_fits = False
         if two_fits:
             iterate_cutoff = self.config.get("iterate_cutoff")
             if iterate_cutoff == "auto":
-                iterate_cutoff = np.nanstd(self.solver_aman.fit_residuals_i1)*2 + np.nanmedian(self.solver_aman.fit_residuals_i1)
-            bad_fit_inds = self.solver_aman.bad_fit_inds
-            fit_residuals_i1 = self.solver_aman.fit_residuals_i1
-            fit_residuals_i2 = self.solver_aman.fit_residuals
+                iterate_cutoff = np.nanstd(self.aman.fit_residuals_i1)*2 + np.nanmedian(self.aman.fit_residuals_i1)
+            bad_fit_inds = self.aman.bad_fit_inds
+            fit_residuals_i1 = self.aman.fit_residuals_i1
+            fit_residuals_i2 = self.aman.fit_residuals
             fig = plt.figure(figsize=(6, 4))
             gs = fig.add_gridspec(7, 1)
             ax1 = fig.add_subplot(gs[0:-2, :])
@@ -1501,7 +1861,7 @@ class ModelFitsPlotter:
                 plt.close()
         else:
             # Plot first fit iteration residuals only
-            fit_residuals_i1 = self.solver_aman.fit_residuals
+            fit_residuals_i1 = self.aman.fit_residuals
             fig, ax1 = plt.subplots()
             im = ax1.scatter(
                 np.arange(len(fit_residuals_i1)),
@@ -1531,12 +1891,12 @@ class ModelFitsPlotter:
         plot_dir = self.plot_dir
         tag = self.tag
         append = self.append_string
-        ancil = self.solver_aman.ancil
-        weights = self.solver_aman.weights
-        fit_rms = self.solver_aman.fit_rms
-        fit_residuals = self.solver_aman.fit_residuals
-        fit_rms_full = self.solver_aman.fit_rms_full
-        fit_residuals_full = self.solver_aman.fit_residuals_full
+        ancil = self.aman.ancil
+        weights = self.aman.weights
+        fit_rms = self.aman.fit_rms
+        fit_residuals = self.aman.fit_residuals
+        fit_rms_full = self.aman.fit_rms_full
+        fit_residuals_full = self.aman.fit_residuals_full
 
         xmax = np.nanmax(fit_residuals_full) * 1.1
         title = f"{append} {tag}"
@@ -1570,10 +1930,10 @@ class ModelFitsPlotter:
         plot_dir = self.plot_dir
         tag = self.tag
         xieta_model = self.xieta_model
-        weights = self.solver_aman.weights
-        modeled_fits = self.solver_aman.modeled_fits
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
+        weights = self.aman.weights
+        modeled_fits = self.aman.modeled_fits
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
         
         scale_weights = weights / np.nanmax(weights)
         plotmask = np.where(weights)
@@ -1628,10 +1988,10 @@ class ModelFitsPlotter:
         plot_dir = self.plot_dir
         tag = self.tag
         xieta_model = self.xieta_model
-        weights = self.solver_aman.weights
-        modeled_fits = self.solver_aman.modeled_fits
-        nominal_xieta_locs = self.solver_aman.nominal_xieta_locs
-        measured_xieta_data = self.solver_aman.measured_xieta_data
+        weights = self.aman.weights
+        modeled_fits = self.aman.modeled_fits
+        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        measured_xieta_data = self.aman.measured_xieta_data
         
         scale_weights = weights / np.nanmax(weights)
         plotmask = np.where(weights)
@@ -1679,7 +2039,8 @@ class ModelFitsPlotter:
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_xieta_cross_residuals{tag}.png", dpi=350)
             plt.close()
-            
+
+   
 ############
 
 if __name__ == "__main__":
