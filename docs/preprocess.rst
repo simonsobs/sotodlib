@@ -135,7 +135,6 @@ processing pipeline would look like::
           calc:
             max_trend: 30
             n_pieces: 5
-          save: True
           select:
             kind: "any"
 
@@ -145,7 +144,6 @@ processing pipeline would look like::
             hp_fc: 0.5
             n_sig: 10
             buffer: 20
-          save: True
           select:
             max_n_glitch: 20
             sig_glitch: 30
@@ -170,7 +168,6 @@ processing pipeline would look like::
           calc:
             low_f: 5
             high_f: 10
-          save: True
           select:
             max_noise: 2000
 
@@ -209,7 +206,6 @@ steps::
     process_pipe:
         - name : "dark_dets"
           calc: True
-          save: True
           select: True
 
         - name: "source_flags"
@@ -219,7 +215,6 @@ steps::
             center_on: 'jupiter' # set to 'planet' for variable according to planet tag of each obs (must use --planet-obs argument of site-pipeline script)
             res: 20 # np.radians(20/60)
             max_pix: 4.0e+6
-          save: True
 
         - name: "glitchfill"
           flag_aman: "sources"
@@ -255,7 +250,6 @@ A configuration file for the processing pipeline would look like::
             source_list: ['jupiter']
             distance: 20
             nstep: 100
-          save: True
           plot:
             wafer_offsets: {'ws0': [-2.5, -0.5],
                             'ws1': [-2.5, -13],
