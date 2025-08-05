@@ -342,6 +342,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             samples=(0, 1),
             ignore_missing=True,
             no_signal=True,
+            no_headers=False,
             on_missing={"det_cal": "skip"},
         )
 

@@ -155,7 +155,7 @@ def model_lat_v1(params, az, el, roll):
       about its axis.
     - mir_center_{xi,eta}0: The (xi,eta) coordinate in the El-structure-centered
       focal plane that appears fixed when the mirrors are rotated about the ray from
-      sky that kits the center of both mirrors.
+      sky that hits the center of both mirrors.
 
     """
     _p = dict(param_defaults['lat_v1'])
