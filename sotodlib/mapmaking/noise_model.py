@@ -109,7 +109,7 @@ class NmatUncorr(Nmat):
 
     @staticmethod
     def from_bunch(data):
-        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=window, nwin=nwin)
+        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=data.window, nwin=data.nwin)
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
@@ -355,12 +355,10 @@ class NmatWhite(Nmat):
 
 class NmatUnit(Nmat):
     """
-    
     This is a noise model that does nothing, equivalent to multiply by a 
     unit noise matrix
-    
     """
-    
+
     def __init__(self, ivar=None):
         self.ivar  = ivar
         self.ready = ivar is not None
@@ -378,7 +376,10 @@ class NmatUnit(Nmat):
         return tod
     def write(self, fname):
         self.check_ready()
-        bunch.write(fname, bunch.Bunch(type="NmatUnit"))
+        data = bunch.Bunch(type="NmatUnit")
+        for field in ["ivar"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
     @staticmethod
     def from_bunch(data): 
         return NmatUnit(ivar=data.ivar)
@@ -391,5 +392,7 @@ def read_nmat(fname):
     typ  = data.type.decode()
     if   typ == "NmatDetvecs": return NmatDetvecs.from_bunch(data)
     elif typ == "NmatUncorr":  return NmatUncorr .from_bunch(data)
+    elif typ == "NmatWhite":   return NmatWhite  .from_bunch(data)
+    elif typ == "NmatUnit":    return NmatUnit   .from_bunch(data)
     elif typ == "Nmat":        return Nmat       .from_bunch(data)
     else: raise IOError("Unrecognized noise matrix type '%s' in '%s'" % (str(typ), fname))
