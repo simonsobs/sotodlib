@@ -165,7 +165,7 @@ def get_preprocess_context(configs, context=None):
         context["metadata"] = []
 
     for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
+        if key.get("name") == "preprocess" or key.get("label") == "preprocess":
             found=True
             break
     if not found:
