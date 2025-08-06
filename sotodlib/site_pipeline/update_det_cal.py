@@ -304,8 +304,6 @@ class ObsInfo:
     ------------
     obs_id: str
         Obs id.
-    am: AxisManager
-        AxisManager containing metadata for the given observation.
     iv_obsids: dict
         Dict mapping detset to iv obs-id.
     bs_obsids: dict
