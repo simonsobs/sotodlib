@@ -18,12 +18,7 @@ from sotodlib.io.hkdb import HkConfig
 from sotodlib.core import Context
 from sotodlib.core.metadata import ManifestDb
 
-logging.basicConfig(
-    format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO
-)
-
 logger = logging.getLogger(__name__)
-
 
 class ReportDataConfig:
     def __init__(
