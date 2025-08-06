@@ -197,9 +197,6 @@ def rotate_focal_plane(tod, hwp=True):
     tod.focal_plane.xi = np.float32(xi)
     tod.focal_plane.eta = np.float32(eta)
     tod.focal_plane.gamma = sign * np.float32(gamma)
-    if 'hwp_angle' in tod._fields:
-        tod.hwp_angle += avg_roll
-        tod.hwp_angle = tod.hwp_angle % (2*np.pi)
 
 
 def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True):
@@ -207,7 +204,7 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
     Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams to
     place all detectors' Q and U timestreams in a common telescope frame. This updates tod.demodQ
     and tod.demodU, in place.
-    To get Qr Ur timestreams, run `rotate_demodQU(tod)` and then `rotate_demodQU(tod, radial=True)`.
+    To get Qr Ur timestreams, run `rotate_demodQU(tod, radial=True)`.
     To restore the Q U timestreams, run `rotate_demodQU(tod, sign=-1, radial=True)`.
     
 
@@ -227,8 +224,11 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
 
     """
     if radial:
-        theta_fp = -np.arctan2(tod.focal_plane.eta, tod.focal_plane.xi)
-        demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*theta_fp + 1j*np.deg2rad(offset)) )).T
+        if update_focal_plane:
+            demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*tod.focal_plane.gamma + 1j*np.deg2rad(offset)) )).T
+        theta_fp = np.arctan2(tod.focal_plane.xi, tod.focal_plane.eta)
+        demodC = (demodC.T * np.exp( sign*(-2j*theta_fp) )).T
+
     else:
         demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*tod.focal_plane.gamma + 1j*np.deg2rad(offset)) )).T
     tod.demodQ = demodC.real
