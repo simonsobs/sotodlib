@@ -204,15 +204,14 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
     Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams to
     place all detectors' Q and U timestreams in a common telescope frame. This updates tod.demodQ
     and tod.demodU, in place.
-    To get Qr Ur timestreams, run `rotate_demodQU(tod, radial=True)`.
+    To get Qr Ur timestreams, run `rotate_demodQU(tod)` and then `rotate_demodQU(tod, radial=True)`.
     To restore the Q U timestreams, run `rotate_demodQU(tod, sign=-1, radial=True)`.
     
 
     Args:
         tod : an axisManager object
-        update_focal_plane (bool, optional): Whether to set focal_plane.gamma angles to zero,
-            consistent with new coordinate reference. Make this true for polarization mapmaking
-            using make_map.
+        update_focal_plane (bool, optional): Whether to update focal_plane.gamma angles consistent with new coordinate reference. 
+            Make this True for polarization mapmaking using make_map.
         offset : float, optional
             The rotation angle in degrees to apply (default is 0).
         sign : int, optional
@@ -224,15 +223,16 @@ def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True)
 
     """
     if radial:
-        if update_focal_plane:
-            demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*tod.focal_plane.gamma + 1j*np.deg2rad(offset)) )).T
         theta_fp = np.arctan2(tod.focal_plane.xi, tod.focal_plane.eta)
-        demodC = (demodC.T * np.exp( sign*(-2j*theta_fp) )).T
+        demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*theta_fp) )).T
+        if update_focal_plane:
+            tod.focal_plane.gamma -= sign * theta_fp
 
     else:
         demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*tod.focal_plane.gamma + 1j*np.deg2rad(offset)) )).T
+        if update_focal_plane:
+            tod.focal_plane.gamma *= 0
     tod.demodQ = demodC.real
     tod.demodU = demodC.imag
     del demodC
-    if update_focal_plane:
-        tod.focal_plane.gamma *= 0
+
