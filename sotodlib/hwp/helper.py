@@ -23,8 +23,10 @@ def update_pattern(solved):
     solved["fast_time_2"] = (solved["fast_time_2"][1:] +
                              solved["fast_time_2"][:-1]) / 2
 
-    solved["angle_1"] = solved["angle_1"][:-1]
-    solved["angle_2"] = solved["angle_2"][:-1]
+    solved["angle_1"] = (solved["angle_1"][1:] +
+                         solved["angle_1"][:-1]) / 2
+    solved["angle_2"] = (solved["angle_2"][1:] +
+                         solved["angle_2"][:-1]) / 2
 
     for i in solved["ref_indexes_1"]:
         t1 = solved["fast_time_1"][i-2]

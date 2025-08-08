@@ -728,6 +728,11 @@ class G3tHWP():
         solved['angle_1'] = solved['angle_1'][offcenter_idx1]
         solved['angle_2'] = solved['angle_2'][offcenter_idx2]
 
+        solved['ref_indexes_1'] = [i - solved['ref_indexes_1'][0] for i in solved['ref_indexes_1'] \
+                                   if (offcenter_idx1[0] <= i and i <= offcenter_idx2[-1])]
+        solved['ref_indexes_2'] = [i - solved['ref_indexes_2'][0] for i in solved['ref_indexes_2'] \
+                                   if (offcenter_idx2[0] <= i and i <= offcenter_idx2[-1])]
+
         return
 
     def write_solution(self, solved, output=None):
@@ -846,6 +851,8 @@ class G3tHWP():
             aman.wrap('B', 0)
         else:
             aman.wrap_new('hwp_angle_ver1'+suffix,
+                          shape=('samps', ), dtype=np.float64)
+            aman.wrap_new('hwp_angle_ver1_1'+suffix,
                           shape=('samps', ), dtype=np.float64)
             aman.wrap_new('hwp_angle_ver2'+suffix,
                           shape=('samps', ), dtype=np.float64)
@@ -1174,6 +1181,14 @@ class G3tHWP():
             aman['num_dead_rots'+suffix] = solved['num_dead_rots'+suffix]
             aman['num_dropped_slits'+suffix] = solved['num_dropped_slits'+suffix]
 
+        solved_copy = deepcopy(solved)  # this is temporary?
+        from .helper import update_pattern
+        update_pattern(solved)
+        for i, suffix in enumerate(self._suffixes):
+            aman['hwp_angle_ver1_1'+suffix] = np.mod(self._angle_interpolation(
+                solved['fast_time'+suffix], solved['angle'+suffix], tod.timestamps), 2*np.pi)
+
+        solved = solved_copy
         solved_copy = deepcopy(solved)  # this is temporary?
         # version 2
         # calculate template subtracted angle
