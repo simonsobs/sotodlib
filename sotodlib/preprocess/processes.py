@@ -1019,8 +1019,15 @@ class Demodulate(_Preprocess):
                             freq_cutoff = v
             else:
                 freq_cutoff = 0.95*hwp_freq
+
+            if 'dsT' in proc_aman['frequency_cutoffs']:
+                proc_aman['frequency_cutoffs'].move('dsT', None)
             proc_aman['frequency_cutoffs'].wrap('dsT', freq_cutoff)
+            if 'demodQ' in proc_aman['frequency_cutoffs']:
+                proc_aman['frequency_cutoffs'].move('demodQ', None)
             proc_aman['frequency_cutoffs'].wrap('demodQ', freq_cutoff)
+            if 'demodU' in proc_aman['frequency_cutoffs']:
+                proc_aman['frequency_cutoffs'].move('demodU', None)
             proc_aman['frequency_cutoffs'].wrap('demodU', freq_cutoff)
 
 
