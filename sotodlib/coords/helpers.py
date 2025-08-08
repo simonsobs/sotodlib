@@ -747,9 +747,9 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
 
     dxi = amp * np.cos(aman.hwp_angle - phase)
     deta = -amp * np.sin(aman.hwp_angle - phase)
-    deflq = quat.rotation_xieta(xi=dxi, eta=deta)
+    deflq = so3g.proj.quat.rotation_xieta(xi=dxi, eta=deta)
 
-    sight = CelestialSightLine.az_el(
+    sight = so3g.proj.CelestialSightLine.az_el(
         aman.timestamps,
         aman.boresight.az,
         aman.boresight.el,
