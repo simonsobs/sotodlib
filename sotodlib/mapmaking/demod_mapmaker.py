@@ -298,6 +298,19 @@ class DemodSignalMap(DemodSignal):
         and Nd the result of applying the noise model to the detector time-ordered data.
         """
         ctime  = obs.timestamps
+        if pdeflect:
+            from sotodlib.coords.helpers import get_deflected_sightline
+            # Get deflection parameters
+            wobble_meta = obs.wobble_params
+            # Get wobble-corrected sightline
+            sight = get_deflected_sightline(
+                obs,
+                wobble_meta,
+                site=smutils.unarr(obs.site),
+                weather=smutils.unarr(obs.weather)
+            )
+        else:
+            sight = None
         for n_split in range(self.Nsplits):
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
@@ -322,20 +335,6 @@ class DemodSignalMap(DemodSignal):
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
                     wcs_kernel = None
-                
-                if pdeflect:
-                    from sotodlib.coords.helpers import get_deflected_sightline
-                    # Get deflection parameters
-                    wobble_meta = obs.wobble_params
-                    # Get wobble-corrected sightline
-                    sight = get_deflected_sightline(
-                        obs,
-                        wobble_meta,
-                        site=smutils.unarr(obs.site),
-                        weather=smutils.unarr(obs.weather)
-                    )
-                else:
-                    sight = None
                 pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True, sight=sight)
             else:
                 pmap_local = pmap
