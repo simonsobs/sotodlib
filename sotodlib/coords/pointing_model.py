@@ -4,7 +4,7 @@
 import numpy as np
 from .. import core
 from .helpers import _valid_arg
-from so3g.proj import quat, CelestialSightLine
+from so3g.proj import quat
 
 import logging
 logger = logging.getLogger(__name__)

@@ -741,21 +741,15 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     if len(wafer_slots) != 1 or len(bands) != 1:
         raise ValueError("Detectors span multiple wafer_slots or bands.")
 
-    ws = wafer_slots[0]
-    band = bands[0]
-
-    # Access amp and phase from combined metadata tree
-    amp = getattr(getattr(wobble_meta, ws), band).amp
-    phase = getattr(getattr(wobble_meta, ws), band).phase
-
-    dxi = amp * np.cos(aman.hwp_angle - phase)
-    deta = -amp * np.sin(aman.hwp_angle - phase)
+    dxi = wobble_meta.amp * np.cos(aman.hwp_angle - wobble_meta.phase)
+    deta = -wobble_meta.amp * np.sin(aman.hwp_angle - wobble_meta.phase)
     deflq = quat.rotation_xieta(xi=dxi, eta=deta)
 
     sight = CelestialSightLine.az_el(
         aman.timestamps,
         aman.boresight.az,
         aman.boresight.el,
+        roll=aman.boresight.roll,
         weather=weather,
         site=site,
     )
