@@ -740,9 +740,13 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
 
     if len(wafer_slots) != 1 or len(bands) != 1:
         raise ValueError("Detectors span multiple wafer_slots or bands.")
+    # the amp and phase are the same for a given wafer, so we can take any of them, in this case for detector index 0
+    # !!!!! this won't work for mixing more than one wafer.
+    amp = wobble_meta.amp[0]
+    phase = wobble_meta.phase[0]
 
-    dxi = wobble_meta.amp * np.cos(aman.hwp_angle - wobble_meta.phase)
-    deta = -wobble_meta.amp * np.sin(aman.hwp_angle - wobble_meta.phase)
+    dxi = amp * np.cos(aman.hwp_angle - phase)
+    deta = -amp * np.sin(aman.hwp_angle - phase)
     deflq = quat.rotation_xieta(xi=dxi, eta=deta)
 
     sight = CelestialSightLine.az_el(
