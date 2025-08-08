@@ -504,7 +504,8 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise'):
+                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
+                    pdeflect=True):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -563,6 +564,9 @@ def make_demod_map(context, obslist, noise_model, info,
         build the ivar locally from the std of the TOD.
     wn_label : str, optional
         Path where to find the white noise per det estimated by the preprocessing.
+    pdeflect : bool, optional
+        Correct wobble deflection. This requires wobble params metadata in the 
+        context
 
     Returns
     -------
@@ -613,7 +617,7 @@ def make_demod_map(context, obslist, noise_model, info,
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label)
+        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label, pdeflect=pdeflect)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
         n_dets += obs.dets.count
