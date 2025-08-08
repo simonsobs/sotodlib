@@ -93,6 +93,9 @@ class Cfg:
     wn_label: str
         Path where to find the white noise per det by the
         preprocessing
+    pdeflect: bool
+        Correct wobble deflection. Requires wobble params
+        metadata in your context
     center_at: str
     max_dets: int
     fixed_time: int
@@ -142,7 +145,8 @@ class Cfg:
         dtype_map: str = 'float64',
         unit: str = 'K',
         use_psd: bool = True,
-        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise'
+        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise',
+        pdeflect: bool = True
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -180,6 +184,7 @@ class Cfg:
         self.unit = unit
         self.use_psd = use_psd
         self.wn_label = wn_label
+        self.pdeflect = pdeflect
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -467,7 +472,8 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,) for r in run_list]
+            wn_label=args.wn_label,pdeflect=args.pdeflect) 
+            for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:
