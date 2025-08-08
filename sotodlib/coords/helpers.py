@@ -742,7 +742,8 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
         raise ValueError("Detectors span multiple wafer_slots or bands.")
     # the amp and phase are the same for a given wafer, so we can take any of them, in this case for detector index 0
     # !!!!! this won't work for mixing more than one wafer.
-    amp = wobble_meta.amp[0]
+    # the metadata has amplitudes in arcmin, and phases in radians
+    amp = wobble_meta.amp[0]/60.*np.pi/180.0
     phase = wobble_meta.phase[0]
 
     dxi = amp * np.cos(aman.hwp_angle - phase)
