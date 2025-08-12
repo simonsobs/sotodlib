@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("map_name", sa.String, nullable=False),
         sa.Column("map_path", sa.String, nullable=False),
         sa.Column("tube_slot", sa.String, nullable=False),
-        sa.Column("arrays", sa.Integer, nullable=False),
+        sa.Column("wafers", sa.Integer, nullable=False),
         sa.Column("frequency", sa.String, nullable=False),
         sa.Column(
             "ctime", sa.Float, nullable=False
