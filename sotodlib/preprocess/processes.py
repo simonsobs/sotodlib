@@ -15,10 +15,13 @@ from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts, flag_cut_select,
                                    sparse_to_ranges_matrix)
 
+from sotodlib.preprocess import preprocess_util as pp_util
+
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
 
+logger = pp_util.init_logger("preprocess")
 
 class FFTTrim(_Preprocess):
     """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
@@ -416,6 +419,9 @@ class PSDCalc(_Preprocess):
         if full_output:
             fft_aman.wrap("nseg", nseg)
 
+        if "frequency_cutoffs" in proc_aman:
+            proc_aman["frequency_cutoffs"].wrap(self.wrap, proc_aman["frequency_cutoffs"][self.signal])
+
         self.save(proc_aman, fft_aman)
 
     def save(self, proc_aman, fft_aman):
@@ -518,7 +524,7 @@ class Noise(_Preprocess):
     Example config block for fitting PSD::
 
     - name: "noise"
-      fit: False
+      fit: True
       subscan: False
       calc:
         fwhite: (5, 10)
@@ -566,6 +572,23 @@ class Noise(_Preprocess):
         psd = proc_aman[self.psd]
         pxx = psd.Pxx_ss if self.subscan else psd.Pxx
 
+        if "frequency_cutoffs" in proc_aman:
+            frequency_cutoff = proc_aman["frequency_cutoffs"][self.psd]
+        else:
+            frequency_cutoff=None
+
+        def check_frequency_cutoff(fmin, fmax):
+             # limit upper frequency cutoffs to hwp freq
+            if 'hwp_angle' in aman and frequency_cutoff is not None:
+                hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                             (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+                if fmax >= frequency_cutoff:
+                    logger.warning(f"Upper freq={fmax} > hwp_freq={hwp_freq}. Limiting to hwp_freq.")
+                    fmax = frequency_cutoff
+            if fmin is not None and fmin >= fmax:
+                raise ValueError(f"lower freq={fmin} >= upper freq={fmax}")
+            return fmax
+
         if self.calc_cfgs is None:
             self.calc_cfgs = {}
 
@@ -583,6 +606,7 @@ class Noise(_Preprocess):
                     calc_wn = True
             if calc_wn or wn_est is None:
                 wn_f_low, wn_f_high = fcfgs.get('fwhite', (5, 10))
+                wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
                 fcfgs['wn_est'] = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                                                    freqs=psd.freqs,
                                                                    nseg=psd.get('nseg'),
@@ -591,9 +615,11 @@ class Noise(_Preprocess):
             if fcfgs.get('subscan') is None:
                 fcfgs['subscan'] = self.subscan
             fcfgs.pop('fwhite', None)
+            f_max = check_frequency_cutoff(fcfgs.get("lowf", None), fcfgs.pop("f_max", 100))
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
+                                                        f_max=f_max,
                                                         **fcfgs)
             if calc_wn or wn_est is None:
                 if not self.subscan:
@@ -603,6 +629,7 @@ class Noise(_Preprocess):
         else:
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
+            wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          nseg=psd.get('nseg'),
@@ -978,6 +1005,30 @@ class Demodulate(_Preprocess):
                                          aman.samps.offset + aman.samps.count - trim))
             aman.restrict('samps', (aman.samps.offset + trim,
                                     aman.samps.offset + aman.samps.count - trim))
+
+        if 'frequency_cutoffs' in proc_aman:
+            hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
+                    (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+            lpf_cfg = self.process_cfgs["demod_cfgs"].get("lpf_cfg", None)
+            if lpf_cfg is not None:
+                for k, v in lpf_cfg.items():
+                    if k == 'cutoff':
+                        if isinstance(v, str):
+                            freq_cutoff = hwp_freq*float(v.split('*')[0])
+                        else:
+                            freq_cutoff = v
+            else:
+                freq_cutoff = 0.95*hwp_freq
+
+            if 'dsT' in proc_aman['frequency_cutoffs']:
+                proc_aman['frequency_cutoffs'].move('dsT', None)
+            proc_aman['frequency_cutoffs'].wrap('dsT', freq_cutoff)
+            if 'demodQ' in proc_aman['frequency_cutoffs']:
+                proc_aman['frequency_cutoffs'].move('demodQ', None)
+            proc_aman['frequency_cutoffs'].wrap('demodQ', freq_cutoff)
+            if 'demodU' in proc_aman['frequency_cutoffs']:
+                proc_aman['frequency_cutoffs'].move('demodU', None)
+            proc_aman['frequency_cutoffs'].wrap('demodU', freq_cutoff)
 
 
 class AzSS(_Preprocess):
@@ -2170,6 +2221,26 @@ class CombineFlags(_Preprocess):
             aman['flags'].move(self.process_cfgs['total_flags_label'], None)
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
+class RotateFocalPlane(_Preprocess):
+    """ Interpret the boresight rotation effect as a focal plane rotation
+    and update them accordingly. This applies constant rotation to focal plane.
+    If hwp=True, rotations of gamma are reflected. This updates boresight.roll
+    and focal_plane, in place.
+
+    Example config block::
+
+        - name : "rotate_focal_plane"
+          process:
+            hwp: True
+
+    .. autofunction:: sotodlib.coords.demod.rotate_focal_plane
+    """
+    name = "rotate_focal_plane"
+
+    def process(self, aman, proc_aman, sim=False):
+        from sotodlib.coords import demod
+        demod.rotate_focal_plane(aman, **self.process_cfgs)
+
 class RotateQU(_Preprocess):
     """Rotate Q and U components to/from telescope coordinates.
 
@@ -2177,8 +2248,8 @@ class RotateQU(_Preprocess):
 
         - name : "rotate_qu"
           process:
-            sign: 1 
-            offset: 0 
+            sign: 1
+            offset: 0
             update_focal_plane: True
 
     .. autofunction:: sotodlib.coords.demod.rotate_demodQU
@@ -2365,6 +2436,18 @@ class CorrectIIRParams(_Preprocess):
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
+        if "frequency_cutoffs" in proc_aman and np.isnan(proc_aman["frequency_cutoffs"]["signal"]):
+            n = len(aman.timestamps)
+            delta_t = (aman.timestamps[-1] - aman.timestamps[0])/n
+            freqs = np.fft.rfftfreq(n, delta_t)
+            iir = tod_ops.filters.iir_filter()(freqs, aman)
+
+            mag = np.abs(iir) / np.max(np.abs(iir))
+            # 3dB scale
+            scale = 10 ** (-3. / 20)
+            freq_cutoff = freqs[np.min(np.where(np.array(mag < scale * np.max(mag)))[0])]
+            proc_aman["frequency_cutoffs"]["signal"] = freq_cutoff
+
 class TrimFlagEdge(_Preprocess):
     """Trim edge until given flags of all detectors are False
     To find first and last sample id that has False (i.e., no flags applied) for all detectors.
@@ -2455,7 +2538,8 @@ _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
 _Preprocess.register(UnionFlags)
 _Preprocess.register(CombineFlags)
-_Preprocess.register(RotateQU) 
+_Preprocess.register(RotateFocalPlane)
+_Preprocess.register(RotateQU)
 _Preprocess.register(SubtractQUCommonMode) 
 _Preprocess.register(FocalplaneNanFlags) 
 _Preprocess.register(PointingModel)  

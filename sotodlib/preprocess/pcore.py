@@ -8,6 +8,7 @@ from so3g.proj import Ranges, RangesMatrix
 from scipy.sparse import csr_array
 from matplotlib import pyplot as plt
 
+
 class _Preprocess(object):
     """The base class for Preprocessing modules which defines the required
     functions and keys required in the configurations.
@@ -469,7 +470,27 @@ class Pipeline(list):
                 proc_aman.restrict('dets', det_list)
             full = proc_aman.copy()
             run_calc = False
-        
+
+        if 'frequency_cutoffs' not in proc_aman:
+            freq_cutoff = np.nan
+            proc_aman.wrap('frequency_cutoffs', core.AxisManager())
+            for _field, _sub_iir_params in aman.iir_params._fields.items():
+                if isinstance(_sub_iir_params, core.AxisManager):
+                    if 'a' in _sub_iir_params._fields:
+                        if _sub_iir_params['a'] is not None:
+                            from ..tod_ops import filters
+                            n = len(aman.timestamps)
+                            delta_t = (aman.timestamps[-1] - aman.timestamps[0])/n
+                            freqs = np.fft.rfftfreq(n, delta_t)
+                            iir = filters.iir_filter()(freqs, aman)
+
+                            mag = np.abs(iir) / np.max(np.abs(iir))
+                            # 3dB scale
+                            scale = 10 ** (-3. / 20)
+                            freq_cutoff = freqs[np.min(np.where(np.array(mag < scale * np.max(mag)))[0])]
+
+            proc_aman['frequency_cutoffs'].wrap('signal', freq_cutoff)
+
         success = 'end'
         for step, process in enumerate(self):
             if sim and process.skip_on_sim:
@@ -491,7 +512,12 @@ class Pipeline(list):
             if aman.dets.count == 0:
                 success = process.name
                 break
-        
+
+        # copy updated frequency cutoffs to full
+        if "frequency_cutoffs" in full:
+            full.move("frequency_cutoffs", None)
+        full.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
+
         return full, success
         
 
