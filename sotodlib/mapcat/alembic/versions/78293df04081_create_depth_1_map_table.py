@@ -111,6 +111,16 @@ def upgrade() -> None:
         sa.Column("preprocess_info", sa.JSON),
     )
 
+    op.create_table(
+        "depth_one_sky_coverage",
+        sa.Column(
+            "map_name",
+            sa.String,
+            sa.ForeignKey("depth_one_maps.map_name"),
+        ),
+        sa.Column("patch_coverage", sa.String, nullable=False),
+    )
+
 
 def downgrade() -> None:
     op.drop_table("depth_one_maps")
@@ -118,3 +128,4 @@ def downgrade() -> None:
     op.drop_table("depth_1_pointing_offsets")
     op.drop_table("tod_depth_one")
     op.drop_table("pipelin_information")
+    op.drop_table("depth_one_sky_coverage")
