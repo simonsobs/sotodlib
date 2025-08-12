@@ -26,7 +26,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("map_name", sa.String, nullable=False),
         sa.Column("map_path", sa.String, nullable=False),
-        sa.Column("tube_slot", sa.String, nullable=False),
+        sa.Column(
+            "tube_slot", sa.String, nullable=False
+        ),  # TODO: Maybe make this a literal?
         sa.Column(
             "wafers", sa.Integer, nullable=False
         ),  # TODO: I'm not sure this field makes sense as a map may use TODs with different wafer availability. I.E., wafers 0,1,2 may be available for one TOD but only 0,2 for another
