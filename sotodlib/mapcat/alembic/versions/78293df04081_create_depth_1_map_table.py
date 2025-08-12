@@ -99,8 +99,22 @@ def upgrade() -> None:
         sa.Column("stream_ids_list", sa.String),
     )
 
+    op.create_table(
+        "pipeline_information",
+        sa.Column(
+            "map_name",
+            sa.String,
+            sa.ForeignKey("depth_one_maps.map_name"),
+        ),
+        sa.Column("sotodlib_version", sa.String, nullable=False),
+        sa.Column("map_maker", sa.String, nullable=False),
+        sa.Column("preprocess_info", sa.JSON),
+    )
+
 
 def downgrade() -> None:
     op.drop_table("depth_one_maps")
     op.drop_table("time_domain_processing")
     op.drop_table("depth_1_pointing_offsets")
+    op.drop_table("tod_depth_one")
+    op.drop_table("pipelin_information")
