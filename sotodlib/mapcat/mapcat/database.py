@@ -30,7 +30,7 @@ class DepthOneMap(BaseModel):
         Standardized names of wafers used in this map
     frequency : str
         Frequency channel of map
-    ctime :
+    ctime : float
         Central unix time of map
     """
 
@@ -62,7 +62,9 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
 
     id: int = Field(primary_key=True)
     map_name: str = Field(index=True, nullable=False)
+    tube_slot: str = Field(index=True, nullable=False)
     frequency: str = Field(index=True, nullable=False)
+    ctime: float = Field(index=True, nullable=False)
 
     def to_model(self) -> DepthOneMap:
         """
