@@ -164,7 +164,7 @@ class TestObsDb(unittest.TestCase):
         # Method 3
         db.update_obs({'obs_id':'myobs0', 'wafer_slot':'ws5', 'bandpass':'f090'},
                       data={'data1': 997})
-        result_m3 = db.get({'obs_id':'myobs0', 'wafer_slot':'ws5', 'bandpass':'f090'})
+        result_m3 = db.get({'wafer_slot':'ws5', 'obs_id':'myobs0', 'bandpass':'f090'})
         self.assertEqual(result_m3['data1'], 997)
         # Method 4
         db.update_obs(('myobs0', 'ws5', 'f150'),

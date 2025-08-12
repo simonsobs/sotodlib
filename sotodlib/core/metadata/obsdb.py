@@ -92,9 +92,9 @@ class ObsDb(object):
                     changes = True
             if changes:
                 self.conn.commit()
-        self.primary_keys = self.get_primary_fields(wafer_info)
+        self.primary_keys = self._get_primary_fields(wafer_info)
 
-    def get_primary_fields(self, wafer_info=None):
+    def _get_primary_fields(self, wafer_info=None):
         """Retrieve the primary keys of the specified table.
            This is used whether to index by obs_id or
            obs_id plus additional fields defined by wafer_info."""
@@ -112,7 +112,7 @@ class ObsDb(object):
     def _convert_wafer_info(self, obs_id, wafer_info):
         """Helper function to allow flexibility in way obs_id and wafer_info are passed in."""
         if isinstance(wafer_info, dict):
-            wafer_info = wafer_info.values()
+            wafer_info = tuple([wafer_info[k] for k in self.primary_keys[1:]])
         if isinstance(obs_id, tuple):
             if len(obs_id) == len(self.primary_keys):
                 wafer_info = tuple([wi for wi in obs_id[1:]])
@@ -121,7 +121,7 @@ class ObsDb(object):
                 raise ValueError(f"obs_id tuple must be of length {len(self.primary_keys)}")
         if isinstance(obs_id, dict):
             if len(obs_id) == len(self.primary_keys):
-                wafer_info = tuple([wi for ki, wi in obs_id.items() if ki != 'obs_id'])
+                wafer_info = tuple([obs_id[k] for k in self.primary_keys[1:]])
                 obs_id = obs_id['obs_id']
             else:
                 raise ValueError(f"obs_id dict must be of length {len(self.primary_keys)}")
@@ -229,6 +229,7 @@ class ObsDb(object):
             un-applied, i.e. cleared from this observation.
 
         Example of ways to pass updates to obsdb when there are multiple primary keys.
+
         1) obs_id as str and wafer_info as tuple::
         
             obsdb.update_obs('obs_2345_xyz_110', wafer_info=('ws0', 'f090'), ...)
