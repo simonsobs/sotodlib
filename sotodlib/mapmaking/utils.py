@@ -641,7 +641,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
             res.wrap(key, downsample_obs(obs[key], down, skip_signal, fft_resample))
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
             res.wrap(key, downsample_cut(obs[key], down))
-        elif key in "fft_resample":
+        elif key in fft_resample:
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
             dat = np.moveaxis(obs[key], ax_idx, -1)
