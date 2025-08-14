@@ -40,6 +40,30 @@ def default_model(telescope):
     return model
 
 
+def correct_sign(tod, telescope):
+    """
+    correct hwp angle sign which is known to be wrong.
+
+    Args:
+        tod: hwp_solution AxisManager
+        telescope: name of telescope
+    """
+    if telescope == 'satp1':
+        # start time, stop time, sign to correct
+        correction = [
+            # pid direction was wrong due to the bug of hwp-pid agent
+            [1717446106, 1717706400, 'pid'],
+            # satp1 SCR6 has unusual offcentering
+            # stop time needs to be updated later
+            [1751000000, 2000000000, 'offcenter'],
+        ]
+        for t0, t1, method in correction:
+            if (t0 <= tod.timestamps[0]) and (tod.timestamps[-1] <= t1):
+                tod[method + '_direction'] *= -1
+                logger.info('This observation has known to have wrong sign'
+                            f' of {method}. Apply correction.')
+
+
 def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
     """
     Applies `hwp_angle_model` to the `hwp_solution` and construct hwp angle
@@ -73,6 +97,7 @@ def apply_hwp_angle_model(tod, on_sign_ambiguous='fail'):
         model = default_model(telescope)
 
     assert model.model_version == 'v2'
+    correct_sign(hwp, telescope)
     # construct sign
     methods = model.sign_matrix.keys()
     if on_sign_ambiguous in methods:
