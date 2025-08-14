@@ -38,7 +38,7 @@ class DepthOneMap(BaseModel):
     map_name: str
     map_path: str
     tube_slot: str
-    wafers: int
+    wafers: str
     frequency: str
     ctime: float
 
