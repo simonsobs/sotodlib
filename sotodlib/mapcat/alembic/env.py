@@ -1,9 +1,9 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from mapcat.settings import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -24,7 +24,10 @@ target_metadata = None
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
-
+if config.get_main_option("sqlalchemy.url") == "SET_IN_ENVIRONMENT_VARIABLE":
+    # Need to do this test as in the test environment the database URL is set
+    # in the configuration manually.
+    config.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
