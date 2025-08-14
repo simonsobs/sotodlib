@@ -36,14 +36,16 @@ def get_parser(parser=None):
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
     from sotodlib.core import Context, AxisManager, IndexAxis
-    from sotodlib.io import metadata   # PerDetectorHdf5 work-around
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
     from sotodlib.coords import pointing_model
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
+    from sotodlib.core import metadata
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
+
+    LoaderError = metadata.loader.LoaderError
 
     #try: import moby2.analysis.socompat
     #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
@@ -187,16 +189,16 @@ def main(**args):
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
-                    #print(obs_id)
-                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta, logger=L)
-                #if obs.dets.count < 100:
-                #    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
-                #    continue
+                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                if obs.dets.count < 10:
+                    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                    continue
                 # Check nans
                 mask = np.logical_not(np.isfinite(obs.signal))
                 if mask.sum() > 0:
                     L.debug("Skipped %s (a nan in signal)" % (sub_id))
                     continue
+                # Check all 0s
                 zero_dets = np.sum(obs.signal, axis=1)
                 mask = zero_dets == 0.0
                 if mask.any():
@@ -208,13 +210,6 @@ def main(**args):
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
                 srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
-                # Apply pointing model
-                pointing_model.apply_pointing_model(obs)
-                # Calibrate to pW and then K_cmb
-                obs.signal *= obs.det_cal.phase_to_pW[:,None]*obs.abscal.abscal_cmb[:,None]
-                if obs.dets.count < 10:
-                    L.debug("Skipped %s (less than 10 detectors)" % (sub_id))
-                    continue
 
                 # Add site and weather, since they're not in obs yet
                 obs.wrap("weather", np.full(1, "typical"))
@@ -240,8 +235,14 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
+                    # Apply pointing model
+                    pointing_model.apply_pointing_model(obs)
+                    # Calibrate to pW
+                    #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+                    # Calibrate to K_cmb
+                    #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.find_usable_detectors(obs,maxcut=0.5)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
@@ -249,21 +250,21 @@ def main(**args):
                     # Gapfill glitches. This function name isn't the clearest
                     #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                     # Gain calibration
-                    gain  = 1
+                    #gain  = 1
                     #for gtype in ["relcal","abscal"]:
                     #    gain *= obs[gtype][:,None]
-                    obs.signal *= gain
+                    #obs.signal *= gain
                     # Fourier-space calibration
-                    fsig  = fft.rfft(obs.signal)
-                    freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    #fsig  = fft.rfft(obs.signal)
+                    #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
                     # iir and timeconstant will be applied in the preprocessing eventually
                     # iir filter
-                    iir_filter  = filters.iir_filter()(freq, obs)
-                    fsig       /= iir_filter
-                    gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
-                    fft.irfft(fsig, obs.signal, normalize=True)
-                    del fsig
+                    #iir_filter  = filters.iir_filter()(freq, obs)
+                    #fsig       /= iir_filter
+                    #gain       /= iir_filter[0].real # keep track of total gain for our record
+                    #fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
+                    #fft.irfft(fsig, obs.signal, normalize=True)
+                    #del fsig
 
                     # Apply pointing correction.
                     #obs.focal_plane.xi    += obs.boresight_offset.xi
@@ -313,7 +314,7 @@ def main(**args):
                     print("Writing noise model %s" % nmat_file)
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-            except (DataMissing,IndexError,ValueError) as e:
+            except (DataMissing,IndexError,ValueError,LoaderError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
                 continue
 
