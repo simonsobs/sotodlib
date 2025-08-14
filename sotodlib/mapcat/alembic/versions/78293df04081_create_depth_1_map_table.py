@@ -43,7 +43,7 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.name", nullable=False, primary_key=True),
+            sa.ForeignKey("depth_one_maps.name", primary_key=True),
         ),
         sa.Column(
             "processing_start", sa.Float, nullable=True
@@ -59,7 +59,7 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name", nullable=False, primary_key=True),
+            sa.ForeignKey("depth_one_maps.map_name", primary_key=True),
         ),
         sa.Column("ra_offset", sa.Float),
         sa.Column("dec_offset", sa.Float),
@@ -67,7 +67,7 @@ def upgrade() -> None:
 
     op.create_table(
         "tod_depth_one",
-        sa.Column("id", sa.Integer, nullable=False, primary_key=True),
+        sa.Column("id", sa.Integer, primary_key=True),
         sa.Column(
             "map_name",
             sa.String,
@@ -109,6 +109,7 @@ def upgrade() -> None:
             "map_name",
             sa.String,
             sa.ForeignKey("depth_one_maps.map_name"),
+            primary_key=True,
         ),
         sa.Column("sotodlib_version", sa.String, nullable=False),
         sa.Column("map_maker", sa.String, nullable=False),
