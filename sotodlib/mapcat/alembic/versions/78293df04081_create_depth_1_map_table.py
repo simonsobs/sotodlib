@@ -43,7 +43,8 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.name", primary_key=True),
+            sa.ForeignKey("depth_one_maps.name"),
+            primary_key=True,
         ),
         sa.Column(
             "processing_start", sa.Float, nullable=True
@@ -59,7 +60,8 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name", primary_key=True),
+            sa.ForeignKey("depth_one_maps.map_name"),
+            primary_key=True,
         ),
         sa.Column("ra_offset", sa.Float),
         sa.Column("dec_offset", sa.Float),

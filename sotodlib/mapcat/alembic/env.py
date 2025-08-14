@@ -29,6 +29,7 @@ if config.get_main_option("sqlalchemy.url") == "SET_IN_ENVIRONMENT_VARIABLE":
     # in the configuration manually.
     config.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -67,9 +68,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()
