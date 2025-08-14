@@ -30,7 +30,7 @@ def upgrade() -> None:
             "tube_slot", sa.String, nullable=False
         ),  # TODO: Maybe make this a literal?
         sa.Column(
-            "wafers", sa.Integer, nullable=False
+            "wafers", sa.String, nullable=False
         ),  # TODO: I'm not sure this field makes sense as a map may use TODs with different wafer availability. I.E., wafers 0,1,2 may be available for one TOD but only 0,2 for another
         sa.Column("frequency", sa.String, nullable=False),
         sa.Column(
