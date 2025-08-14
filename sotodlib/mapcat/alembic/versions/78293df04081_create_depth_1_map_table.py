@@ -46,10 +46,10 @@ def upgrade() -> None:
             sa.ForeignKey("depth_one_maps.name", nullable=False, primary_key=True),
         ),
         sa.Column(
-            "processing_start", sa.Float, nullable=False
+            "processing_start", sa.Float, nullable=True
         ),  # TODO: should this be sa.Datetime
         sa.Column(
-            "processing_end", sa.Float, nullable=False
+            "processing_end", sa.Float, nullable=True
         ),  # TODO: should this be sa.Datetime
         sa.Column("processing_status", sa.String, nullable=False),
     )
