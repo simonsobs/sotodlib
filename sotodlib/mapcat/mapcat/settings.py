@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_name: str = "socat.db"
+    database_name: str = "mapcat.db"
     database_type: Literal["sqlite", "postgresql"] = "sqlite"
 
     model_config: SettingsConfigDict = {
