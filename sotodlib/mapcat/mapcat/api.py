@@ -272,15 +272,17 @@ async def create_processing_status(
     return response
 
 
-@router.get("/procstat/{map_name}")
-async def get_depth_one(map_name: str, session: SessionDependency) -> ProcessingStatus:
+@router.get("/procstat/{proc_id}")
+async def get_processing_status(
+    proc_id: int, session: SessionDependency
+) -> ProcessingStatus:
     """
     Get a depth 1 map by id
 
     Parameters
     ----------
-    map_name : str
-        Name of map whos processing status to get
+    proc_id : int
+        ID of processing status
     session : SessionDependancy
         Session to use
 
@@ -292,18 +294,19 @@ async def get_depth_one(map_name: str, session: SessionDependency) -> Processing
     Raises
     ------
     HTTPException
-        If map_name does not correspond to any depth 1 map processing status
+        If proc_id does not correspond to any depth 1 map processing status
     """
     try:
-        response = await core.get_proccessing_status(map_name=map_name, session=session)
+        response = await core.get_proccessing_status(proc_id=proc_id, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     return response
 
 
-@router.post("/procstat/{map_name}")
+@router.post("/procstat/{proc_id}")
 async def update_processing_status(
+    proc_id: int,
     model: ProcessingStatusModificationRequest,
     session: SessionDependency,
 ) -> ProcessingStatus:
@@ -312,6 +315,8 @@ async def update_processing_status(
 
     Parameters
     ----------
+    proc_id : int
+        ID of processing status
     model : ProcessingStatusModificationRequest
         Parameters of processing status to modify
     session : SessionDependency
@@ -330,6 +335,7 @@ async def update_processing_status(
 
     try:
         response = await core.update_processing_status(
+            proc_id=proc_id,
             map_name=model.map_name,
             processing_start=model.processing_start,
             processing_end=model.processing_end,
@@ -342,15 +348,15 @@ async def update_processing_status(
     return response
 
 
-@router.delete("/procstat/{map_name}")
-async def delete_processing_status(map_name: str, session: SessionDependency) -> None:
+@router.delete("/procstat/{proc_id}")
+async def delete_processing_status(proc_id: int, session: SessionDependency) -> None:
     """
     Delete a depth one map by ID
 
     Parameters
     ----------
-    map_name : str
-        Name of depth one map whos processing status to delete
+    proc_id : int
+        ID of processing status
     session : SessionDependency
         Session to use
 
@@ -364,7 +370,7 @@ async def delete_processing_status(map_name: str, session: SessionDependency) ->
         If map_name does not correspond to any depth one map
     """
     try:
-        await core.delete_processing_status(map_name=map_name, session=session)
+        await core.delete_processing_status(proc_id=proc_id, session=session)
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return

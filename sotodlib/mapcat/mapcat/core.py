@@ -228,15 +228,15 @@ async def create_proccessing_status(
 
 
 async def get_proccessing_status(
-    map_name: int, session: AsyncSession
+    proc_id: int, session: AsyncSession
 ) -> ProcessingStatus:
     """
     Get a depth 1 map by id.
 
     Parameters
     ----------
-    map_name : int
-        Map name to get status of
+    proc_id : int
+        ID of processing status
     session : AsyncSession
         Session to use
 
@@ -250,16 +250,17 @@ async def get_proccessing_status(
     ValueError
         If map is not found
     """
-    proc_stat = await session.get(ProcessingStatusTable, map_name)
+    proc_stat = await session.get(ProcessingStatusTable, proc_id)
 
     if proc_stat is None:
-        raise ValueError(f"Depth-1 map with name {map_name} not found.")
+        raise ValueError(f"Depth-1 map with ID {proc_id} not found.")
 
     return proc_stat.to_model()
 
 
 async def update_processing_status(
-    map_name: str,
+    proc_id: int,
+    map_name: str | None,
     processing_start: float | None,
     processing_end: float | None,
     processing_status: str | None,
@@ -270,6 +271,8 @@ async def update_processing_status(
 
     Parameters
     ----------
+    proc_id : int
+        Internal ID of the processing status
     map_name : str
         Name of depth 1 map to track
     processing_start : float | None
@@ -292,10 +295,11 @@ async def update_processing_status(
         If the processing status is not found
     """
     async with session.begin():
-        proc_stat = await session.get(ProcessingStatusTable, map_name)
+        proc_stat = await session.get(ProcessingStatusTable, proc_id)
 
         if proc_stat is None:
-            raise ValueError(f"Depth 1 map with name {map_name} not found.")
+            raise ValueError(f"Depth 1 map with ID {proc_id} not found.")
+        proc_stat.map_name = map_name if map_name is not None else proc_stat.map_name
         proc_stat.processing_start = (
             processing_start
             if processing_start is not None
@@ -315,14 +319,14 @@ async def update_processing_status(
     return proc_stat.to_model()
 
 
-async def delete_processing_status(map_name: str, session: AsyncSession) -> None:
+async def delete_processing_status(proc_id: int, session: AsyncSession) -> None:
     """
     Delete a processing status of a map from database
 
     Parameters
     ----------
-    map_name : str
-        Name of depth one map
+    proc_id : int
+        Internal ID of the processing status
     session : AsyncSession
         Session to use
 
@@ -336,10 +340,10 @@ async def delete_processing_status(map_name: str, session: AsyncSession) -> None
         If the processing status is not found
     """
     async with session.begin():
-        proc_stat = await session.get(ProcessingStatusTable, map_name)
+        proc_stat = await session.get(ProcessingStatusTable, proc_id)
 
         if proc_stat is None:
-            raise ValueError(f"Depth 1 map with name {map_name} not found.")
+            raise ValueError(f"Depth 1 map with name {id} not found.")
 
         await session.delete(proc_stat)
         await session.commit()

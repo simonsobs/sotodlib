@@ -104,10 +104,13 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
 
 class ProcessingStatus(BaseModel):
     """
-    Processing status of a depth-1 map
+    Processing status of a depth-1 map. Note a map
+    can have multiple processing statuses
 
     Attributes
     ----------
+    id : str
+        Internal ID of the processing status
     map_name : str
         Name of depth 1 map being tracked. Primary Key, foreign into DepthOneMap
     processing_start : float
@@ -118,6 +121,7 @@ class ProcessingStatus(BaseModel):
         Status of processing
     """
 
+    id: int
     map_name: str
     processing_start: float | None
     processing_end: float | None
@@ -125,7 +129,7 @@ class ProcessingStatus(BaseModel):
 
     def __repr__(self):
         # TODO: This should probably change based on process status once we nail that down
-        return f"ProcessingStatus(map_name={self.map_name}, processing_start={self.processing_start}, processing_end={self.processing_end}, processing_status={self.processing_status})"  # pragma: no cover
+        return f"ProcessingStatus(id={self.id}, map_name={self.map_name}, processing_start={self.processing_start}, processing_end={self.processing_end}, processing_status={self.processing_status})"  # pragma: no cover
 
 
 class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
@@ -137,6 +141,8 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
 
     Attributes
     ----------
+    id : int
+        Internal ID of the processing status
     map_name : str
         Name of depth 1 map being tracked. Primary Key, foreign into DepthOneMap
     processing_start : float | None
@@ -148,11 +154,9 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     """
 
     __tablename__ = "processing_status"
-
+    id: int = Field(primary_key=True)
     map_name: str = Field(
-        primary_key=True,
         index=True,
-        unique=True,
         nullable=False,
         foreign_key="depth_one_maps.map_name",
     )
@@ -171,6 +175,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
             Processing status corresponding to this depth-1 map
         """
         return ProcessingStatus(
+            id=self.id,
             map_name=self.map_name,
             processing_start=self.processing_start,
             processing_end=self.processing_end,

@@ -40,13 +40,12 @@ def upgrade() -> None:
 
     op.create_table(
         "time_domain_processing",
+        sa.Column("id", sa.Integer, primary_key=True),
         sa.Column(
             "map_name",
             sa.String,
             sa.ForeignKey("depth_one_maps.name"),
-            primary_key=True,
             nullable=False,
-            unique=True,
         ),
         sa.Column(
             "processing_start", sa.Float, nullable=True
