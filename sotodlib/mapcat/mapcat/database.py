@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlmodel import JSON, Column, Field, SQLModel
+from sqlmodel import JSON, Column, Field, SQLModel, Relationship
 
 from .settings import settings
 
@@ -74,10 +74,13 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     __tablename__ = "depth_one_maps"
 
     id: int = Field(primary_key=True)
-    map_name: str = Field(index=True, nullable=False)
+    map_name: str = Field(index=True, unique=True, nullable=False)
     tube_slot: str = Field(index=True, nullable=False)
     frequency: str = Field(index=True, nullable=False)
     ctime: float = Field(index=True, nullable=False)
+    processing_status: list["ProcessingStatusTable"] = Relationship(
+        back_populates="dmap"
+    )
 
     def to_model(self) -> DepthOneMap:
         """
@@ -149,12 +152,14 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     map_name: str = Field(
         primary_key=True,
         index=True,
+        unique=True,
         nullable=False,
         foreign_key="depth_one_maps.map_name",
     )
     processing_start: float = Field(nullable=True)
     processing_end: float = Field(nullable=True)
     processing_status: str = Field(index=True, nullable=False)
+    dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
 
     def to_model(self) -> ProcessingStatus:
         """
@@ -169,7 +174,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
             map_name=self.map_name,
             processing_start=self.processing_start,
             processing_end=self.processing_end,
-            processing_status=self.cProcessingStatus,
+            processing_status=self.processing_status,
         )
 
 
