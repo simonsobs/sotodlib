@@ -147,7 +147,10 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     __tablename__ = "processing_status"
 
     map_name: str = Field(
-        index=True, nullable=False, foreign_key="depth_one_maps.map_name"
+        primary_key=True,
+        index=True,
+        nullable=False,
+        foreign_key="depth_one_maps.map_name",
     )
     processing_start: float = Field(nullable=True)
     processing_end: float = Field(nullable=True)
