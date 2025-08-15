@@ -91,7 +91,7 @@ async def get_depth_one(map_id: int, session: AsyncSession) -> DepthOneMap:
     if dmap is None:
         raise ValueError(f"Depth-1 map with ID {map_id} not found.")
 
-    return dmap.to_map()
+    return dmap.to_model()
 
 
 async def update_depth_one(
@@ -255,7 +255,7 @@ async def get_proccessing_status(
     if proc_stat is None:
         raise ValueError(f"Depth-1 map with name {map_name} not found.")
 
-    return proc_stat.to_map()
+    return proc_stat.to_model()
 
 
 async def update_processing_status(
