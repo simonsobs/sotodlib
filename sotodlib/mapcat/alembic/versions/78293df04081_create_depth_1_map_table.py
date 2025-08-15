@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.create_table(
         "depth_one_maps",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("map_name", sa.String, nullable=False),
+        sa.Column("map_name", sa.String, unique=True, nullable=False),
         sa.Column("map_path", sa.String, nullable=False),
         sa.Column(
             "tube_slot", sa.String, nullable=False
@@ -45,6 +45,8 @@ def upgrade() -> None:
             sa.String,
             sa.ForeignKey("depth_one_maps.name"),
             primary_key=True,
+            nullable=False,
+            unique=True,
         ),
         sa.Column(
             "processing_start", sa.Float, nullable=True
@@ -124,6 +126,7 @@ def upgrade() -> None:
             "map_name",
             sa.String,
             sa.ForeignKey("depth_one_maps.map_name"),
+            primary_key=True,
         ),
         sa.Column("patch_coverage", sa.String, nullable=False),
     )
