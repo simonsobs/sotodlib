@@ -367,3 +367,6 @@ async def delete_processing_status(map_name: str, session: SessionDependency) ->
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return
+
+
+app.include_router(router)
