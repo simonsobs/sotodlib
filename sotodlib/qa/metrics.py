@@ -423,18 +423,20 @@ class HWPSolQA(QAMetric):
 
 
 class HWPSolSuccess(HWPSolQA):
-    """ Records success of the HWP angle solution calculation, for each encode."""
+    """ Records success of the HWP angle solution calculation, for each encoder.
+    0: No data, 1: Success, 2: Fail
+    """
 
-    _influx_field = "logger"
+    _influx_field = "sol_success"
     _needs_encoder = True
 
     def _gen_value(self, meta):
-        if "Angle calculation succeeded" in meta.hwp_solution[f"logger_{self._encoder}"]:
-            return True
-        elif meta.hwp_solution[f"logger_{self._encoder}"] == 'No HWP data':
-            return 'No data'
+        if meta.hwp_solution[f"logger_{self._encoder}"] == 'No HWP data':
+            return 0
+        elif meta.hwp_solution[f"logger_{self._encoder}"] == "Angle calculation succeeded":
+            return 1
         else:
-            return False
+            return 2
 
 
 class HWPSolPrimaryEncoder(HWPSolQA):
