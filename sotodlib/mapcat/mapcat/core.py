@@ -413,7 +413,7 @@ async def get_pointing_residual(
     ValueError
         If pointing residual is not found
     """
-    point_resid = await session.get(PointingResidualTable, point_resid)
+    point_resid = await session.get(PointingResidualTable, point_id)
 
     if point_resid is None:
         raise ValueError(f"Depth-1 map with ID {point_id} not found.")

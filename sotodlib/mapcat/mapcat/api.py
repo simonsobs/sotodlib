@@ -494,7 +494,6 @@ async def update_pointing_residual(
     HTTPException
         If ID does not correspond to any pointing residual
     """
-
     try:
         response = await core.update_pointing_residual(
             point_id=point_id,

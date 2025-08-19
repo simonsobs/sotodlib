@@ -82,14 +82,12 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     tube_slot: str = Field(index=True, nullable=False)
     frequency: str = Field(index=True, nullable=False)
     ctime: float = Field(index=True, nullable=False)
-    """
     processing_status: list["ProcessingStatusTable"] = Relationship(
         back_populates="dmap"
     )
     pointing_residual: list["PointingResidualTable"] = Relationship(
         back_populates="dmap"
     )
-    """
 
     def to_model(self) -> DepthOneMap:
         """
@@ -172,7 +170,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     processing_start: float = Field(nullable=True)
     processing_end: float = Field(nullable=True)
     processing_status: str = Field(index=True, nullable=False)
-    # dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
+    dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
 
     def to_model(self) -> ProcessingStatus:
         """
@@ -247,7 +245,7 @@ class PointingResidualTable(PointingResidual, SQLModel, table=True):
     )
     ra_offset: float = Field(nullable=True)
     dec_offset: float = Field(nullable=True)
-    # dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+    dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
 
     def to_model(self) -> PointingResidual:
         """
