@@ -352,6 +352,7 @@ async def delete_processing_status(proc_id: int, session: AsyncSession) -> None:
 
     return
 
+
 async def create_pointing_residual(
     map_name: str,
     ra_offset: float | None,
@@ -388,6 +389,7 @@ async def create_pointing_residual(
 
     return point_resid.to_model()
 
+
 async def get_pointing_residual(
     point_id: int, session: AsyncSession
 ) -> PointingResidual:
@@ -417,6 +419,7 @@ async def get_pointing_residual(
         raise ValueError(f"Depth-1 map with ID {point_id} not found.")
 
     return point_resid.to_model()
+
 
 async def update_pointing_residual(
     point_id: int,
@@ -456,11 +459,11 @@ async def update_pointing_residual(
 
         if point_resid is None:
             raise ValueError(f"Depth 1 map with ID {point_id} not found.")
-        point_resid.map_name = map_name if map_name is not None else point_resid.map_name
+        point_resid.map_name = (
+            map_name if map_name is not None else point_resid.map_name
+        )
         point_resid.ra_offset = (
-            ra_offset
-            if ra_offset is not None
-            else point_resid.ra_offset
+            ra_offset if ra_offset is not None else point_resid.ra_offset
         )
         point_resid.dec_offset = (
             dec_offset if dec_offset is not None else point_resid.dec_offset
@@ -469,6 +472,7 @@ async def update_pointing_residual(
         await session.commit()
 
     return point_resid.to_model()
+
 
 async def delete_pointing_status(point_id: int, session: AsyncSession) -> None:
     """
@@ -500,8 +504,3 @@ async def delete_pointing_status(point_id: int, session: AsyncSession) -> None:
         await session.commit()
 
     return
-
-
-
-
-

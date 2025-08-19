@@ -86,6 +86,7 @@ class ProcessingStatusModificationRequest(BaseModel):
     processing_end: float | None
     processing_status: str | None
 
+
 class PointingResidualModificationRequest(BaseModel):
     """
     Class which defines with pointing residual attributes are avilable to modify.
@@ -103,6 +104,7 @@ class PointingResidualModificationRequest(BaseModel):
     map_name: str | None
     ra_offset: float | None
     dec_offset: float | None
+
 
 @router.put("/depthone/new")  # TODO : path?
 async def create_depth_one(
@@ -393,6 +395,7 @@ async def delete_processing_status(proc_id: int, session: SessionDependency) -> 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return
 
+
 @router.put("/pointresid/new")  # TODO : path?
 async def create_pointing_residual(
     model: PointingResidualModificationRequest,
@@ -430,6 +433,7 @@ async def create_pointing_residual(
 
     return response
 
+
 @router.get("/pointresid/{point_id}")
 async def get_pointing_residual(
     point_id: int, session: SessionDependency
@@ -460,6 +464,7 @@ async def get_pointing_residual(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     return response
+
 
 @router.post("/pointresid/{point_id}")
 async def update_pointing_residual(
@@ -503,6 +508,7 @@ async def update_pointing_residual(
 
     return response
 
+
 @router.delete("/pointresid/{point_id}")
 async def delete_pointing_residual(point_id: int, session: SessionDependency) -> None:
     """
@@ -529,5 +535,6 @@ async def delete_pointing_residual(point_id: int, session: SessionDependency) ->
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return
+
 
 app.include_router(router)

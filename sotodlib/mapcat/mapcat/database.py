@@ -90,6 +90,7 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
         back_populates="dmap"
     )
     """
+
     def to_model(self) -> DepthOneMap:
         """
         Return an Extragalactic source from table.
@@ -171,7 +172,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     processing_start: float = Field(nullable=True)
     processing_end: float = Field(nullable=True)
     processing_status: str = Field(index=True, nullable=False)
-    #dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
+    # dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
 
     def to_model(self) -> ProcessingStatus:
         """
@@ -189,7 +190,8 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
             processing_end=self.processing_end,
             processing_status=self.processing_status,
         )
-    
+
+
 class PointingResidual(BaseModel):
     """
     Pointing error for a depth one map, computed by
@@ -245,7 +247,7 @@ class PointingResidualTable(PointingResidual, SQLModel, table=True):
     )
     ra_offset: float = Field(nullable=True)
     dec_offset: float = Field(nullable=True)
-    #dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+    # dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
 
     def to_model(self) -> PointingResidual:
         """
@@ -260,7 +262,7 @@ class PointingResidualTable(PointingResidual, SQLModel, table=True):
             id=self.id,
             map_name=self.map_name,
             ra_offset=self.ra_offset,
-            dec_offset=self.dec_offset
+            dec_offset=self.dec_offset,
         )
 
 
