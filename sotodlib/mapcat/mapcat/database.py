@@ -69,6 +69,10 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
         Frequency channel of map
     ctime : float
         Central unix time of map
+    processing_status : list[ProcessingStatusTable]
+        List of processing status tables associated with d1 map
+    pointing_residual : list[PointingResidualTable]
+        List of pointing residual table associated with d1 map
     """
 
     __tablename__ = "depth_one_maps"
@@ -78,10 +82,14 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     tube_slot: str = Field(index=True, nullable=False)
     frequency: str = Field(index=True, nullable=False)
     ctime: float = Field(index=True, nullable=False)
+    """
     processing_status: list["ProcessingStatusTable"] = Relationship(
         back_populates="dmap"
     )
-
+    pointing_residual: list["PointingResidualTable"] = Relationship(
+        back_populates="dmap"
+    )
+    """
     def to_model(self) -> DepthOneMap:
         """
         Return an Extragalactic source from table.
@@ -144,7 +152,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     id : int
         Internal ID of the processing status
     map_name : str
-        Name of depth 1 map being tracked. Primary Key, foreign into DepthOneMap
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
     processing_start : float | None
         Time processing started. None if not started.
     processing_end : float | None
@@ -163,7 +171,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
     processing_start: float = Field(nullable=True)
     processing_end: float = Field(nullable=True)
     processing_status: str = Field(index=True, nullable=False)
-    dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
+    #dmap: DepthOneMapTable = Relationship(back_populates="processing_status")
 
     def to_model(self) -> ProcessingStatus:
         """
@@ -181,9 +189,82 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
             processing_end=self.processing_end,
             processing_status=self.processing_status,
         )
+    
+class PointingResidual(BaseModel):
+    """
+    Pointing error for a depth one map, computed by
+    comparing positions of PSes in that map to
+    their known possitions
+
+    Attributes
+    ----------
+    id : str
+        Internal ID of the pointing error
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    ra_offset : float
+        Calculated ra offset of PSes
+    dec_offset : float
+        Calculated dec offset of PSes
+    """
+
+    id: int
+    map_name: str
+    ra_offset: float | None
+    dec_offset: float | None
+
+    def __repr__(self):
+        # TODO: This should probably change based on process status once we nail that down
+        return f"PointingError(id={self.id}, map_name={self.map_name} has offset ra={self.ra_offset}, dec={self.dec_offset})"  # pragma: no cover
 
 
-ALL_TABLES = [DepthOneMapTable, ProcessingStatusTable]
+class PointingResidualTable(PointingResidual, SQLModel, table=True):
+    """
+    Table for tracking Pointing error for a depth one map,
+    computed by comparing positions of PSes in that map to
+    their known possitions
+
+    Attributes
+    ----------
+    id : str
+        Internal ID of the pointing error
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    ra_offset : float
+        Calculated ra offset of PSes
+    dec_offset : float
+        Calculated dec offset of PSes
+    """
+
+    __tablename__ = "depth_1_pointing_residuals"
+    id: int = Field(primary_key=True)
+    map_name: str = Field(
+        index=True,
+        nullable=False,
+        foreign_key="depth_one_maps.map_name",
+    )
+    ra_offset: float = Field(nullable=True)
+    dec_offset: float = Field(nullable=True)
+    #dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+
+    def to_model(self) -> PointingResidual:
+        """
+        Return an Extragalactic source from table.
+
+        Returns
+        -------
+        ProcessingStatus : ProcessingStatus
+            Processing status corresponding to this depth-1 map
+        """
+        return PointingResidual(
+            id=self.id,
+            map_name=self.map_name,
+            ra_offset=self.ra_offset,
+            dec_offset=self.dec_offset
+        )
+
+
+ALL_TABLES = [DepthOneMapTable, ProcessingStatusTable, PointingResidualTable]
 
 async_engine = create_async_engine(settings.database_url, echo=True, future=True)
 

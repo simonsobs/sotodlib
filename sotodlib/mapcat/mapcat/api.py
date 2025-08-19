@@ -14,6 +14,7 @@ from .database import (
     ALL_TABLES,
     DepthOneMap,
     ProcessingStatus,
+    PointingResidual,
     async_engine,
     get_async_session,
 )
@@ -85,6 +86,23 @@ class ProcessingStatusModificationRequest(BaseModel):
     processing_end: float | None
     processing_status: str | None
 
+class PointingResidualModificationRequest(BaseModel):
+    """
+    Class which defines with pointing residual attributes are avilable to modify.
+
+    Attributes
+    ----------
+    map_name : float | None
+        Name of map whos pointing residual is being tracked
+    ra_offset : float
+        Calculated ra offset of PSes
+    dec_offset : float
+        Calculated dec offset of PSes
+    """
+
+    map_name: str | None
+    ra_offset: float | None
+    dec_offset: float | None
 
 @router.put("/depthone/new")  # TODO : path?
 async def create_depth_one(
@@ -277,7 +295,7 @@ async def get_processing_status(
     proc_id: int, session: SessionDependency
 ) -> ProcessingStatus:
     """
-    Get a depth 1 map by id
+    Get a depth 1 map processing status by id
 
     Parameters
     ----------
@@ -289,7 +307,7 @@ async def get_processing_status(
     Returns
     -------
     response : ProcessingStatus
-        ProcessingStatus corresponding to map_name
+        ProcessingStatus corresponding to proc_id
 
     Raises
     ------
@@ -311,7 +329,7 @@ async def update_processing_status(
     session: SessionDependency,
 ) -> ProcessingStatus:
     """
-    Update depth 1 map parameters by id
+    Update depth 1 map processing status by id
 
     Parameters
     ----------
@@ -330,7 +348,7 @@ async def update_processing_status(
     Raises
     ------
     HTTPException
-        If ID does not correspond to any source
+        If ID does not correspond to any processing status
     """
 
     try:
@@ -351,7 +369,7 @@ async def update_processing_status(
 @router.delete("/procstat/{proc_id}")
 async def delete_processing_status(proc_id: int, session: SessionDependency) -> None:
     """
-    Delete a depth one map by ID
+    Delete a processing by ID
 
     Parameters
     ----------
@@ -367,7 +385,7 @@ async def delete_processing_status(proc_id: int, session: SessionDependency) -> 
     Raises
     ------
     HTTPException
-        If map_name does not correspond to any depth one map
+        If proc_id does not correspond to any processing status
     """
     try:
         await core.delete_processing_status(proc_id=proc_id, session=session)
@@ -375,5 +393,141 @@ async def delete_processing_status(proc_id: int, session: SessionDependency) -> 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return
 
+@router.put("/pointresid/new")  # TODO : path?
+async def create_pointing_residual(
+    model: PointingResidualModificationRequest,
+    session: SessionDependency,
+) -> PointingResidual:
+    """
+    Create a new pointing residual for a depth one map in the catalog.
+
+    Parameters
+    ----------
+    model : PointingResidualModificationRequest
+        Class containing modifyable attributes of the pointing residual
+    session : SessionDependancy
+        Session to use
+
+    Returns
+    -------
+    response : PointingResidual
+        PointingResidual which was specified by model and added to the database
+
+    Raise
+    -----
+    HTTPException
+        If the model does not contain required info or api response is malformed
+    """
+    try:
+        response = await core.create_pointing_residual(
+            map_name=model.map_name,
+            ra_offset=model.ra_offset,
+            dec_offset=model.dec_offset,
+            session=session,
+        )
+    except ValidationError as e:  # pragma: no cover
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.errors())
+
+    return response
+
+@router.get("/pointresid/{point_id}")
+async def get_pointing_residual(
+    point_id: int, session: SessionDependency
+) -> PointingResidual:
+    """
+    Get a pointing residual by id
+
+    Parameters
+    ----------
+    point_id : int
+        ID of pointing residual
+    session : SessionDependancy
+        Session to use
+
+    Returns
+    -------
+    response : PointingResidual
+        PointingResidual corresponding to point_id
+
+    Raises
+    ------
+    HTTPException
+        If point_id does not correspond to any depth 1 map pointing residuals
+    """
+    try:
+        response = await core.get_pointing_residual(point_id=point_id, session=session)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    return response
+
+@router.post("/pointresid/{point_id}")
+async def update_pointing_residual(
+    point_id: int,
+    model: PointingResidualModificationRequest,
+    session: SessionDependency,
+) -> ProcessingStatus:
+    """
+    Update depth 1 map pointing residual by id
+
+    Parameters
+    ----------
+    point_id : int
+        ID of pointing residual
+    model : PointingResidualModificationRequest
+        Parameters of pointing residual to modify
+    session : SessionDependency
+        Session to use
+
+    Returns
+    -------
+    response : PointingResidual
+        PointingResidual that has been modified
+
+    Raises
+    ------
+    HTTPException
+        If ID does not correspond to any pointing residual
+    """
+
+    try:
+        response = await core.update_pointing_residual(
+            point_id=point_id,
+            map_name=model.map_name,
+            ra_offset=model.ra_offset,
+            dec_offset=model.dec_offset,
+            session=session,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    return response
+
+@router.delete("/pointresid/{point_id}")
+async def delete_pointing_residual(point_id: int, session: SessionDependency) -> None:
+    """
+    Delete a pointing residual by ID
+
+    Parameters
+    ----------
+    point_id : int
+        ID of pointing residual
+    session : SessionDependency
+        Session to use
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    HTTPException
+        If point_id does not correspond to any pointing residual
+    """
+    try:
+        await core.delete_pointing_residual(point_id=point_id, session=session)
+    except ValueError as e:  # pragma: no cover
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return
 
 app.include_router(router)

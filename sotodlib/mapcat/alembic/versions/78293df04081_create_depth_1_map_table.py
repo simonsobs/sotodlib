@@ -57,12 +57,13 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "depth_1_pointing_offsets",
+        "depth_1_pointing_residuals",
+        sa.Column("id", sa.Integer, primary_key=True),
         sa.Column(
             "map_name",
             sa.String,
             sa.ForeignKey("depth_one_maps.map_name"),
-            primary_key=True,
+            nullable=False,
         ),
         sa.Column("ra_offset", sa.Float),
         sa.Column("dec_offset", sa.Float),
