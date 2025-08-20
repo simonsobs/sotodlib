@@ -8,8 +8,6 @@ on:
 jobs:
   create-release:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
