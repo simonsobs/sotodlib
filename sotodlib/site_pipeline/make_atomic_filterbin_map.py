@@ -335,7 +335,7 @@ def main(
             fixed_time=args.fixed_time, mindur=args.min_dur)
     except mapmaking.NoTODFound as err:
         L.exception(err)
-        exit(1)
+        exit(0)
     L.info(f'Running {len(obslists)} maps after build_obslists')
 
     split_labels = []
