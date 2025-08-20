@@ -1,0 +1,37 @@
+name: SOTODLIB PyPI Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  pypi-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+      contents: read  # Required to checkout the repository
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for tags
+          ref: ${{ github.ref_name }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Verify we're on the correct tag
+        run: |
+          echo "Current tag: $(git describe --tags --exact-match)"
+          echo "Expected tag: ${{ github.ref_name }}"
+          git describe --tags --exact-match | grep -q "${{ github.ref_name }}"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          python -m build --wheel --sdist      
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
