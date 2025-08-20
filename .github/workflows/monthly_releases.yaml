@@ -24,7 +24,7 @@ jobs:
           latest_tag=$(git describe --tags --abbrev=0 || echo "v0.0.0")
           version=${latest_tag#v}  # Remove 'v' prefix
           echo "Latest tag: $latest_tag, latest version: $version"
-          IFS='.' read -r major minor patch <<< "$version"
+          IFS='.' read -r major minor patch rest <<< "$version"
           new_patch=$((patch + 1))
           new_version="v$major.$minor.$new_patch"
           echo "New version: $new_version"
