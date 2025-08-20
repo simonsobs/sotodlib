@@ -61,6 +61,7 @@ jobs:
 
       - name: Install sotodlib
         run: |
+          python3 -m pip install -vv -r requirements.txt
           python3 -m pip install -vv .[tests]
 
       - name: Run Serial Tests
