@@ -70,8 +70,7 @@ Installing sotodlib
 
 You can either install directly to your conda environment / virtualenv::
 
-    %> cd sotodlib
-    %> pip install .
+    %> pip install sotodlib
 
 Or (if you are frequently hacking on this code) you can install the package in
 "develop" mode, which installs symlinks from your conda environment /
