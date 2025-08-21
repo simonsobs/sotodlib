@@ -433,7 +433,7 @@ async def update_pointing_residual(
 
     Parameters
     ----------
-    proc_id : int
+    point_ID : int
         Internal ID of the pointing residual
     map_name : str
         Name of depth 1 map to track
@@ -474,7 +474,7 @@ async def update_pointing_residual(
     return point_resid.to_model()
 
 
-async def delete_pointing_status(point_id: int, session: AsyncSession) -> None:
+async def delete_pointing_residual(point_id: int, session: AsyncSession) -> None:
     """
     Delete a pointing residual of a map from database
 

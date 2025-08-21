@@ -471,9 +471,9 @@ async def update_pointing_residual(
     point_id: int,
     model: PointingResidualModificationRequest,
     session: SessionDependency,
-) -> ProcessingStatus:
+) -> PointingResidual:
     """
-    Update depth 1 map pointing residual by id
+    Update pointing residual by ID.
 
     Parameters
     ----------
@@ -487,13 +487,14 @@ async def update_pointing_residual(
     Returns
     -------
     response : PointingResidual
-        PointingResidual that has been modified
+        Modified PointingResidual
 
     Raises
     ------
     HTTPException
         If ID does not correspond to any pointing residual
     """
+
     try:
         response = await core.update_pointing_residual(
             point_id=point_id,
