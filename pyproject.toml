@@ -1,17 +1,17 @@
 [build-system]
-requires = ["setuptools", "versioneer[toml]==0.29"]
+requires = ["setuptools", "versioneer[toml]==0.29", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sotodlib"
 readme = "README.md"
 description = "Simons Observatory TOD Simulation and Processing"
-license = {file = "LICENSE"}
+license = "MIT"
 maintainers = [
   {name = "Simons Observatory Collaboration"},
   {email = "so_software@simonsobservatory.org"},
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9, <3.13"
 dependencies = [
   "numpy",
   "scipy",
@@ -21,7 +21,7 @@ dependencies = [
   "toml",
   "skyfield",
   "so3g",
-  "pixell",
+  "pixell>=0.23.0",
   "pytest",
   "scikit-image",
   "pyfftw",
@@ -32,10 +32,9 @@ dependencies = [
 ]
 dynamic=["version"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: BSD License",
   "Topic :: Scientific/Engineering :: Astronomy",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
@@ -51,7 +50,6 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
-  "sodetlib @ git+https://github.com/simonsobs/sodetlib",
   "let-me-scroll-it",
   "plotly",
   "pandas",
