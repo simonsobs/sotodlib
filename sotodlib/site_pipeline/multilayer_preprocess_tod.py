@@ -142,8 +142,9 @@ def multilayer_preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         dets = {gb:gg for gb, gg in zip(group_by_proc, group)}
         try:
-            error, outputs_grp_init, _, aman = pp_util.preproc_or_load_group(obs_id, configs_init,
-                                                                             dets=dets, logger=logger)
+            error, outputs_grp_init, _, aman, full = pp_util.preproc_or_load_group(obs_id, configs_init,
+                                                                                   dets=dets, logger=logger,
+                                                                                   return_full=True)
             if error is None:
                 outputs_init.append(outputs_grp_init)
 
@@ -160,7 +161,7 @@ def multilayer_preprocess_tod(obs_id,
 
             # now run the pipeline on the processed axis manager
             logger.info(f"Beginning processing pipeline for {obs_id}:{group}")
-            proc_aman, success = pipe_proc.run(aman)
+            proc_aman, success = pipe_proc.run(aman, full=full)
             proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_init))
 
             # remove fields found in aman.preprocess from proc_aman
@@ -281,7 +282,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs_init: str,
           configs_proc: str,
-          query: Optional[str] = None,
+          query: Optional[str] = '',
           obs_id: Optional[str] = None,
           overwrite: bool = False,
           min_ctime: Optional[int] = None,
@@ -386,7 +387,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
 def main(configs_init: str,
          configs_proc: str,
-         query: Optional[str] = None,
+         query: Optional[str] = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,

@@ -409,7 +409,7 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
+    def run(self, aman, proc_aman=None, full=None, select=True, sim=False, update_plot=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -433,6 +433,12 @@ class Pipeline(list):
             returned this preprocess axismanager. In this case, calls to
             ``process.calc_and_save()`` are skipped as the information is
             expected to be present in this AxisManager.
+        full: AxisManager (Optional)
+            A preprocess axismanager.  This axis manager stores the outputs of
+            preprocessing functions (proc_aman) but without any of the detector
+            or samps restrictions applied, thus maintaining its original shape.
+            This is returned at the end of the pipeline.  If not passed it is
+            instantiated with the same number of dets and samps as aman.
         select: boolean (Optional)
             if True, the aman detector axis is restricted as described in
             each preprocess module. Most pipelines are developed with 
@@ -448,18 +454,22 @@ class Pipeline(list):
 
         Returns
         -------
-        proc_aman: AxisManager
+        full: AxisManager
             A preprocess axismanager that contains all data products calculated
-            throughout the running of the pipeline
-        
+            throughout the running of the pipeline.
+        success: str
+            A string that stores the name of the last process step that the pipeline
+            completed.  If the pipeline successfully finishes all steps, success = 'end'.
         """
         if proc_aman is None:
             if 'preprocess' in aman:
                 proc_aman = aman.preprocess.copy()
-                full = aman.preprocess.copy()
+                if full is None:
+                    full = aman.preprocess.copy()
             else:
                 proc_aman = core.AxisManager(aman.dets, aman.samps)
-                full = core.AxisManager( aman.dets, aman.samps)
+                if full is None:
+                    full = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
             update_plot = False
         else:
@@ -468,7 +478,8 @@ class Pipeline(list):
                 det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
                 aman.restrict('dets', det_list)
                 proc_aman.restrict('dets', det_list)
-            full = proc_aman.copy()
+            if full is None:
+                full = proc_aman.copy()
             run_calc = False
 
         if 'frequency_cutoffs' not in proc_aman:

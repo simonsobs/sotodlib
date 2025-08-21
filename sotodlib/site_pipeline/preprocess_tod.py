@@ -316,7 +316,7 @@ def get_parser(parser=None):
 def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs: str,
-          query: Optional[str] = None,
+          query: Optional[str] = '',
           obs_id: Optional[str] = None,
           overwrite: bool = False,
           min_ctime: Optional[int] = None,
@@ -404,7 +404,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
 
 def main(configs: str,
-         query: Optional[str] = None,
+         query: Optional[str] = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
