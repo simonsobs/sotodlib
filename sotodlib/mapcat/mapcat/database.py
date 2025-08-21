@@ -85,9 +85,9 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     processing_status: list["ProcessingStatusTable"] = Relationship(
         back_populates="dmap"
     )
-    pointing_residual: list["PointingResidualTable"] = Relationship(
-        back_populates="dmap"
-    )
+    # pointing_residual: list["PointingResidualTable"] = Relationship(
+    #    back_populates="dmap"
+    # )
 
     def to_model(self) -> DepthOneMap:
         """
@@ -160,7 +160,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
         Status of processing
     """
 
-    __tablename__ = "processing_status"
+    __tablename__ = "time_domain_processing"
     id: int = Field(primary_key=True)
     map_name: str = Field(
         index=True,
@@ -245,7 +245,7 @@ class PointingResidualTable(PointingResidual, SQLModel, table=True):
     )
     ra_offset: float = Field(nullable=True)
     dec_offset: float = Field(nullable=True)
-    dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+    # dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
 
     def to_model(self) -> PointingResidual:
         """
