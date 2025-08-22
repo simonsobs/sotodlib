@@ -709,9 +709,9 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     pointing correction using combined wobble metadata that contains 
     both amp and phase fields.
     
-    This function assumes that all detectors in `aman` belong to a single wafer
-    and frequency band. It extracts the corresponding deflection amplitude and 
-    phase from the metadata, computes the wobble correction quaternion, and 
+    This function will raise ValueError unless all detectors belong to a single
+    wafer and frequency band. It extracts the corresponding deflection amplitude
+    and phase from the metadata, computes the wobble correction quaternion, and
     applies it to the boresight pointing.
 
     Parameters
@@ -722,7 +722,7 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
 
     wobble_meta : AxisManager
         Metadata tree containing both amp and phase fields under
-        wobble_meta.{wafer_slot}.{band}.{amp, phase}
+        wobble_meta.{amp, phase}
 
     site : str
         Observatory site identifier for sightline generation (default 'so').
