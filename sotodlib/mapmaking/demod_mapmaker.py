@@ -66,7 +66,7 @@ class DemodMapmaker:
 
     def add_obs(self, id, obs, noise_model=None, split_labels=None,
                 use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
-                pdeflect=True):
+                apply_wobble=True):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
         a RHS and div map.
@@ -122,7 +122,7 @@ class DemodMapmaker:
                 raise RuntimeError(msg)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels,pdeflect=pdeflect)
+            signal.add_obs(id, obs, nmat, tod, split_labels=split_labels,apply_wobble=apply_wobble)
         # Save what we need about this observation
         self.data.append(bunch.Bunch(id=id, ndet=obs.dets.count, nsamp=len(ctime), dets=obs.dets.vals, nmat=nmat))
 
@@ -290,7 +290,7 @@ class DemodSignalMap(DemodSignal):
                    ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=None, recenter=None, tile_shape=None, tiled=False,
                    Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, pdeflect=True):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, apply_wobble=True):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
@@ -298,7 +298,7 @@ class DemodSignalMap(DemodSignal):
         and Nd the result of applying the noise model to the detector time-ordered data.
         """
         ctime  = obs.timestamps
-        if pdeflect:
+        if apply_wobble:
             from sotodlib.coords.helpers import get_deflected_sightline
             # Get deflection parameters
             wobble_meta = obs.wobble_params
@@ -504,7 +504,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
                     unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
-                    pdeflect=True):
+                    apply_wobble=True):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -563,8 +563,8 @@ def make_demod_map(context, obslist, noise_model, info,
         build the ivar locally from the std of the TOD.
     wn_label : str, optional
         Path where to find the white noise per det estimated by the preprocessing.
-    pdeflect : bool, optional
-        Correct wobble deflection. This requires wobble params metadata in the 
+    apply_wobble : bool, optional
+        Correct wobble deflection. This requires aman.wobble_params metadata in the
         context
 
     Returns
@@ -616,7 +616,7 @@ def make_demod_map(context, obslist, noise_model, info,
             continue
         obs.wrap("weather", np.full(1, "toco"))
         obs.wrap("site",    np.full(1, site))
-        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label, pdeflect=pdeflect)
+        mapmaker.add_obs(name, obs, split_labels=split_labels, use_psd=use_psd, wn_label=wn_label, apply_wobble=apply_wobble)
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
         nobs_kept += 1
         n_dets += obs.dets.count

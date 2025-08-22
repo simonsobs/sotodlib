@@ -93,9 +93,9 @@ class Cfg:
     wn_label: str
         Path where to find the white noise per det by the
         preprocessing
-    pdeflect: bool
-        Correct wobble deflection. Requires wobble params
-        metadata in your context
+    apply_wobble: bool
+        Correct wobble deflection. This requires
+        aman.wobble_params metadata in the context
     center_at: str
     max_dets: int
     fixed_time: int
@@ -146,7 +146,7 @@ class Cfg:
         unit: str = 'K',
         use_psd: bool = True,
         wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise',
-        pdeflect: bool = True
+        apply_wobble: bool = True
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -184,7 +184,7 @@ class Cfg:
         self.unit = unit
         self.use_psd = use_psd
         self.wn_label = wn_label
-        self.pdeflect = pdeflect
+        self.apply_wobble = apply_wobble
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -472,7 +472,7 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,pdeflect=args.pdeflect) 
+            wn_label=args.wn_label,apply_wobble=args.apply_wobble)
             for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
