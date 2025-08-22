@@ -252,7 +252,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     jclass += "_" + g
                 else:
                     jclass += "_" + gb + "_" + str(g)
-            if jdb.get_jobs(jclass=jclass, jstate=["done", "failed", "ignored"]):
+            if jdb.get_jobs(jclass=jclass, jstate=["failed"]):
                 run_list_skipped.append(r)
             else:
                 open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"])

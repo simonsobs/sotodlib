@@ -180,7 +180,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     jclass += "_" + g
                 else:
                     jclass += "_" + gb + "_" + str(g)
-            if jdb.get_jobs(jclass=jclass, jstate=["done", "failed", "ignored"]):
+            if jdb.get_jobs(jclass=jclass, jstate=["failed"]):
                 run_list_skipped.append(r)
             else:
                 open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"])
@@ -231,7 +231,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             errmsg, tb = PreprocessErrors.get_errors(e)
             logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
             obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-            out_dict = None
+            out_dict_init = None
+            out_dict_proc = None
             error = PreprocessErrors.ExecutorFutureError
 
             if jobdb_path is not None:
