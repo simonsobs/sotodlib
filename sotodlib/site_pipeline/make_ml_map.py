@@ -30,6 +30,7 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--downgrade", type=int, default=1, help="Downgrade the map by this factor. 1 means no downgrade")
     return parser
 
 def main(**args):
@@ -39,6 +40,7 @@ def main(**args):
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
     from sotodlib.mapmaking import log
+    from sotodlib.utils.load_balancer import balance
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
 
@@ -51,7 +53,20 @@ def main(**args):
     SITE    = args.site.lower()
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
+
+    try:
+        from mpi4py.util import pkl5
+        if comm is not None:
+            comm = pkl5.Intracomm(comm)
+        else:
+            comm = None
+    except Exception:
+        print("Warning: Could not import pkl5. This may cause issues with MPI pickling.")
+        pass
+
     shape, wcs = enmap.read_map_geometry(args.area)
+    if args.downgrade > 1:
+        shape, wcs = enmap.downgrade_geometry(shape, wcs, args.downgrade)
 
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
@@ -100,6 +115,8 @@ def main(**args):
     if args.srcsamp:
         srcsamp_mask  = enmap.read_map(args.srcsamp)
 
+    sub_ids = balance(sub_ids, comm, comm.size, comm.rank)
+    L.debug("Sub-ids for rank %d: %s" % (comm.rank, sub_ids))
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
@@ -157,9 +174,9 @@ def main(**args):
         # To be able to distribute the tods sensibly, we need a rough estimate of where
         # on the sky each tod is. We should be able to get this using the central
         # ctime, az and el for each tod.
-        for ind in range(comm.rank, len(sub_ids), comm.size):
+        for sub_id in sub_ids:
             # Detsets correspond to separate files, so treat them as separate TODs.
-            sub_id = sub_ids[ind]
+
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
