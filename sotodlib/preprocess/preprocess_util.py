@@ -825,7 +825,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False, return_full=False):
+                          logger=None, overwrite=False, return_proc_aman=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -856,8 +856,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Optional. Logger object or None will generate a new one.
     overwrite: bool
         Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
-    return_full: bool
-        Optional. Return proc_aman.
+    return_proc_aman: bool
+        Optional. Return proc_aman if True, otherwise return None.  proc_aman is still merged
+        into aman, where it will be restricted even if return_proc_aman is True.
 
     Returns
     -------
@@ -913,10 +914,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                            f"groups in observation: {obs_id}:{cur_groups}. "
                            f"No analysis to run.")
             error = 'no_group_overlap'
-            if return_full:
-                return error, [obs_id, dets], [obs_id, dets], None, None
-            else:
-                return error, [obs_id, dets], [obs_id, dets], None
+            return error, [obs_id, dets], [obs_id, dets], None, None
 
     db_init_exist = find_db(obs_id, configs_init, dets, context_init,
                             logger=logger)
@@ -929,10 +927,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     if (not db_init_exist) and db_proc_exist and (not overwrite):
         logger.info('dependent db requires initial db if not overwriting')
         error = 'no_init_db'
-        if return_full:
-            return error, [obs_id, dets], [obs_id, dets], None, None
-        else:
-            return error, [obs_id, dets], [obs_id, dets], None
+        return error, [obs_id, dets], [obs_id, dets], None, None
 
     if db_init_exist and (not overwrite):
         if db_proc_exist:
@@ -947,10 +942,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
-                if return_full:
-                    return error, [errmsg, tb], [errmsg, tb], None, None
-                else:
-                    return error, [errmsg, tb], [errmsg, tb], None
+                return error, [errmsg, tb], [errmsg, tb], None, None
         else:
             try:
                 logger.info(f"init db exists for {obs_id} {dets} loading data and applying preprocessing.")
@@ -984,40 +976,38 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                         aman.move("tags", None)
                     aman.wrap('tags', tags_proc)
 
-                    proc_aman, success = pipe_proc.run(aman)
+                    proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
+                    # copy proc_aman so we can return proc_aman with full dimensions
+                    # and preprocess metadata for both layers
+                    proc_aman_copy = proc_aman.copy()
 
                     # remove fields found in aman.preprocess from proc_aman
                     for fld_init in init_fields:
-                        if fld_init in proc_aman:
-                            proc_aman.move(fld_init, None)
+                        if fld_init in proc_aman_copy:
+                            proc_aman_copy.move(fld_init, None)
 
-                    proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+                    proc_aman_copy.wrap('pcfg_ref', aman_cfgs_ref)
 
                 except Exception as e:
                     error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
                     errmsg = f'Dependent pipeline failed with {type(e)}: {e}'
                     tb = ''.join(traceback.format_tb(e.__traceback__))
                     logger.info(f"{error}\n{errmsg}\n{tb}")
-                    if return_full:
-                        return error, [errmsg, tb], [errmsg, tb], None, None
-                    else:
-                        return error, [errmsg, tb], [errmsg, tb], None
+                    return error, [errmsg, tb], [errmsg, tb], None, None
+
                 if success != 'end':
                     # If a single group fails we don't log anywhere just mis an entry in the db.
-                    if return_full:
-                        return success, [obs_id, dets], [obs_id, dets], None, None
-                    else:
-                        return success, [obs_id, dets], [obs_id, dets], None
+                    return success, [obs_id, dets], [obs_id, dets], None, None
 
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                proc_aman_copy.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-                aman.preprocess.merge(proc_aman)
+                aman.preprocess.merge(proc_aman_copy)
 
-                if return_full:
+                if return_proc_aman:
                     return error, [obs_id, dets], outputs_proc, aman, proc_aman
                 else:
-                    return error, [obs_id, dets], outputs_proc, aman
+                    return error, [obs_id, dets], outputs_proc, aman, None
     else:
         # pipeline for init config
         logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
@@ -1035,25 +1025,20 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             errmsg = f'Initial pipeline failed with {type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
             logger.info(f"{error}\n{errmsg}\n{tb}")
-            if return_full:
-                return error, [errmsg, tb], [errmsg, tb], None, None
-            else:
-                return error, [errmsg, tb], [errmsg, tb], None
+            return error, [errmsg, tb], [errmsg, tb], None, None
+
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
-            if return_full:
-                return success, [obs_id, dets], [obs_id, dets], None, None
-            else:
-                return success, [obs_id, dets], [obs_id, dets], None
+            return success, [obs_id, dets], [obs_id, dets], None, None
 
         logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
         proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
 
         if configs_proc is None:
-            if return_full:
+            if return_proc_aman:
                 return error, outputs_init, [obs_id, dets], aman, proc_aman
             else:
-                return error, outputs_init, [obs_id, dets], aman
+                return error, outputs_init, [obs_id, dets], aman, None
         else:
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
@@ -1068,40 +1053,39 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                     aman.move("tags", None)
                 aman.wrap('tags', tags_proc)
 
-                proc_aman, success = pipe_proc.run(aman)
+                proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
+
+                # copy proc_aman so we can return proc_aman with full dimensions
+                # and preprocess metadata for both layers
+                proc_aman_copy = proc_aman.copy()
 
                 # remove fields found in aman.preprocess from proc_aman
                 for fld_init in init_fields:
-                    if fld_init in proc_aman:
-                        proc_aman.move(fld_init, None)
+                    if fld_init in proc_aman_copy:
+                        proc_aman_copy.move(fld_init, None)
 
-                proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+                proc_aman_copy.wrap('pcfg_ref', aman_cfgs_ref)
 
             except Exception as e:
                 error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
                 errmsg = f'Dependent pipeline failed with {type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
-                if return_full:
-                    return error, [errmsg, tb], [errmsg, tb], None, None
-                else:
-                    return error, [errmsg, tb], [errmsg, tb], None
+                return error, [errmsg, tb], [errmsg, tb], None, None
+
             if success != 'end':
                 # If a single group fails we don't log anywhere just mis an entry in the db.
-                if return_full:
-                    return success, [obs_id, dets], [obs_id, dets], None, None
-                else:
-                    return success, [obs_id, dets], [obs_id, dets], None
+                return success, [obs_id, dets], [obs_id, dets], None, None
 
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
             proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-            aman.preprocess.merge(proc_aman)
+            aman.preprocess.merge(proc_aman_copy)
 
-            if return_full:
+            if return_proc_aman:
                 return error, outputs_init, outputs_proc, aman, proc_aman
             else:
-                return error, outputs_init, outputs_proc, aman, proc_aman
+                return error, outputs_init, outputs_proc, aman, None
 
 
 def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):

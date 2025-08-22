@@ -409,7 +409,8 @@ class Pipeline(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
     
-    def run(self, aman, proc_aman=None, full=None, select=True, sim=False, update_plot=False):
+    def run(self, aman, proc_aman=None, full_aman=None,
+            select=True, sim=False, update_plot=False):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -433,7 +434,7 @@ class Pipeline(list):
             returned this preprocess axismanager. In this case, calls to
             ``process.calc_and_save()`` are skipped as the information is
             expected to be present in this AxisManager.
-        full: AxisManager (Optional)
+        full_aman: AxisManager (Optional)
             A preprocess axismanager.  This axis manager stores the outputs of
             preprocessing functions (proc_aman) but without any of the detector
             or samps restrictions applied, thus maintaining its original shape.
@@ -454,7 +455,7 @@ class Pipeline(list):
 
         Returns
         -------
-        full: AxisManager
+        full_aman: AxisManager
             A preprocess axismanager that contains all data products calculated
             throughout the running of the pipeline.
         success: str
@@ -464,12 +465,12 @@ class Pipeline(list):
         if proc_aman is None:
             if 'preprocess' in aman:
                 proc_aman = aman.preprocess.copy()
-                if full is None:
-                    full = aman.preprocess.copy()
+                if full_aman is None:
+                    full_aman = aman.preprocess.copy()
             else:
                 proc_aman = core.AxisManager(aman.dets, aman.samps)
-                if full is None:
-                    full = core.AxisManager( aman.dets, aman.samps)
+                if full_aman is None:
+                    full_aman = core.AxisManager( aman.dets, aman.samps)
             run_calc = True
             update_plot = False
         else:
@@ -478,8 +479,8 @@ class Pipeline(list):
                 det_list = [det for det in proc_aman.dets.vals if det in aman.dets.vals]
                 aman.restrict('dets', det_list)
                 proc_aman.restrict('dets', det_list)
-            if full is None:
-                full = proc_aman.copy()
+            if full_aman is None:
+                full_aman = proc_aman.copy()
             run_calc = False
 
         if 'frequency_cutoffs' not in proc_aman:
@@ -511,7 +512,7 @@ class Pipeline(list):
             if run_calc:
                 process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
-                update_full_aman( proc_aman, full, self.wrap_valid)
+                update_full_aman( proc_aman, full_aman, self.wrap_valid)
             if update_plot:
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
             plt.close()
@@ -524,12 +525,12 @@ class Pipeline(list):
                 success = process.name
                 break
 
-        # copy updated frequency cutoffs to full
-        if "frequency_cutoffs" in full:
-            full.move("frequency_cutoffs", None)
-        full.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
+        # copy updated frequency cutoffs to full_aman
+        if "frequency_cutoffs" in full_aman:
+            full_aman.move("frequency_cutoffs", None)
+        full_aman.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
 
-        return full, success
+        return full_aman, success
         
 
 class _FracFlaggedMixIn(object):
