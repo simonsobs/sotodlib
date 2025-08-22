@@ -16,6 +16,33 @@ from .. import core
 
 from . import _Preprocess, Pipeline, processes
 
+class PreprocessErrors:
+    """Stores the various errors that can occur from the preprocessing
+    functions.
+    """
+    LoadSuccess = "load_success"
+    GetGroupsError = "get_groups_error"
+    MetaDataError = "get_meta_data_error"
+    NoDetsRemainError = "no_dets_remain_error"
+    NoGroupOverlapError = "no_group_overlap_error"
+    MultilayerPipelineLoadError = "multilayer_load_and_preprocess_error"
+    SingleLayerPipelineLoadError = "single_layer_load_and_preprocess_error"
+    PipeLineRunError = "pipeline_run_error"
+    InitPipeLineRunError = "init_pipeline_run_error"
+    ProcPipeLineRunError = "proc_pipeline_run_error"
+    PipeLineStepError = "pipeline_step_error"
+    NoInitDbError = "no_init_db_error"
+    GroupOutputError = "group_output_error"
+    ExecutorFutureError = "executor_future_error"
+
+    @classmethod
+    def get_errors(cls, e):
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+
+        return errmsg, tb
+
+
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
     filename and dataset name for a result.
@@ -178,7 +205,7 @@ def get_preprocess_context(configs, context=None):
     return configs, context
 
 
-def get_groups(obs_id, configs, context):
+def get_groups(obs_id, configs, context=None):
     """Get subobs group method and groups. To be used in
     ``preprocess_*.py`` site pipeline scripts.
 
@@ -186,7 +213,7 @@ def get_groups(obs_id, configs, context):
     ----------
     obs_id : str
         The obsid.
-    configs : dict
+    configs : str or dict
         The configuration dictionary.
     context : core.Context
         The Context file to use.
@@ -200,6 +227,10 @@ def get_groups(obs_id, configs, context):
     """
 
     try:
+        if type(configs) == str:
+            configs = yaml.safe_load(open(configs, "r"))
+        if context is None:
+            context = core.Context(configs["context_file"])
         group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
         for i, gb in enumerate(group_by):
             if gb.startswith('dets:'):
@@ -214,7 +245,7 @@ def get_groups(obs_id, configs, context):
         groups = [[b for a,b in r.items()] for r in rs]
         return group_by, groups, None
     except Exception as e:
-        error = f'Failed get groups for: {obs_id}'
+        error = PreprocessErrors.GetGroupsError
         errmsg = f'{type(e)}: {e}'
         tb = ''.join(traceback.format_tb(e.__traceback__))
         return [], [], [error, errmsg, tb]
@@ -729,12 +760,6 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     group_by, groups, error = get_groups(obs_id, configs, context)
 
-    if os.path.exists(configs['archive']['index']):
-        db = core.metadata.ManifestDb(configs['archive']['index'])
-        x = db.inspect({'obs:obs_id': obs_id})
-    else:
-        x = None
-
     all_groups = groups.copy()
     for g in all_groups:
         if 'wafer.bandpass' in group_by:
@@ -742,26 +767,17 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                 groups.remove(g)
                 continue
 
-    # get groups in db
-    db_groups = []
-    if x is not None and len(x) > 0:
-        [db_groups.append([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-
     for g in groups:
         dets = {gb:gg for gb, gg in zip(group_by, g)}
         outputs_grp = save_group(obs_id, configs, dets, context, subdir)
 
         if os.path.exists(outputs_grp['temp_file']):
             try:
-                if not remove and g not in db_groups:
-                    cleanup_mandb(None, outputs_grp, configs, logger)
+                if not remove:
+                    cleanup_mandb(outputs_grp, (obs_id, g),
+                                  None, configs, logger)
                 else:
-                    # if we're overwriting
-                    if remove:
-                        logger.info(f"remove={remove}: removing {outputs_grp['temp_file']}")
-                    # if found in database already
-                    elif g in db_groups:
-                        logger.info(f"{outputs_grp['temp_file']} found in db, removing")
+                    # if we're overwriting, remove file so it will re-run
                     os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
@@ -771,8 +787,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
 def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
                 subdir='temp', remove=False):
-    """
-    For a given obs id, this function will search the policy_dir directory
+    """For a given obs id, this function will search the policy_dir directory
     if it exists for any files with that obsnum in their filename. If any are
     found, it will run save_group_and_cleanup for that obs id.
 
@@ -812,60 +827,62 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False):
-    """
-    This function is expected to receive a single obs_id, and dets dictionary.
-    The dets dictionary must match the grouping specified in the preprocess
-    config files. It accepts either one or two config strings or dicts representing
-    an initial and a dependent pipeline stage. If the preprocess database entry for
-    this obsid-dets group already exists then this function will just load back the
-    processed tod calling either the ``load_and_preprocess`` or
-    ``multilayer_load_and_preprocess`` functions. If the db entry does not exist or
-    the overwrite flag is set to True then the full preprocessing steps defined in
-    the configs are run and the outputs are written to a unique h5 file. Any errors,
-    the info to populate the database, the file path of the h5 file, and the process
-    tod are returned from this function. This function is expected to be run in
-    conjunction with the ``cleanup_mandb`` function which consumes all of the outputs
-    (except the processed tod), writes to the database, and moves the multiple h5 files
-    into fewer h5 files (each <= 10 GB).
+                         logger=None, overwrite=False, save_archive=False):
+    """This function takes a single obs_id and dets dictionary and will either
+    load from a preprocessing database if it exists or run the preprocessing
+    pipeline if it does not or overwrite is True. Both single and multilayer
+    preprocessing are supported. The dets dict must match the grouping
+    specified in the preprocessing config file.  Processed axis managers are
+    written to a temporary h5 file and can be written to an archive and database
+    by using cleanup_mandb (or setting save_archive to True) which consumes
+    all of the outputs (except the processed tod), writes to the database,
+    and moves the multiple h5 files into fewer h5 files (each <= 10 GB).
 
     Arguments
     ---------
-    obs_id: str
+    obs_id : str
         Obs id to process or load
-    configs_init: fpath or dict
+    configs_init : fpath or dict
         Filepath or dictionary containing the preprocess configuration file.
-    dets: dict
-        Dictionary specifying which detectors/wafers to load see ``Context.obsdb.get_obs``.
-    configs_proc: fpath or dict
-        Filepath or dictionary containing a dependent preprocess configuration file.
-    logger: PythonLogger
+    dets : dict
+        Dictionary specifying which detectors/wafers to load see
+        ``Context.obsdb.get_obs``.
+    configs_proc : fpath or dict
+        Filepath or dictionary containing a dependent preprocess configuration
+        file.
+    logger : PythonLogger
         Optional. Logger object or None will generate a new one.
-    overwrite: bool
-        Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
+    overwrite : bool
+        Optional. Whether or not to overwrite existing entries in the
+        preprocess manifest db.
+    save_archive :
+        Call cleanup_mandb if True to save to the archive and database files
+        in configs_init and configs_proc
 
     Returns
     -------
-    error: str
-        String indicating if the function succeeded in its execution or failed.
-        If ``None`` then it succeeded in processing and the mandB should be updated.
-        If ``'load_success'`` then axis manager was successfully loaded from existing preproc db.
-        If any other string then processing failed and output will be logged in the error log.
-    output_init: list
-        Varies depending on the value of ``error``.
-        If ``error == None`` then output is the info needed to update the manifest db.
-        If ``error == 'load_success'`` then output is just ``[obs_id, dets]``.
-        If ``error`` is anything else then output stores what to save in the error log.
-    output_proc: list:
-        See output_init for possible values.
-    aman: Core.AxisManager
-        Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
+    aman : AxisManager or None
+        Preprocessed axis manager if preproc_or_load_group finished
+        successfully or None if it failed.
+    out_dict_init : dict or tuple
+        Dictionary output for init config from save_group if preprocessing
+        ran successfully or tuple of (obs_id, group) if preprocessing was
+        loaded or preproc_or_load_group failed.
+    out_dict_proc : dict or tuple
+        Dictionary output for proc config from save_group if preprocessing
+        ran successfully for that layer or a tuple of (obs_id, group)
+        if preprocessing was loaded, that layer was not run or loaded, or
+        preproc_or_load_group failed.
+    error : str or None
+        Error from PreprocessError or None if preproc_or_load_group finished
+        successfully.
     """
+
+    init_temp_subdir = "temp"
+    proc_temp_subdir = "temp_proc"
 
     if logger is None:
         logger = init_logger("preprocess")
-
-    error = None
 
     if type(configs_init) == str:
         configs_init = yaml.safe_load(open(configs_init, "r"))
@@ -876,187 +893,153 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         if type(configs_proc) == str:
             configs_proc = yaml.safe_load(open(configs_proc, "r"))
         context_proc = core.Context(configs_proc["context_file"])
-
-        group_by, groups, error = get_groups(obs_id, configs_proc, context_proc)
+        group_by, groups, error = get_groups(obs_id, configs_proc)
     else:
-        group_by, groups, error = get_groups(obs_id, configs_init, context_init)
+        group_by, groups, error = get_groups(obs_id, configs_init)
 
     if error is not None:
-        return error[0], [error[1], error[2]], [error[1], error[2]], None
+        logger.error(f"Get Groups Error for {obs_id}: {group}\n{error[1]}\n{error[2]}")
+        return None, (obs_id, group), (obs_id, group), error[0]
 
-    all_groups = groups.copy()
-    cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
-    for g in all_groups:
-        if g not in cur_groups:
-            groups.remove(g)
+    group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
 
-        if len(groups) == 0:
-            logger.warning(f"group_list:{cur_groups} contains no overlap with "
-                           f"groups in observation: {obs_id}:{cur_groups}. "
-                           f"No analysis to run.")
-            error = 'no_group_overlap'
-            return error, [obs_id, dets], [obs_id, dets], None
+    # Verify if group exists for this obs id
+    if group not in groups:
+        logger.warning(f"Group {group} not found for {obs_id}. "
+                       f"No analysis to run.")
+        return None, (obs_id, group), (obs_id, group), PreprocessErrors.NoGroupOverlapError
 
     db_init_exist = find_db(obs_id, configs_init, dets, context_init,
                             logger=logger)
-
-    db_proc_exist = False
     if configs_proc is not None:
         db_proc_exist = find_db(obs_id, configs_proc, dets, context_proc,
                                 logger=logger)
+    else:
+        db_proc_exist = False
 
-    if (not db_init_exist) and db_proc_exist and (not overwrite):
-        logger.info('dependent db requires initial db if not overwriting')
-        error = 'no_init_db'
-        return error, [obs_id, dets], [obs_id, dets], None
+    # Cannot run if proc db exists but init db does not
+    if db_proc_exist and not db_init_exist and not overwrite:
+        logger.error("loading from proc db requires init db if overwrite is False")
+        return None, (obs_id, group), (obs_id, group), PreprocessErrors.NoInitDbError
 
-    if db_init_exist and (not overwrite):
-        if db_proc_exist:
+    # Load first layer only
+    if not overwrite:
+        if db_init_exist and not db_proc_exist:
+            out_dict_init = (obs_id, group)
             try:
-                logger.info(f"both db and depdendent db exist for {obs_id} {dets} loading data and applying preprocessing.")
-                aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                                      configs_proc=configs_proc, logger=logger)
-                error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman
-            except Exception as e:
-                error = f'Failed to load: {obs_id} {dets}'
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
-        else:
-            try:
-                logger.info(f"init db exists for {obs_id} {dets} loading data and applying preprocessing.")
+                logger.info(f"Loading and applying preprocessing for single layer db on {obs_id}:{group}")
                 aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
                                            context=context_init, logger=logger)
             except Exception as e:
-                error = f'Failed to load: {obs_id} {dets}'
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
+                errmsg, tb = PreprocessErrors.get_errors(e)
+                logger.error(f"Single layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
+                return None, out_dict_init, (obs_id, group), PreprocessErrors.SingleLayerPipelineLoadError
 
+            # Return if not running or loading proc db
             if configs_proc is None:
-                error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman
-            else:
-                try:
-                    outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
-                    init_fields = aman.preprocess._fields.copy()
-                    logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
-                    # pipeline for init config
-                    pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
-                    aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
-                    # pipeline for processing config
-                    pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
+                logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
+                return aman, out_dict_init, (obs_id, group), PreprocessErrors.LoadSuccess
 
-                    # tags from context proc
-                    tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
+        # Load first and second layer
+        if db_init_exist and db_proc_exist:
+            try:
+                logger.info(f"Loading and applying preprocessing for both dbs on {obs_id}:{group}")
+                aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
+                                                      configs_proc=configs_proc, logger=logger)
+                logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
+                return aman, (obs_id, group), (obs_id, group), PreprocessErrors.LoadSuccess
+            except Exception as e:
+                errmsg, tb = PreprocessErrors.get_errors(e)
+                logger.error(f"Multilayer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
+                return None, (obs_id, group), (obs_id, group), PreprocessErrors.MultilayerPipelineLoadError
 
-                    if "tags" in aman._fields:
-                        aman.move("tags", None)
-                    aman.wrap('tags', tags_proc)
-
-                    proc_aman, success = pipe_proc.run(aman)
-
-                    # remove fields found in aman.preprocess from proc_aman
-                    for fld_init in init_fields:
-                        if fld_init in proc_aman:
-                            proc_aman.move(fld_init, None)
-
-                    proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
-
-                except Exception as e:
-                    error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
-                    errmsg = f'Dependent pipeline failed with {type(e)}: {e}'
-                    tb = ''.join(traceback.format_tb(e.__traceback__))
-                    logger.info(f"{error}\n{errmsg}\n{tb}")
-                    return error, [errmsg, tb], [errmsg, tb], None
-                if success != 'end':
-                    # If a single group fails we don't log anywhere just mis an entry in the db.
-                    return success, [obs_id, dets], [obs_id, dets], None
-
-                logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
-
-                aman.preprocess.merge(proc_aman)
-
-                return error, [obs_id, dets], outputs_proc, aman
-    else:
-        # pipeline for init config
-        logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
+    # Run first layer
+    if not db_init_exist or overwrite:
         try:
-            pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
+            logger.info(f"Generating new init db for {obs_id}: {group}")
+            pipe_init = Pipeline(configs_init["process_pipe"],
+                                 plot_dir=configs_init["plot_dir"],
+                                 logger=logger)
             aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
-            outputs_init = save_group(obs_id, configs_init, dets, context_init, subdir='temp')
+
+            out_dict_init = save_group(obs_id, configs_init, dets,
+                                       context_init, subdir=init_temp_subdir)
             aman = context_init.get_obs(obs_id, dets=dets)
-            tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
+            tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id,
+                                                   tags=True)['tags'])
             aman.wrap('tags', tags)
             proc_aman, success = pipe_init.run(aman)
             aman.wrap('preprocess', proc_aman)
         except Exception as e:
-            error = f'Failed to run initial pipeline: {obs_id} {dets}'
-            errmsg = f'Initial pipeline failed with {type(e)}: {e}'
-            tb = ''.join(traceback.format_tb(e.__traceback__))
-            logger.info(f"{error}\n{errmsg}\n{tb}")
-            return error, [errmsg, tb], [errmsg, tb], None
+            errmsg, tb = PreprocessErrors.get_errors(e)
+            logger.error(f"Pipeline Run Error for {obs_id}: {group}\n{errmsg}\n{tb}")
+            return None, (obs_id, group), (obs_id, group), PreprocessErrors.InitPipeLineRunError
         if success != 'end':
-            # If a single group fails we don't log anywhere just mis an entry in the db.
-            return success, [obs_id, dets], [obs_id, dets], None
+            logger.error(f"Init Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
+            return None, (obs_id, group), (obs_id, group), PreprocessErrors.PipeLineStepError
 
-        logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
-        proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
-
+        logger.info(f"Saving data to {out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
+        proc_aman.save(out_dict_init['temp_file'], out_dict_init['db_data']['dataset'],
+                       overwrite)
+        if save_archive:
+            cleanup_mandb(out_dict_init, (obs_id, group), None, configs_init,
+                          logger=logger, overwrite=False)
+        # Return if not running proc db
         if configs_proc is None:
-            return error, outputs_init, [obs_id, dets], aman
-        else:
-            try:
-                outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
-                init_fields = aman.preprocess._fields.copy()
-                logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
-                # pipeline for processing config
-                pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
-                 # tags from context proc
-                tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
+            logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
+            return aman, out_dict_init, (obs_id, group), None
 
-                if "tags" in aman._fields:
-                    aman.move("tags", None)
-                aman.wrap('tags', tags_proc)
+    # Run second layer
+    if (not db_proc_exist or overwrite) and configs_proc is not None:
+        try:
+            logger.info(f"Starting proc pipeline on {obs_id}: {group}")
+            init_fields = aman.preprocess._fields.copy()
+            tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id,
+                                                        tags=True)['tags'])
+            if "tags" in aman._fields:
+                aman.move("tags", None)
+            aman.wrap('tags', tags_proc)
 
-                proc_aman, success = pipe_proc.run(aman)
+            out_dict_proc = save_group(obs_id, configs_proc, dets,
+                                       context_proc, subdir=proc_temp_subdir)
 
-                # remove fields found in aman.preprocess from proc_aman
-                for fld_init in init_fields:
-                    if fld_init in proc_aman:
-                        proc_aman.move(fld_init, None)
+            pipe_proc = Pipeline(configs_proc["process_pipe"],
+                                 plot_dir=configs_proc["plot_dir"], logger=logger)
+            proc_aman, success = pipe_proc.run(aman)
+            pipe_init = Pipeline(configs_init["process_pipe"],
+                                 plot_dir=configs_init["plot_dir"],
+                                 logger=logger)
+            proc_aman.wrap('pcfg_ref', get_pcfg_check_aman(pipe_init))
 
-                proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+            for init_field in init_fields:
+                if init_field in proc_aman:
+                    proc_aman.move(init_field, None)
+        except Exception as e:
+            errmsg, tb = PreprocessErrors.get_errors(e)
+            logger.error(f"Pipeline Run Error for {obs_id}: {group}\n{errmsg}\n{tb}")
+            return None, (obs_id, group), (obs_id, group), PreprocessErrors.ProcPipeLineRunError
+        if success != 'end':
+            logger.error(f"Proc Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
+            return None, (obs_id, group), (obs_id, group), PreprocessErrors.PipeLineStepError
 
-            except Exception as e:
-                error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
-                errmsg = f'Dependent pipeline failed with {type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
-            if success != 'end':
-                # If a single group fails we don't log anywhere just mis an entry in the db.
-                return success, [obs_id, dets], [obs_id, dets], None
+        logger.info(f"Saving proc axis manager to {out_dict_proc['temp_file']}:{out_dict_proc['db_data']['dataset']}")
+        proc_aman.save(out_dict_proc['temp_file'], out_dict_proc['db_data']['dataset'],
+                       overwrite)
+        if save_archive:
+            cleanup_mandb(out_dict_proc, (obs_id, group), None, configs_proc,
+                          logger=logger, overwrite=False)
+        aman.preprocess.merge(proc_aman)
 
-            logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-            proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
-
-            aman.preprocess.merge(proc_aman)
-
-            return error, outputs_init, outputs_proc, aman
+    logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
+    return aman, out_dict_init, out_dict_proc, None
 
 
-def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
-    """
-    Function to update the manifest db when data is collected from the
+def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=False):
+    """Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
     See the ``preproc_or_load_group`` docstring for the varying expected
-    values of ``error`` and the associated ``outputs``. This function will
+    values of ``error`` and the associated ``out_dict``. This function will
     either:
 
     1) Update the mandb sqlite file and move the h5 archive from its temporary
@@ -1086,9 +1069,9 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
     if logger is None:
         logger = init_logger("preprocess")
 
-    if error is None:
+    if error is None and out_dict is not None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
+        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
         nfile = 0
         folder = os.path.dirname(configs['archive']['policy']['filename'])
@@ -1099,14 +1082,11 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
             nfile += 1
             dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-        group_by = [k.split(':')[-1] for k in outputs['db_data'].keys() if 'dets' in k]
+        group_by = [k.split(':')[-1] for k in out_dict['db_data'].keys() if 'dets' in k]
         h5_path = os.path.relpath(dest_file,
                                   start=os.path.dirname(configs['archive']['index']))
 
-        src_file = outputs['temp_file']
-
-        logger.debug(f"Source file: {src_file}")
-        logger.debug(f"Destination file: {dest_file}")
+        src_file = out_dict['temp_file']
 
         with h5py.File(dest_file,'a') as f_dest:
             with h5py.File(src_file,'r') as f_src:
@@ -1120,12 +1100,12 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
                         logger.debug(f"\t{dts}/{member}")
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-        logger.info(f"Saving to database under {outputs['db_data']}")
+        logger.info(f"Saving to database under {out_dict['db_data']}")
         db = get_preprocess_db(configs, group_by, logger)
-        if len(db.inspect(outputs['db_data'])) == 0:
-            db.add_entry(outputs['db_data'], h5_path)
+        if len(db.inspect(out_dict['db_data'])) == 0:
+            db.add_entry(out_dict['db_data'], h5_path)
         os.remove(src_file)
-    elif error == 'load_success':
+    elif error == PreprocessErrors.LoadSuccess or (error is None and out_dict is None):
         return
     else:
         folder = os.path.dirname(configs['archive']['index'])
@@ -1133,9 +1113,7 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
             os.makedirs(folder)
         errlog = os.path.join(folder, 'errlog.txt')
         f = open(errlog, 'a')
-        f.write(f'{time.time()}, {error}\n')
-        if outputs is not None:
-            f.write(f'\t{outputs[0]}\n\t{outputs[1]}\n')
+        f.write(f"{time.time()}, {out_meta[0]}, {out_meta[1]}, {error}\n")
         f.close()
 
 
