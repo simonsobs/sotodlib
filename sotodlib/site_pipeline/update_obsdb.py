@@ -213,6 +213,7 @@ def main(config: str,
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
                 if config_dict["skip_bad_books"]:
+                    _, book_id = os.path.split(bookpath)
                     config_dict["known_bad_books"].append(book_id)
                     logger.error(f"failed to add {bookpath}. There are now {len(config_dict['known_bad_books'])} known bad books.")
                     bad_book_counter +=1
