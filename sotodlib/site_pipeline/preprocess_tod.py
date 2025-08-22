@@ -135,7 +135,6 @@ def preprocess_tod(obs_id, configs, group, verbosity=0, overwrite=False,
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
-
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     if configs.get("lmsi_config", None) is not None:
@@ -188,10 +187,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
-    os.makedirs(os.path.dirname(configs_proc['archive']['policy']['filename']),
+    os.makedirs(os.path.dirname(configs['archive']['policy']['filename']),
                 exist_ok=True)
 
-    jdb = JobManager(sqlite_file=configs["jobdb"])
+    jobdb_path = configs.get("jobdb", None)
+    if jobdb_path is not None:
+        jdb = JobManager(sqlite_file=jobdb_path)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
@@ -225,17 +226,15 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     futures_dict = {}
     for obs in obs_list:
         futures.append(executor.submit(pp_util.get_groups, obs["obs_id"], configs))
-
-    for obs, future in zip(obs_list, futures):
-        futures_dict[future] = obs["obs_id"]
+        futures_dict[futures[-1]] = obs
 
     for future in tqdm(as_completed_callable(futures), total=len(futures),
                        desc="building run list from obs list"):
-        obs_id = futures_dict[future]
+        obs = futures_dict[future]
         _, groups, _ = future.result()
 
-        if db is not None:
-            x = db.inspect({'obs:obs_id': obs_id})
+        if db is not None and not overwrite:
+            x = db.inspect({'obs:obs_id': obs['obs_id']})
             if x is not None and len(x) != 0 and len(x) != len(groups):
                 [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
 
@@ -243,39 +242,31 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             if 'NC' not in group:
                 run_list.append((obs, group))
 
-    run_list_failed = []
-    for r in run_list:
-        jclass = r[0]['obs_id']
-        for gb, g in zip(group_by, r[1]):
-            if gb == 'detset':
-                jclass += "_" + g
+    if jobdb_path is not None:
+        run_list_skipped = []
+        jobs = []
+        for r in run_list:
+            jclass = r[0]['obs_id']
+            for gb, g in zip(group_by, r[1]):
+                if gb == 'detset':
+                    jclass += "_" + g
+                else:
+                    jclass += "_" + gb + "_" + str(g)
+            if jdb.get_jobs(jclass=jclass, jstate=["done", "failed", "ignored"]):
+                run_list_skipped.append(r)
             else:
-                jclass += "_" + gb + "_" + str(g)
-        if jdb.get_jobs(jclass=jclass, jstate=["done", "failed", "ignored"]):
-            run_list_failed.append(r)
+                open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"])
+                if open_jobs:
+                    job = open_jobs[0]
+                else:
+                    job = jdb.create_job(jclass)
 
-    logger.info(f"skipping {len(run_list_failed)} jobs from jobdb")
+                jobs.append(job)
 
-    run_list = [r for r in run_list if r not in run_list_failed]
-
-    jobs = []
-    for r in run_list:
-        jclass = r[0]['obs_id']
-        for gb, g in zip(group_by, r[1]):
-            if gb == 'detset':
-                jclass += "_" + g
-            else:
-                jclass += "_" + gb + "_" + str(g)
-        new_jobs = {}
-        open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"])
-
-        if open_jobs:
-            job = open_jobs[0]
-        else:
-            job = jdb.create_job(jclass)
-
-        jobs.append(job)
-
+        logger.info(f"skipping {len(run_list_skipped)} jobs from jobdb")
+        run_list = [r for r in run_list if r not in run_list_skipped]
+    else:
+        jobs = [None for r in run_list]
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
     futures = []
@@ -285,7 +276,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     run_parallel = nproc > 1
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    for r in run_list:
+    for r, j in zip(run_list, jobs):
         futures.append(executor.submit(preprocess_tod,
                                        obs_id=r[0]['obs_id'],
                                        configs=configs,
@@ -293,14 +284,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                                        verbosity=verbosity,
                                        overwrite=overwrite,
                                        run_parallel=run_parallel))
-
-    for r, j, future in zip(run_list, jobs, futures):
-        futures_dict[future] = (r[0]['obs_id'], r[1], j)
+        futures_dict[futures[-1]] = (r[0]['obs_id'], r[1], j)
         if r[0]['obs_id'] not in obs_errors:
             obs_errors[r[0]['obs_id']] = []
 
     for future in tqdm(as_completed_callable(futures), total=len(futures),
-                           desc="preprocess_tod"):
+                       desc="preprocess_tod"):
         obs_id, group, job = futures_dict[future]
         out_meta = (obs_id, group)
         try:
@@ -314,6 +303,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             out_dict = None
             error = PreprocessErrors.ExecutorFutureError
 
+        if jobdb_path is not None:
             with jdb.locked(job) as j:
                 j.mark_visited()
                 j.jstate = "failed"
@@ -324,10 +314,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             logger.info(f"Adding future result to db for {obs_id}: {group}")
             pp_util.cleanup_mandb(out_dict, out_meta, error, configs, logger)
 
-        with jdb.locked(job) as j:
-            if j.visit_count == 0:
-                j.mark_visited()
-                j.jstate = "done"
+        if jobdb_path is not None:
+            with jdb.locked(job) as j:
+                if j.visit_count == 0:
+                    j.mark_visited()
+                    j.jstate = "done"
 
     n_obs_fail = 0
     n_groups_fail = 0
@@ -340,11 +331,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 if entry['error'] is not None:
                     n_groups_fail += 1
 
-    logger.warn(f"{n_obs_fail}/{len(obs_errors)} observations failed entirely")
-    logger.warn(f"{n_groups_fail}/{len(run_list)} groups failed")
-
-    if raise_error:
-        raise RuntimeError("preprocess_tod ended with failed obsids")
+    if raise_error and (n_groups_fail > 0):
+        raise RuntimeError(f"preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
+                           f"failed obsids and {n_groups_fail}/{len(run_list)} failed groups")
     else:
         logger.info("preprocess_tod is done")
 

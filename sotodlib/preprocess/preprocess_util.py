@@ -927,12 +927,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         if db_init_exist and not db_proc_exist:
             out_dict_init = (obs_id, group)
             try:
-                logger.info(f"Loading and applying preprocessing for single layer db on {obs_id}:{group}")
+                logger.info(f"Loading and applying preprocessing for initial layer db on {obs_id}:{group}")
                 aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
                                            context=context_init, logger=logger)
             except Exception as e:
                 errmsg, tb = PreprocessErrors.get_errors(e)
-                logger.error(f"Single layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
+                logger.error(f"Initial layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
                 return None, out_dict_init, (obs_id, group), PreprocessErrors.SingleLayerPipelineLoadError
 
             # Return if not running or loading proc db
@@ -1069,7 +1069,7 @@ def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=Fal
     if logger is None:
         logger = init_logger("preprocess")
 
-    if error is None and out_dict is not None:
+    if error is None and out_dict is not None and isinstance(out_dict, dict):
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
@@ -1091,13 +1091,11 @@ def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=Fal
         with h5py.File(dest_file,'a') as f_dest:
             with h5py.File(src_file,'r') as f_src:
                 for dts in f_src.keys():
-                    logger.debug(f"\t{dts}")
                     # If the dataset or group already exists, delete it to overwrite
                     if overwrite and dts in f_dest:
                         del f_dest[dts]
                     f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
                     for member in f_src[dts]:
-                        logger.debug(f"\t{dts}/{member}")
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
         logger.info(f"Saving to database under {out_dict['db_data']}")
