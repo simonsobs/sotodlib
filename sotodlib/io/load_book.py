@@ -56,7 +56,7 @@ TMPDIR_VAR = 'SOTODLIB_TOD_TMPDIR'
 
 
 def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
-                  no_signal=None,
+                  no_signal=None, no_headers=None, special_channels=None,
                   **kwargs):
     """Obsloader function for SO "Level 3" obs/oper Books.
 
@@ -82,6 +82,9 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
 
     if no_signal is None:
         no_signal = False  # from here, assume no_signal in [True, False]
+    if no_headers is None:
+        # By default, suppress headers for "obs" book loads.
+        no_headers = obs_id.startswith('obs_')
 
     # Regardless of what dets have been asked for (maybe none), get
     # the list of detsets implicated in this observation.  Make sure
@@ -150,6 +153,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
         results[detset] = _load_book_detset(
             files, prefix=prefix, load_ancil=(ancil is None),
             samples=samples, dets=dets_req, no_signal=no_signal,
+            no_headers=no_headers, special_channels=special_channels,
             signal_buffer=signal_buffer)
         if ancil is None:
             ancil = results[detset]['ancil']
@@ -181,7 +185,8 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
                            get_frame_det_info=False)
     return obs
 
-def load_book_file(filename, dets=None, samples=None, no_signal=False):
+def load_book_file(filename, dets=None, samples=None, no_signal=False,
+                   no_headers=False, special_channels=False):
     """Load one or more g3 files (from an obs/oper book) and return the
     contents as an AxisManager.
 
@@ -193,6 +198,10 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
       samples (tuple or None): Sample range to load.
       no_signal (bool): If True, the signal data are not read and
         .signal is set to None.
+      no_headers (bool): If True, the smurf header fields are not read,
+        and .primary will not be present in the output.
+      special_channels (bool): If True, fixed tones (untracked)
+        channels will be loaded and exposed at .tones.
 
     Notes:
 
@@ -228,13 +237,13 @@ def load_book_file(filename, dets=None, samples=None, no_signal=False):
     files = [(f, None, None) for f in filename]
     this_detset = _load_book_detset(
         files, load_ancil=True,
-        samples=samples, dets=dets, no_signal=no_signal)
+        samples=samples, dets=dets, no_signal=no_signal,
+        no_headers=no_headers, special_channels=special_channels)
 
     return _concat_filesets({'?': this_detset},
                             this_detset['ancil'],
                             this_detset['timestamps'],
-                            sample0=samples[0],
-                            no_signal=no_signal)
+                            sample0=samples[0])
 
 
 def load_smurf_npy_data(ctx, obs_id, substr):
@@ -263,6 +272,7 @@ def load_smurf_npy_data(ctx, obs_id, substr):
 
 def _load_book_detset(files, prefix='', load_ancil=True,
                       dets=None, samples=None, no_signal=False,
+                      no_headers=False, special_channels=False,
                       signal_buffer=None):
     """Read data from a single detset.
 
@@ -276,14 +286,21 @@ def _load_book_detset(files, prefix='', load_ancil=True,
     stream_id = None
     ancil_acc = None
     times_acc = None
+
+    flag_accs = {}
+    this_stream_dets = None
+
     if load_ancil:
         times_acc = Accumulator1d(samples=samples)
         ancil_acc = AccumulatorTimesampleMap(samples=samples)
-    primary_acc = AccumulatorNamed(samples=samples)
-    bias_names = []
-    bias_acc = Accumulator2d(samples=samples)
-    signal_acc = None
-    this_stream_dets = None
+    if no_headers:
+        primary_acc = None
+        bias_names = None
+        bias_acc = None
+    else:
+        primary_acc = AccumulatorNamed(samples=samples)
+        bias_names = []
+        bias_acc = Accumulator2d(samples=samples)
 
     if no_signal:
         signal_acc = None
@@ -299,28 +316,43 @@ def _load_book_detset(files, prefix='', load_ancil=True,
             keys_to_keep=dets,
             calibrate=SIGNAL_RESCALE)
 
+    if special_channels:
+        tones_acc = Accumulator2d(
+            samples=samples,
+            calibrate=SIGNAL_RESCALE)
+    else:
+        tones_acc = None
+
+    if (not no_signal) or (not no_headers) or (special_channels):
+        # If we're not otherwise scanning every frame ... don't due
+        # any smurfy flags.
+        flag_accs['smurfgaps'] = Accumulator1d(samples=samples)
+
     # Sniff out a smurf status frame.
     smurf_proc = load_smurf.SmurfStatus._get_frame_processor()
 
     for frame, frame_offset in _frames_iterator(files, prefix, samples,
                                                 smurf_proc=smurf_proc):
-        more_data = True
+        # This is to escape once requested number of samples (and a
+        # smurf dump frame) are read.  Loop can exit early if no data
+        # are actually required from frame.
+        more_data = (not smurf_proc.get('dump_frame', False))
 
         # Anything in ancil should be identical across
         # filesets, so only process it once.
         if load_ancil:
-            more_data &= times_acc.append(frame['ancil'].times, frame_offset)
-            more_data &= ancil_acc.append(frame['ancil'], frame_offset)
+            more_data |= times_acc.append(frame['ancil'].times, frame_offset)
+            more_data |= ancil_acc.append(frame['ancil'], frame_offset)
 
         if 'stream_id' in frame:
             if stream_id is None:
                 stream_id = frame['stream_id']
             assert (stream_id == frame['stream_id'])  # check your data files
 
-        if 'primary' in frame:
-            more_data &= primary_acc.append(frame['primary'], frame_offset)
+        if 'primary' in frame and primary_acc is not None:
+            more_data |= primary_acc.append(frame['primary'], frame_offset)
             bias_names = _check_bias_names(frame)[:_TES_BIAS_COUNT]
-            more_data &= bias_acc.append(frame['tes_biases'], frame_offset)
+            more_data |= bias_acc.append(frame['tes_biases'], frame_offset)
 
         if 'signal' in frame:
             # Even if no_signal, we need the det list.
@@ -329,7 +361,13 @@ def _load_book_detset(files, prefix='', load_ancil=True,
 
             # Extract the main signal
             if not no_signal:
-                more_data &= signal_acc.append(frame['signal'], frame_offset)
+                more_data |= signal_acc.append(frame['signal'], frame_offset)
+
+        if 'untracked' in frame and special_channels:
+            more_data |= tones_acc.append(frame['untracked'], frame_offset)
+
+        if 'flag_smurfgaps' in frame and 'smurfgaps' in flag_accs:
+            more_data |= flag_accs['smurfgaps'].append(frame['flag_smurfgaps'])
 
         if not more_data:
             break
@@ -386,6 +424,8 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         'bias_names': bias_names,
         'smurf_ch_info': ch_info,
         'iir_params': iir_params,
+        'tones': tones_acc,
+        'flags': flag_accs,
         'ancil': ancil_acc,
         'timestamps': times_acc,
     }
@@ -393,7 +433,7 @@ def _load_book_detset(files, prefix='', load_ancil=True,
 
 def _concat_filesets(results, ancil=None, timestamps=None,
                      sample0=0, obs_id=None, dets=None,
-                     no_signal=False, signal_buffer=None,
+                     signal_buffer=None,
                      get_frame_det_info=True):
     """Assemble multiple detset results (as returned by _load_book_detset)
     into a full AxisManager.
@@ -462,8 +502,34 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 aman['signal'][dets_ofs:dets_ofs + len(d)] = d
                 dets_ofs += len(d)
 
-    # In sims, the whole primary block may be unpopulated.
-    if any([v['primary'].data is not None for v in results.values()]):
+    if one_result['tones'] is not None:
+        # Expose the "untracked" channels, i.e. fixed tones.
+        n_tones = 0
+        tone_info = []
+        for v in results.values():
+            d = v['tones'].finalize()
+            n_tones += d.shape[0]
+            for k in v['tones'].keys:
+                # Should look like this: sch_NONE_2_326
+                b, c = map(int, k.split('_')[2:])
+                tone_info.append((v['stream_id'], v['stream_id'] + f'_{b}_{c}', b, c))
+        ts, tk, tb, tc = map(np.array, zip(*tone_info))
+        tman = core.AxisManager(core.LabelAxis('tdets', tk),
+                                aman.samps)
+        aman.wrap('tones', tman)
+        aman.tones.wrap('stream_id', ts, axis_map=[(0, 'tdets')])
+        aman.tones.wrap('band', tb, axis_map=[(0, 'tdets')])
+        aman.tones.wrap('channel', tc, axis_map=[(0, 'tdets')])
+        aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype='float32')
+        dets_ofs = 0
+        for v in results.values():
+            d = v['tones'].data
+            aman.tones['signal'][dets_ofs:dets_ofs + len(d)] = d
+            dets_ofs += len(d)
+
+    # In sims, or if no_headers, the primary block may be unpopulated.
+    if any([(v['primary'] is not None and v['primary'].data is not None)
+            for v in results.values()]):
         # Biases
         all_bias_names = []
         for v in results.values():
@@ -474,17 +540,22 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             aman['biases'][i * _TES_BIAS_COUNT:(i + 1) * _TES_BIAS_COUNT, :] = \
                 v['biases'].finalize()[:_TES_BIAS_COUNT, :]
 
-        # Primary (and other stuff to group per-stream)
+        # Other header data, per-stream
         aman.wrap('primary', core.AxisManager(aman.samps))
-        aman.wrap('iir_params', core.AxisManager())
-        aman['iir_params'].wrap('per_stream', True)
         for r in results.values():
             # Primary.
             _prim = core.AxisManager(aman.samps)
             for k, v in r['primary'].finalize().items():
                 _prim.wrap(k, v, [(0, 'samps')])
             aman['primary'].wrap(r['stream_id'], _prim)
-            # Filter parameters
+
+
+    if any([v['iir_params'] is not None
+            for v in results.values()]):
+        # Filter parameters, per-stream
+        aman.wrap('iir_params', core.AxisManager())
+        aman['iir_params'].wrap('per_stream', True)
+        for r in results.values():
             _iir = None
             if r.get('iir_params') is not None:
                 _iir = core.AxisManager()
@@ -494,6 +565,12 @@ def _concat_filesets(results, ancil=None, timestamps=None,
 
     # flags place
     aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
+
+    # Assemble per-wafer flags by suffixing the stream_id.
+    for flag_key in one_result['flags'].keys():
+        for v in results.values():
+            fasr = so3g.RangesInt32.from_mask(v['flags'][flag_key].finalize())
+            aman.flags.wrap(f'{flag_key}_{v["stream_id"]}', fasr, axis_map=[(0, 'samps')])
 
     if not get_frame_det_info:
         return aman
@@ -790,8 +867,9 @@ class Accumulator2d(Accumulator):
                              self.extract_at_idx,
                              src_slice.start, src_slice.stop)
             elif self.shape is not None:
-                data.extract(self.data[:, dest_slice], None, self.extract_at_idx,
-                             src_slice.start, src_slice.stop)
+                if len(data.names) > 0:
+                    data.extract(self.data[:, dest_slice], None, self.extract_at_idx,
+                                 src_slice.start, src_slice.stop)
             else:
                 _sh = [len(data.names), len(data.times)]
                 if self.extract_at_idx is not None:

@@ -2,8 +2,9 @@
 # Full license can be found in the top level "LICENSE" file.
 """Helper functions for LoadContext operator."""
 
-import numpy as np
+import re
 
+import numpy as np
 from astropy.table import Column
 
 import so3g
@@ -38,13 +39,16 @@ def read_and_preprocess_wafers(
     gcomm,
     wafer_readers,
     wafer_dets,
-    pconf=None,
+    preconfig=None,
     context=None,
     context_file=None,
 ):
     """Read the wafer data.
 
     Each process reads zero or more wafers and applies preprocessing.
+
+    If the preprocessing config is specified, it should include the archive stanza,
+    which will be inserted into the context dictionary.
 
     Args:
         obs_name (str):  The observation name.
@@ -53,7 +57,7 @@ def read_and_preprocess_wafers(
         wafer_readers (dict):  For each wafer name, the group rank assigned
             to read this wafer.
         wafer_dets (dict):  For each wafer name, the list of detectors.
-        pconf (dict):  The preprocessing configuration to apply (or None).
+        preconfig (dict):  The preprocessing configuration to apply (or None).
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
 
@@ -73,6 +77,36 @@ def read_and_preprocess_wafers(
     for wf, reader in wafer_readers.items():
         if reader == rank:
             ctx = open_context(context=context, context_file=context_file)
+            if preconfig is not None:
+                # Ensure that the preprocessing archive is defined.  First
+                # check if it already exists in the context.
+                have_ctx_archive = False
+                if ctx.get("metadata") is None:
+                    ctx["metadata"] = []
+                for key in ctx.get("metadata"):
+                    if key.get("name") == "preprocess":
+                        have_ctx_archive = True
+                        break
+                # Check if the archive exists in the preprocess config
+                if "archive" in preconfig:
+                    have_pre_archive = True
+                else:
+                    have_pre_archive = False
+                # The archive should only be defined in one place...
+                if have_ctx_archive and have_pre_archive:
+                    msg = "Both the context file AND the preprocess config define"
+                    msg += " a preprocess archive.  There can be only one."
+                    raise RuntimeError(msg)
+                if not have_ctx_archive:
+                    if not have_pre_archive:
+                        msg = "Either the context or the preprocess config must "
+                        msg += "specify the preprocess archive."
+                        raise RuntimeError(msg)
+                    else:
+                        ctx["metadata"].append(
+                            {"db": preconfig["archive"]["index"], "name": "preprocess"}
+                        )
+            # Load the data and immediately close context
             axtod = ctx.get_obs(session_name, dets=wafer_dets[wf])
             if context_file is not None:
                 del ctx
@@ -85,16 +119,21 @@ def read_and_preprocess_wafers(
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
-                axtod = apply_hwp_angle_model(axtod)
-                timer.stop()
-                elapsed = timer.seconds()
-                timer.start()
-                log.debug(
-                    f"LoadContext {obs_name} HWP model wafer {wf} in {elapsed} seconds",
-                )
+                # Did we already apply it in the preprocessing?
+                if (
+                    preconfig is None
+                    or "hwp_angle_model" not in preconfig["process_pipe"]
+                ):
+                    axtod = apply_hwp_angle_model(axtod)
+                    timer.stop()
+                    elapsed = timer.seconds()
+                    timer.start()
+                    log.debug(
+                        f"LoadContext {obs_name} HWP model wafer {wf} in {elapsed} seconds",
+                    )
 
-            if pconf is not None:
-                prepipe = PreProcPipe(pconf["process_pipe"], logger=log)
+            if preconfig is not None:
+                prepipe = PreProcPipe(preconfig["process_pipe"], logger=log)
                 prepipe.run(axtod, axtod.preprocess)
                 timer.stop()
                 elapsed = timer.seconds()
@@ -316,6 +355,7 @@ def distribute_detector_data(
     wafer_readers,
     wafer_proc_dets,
     proc_wafer_dets,
+    path_sep,
     is_flag=False,
     flag_invert=False,
     flag_mask=None,
@@ -345,6 +385,7 @@ def distribute_detector_data(
             processes and the detector indices to send.
         proc_wafer_dets (dict):  For each process, the dictionary of wafer name to
             local detector indices to receive.
+        path_sep (str):  The path separation char when building flattened names.
         is_flag (bool):  If True, this field is a flag.
         flag_invert (bool):  If True, invert the meaning of the flag values.
         flag_mask (np.uint8):  The flag mask (or None).
@@ -368,13 +409,15 @@ def distribute_detector_data(
     except Exception:
         pass
 
-    def _process_flag(mask, inbuf, outbuf, invert):
+    def _process_flag(mask, inbuf, detdata, det_begin, det_end, invert):
+        n_det = det_end - det_begin
         temp = mask * np.ones_like(inbuf)
         if invert:
             temp[inbuf != 0] = 0
         else:
             temp[inbuf == 0] = 0
-        outbuf |= temp
+        for idet in range(n_det):
+            detdata[idet + det_begin, :] |= temp[idet]
 
     # Keep a handle to our send buffers to ensure that any temporary objects
     # remain in existance until after all receives have happened.
@@ -398,6 +441,13 @@ def distribute_detector_data(
             # axis manager.
             restricted_dets = axwafers[wafer][axis_dets].vals
             restricted_indices = {y: x for x, y in enumerate(restricted_dets)}
+
+            # If the field is nested, descend
+            field_path = axfield.split(path_sep)
+            axroot = axwafers[wafer]
+            axobject = axroot[field_path[0]]
+            for ch in field_path[1:]:
+                axobject = axobject[ch]
 
             for receiver, send_dets in wafer_proc_dets[wafer].items():
                 # "send_dets" is the un-restricted range of wafer detectors.
@@ -444,7 +494,7 @@ def distribute_detector_data(
                 # Is this some detector flag data using ranges instead of samples?
                 # If so, we construct a temporary buffer and build sample flags
                 # from the ranges.
-                if isinstance(axwafers[wafer][axfield], so3g.proj.RangesMatrix):
+                if isinstance(axobject, so3g.proj.RangesMatrix):
                     # Yes, flagged ranges.  We may have restricted sample ranges
                     # for our flags, and so we initialize the full buffer to
                     # the invalid mask.
@@ -458,7 +508,7 @@ def distribute_detector_data(
                             # we will "unflag" the specified ranges.
                             off = idet_send * obs.n_local_samples + ax_shift
                             sdata[off : off + restricted_samps] = flag_mask
-                            for rg in axwafers[wafer][axfield][idet_ax].ranges():
+                            for rg in axobject[idet_ax].ranges():
                                 sdata[off + rg[0] : off + rg[1]] = 0
                     else:
                         for idet_ax, idet_send in restrict_to_send.items():
@@ -466,7 +516,7 @@ def distribute_detector_data(
                             # we will flag the specified ranges.
                             off = idet_send * obs.n_local_samples + ax_shift
                             sdata[off : off + restricted_samps] = 0
-                            for rg in axwafers[wafer][axfield][idet_ax].ranges():
+                            for rg in axobject[idet_ax].ranges():
                                 sdata[off + rg[0] : off + rg[1]] = flag_mask
                 else:
                     # Either normal sample flags or signal data
@@ -486,24 +536,24 @@ def distribute_detector_data(
                         )
                     for idet_ax, idet_send in restrict_to_send.items():
                         off = idet_send * obs.n_local_samples + ax_shift
-                        sdata[off : off + restricted_samps] = axwafers[wafer][axfield][
-                            idet_ax, :
-                        ]
+                        sdata[off : off + restricted_samps] = axobject[idet_ax, :]
 
                 if receiver == rank:
                     # We just need to process the data locally
+                    sdata_2d = sdata.reshape((n_send_det, -1))
                     if is_flag:
                         _process_flag(
                             flag_mask,
-                            sdata.reshape((n_send_det, -1)),
-                            obs.detdata[field][recv_dets[0] : recv_dets[1], :],
+                            sdata_2d,
+                            obs.detdata[field],
+                            recv_dets[0],
+                            recv_dets[1],
                             flag_invert,
                         )
                     else:
-                        obs.detdata[field][recv_dets[0] : recv_dets[1], :] = (
-                            sdata.reshape((n_send_det, -1))
-                        )
-                        # Update per-detector flags
+                        for idet in range(n_send_det):
+                            obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[idet]
+                    # Update per-detector flags
                     dflags = {
                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
                         for x in range(n_recv_det)
@@ -534,18 +584,21 @@ def distribute_detector_data(
             tag = (sender * gsize + rank) * tag_stride + 2 * wf_index[wafer]
             flag_tag = tag + 1
             recv_data = gcomm.recv(source=sender, tag=tag)
+            recv_2d = recv_data.reshape((n_recv_det, -1))
             det_flags = gcomm.recv(source=sender, tag=flag_tag)
-            det_slc = slice(recv_dets[0], recv_dets[1], 1)
             if is_flag:
                 _process_flag(
                     flag_mask,
-                    recv_data.reshape((n_recv_det, -1)),
-                    obs.detdata[field][det_slc, :],
+                    recv_2d,
+                    obs.detdata[field],
+                    recv_dets[0],
+                    recv_dets[1],
                     flag_invert,
                 )
             else:
                 # Just assign
-                obs.detdata[field][det_slc, :] = recv_data.reshape((n_recv_det, -1))
+                for idet in range(n_recv_det):
+                    obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
             # Update per-detector flags
             dflags = {
                 obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
@@ -553,6 +606,7 @@ def distribute_detector_data(
                 if det_flags[x] != 0
             }
             obs.update_local_detector_flags(dflags)
+            del recv_2d
             del recv_data
             del det_flags
 
@@ -565,6 +619,17 @@ def distribute_detector_data(
     # Now safe to delete our dictionary of isend buffer handles, which might include
     # temporary buffers of ranges flags.
     del send_data
+
+    # Every process checks its local data for NaN values.  If any are found, a warning
+    # is printed and the detector is cut.
+    dflags = dict()
+    for det in obs.local_detectors:
+        nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+        if nnan > 0:
+            msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
+            log.warning(msg)
+            dflags[det] = defaults.det_mask_invalid
+    obs.update_local_detector_flags(dflags)
 
 
 @function_timer
@@ -716,3 +781,46 @@ def compute_boresight_pointing(
         comm=gcomm,
         timer=timer,
     )
+
+
+def ax_name_fp_subst(var, fp_array, det=None):
+    """Substitute a focalplane column value into a string.
+
+    If det is not specified, then there should be a unique name for the whole table
+    column when substituting.
+
+    Args:
+        var (str):  The input variable string
+        fp_array (Table):  The focalplane astropy Table of detector properties.
+        det (str):  If not None, use the value for this row of the table.
+
+    Returns:
+        (str):  The string with substitutions made.
+
+    """
+    if var is None:
+        return None
+    out = ""
+    last = 0
+    for match in re.finditer(r"(\{.*\})", var):
+        out += var[last:match.start()]
+        colname = match.group()
+        colname = colname.replace("{", "")
+        colname = colname.replace("}", "")
+        if colname not in fp_array.keys():
+            msg = f"Column '{colname}' not in focalplane table"
+            raise RuntimeError(msg)
+        if det is None:
+            vals = np.unique(fp_array[colname])
+            if len(vals) == 1:
+                out += f"{vals[0]}"
+            else:
+                msg = f"Column '{colname}' has multiple values ({vals}), cannot"
+                msg += " use in name"
+                raise RuntimeError(msg)
+        else:
+            mask = fp_array[colname] == det
+            out += f"{fp_array[colname][mask][0]}"
+        last = match.end()
+    out += var[last:]
+    return out

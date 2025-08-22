@@ -107,14 +107,18 @@ class DemodMapmakingTest(unittest.TestCase):
 
         shape, wcs = enmap.fullsky_geometry(res=0.5*coords.DEG)
         signal_map = enmap.zeros((3, *shape), wcs)
-        
+
         T_stream, Q_stream, U_stream = 1., 0.25, 0.01
         signal_map[0] += T_stream
         signal_map[1] += Q_stream
         signal_map[2] += U_stream
 
+        # from_map expects and outputs float64
         _ = coords.demod.from_map(tod, signal_map, modulated=True, wrap=True)
         hwp.demod_tod(tod)
+        # make_map expects float32
+        for signal in ['signal', 'dsT', 'demodQ', 'demodU']:
+           tod[signal] = tod[signal].astype('float32')
         results = coords.demod.make_map(tod)
 
         m0 = results['map']

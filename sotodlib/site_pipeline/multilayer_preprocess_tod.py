@@ -277,21 +277,21 @@ def get_parser(parser=None):
     )
     return parser
 
-def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
-         as_completed_callable: Callable,
-         configs_init: str,
-         configs_proc: str,
-         query: Optional[str] = None, 
-         obs_id: Optional[str] = None, 
-         overwrite: bool = False,
-         min_ctime: Optional[int] = None,
-         max_ctime: Optional[int] = None,
-         update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
-         planet_obs: bool = False,
-         verbosity: Optional[int] = None,
-         nproc: Optional[int] = 4,
-         raise_error: Optional[bool] = False):
+def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+          as_completed_callable: Callable,
+          configs_init: str,
+          configs_proc: str,
+          query: Optional[str] = None,
+          obs_id: Optional[str] = None,
+          overwrite: bool = False,
+          min_ctime: Optional[int] = None,
+          max_ctime: Optional[int] = None,
+          update_delay: Optional[int] = None,
+          tags: Optional[str] = None,
+          planet_obs: bool = False,
+          verbosity: Optional[int] = None,
+          nproc: Optional[int] = 4,
+          raise_error: Optional[bool] = False):
 
     logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -383,8 +383,39 @@ def main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     if raise_error and n_fail > 0:
         raise RuntimeError(f"multilayer_preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
 
-if __name__ == '__main__':
-    args = get_parser().parse_args()
-    rank, executor, as_completed_callable = get_exec_env(args.nproc)
+
+def main(configs_init: str,
+         configs_proc: str,
+         query: Optional[str] = None,
+         obs_id: Optional[str] = None,
+         overwrite: bool = False,
+         min_ctime: Optional[int] = None,
+         max_ctime: Optional[int] = None,
+         update_delay: Optional[int] = None,
+         tags: Optional[str] = None,
+         planet_obs: bool = False,
+         verbosity: Optional[int] = None,
+         nproc: Optional[int] = 4,
+         raise_error: Optional[bool] = False):
+
+    rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
-        main(executor=executor, as_completed_callable=as_completed_callable, **vars(args))
+        _main(executor=executor,
+              as_completed_callable=as_completed_callable,
+              configs_init=configs_init,
+              configs_proc=configs_proc,
+              query=query,
+              obs_id=obs_id,
+              overwrite=overwrite,
+              min_ctime=min_ctime,
+              max_ctime=max_ctime,
+              update_delay=update_delay,
+              tags=tags,
+              planet_obs=planet_obs,
+              verbosity=verbosity,
+              nproc=nproc,
+              raise_error=raise_error)
+
+
+if __name__ == '__main__':
+    sp_util.main_launcher(main, get_parser)

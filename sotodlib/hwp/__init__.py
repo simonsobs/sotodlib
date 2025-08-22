@@ -6,7 +6,7 @@ This module contains code for HWP analysis tools
 
 """
 from .g3thwp import G3tHWP
-from .hwp import (get_hwpss, subtract_hwpss, demod_tod)
+from .hwp import (get_hwpss, subtract_hwpss, demod_tod, get_hwp_freq)
 from .sim_hwp import I_to_P_param
 from .sim_hwp import sim_hwpss
 from .sim_hwp import sim_hwpss_2f4f

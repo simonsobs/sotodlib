@@ -112,6 +112,7 @@ def get_pca(tod=None, cov=None, signal=None, wrap=None, mask=None):
         if signal is None:
             signal = tod.signal
         cov = np.cov(signal)
+        cov = np.atleast_2d(cov)  # In case there is exactly 1 det
 
     if mask is not None:
         var_min = min(np.diag(cov)[mask])

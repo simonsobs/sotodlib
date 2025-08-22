@@ -39,6 +39,17 @@ SOURCE_LIST = ['mercury',
                ('QSO_J2253+1608', 343.4952422, 16.14301323),
                ('galactic_center', -93.5833, -29.0078)]
 
+def get_source_list_fromstr(target_source):
+    """Get a source_list from SOURCE_LIST by name, or raise ValueError if not found.
+    """
+    for isource in SOURCE_LIST:
+        if isinstance(isource, str):
+            isource_name = isource
+        elif isinstance(isource, tuple):
+            isource_name = isource[0]
+        if isource_name.lower() == target_source.lower():
+            return isource
+    raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
 
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
@@ -119,7 +130,11 @@ def get_scan_q(tod, planet, boresight_offset=None, refq=None):
     el = np.median(tod.boresight.el[::10])
     az = np.median(tod.boresight.az[::10])
     t = (tod.timestamps[0] + tod.timestamps[-1]) / 2
-    if isinstance(planet, str):
+    if isinstance(planet, (list, tuple)):
+        _, ra, dec = planet
+        planet = SlowSource(t, float(ra) * coords.DEG,
+                                        float(dec) * coords.DEG)
+    else:
         planet = SlowSource.for_named_source(planet, t)
 
     def scan_q_model(t, az, el, planet):
@@ -213,7 +228,7 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
-                       wrap=None):
+                       wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -234,6 +249,8 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
+        Default is None. (Nothing happens.)
 
     Returns:
       The filtered signal.
@@ -249,6 +266,16 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         raise ValueError("Must provide signal if tod is None")
     if signal is None:
         raise ValueError("signal somehow still None!")
+    
+    if edge_guard is not None:
+        if isinstance(edge_guard, int):
+            edgebl = np.zeros(source_flags.shape[-1], dtype=bool)
+            edgebl[edge_guard:-edge_guard] = True
+            edgerm = so3g.proj.ranges.RangesMatrix.from_mask(edgebl)
+            for iflag in source_flags:
+                iflag.intersect(edgerm)
+        else:
+            raise ValueError("edge_guard must be an int.")
 
     # Get a reasonable gap fill.
     signal_pca = signal.copy()
@@ -300,13 +327,11 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
-def _get_astrometric(source_name, timestamp, site="_default"):
+def _get_astrometric(source_name, timestamp, site="_default", planets=None):
     """
     Derive skyfield's Astrometric object of a celestial source at a
     specific timestamp and observing site, which is used to derive
     radec/azel in get_source_pos/get_source_azel.
-
-    Note that it will download a 16M ephemeris file on first use.
 
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
@@ -314,14 +339,37 @@ def _get_astrometric(source_name, timestamp, site="_default"):
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
+      planets (SpiceKernel): the ephemeris object for
+        skyfield.jpllib). If not passed in, a sensible default
+        ephemeris is used.
 
     Returns:
+      planets: SpiceKernel object (for re-use)
       astrometric: skyfield's astrometric object
-    """
-    # Get the ephemeris
-    de_filename = core.get_local_file("de421.bsp")
 
-    planets = jpllib.SpiceKernel(de_filename)
+    Notes:
+      The SpiceKernel holds the ephemeris file open. To close that
+      file, run planets.close().  Deleting the object is not enough,
+      as the garbage collection can be lazy.  After .close(), the
+      kernel can't be used for ephemeris stuff. Some operations on the
+      returned "astrometric" object will try to use the kernel, and
+      will fail. So keep planets around until you're done computing on
+      astrometric, then call close().
+
+      If you're doing lots of astrometric stuff, you can get the
+      kernel once and re-use it.
+
+      If the default ephemeris file (de421.bsp) is not found, it will
+      be downloaded (16M) and cached.
+
+    """
+    if planets is None:
+        # Get the ephemeris
+        de_filename = core.get_local_file("de421.bsp")
+        planets = jpllib.SpiceKernel(de_filename)
+    else:
+        assert len(planets.codes)  # Someone .closed this eph!
+
     for k in [
         source_name,
         source_name + " barycenter",
@@ -347,8 +395,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
-    planets.close()
-    return astrometric
+    return planets, astrometric
 
 
 def get_source_pos(source_name, timestamp, site='_default'):
@@ -388,8 +435,9 @@ def get_source_pos(source_name, timestamp, site='_default'):
         return ra, dec, float('inf')
     
     # Derive from skyfield astrometric object
-    amet0 = _get_astrometric(source_name, timestamp, site)
+    planets, amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
+    planets.close()
     return ra.to(units.rad).value, dec.to(units.rad).value, distance.to(units.au).value
 
 
@@ -412,8 +460,9 @@ def get_source_azel(source_name, timestamp, site='_default'):
       el (float): in radians.
       distance (float): in AU.
     """
-    amet0 = _get_astrometric(source_name, timestamp, site)
+    planets, amet0 = _get_astrometric(source_name, timestamp, site)
     el, az, distance = amet0.apparent().altaz()
+    planets.close()
     return az.to(units.rad).value, el.to(units.rad).value, distance.to(units.au).value
 
 

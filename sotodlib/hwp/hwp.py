@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import bin_signal, filters, apodize
+from sotodlib.tod_ops import filters, apodize, fft_ops
 import logging
 
 logger = logging.getLogger(__name__)
@@ -258,13 +258,13 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
                 weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
                                                                                                              flags=flags, 
                                                                                                              apodize_samps=apodize_flags_samps)
+    else:
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
         else:
-            if (flags is not None) and apodize_flags:
-                weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
-            else:
-                weight_for_signal = None
+            weight_for_signal = None
     
-    binning_dict = bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
+    binning_dict = tod_ops.bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
     bin_centers = binning_dict['bin_centers']
@@ -348,7 +348,7 @@ def harms_func(x, modes, coeffs):
     -------
     numpy.ndarray: The calculated harmonics function.
     """
-    vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
+    vects = np.zeros([2*len(modes), x.shape[0]], dtype=coeffs.dtype if coeffs is not None else 'float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
@@ -356,7 +356,7 @@ def harms_func(x, modes, coeffs):
     if coeffs is None:
         return vects
     else:
-        harmonics = np.matmul(coeffs, vects)
+        harmonics = np.matmul(coeffs, vects, casting='no')
         return harmonics
 
 
@@ -568,6 +568,20 @@ def subtract_hwpss(aman, signal='signal', hwpss_template_name='hwpss_model',
     if remove_template:
         aman.move(hwpss_template_name, None)
 
+def get_hwp_freq(timestamps, hwp_angle):
+    """
+    Calculate the frequency of HWP rotation.
+
+    Parameters:
+    timestamps (array-like): An array of timestamps.
+    hwp_angle (array-like): An array of HWP angles in radian
+
+    Returns:
+    float: The frequency of the HWP rotation in Hz.
+    """
+    hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(hwp_angle)))) /
+            (timestamps[-1] - timestamps[0])) / (2 * np.pi)
+    return hwp_freq
 
 def demod_tod(aman, signal=None, demod_mode=4,
               bpf_cfg=None, lpf_cfg=None, wrap=True):
@@ -622,8 +636,7 @@ def demod_tod(aman, signal=None, demod_mode=4,
         raise TypeError("Signal must be None, str, or ndarray")
     
     # HWP speed in Hz
-    speed = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
-            (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
+    speed = get_hwp_freq(timestamps=aman.timestamps, hwp_angle=aman.hwp_angle)
     
     if bpf_cfg is None:
         bpf_center = demod_mode * speed
@@ -652,20 +665,29 @@ def demod_tod(aman, signal=None, demod_mode=4,
                 lpf_cfg[k] = speed*float(v.split('*')[0])
 
     lpf = filters.get_lpf(lpf_cfg)
-        
-    phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
+
+    # Create a RFFT object to reuse
+    n = fft_ops.find_superior_integer(aman.samps.count)
+    rfft = fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
+
+    phasor = np.empty_like(aman.hwp_angle, dtype=np.promote_types(signal.dtype, np.complex64))
+    np.exp((demod_mode * 1j * aman.hwp_angle), out=phasor)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
-                                   signal_name=signal_name) * phasor
+                                   signal_name=signal_name, rfft=rfft) * 2. * phasor
 
     # Filter the demodulated signal
     demod_aman = core.AxisManager(aman.dets, aman.samps)
     demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
-    demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None)
+    demod_aman.wrap("dsT", aman[signal_name].copy(), axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["dsT"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None, rfft=rfft)
     demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None) * 2.
+    demod_aman["demodQ"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None, rfft=rfft)
     demod_aman.wrap("demodU", demod.imag, axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None) * 2.
+    demod_aman["demodU"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None, rfft=rfft)
+
+    # Destroy the RFFT object
+    del rfft
+
     # Either wrap or return the demodulated signal
     if wrap:
         for fld in ['dsT', 'demodQ', 'demodU']:

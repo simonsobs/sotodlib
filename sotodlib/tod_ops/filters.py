@@ -91,6 +91,10 @@ def fourier_filter(tod, filt_function,
         signal = tod[signal_name]
     signal = np.atleast_2d(signal)
 
+    if (signal.dtype != "float32"):
+        logger.warn(f'fourier_filter: signal dtype {signal.dtype} is not float32. '
+                    f'fourier_filter will demote to float32.')
+
     if isinstance(filt_function, identity_filter):
         logger.info('fourier_filter: filt_function is identity; skipping FFT.')
         signal = signal.copy()
@@ -353,6 +357,15 @@ def band_pass_butter4(freqs, tod, fc_low, fc_high):
     return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
 
 @fft_filter
+def band_stop_butter4(freqs, tod, fc_low, fc_high):
+    """4th-order band-stop filter with f3db at fc (Hz).
+
+    """
+    b, a = signal.butter(4, [2*np.pi*fc_low, 2*np.pi*fc_high],
+                         'bandstop', analog=True)
+    return np.abs(signal.freqs(b, a, 2*np.pi*freqs)[1])
+
+@fft_filter
 def tau_filter(freqs, tod, tau_name='timeconst', do_inverse=True):
     """tau_filter is deprecated; use timeconst_filter."""
     logging.warning('tau_filter is deprecated; use timeconst_filter.')
@@ -472,6 +485,15 @@ def high_pass_sine2(freqs, tod, cutoff, width=None):
         width = cutoff * 2
     phase = np.pi * np.clip((abs(freqs) - cutoff) / width, -0.5, 0.5)
     return 0.5 + 0.5 * np.sin(phase)
+
+@fft_filter
+def band_stop_sine2(freqs, tod, fc_low, fc_high, width=None):
+    """Band-stop filter.  Response falls/rises from 1/0 to 0/1 between frequencies
+    (fc_low/fc_high - width/2, fc_low/fc_high + width/2), with a sine-squared shape.
+
+    """
+    return low_pass_sine2._fun(freqs, tod, fc_low, width) + \
+        high_pass_sine2._fun(freqs, tod, fc_high, width)
 
 @fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
@@ -634,5 +656,35 @@ def get_bpf(cfg):
         trans_width = cfg['trans_width']
         return low_pass_sine2(cutoff=center + width/2., width=trans_width)*\
                 high_pass_sine2(cutoff=center - width/2., width=trans_width)
+    else:
+        raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')
+
+
+def get_bsf(cfg):
+    """
+    Returns a band-stop filter based on the configuration.
+
+    Args:
+        cfg (dict): A dictionary containing the band-stop filter configuration.
+            It must have the following keys:
+            - "type": A string specifying the type of band-stop filter. Supported values are "identity", "butter4" and "sine2".
+            - "center": A float specifying the center frequency of the band-stop filter.
+            - "width": A float specifying the width of the band-stop filter.
+            - "trans_width": A float specifying the transition width of the band-stop filter (only for "sine2" type).
+
+    Returns:
+        filters.fourier_filter: the band-stop filter.
+    """
+    if cfg['type'] == 'identity':
+        return identity_filter()
+    elif cfg['type'] == 'butter4':
+        center = cfg['center']
+        width = cfg['width']
+        return band_stop_butter4(fc_low=center - width / 2., fc_high=center + width / 2.)
+    elif cfg['type'] == 'sine2':
+        center = cfg['center']
+        width = cfg['width']
+        trans_width = cfg['trans_width']
+        return band_stop_sine2(fc_low=center - width / 2., fc_high=center + width / 2, width=trans_width)
     else:
         raise ValueError('Unsupported filter type. Supported filters are `identity`, `butter4` and `sine2`')

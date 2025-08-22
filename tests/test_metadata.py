@@ -239,6 +239,10 @@ class MetadataTest(unittest.TestCase):
                          'obs:timestamp': (1300000000, 1400000001),
                          'dataset': 'early'}, filename='y')
 
+        # Does .get_entries work?
+        entries = mandb.get_entries(['obs:timestamp__lo', 'obs:timestamp__hi'])
+        print(entries)
+
         # Does .inspect work properly?
         entries = mandb.inspect({'wafer': 'A'})
         self.assertEqual(len(entries), 3)

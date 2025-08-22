@@ -69,6 +69,7 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
 
 def setup_preprocess(parser, operators):
     wrk.setup_filter_hwpss(operators)
+    wrk.setup_filter_hwpss_model(operators)
     wrk.setup_simple_jumpcorrect(operators)
     wrk.setup_simple_deglitch(operators)
     wrk.setup_flag_diff_noise_outliers(operators)
@@ -100,9 +101,25 @@ def preprocess(job, otherargs, runargs, data):
 
     # Filters which we might want to run on a copy of the data.
     _run_pre_op(job_ops.hwpfilter, wrk.filter_hwpss)
+    _run_pre_op(job_ops.hwpss_model, wrk.filter_hwpss_model)
     _run_pre_op(job_ops.diff_noise_cut, wrk.flag_diff_noise_outliers)
     _run_pre_op(job_ops.noise_cut, wrk.flag_noise_outliers)
 
     if otherargs.preprocess_copy:
         toast.ops.Delete(detdata=[prename,]).apply(data)
+
+    # If we generated a relative gain from the HWPSS 2f component,
+    # apply that now.
+    if job_ops.hwpss_model.enabled:
+        if job_ops.hwpss_model.relcal_fixed is not None:
+            toast.ops.CalibrateDetectors(
+                cal_name=job_ops.hwpss_model.relcal_fixed
+            ).apply(data)
+        elif job_ops.hwpss_model.relcal_continuous is not None:
+            toast.ops.Combine(
+                first=defaults.det_data,
+                second=job_ops.hwpss_model.relcal_continuous,
+                result=defaults.det_data,
+                op="multiply",
+            ).apply(data)
 
