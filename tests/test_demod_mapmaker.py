@@ -45,7 +45,7 @@ def make_map(obs, nside=None, nside_tile=None, shape=None, wcs=None, comps='TQU'
 
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=NmatWhite(), comps=comps)
-    mapmaker.add_obs('obs0', obs, use_psd=False, pdeflect=False)
+    mapmaker.add_obs('obs0', obs, use_psd=False, apply_wobble=False)
     imap = unweight_map(signal_map.rhs[0], signal_map.div[0])
     return imap
 
