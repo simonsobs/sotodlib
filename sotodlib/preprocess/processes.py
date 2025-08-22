@@ -1730,6 +1730,7 @@ class DetcalNanCuts(_Preprocess):
             meta.restrict('dets', meta.dets.vals[keep])
         else:
             return keep
+>>>>>>> origin/master
 
 class PCARelCal(_Preprocess):
     """
