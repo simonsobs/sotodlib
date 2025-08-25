@@ -107,7 +107,7 @@ def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.),
     wafer_r = np.sqrt(wafer_x**2 + wafer_y**2)
     wafer_theta = np.arctan2(wafer_y, wafer_x)
 
-    fp_to_sky = optics.sat_to_sky(optics.SAT_X, optics.SAT_LON)
+    fp_to_sky = optics.sat_to_sky(optics.SAT_R_FP, optics.SAT_R_SKY)
     lon = fp_to_sky(wafer_r)
     
     q1 = quat.rotation_iso(lon, 0)

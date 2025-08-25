@@ -70,7 +70,7 @@ def wrapper_gaussian2d_nonlin(xieta, xi0, eta0, fwhm_xi, fwhm_eta, phi, a, *args
     return  gaussian2d_nonlin(xieta, xi0, eta0, fwhm_xi, fwhm_eta, phi, a, nonlin_coeffs)
 
 def wrap_fp_rset(tod, fp_rset):
-    tod.restrict('dets', tod.dets.vals[np.in1d(tod.dets.vals, fp_rset['dets:readout_id'])])
+    tod.restrict('dets', tod.dets.vals[np.isin(tod.dets.vals, fp_rset['dets:readout_id'])])
     focal_plane = core.AxisManager(tod.dets)
     focal_plane.wrap_new('xi', shape=('dets', ))
     focal_plane.wrap_new('eta', shape=('dets', ))

@@ -1705,7 +1705,7 @@ class FourierFilter(_Preprocess):
 
 class ReduceFlags(_Preprocess):
     name = 'reduce_flags'
-    def process(self, aman, proc_aman):
+    def process(self, aman, proc_aman, sim=False):
         aman.flags.reduce(**self.process_cfgs)       
 
 class DetcalNanCuts(_Preprocess):
@@ -2506,6 +2506,7 @@ class SmurfGapsFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("smurfgaps", flag_aman)
 
+_Preprocess.register(ReduceFlags)
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
