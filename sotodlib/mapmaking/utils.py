@@ -292,7 +292,7 @@ def get_ids(query, context=None):
     try:
         with open(query, "r") as fname:
             return [line.split()[0] for line in fname]
-    except IOError:
+    except FileNotFoundError:
         return context.obsdb.query(query or "1")['obs_id']
 
 def get_subids(query, context=None, method="auto"):
@@ -300,7 +300,7 @@ def get_subids(query, context=None, method="auto"):
     unit to use for mapmaking."""
     if method == "auto":
         try: return get_subids_file(query, context=context)
-        except IOError: return get_subids_query(query, context=context)
+        except FileNotFoundError: return get_subids_query(query, context=context)
     elif method == "file":
         return get_subids_file(query, context=context)
     elif method == "query":
@@ -760,6 +760,8 @@ class AtomicInfo(Base):
     uv: Mapped[Optional[float]]
     ra_center: Mapped[Optional[float]]
     dec_center: Mapped[Optional[float]]
+    number_dets: Mapped[Optional[int]]
+    moon_distance: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
@@ -772,13 +774,26 @@ class AtomicInfo(Base):
     def __repr__(self):
         return f"({self.obs_id},{self.telescope},{self.freq_channel},{self.wafer},{self.ctime},{self.split_label})"
 
-def atomic_db_aux(atomic_db, info, valid = True):
-    info.valid = valid
+    @classmethod
+    def from_dict(cls, contents: dict):
+        core = cls(
+            obs_id=contents.pop("obs_id"),
+            telescope=contents.pop("telescope"),
+            freq_channel=contents.pop("freq_channel"),
+            wafer=contents.pop("wafer"),
+            ctime=contents.pop("ctime"),
+            split_label=contents.pop("split_label"),
+        )
+        for k, v in contents.items():
+            setattr(core, k, v)
+        return core
+
+def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
     engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
-        session.add(info)
+        session.add_all(info)
         try:
             session.commit()
         except exc.IntegrityError:
