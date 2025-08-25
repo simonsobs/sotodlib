@@ -1,5 +1,46 @@
+"""
+Test the core functions
+"""
+
 import pytest
+
+from sotodlib.mapcat.mapcat import core
+
 from httpx import HTTPStatusError
+
+
+@pytest.mark.asyncio
+async def test_database_exists(database_async_sesionmaker):
+    return
+
+
+@pytest.mark.asyncio
+async def create_depth_one(database_async_sesionmaker):
+    async with database_async_sesionmaker() as session:
+        map_id = (
+            await core.create_depth_one(
+                map_name="myDepthOne",
+                map_path="/PATH/TO/DEPTH/ONE",
+                tube_slot="OTi1",
+                wafers="ws0,ws1,ws2",
+                frequency="f090",
+                ctime=1755787524.0,
+            )
+        ).id
+
+    async with database_async_sesionmaker() as session:
+        dmap = await core.get_depth_one(map_id, session=session)
+
+    assert dmap.map_id == map_id
+    assert dmap.map_name == "myDepthOne"
+    assert dmap.map_path == "/PATH/TO/DEPTH/ONE"
+    assert dmap.tube_slot == "OTi1"
+    assert dmap.wafers == "ws0,ws1,ws2"
+    assert dmap.frequency == "f090"
+    assert dmap.ctime == 1755787524.0
+
+    async with database_async_sesionmaker() as session:
+        await core.delete_depth_one(map_id, session=session)
 
 
 def test_depth_one_map(client):

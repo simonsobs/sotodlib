@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mapcat.database import (
+from sotodlib.mapcat.mapcat.database import (
     DepthOneMap,
     DepthOneMapTable,
     ProcessingStatus,
