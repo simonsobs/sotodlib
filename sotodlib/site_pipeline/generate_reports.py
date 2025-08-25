@@ -47,6 +47,7 @@ class GenerateReportConfig:
     def __init__(
         self,
         platform: Literal["satp1", "satp2", "satp3", "lat"],
+        site_url: str,
         report_interval: Literal["weekly", "monthly"],
         start_time: Union[dt.datetime, float, str],
         output_root: str,
@@ -58,6 +59,7 @@ class GenerateReportConfig:
         template_dir: Optional[str] = None,
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
+        self.site_url: str = site_url
         self.report_interval = report_interval
 
         def convert_to_datetime(
@@ -82,7 +84,7 @@ class GenerateReportConfig:
         self.template_dir = template_dir
         self.data_config = data_config
         self.skip_html = skip_html
-
+        
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
         if self.report_interval == "weekly":
             delta = dt.timedelta(weeks=1)
@@ -119,6 +121,7 @@ def main(cfg: str) -> None:
             start_time=start_time,
             stop_time=stop_time,
             platform=cfg.platform,
+            site_url=cfg.site_url,
             **cfg.data_config,
         )
 
@@ -165,12 +168,14 @@ def render_report(
     template = env.get_template("report.html")
 
     obs_efficiency_plots = plots.wafer_obs_efficiency(data)
+    source_footprint_plots = plots.source_footprints(data)
     figures: Dict[str, go.Figure] = {
         "obs_efficiency_heatmap": obs_efficiency_plots.heatmap,
         "obs_efficiency_pie": obs_efficiency_plots.pie,
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
-        "cal_footprints": plots.cal_footprints(data),
+        "source_focalplane": source_footprint_plots.focalplane,
+        "source_table": source_footprint_plots.table
     }
 
     html_kw = dict(full_html=False, include_plotlyjs=False)
