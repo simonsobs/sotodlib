@@ -1,9 +1,9 @@
 import os
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 def run_migration(database_path: str):
@@ -13,21 +13,19 @@ def run_migration(database_path: str):
     from alembic import command
     from alembic.config import Config
 
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = Config("./sotodlib/mapcat/alembic.ini")
     database_url = f"sqlite:///{database_path}"
     alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+    alembic_cfg.set_main_option("script_location", "./sotodlib/mapcat/alembic/")
     command.upgrade(alembic_cfg, "heads")
 
     return
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def database_async_sesionmaker(tmp_path_factory):
+@pytest.fixture(scope="session", autouse=True)
+def database_sesionmaker(tmp_path_factory):
     """
-    Create a temporary SQLite database for testing. This is a
-    somewhat tricky scenario as we must create the database using
-    the synchronous engine, but access it using the asynchronous
-    engine.
+    Create a temporary SQLite database for testing.
     """
 
     tmp_path = tmp_path_factory.mktemp("mapcat")
@@ -37,11 +35,11 @@ async def database_async_sesionmaker(tmp_path_factory):
     # Run the migration on the database. This is blocking.
     run_migration(database_path)
 
-    database_url = f"sqlite+aiosqlite:///{database_path}"
+    database_url = f"sqlite:///{database_path}"
 
-    async_engine = create_async_engine(database_url, echo=True, future=True)
+    engine = create_engine(database_url, echo=True, future=True)
 
-    yield async_sessionmaker(bind=async_engine, expire_on_commit=False)
+    yield sessionmaker(bind=engine, expire_on_commit=False)
 
     # Clean up the database (don't do this in case we want to inspect)
     # database_path.unlink()
@@ -60,7 +58,7 @@ def client(tmp_path_factory):
 
     os.environ["mapcat_model_database_name"] = str(database_path)
 
-    from mapcat.api import app
+    from sotodlib.mapcat.mapcat.api import app
 
     yield TestClient(app)
 
@@ -70,7 +68,7 @@ def mock_client_depth1(tmp_path_factory):
     """
     Create a test mock database client for mock test.
     """
-    from mapcat.client import mock
+    from sotodlib.mapcat.mapcat.client import mock
 
     yield mock.DepthOneClient()
 
@@ -80,7 +78,7 @@ def mock_client_processing(tmp_path_factory):
     """
     Create a test mock database client for mock test.
     """
-    from mapcat.client import mock
+    from sotodlib.mapcat.mapcat.client import mock
 
     yield mock.ProcessingClient()
 
@@ -90,6 +88,6 @@ def mock_client_pointing(tmp_path_factory):
     """
     Create a test mock pointing data base
     """
-    from mapcat.client import mock
+    from sotodlib.mapcat.mapcat.client import mock
 
     yield mock.ProcessingClient()

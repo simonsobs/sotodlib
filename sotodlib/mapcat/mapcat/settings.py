@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     }
 
     @property
-    def database_url(self) -> str:
+    def async_database_url(self) -> str:
         if self.database_type == "sqlite":
             return f"sqlite+aiosqlite:///{self.database_name}"
         if self.database_type == "postgresql":

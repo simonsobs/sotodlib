@@ -5,7 +5,7 @@ Core functionality providing access to the database.
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from sotodlib.mapcat.mapcat.database import (
     DepthOneMap,
@@ -17,14 +17,14 @@ from sotodlib.mapcat.mapcat.database import (
 )
 
 
-async def create_depth_one(
+def create_depth_one(
     map_name: str,
     map_path: str,
     tube_slot: str,
     wafers: str,
     frequency: str,
     ctime: float,
-    session: AsyncSession,
+    session: Session,
 ) -> DepthOneMap:
     """
     Create a new depth 1 map in the depth 1 map table
@@ -43,7 +43,7 @@ async def create_depth_one(
         Frequency channel of map
     ctime : float
         Central unix time of map
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -60,14 +60,14 @@ async def create_depth_one(
         ctime=ctime,
     )
 
-    async with session.begin():
+    with session.begin():
         session.add(dmap)
-        await session.commit()
+        session.commit()
 
     return dmap.to_model()
 
 
-async def get_depth_one(map_id: int, session: AsyncSession) -> DepthOneMap:
+def get_depth_one(map_id: int, session: Session) -> DepthOneMap:
     """
     Get a depth 1 map by id.
 
@@ -75,7 +75,7 @@ async def get_depth_one(map_id: int, session: AsyncSession) -> DepthOneMap:
     ----------
     map_id : int
         Interal map ID number
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -88,7 +88,7 @@ async def get_depth_one(map_id: int, session: AsyncSession) -> DepthOneMap:
     ValueError
         If map is not found
     """
-    dmap = await session.get(DepthOneMapTable, map_id)
+    dmap = session.get(DepthOneMapTable, map_id)
 
     if dmap is None:
         raise ValueError(f"Depth-1 map with ID {map_id} not found.")
@@ -96,7 +96,7 @@ async def get_depth_one(map_id: int, session: AsyncSession) -> DepthOneMap:
     return dmap.to_model()
 
 
-async def update_depth_one(
+def update_depth_one(
     map_id: int,
     map_name: str | None,
     map_path: str | None,
@@ -104,7 +104,7 @@ async def update_depth_one(
     wafers: str | None,
     frequency: str | None,
     ctime: str | None,
-    session: AsyncSession,
+    session: Session,
 ) -> DepthOneMap:
     """
     Update a depth one map.
@@ -125,7 +125,7 @@ async def update_depth_one(
         Frequency channel of map
     ctime : float | None
         Central unix time of map
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -138,8 +138,8 @@ async def update_depth_one(
     ValueError
         If the map is not found
     """
-    async with session.begin():
-        dmap = await session.get(DepthOneMapTable, map_id)
+    with session.begin():
+        dmap = session.get(DepthOneMapTable, map_id)
 
         if dmap is None:
             raise ValueError(f"Depth 1 map with ID {map_id} not found.")
@@ -150,12 +150,12 @@ async def update_depth_one(
         dmap.frequency = frequency if frequency is not None else dmap.frequency
         dmap.ctime = ctime if ctime is not None else dmap.ctime
 
-        await session.commit()
+        session.commit()
 
     return dmap.to_model()
 
 
-async def delete_depth_one(map_id: int, session: AsyncSession) -> None:
+def delete_depth_one(map_id: int, session: Session) -> None:
     """
     Delete a depth one map from the database
 
@@ -163,7 +163,7 @@ async def delete_depth_one(map_id: int, session: AsyncSession) -> None:
     ----------
     map_id : int
         ID of depth one map
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -175,24 +175,24 @@ async def delete_depth_one(map_id: int, session: AsyncSession) -> None:
     ValueError
         If the source is not found
     """
-    async with session.begin():
-        dmap = await session.get(DepthOneMapTable, map_id)
+    with session.begin():
+        dmap = session.get(DepthOneMapTable, map_id)
 
         if dmap is None:
             raise ValueError(f"Depth 1 map with ID {map_id} not found.")
 
-        await session.delete(dmap)
-        await session.commit()
+        session.delete(dmap)
+        session.commit()
 
     return
 
 
-async def create_proccessing_status(
+def create_proccessing_status(
     map_name: str,
     processing_start: float | None,
     processing_end: float | None,
     processing_status: str,
-    session: AsyncSession,
+    session: Session,
 ) -> ProcessingStatus:
     """
     Create a entry tracking depth one map processing status.
@@ -207,7 +207,7 @@ async def create_proccessing_status(
         Time of processing end
     processing_status : str
         Status of processing
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -222,15 +222,15 @@ async def create_proccessing_status(
         processing_status=processing_status,
     )
 
-    async with session.begin():
+    with session.begin():
         session.add(proc_stat)
-        await session.commit()
+        session.commit()
 
     return proc_stat.to_model()
 
 
-async def get_proccessing_status(
-    proc_id: int, session: AsyncSession
+def get_proccessing_status(
+    proc_id: int, session: Session
 ) -> ProcessingStatus:
     """
     Get the processing status of a depth 1 map by (processing status) id.
@@ -239,7 +239,7 @@ async def get_proccessing_status(
     ----------
     proc_id : int
         ID of processing status
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -252,7 +252,7 @@ async def get_proccessing_status(
     ValueError
         If processing status is not found
     """
-    proc_stat = await session.get(ProcessingStatusTable, proc_id)
+    proc_stat = session.get(ProcessingStatusTable, proc_id)
 
     if proc_stat is None:
         raise ValueError(f"Depth-1 map with ID {proc_id} not found.")
@@ -260,13 +260,13 @@ async def get_proccessing_status(
     return proc_stat.to_model()
 
 
-async def update_processing_status(
+def update_processing_status(
     proc_id: int,
     map_name: str | None,
     processing_start: float | None,
     processing_end: float | None,
     processing_status: str | None,
-    session: AsyncSession,
+    session: Session,
 ) -> ProcessingStatus:
     """
     Update a depth one map processing status.
@@ -283,7 +283,7 @@ async def update_processing_status(
         Time of processing end
     processing_status : str
         Status of processing
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -296,8 +296,8 @@ async def update_processing_status(
     ValueError
         If the processing status is not found
     """
-    async with session.begin():
-        proc_stat = await session.get(ProcessingStatusTable, proc_id)
+    with session.begin():
+        proc_stat = session.get(ProcessingStatusTable, proc_id)
 
         if proc_stat is None:
             raise ValueError(f"Depth 1 map with ID {proc_id} not found.")
@@ -316,12 +316,12 @@ async def update_processing_status(
             else proc_stat.processing_status
         )
 
-        await session.commit()
+        session.commit()
 
     return proc_stat.to_model()
 
 
-async def delete_processing_status(proc_id: int, session: AsyncSession) -> None:
+def delete_processing_status(proc_id: int, session: Session) -> None:
     """
     Delete a processing status of a map from database
 
@@ -329,7 +329,7 @@ async def delete_processing_status(proc_id: int, session: AsyncSession) -> None:
     ----------
     proc_id : int
         Internal ID of the processing status
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -341,23 +341,23 @@ async def delete_processing_status(proc_id: int, session: AsyncSession) -> None:
     ValueError
         If the processing status is not found
     """
-    async with session.begin():
-        proc_stat = await session.get(ProcessingStatusTable, proc_id)
+    with session.begin():
+        proc_stat = session.get(ProcessingStatusTable, proc_id)
 
         if proc_stat is None:
             raise ValueError(f"Depth 1 map with name {proc_id} not found.")
 
-        await session.delete(proc_stat)
-        await session.commit()
+        session.delete(proc_stat)
+        session.commit()
 
     return
 
 
-async def create_pointing_residual(
+def create_pointing_residual(
     map_name: str,
     ra_offset: float | None,
     dec_offset: float | None,
-    session: AsyncSession,
+    session: Session,
 ) -> PointingResidual:
     """
     Create a entry tracking depth one map processing status.
@@ -370,7 +370,7 @@ async def create_pointing_residual(
         Calculated ra offset of PSes
     dec_offset : float
         Calculated dec offset of PSes
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -383,15 +383,15 @@ async def create_pointing_residual(
         ra_offset=ra_offset,
         dec_offset=dec_offset,
     )
-    async with session.begin():
+    with session.begin():
         session.add(point_resid)
-        await session.commit()
+        session.commit()
 
     return point_resid.to_model()
 
 
-async def get_pointing_residual(
-    point_id: int, session: AsyncSession
+def get_pointing_residual(
+    point_id: int, session: Session
 ) -> PointingResidual:
     """
     Get a depth 1 map pointing residual by (pointing residual) id.
@@ -400,7 +400,7 @@ async def get_pointing_residual(
     ----------
     point_id : int
         ID of pointing residual
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -413,7 +413,7 @@ async def get_pointing_residual(
     ValueError
         If pointing residual is not found
     """
-    point_resid = await session.get(PointingResidualTable, point_id)
+    point_resid = session.get(PointingResidualTable, point_id)
 
     if point_resid is None:
         raise ValueError(f"Depth-1 map with ID {point_id} not found.")
@@ -421,12 +421,12 @@ async def get_pointing_residual(
     return point_resid.to_model()
 
 
-async def update_pointing_residual(
+def update_pointing_residual(
     point_id: int,
     map_name: str | None,
     ra_offset: float | None,
     dec_offset: float | None,
-    session: AsyncSession,
+    session: Session,
 ) -> PointingResidual:
     """
     Update a depth one map pointing residual.
@@ -441,7 +441,7 @@ async def update_pointing_residual(
         Calculated ra offset of PSes
     dec_offset : float
         Calculated dec offset of PSes
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -454,8 +454,8 @@ async def update_pointing_residual(
     ValueError
         If the pointing residual is not found
     """
-    async with session.begin():
-        point_resid = await session.get(PointingResidualTable, point_id)
+    with session.begin():
+        point_resid = session.get(PointingResidualTable, point_id)
 
         if point_resid is None:
             raise ValueError(f"Depth 1 map with ID {point_id} not found.")
@@ -469,12 +469,12 @@ async def update_pointing_residual(
             dec_offset if dec_offset is not None else point_resid.dec_offset
         )
 
-        await session.commit()
+        session.commit()
 
     return point_resid.to_model()
 
 
-async def delete_pointing_residual(point_id: int, session: AsyncSession) -> None:
+def delete_pointing_residual(point_id: int, session: Session) -> None:
     """
     Delete a pointing residual of a map from database
 
@@ -482,7 +482,7 @@ async def delete_pointing_residual(point_id: int, session: AsyncSession) -> None
     ----------
     proc_id : int
         Internal ID of the pointing residual
-    session : AsyncSession
+    session : Session
         Session to use
 
     Returns
@@ -494,13 +494,13 @@ async def delete_pointing_residual(point_id: int, session: AsyncSession) -> None
     ValueError
         If the pointing residual is not found
     """
-    async with session.begin():
-        point_resid = await session.get(PointingResidualTable, point_id)
+    with session.begin():
+        point_resid = session.get(PointingResidualTable, point_id)
 
         if point_resid is None:
             raise ValueError(f"Depth 1 map with name {point_id} not found.")
 
-        await session.delete(point_resid)
-        await session.commit()
+        session.delete(point_resid)
+        session.commit()
 
     return

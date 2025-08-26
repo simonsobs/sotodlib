@@ -8,25 +8,25 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import mapcat.core as core
+import sotodlib.mapcat.mapcat.core as core
 
 from .database import (
     ALL_TABLES,
     DepthOneMap,
     ProcessingStatus,
     PointingResidual,
-    async_engine,
-    get_async_session,
+    engine,
+    get_session,
 )
 
 
-async def lifespan(f: FastAPI):
+def lifespan(f: FastAPI):
     # Use SQLModel to create the tables.
     print("Creating tables")
     for table in ALL_TABLES:
         print("Creating table", table)
-        async with async_engine.begin() as conn:
-            await conn.run_sync(table.metadata.create_all)
+        with engine.begin() as conn:
+            conn.run_sync(table.metadata.create_all)
     yield
 
 
@@ -34,7 +34,7 @@ app = FastAPI(lifespan=lifespan)
 
 router = APIRouter(prefix="/api/v1")
 
-SessionDependency = Annotated[AsyncSession, Depends(get_async_session)]
+SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 
 
 class DepthOneMapModificationRequest(BaseModel):
@@ -107,7 +107,7 @@ class PointingResidualModificationRequest(BaseModel):
 
 
 @router.put("/depthone/new")  # TODO : path?
-async def create_depth_one(
+def create_depth_one(
     model: DepthOneMapModificationRequest,
     session: SessionDependency,
 ) -> DepthOneMap:
@@ -133,7 +133,7 @@ async def create_depth_one(
     """
 
     try:
-        response = await core.create_depth_one(
+        response = core.create_depth_one(
             map_name=model.map_name,
             map_path=model.map_path,
             tube_slot=model.tube_slot,
@@ -149,7 +149,7 @@ async def create_depth_one(
 
 
 @router.get("/depthone/{map_id}")
-async def get_depth_one(map_id: int, session: SessionDependency) -> DepthOneMap:
+def get_depth_one(map_id: int, session: SessionDependency) -> DepthOneMap:
     """
     Get a depth 1 map by id
 
@@ -171,7 +171,7 @@ async def get_depth_one(map_id: int, session: SessionDependency) -> DepthOneMap:
         If map_id does not correspond to any depth 1 map
     """
     try:
-        response = await core.get_depth_one(map_id=map_id, session=session)
+        response =  core.get_depth_one(map_id=map_id, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -179,7 +179,7 @@ async def get_depth_one(map_id: int, session: SessionDependency) -> DepthOneMap:
 
 
 @router.post("/depthone/{map_id}")
-async def update_depth_one(
+def update_depth_one(
     map_id: int,
     model: DepthOneMapModificationRequest,
     session: SessionDependency,
@@ -208,7 +208,7 @@ async def update_depth_one(
     """
 
     try:
-        response = await core.update_depth_one(
+        response = core.update_depth_one(
             map_id=map_id,
             map_name=model.map_name,
             map_path=model.map_path,
@@ -225,7 +225,7 @@ async def update_depth_one(
 
 
 @router.delete("/depthone/{map_id}")
-async def delete_depth_one(map_id: int, session: SessionDependency) -> None:
+def delete_depth_one(map_id: int, session: SessionDependency) -> None:
     """
     Delete a depth one map by ID
 
@@ -246,14 +246,14 @@ async def delete_depth_one(map_id: int, session: SessionDependency) -> None:
         If map_id does not correspond to any depth one map
     """
     try:
-        await core.delete_depth_one(map_id=map_id, session=session)
+        core.delete_depth_one(map_id=map_id, session=session)
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return
 
 
 @router.put("/procstat/new")  # TODO : path?
-async def create_processing_status(
+def create_processing_status(
     model: ProcessingStatusModificationRequest,
     session: SessionDependency,
 ) -> ProcessingStatus:
@@ -279,7 +279,7 @@ async def create_processing_status(
     """
 
     try:
-        response = await core.create_proccessing_status(
+        response = core.create_proccessing_status(
             map_name=model.map_name,
             processing_start=model.processing_start,
             processing_end=model.processing_end,
@@ -293,7 +293,7 @@ async def create_processing_status(
 
 
 @router.get("/procstat/{proc_id}")
-async def get_processing_status(
+def get_processing_status(
     proc_id: int, session: SessionDependency
 ) -> ProcessingStatus:
     """
@@ -317,7 +317,7 @@ async def get_processing_status(
         If proc_id does not correspond to any depth 1 map processing status
     """
     try:
-        response = await core.get_proccessing_status(proc_id=proc_id, session=session)
+        response = core.get_proccessing_status(proc_id=proc_id, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -325,7 +325,7 @@ async def get_processing_status(
 
 
 @router.post("/procstat/{proc_id}")
-async def update_processing_status(
+def update_processing_status(
     proc_id: int,
     model: ProcessingStatusModificationRequest,
     session: SessionDependency,
@@ -354,7 +354,7 @@ async def update_processing_status(
     """
 
     try:
-        response = await core.update_processing_status(
+        response = core.update_processing_status(
             proc_id=proc_id,
             map_name=model.map_name,
             processing_start=model.processing_start,
@@ -369,7 +369,7 @@ async def update_processing_status(
 
 
 @router.delete("/procstat/{proc_id}")
-async def delete_processing_status(proc_id: int, session: SessionDependency) -> None:
+def delete_processing_status(proc_id: int, session: SessionDependency) -> None:
     """
     Delete a processing by ID
 
@@ -390,14 +390,14 @@ async def delete_processing_status(proc_id: int, session: SessionDependency) -> 
         If proc_id does not correspond to any processing status
     """
     try:
-        await core.delete_processing_status(proc_id=proc_id, session=session)
+        core.delete_processing_status(proc_id=proc_id, session=session)
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return
 
 
 @router.put("/pointresid/new")  # TODO : path?
-async def create_pointing_residual(
+def create_pointing_residual(
     model: PointingResidualModificationRequest,
     session: SessionDependency,
 ) -> PointingResidual:
@@ -422,7 +422,7 @@ async def create_pointing_residual(
         If the model does not contain required info or api response is malformed
     """
     try:
-        response = await core.create_pointing_residual(
+        response = core.create_pointing_residual(
             map_name=model.map_name,
             ra_offset=model.ra_offset,
             dec_offset=model.dec_offset,
@@ -435,7 +435,7 @@ async def create_pointing_residual(
 
 
 @router.get("/pointresid/{point_id}")
-async def get_pointing_residual(
+def get_pointing_residual(
     point_id: int, session: SessionDependency
 ) -> PointingResidual:
     """
@@ -459,7 +459,7 @@ async def get_pointing_residual(
         If point_id does not correspond to any depth 1 map pointing residuals
     """
     try:
-        response = await core.get_pointing_residual(point_id=point_id, session=session)
+        response = core.get_pointing_residual(point_id=point_id, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -467,7 +467,7 @@ async def get_pointing_residual(
 
 
 @router.post("/pointresid/{point_id}")
-async def update_pointing_residual(
+def update_pointing_residual(
     point_id: int,
     model: PointingResidualModificationRequest,
     session: SessionDependency,
@@ -496,7 +496,7 @@ async def update_pointing_residual(
     """
 
     try:
-        response = await core.update_pointing_residual(
+        response = core.update_pointing_residual(
             point_id=point_id,
             map_name=model.map_name,
             ra_offset=model.ra_offset,
@@ -510,7 +510,7 @@ async def update_pointing_residual(
 
 
 @router.delete("/pointresid/{point_id}")
-async def delete_pointing_residual(point_id: int, session: SessionDependency) -> None:
+def delete_pointing_residual(point_id: int, session: SessionDependency) -> None:
     """
     Delete a pointing residual by ID
 
@@ -531,7 +531,7 @@ async def delete_pointing_residual(point_id: int, session: SessionDependency) ->
         If point_id does not correspond to any pointing residual
     """
     try:
-        await core.delete_pointing_residual(point_id=point_id, session=session)
+        core.delete_pointing_residual(point_id=point_id, session=session)
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return

@@ -6,7 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
 from sqlmodel import JSON, Column, Field, SQLModel, Relationship
 
 from .settings import settings
@@ -82,12 +84,14 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     tube_slot: str = Field(index=True, nullable=False)
     frequency: str = Field(index=True, nullable=False)
     ctime: float = Field(index=True, nullable=False)
+    
     processing_status: list["ProcessingStatusTable"] = Relationship(
-        back_populates="dmap"
+        back_populates="dmap", cascade_delete=True
     )
-    # pointing_residual: list["PointingResidualTable"] = Relationship(
-    #    back_populates="dmap"
-    # )
+    pointing_residual: list["PointingResidualTable"] = Relationship(
+       back_populates="dmap", cascade_delete=True
+    )
+    
 
     def to_model(self) -> DepthOneMap:
         """
@@ -166,6 +170,7 @@ class ProcessingStatusTable(ProcessingStatus, SQLModel, table=True):
         index=True,
         nullable=False,
         foreign_key="depth_one_maps.map_name",
+        ondelete="CASCADE",
     )
     processing_start: float = Field(nullable=True)
     processing_end: float = Field(nullable=True)
@@ -242,10 +247,11 @@ class PointingResidualTable(PointingResidual, SQLModel, table=True):
         index=True,
         nullable=False,
         foreign_key="depth_one_maps.map_name",
+        ondelete="CASCADE",
     )
     ra_offset: float = Field(nullable=True)
     dec_offset: float = Field(nullable=True)
-    # dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+    dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
 
     def to_model(self) -> PointingResidual:
         """
@@ -266,10 +272,23 @@ class PointingResidualTable(PointingResidual, SQLModel, table=True):
 
 ALL_TABLES = [DepthOneMapTable, ProcessingStatusTable, PointingResidualTable]
 
-async_engine = create_async_engine(settings.database_url, echo=True, future=True)
+
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlite3 import Connection as SQLite3Connection
+
+#This snippet turns on foreign keys if using SQLite
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, SQLite3Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.close()
+
+engine = create_engine(settings.sync_database_url, echo=True, future=True,)
 
 
-async def get_async_session() -> AsyncSession:
-    async_session = async_sessionmaker(bind=async_engine, expire_on_commit=False)
-    async with async_session() as session:
+def get_session() -> Session:
+    session_maker = sessionmaker(bind=engine, expire_on_commit=False)
+    with session_maker() as session:
         yield session
