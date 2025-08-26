@@ -23,7 +23,7 @@ def run_migration(database_path: str):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def database_sesionmaker(tmp_path_factory):
+def database_sessionmaker(tmp_path_factory):
     """
     Create a temporary SQLite database for testing.
     """

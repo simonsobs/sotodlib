@@ -315,7 +315,7 @@ def get_processing_status(proc_id: int, session: SessionDependency) -> Processin
         If proc_id does not correspond to any depth 1 map processing status
     """
     try:
-        response = core.get_proccessing_status(proc_id=proc_id, session=session)
+        response = core.get_processing_status(proc_id=proc_id, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 

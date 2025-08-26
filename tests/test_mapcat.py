@@ -9,12 +9,12 @@ from sotodlib.mapcat.mapcat import core
 from httpx import HTTPStatusError
 
 
-def test_database_exists(database_sesionmaker):
+def test_database_exists(database_sessionmaker):
     return
 
 
-def test_create_depth_one(database_sesionmaker):
-    with database_sesionmaker() as session:
+def test_create_depth_one(database_sessionmaker):
+    with database_sessionmaker() as session:
         map_id = (
             core.create_depth_one(
                 map_name="myDepthOne",
@@ -27,7 +27,7 @@ def test_create_depth_one(database_sesionmaker):
             )
         ).id
 
-    with database_sesionmaker() as session:
+    with database_sessionmaker() as session:
         dmap = core.get_depth_one(map_id, session=session)
 
     assert dmap.id == map_id
@@ -38,9 +38,9 @@ def test_create_depth_one(database_sesionmaker):
     assert dmap.frequency == "f090"
     assert dmap.ctime == 1755787524.0
 
-    with database_sesionmaker() as session:
+    with database_sessionmaker() as session:
         proc_id = (
-            core.create_proccessing_status(
+            core.create_processing_status(
                 map_name="myDepthOne",
                 processing_start=1756787524.0,
                 processing_end=1756797524.0,
@@ -58,7 +58,21 @@ def test_create_depth_one(database_sesionmaker):
             )
         ).id
 
-    with database_sesionmaker() as session:
+    with database_sessionmaker() as session:
+        proc = core.get_processing_status(proc_id, session=session)
+        point = core.get_pointing_residual(point_id, session=session)
+
+    assert proc.id == proc_id
+    assert proc.map_name == "myDepthOne"
+    assert proc.processing_start == 1756787524.0
+    assert proc.processing_end == 1756797524.0
+    assert proc.processing_status == "done"
+
+    assert point.map_name == "myDepthOne"
+    assert point.ra_offset == 1.2
+    assert point.dec_offset == -0.8
+
+    with database_sessionmaker() as session:
         dmap = core.update_depth_one(
             map_id=map_id,
             map_name="newDepthOne",
@@ -78,20 +92,20 @@ def test_create_depth_one(database_sesionmaker):
     assert dmap.ctime == 1755787525.0
 
     # Check updating depth one automatically updates chile tables
-    with database_sesionmaker() as session:
+    with database_sessionmaker() as session:
         proc = core.get_pointing_residual(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
 
     assert proc.map_name == "newDepthOne"
     assert point.map_name == "newDepthOne"
 
-    # Check getting an uregistered ID raises ValueError
+    # Check bad map ID raises ValueError
     with pytest.raises(ValueError):
-        with database_sesionmaker() as session:
+        with database_sessionmaker() as session:
             core.get_depth_one(999999, session=session)
 
     with pytest.raises(ValueError):
-        with database_sesionmaker() as session:
+        with database_sessionmaker() as session:
             core.update_depth_one(
                 999999,
                 map_name="IGNORE",
@@ -103,7 +117,31 @@ def test_create_depth_one(database_sesionmaker):
                 session=session,
             )
 
-    with database_sesionmaker() as session:
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_depth_one(999999, session=session)
+
+    # Check bad proc ID raises ValueError
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.get_processing_status(999999, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.update_processing_status(
+                999999,
+                map_name="IGNORE",
+                processing_start=0,
+                processing_end=0,
+                processing_status="IGNORE",
+                session=session,
+            )
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_processing_status(999999, session=session)
+
+    with database_sessionmaker() as session:
         core.delete_depth_one(map_id, session=session)
 
 

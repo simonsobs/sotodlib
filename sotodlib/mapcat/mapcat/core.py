@@ -189,7 +189,7 @@ def delete_depth_one(map_id: int, session: Session) -> None:
     return
 
 
-def create_proccessing_status(
+def create_processing_status(
     map_name: str,
     processing_start: float | None,
     processing_end: float | None,
@@ -231,7 +231,7 @@ def create_proccessing_status(
     return proc_stat.to_model()
 
 
-def get_proccessing_status(proc_id: int, session: Session) -> ProcessingStatus:
+def get_processing_status(proc_id: int, session: Session) -> ProcessingStatus:
     """
     Get the processing status of a depth 1 map by (processing status) id.
 
