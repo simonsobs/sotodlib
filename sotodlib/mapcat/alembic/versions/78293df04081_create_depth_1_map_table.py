@@ -44,7 +44,7 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.name"),
+            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
             nullable=False,
         ),
         sa.Column(
@@ -62,7 +62,7 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name"),
+            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
             nullable=False,
         ),
         sa.Column("ra_offset", sa.Float),
@@ -75,7 +75,8 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name"),
+            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
+            nullable=False,
         ),
         sa.Column("pwv", sa.Float),
         sa.Column(
@@ -109,11 +110,13 @@ def upgrade() -> None:
 
     op.create_table(
         "pipeline_information",
+        sa.Column("id", sa.Integer, primary_key=True),
         sa.Column(
             "map_name",
             sa.String,
             sa.ForeignKey("depth_one_maps.map_name"),
-            primary_key=True,
+            nullable=False,
+            onupdate="CASCADE",
         ),
         sa.Column("sotodlib_version", sa.String, nullable=False),
         sa.Column("map_maker", sa.String, nullable=False),
@@ -122,11 +125,12 @@ def upgrade() -> None:
 
     op.create_table(
         "depth_one_sky_coverage",
+        sa.Column("id", sa.Integer, primary_key=True),
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name"),
-            primary_key=True,
+            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
+            nullable=False,
         ),
         sa.Column("patch_coverage", sa.String, nullable=False),
     )
