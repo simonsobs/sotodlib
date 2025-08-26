@@ -84,14 +84,13 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     tube_slot: str = Field(index=True, nullable=False)
     frequency: str = Field(index=True, nullable=False)
     ctime: float = Field(index=True, nullable=False)
-    
+
     processing_status: list["ProcessingStatusTable"] = Relationship(
         back_populates="dmap", cascade_delete=True
     )
     pointing_residual: list["PointingResidualTable"] = Relationship(
-       back_populates="dmap", cascade_delete=True
+        back_populates="dmap", cascade_delete=True
     )
-    
 
     def to_model(self) -> DepthOneMap:
         """
@@ -277,7 +276,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlite3 import Connection as SQLite3Connection
 
-#This snippet turns on foreign keys if using SQLite
+
+# This snippet turns on foreign keys if using SQLite
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
     if isinstance(dbapi_connection, SQLite3Connection):
@@ -285,7 +285,12 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
         cursor.execute("PRAGMA foreign_keys=ON;")
         cursor.close()
 
-engine = create_engine(settings.sync_database_url, echo=True, future=True,)
+
+engine = create_engine(
+    settings.sync_database_url,
+    echo=True,
+    future=True,
+)
 
 
 def get_session() -> Session:

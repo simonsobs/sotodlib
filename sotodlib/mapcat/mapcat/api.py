@@ -171,7 +171,7 @@ def get_depth_one(map_id: int, session: SessionDependency) -> DepthOneMap:
         If map_id does not correspond to any depth 1 map
     """
     try:
-        response =  core.get_depth_one(map_id=map_id, session=session)
+        response = core.get_depth_one(map_id=map_id, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -293,9 +293,7 @@ def create_processing_status(
 
 
 @router.get("/procstat/{proc_id}")
-def get_processing_status(
-    proc_id: int, session: SessionDependency
-) -> ProcessingStatus:
+def get_processing_status(proc_id: int, session: SessionDependency) -> ProcessingStatus:
     """
     Get a depth 1 map processing status by id
 

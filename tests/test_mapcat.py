@@ -13,7 +13,6 @@ def test_database_exists(database_sesionmaker):
     return
 
 
-
 def test_create_depth_one(database_sesionmaker):
     with database_sesionmaker() as session:
         map_id = (
@@ -39,18 +38,17 @@ def test_create_depth_one(database_sesionmaker):
     assert dmap.frequency == "f090"
     assert dmap.ctime == 1755787524.0
 
-    
     with database_sesionmaker() as session:
         proc_id = (
             core.create_proccessing_status(
-                map_name ="myDepthOne",
+                map_name="myDepthOne",
                 processing_start=1756787524.0,
                 processing_end=1756797524.0,
                 processing_status="done",
                 session=session,
             )
         ).id
-    
+
         point_id = (
             core.create_pointing_residual(
                 map_name="myDepthOne",
@@ -59,20 +57,18 @@ def test_create_depth_one(database_sesionmaker):
                 session=session,
             )
         ).id
-    
-    
+
     with database_sesionmaker() as session:
         dmap = core.update_depth_one(
-                map_id=map_id,
-                map_name="newDepthOne",
-                map_path="/NEW/PATH/TO/DEPTH/ONE",
-                tube_slot="OTi2",
-                wafers="ws0,ws1",
-                frequency="f150",
-                ctime=1755787525.0,
-                session=session,
-            )
-    
+            map_id=map_id,
+            map_name="newDepthOne",
+            map_path="/NEW/PATH/TO/DEPTH/ONE",
+            tube_slot="OTi2",
+            wafers="ws0,ws1",
+            frequency="f150",
+            ctime=1755787525.0,
+            session=session,
+        )
 
     assert dmap.map_name == "newDepthOne"
     assert dmap.map_path == "/NEW/PATH/TO/DEPTH/ONE"
@@ -81,7 +77,7 @@ def test_create_depth_one(database_sesionmaker):
     assert dmap.frequency == "f150"
     assert dmap.ctime == 1755787525.0
 
-    #Check updating depth one automatically updates chile tables
+    # Check updating depth one automatically updates chile tables
     with database_sesionmaker() as session:
         proc = core.get_pointing_residual(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
@@ -89,17 +85,27 @@ def test_create_depth_one(database_sesionmaker):
     assert proc.map_name == "newDepthOne"
     assert point.map_name == "newDepthOne"
 
-    #Check getting an uregistered ID raises ValueError
+    # Check getting an uregistered ID raises ValueError
     with pytest.raises(ValueError):
         with database_sesionmaker() as session:
-            core.get_depth_one(
-                999999, session=session
-            )
-    
+            core.get_depth_one(999999, session=session)
 
+    with pytest.raises(ValueError):
+        with database_sesionmaker() as session:
+            core.update_depth_one(
+                999999,
+                map_name="IGNORE",
+                map_path="IGNORE",
+                tube_slot="IGNORE",
+                wafers="IGNORE",
+                frequency="IGNORE",
+                ctime=0,
+                session=session,
+            )
 
     with database_sesionmaker() as session:
         core.delete_depth_one(map_id, session=session)
+
 
 """
 def test_depth_one_map(client):

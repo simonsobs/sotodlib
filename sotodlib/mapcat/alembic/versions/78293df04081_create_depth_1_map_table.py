@@ -44,7 +44,9 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
+            sa.ForeignKey(
+                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+            ),
             nullable=False,
         ),
         sa.Column(
@@ -62,7 +64,9 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
+            sa.ForeignKey(
+                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+            ),
             nullable=False,
         ),
         sa.Column("ra_offset", sa.Float),
@@ -75,7 +79,9 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
+            sa.ForeignKey(
+                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+            ),
             nullable=False,
         ),
         sa.Column("pwv", sa.Float),
@@ -129,7 +135,9 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"),
+            sa.ForeignKey(
+                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+            ),
             nullable=False,
         ),
         sa.Column("patch_coverage", sa.String, nullable=False),

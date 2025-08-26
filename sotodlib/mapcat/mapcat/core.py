@@ -16,6 +16,8 @@ from sotodlib.mapcat.mapcat.database import (
     PointingResidualTable,
 )
 
+# TODO: Should update functions have none defaults? This would also entail reodering all funcs to put session immediately after id
+
 
 def create_depth_one(
     map_name: str,
@@ -229,9 +231,7 @@ def create_proccessing_status(
     return proc_stat.to_model()
 
 
-def get_proccessing_status(
-    proc_id: int, session: Session
-) -> ProcessingStatus:
+def get_proccessing_status(proc_id: int, session: Session) -> ProcessingStatus:
     """
     Get the processing status of a depth 1 map by (processing status) id.
 
@@ -390,9 +390,7 @@ def create_pointing_residual(
     return point_resid.to_model()
 
 
-def get_pointing_residual(
-    point_id: int, session: Session
-) -> PointingResidual:
+def get_pointing_residual(point_id: int, session: Session) -> PointingResidual:
     """
     Get a depth 1 map pointing residual by (pointing residual) id.
 
