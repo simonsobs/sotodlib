@@ -14,6 +14,7 @@ def test_database_exists(database_sessionmaker):
 
 
 def test_create_depth_one(database_sessionmaker):
+    # Create a depth one map
     with database_sessionmaker() as session:
         map_id = (
             core.create_depth_one(
@@ -27,6 +28,7 @@ def test_create_depth_one(database_sessionmaker):
             )
         ).id
 
+    # Get depth one map back
     with database_sessionmaker() as session:
         dmap = core.get_depth_one(map_id, session=session)
 
@@ -38,6 +40,7 @@ def test_create_depth_one(database_sessionmaker):
     assert dmap.frequency == "f090"
     assert dmap.ctime == 1755787524.0
 
+    # Make proc stat and point resid tables, child to our depth one map
     with database_sessionmaker() as session:
         proc_id = (
             core.create_processing_status(
@@ -58,6 +61,7 @@ def test_create_depth_one(database_sessionmaker):
             )
         ).id
 
+    # Get proc stat and point resid back
     with database_sessionmaker() as session:
         proc = core.get_processing_status(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
@@ -68,10 +72,12 @@ def test_create_depth_one(database_sessionmaker):
     assert proc.processing_end == 1756797524.0
     assert proc.processing_status == "done"
 
+    assert point.id == point_id
     assert point.map_name == "myDepthOne"
     assert point.ra_offset == 1.2
     assert point.dec_offset == -0.8
 
+    # Update depth one map
     with database_sessionmaker() as session:
         dmap = core.update_depth_one(
             map_id=map_id,
@@ -91,13 +97,43 @@ def test_create_depth_one(database_sessionmaker):
     assert dmap.frequency == "f150"
     assert dmap.ctime == 1755787525.0
 
-    # Check updating depth one automatically updates chile tables
+    # Check updating depth one automatically updates child tables
     with database_sessionmaker() as session:
         proc = core.get_pointing_residual(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
 
     assert proc.map_name == "newDepthOne"
     assert point.map_name == "newDepthOne"
+
+    # Update proc status and point resid
+    with database_sessionmaker() as session:
+        proc = core.update_processing_status(
+            proc_id=proc_id,
+            map_name=None,
+            processing_start=1756887524.0,
+            processing_end=1756799524.0,
+            processing_status="in progress",
+            session=session,
+        )
+
+        point = core.update_pointing_residual(
+            point_id=point_id,
+            map_name=None,
+            ra_offset=1.4,
+            dec_offset=-0.75,
+            session=session,
+        )
+
+    assert proc.id == proc_id
+    assert proc.map_name == "newDepthOne"
+    assert proc.processing_start == 1756887524.0
+    assert proc.processing_end == 1756799524.0
+    assert proc.processing_status == "in progress"
+
+    assert point.id == point_id
+    assert point.map_name == "newDepthOne"
+    assert point.ra_offset == 1.4
+    assert point.dec_offset == -0.75
 
     # Check bad map ID raises ValueError
     with pytest.raises(ValueError):
