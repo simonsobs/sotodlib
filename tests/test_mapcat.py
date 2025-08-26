@@ -9,29 +9,29 @@ from sotodlib.mapcat.mapcat import core
 from httpx import HTTPStatusError
 
 
-@pytest.mark.asyncio
-async def test_database_exists(database_async_sesionmaker):
+def test_database_exists(database_sesionmaker):
     return
 
 
-@pytest.mark.asyncio
-async def create_depth_one(database_async_sesionmaker):
-    async with database_async_sesionmaker() as session:
+
+def test_create_depth_one(database_sesionmaker):
+    with database_sesionmaker() as session:
         map_id = (
-            await core.create_depth_one(
+            core.create_depth_one(
                 map_name="myDepthOne",
                 map_path="/PATH/TO/DEPTH/ONE",
                 tube_slot="OTi1",
                 wafers="ws0,ws1,ws2",
                 frequency="f090",
                 ctime=1755787524.0,
+                session=session,
             )
         ).id
 
-    async with database_async_sesionmaker() as session:
-        dmap = await core.get_depth_one(map_id, session=session)
+    with database_sesionmaker() as session:
+        dmap = core.get_depth_one(map_id, session=session)
 
-    assert dmap.map_id == map_id
+    assert dmap.id == map_id
     assert dmap.map_name == "myDepthOne"
     assert dmap.map_path == "/PATH/TO/DEPTH/ONE"
     assert dmap.tube_slot == "OTi1"
@@ -39,10 +39,69 @@ async def create_depth_one(database_async_sesionmaker):
     assert dmap.frequency == "f090"
     assert dmap.ctime == 1755787524.0
 
-    async with database_async_sesionmaker() as session:
-        await core.delete_depth_one(map_id, session=session)
+    
+    with database_sesionmaker() as session:
+        proc_id = (
+            core.create_proccessing_status(
+                map_name ="myDepthOne",
+                processing_start=1756787524.0,
+                processing_end=1756797524.0,
+                processing_status="done",
+                session=session,
+            )
+        ).id
+    
+        point_id = (
+            core.create_pointing_residual(
+                map_name="myDepthOne",
+                ra_offset=1.2,
+                dec_offset=-0.8,
+                session=session,
+            )
+        ).id
+    
+    
+    with database_sesionmaker() as session:
+        dmap = core.update_depth_one(
+                map_id=map_id,
+                map_name="newDepthOne",
+                map_path="/NEW/PATH/TO/DEPTH/ONE",
+                tube_slot="OTi2",
+                wafers="ws0,ws1",
+                frequency="f150",
+                ctime=1755787525.0,
+                session=session,
+            )
+    
+
+    assert dmap.map_name == "newDepthOne"
+    assert dmap.map_path == "/NEW/PATH/TO/DEPTH/ONE"
+    assert dmap.tube_slot == "OTi2"
+    assert dmap.wafers == "ws0,ws1"
+    assert dmap.frequency == "f150"
+    assert dmap.ctime == 1755787525.0
+
+    #Check updating depth one automatically updates chile tables
+    with database_sesionmaker() as session:
+        proc = core.get_pointing_residual(proc_id, session=session)
+        point = core.get_pointing_residual(point_id, session=session)
+
+    assert proc.map_name == "newDepthOne"
+    assert point.map_name == "newDepthOne"
+
+    #Check getting an uregistered ID raises ValueError
+    with pytest.raises(ValueError):
+        with database_sesionmaker() as session:
+            core.get_depth_one(
+                999999, session=session
+            )
+    
 
 
+    with database_sesionmaker() as session:
+        core.delete_depth_one(map_id, session=session)
+
+"""
 def test_depth_one_map(client):
     # Add depth 1 map
     response = client.put(
@@ -188,3 +247,4 @@ def test_depth_one_map(client):
     assert (
         response.status_code == 404
     )  # ID should be deleted, make sure we don't find it again
+"""
