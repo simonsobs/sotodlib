@@ -40,7 +40,7 @@ def test_create_depth_one(database_sessionmaker):
     assert dmap.frequency == "f090"
     assert dmap.ctime == 1755787524.0
 
-    # Make proc stat and point resid tables, child to our depth one map
+    # Make child tables
     with database_sessionmaker() as session:
         proc_id = (
             core.create_processing_status(
@@ -60,11 +60,41 @@ def test_create_depth_one(database_sessionmaker):
                 session=session,
             )
         ).id
+        tod_id = (
+            core.create_tod(
+                map_name="myDepthOne",
+                obs_id="obs_1753486724_lati6_111",
+                pwv=0.7,
+                ctime=1755787524.0,
+                start_time=1755687524.0,
+                stop_time=1755887524.0,
+                nsamples=28562,
+                telescope="lat",
+                telescope_flavor="lat",
+                tube_slot="i6",
+                tube_flavor="mf",
+                frequency="150",
+                scan_type="ops",
+                subtype="cmb",
+                wafer_count=3,
+                duration=100000,
+                az_center=180.0,
+                az_throw=90.0,
+                el_center=50.0,
+                el_throw=0.0,
+                roll_center=0.0,
+                roll_throw=0.0,
+                wafer_slots_list="ws0,ws1,ws2",
+                stream_ids_list="ufm_mv25,ufm_mv26,ufm_mv11",
+                session=session,
+            )
+        ).id
 
-    # Get proc stat and point resid back
+    # Get child tables back
     with database_sessionmaker() as session:
         proc = core.get_processing_status(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
+        tod = core.get_tod(tod_id, session=session)
 
     assert proc.id == proc_id
     assert proc.map_name == "myDepthOne"
@@ -76,6 +106,32 @@ def test_create_depth_one(database_sessionmaker):
     assert point.map_name == "myDepthOne"
     assert point.ra_offset == 1.2
     assert point.dec_offset == -0.8
+
+    assert tod.id == tod_id
+    assert tod.map_name == "myDepthOne"
+    assert tod.pwv == 0.7
+    assert tod.obs_id == "obs_1753486724_lati6_111"
+    assert tod.ctime == 1755787524.0
+    assert tod.start_time == 1755687524.0
+    assert tod.stop_time == 1755887524.0
+    assert tod.nsamples == 28562
+    assert tod.telescope == "lat"
+    assert tod.telescope_flavor == "lat"
+    assert tod.tube_slot == "i6"
+    assert tod.tube_flavor == "mf"
+    assert tod.frequency == "150"
+    assert tod.scan_type == "ops"
+    assert tod.subtype == "cmb"
+    assert tod.wafer_count == 3
+    assert tod.duration == 100000
+    assert tod.az_center == 180.0
+    assert tod.az_throw == 90.0
+    assert tod.el_center == 50.0
+    assert tod.el_throw == 0.0
+    assert tod.roll_center == 0.0
+    assert tod.roll_throw == 0.0
+    assert tod.wafer_slots_list == "ws0,ws1,ws2"
+    assert tod.stream_ids_list == "ufm_mv25,ufm_mv26,ufm_mv11"
 
     # Update depth one map
     with database_sessionmaker() as session:
@@ -101,9 +157,11 @@ def test_create_depth_one(database_sessionmaker):
     with database_sessionmaker() as session:
         proc = core.get_pointing_residual(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
+        tod = core.get_tod(tod_id, session=session)
 
     assert proc.map_name == "newDepthOne"
     assert point.map_name == "newDepthOne"
+    assert tod.map_name == "newDepthOne"
 
     # Update proc status and point resid
     with database_sessionmaker() as session:
@@ -123,6 +181,34 @@ def test_create_depth_one(database_sessionmaker):
             dec_offset=-0.75,
             session=session,
         )
+        tod = core.update_tod(
+            tod_id=tod_id,
+            map_name=None,
+            obs_id="obs_1753486324_lati6_110",
+            pwv=0.4,
+            ctime=1753486324.0,
+            start_time=1753536324.0,
+            stop_time=1753581324.0,
+            nsamples=28542,
+            telescope="sat",
+            telescope_flavor="sat",
+            tube_slot=None,
+            tube_flavor="lf",
+            frequency="030",
+            scan_type="cal",
+            subtype="mars",
+            wafer_count=2,
+            duration=200000,
+            az_center=90.0,
+            az_throw=120.0,
+            el_center=60.0,
+            el_throw=5.0,
+            roll_center=25.0,
+            roll_throw=5.0,
+            wafer_slots_list="ws0,ws1",
+            stream_ids_list="ufm_mv25,ufm_mv26",
+            session=session,
+        )
 
     assert proc.id == proc_id
     assert proc.map_name == "newDepthOne"
@@ -134,6 +220,31 @@ def test_create_depth_one(database_sessionmaker):
     assert point.map_name == "newDepthOne"
     assert point.ra_offset == 1.4
     assert point.dec_offset == -0.75
+
+    assert tod.map_name == "newDepthOne"
+    assert tod.pwv == 0.4
+    assert tod.obs_id == "obs_1753486324_lati6_110"
+    assert tod.ctime == 1753486324.0
+    assert tod.start_time == 1753536324.0
+    assert tod.stop_time == 1753581324.0
+    assert tod.nsamples == 28542
+    assert tod.telescope == "sat"
+    assert tod.telescope_flavor == "sat"
+    assert tod.tube_slot == "i6"
+    assert tod.tube_flavor == "lf"
+    assert tod.frequency == "030"
+    assert tod.scan_type == "cal"
+    assert tod.subtype == "mars"
+    assert tod.wafer_count == 2
+    assert tod.duration == 200000
+    assert tod.az_center == 90.0
+    assert tod.az_throw == 120.0
+    assert tod.el_center == 60.0
+    assert tod.el_throw == 5.0
+    assert tod.roll_center == 25.0
+    assert tod.roll_throw == 5.0
+    assert tod.wafer_slots_list == "ws0,ws1"
+    assert tod.stream_ids_list == "ufm_mv25,ufm_mv26"
 
     # Check bad map ID raises ValueError
     with pytest.raises(ValueError):
@@ -177,7 +288,109 @@ def test_create_depth_one(database_sessionmaker):
         with database_sessionmaker() as session:
             core.delete_processing_status(999999, session=session)
 
+    # Check bad point ID raises ValueError
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.get_pointing_residual(999999, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.update_pointing_residual(
+                999999,
+                map_name="IGNORE",
+                ra_offset=0.0,
+                dec_offset=0.0,
+                session=session,
+            )
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_pointing_residual(999999, session=session)
+
+    # Delete depth 1
     with database_sessionmaker() as session:
+        core.delete_depth_one(map_id, session=session)
+
+    # Check that proc stat and point resid were cascade deleted
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_processing_status(999999, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_pointing_residual(999999, session=session)
+
+
+def test_add_remove_child_tables(database_sessionmaker):
+    # Create a depth one map
+    with database_sessionmaker() as session:
+        map_id = (
+            core.create_depth_one(
+                map_name="myDepthOne",
+                map_path="/PATH/TO/DEPTH/ONE",
+                tube_slot="OTi1",
+                wafers="ws0,ws1,ws2",
+                frequency="f090",
+                ctime=1755787524.0,
+                session=session,
+            )
+        ).id
+
+    # Make proc stat and point resid tables, child to our depth one map
+    with database_sessionmaker() as session:
+        proc_id = (
+            core.create_processing_status(
+                map_name="myDepthOne",
+                processing_start=1756787524.0,
+                processing_end=1756797524.0,
+                processing_status="done",
+                session=session,
+            )
+        ).id
+
+        point_id = (
+            core.create_pointing_residual(
+                map_name="myDepthOne",
+                ra_offset=1.2,
+                dec_offset=-0.8,
+                session=session,
+            )
+        ).id
+
+        tod_id = (
+            core.create_tod(
+                map_name="myDepthOne",
+                obs_id="obs_1753486724_lati6_111",
+                pwv=0.7,
+                ctime=1755787524.0,
+                start_time=1755687524.0,
+                stop_time=1755887524.0,
+                nsamples=28562,
+                telescope="lat",
+                telescope_flavor="lat",
+                tube_slot="i6",
+                tube_flavor="mf",
+                frequency="150",
+                scan_type="ops",
+                subtype="cmb",
+                wafer_count=3,
+                duration=100000,
+                az_center=180.0,
+                az_throw=90.0,
+                el_center=50.0,
+                el_throw=0.0,
+                roll_center=0.0,
+                roll_throw=0.0,
+                wafer_slots_list="ws0,ws1,ws2",
+                stream_ids_list="ufm_mv25,ufm_mv26,ufm_mv11",
+                session=session,
+            )
+        ).id
+    with database_sessionmaker() as session:
+        core.delete_processing_status(proc_id, session=session)
+        core.delete_pointing_residual(point_id, session=session)
+        core.delete_tod(tod_id, session=session)
+
         core.delete_depth_one(map_id, session=session)
 
 

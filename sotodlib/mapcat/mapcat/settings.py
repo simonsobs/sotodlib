@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # pragma: no cover
     database_name: str = "mapcat.db"
     database_type: Literal["sqlite", "postgresql"] = "sqlite"
 

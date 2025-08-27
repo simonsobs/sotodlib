@@ -84,6 +84,7 @@ def upgrade() -> None:
             ),
             nullable=False,
         ),
+        sa.Column("obs_id", sa.String, nullable=False),
         sa.Column("pwv", sa.Float),
         sa.Column(
             "ctime", sa.Float, nullable=False
@@ -100,7 +101,7 @@ def upgrade() -> None:
         sa.Column("tube_slot", sa.String),
         sa.Column("tube_flavor", sa.String),
         sa.Column("frequency", sa.String),
-        sa.Column("type", sa.String),
+        sa.Column("scan_type", sa.String),
         sa.Column("subtype", sa.String),
         sa.Column("wafer_count", sa.Integer),
         sa.Column("duration", sa.Float),
