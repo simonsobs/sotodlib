@@ -356,19 +356,19 @@ class TODDepthOne(BaseModel):
     wafer_slots_list: str
     stream_ids_list: str
 
-    def __iter__(self):
+    def __iter__(self):  # pragma: no cover
         """
         Iterable method for returning all attributes of class
         """
         for key in vars(self).keys():
             yield key, vars(self).keys()
 
-    def __repr__(self):
+    def __repr__(self):  # pragma: no cover
         msg = f"TODDepthOne(id={self.id}, "
         for attr, value in self.__iter__():
             msg += f"{attr}={value}"
         msg += ")"
-        return msg  # pragma: no cover
+        return msg
 
 
 class TODDepthOneTable(TODDepthOne, SQLModel, table=True):

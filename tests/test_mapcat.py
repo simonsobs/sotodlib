@@ -303,9 +303,45 @@ def test_create_depth_one(database_sessionmaker):
                 session=session,
             )
 
+    # Check bad tod ID raises ValueError
     with pytest.raises(ValueError):
         with database_sessionmaker() as session:
-            core.delete_pointing_residual(999999, session=session)
+            core.get_tod(999999, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.update_tod(
+                999999,
+                map_name="INGORE",
+                obs_id="INGORE",
+                pwv=0.0,
+                ctime=0.0,
+                start_time=0.0,
+                stop_time=0.0,
+                nsamples=0.0,
+                telescope="INGORE",
+                telescope_flavor="INGORE",
+                tube_slot="INGORE",
+                tube_flavor="INGORE",
+                frequency="INGORE",
+                scan_type="INGORE",
+                subtype="INGORE",
+                wafer_count=0.0,
+                duration=0.0,
+                az_center=0.0,
+                az_throw=0.0,
+                el_center=0.0,
+                el_throw=0.0,
+                roll_center=0.0,
+                roll_throw=0.0,
+                wafer_slots_list="INGORE",
+                stream_ids_list="INGORE",
+                session=session,
+            )
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_tod(999999, session=session)
 
     # Delete depth 1
     with database_sessionmaker() as session:
@@ -314,11 +350,15 @@ def test_create_depth_one(database_sessionmaker):
     # Check that proc stat and point resid were cascade deleted
     with pytest.raises(ValueError):
         with database_sessionmaker() as session:
-            core.delete_processing_status(999999, session=session)
+            core.delete_processing_status(proc_id, session=session)
 
     with pytest.raises(ValueError):
         with database_sessionmaker() as session:
-            core.delete_pointing_residual(999999, session=session)
+            core.delete_pointing_residual(point_id, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_tod(tod_id, session=session)
 
 
 def test_add_remove_child_tables(database_sessionmaker):
