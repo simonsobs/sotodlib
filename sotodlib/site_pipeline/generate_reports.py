@@ -95,8 +95,8 @@ class GenerateReportConfig:
         now = dt.datetime.now(tz=dt.timezone.utc)
         while start < self.stop_time:
             stop: dt.datetime = start + delta
-            if stop > now - dt.timedelta(days=1):
-                # Give a buffer of 1 day to compile report for previous interval
+            if stop > now - dt.timedelta(hours=1):
+                # Give a buffer of 1 hour to compile report for previous interval
                 break
             self.time_intervals.append((start, stop))
             start += delta
