@@ -586,12 +586,13 @@ def make_demod_map(context, obslist, noise_model, info,
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
-        error, output_init, output_proc, obs = preprocess_util.preproc_or_load_group(obs_id,
-                                                configs_init=preproc_init,
-                                                configs_proc=preproc_proc,
-                                                dets={'wafer_slot':detset, 'wafer.bandpass':band},
-                                                logger=L,
-                                                overwrite=False)
+        error, output_init, output_proc, obs, _ = preprocess_util.preproc_or_load_group(obs_id,
+                                                   configs_init=preproc_init,
+                                                   configs_proc=preproc_proc,
+                                                   dets={'wafer_slot':detset, 'wafer.bandpass':band},
+                                                   logger=L,
+                                                   overwrite=False,
+                                                   return_proc_aman=False)
         errors.append(error) ; outputs.append((output_init, output_proc)) ;
         if error not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the preproc database'%(obs_id,detset,band))
