@@ -300,7 +300,7 @@ class MLMapmaker(Operator):
     @traitlets.validate("nmat_type")
     def _check_nmat_type(self, proposal):
         check = proposal["value"]
-        allowed = ["NmatUncorr", "NmatDetvecs", "NmatWhite", "NmatUnit", "Nmat"]
+        allowed = ["NmatUncorr", "NmatDetvecs", "NmatDetvecsDCT", "NmatWhite", "NmatUnit", "Nmat"]
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)
@@ -622,7 +622,7 @@ class MLMapmaker(Operator):
                 )
 
         # nmat_type is guaranteed to be a valid Nmat class
-        if self.nmat_type == 'NmatDetvecs':
+        if self.nmat_type in ['NmatDetvecs', 'NmatDetvecsDCT']:
             noise_model = getattr(mm, self.nmat_type)(downweight=self.downweight)
         else:
             noise_model = getattr(mm, self.nmat_type)()
