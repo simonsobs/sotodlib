@@ -659,9 +659,11 @@ def cleanup_archive(configs, logger=None):
     if os.path.exists(configs['archive']['index']):
         db = core.metadata.ManifestDb(configs['archive']['index'])
 
+        basename = os.path.splitext(os.path.basename(configs["archive"]["policy"]["filename"]))[0]
+
         # remove datasets from last archive file if they are not in db
         archive_files = list(
-            Path(os.path.dirname(configs["archive"]["policy"]["filename"])).rglob("*.h5")
+            Path(os.path.dirname(configs["archive"]["policy"]["filename"])).rglob(f"{basename}*.h5")
         )
         pattern = re.compile(r"\d+")
         archive_files = [p for p in archive_files if pattern.findall(p.stem)]
