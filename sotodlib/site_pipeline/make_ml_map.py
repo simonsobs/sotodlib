@@ -161,6 +161,9 @@ def main(**args):
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
+            # This *must* come after all the other signals due to how it zeros out the
+            # affected samples in the tod (inherited from SignalCut). Might have been better
+            # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
 
