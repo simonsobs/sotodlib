@@ -225,7 +225,7 @@ class NmatDetvecs(Nmat):
                 iV    = self.iV[bi]/nsamp**0.5
                 ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
         else:
-            so3g.nmat_detvecs_apply(ftod.view(dtype), self.bins, self.iD, self.iV, float(self.s), float(nsamp))
+            so3g.nmat_detvecs_apply(ftod.view(dtype), self.bins*2, self.iD, self.iV, float(self.s), float(nsamp))
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
 
@@ -383,6 +383,145 @@ class NmatUnit(Nmat):
     @staticmethod
     def from_bunch(data): 
         return NmatUnit(ivar=data.ivar)
+
+
+class NmatDetvecsDCT(Nmat):
+    def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
+            downweight=[], verbose=False, bins=None,
+            D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000):
+        # This is all taken from act, not tuned to so yet
+        if bin_edges is None: bin_edges = np.array([
+            0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
+            1.20, 1.40, 1.70, 2.00, 2.40, 2.80, 3.40, 3.80,
+            4.60, 5.00, 5.50, 6.00, 6.50, 7.00, 8.00, 9.00, 10.0, 11.0,
+            12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 22.0,
+            24.0, 26.0, 28.0, 30.0, 32.0, 36.5, 41.0,
+            45.0, 50.0, 55.0, 65.0, 70.0, 80.0, 90.0,
+            100., 110., 120., 130., 140., 150., 160., 170.,
+            180., 190.
+        ])
+        self.bin_edges = bin_edges
+        self.mode_bins = mode_bins
+        self.eig_lim   = np.zeros(len(mode_bins))+eig_lim
+        self.single_lim= np.zeros(len(mode_bins))+single_lim
+        self.verbose   = verbose
+        self.downweight= downweight
+        self.bins = bins
+        self.bmin_eigvec = bmin_eigvec
+        self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
+        self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
+
+    def build(self, tod, srate, **kwargs):
+        # Apply window before measuring noise model
+        ftod  = fft.dct(tod)
+        return self.build_fourier(ftod, tod.shape[1], srate, **kwargs)
+
+    def build_fourier(self, ftod, nsamp, srate, **kwargs):
+        ndet, nfreq = ftod.shape
+        dtype       = utils.real_dtype(ftod.dtype)
+        # First build our set of eigenvectors in two bins. The first goes from
+        # 0.25 to 4 Hz the second from 4Hz and up
+        mode_bins = makebins(self.mode_bins, srate, nfreq, nmin=self.bmin_eigvec, rfun=np.ceil, cap=False)
+        if np.any(np.diff(mode_bins) < 0):
+            raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
+        # Then use these to get our set of basis vectors
+        vecs = find_modes_jon(ftod, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, verbose=self.verbose)
+        nmode= vecs.shape[1]
+        if vecs.size == 0: raise errors.ModelError("Could not find any noise modes")
+        # Cut bins that extend beyond our max frequency
+        bin_edges = self.bin_edges[self.bin_edges < srate/2 * 0.99]
+        bins      = makebins(bin_edges, srate, nfreq, nmin=5, rfun=np.round)
+        nbin      = len(bins)
+        # Now measure the power of each basis vector in each bin. The residual
+        # noise will be modeled as uncorrelated
+        E  = np.zeros([nbin,nmode])
+        D  = np.zeros([nbin,ndet])
+        Nd = np.zeros([nbin,ndet])
+        for bi, b in enumerate(bins):
+            # Skip the DC mode, since it's it's unmeasurable and filtered away
+            b = np.maximum(1,b)
+            E[bi], D[bi], Nd[bi] = measure_detvecs(ftod[:,b[0]:b[1]], vecs)
+        # Optionally downweight the lowest frequency bins
+        if self.downweight != None and len(self.downweight) > 0:
+            D[:len(self.downweight)] /= np.array(self.downweight)[:,None]
+        # Instead of VEV' we can have just VV' if we bake sqrt(E) into V
+        V = vecs[None]*E[:,None]**0.5
+        # At this point we have a model for the total noise covariance as
+        # N = D + VV'. But since we're doing inverse covariance weighting
+        # we need a similar representation for the inverse iN. The function
+        # woodbury_invert computes iD, iV, s such that iN = iD + s iV iV'
+        # where s usually is -1, but will become +1 if one inverts again
+        iD, iV, s = woodbury_invert(D, V)
+        # Also compute a representative white noise level
+        bsize = bins[:,1]-bins[:,0]
+        ivar  = np.sum(iD*bsize[:,None],0)/np.sum(bsize)
+        # What about units? I haven't applied any fourier unit factors so far,
+        # so we're in plain power units. From the uncorrelated model I found
+        # that factor of tod.shape[1] is needed
+        iD   *= nsamp
+        iV   *= nsamp**0.5
+        ivar *= nsamp
+        # Fix dtype
+        bins = np.ascontiguousarray(bins.astype(np.int32))
+        D    = np.ascontiguousarray(D.astype(dtype))
+        V    = np.ascontiguousarray(V.astype(dtype))
+        iD   = np.ascontiguousarray(iD.astype(dtype))
+        iV   = np.ascontiguousarray(iV.astype(dtype))
+
+        return NmatDetvecsDCT(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
+                downweight=self.downweight, verbose=self.verbose,
+                bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
+
+    def apply(self, tod, inplace=True, slow=False):
+        self.check_ready()
+        if not inplace: tod = np.array(tod)
+        ftod = fft.dct(tod)
+        self.apply_fourier(ftod, tod.shape[1], slow=slow)
+        fft.idct(ftod, tod)
+        return tod
+
+    def apply_fourier(self, ftod, nsamp, slow=False):
+        self.check_ready()
+        dtype= utils.real_dtype(ftod.dtype)
+        if slow:
+            for bi, b in enumerate(self.bins):
+                # Want to multiply by iD + siViV'
+                ft    = ftod[:,b[0]:b[1]]
+                iD    = self.iD[bi]/nsamp
+                iV    = self.iV[bi]/nsamp**0.5
+                ft[:] = iD[:,None]*ft + self.s*iV.dot(iV.T.dot(ft))
+        else:
+            so3g.nmat_detvecs_apply2(ftod.view(dtype), self.bins, self.iD, self.iV, float(self.s), float(nsamp))
+        # I divided by the normalization above instead of passing normalize=True
+        # here to reduce the number of operations needed
+
+    def white(self, tod, inplace=True):
+        self.check_ready()
+        if not inplace: tod = np.array(tod)
+        tod *= self.ivar[:,None]
+        return tod
+
+    def write(self, fname):
+        self.check_ready()
+        data = bunch.Bunch(type="NmatDetvecsDCT")
+        for field in ["bin_edges", "eig_lim", "single_lim", "downweight",
+                "bins", "D", "V", "iD", "iV", "s", "ivar"]:
+            data[field] = getattr(self, field)
+        try:
+            bunch.write(fname, data)
+        except Exception as e:
+            msg = f"Failed to write {fname}: {e}"
+            raise RuntimeError(msg)
+
+    @staticmethod
+    def from_bunch(data):
+        return NmatDetvecsDCT(bin_edges=data.bin_edges, eig_lim=data.eig_lim, single_lim=data.single_lim,
+                downweight=data.downweight,
+                bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
+
+
+
+
 
 def write_nmat(fname, nmat):
     nmat.write(fname)
