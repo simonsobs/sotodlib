@@ -317,6 +317,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         pp_util.cleanup_obs(obs_id, policy_dir_proc, errlog, configs_proc, context_proc,
                             subdir='temp_proc', remove=overwrite)
 
+    # remove datasets from final archive file not found in init db
+    pp_util.cleanup_archive(configs_init, logger)
+    pp_util.cleanup_archive(configs_proc, logger)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
@@ -327,6 +331,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs_proc['archive']['index'])
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:

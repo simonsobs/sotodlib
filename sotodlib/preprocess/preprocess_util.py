@@ -8,6 +8,8 @@ import numpy as np
 import h5py
 import traceback
 import inspect
+from pathlib import Path
+import re
 from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
@@ -633,6 +635,49 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         dbexist = False
 
     return dbexist
+
+
+def cleanup_archive(configs, logger=None):
+    """This function finds the final preprocess archive file and deletes any
+    datasets that are not found in the preprocess database.  This helps avoid
+    cases where the database writing was interrupted in a previous run.
+
+    Arguments
+    ----------
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    """
+
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+
+    if logger is None:
+        logger = init_logger("preprocess")
+
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+
+        # remove datasets from last archive file if they are not in db
+        archive_files = list(
+            Path(os.path.dirname(configs["archive"]["policy"]["filename"])).rglob("*.h5")
+        )
+        pattern = re.compile(r"\d+")
+        archive_files = [p for p in archive_files if pattern.findall(p.stem)]
+
+        if archive_files:
+            latest_file = max([(int(pattern.findall(p.stem)[-1]), p)
+                               for p in archive_files if pattern.findall(p.stem)],
+                              key=lambda t: t[0])[1]
+
+            db_datasets = [d['dataset'] for d in db.inspect()]
+            with h5py.File(latest_file, "r+") as f:
+                keys = list(f.keys())
+                for key in keys:
+                    if key not in db_datasets:
+                        logger.debug(f"{key} not found in db. deleting it from {latest_file}.")
+                        del f[key]
 
 
 def save_group(obs_id, configs, dets, context=None, subdir='temp'):
