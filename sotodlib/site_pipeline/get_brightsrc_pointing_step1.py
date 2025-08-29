@@ -201,7 +201,7 @@ def main_one_obs(configs, obs_id, sso_name=None,
             logger.info(f'sso_names of {sso_names} are found from observation tags.' + 
                         f'Processing only {sso_name}')
     
-    tod = ctx.get_obs(obs_id, dets=[])
+    tod = ctx.get_obs(obs_id, no_signal=True)
     streamed_wafer_slots = ['ws{}'.format(index) for index, bit in enumerate(obs_id.split('_')[-1]) if bit == '1']
     processed_wafer_slots = []
     finished_wafer_slots = []
