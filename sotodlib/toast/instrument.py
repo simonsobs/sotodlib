@@ -97,6 +97,7 @@ class SOSite(GroundSite):
             lat,
             lon,
             alt,
+            weather=weather,
             **kwargs,
         )
 
