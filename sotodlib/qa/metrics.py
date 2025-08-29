@@ -270,6 +270,7 @@ class PreprocessArrayNET(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", [])
         self._noise_aman = process_args.get("noise_aman", "noise")
+        self._unit_factor = process_args.get("unit_factor", 1e6)
 
     def _process(self, meta):
 
@@ -285,7 +286,7 @@ class PreprocessArrayNET(PreprocessQA):
                     (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
                 )[0]
 
-                white_noise = meta.preprocess[self._noise_aman].white_noise[subset]
+                white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
                 mask = (white_noise != 0) & (~np.isnan(white_noise))
                 good_indices = np.nonzero(mask)[0]
                 if good_indices.size > 0:
@@ -338,6 +339,7 @@ class PreprocessDetNET(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", [])
         self._noise_aman = process_args.get("noise_aman", "noise")
+        self._unit_factor = process_args.get("unit_factor", 1e6)
 
     def _process(self, meta):
 
@@ -353,7 +355,7 @@ class PreprocessDetNET(PreprocessQA):
                     (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
                 )[0]
 
-                white_noise = meta.preprocess[self._noise_aman].white_noise[subset]
+                white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
                 mask = (white_noise != 0) & (~np.isnan(white_noise))
                 good_indices = np.nonzero(mask)[0]
                 if good_indices.size > 0:
