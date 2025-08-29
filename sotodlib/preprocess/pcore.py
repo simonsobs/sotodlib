@@ -586,32 +586,34 @@ class _FracFlaggedMixIn(object):
                 frac_flagged = np.array([
                     np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1][key2][subset]
                 ], dtype=float)
-                num_valid = np.array([
-                    np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1].valid[subset]
-                ])
-                with np.errstate(divide="ignore"):
-                    frac_flagged *= np.where(num_valid > 0, 1 / num_valid, 0)
 
-                # record percentiles over detectors and fraction of samples flagged
-                perc = np.percentile(frac_flagged, percentiles)
-                mean = frac_flagged.mean()
+                if len(frac_flagged) > 0:
+                    num_valid = np.array([
+                        np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1].valid[subset]
+                    ])
+                    with np.errstate(divide="ignore"):
+                        frac_flagged *= np.where(num_valid > 0, 1 / num_valid, 0)
 
-                # get the tags for this wafer (all detectors in this subset share these)
-                tags_base = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_base["telescope"] = meta.obs_info.telescope
+                    # record percentiles over detectors and fraction of samples flagged
+                    perc = np.percentile(frac_flagged, percentiles)
+                    mean = frac_flagged.mean()
 
-                # add tags and values to respective lists in order
-                tags_perc = [tags_base.copy() for i in range(perc.size)]
-                for i, t in enumerate(tags_perc):
-                    t["det_stat"] = f"percentile_{percentiles[i]}"
-                vals += list(perc)
-                tags += tags_perc
-                tags_mean = tags_base.copy()
-                tags_mean["det_stat"] = "mean"
-                vals.append(mean)
-                tags.append(tags_mean)
+                    # get the tags for this wafer (all detectors in this subset share these)
+                    tags_base = {
+                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
+
+                    # add tags and values to respective lists in order
+                    tags_perc = [tags_base.copy() for i in range(perc.size)]
+                    for i, t in enumerate(tags_perc):
+                        t["det_stat"] = f"percentile_{percentiles[i]}"
+                    vals += list(perc)
+                    tags += tags_perc
+                    tags_mean = tags_base.copy()
+                    tags_mean["det_stat"] = "mean"
+                    vals.append(mean)
+                    tags.append(tags_mean)
 
         obs_time = [meta.obs_info.timestamp] * len(vals)
         return {

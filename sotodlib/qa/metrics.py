@@ -212,24 +212,25 @@ class PreprocessValidDets(PreprocessQA):
                     (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
                 )[0]
 
-                # Compute the number of samples that are valid
-                frac_valid = np.array([
-                    np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
-                    for r in meta.preprocess[self._key].valid[subset]
-                ])
+                if len(subset) > 0:
+                    # Compute the number of samples that are valid
+                    frac_valid = np.array([
+                        np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
+                        for r in meta.preprocess[self._key].valid[subset]
+                    ])
 
-                # Count detectors with fraction valid above threshold
-                n_good = (frac_valid > self._thresh).sum()
+                    # Count detectors with fraction valid above threshold
+                    n_good = (frac_valid > self._thresh).sum()
 
-                # get the tags for this wafer (all detectors in this subset share these)
-                tags_i = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_i["telescope"] = meta.obs_info.telescope
+                    # get the tags for this wafer (all detectors in this subset share these)
+                    tags_i = {
+                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                    }
+                    tags_i["telescope"] = meta.obs_info.telescope
 
-                # add tags and values to respective lists in order
-                vals.append(n_good)
-                tags.append(tags_i)
+                    # add tags and values to respective lists in order
+                    vals.append(n_good)
+                    tags.append(tags_i)
 
         obs_time = [meta.obs_info.timestamp] * len(vals)
         return {
@@ -290,14 +291,12 @@ class PreprocessArrayNET(PreprocessQA):
                 good_indices = np.nonzero(mask)[0]
                 if good_indices.size > 0:
                     vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)))
-                else:
-                    vals.append(0.0)
 
-                tags_base = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_base["telescope"] = meta.obs_info.telescope
-                tags.append(tags_base)
+                    tags_base = {
+                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
+                    tags.append(tags_base)
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
@@ -358,14 +357,12 @@ class PreprocessDetNET(PreprocessQA):
                 good_indices = np.nonzero(mask)[0]
                 if good_indices.size > 0:
                     vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)) * np.sqrt(len(good_indices)))
-                else:
-                    vals.append(0.0)
 
-                tags_base = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_base["telescope"] = meta.obs_info.telescope
-                tags.append(tags_base)
+                    tags_base = {
+                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
+                    tags.append(tags_base)
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
