@@ -762,6 +762,8 @@ class AtomicInfo(Base):
     dec_center: Mapped[Optional[float]]
     number_dets: Mapped[Optional[int]]
     moon_distance: Mapped[Optional[float]]
+    wind_speed: Mapped[Optional[float]]
+    wind_direction: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
