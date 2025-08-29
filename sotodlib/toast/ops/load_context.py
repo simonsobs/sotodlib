@@ -778,9 +778,45 @@ class LoadContext(Operator):
             sample_rate=1.0 * u.Hz,
         )
 
-        # For now, this should be good enough position for instruments near the
-        # S.O. location.
-        site = SOSite()
+        # Use the default observatory location
+        raw_site = so3g.proj.coords.SITES["_default"]
+        tele_lon_deg = raw_site.lon
+        tele_lat_deg = raw_site.lat
+        tele_alt_m = raw_site.elev
+
+        # Construct a toast weather object.  If we had metadata containing the
+        # current conditions (temperature, PWV, wind, etc) we could use it here.
+        # For now, we use the EarthlySite.typical_weather so that our pointing
+        # corrections are the same as other parts of the code.  For the weather
+        # parameters not in this dictionary, we use the toast-bundled MERRA-2
+        # data for the Atacama.  We add this MERRA-2 data later once we have the
+        # observing session start time.
+
+        site_temp_celsius = raw_site.typical_weather["temperature"]
+        site_humidity = raw_site.typical_weather["humidity"]
+        site_pressure = raw_site.typical_weather["pressure"]
+
+        site_weather = toast.weather.Weather(
+            time=None,
+            ice_water=None,
+            liquid_water=None,
+            pwv=None,
+            humidity=None,
+            surface_pressure=site_pressure * u.mbar,
+            surface_temperature=site_temp_celsius * u.Celsius,
+            air_temperature=site_temp_celsius * u.Celsius,
+            west_wind=None,
+            south_wind=None,
+        )
+        site_weather.relative_humidity = site_humidity
+
+        site = SOSite(
+            name="SO",
+            lat=tele_lat_deg * u.degree,
+            lon=tele_lon_deg * u.degree,
+            alt=tele_alt_m * u.meter,
+            weather=site_weather,
+        )
 
         telescope = toast.instrument.Telescope(
             self.telescope_name, focalplane=focalplane, site=site
@@ -1110,12 +1146,12 @@ class LoadContext(Operator):
                     log.debug(msg)
                     bf = np.zeros(ob.n_local_samples, dtype=np.float64)
                     (rate, dt, _, _, _) = toast.utils.rate_from_times(shrbuf)
-                    bf[ax_shift:ax_shift+restricted_samps] = shrbuf
+                    bf[ax_shift : ax_shift + restricted_samps] = shrbuf
                     bf[0:ax_shift] = shrbuf[0] + dt * np.arange(
                         -ax_shift, 0, 1, dtype=np.float64
                     )
                     end_gap = ob.n_local_samples - restricted_samps - ax_shift
-                    bf[ax_shift + restricted_samps:] = shrbuf[-1] + dt * np.arange(
+                    bf[ax_shift + restricted_samps :] = shrbuf[-1] + dt * np.arange(
                         1, end_gap + 1, 1, dtype=np.float64
                     )
             ob.shared[shr_obs_name].set(bf, fromrank=0)
@@ -1139,6 +1175,28 @@ class LoadContext(Operator):
         ob.session.end = datetime.fromtimestamp(
             ob.shared[self.times].data[-1]
         ).astimezone(timezone.utc)
+
+        # Update site weather, now that we have the observing time.
+        sim_atacama = toast.weather.SimWeather(
+            time=ob.session.start,
+            name="atacama",
+            median_weather=True,
+        )
+        old_weather = ob.telescope.site.weather
+        new_weather = toast.weather.Weather(
+            time=sim_atacama.time,
+            ice_water=sim_atacama.ice_water,
+            liquid_water=sim_atacama.liquid_water,
+            pwv=sim_atacama.pwv,
+            humidity=sim_atacama.humidity,
+            surface_pressure=old_weather.surface_pressure,
+            surface_temperature=old_weather.surface_temperature,
+            air_temperature=old_weather.air_temperature,
+            west_wind=sim_atacama.west_wind,
+            south_wind=sim_atacama.south_wind,
+        )
+        new_weather.relative_humidity = old_weather.relative_humidity
+        ob.telescope.site.weather = new_weather
 
         log.debug_rank(
             f"LoadContext {ob.name} sample rate calculation took",
@@ -1176,6 +1234,7 @@ class LoadContext(Operator):
                 if isinstance(ax[k], AxisManager):
                     _ax_del_children(ax[k])
                 del ax[k]
+
         for wfname in list(axwafers.keys()):
             _ax_del_children(axwafers[wfname])
             del axwafers[wfname]
