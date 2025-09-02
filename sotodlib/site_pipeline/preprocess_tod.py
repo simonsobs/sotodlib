@@ -134,6 +134,8 @@ def preprocess_tod(obs_id,
     else:
         make_lmsi = False
 
+    new_plots = None
+
     n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -180,7 +182,7 @@ def preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        if os.path.exists(new_plots):
+        if new_plots is not None and os.path.exists(new_plots):
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))

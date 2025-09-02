@@ -136,6 +136,9 @@ def multilayer_preprocess_tod(obs_id,
     else:
         make_lmsi = False
 
+    new_plots_init = None
+    new_plot_proc = None
+
     # loop through and reduce each group
     n_fail = 0
     for group in groups_proc:
@@ -146,6 +149,10 @@ def multilayer_preprocess_tod(obs_id,
                                                                              dets=dets, logger=logger)
             if error is None:
                 outputs_init.append(outputs_grp_init)
+                if make_lmsi:
+                    new_plots_init = os.path.join(configs_init["plot_dir"],
+                            f'{str(aman.timestamps[0])[:5]}',
+                            aman.obs_info.obs_id)
 
             init_fields = aman.preprocess._fields.copy()
 
@@ -162,6 +169,11 @@ def multilayer_preprocess_tod(obs_id,
             logger.info(f"Beginning processing pipeline for {obs_id}:{group}")
             proc_aman, success = pipe_proc.run(aman)
             proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_init))
+
+            if make_lmsi:
+                new_plots_proc = os.path.join(configs_init["plot_dir"],
+                         f'{str(aman.timestamps[0])[:5]}',
+                         aman.obs_info.obs_id)
 
             # remove fields found in aman.preprocess from proc_aman
             for fld_init in init_fields:
@@ -196,10 +208,11 @@ def multilayer_preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        if os.path.exists(new_plots):
-            lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
-                      Path(configs1["lmsi_config"]),
-                      Path(os.path.join(new_plots, 'index.html')))
+        for configs, new_plots in zip([configs_init, configs_proc], [new_plots_init, new_plots_proc]):
+            if new_plots is not None and os.path.exists(new_plots):
+                lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
+                          Path(configs["lmsi_config"]),
+                          Path(os.path.join(new_plots, 'index.html')))
 
     if run_parallel:
         if n_fail == len(groups_proc):
