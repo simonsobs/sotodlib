@@ -1124,6 +1124,8 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         db = get_preprocess_db(configs, group_by, logger)
         if len(db.inspect(outputs['db_data'])) == 0:
             db.add_entry(outputs['db_data'], h5_path)
+        # make sure we close the db each time
+        db.conn.close()
         os.remove(src_file)
     elif error == 'load_success':
         return
