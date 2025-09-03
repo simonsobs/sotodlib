@@ -17,7 +17,7 @@ from sotodlib.site_pipeline import util
 from sotodlib.preprocess import Pipeline
 logger = util.init_logger(__name__, 'make_map_based_pointing: ')
 
-def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter', 'mars']):
+def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter', 'mars', 'saturn']):
     obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
     sso_names = []
     for _name in candidate_names:
@@ -225,7 +225,7 @@ def main_one_obs(configs, obs_id, sso_name=None,
     
     logger.info(f'Found saved data for these wafer_slots: {finished_wafer_slots}')
     logger.info(f'Will continue for these wafer_slots: {processed_wafer_slots}')
-
+    logger.info("using filelock")
     if configs.get('parallel_job'):
         logger.info('Continuing with parallel job')
         try:

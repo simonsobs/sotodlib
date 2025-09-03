@@ -22,7 +22,7 @@ from sotodlib.site_pipeline import util
 from sotodlib.preprocess import Pipeline
 logger = util.init_logger(__name__, 'update_pointing: ')
 
-def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter']):
+def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter', 'mars', 'saturn']):
     obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
     sso_names = []
     for _name in candidate_names:
