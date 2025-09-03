@@ -1460,6 +1460,7 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
+    
     def __init__(self, step_cfgs):
         self.source_flags_name = step_cfgs.get('source_flags_name', 'source_flags')
         super().__init__(step_cfgs)
@@ -1703,6 +1704,10 @@ class FourierFilter(_Preprocess):
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
 
+class ReduceFlags(_Preprocess):
+    name = 'reduce_flags'
+    def process(self, aman, proc_aman, sim=False):
+        aman.flags.reduce(**self.process_cfgs)       
 
 class DetcalNanCuts(_Preprocess):
     """
@@ -2502,6 +2507,7 @@ class SmurfGapsFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("smurfgaps", flag_aman)
 
+_Preprocess.register(ReduceFlags)
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
