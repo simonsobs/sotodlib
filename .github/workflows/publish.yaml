@@ -13,7 +13,7 @@ jobs:
       contents: read  # Required to checkout the repository
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Fetch full history for tags
           ref: ${{ github.ref_name }}
