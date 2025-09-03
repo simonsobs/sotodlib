@@ -306,18 +306,32 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
     return fig
 
 
-def cal_footprints(d: "ReportData") -> go.Figure:
+@dataclass
+class SourceFootprintPlots:
+    focalplane: go.Figure
+    table: go.Figure
+
+
+def source_footprints(d: "ReportData") -> go.Figure:
 
     if d.cfg.platform in ["satp1", "satp2", "satp3"]:
         wafer_rad = 0.10488
         wafer_sep = 0.219911
+        pie_width = 0.25
 
         angs = np.arange(-np.pi / 2, 3 * np.pi / 2, np.pi / 3)
         x0s = [0] + [np.cos(a) * wafer_sep for a in angs]
         y0s = [0] + [np.sin(a) * wafer_sep for a in angs]
+        
+        wafers = ['ws0', 'ws1', 'ws6', 'ws5', 'ws4', 'ws3', 'ws2']
+        
+        wafer_centers = {}
+        for i, wafer in enumerate(wafers):
+            wafer_centers[wafer] = (x0s[i], y0s[i])
 
     elif d.cfg.platform == "lat":
         wafer_rad = 0.005236
+        pie_width = 0.125
         x0s = [-0.00647517,  0.00316777,  0.00316777, -0.03335673, -0.02370855,
                -0.02371379,  0.02070833,  0.03023957,  0.03025179,  0.0204762 ,
                 0.03025005,  0.03023957, -0.00637918,  0.00327947,  0.00325853,
@@ -327,6 +341,17 @@ def cal_footprints(d: "ReportData") -> go.Figure:
                -0.02117608, -0.01556659, -0.0099571 , -0.02117957,  0.01579872,
                 0.02117957,  0.0099571 ,  0.03112446,  0.03673045,  0.02551671,
                 0.01556834,  0.02117608,  0.01021716]
+        
+        wafers = ['c1_ws0', 'c1_ws1', 'c1_ws2',
+                  'i1_ws0', 'i1_ws1', 'i1_ws2',
+                  'i3_ws0', 'i3_ws1', 'i3_ws2',
+                  'i4_ws0', 'i4_ws1', 'i4_ws2',
+                  'i5_ws0', 'i5_ws1', 'i5_ws2',
+                  'i6_ws0', 'i6_ws1', 'i6_ws2']
+        
+        wafer_centers = {}
+        for i, wafer in enumerate(wafers):
+            wafer_centers[wafer] = (x0s[i], y0s[i])
 
     def hex(x0, y0):
         angs = np.linspace(0, 2 * np.pi, 7)
@@ -337,10 +362,69 @@ def cal_footprints(d: "ReportData") -> go.Figure:
             ]
         )
         return pts
+    
+    xs = [x for x, y in wafer_centers.values()]
+    ys = [y for x, y in wafer_centers.values()]
+
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    x_span = x_max - x_min
+    y_span = y_max - y_min
+    if x_span > y_span:
+        y_mid = (y_max + y_min) / 2
+        y_min = y_mid - x_span / 2
+        y_max = y_mid + x_span / 2
+    else:
+        x_mid = (x_max + x_min) / 2
+        x_min = x_mid - y_span / 2
+        x_max = x_mid + y_span / 2
+    x_margin = x_span * 0.05
+    y_margin = x_span * 0.05
+    
+    x_range = [x_min - 1.1*wafer_rad, x_max + 1.1*wafer_rad]
+    y_range = [y_min - 1.1*wafer_rad, y_max + 1.1*wafer_rad]
+    
+    def get_normalized_positions(positions, x_range, y_range, fig_width, fig_height):
+        x0, x1 = x_range
+        y0, y1 = y_range
+        x_span = x1 - x0
+        y_span = y1 - y0
+
+        data_aspect = x_span / y_span
+        fig_aspect = fig_width / fig_height
+
+        norm_positions = {}
+
+        if data_aspect > fig_aspect:
+            # Y is scaled (shorter)
+            scale = fig_aspect / data_aspect
+            y_offset = (1 - scale) / 2
+            for key, (x, y) in positions.items():
+                x_paper = (x - x0) / x_span
+                y_paper = y_offset + scale * (y - y0) / y_span
+                norm_positions[key] = (x_paper, y_paper)
+        else:
+            # X is scaled (shorter)
+            scale = data_aspect / fig_aspect
+            x_offset = (1 - scale) / 2
+            for key, (x, y) in positions.items():
+                x_paper = x_offset + scale * (x - x0) / x_span
+                y_paper = (y - y0) / y_span
+                norm_positions[key] = (x_paper, y_paper)
+
+        return norm_positions
+    
+    norm_positions = get_normalized_positions(wafer_centers, x_range, y_range, 700, 700)
+    
+    def normalize_values(values, target_total=100):
+        total = sum(values)
+        if total == 0:
+            return values  # leave empty pie alone
+        return [v * target_total / total for v in values]
 
     fig = go.Figure()
 
-    for x0, y0 in zip(x0s, y0s):
+    for i, (x0, y0) in enumerate(zip(x0s, y0s)):
         pts = hex(x0, y0)
         fig.add_trace(
             go.Scatter(
@@ -355,55 +439,133 @@ def cal_footprints(d: "ReportData") -> go.Figure:
                 hoverinfo="skip",
             )
         )
+        
+        fig.add_annotation(
+            x=x0,
+            y=y0 + 0.9*wafer_rad,
+            text=wafers[i],
+            showarrow=False,
+            font=dict(size=12),
+            xanchor='center',
+            yanchor='bottom',
+            xref='x',
+            yref='y'
+        )
 
     ntargets = 0
     target_colors = {}
-    if d.cal_footprints is not None:
-        for fp in d.cal_footprints:
-            if fp.bounds is None:
-                continue
-            if fp.target not in target_colors:
-                target_colors[fp.target] = DEFAULT_PLOTLY_COLORS[ntargets]
-                ntargets += 1
+    if d.source_footprints is not None:        
+        wafer_map = defaultdict(list)
+        for fp in d.source_footprints:
+            wafer_map[fp.wafer].append(fp)
+            
+        if wafer_map:
+            for wafer, group in wafer_map.items():
+                x, y = norm_positions[wafer]
+                labels = [fp.source for fp in group]
+                values = [fp.count for fp in group]
+                hovertext = [
+                    f"Wafer: {fp.wafer}<br>Source: {fp.source}<br>Count: {fp.count}<br>ObsIDs:<br>" + "<br>".join(fp.obsids)
+                    for fp in group
+                ]
+                
+                x0 = x - pie_width / 2
+                x1 = x + pie_width / 2
+                y0 = y - pie_width / 2
+                y1 = y + pie_width / 2
+
                 fig.add_trace(
-                    go.Scatter(
-                        x=[None],
-                        y=[None],
-                        fill="toself",
-                        name=fp.target,
-                        mode="lines",
-                        marker=dict(color=target_colors[fp.target]),
-                        fillcolor=target_colors[fp.target],
-                        opacity=0.5,
-                        legendgroup=fp.target,
-                        showlegend=True,
+                    go.Pie(
+                        labels=labels,
+                        values=normalize_values(values),
+                        name=wafer,
+                        domain=dict(x=[x0, x1], y=[y0, y1]),
+                        scalegroup='wafer_pies',
+                        hoverinfo='text',
+                        hovertext=hovertext
                     )
                 )
 
-        xs, ys = fp.bounds.T
-        fig.add_trace(
-            go.Scatter(
-                x=xs,
-                y=ys,
-                fill="toself",
-                name=fp.obs_id,
-                mode="lines",
-                marker=dict(color=target_colors[fp.target]),
-                fillcolor=target_colors[fp.target],
-                opacity=0.2,
-                legendgroup=fp.target,
-                showlegend=False,
-            )
-        )
+    fig.add_trace(go.Scatter(
+        x=[x_min, x_max],
+        y=[y_min, y_max],
+        mode='markers',
+        marker=dict(opacity=0),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
 
-    # margin = 50
-    layout: Dict[str, Any] = dict(
-        xaxis_title="Xi",
-        yaxis_title="Eta",
+    fig.update_layout(
+        xaxis=dict(
+            range=x_range,
+            title='Xi (rad)',
+            showgrid=True,
+            zeroline=True,
+            fixedrange=True
+        ),
+        yaxis=dict(
+            range=y_range,
+            title='Eta (rad)',
+            showgrid=True,
+            zeroline=True,
+            fixedrange=True
+        ),
+        width=800,
+        height=800,
+        margin=dict(t=50, b=50, l=50, r=50)
     )
-    margin=0
-    if margin is not None:
-        layout["margin"] = dict(t=margin, b=margin, l=margin, r=margin)
-    layout['margin']['t'] = 50
-    fig.update_layout(layout)
-    return fig
+    
+    wafers = sorted(set(fp.wafer for fp in d.source_footprints))
+    sources = sorted(set(fp.source for fp in d.source_footprints))
+    
+    lookup = {
+        (fp.wafer, fp.source): fp.obsids
+        for fp in d.source_footprints
+    }
+    
+    def make_obsid_links(obsids):
+        if not obsids:
+            return ""
+        links = [
+            f'<a href="{d.cfg.site_url}/site-pipeline/{d.cfg.platform}/preprocess/{obsid.split("_")[1][:5]}/{obsid}/" target="_blank">{obsid}</a>'
+            for obsid in obsids
+        ]
+        return "<br>".join(links) + ("<br>" if len(links) == 1 else "")
+    
+    wafer_col = wafers
+    source_cols = []
+    for source in sources:
+        col = []
+        for wafer in wafers:
+            obsids = lookup.get((wafer, source), [])
+            col.append(make_obsid_links(obsids))
+        source_cols.append(col)
+
+    table_columns = [wafer_col] + source_cols
+    header_labels = ["Wafers"] + sources
+
+    table = go.Figure(data=[go.Table(
+        header=dict(
+            values=header_labels,
+            fill_color='lightgrey',
+            align='left',
+            font=dict(size=12),
+            line_color='black'
+        ),
+        cells=dict(
+            values=table_columns,
+            fill_color='white',
+            align='left',
+            line_color='black',
+            height=30
+        )
+    )])
+    
+    table.update_layout(
+        width=500,
+        height=400 + 30 * len(wafers),
+        margin=dict(l=20, r=20, t=20, b=20),
+        dragmode=False
+    )
+    
+    return SourceFootprintPlots(focalplane=fig, table=table)
