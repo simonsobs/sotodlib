@@ -1,5 +1,4 @@
 import os
-from pdb import run
 import yaml
 import time
 import logging
@@ -373,28 +372,29 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     futures = []
+    futures_kargs = {}
     for r in run_list:
+        futures_kargs[r[0]["obs_id"]] = {
+            "obs_id": r[0]["obs_id"],
+            "group_list": r[1],
+            "verbosity": verbosity,
+            "configs": configs,
+            "overwrite": overwrite,
+            "run_parallel": True,
+            "try": 1,
+        }
+        kwargs = {k: v for k, v in futures_kargs[r[0]["obs_id"]].items() if k != "try"}
         fut = executor.submit(
             preprocess_tod,
-            obs_id=r[0]["obs_id"],
-            group_list=r[1],
-            verbosity=verbosity,
-            configs=configs,
-            overwrite=overwrite,
-            run_parallel=True,
+            **kwargs
         )
-        fut.kargs = {"obs_id": r[0]["obs_id"],
-                     "group_list": r[1],
-                     "verbosity": verbosity,
-                     "configs": configs,
-                     "overwrite": overwrite,
-                     "run_parallel": True,
-                     "try": 1}
+        fut.obs_id = r[0]["obs_id"]
         futures.append(fut)
 
     while futures:
         future_to_check = futures.pop(0)
-        if future_to_check.done():
+        kwargs = {k: v for k, v in futures_kargs[future_to_check.obs_id].items() if k != "try"}
+        if future_to_check.done() and future_to_check.exception() is None:
             err, db_datasets = future_to_check.result()
             if err is not None:
                 n_fail += 1
@@ -405,26 +405,23 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         pp_util.cleanup_mandb(err, db_dataset, configs, logger)
                 else:
                     pp_util.cleanup_mandb(err, db_datasets, configs, logger)
-        elif isinstance(future_to_check.exception(), OSError) and future_to_check.kargs["try"] <= 3:
+        elif future_to_check.done() and (
+            isinstance(future_to_check.exception(), OSError)
+            and future_to_check.kargs["try"] <= 3
+        ):
             logger.info(f"Future raised an OSError: {future_to_check.exception()}, resubmitting")
+            
             new_future = executor.submit(
                 preprocess_tod,
-                obs_id=future_to_check.kargs["obs_id"],
-                group_list=future_to_check.kargs["group_list"],
-                verbosity=future_to_check.kargs["verbosity"],
-                configs=future_to_check.kargs["configs"],
-                overwrite=future_to_check.kargs["overwrite"],
-                run_parallel=future_to_check.kargs["run_parallel"],
+                **kwargs
             )
-            new_future.kargs = {"obs_id": future_to_check.kargs["obs_id"],
-                                "group_list": future_to_check.kargs["group_list"],
-                                "verbosity": future_to_check.kargs["verbosity"],
-                                "configs": future_to_check.kargs["configs"],
-                                "overwrite": future_to_check.kargs["overwrite"],
-                                "run_parallel": future_to_check.kargs["run_parallel"],
-                                "try": future_to_check.kargs["try"] + 1}
+            new_future.obs_id = future_to_check.obs_id
+            futures_kargs[new_future.obs_id]["try"] += 1
             futures.append(new_future)
-        elif isinstance(future_to_check.exception(), OSError) and future_to_check.kargs["try"] > 3:
+        elif future_to_check.done() and ((
+            isinstance(future_to_check.exception(), ValueError)
+            and future_to_check.kargs["try"] > 3
+        ) or not isinstance(future_to_check.exception(), ValueError)):
             logger.info(f"Future failed after 3 attempts: {future_to_check.exception()}")
             errmsg = f'{type(future_to_check.exception())}: {future_to_check.exception()}'
             tb = ''.join(traceback.format_tb(future_to_check.exception().__traceback__))
