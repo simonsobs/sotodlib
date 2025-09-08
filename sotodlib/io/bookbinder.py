@@ -33,7 +33,7 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
-MAX_DROPPED_SAMPLES = 100
+MAX_DROPPED_SAMPLES = 200
 class BadTimeSamples(Exception):
     """Exception raised when there are drops in the time samples in the 
     UFM timestreams"""
