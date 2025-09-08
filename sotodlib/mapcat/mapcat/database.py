@@ -75,6 +75,10 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
         List of processing status tables associated with d1 map
     pointing_residual : list[PointingResidualTable]
         List of pointing residual table associated with d1 map
+    tods: list[TODDepthOneTable]
+        List of tods associated with d1 map
+    pipeline_information: list[PipelineInformation]
+        List of pipeline info associed with d1 map
     """
 
     __tablename__ = "depth_one_maps"
@@ -86,13 +90,20 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
     ctime: float = Field(index=True, nullable=False)
 
     processing_status: list["ProcessingStatusTable"] = Relationship(
-        back_populates="dmap", cascade_delete=True
+        back_populates="dmap",
+        cascade_delete=True,
     )
     pointing_residual: list["PointingResidualTable"] = Relationship(
-        back_populates="dmap", cascade_delete=True
+        back_populates="dmap",
+        cascade_delete=True,
     )
     tods: list["TODDepthOneTable"] = Relationship(
-        back_populates="dmap", cascade_delete=True
+        back_populates="dmap",
+        cascade_delete=True,
+    )
+    pipeline_information: list["PipelineInformation"] = Relationship(
+        back_populates="dmap",
+        cascade_delete=True,
     )
 
     def to_model(self) -> DepthOneMap:
@@ -500,11 +511,91 @@ class TODDepthOneTable(TODDepthOne, SQLModel, table=True):
         )
 
 
+class PipelineInformation(BaseModel):
+    """
+    Pipeline information for a depth one map.
+
+    Attributes
+    ----------
+    id : str
+        Internal ID of the pipeline info
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    sotodlib_version : str
+        Version of sotodlib used to make the map
+    map_maker : str
+        Mapmaker used to make the map
+    preprocess_info : dict[str, Any]
+        JSON of any additional preprocessing info
+    """
+
+    id: int
+    map_name: str
+    sotodlib_version: str
+    map_maker: str
+    preprocess_info: dict[str, Any]
+
+    def __repr__(self):
+        # TODO: return preprocess info?
+        return f"PipelineInformation(id={self.id}, map_name={self.map_name} made using  sotodlib={self.sotodlib_version}, map_maker={self.map_maker}"  # pragma: no cover
+
+
+class PipelineInformationTable(PipelineInformation, SQLModel, table=True):
+    """
+    Table for tracking processing information for a depth one map.
+
+    Attributes
+    ----------
+    id : str
+        Internal ID of the pipeline info
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    sotodlib_version : str
+        Version of sotodlib used to make the map
+    map_maker : str
+        Mapmaker used to make the map
+    preprocess_info : dict[str, Any]
+        JSON of any additional preprocessing info
+    """
+
+    __tablename__ = "pipeline_information"
+    id: int = Field(primary_key=True)
+    map_name: str = Field(
+        index=True,
+        nullable=False,
+        foreign_key="depth_one_maps.map_name",
+        ondelete="CASCADE",
+    )
+    sotodlib_version: str = Field(nullable=False)
+    map_maker: str = Field(nullable=False)
+    preprocess_info: dict[str, Any] = Field(sa_column=Column(JSON))
+
+    dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+
+    def to_model(self) -> PointingResidual:
+        """
+        Return pipeline information from table.
+
+        Returns
+        -------
+        PipelineInformation : PointPipelineInformationingResidual
+            Pipeline information corresponding to this depth-1 map
+        """
+        return PipelineInformation(
+            id=self.id,
+            map_name=self.map_name,
+            sotodlib_version=self.sotodlib_version,
+            map_maker=self.map_maker,
+            preprocess_info=self.preprocess_info,
+        )
+
+
 ALL_TABLES = [
     DepthOneMapTable,
     ProcessingStatusTable,
     PointingResidualTable,
     TODDepthOneTable,
+    PipelineInformationTable,
 ]
 
 

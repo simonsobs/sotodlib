@@ -16,6 +16,8 @@ from sotodlib.mapcat.mapcat.database import (
     PointingResidualTable,
     TODDepthOne,
     TODDepthOneTable,
+    PipelineInformation,
+    PipelineInformationTable,
 )
 
 # TODO: Should update functions have none defaults? This would also entail reodering all funcs to put session immediately after id
@@ -817,6 +819,169 @@ def delete_tod(tod_id: int, session: Session) -> None:
             raise ValueError(f"Depth 1 map with name {tod_id} not found.")
 
         session.delete(tod)
+        session.commit()
+
+    return
+
+
+def create_pipeline_information(
+    map_name: str,
+    sotodlib_version: str,
+    map_maker: str,
+    preprocess_info: dict[str, Any] | None,
+    session: Session,
+) -> PointingResidual:
+    """
+    Create a entry tracking depth one map pipeline information.
+
+    Parameters
+    ----------
+    map_name : str
+        Name of depth 1 map to track
+    sotodlib_version : str
+        Version of sotodlib used to make the map
+    map_maker : str
+        Mapmaker used to make the map
+    preprocess_info : dict[str, Any] | None
+        JSON of any additional preprocessing info
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    pipe_info.to_model() : PipelineInformation
+        PipelineInformation instance initialized with parameters above
+    """
+    pipe_info = PipelineInformationTable(
+        map_name=map_name,
+        sotodlib_version=sotodlib_version,
+        map_maker=map_maker,
+        preprocess_info=preprocess_info,
+    )
+    with session.begin():
+        session.add(pipe_info)
+        session.commit()
+
+    return pipe_info.to_model()
+
+
+def get_pipeline_information(pipe_id: int, session: Session) -> PipelineInformation:
+    """
+    Get a depth 1 map pipeline information by (pipe info) id.
+
+    Parameters
+    ----------
+    pipe_id : int
+        ID of pipeline info
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    pipe_info.to_service() : PipelineInformation
+        Requested pipeline info for depth 1 map
+
+    Raises
+    ------
+    ValueError
+        If pipeline information is not found
+    """
+    pipe_info = session.get(PipelineInformation, pipe_id)
+
+    if pipe_info is None:
+        raise ValueError(f"Pipeline info with ID {pipe_id} not found.")
+
+    return pipe_info.to_model()
+
+
+def update_pipeline_information(
+    pipe_id: int,
+    map_name: str | None,
+    sotodlib_version: str | None,
+    map_maker: str | None,
+    preprocess_info: dict[str, Any] | None,
+    session: Session,
+) -> PipelineInformation:
+    """
+    Update a depth one map pipeline information.
+
+    Parameters
+    ----------
+    pipe_id : int
+        Internal ID of the pointing residual
+    map_name : str
+        Name of depth 1 map to track
+    sotodlib_version : str | None
+        Version of sotodlib used to make the map
+    map_maker : str | None
+        Mapmaker used to make the map
+    preprocess_info : dict[str, Any] | None
+        JSON of any additional preprocessing info
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    pipe_info.to_model() : PipelineInformation
+        PipelineInformation instance updated with parameters above
+
+    Raises
+    ------
+    ValueError
+        If the pipeline information is not found
+    """
+    with session.begin():
+        pipe_info = session.get(PipelineInformationTable, pipe_id)
+
+        if pipe_info is None:
+            raise ValueError(f"Pipeline info with ID {pipe_id} not found.")
+        pipe_info.map_name = map_name if map_name is not None else pipe_info.map_name
+        pipe_info.sotodlib_version = (
+            sotodlib_version
+            if sotodlib_version is not None
+            else pipe_info.sotodlib_version
+        )
+        pipe_info.map_maker = (
+            map_maker if map_maker is not None else pipe_info.map_maker
+        )
+        pipe_info.preprocess_info = (
+            preprocess_info
+            if preprocess_info is not None
+            else pipe_info.preprocess_info
+        )
+
+        session.commit()
+
+    return pipe_info.to_model()
+
+
+def delete_pipeline_information(pipe_id: int, session: Session) -> None:
+    """
+    Delete a pipeline information of a map from database
+
+    Parameters
+    ----------
+    pipe_id : int
+        Internal ID of the pipeline information
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If the pipeline information is not found
+    """
+    with session.begin():
+        pipe_info = session.get(PipelineInformationTable, pipe_id)
+
+        if pipe_info is None:
+            raise ValueError(f"Pipeline info with ID {pipe_id} not found.")
+
+        session.delete(pipe_info)
         session.commit()
 
     return
