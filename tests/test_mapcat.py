@@ -90,11 +90,22 @@ def test_create_depth_one(database_sessionmaker):
             )
         ).id
 
+        pipe_id = (
+            core.create_pipeline_information(
+                map_name="myDepthOne",
+                sotodlib_version="1.2.3",
+                map_maker="minkasi",
+                preprocess_info={"config": "test"},
+                session=session,
+            )
+        ).id
+
     # Get child tables back
     with database_sessionmaker() as session:
         proc = core.get_processing_status(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
         tod = core.get_tod(tod_id, session=session)
+        pipe = core.get_pipeline_information(pipe_id, session=session)
 
     assert proc.id == proc_id
     assert proc.map_name == "myDepthOne"
@@ -133,6 +144,12 @@ def test_create_depth_one(database_sessionmaker):
     assert tod.wafer_slots_list == "ws0,ws1,ws2"
     assert tod.stream_ids_list == "ufm_mv25,ufm_mv26,ufm_mv11"
 
+    assert pipe.id == pipe_id
+    assert pipe.map_name == "myDepthOne"
+    assert pipe.sotodlib_version == "1.2.3"
+    assert pipe.map_maker == "minkasi"
+    assert pipe.preprocess_info == {"config": "test"}
+
     # Update depth one map
     with database_sessionmaker() as session:
         dmap = core.update_depth_one(
@@ -158,10 +175,12 @@ def test_create_depth_one(database_sessionmaker):
         proc = core.get_pointing_residual(proc_id, session=session)
         point = core.get_pointing_residual(point_id, session=session)
         tod = core.get_tod(tod_id, session=session)
+        pipe = core.get_pipeline_information(pipe_id, session=session)
 
     assert proc.map_name == "newDepthOne"
     assert point.map_name == "newDepthOne"
     assert tod.map_name == "newDepthOne"
+    assert pipe.map_name == "newDepthOne"
 
     # Update proc status and point resid
     with database_sessionmaker() as session:
@@ -210,6 +229,15 @@ def test_create_depth_one(database_sessionmaker):
             session=session,
         )
 
+        pipe = core.update_pipeline_information(
+            pipe_id=pipe_id,
+            map_name=None,
+            sotodlib_version="1.2.4",
+            map_maker="sigurd",
+            preprocess_info={"config2": "test2"},
+            session=session,
+        )
+
     assert proc.id == proc_id
     assert proc.map_name == "newDepthOne"
     assert proc.processing_start == 1756887524.0
@@ -245,6 +273,12 @@ def test_create_depth_one(database_sessionmaker):
     assert tod.roll_throw == 5.0
     assert tod.wafer_slots_list == "ws0,ws1"
     assert tod.stream_ids_list == "ufm_mv25,ufm_mv26"
+
+    assert pipe.id == pipe_id
+    assert pipe.map_name == "newDepthOne"
+    assert pipe.sotodlib_version == "1.2.4"
+    assert pipe.map_maker == "sigurd"
+    assert pipe.preprocess_info == {"config2": "test2"}
 
     # Check bad map ID raises ValueError
     with pytest.raises(ValueError):
@@ -343,6 +377,26 @@ def test_create_depth_one(database_sessionmaker):
         with database_sessionmaker() as session:
             core.delete_tod(999999, session=session)
 
+    # Check bad pipe ID raises ValueError
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.get_pipeline_information(999999, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.update_pipeline_information(
+                999999,
+                map_name="IGNORE",
+                sotodlib_version="IGNORE",
+                map_maker="IGNORE",
+                preprocess_info={"IGNORE": "IGNORE"},
+                session=session,
+            )
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_pipeline_information(999999, session=session)
+
     # Delete depth 1
     with database_sessionmaker() as session:
         core.delete_depth_one(map_id, session=session)
@@ -359,6 +413,10 @@ def test_create_depth_one(database_sessionmaker):
     with pytest.raises(ValueError):
         with database_sessionmaker() as session:
             core.delete_tod(tod_id, session=session)
+
+    with pytest.raises(ValueError):
+        with database_sessionmaker() as session:
+            core.delete_pipeline_information(pipe_id, session=session)
 
 
 def test_add_remove_child_tables(database_sessionmaker):
@@ -426,10 +484,21 @@ def test_add_remove_child_tables(database_sessionmaker):
                 session=session,
             )
         ).id
+
+        pipe_id = (
+            core.create_pipeline_information(
+                map_name="myDepthOne",
+                sotodlib_version="1.2.3",
+                map_maker="minkasi",
+                preprocess_info={"config": "test"},
+                session=session,
+            )
+        ).id
     with database_sessionmaker() as session:
         core.delete_processing_status(proc_id, session=session)
         core.delete_pointing_residual(point_id, session=session)
         core.delete_tod(tod_id, session=session)
+        core.delete_pipeline_information(pipe_id, session=session)
 
         core.delete_depth_one(map_id, session=session)
 

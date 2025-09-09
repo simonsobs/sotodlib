@@ -121,9 +121,10 @@ def upgrade() -> None:
         sa.Column(
             "map_name",
             sa.String,
-            sa.ForeignKey("depth_one_maps.map_name"),
+            sa.ForeignKey(
+                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+            ),
             nullable=False,
-            onupdate="CASCADE",
         ),
         sa.Column("sotodlib_version", sa.String, nullable=False),
         sa.Column("map_maker", sa.String, nullable=False),

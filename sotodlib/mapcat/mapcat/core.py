@@ -830,7 +830,7 @@ def create_pipeline_information(
     map_maker: str,
     preprocess_info: dict[str, Any] | None,
     session: Session,
-) -> PointingResidual:
+) -> PipelineInformation:
     """
     Create a entry tracking depth one map pipeline information.
 
@@ -886,7 +886,7 @@ def get_pipeline_information(pipe_id: int, session: Session) -> PipelineInformat
     ValueError
         If pipeline information is not found
     """
-    pipe_info = session.get(PipelineInformation, pipe_id)
+    pipe_info = session.get(PipelineInformationTable, pipe_id)
 
     if pipe_info is None:
         raise ValueError(f"Pipeline info with ID {pipe_id} not found.")

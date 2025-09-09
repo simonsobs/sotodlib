@@ -101,7 +101,7 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
         back_populates="dmap",
         cascade_delete=True,
     )
-    pipeline_information: list["PipelineInformation"] = Relationship(
+    pipeline_information: list["PipelineInformationTable"] = Relationship(
         back_populates="dmap",
         cascade_delete=True,
     )
@@ -570,7 +570,7 @@ class PipelineInformationTable(PipelineInformation, SQLModel, table=True):
     map_maker: str = Field(nullable=False)
     preprocess_info: dict[str, Any] = Field(sa_column=Column(JSON))
 
-    dmap: DepthOneMapTable = Relationship(back_populates="pointing_residual")
+    dmap: DepthOneMapTable = Relationship(back_populates="pipeline_information")
 
     def to_model(self) -> PointingResidual:
         """
