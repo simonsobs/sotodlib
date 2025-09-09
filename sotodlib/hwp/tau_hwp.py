@@ -38,19 +38,18 @@ def get_tau_hwp(
 
     Returns
     -------
-    out_aman : AxisManager
+    result : AxisManager
         An AxisManager containing time constants, their errors, and reduced
         chi-squared statistics.
     """
     if wn is None:
-        wn = np.ones_like(aman.dets.count)
+        wn = np.ones(aman.dets.count)
 
-    hwp_rate = np.gradient(np.unwrap(aman.hwp_solution.hwp_angle)
-                           * 200 / 2 / np.pi)
-    aman.wrap('hwp_rate', np.abs(hwp_rate), [(0, 'samps')])
+    hwp_rate = np.gradient(np.unwrap(aman.hwp_angle) * 200 / 2 / np.pi)
+    if 'hwp_rate' not in aman:
+        aman.wrap('hwp_rate', hwp_rate, [(0, 'samps')])
 
-    logger.debug('wrap time vs phase rotation')
-    idx = np.where((min_fhwp < hwp_rate) & (hwp_rate < max_fhwp))[0]
+    idx = np.where((min_fhwp < abs(hwp_rate)) & (abs(hwp_rate) < max_fhwp))[0]
     start = idx[0]
     end = idx[-1]
     sections = core.OffsetAxis('sections', count=int((end-start)/width),
@@ -74,7 +73,7 @@ def get_tau_hwp(
                 axis_map=[(0, 'dets'), (1, 'sections')])
     result.wrap('demodU', np.transpose(demodU),
                 axis_map=[(0, 'dets'), (1, 'sections')])
-    result.wrap('weights', np.sqrt(width/2/hwp_freq[None, :])/wn[:, None],
+    result.wrap('weights', np.sqrt(width/2/abs(hwp_freq[None, :]))/wn[:, None],
                 axis_map=[(0, 'dets'), (1, 'sections')])
 
     logger.debug('Fit time constant')
@@ -91,7 +90,6 @@ def get_tau_hwp(
             model.set_param_hint('mode', vary=False)
             params = model.make_params(
                 tau=1e-3,
-                g=0,
                 AQ=np.median(result.demodQ[i]),
                 AU=np.median(result.demodU[i]),
                 mode=demod_mode,
