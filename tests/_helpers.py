@@ -286,6 +286,10 @@ def simulation_test_data(
     else:
         schedule = observing_schedule(telescope, mpicomm=toastcomm.comm_world)
 
+    # Add boresight rotation to one scan
+
+    schedule.scans[0].boresight_angle = 30 * u.deg
+
     sim_ground = toast.ops.SimGround(
         name="sim_ground",
         telescope=telescope,
