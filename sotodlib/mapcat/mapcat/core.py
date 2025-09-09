@@ -195,6 +195,179 @@ def delete_depth_one(map_id: int, session: Session) -> None:
     return
 
 
+def get_map_processing_status(map_id: int, session: Session) -> list[ProcessingStatus]:
+    """
+    Get the processing status of a depth 1 map by map id.
+
+    Parameters
+    ----------
+    map_id : int
+        ID of depth 1 map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    dmap.processing_status : list[ProcessingStatus]
+        List of processing status associated with this depth 1 map
+
+    Raises
+    ------
+    ValueError
+        If map is not found
+    ValueError
+        If map has no processing status
+    """
+    dmap = session.get(DepthOneMapTable, map_id)
+
+    if dmap is None:
+        raise ValueError(f"Depth-1 map with ID {map_id} not found.")
+
+    if len(dmap.processing_status) == 0:
+        raise ValueError(f"Depth-1 map with ID {map_id} has no processing status.")
+
+    return dmap.processing_status
+
+
+def get_map_pointing_residual(map_id: int, session: Session) -> list[PointingResidual]:
+    """
+    Get the pointing residual of a depth 1 map by map id.
+
+    Parameters
+    ----------
+    map_id : int
+        ID of depth 1 map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    dmap.pointing_residual : list[PointingResidual]
+        List of pointing residuals associated with this depth 1 map
+
+    Raises
+    ------
+    ValueError
+        If map is not found
+    ValueError
+        If map has no pointing residuals
+    """
+    dmap = session.get(DepthOneMapTable, map_id)
+
+    if dmap is None:
+        raise ValueError(f"Depth-1 map with ID {map_id} not found.")
+
+    if len(dmap.pointing_residual) == 0:
+        raise ValueError(f"Depth-1 map with ID {map_id} has no pointing residuals.")
+
+    return dmap.pointing_residual
+
+
+def get_map_tods(map_id: int, session: Session) -> list[TODDepthOne]:
+    """
+    Get the TODs of a depth 1 map by map id.
+
+    Parameters
+    ----------
+    map_id : int
+        ID of depth 1 map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    dmap.tods : list[TODDepthOne]
+        List of TODs associated with this depth 1 map
+
+    Raises
+    ------
+    ValueError
+        If map is not found
+    ValueError
+        If map has no TODs
+    """
+    dmap = session.get(DepthOneMapTable, map_id)
+
+    if dmap is None:
+        raise ValueError(f"Depth-1 map with ID {map_id} not found.")
+
+    if len(dmap.tods) == 0:
+        raise ValueError(f"Depth-1 map with ID {map_id} has no TODs.")
+
+    return dmap.tods
+
+
+def get_map_pipeline_information(
+    map_id: int, session: Session
+) -> list[PipelineInformation]:
+    """
+    Get the pipeline information of a depth 1 map by map id.
+
+    Parameters
+    ----------
+    map_id : int
+        ID of the depth 1 map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    dmap.pipeline_information : list[PipelineInformation]
+        List of pipeline information associated with this depth 1 map
+
+    Raises
+    -------
+    ValueError
+        If map is not found
+    ValueError
+        If map has no pipeline information
+
+    """
+    dmap = session.get(DepthOneMapTable, map_id)
+
+    if dmap is None:
+        raise ValueError(f"Depth-1 map with ID {map_id} not found.")
+
+    if len(dmap.pipeline_information) == 0:
+        raise ValueError(f"Depth-1 map with ID {map_id} has no pipeline information.")
+
+    return dmap.pipeline_information
+
+
+def get_map_sky_coverage(map_id: int, session: Session) -> list[SkyCoverage]:
+    """
+    Get the sky coverage of a depth 1 map by map id.
+
+    Parameters
+    ----------
+    map_id : int
+        ID of the depth 1 map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    dmap.depth_one_sky_coverage : list[depth_one_sky_coverage]
+        Sky coverage of this depth 1 map
+
+        Raises
+    -------
+    ValueError
+        If map is not found
+    ValueError
+        If map has no sky coverage
+    """
+    dmap = session.get(DepthOneMapTable, map_id)
+
+    if dmap is None:
+        raise ValueError(f"Depth-1 map with ID {map_id} not found.")
+
+    if len(dmap.depth_one_sky_coverage) == 0:
+        raise ValueError(f"Depth-1 map with ID {map_id} has no sky coverage.")
+
+    return dmap.depth_one_sky_coverage
+
+
 def create_processing_status(
     map_name: str,
     processing_start: float | None,
@@ -261,7 +434,7 @@ def get_processing_status(proc_id: int, session: Session) -> ProcessingStatus:
     proc_stat = session.get(ProcessingStatusTable, proc_id)
 
     if proc_stat is None:
-        raise ValueError(f"Depth-1 map with ID {proc_id} not found.")
+        raise ValueError(f"Processing status with ID {proc_id} not found.")
 
     return proc_stat.to_model()
 
@@ -306,7 +479,7 @@ def update_processing_status(
         proc_stat = session.get(ProcessingStatusTable, proc_id)
 
         if proc_stat is None:
-            raise ValueError(f"Depth 1 map with ID {proc_id} not found.")
+            raise ValueError(f"Processing status with ID {proc_id} not found.")
         proc_stat.map_name = map_name if map_name is not None else proc_stat.map_name
         proc_stat.processing_start = (
             processing_start
@@ -351,7 +524,7 @@ def delete_processing_status(proc_id: int, session: Session) -> None:
         proc_stat = session.get(ProcessingStatusTable, proc_id)
 
         if proc_stat is None:
-            raise ValueError(f"Depth 1 map with name {proc_id} not found.")
+            raise ValueError(f"Processing status with ID {proc_id} not found.")
 
         session.delete(proc_stat)
         session.commit()
