@@ -21,6 +21,9 @@ plt.style.use("tableau-colorblind10")
 
 def _add_attrs(dset, attrs):
     for k, v in attrs.items():
+        if v is None:
+            logger.warning("Not adding attribute %s because it is None", k)
+            continue
         dset.attrs[k] = v
 
 
@@ -110,7 +113,7 @@ class Template:
             np.isin(["bandpass", "pol", "rhombus"], list(aman.det_info.wafer.keys()))
         ):
             logger.warning(
-                "det_info.wafer seems to be missint metadata? Safe to ignore in rset mode."
+                "det_info.wafer seems to be missing metadata? Safe to ignore in rset mode."
             )
             return
         mapping = np.argsort(np.argsort(self.det_ids[template_msk]))
@@ -135,6 +138,7 @@ class FocalPlane:
     stream_id: str
     wafer_slot: str
     det_ids: NDArray[np.str_]  # (ndet,)
+    id_strs: NDArray[np.str_]  # (ndet,)
     avg_fp: NDArray[np.floating]  # (ndim, ndet)
     weights: NDArray[np.floating]  # (ndet,)
     transformed: NDArray[np.floating]  # (ndet, ndim)
@@ -146,6 +150,8 @@ class FocalPlane:
     template: Optional[Template] = field(default=None)
     transform: Transform = field(default_factory=Transform.identity)
     transform_nocm: Transform = field(default_factory=Transform.identity)
+    config: str = field(default="")
+    with_cm: bool = field(default=True)
     full_fp: Optional[NDArray[np.floating]] = field(
         init=False, default=None
     )  # (ndet, ndim, n_aman)
@@ -158,6 +164,34 @@ class FocalPlane:
             np.isclose(self.center, self.template.center)
         ):
             raise ValueError("Focalplane center does not match template")
+
+    @property
+    def template_fp(self):
+        if self.template is not None:
+            return self.template.fp
+        logger.warning(
+            "No template in focal plane %s, reconstructing from transformed. This will be wrong with_cm is set wrong!",
+            self.stream_id,
+        )
+        transform = self.transform_nocm
+        if self.with_cm:
+            transform = self.transform
+        return (self.transformed - transform.shift) @ np.linalg.inv(transform.affine)
+
+    @property
+    def template_center(self):
+        if self.template is not None:
+            return self.template.center
+        logger.warning(
+            "No template in focal plane %s, reconstructing from transformed. This will be wrong with_cm is set wrong!",
+            self.stream_id,
+        )
+        transform = self.transform_nocm
+        if self.with_cm:
+            transform = self.transform
+        return (self.center_transformed - transform.shift) @ np.linalg.inv(
+            transform.affine
+        )
 
     @property
     def diff(self):
@@ -175,10 +209,10 @@ class FocalPlane:
 
     @property
     def padded(self):
-        return self.tot_weight is None 
+        return self.tot_weight is None
 
     @classmethod
-    def empty(cls, template, stream_id, wafer_slot, n_aman):
+    def empty(cls, template, stream_id, wafer_slot, n_aman, config=""):
         if template is None:
             raise TypeError("template must be an instance of Template, not None")
         full_fp = np.full(template.fp.shape + (n_aman,), np.nan)
@@ -195,6 +229,7 @@ class FocalPlane:
             stream_id,
             wafer_slot,
             template.det_ids,
+            template.id_strs,
             avg_fp,
             weight,
             transformed,
@@ -203,6 +238,7 @@ class FocalPlane:
             n_point,
             n_gamma,
             template=template,
+            config=config,
         )
         fp.full_fp = full_fp
         fp.tot_weight = tot_weight
@@ -244,6 +280,7 @@ class FocalPlane:
         self.tot_weight[template_msk] += weights
 
     def save(self, f, db_info, group):
+        logger.info("Saving %s", self.stream_id)
         ndets = len(self.det_ids)
         outdt = [
             ("dets:det_id", self.det_ids.dtype),
@@ -253,7 +290,13 @@ class FocalPlane:
             ("padded", np.bool_),
         ]
         fpout = np.fromiter(
-            zip(self.det_ids, *(self.transformed.T), np.ones(len(self.det_ids), dtype=bool)*(self.padded)), dtype=outdt, count=ndets
+            zip(
+                self.det_ids,
+                *(self.transformed.T),
+                np.ones(len(self.det_ids), dtype=bool) * (self.padded),
+            ),
+            dtype=outdt,
+            count=ndets,
         )
         write_dataset(
             metadata.ResultSet.from_friend(fpout),
@@ -271,6 +314,7 @@ class FocalPlane:
 
         outdt_full = [
             ("dets:det_id", self.det_ids.dtype),
+            ("id_strs", self.id_strs.dtype),
             ("xi_t", np.float32),
             ("eta_t", np.float32),
             ("gamma_t", np.float32),
@@ -285,6 +329,7 @@ class FocalPlane:
         fpfullout = np.fromiter(
             zip(
                 self.det_ids,
+                self.id_strs,
                 *(self.transformed.T),
                 *(self.avg_fp.T),
                 *(self.weights.T),
@@ -308,16 +353,20 @@ class FocalPlane:
             {
                 "fit_centers": self.center_transformed,
                 "template_centers": self.center,
+                "config": self.config,
+                "with_cm": self.with_cm,
+                "tot_weight": self.tot_weight,
             },
         )
 
     @classmethod
-    def load(cls, group):
+    def load(cls, group, include_cm=None):
         stream_id = group.name.split("/")[-1]
         fp_full = read_dataset(group.file, f"{group.name}/focal_plane_full")
         if fp_full.keys is None:
             raise ValueError("fp_full somehow has no keys")
         det_ids = fp_full["dets:det_id"]
+        id_strs = fp_full["id_strs"]
         avg_fp = np.column_stack(
             (
                 np.array(fp_full["xi_m"]),
@@ -349,11 +398,26 @@ class FocalPlane:
         else:
             logger.warning("No wafer slot found in this focal plane, may be old.")
             wafer_slot = "ws?"
+        config = group.attrs.get("config", "")
+        if config == "":
+            logger.warning("No config found in this focal plane, may be old.")
+        if "with_cm" in group.attrs:
+            with_cm = group.attrs["with_cm"]
+        else:
+            with_cm = True
+            logger.warning(
+                "No with_cm found in this focal plane, may be old. Attempting to set based on receiver!"
+            )
+            if include_cm is None:
+                logger.warning("\tinclude_cm not set! Using True for with_cm")
+            else:
+                with_cm = include_cm
 
-        return FocalPlane(
+        fp = FocalPlane(
             stream_id,
             wafer_slot,
             np.array(det_ids),
+            np.array(id_strs),
             avg_fp,
             np.array(weights),
             transformed,
@@ -365,7 +429,12 @@ class FocalPlane:
             template,
             transform,
             transform_nocm,
+            config,
+            with_cm,
         )
+        fp.tot_weight = group.attrs.get("tot_weight", None)
+
+        return fp
 
 
 @dataclass
@@ -381,6 +450,11 @@ class OpticsTube:
         self.center_transformed = mt.apply_transform(
             self.center, self.transform_fullcm.affine, self.transform_fullcm.shift
         )
+
+    def __setattr__(self, name, val):
+        self.__dict__[name] = val
+        if name == "focal_planes":
+            self.__dict__.pop("fp_dict", None)
 
     @property
     def num_fps(self):
@@ -419,6 +493,15 @@ class OpticsTube:
 
         return OpticsTube(name, center)
 
+    def delete_fp(self, stream_id):
+        self.focal_planes = [
+            fp for fp in self.focal_planes if fp.stream_id != stream_id
+        ]
+
+    @cached_property
+    def fp_dict(self):
+        return {fp.stream_id: fp for fp in self.focal_planes}
+
     def save(self, f, db_info, group="/"):
         g = f[group]
         g.create_group(self.name)
@@ -435,13 +518,13 @@ class OpticsTube:
             )
 
     @classmethod
-    def load(cls, group):
+    def load(cls, group, include_cm=None):
         name = group.name.split("/")[-1]
         center = group.attrs["center"]
         transform = Transform.load(group["transform"])
         transform_fullcm = Transform.load(group["transform"], "_fullcm")
         fps = [
-            FocalPlane.load(group[grp])
+            FocalPlane.load(group[grp], include_cm)
             for grp in group.keys()
             if "transform" not in grp
         ]
@@ -456,6 +539,7 @@ class Receiver:
         default_factory=partial(np.zeros, shape=(1, 3))
     )
     include_cm: bool = field(default=False)
+    valid_ids: List[str] = field(default_factory=list)
     transform: Transform = field(default_factory=Transform.identity)
     center_transformed: NDArray[np.floating] = field(init=False)
 
@@ -464,6 +548,14 @@ class Receiver:
             self.center, self.transform.affine, self.transform.shift
         )
 
+    def __setattr__(self, name, val):
+        self.__dict__[name] = val
+        if name == "optics_tubes":
+            self.__dict__.pop("ot_dict", None)
+
+    def delete_ot(self, name):
+        self.focal_planes = [ot for ot in self.optics_tubes if ot.name != name]
+
     def save(self, f, db_info, group="/"):
         _add_attrs(
             f[group],
@@ -471,6 +563,7 @@ class Receiver:
                 "center": self.center,
                 "center_transformed": self.center_transformed,
                 "include_cm": self.include_cm,
+                "valid_ids": self.valid_ids,
             },
         )
         self.transform.save(f, os.path.join(group, "transform"))
@@ -481,14 +574,17 @@ class Receiver:
     def load(cls, f, group="/"):
         center = f[group].attrs["center"]
         include_cm = f[group].attrs["include_cm"]
+        valid_ids = f[group].attrs.get("valid_ids", [])
+        if len(valid_ids) == 0:
+            logger.warning("valid_ids list is empty! May be an old Receiver object!")
         transform = Transform.load(f[group]["transform"])
         ots = [
-            OpticsTube.load(f[group][grp])
+            OpticsTube.load(f[group][grp], include_cm)
             for grp in f[group].keys()
             if "transform" not in grp
         ]
 
-        return Receiver(ots, center, include_cm, transform)
+        return Receiver(ots, center, include_cm, list(valid_ids), transform)
 
     @classmethod
     def load_file(cls, path):
@@ -505,6 +601,10 @@ class Receiver:
             fps += ot.focal_planes
         return fps
 
+    @cached_property
+    def ot_dict(self):
+        return {ot.name: ot for ot in self.optics_tubes}
+
     @property
     def lims(self):
         xmax = np.max([np.nanmax(fp.transformed[:, 0]) for fp in self.focal_planes])
@@ -513,10 +613,20 @@ class Receiver:
         ymin = np.min([np.nanmin(fp.transformed[:, 1]) for fp in self.focal_planes])
         return (xmin, xmax), (ymin, ymax)
 
+    @property
+    def fp_valid_ids(self):
+        valid_ids = []
+        for fp in self.focal_planes:
+            if fp.template is None:
+                continue
+            valid_ids += list(fp.template.valid_ids)
+        valid_ids = np.unique(valid_ids)
+        return valid_ids.tolist()
+
 
 # Plotting Functions
 def plot_ufm(focal_plane, plot_dir):
-    nominal = focal_plane.template.fp
+    nominal = focal_plane.template_fp
     measured = focal_plane.avg_fp
     transformed = focal_plane.transformed
     fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
@@ -564,9 +674,21 @@ def plot_ufm(focal_plane, plot_dir):
 
 def plot_ot(ot, plot_dir):
     fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
-    dists = [fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi for fp in ot.focal_planes if fp.tot_weight is not None]
-    xis = [fp.transformed[fp.isfinite, 0] for fp in ot.focal_planes if fp.tot_weight is not None]
-    etas = [fp.transformed[fp.isfinite, 1] for fp in ot.focal_planes if fp.tot_weight is not None]
+    dists = [
+        fp.dist[fp.isfinite] * 180 * 60 * 60 / np.pi
+        for fp in ot.focal_planes
+        if fp.tot_weight is not None
+    ]
+    xis = [
+        fp.transformed[fp.isfinite, 0]
+        for fp in ot.focal_planes
+        if fp.tot_weight is not None
+    ]
+    etas = [
+        fp.transformed[fp.isfinite, 1]
+        for fp in ot.focal_planes
+        if fp.tot_weight is not None
+    ]
 
     # Plot the radial dist
     r = np.sqrt(np.hstack(xis) ** 2 + np.hstack(etas) ** 2)
@@ -641,14 +763,12 @@ def plot_by_gamma(focal_plane, plot_dir):
 
 
 def plot_receiver(receiver, plot_dir):
+    valid_ids = receiver.valid_ids
     max_diff = 0
-    valid_ids = []
     for fp in receiver.focal_planes:
         diff = np.nanpercentile(np.abs(fp.diff), 97)
         if diff > max_diff:
             max_diff = diff
-        valid_ids += list(fp.template.valid_ids)
-    valid_ids = np.unique(valid_ids)
     max_diff *= 180 * 60 * 60 / np.pi
     xlims, ylims = receiver.lims
 
@@ -668,7 +788,7 @@ def plot_receiver(receiver, plot_dir):
         for fp in receiver.focal_planes:
             if fp.tot_weight is None:
                 continue
-            msk = (fp.template.id_strs == valid_ids[i]) * fp.isfinite
+            msk = (fp.id_strs == valid_ids[i]) * fp.isfinite
             if np.sum(msk) < 3:
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
