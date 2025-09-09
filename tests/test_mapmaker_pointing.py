@@ -135,6 +135,7 @@ class MapmakerPointingTest(unittest.TestCase):
             comps="TQU",
             nmat_type="Nmat",
             maxiter=[3],
+            weather="typical",
             truncate_tod=False,
             write_hits=True,
             write_rhs=False,
