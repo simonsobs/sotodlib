@@ -319,13 +319,8 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    logger.info("Restricting detectors on all processes")
-    keep_all = np.ones(meta.dets.count,dtype=bool)
-    for process in pipe[:]:
-        keep = process.select(meta, in_place=False)
-        if isinstance(keep, np.ndarray):
-            keep_all &= keep
-    meta.restrict("dets", meta.dets.vals[keep_all])
+    logger.info(f"Cutting on the last process: {pipe[-1].name}")
+    pipe[-1].select(meta)
     return meta
 
 
@@ -372,7 +367,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
-        pipe.run(aman, aman.preprocess, select=False)
+        pipe.run(aman, aman.preprocess)
         return aman
 
 
