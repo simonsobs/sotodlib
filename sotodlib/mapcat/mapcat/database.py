@@ -77,8 +77,10 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
         List of pointing residual table associated with d1 map
     tods: list[TODDepthOneTable]
         List of tods associated with d1 map
-    pipeline_information: list[PipelineInformation]
+    pipeline_information: list[PipelineInformationTable]
         List of pipeline info associed with d1 map
+    depth_one_sky_coverage : list[SkyCoverageTable]
+        List of sky coverage patches for d1 map.
     """
 
     __tablename__ = "depth_one_maps"
@@ -102,6 +104,10 @@ class DepthOneMapTable(DepthOneMap, SQLModel, table=True):
         cascade_delete=True,
     )
     pipeline_information: list["PipelineInformationTable"] = Relationship(
+        back_populates="dmap",
+        cascade_delete=True,
+    )
+    depth_one_sky_coverage: list["SkyCoverageTable"] = Relationship(
         back_populates="dmap",
         cascade_delete=True,
     )
@@ -572,13 +578,13 @@ class PipelineInformationTable(PipelineInformation, SQLModel, table=True):
 
     dmap: DepthOneMapTable = Relationship(back_populates="pipeline_information")
 
-    def to_model(self) -> PointingResidual:
+    def to_model(self) -> PipelineInformation:
         """
         Return pipeline information from table.
 
         Returns
         -------
-        PipelineInformation : PointPipelineInformationingResidual
+        PipelineInformation : PipelineInformation
             Pipeline information corresponding to this depth-1 map
         """
         return PipelineInformation(
@@ -590,12 +596,79 @@ class PipelineInformationTable(PipelineInformation, SQLModel, table=True):
         )
 
 
+class SkyCoverage(BaseModel):
+    """
+    Sky coverage for a depth one map.
+
+    Attributes
+    ----------
+    id : str
+        Internal ID of the sky coverage
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    patch_coverage : str
+        String which represents the sky coverage of the d1map
+    """
+
+    id: int
+    map_name: str
+    patch_coverage: str
+
+    def __repr__(self):
+        # TODO: patch_coverage probably won't be human readable, this should probably
+        # parse patch_coverage into somethin you can read.
+        return f"PipelineInformation(id={self.id}, map_name={self.map_name} has sky coverage {self.patch_coverage}"  # pragma: no cover
+
+
+class SkyCoverageTable(SkyCoverage, SQLModel, table=True):
+    """
+    Table for tracking sky coverage for a depth one map.
+
+    Attributes
+    ----------
+    id : str
+        Internal ID of the sky coverage
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    patch_coverage : str
+        String which represents the sky coverage of the d1map
+    """
+
+    __tablename__ = "depth_one_sky_coverage"
+    id: int = Field(primary_key=True)
+    map_name: str = Field(
+        index=True,
+        nullable=False,
+        foreign_key="depth_one_maps.map_name",
+        ondelete="CASCADE",
+    )
+    patch_coverage: str = Field(nullable=False, index=True)
+
+    dmap: DepthOneMapTable = Relationship(back_populates="depth_one_sky_coverage")
+
+    def to_model(self) -> SkyCoverage:
+        """
+        Return sky coverage from table.
+
+        Returns
+        -------
+        SkyCoverage : SkyCoverage
+            Sky coverage corresponding to this depth-1 map
+        """
+        return SkyCoverage(
+            id=self.id,
+            map_name=self.map_name,
+            patch_coverage=self.patch_coverage,
+        )
+
+
 ALL_TABLES = [
     DepthOneMapTable,
     ProcessingStatusTable,
     PointingResidualTable,
     TODDepthOneTable,
     PipelineInformationTable,
+    SkyCoverageTable,
 ]
 
 

@@ -18,6 +18,8 @@ from sotodlib.mapcat.mapcat.database import (
     TODDepthOneTable,
     PipelineInformation,
     PipelineInformationTable,
+    SkyCoverage,
+    SkyCoverageTable,
 )
 
 # TODO: Should update functions have none defaults? This would also entail reodering all funcs to put session immediately after id
@@ -248,7 +250,7 @@ def get_processing_status(proc_id: int, session: Session) -> ProcessingStatus:
 
     Returns
     -------
-    proc_stat.to_service() : ProcessingStatus
+    proc_stat.to_model() : ProcessingStatus
         Requested entry for depth 1 map
 
     Raises
@@ -407,7 +409,7 @@ def get_pointing_residual(point_id: int, session: Session) -> PointingResidual:
 
     Returns
     -------
-    point_resid.to_service() : PointingResidual
+    point_resid.to_model() : PointingResidual
         Requested pointing residual for depth 1 map
 
     Raises
@@ -642,7 +644,7 @@ def get_tod(tod_id: int, session: Session) -> TODDepthOne:
 
     Returns
     -------
-    tod.to_service() : TODDepthOne
+    tod.to_model() : TODDepthOne
         Requested tod
 
     Raises
@@ -878,7 +880,7 @@ def get_pipeline_information(pipe_id: int, session: Session) -> PipelineInformat
 
     Returns
     -------
-    pipe_info.to_service() : PipelineInformation
+    pipe_info.to_model() : PipelineInformation
         Requested pipeline info for depth 1 map
 
     Raises
@@ -982,6 +984,145 @@ def delete_pipeline_information(pipe_id: int, session: Session) -> None:
             raise ValueError(f"Pipeline info with ID {pipe_id} not found.")
 
         session.delete(pipe_info)
+        session.commit()
+
+    return
+
+
+def create_sky_coverage(
+    map_name: str,
+    patch_coverage: str,
+    session: Session,
+) -> SkyCoverage:
+    """
+    Create a entry tracking depth one map Sky coverage for a depth one map.
+
+    Parameters
+    ----------
+    id : str
+        Internal ID of the sky coverage
+    map_name : str
+        Name of depth 1 map being tracked. Foreign into DepthOneMap
+    patch_coverage : str
+        String which represents the sky coverage of the d1map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    sky_cov.to_model() : SkyCoverage
+        PipelineInformation instance initialized with parameters above
+    """
+    sky_cov = SkyCoverageTable(
+        map_name=map_name,
+        patch_coverage=patch_coverage,
+    )
+    with session.begin():
+        session.add(sky_cov)
+        session.commit()
+
+    return sky_cov.to_model()
+
+
+def get_sky_coverage(sky_id: int, session: Session) -> SkyCoverage:
+    """
+    Get a depth 1 map sky coverage by (sky coverage) id.
+
+    Parameters
+    ----------
+    sky_id : int
+        ID of sky coverage
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    sky_cov.to_model() : SkyCoverage
+        Requested sky coverage for depth 1 map
+
+    Raises
+    ------
+    ValueError
+        If sky coverage is not found
+    """
+    sky_cov = session.get(SkyCoverageTable, sky_id)
+
+    if sky_cov is None:
+        raise ValueError(f"Sky coverage with ID {sky_id} not found.")
+
+    return sky_cov.to_model()
+
+
+def update_sky_coverage(
+    sky_id: int,
+    map_name: str | None,
+    patch_coverage: str | None,
+    session: Session,
+) -> SkyCoverage:
+    """
+    Update a depth one map pipeline information.
+
+    Parameters
+    ----------
+    pipe_id : int
+        Internal ID of the pointing residual
+    patch_coverage : str
+        String which represents the sky coverage of the d1map
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    sky_cov.to_model() : SkyCoverage
+        SkyCoverage instance updated with parameters above
+
+    Raises
+    ------
+    ValueError
+        If the sky coverage is not found
+    """
+    with session.begin():
+        sky_cov = session.get(SkyCoverageTable, sky_id)
+
+        if sky_cov is None:
+            raise ValueError(f"Sky coverage with ID {sky_id} not found.")
+        sky_cov.map_name = map_name if map_name is not None else sky_cov.map_name
+        sky_cov.patch_coverage = (
+            patch_coverage if patch_coverage is not None else sky_cov.patch_coverage
+        )
+
+        session.commit()
+
+    return sky_cov.to_model()
+
+
+def delete_sky_coverage(sky_id: int, session: Session) -> None:
+    """
+    Delete a sky coverage of a map from database
+
+    Parameters
+    ----------
+    sky_id : int
+        Internal ID of the sky coverage
+    session : Session
+        Session to use
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If the sky coverage is not found
+    """
+    with session.begin():
+        sky_cov = session.get(SkyCoverageTable, sky_id)
+
+        if sky_cov is None:
+            raise ValueError(f"Sky coverage with ID {sky_id} not found.")
+
+        session.delete(sky_cov)
         session.commit()
 
     return
