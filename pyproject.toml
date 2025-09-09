@@ -29,6 +29,10 @@ dependencies = [
   "psycopg2-binary",
   "lmfit",
   "flacarray>=0.3",
+  "fastapi",
+  "sqlalchemy",
+  "pydantic",
+  "sqlmodel",
 ]
 dynamic=["version"]
 classifiers = [
