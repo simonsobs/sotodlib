@@ -678,7 +678,7 @@ def demod_tod(aman, signal=None, demod_mode=4,
     # Filter the demodulated signal
     demod_aman = core.AxisManager(aman.dets, aman.samps)
     demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
-    demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman.wrap("dsT", aman[signal_name].copy(), axis_map=[(0, 'dets'), (1, 'samps')])
     demod_aman["dsT"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None, rfft=rfft)
     demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
     demod_aman["demodQ"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None, rfft=rfft)
