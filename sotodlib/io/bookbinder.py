@@ -602,7 +602,7 @@ class SmurfStreamProcessor:
             self.times >= self.min_ctime,
             self.times <= self.max_ctime,
         ], axis=0)
-        if np.any( np.diff(self.times[msk]) < 0):
+        if np.any(np.diff(self.times[msk]) <= 0):
             raise BadTimeSamples(
                 f"{self.obs_id} has time samples not increasing"
             )
