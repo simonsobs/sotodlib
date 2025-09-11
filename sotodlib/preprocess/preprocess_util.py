@@ -993,7 +993,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
                 proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-                aman.preprocess.move('valid', None)
+                if 'valid' in aman.preprocess:
+                    aman.preprocess.move('valid', None)
                 aman.preprocess.merge(proc_aman)
 
                 return error, [obs_id, dets], outputs_proc, aman
@@ -1061,7 +1062,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
             proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-            aman.preprocess.move('valid', None)
+            if 'valid' in aman.preprocess:
+                aman.preprocess.move('valid', None)
             aman.preprocess.merge(proc_aman)
 
             return error, outputs_init, outputs_proc, aman
