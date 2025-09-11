@@ -225,7 +225,7 @@ def main_one_obs(configs, obs_id, sso_name=None,
     
     logger.info(f'Found saved data for these wafer_slots: {finished_wafer_slots}')
     logger.info(f'Will continue for these wafer_slots: {processed_wafer_slots}')
-    logger.info("using filelock")
+    
     if configs.get('parallel_job'):
         logger.info('Continuing with parallel job')
         try:
