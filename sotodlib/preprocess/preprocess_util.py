@@ -898,10 +898,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         group_by, groups, error = get_groups(obs_id, configs_init, context_init)
 
     if error is not None:
-        if return_full:
-            return error[0], [error[1], error[2]], [error[1], error[2]], None, None
-        else:
-            return error[0], [error[1], error[2]], [error[1], error[2]], None
+        return error[0], [error[1], error[2]], [error[1], error[2]], None, None
 
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
@@ -936,7 +933,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
                                                       configs_proc=configs_proc, logger=logger)
                 error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman
+                return error, [obs_id, dets], [obs_id, dets], aman, None
             except Exception as e:
                 error = f'Failed to load: {obs_id} {dets}'
                 errmsg = f'{type(e)}: {e}'
@@ -953,11 +950,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
+                return error, [errmsg, tb], [errmsg, tb], None, None
 
             if configs_proc is None:
                 error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman
+                return error, [obs_id, dets], [obs_id, dets], aman, None
             else:
                 try:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
