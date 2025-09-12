@@ -513,6 +513,28 @@ class Pipeline(list):
                 success = process.name
                 break
 
+        if run_calc:
+            _, fs_dets, ns_dets = full.dets.intersection(
+                proc_aman.dets,
+                return_slices=True
+            )
+            _, fs_samps, ns_samps = full.samps.intersection(
+                proc_aman.samps,
+                return_slices=True
+            )
+
+            x = Ranges( full.samps.count )
+            m = x.mask()
+            m[fs_samps] = True
+            v = Ranges.from_mask(m)
+
+            valid = RangesMatrix(
+                [v if i in fs_dets else x for i in range(full.dets.count)]
+            )
+            if 'valid' in full:
+                full.move('valid', None)
+            full.wrap('valid', valid, [(0,'dets'),(1,'samps')])
+
         # copy updated frequency cutoffs to full
         if "frequency_cutoffs" in full:
             full.move("frequency_cutoffs", None)
