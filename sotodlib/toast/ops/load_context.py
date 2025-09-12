@@ -124,7 +124,7 @@ class LoadContext(Operator):
     preprocess_config = Unicode(
         None,
         allow_none=True,
-        help="Apply pre-processing with this configuration",
+        help="Apply site-pipeline pre-processing with this configuration",
     )
 
     observations = List(list(), help="List of observation IDs to load")

@@ -7,6 +7,7 @@
 # Namespace imports
 
 from .act_sign import ActSign
+from .bias_cut import DetBiasCuts
 from .corotator import CoRotator
 from .sim_sso import SimSSO
 from .sim_catalog import SimCatalog

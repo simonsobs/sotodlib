@@ -16,6 +16,7 @@ from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
 
+from ...coords import pointing_model
 from ...core import Context, AxisManager
 from ...core.axisman import AxisInterface
 from ...preprocess import Pipeline as PreProcPipe
@@ -116,6 +117,15 @@ def read_and_preprocess_wafers(
             log.debug(
                 f"LoadContext {obs_name} loaded wafer {wf} in {elapsed} seconds",
             )
+
+            # Apply pointing model, UNLESS we are applying a preprocess config
+            # on load and that config includes the pointing model
+            if "pointing_model" in axtod:
+                if (
+                    preconfig is None
+                    or "pointing_model" not in preconfig["process_pipe"]
+                ):
+                    pointing_model.apply_pointing_model(axtod)
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
@@ -803,7 +813,7 @@ def ax_name_fp_subst(var, fp_array, det=None):
     out = ""
     last = 0
     for match in re.finditer(r"(\{.*\})", var):
-        out += var[last:match.start()]
+        out += var[last : match.start()]
         colname = match.group()
         colname = colname.replace("{", "")
         colname = colname.replace("}", "")
