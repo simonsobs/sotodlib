@@ -149,7 +149,10 @@ class DetBiasCuts(Operator):
                     log.debug(msg)
                     bias_flags[det] = self.bias_mask
                     continue
-                if len(self.psat_range) == 2:
+                if len(self.psat_range) != 0:
+                    if len(self.psat_range) != 2:
+                        msg = "psat_range should be a 2-tuple with the low, high values"
+                        raise RuntimeError(msg)
                     if p_sat_key not in cnames:
                         msg = f"{ob.name}:{det} no focalplane key '{p_sat_key}',"
                         msg += " but PSAT range specified. Cutting."
@@ -165,7 +168,10 @@ class DetBiasCuts(Operator):
                         log.debug(msg)
                         bias_flags[det] = self.bias_mask
                         continue
-                if len(self.rn_range) == 2:
+                if len(self.rn_range) != 0:
+                    if len(self.rn_range) != 2:
+                        msg = "rn_range should be a 2-tuple with the low, high values"
+                        raise RuntimeError(msg)
                     if r_n_key not in cnames:
                         msg = f"{ob.name}:{det} no focalplane key '{r_n_key}',"
                         msg += " but r_n range specified. Cutting."
