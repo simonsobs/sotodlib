@@ -681,6 +681,8 @@ def cleanup_archive(configs, logger=None):
                         logger.debug(f"{key} not found in db. deleting it from {latest_file}.")
                         del f[key]
 
+        db.conn.close()
+
 
 def save_group(obs_id, configs, dets, context=None, subdir='temp'):
     """This function returns a dictionary containing the data destination filename
