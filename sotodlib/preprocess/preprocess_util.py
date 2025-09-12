@@ -876,6 +876,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         See output_init for possible values.
     aman: Core.AxisManager
         Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
+    proc_aman: Core.AxisManager or None
+        If return_proc_aman is ``True``, the unrestricted preprocessing axis manager
+        is returned when the pipelines are run.  None is returned when loading
+        from only the first layer or from both layers, when an error occurs,
+        or when return_proc_aman is ``False``.
     """
 
     if logger is None:
