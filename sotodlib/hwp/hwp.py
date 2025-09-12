@@ -751,12 +751,18 @@ def get_tau_hwp(
         An AxisManager containing time constants, their errors, and reduced
         chi-squared statistics.
     """
-    if wn is None:
-        wn = np.ones(aman.dets.count)
-
     hwp_rate = np.gradient(np.unwrap(aman.hwp_angle) * 200 / 2 / np.pi)
     if 'hwp_rate' not in aman:
         aman.wrap('hwp_rate', hwp_rate, [(0, 'samps')])
+
+    if wn is None:
+        # Calculate white noise from section with low hwp speed.
+        idx = np.where(abs(hwp_rate) < .5)[0]
+        s = aman.samps.offset + idx[0]
+        e = aman.samps.offset + idx[-1]
+        aman_short = aman.restrict('samps', (s, e), in_place=False)
+        freqs, Pxx, nseg = fft_ops.calc_psd(aman_short, full_output=True)
+        wn = fft_ops.calc_wn(aman_short, pxx=Pxx, freqs=freqs, nseg=nseg)
 
     idx = np.where((min_fhwp < abs(hwp_rate)) & (abs(hwp_rate) < max_fhwp))[0]
     start = idx[0]
@@ -785,8 +791,8 @@ def get_tau_hwp(
                 axis_map=[(0, 'dets'), (1, 'sections')])
     result.wrap('demodU', np.transpose(demodU),
                 axis_map=[(0, 'dets'), (1, 'sections')])
-    result.wrap('weights', np.sqrt(width/2/abs(hwp_freq[None, :]))/wn[:, None],
-                axis_map=[(0, 'dets'), (1, 'sections')])
+    result.wrap('weights', np.sqrt(width/200)/wn,
+                axis_map=[(0, 'dets')])
 
     logger.debug('Fit time constant')
     AQ = np.full(result.dets.count, np.nan)
@@ -810,7 +816,7 @@ def get_tau_hwp(
                 data=result.demodQ[i] + 1j * result.demodU[i],
                 params=params,
                 fhwp=result.hwp_freq,
-                weights=result.weights[i],
+                weights=np.full(result.sections.count, result.weights[i])
             )
             AQ[i] = fit.params['AQ'].value
             AQ_error[i] = fit.params['AQ'].stderr
