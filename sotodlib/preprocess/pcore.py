@@ -58,7 +58,7 @@ class _Preprocess(object):
             Transfer Function simulations and determining which steps should be run.
         """
         if self.process_cfgs is None:
-            return
+            return aman, proc_aman
         raise NotImplementedError
         
     def calc_and_save(self, aman, proc_aman):
@@ -79,7 +79,7 @@ class _Preprocess(object):
             pipeline.
         """
         if self.calc_cfgs is None:
-            return
+            return aman, proc_aman
         raise NotImplementedError
     
     def save(self, proc_aman, *args):
@@ -496,9 +496,9 @@ class Pipeline(list):
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
-            process.process(aman, proc_aman, sim)
+            aman, proc_aman = process.process(aman, proc_aman, sim)
             if run_calc:
-                process.calc_and_save(aman, proc_aman)
+                aman, proc_aman = process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full, self.wrap_valid)
             if update_plot:
