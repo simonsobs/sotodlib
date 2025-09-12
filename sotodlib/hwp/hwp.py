@@ -705,21 +705,21 @@ def tau_model(fhwp, tau, AQ, AU, mode):
 def get_tau_hwp(
     aman,
     width=1000,
+    apodize_samps=2000,
+    trim_samps=2000,
     min_fhwp=1.,
-    max_fhwp=2.02,
+    max_fhwp=2.,
     demod_mode=4,
     wn=None,
+    full_output=False,
     merge=False,
     name='tau_hwp'
 ):
     """
     Analyze observation with hwp spinning up or spinning down and
     compute the timeconstant of detectors.
-    This splits the TOD to small sections and demoulate individual section
-    to estimate the average half-wave plate synchronous signal of each
-    section, then estimate timeconstant from its dependence on hwp
-    rotation speed.
-
+    This demoulate tod and estimate timeconstant from hwp rotation
+    speed depdndence of half-wave plate synchronous signal.
 
     Parameters
     ----------
@@ -727,6 +727,10 @@ def get_tau_hwp(
         AxisManager object containing the TOD data.
     width: int optional
         width of single section of TOD.
+    apodize_samps: int optional
+        Number of samples on tod ends to apodize.
+    trim_samps: int optional
+        Number of samples on tod ends to trim.
     min_fhwp: float optional
         Mininum rotation frequency of hwp to be used for calculation.
     max_fhwp: float optional
@@ -736,12 +740,11 @@ def get_tau_hwp(
     wn: str or None
         Precomputed white noise level of signal to be used for weights of
         fitting. If none, the fitting weights will be 1.
-    flag_name : str or None
-        Name of the flag field in `aman` to use for masking data. If None,
-        no masking is applied.
-    merge: bool, optional
+    full_output: bool optional
+        Whether to output all the statistics used for fitting.
+    merge: bool optional
         Whether to merge calculated statistics to `aman`. Default is False.
-    name: str, optional
+    name: str optional
         Name under which to wrap the calculated statistics.
         Default is 'tau_hwp'.
 
@@ -751,6 +754,16 @@ def get_tau_hwp(
         An AxisManager containing time constants, their errors, and reduced
         chi-squared statistics.
     """
+
+    lpf_cfg = {'type': 'sine2',
+               'cutoff': min_fhwp * 0.95,
+               'trans_width': 0.1}
+    # no band pass filter
+    bpf_cfg = {'type': 'sine2',
+               'center': 0,
+               'width': 200,
+               'trans_width': 0.1}
+
     hwp_rate = np.gradient(np.unwrap(aman.hwp_angle) * 200 / 2 / np.pi)
     if 'hwp_rate' not in aman:
         aman.wrap('hwp_rate', hwp_rate, [(0, 'samps')])
@@ -761,62 +774,59 @@ def get_tau_hwp(
         s = aman.samps.offset + idx[0]
         e = aman.samps.offset + idx[-1]
         aman_short = aman.restrict('samps', (s, e), in_place=False)
-        freqs, Pxx, nseg = fft_ops.calc_psd(aman_short, full_output=True)
+        freqs, Pxx, nseg = fft_ops.calc_psd(aman_short, noverlap=0,
+                                            full_output=True)
         wn = fft_ops.calc_wn(aman_short, pxx=Pxx, freqs=freqs, nseg=nseg)
 
+    tod_ops.detrend_tod(aman, "median")
+    tod_ops.apodize.apodize_cosine(aman, apodize_samps=apodize_samps)
+    demod_tod(aman, demod_mode=demod_mode,
+              lpf_cfg=lpf_cfg, bpf_cfg=bpf_cfg, wrap=True)
+
     idx = np.where((min_fhwp < abs(hwp_rate)) & (abs(hwp_rate) < max_fhwp))[0]
-    start = idx[0]
-    end = idx[-1]
-    sections = core.OffsetAxis('sections', count=int((end-start)/width),
-                               offset=0)
-    result = core.AxisManager(aman.dets, sections)
+    s = idx[0] if trim_samps < idx[0] else trim_samps
+    e = idx[-1] if trim_samps < aman.samps.count - idx[-1] \
+        else aman.samps.count - trim_samps
+    s += aman.samps.offset
+    e += aman.samps.offset
 
-    hwp_freq, demodQ, demodU = [], [], []
-    timestamps = []
-    for i in range(result.sections.count):
-        s = aman.samps.offset + start + i * width
-        e = s + width
-        aman_short = aman.restrict('samps', (s, e), in_place=False)
-        _, _demodQ, _demodU = demod_tod(aman_short, demod_mode=demod_mode,
-                                        wrap=False)
-        timestamps.append(np.median(aman_short.timestamps))
-        hwp_freq.append(np.median(aman_short.hwp_rate))
-        demodQ.append(np.median(_demodQ, axis=1))
-        demodU.append(np.median(_demodU, axis=1))
+    aman.restrict('samps', (s, e), in_place=True)
 
-    hwp_freq = np.array(hwp_freq)
-    result.wrap('timestamps', np.array(timestamps), axis_map=[(0, 'sections')])
-    result.wrap('hwp_freq', hwp_freq, axis_map=[(0, 'sections')])
-    result.wrap('demodQ', np.transpose(demodQ),
-                axis_map=[(0, 'dets'), (1, 'sections')])
-    result.wrap('demodU', np.transpose(demodU),
-                axis_map=[(0, 'dets'), (1, 'sections')])
-    result.wrap('weights', np.sqrt(width/200)/wn,
-                axis_map=[(0, 'dets')])
+    nsections = int(aman.samps.count / width)
+    timestamps = np.zeros(nsections)
+    hwp_rate = np.zeros(nsections)
+    demodQ = np.zeros((nsections, aman.dets.count))
+    demodU = np.zeros((nsections, aman.dets.count))
+    weights = np.sqrt(width/200)/wn
+    for i in range(nsections):
+        timestamps[i] = np.median(aman.timestamps[i*width:(i+1)*width])
+        hwp_rate[i] = np.median(aman.hwp_rate[i*width:(i+1)*width])
+        demodQ[i] = np.median(aman.demodQ[:, i*width:(i+1)*width], axis=1)
+        demodU[i] = np.median(aman.demodU[:, i*width:(i+1)*width], axis=1)
 
     logger.debug('Fit time constant')
-    AQ = np.full(result.dets.count, np.nan)
-    AQ_error = np.full(result.dets.count, np.nan)
-    AU = np.full(result.dets.count, np.nan)
-    AU_error = np.full(result.dets.count, np.nan)
-    tau = np.full(result.dets.count, np.nan)
-    tau_error = np.full(result.dets.count, np.nan)
-    redchi2s = np.full(result.dets.count, np.nan)
-    for i in range(result.dets.count):
+    AQ = np.full(aman.dets.count, np.nan)
+    AQ_error = np.full(aman.dets.count, np.nan)
+    AU = np.full(aman.dets.count, np.nan)
+    AU_error = np.full(aman.dets.count, np.nan)
+    tau = np.full(aman.dets.count, np.nan)
+    tau_error = np.full(aman.dets.count, np.nan)
+    redchi2s = np.full(aman.dets.count, np.nan)
+    for i in range(aman.dets.count):
         try:
             model = LmfitModel(tau_model, independent_vars=['fhwp'])
             model.set_param_hint('mode', vary=False)
             params = model.make_params(
                 tau=1e-3,
-                AQ=np.median(result.demodQ[i]),
-                AU=np.median(result.demodU[i]),
+                AQ=np.median(demodQ[:, i]),
+                AU=np.median(demodU[:, i]),
                 mode=demod_mode,
             )
             fit = model.fit(
-                data=result.demodQ[i] + 1j * result.demodU[i],
+                data=demodQ[:, i] + 1j * demodU[:, i],
                 params=params,
-                fhwp=result.hwp_freq,
-                weights=np.full(result.sections.count, result.weights[i])
+                fhwp=hwp_rate,
+                weights=np.full(nsections, weights[i])
             )
             AQ[i] = fit.params['AQ'].value
             AQ_error[i] = fit.params['AQ'].stderr
@@ -828,6 +838,20 @@ def get_tau_hwp(
         except Exception:
             logger.debug(f'Failed to fit {aman.dets.vals[i]}')
 
+    if full_output:
+        sections = core.OffsetAxis('sections', count=nsections,
+                                   offset=0)
+        result = core.AxisManager(aman.dets, sections)
+        result.wrap('timestamps', timestamps, axis_map=[(0, 'sections')])
+        result.wrap('hwp_rate', hwp_rate, axis_map=[(0, 'sections')])
+        result.wrap('demodQ', np.transpose(demodQ),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+        result.wrap('demodU', np.transpose(demodU),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+        result.wrap('weights', weights,
+                    axis_map=[(0, 'dets')])
+    else:
+        result = core.AxisManager(aman.dets)
     result.wrap('AQ', AQ, axis_map=[(0, 'dets')])
     result.wrap('AQ_error', AQ_error, axis_map=[(0, 'dets')])
     result.wrap('AU', AU, axis_map=[(0, 'dets')])

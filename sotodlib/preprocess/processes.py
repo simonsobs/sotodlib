@@ -2512,10 +2512,11 @@ class GetTauHWP(_Preprocess):
         - name: "get_tau_hwp"
           calc:
             width: 1000
+            apodize_samps: 2000
+            trim_samps: 2000
             min_fhwp: 1
             max_fhwp: 2
             demod_mode: 4
-            wn: None
             name: "tau_hwp"
             merge: False
           save: True
