@@ -410,9 +410,9 @@ def main(
             preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False)
 
     # remove datasets from final archive file not found in db
-    pp_util.cleanup_archive(preprocess_config[0], L)
+    preprocess_util.cleanup_archive(preprocess_config[0], L)
     if len(preprocess_config) > 1:
-        pp_util.cleanup_archive(preprocess_config[1], L)
+        preprocess_util.cleanup_archive(preprocess_config[1], L)
 
     run_list = []
     for oi, ol in enumerate(obslists_arr):
