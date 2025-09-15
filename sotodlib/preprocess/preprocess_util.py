@@ -365,8 +365,8 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
     configs, context = get_preprocess_context(configs, context)
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    if 'valid' in meta.preprocess:
-        keep = has_any_cuts(meta.preprocess.valid)
+    if 'valid_data' in meta.preprocess:
+        keep = has_any_cuts(meta.preprocess.valid_data)
         meta.restrict("dets", keep)
     else:
         det_vals = load_preprocess_det_select(obs_id, configs=configs, context=context,
@@ -451,8 +451,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all proc pipeline processes")
-            if 'valid' in meta_proc.preprocess:
-                keep_all = has_any_cuts(meta_proc.preprocess.valid)
+            if 'valid_data' in meta_proc.preprocess:
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data)
             else:
                 keep_all = np.ones(meta_proc.dets.count, dtype=bool)
                 for process in pipe_proc[:]:
@@ -471,8 +471,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
-            if 'valid' in aman.preprocess:
-                aman.preprocess.move('valid', None)
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
             pipe_proc.run(aman, aman.preprocess, select=False)
 
@@ -590,8 +590,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
-            if 'valid' in aman.preprocess:
-                aman.preprocess.move('valid', None)
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
             pipe_proc.run(aman, aman.preprocess, sim=True)
 
@@ -956,7 +956,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 try:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
                     init_fields = aman.preprocess._fields.copy()
-                    init_fields.pop('valid', None)
+                    init_fields.pop('valid_data', None)
                     logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                     # pipeline for init config
                     pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
@@ -993,8 +993,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
                 proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-                if 'valid' in aman.preprocess:
-                    aman.preprocess.move('valid', None)
+                if 'valid_data' in aman.preprocess:
+                    aman.preprocess.move('valid_data', None)
                 aman.preprocess.merge(proc_aman)
 
                 return error, [obs_id, dets], outputs_proc, aman
@@ -1029,7 +1029,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
                 init_fields = aman.preprocess._fields.copy()
-                init_fields.pop('valid', None)
+                init_fields.pop('valid_data', None)
                 logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                 # pipeline for processing config
                 pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
@@ -1062,8 +1062,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
             proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
-            if 'valid' in aman.preprocess:
-                aman.preprocess.move('valid', None)
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman)
 
             return error, outputs_init, outputs_proc, aman

@@ -246,6 +246,36 @@ def _ranges_match( o, n, oidx, nidx):
     omsk[oidx[0]] = nmsk[nidx[0]]
     return Ranges.from_mask(omsk)
 
+def _wrap_valid_ranges(new, out, valid_name="valid"):
+    """Wraps in a new Ranges field into out that tracks the current number of
+    detectors and samples."""
+    if 'dets' in new._axes:
+        _, fs_dets, ns_dets = out.dets.intersection(
+            new.dets,
+            return_slices=True
+        )
+    else:
+        fs_dets = range(out.dets.count)
+    if 'samps' in new._axes:
+        _, fs_samps, ns_samps = out.samps.intersection(
+            new.samps,
+            return_slices=True
+        )
+    else:
+        fs_samps = slice(None)
+
+    x = Ranges( out.samps.count )
+    m = x.mask()
+    m[fs_samps] = True
+    v = Ranges.from_mask(m)
+
+    valid = RangesMatrix(
+        [v if i in fs_dets else x for i in range(out.dets.count)]
+    )
+    if valid_name in out:
+        out.move(valid_name, None)
+    out.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
+
 def _expand(new, full, wrap_valid=True):
     """new will become a top level axismanager in full once it is matched to
     size"""
@@ -321,15 +351,8 @@ def _expand(new, full, wrap_valid=True):
                     # Skip expansion for scalar array with no axes.
                     out[k] = v
     if wrap_valid:
-        x = Ranges( full.samps.count )
-        m = x.mask()
-        m[fs_samps] = True
-        v = Ranges.from_mask(m)
+        _wrap_valid_ranges(new, full)
 
-        valid = RangesMatrix( 
-            [v if i in fs_dets else x for i in range(full.dets.count)]
-        )
-        out.wrap('valid',valid,[(0,'dets'),(1,'samps')])
     return out
 
 def update_full_aman(proc_aman, full, wrap_valid):
@@ -514,26 +537,7 @@ class Pipeline(list):
                 break
 
         if run_calc:
-            _, fs_dets, ns_dets = full.dets.intersection(
-                proc_aman.dets,
-                return_slices=True
-            )
-            _, fs_samps, ns_samps = full.samps.intersection(
-                proc_aman.samps,
-                return_slices=True
-            )
-
-            x = Ranges( full.samps.count )
-            m = x.mask()
-            m[fs_samps] = True
-            v = Ranges.from_mask(m)
-
-            valid = RangesMatrix(
-                [v if i in fs_dets else x for i in range(full.dets.count)]
-            )
-            if 'valid' in full:
-                full.move('valid', None)
-            full.wrap('valid', valid, [(0,'dets'),(1,'samps')])
+           _wrap_valid_ranges(proc_aman, full, valid_name='valid_data')
 
         # copy updated frequency cutoffs to full
         if "frequency_cutoffs" in full:
