@@ -246,9 +246,8 @@ def _ranges_match( o, n, oidx, nidx):
     omsk[oidx[0]] = nmsk[nidx[0]]
     return Ranges.from_mask(omsk)
 
-def _wrap_valid_ranges(new, out, valid_name="valid"):
-    """Wraps in a new Ranges field into out that tracks the current number of
-    detectors and samples."""
+def _intersect(new, out):
+    '''Get detector and samples intersection between ``new`` and ``out``.'''
     if 'dets' in new._axes:
         _, fs_dets, ns_dets = out.dets.intersection(
             new.dets,
@@ -256,6 +255,7 @@ def _wrap_valid_ranges(new, out, valid_name="valid"):
         )
     else:
         fs_dets = range(out.dets.count)
+        ns_dets = None
     if 'samps' in new._axes:
         _, fs_samps, ns_samps = out.samps.intersection(
             new.samps,
@@ -263,6 +263,15 @@ def _wrap_valid_ranges(new, out, valid_name="valid"):
         )
     else:
         fs_samps = slice(None)
+        ns_samps = None
+
+    return fs_dets, ns_dets, fs_samps, ns_samps
+
+def _wrap_valid_ranges(new, out, valid_name="valid"):
+    """Wraps in a new Ranges field into ``out`` that tracks the current number
+    of detectors and samples that intersect with ``new``.
+    """
+    fs_dets, _, fs_samps, _ = _intersect(new, out)
 
     x = Ranges( out.samps.count )
     m = x.mask()
@@ -279,20 +288,8 @@ def _wrap_valid_ranges(new, out, valid_name="valid"):
 def _expand(new, full, wrap_valid=True):
     """new will become a top level axismanager in full once it is matched to
     size"""
-    if 'dets' in new._axes:
-        _, fs_dets, ns_dets = full.dets.intersection(
-            new.dets, 
-            return_slices=True
-        )
-    else:
-        fs_dets = range(full.dets.count)
-    if 'samps' in new._axes:
-        _, fs_samps, ns_samps = full.samps.intersection(
-            new.samps, 
-            return_slices=True
-        )
-    else:
-        fs_samps = slice(None)
+
+    fs_dets, ns_dets, fs_samps, ns_samps = _intersect(new, full)
 
     out = core.AxisManager()
     for k, v in full._axes.items():
@@ -351,7 +348,7 @@ def _expand(new, full, wrap_valid=True):
                     # Skip expansion for scalar array with no axes.
                     out[k] = v
     if wrap_valid:
-        _wrap_valid_ranges(new, full)
+        _wrap_valid_ranges(new, out)
 
     return out
 
