@@ -10,8 +10,9 @@ import json
 import h5py
 import logging
 import numpy as np
-import alphashape
+# import alphashape
 from influxdb import InfluxDBClient
+from collections import defaultdict
 
 from sotodlib.io import hkdb
 from sotodlib.io.hkdb import HkConfig
@@ -24,6 +25,7 @@ class ReportDataConfig:
     def __init__(
         self,
         platform: Literal["satp1", "satp2", "satp3", "lat"],
+        site_url: str,
         ctx_path: str,
         start_time: Union[dt.datetime, float, str],
         stop_time: Union[dt.datetime, float, str],
@@ -31,17 +33,18 @@ class ReportDataConfig:
         buffer_time: float = 3600,
         influx_client_kw: Optional[Dict[str, Any]] = None,
         longterm_obs_file: Optional[str] = None,
-        preprocess_archive_path: Optional[str] = None,
-        load_cal_footprints: bool = True,
+        preprocess_sourcedb_path: Optional[str] = None,
+        load_source_footprints: bool = True,
         cal_targets: Optional[List[str]] = None,
         show_hk_pb: bool = False,
     ) -> None:
         self.ctx_path: str = ctx_path
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
+        self.site_url: str = site_url
         self.buffer_time: float = buffer_time
         self.longterm_obs_file: Optional[str] = longterm_obs_file
-        self.preprocess_archive_path: Optional[str] = preprocess_archive_path
-        self.load_cal_footprints: bool = load_cal_footprints
+        self.preprocess_sourcedb_path: Optional[str] = preprocess_sourcedb_path
+        self.load_source_footprints: bool = load_source_footprints
         self.show_hk_pb: bool = show_hk_pb
 
         if cal_targets is None:
@@ -339,11 +342,10 @@ class Footprint:
         coordinates.
     """
 
-    obs_id: str
-    target: str
-    xi_p: np.ndarray
-    eta_p: np.ndarray
-    bounds: Optional[np.ndarray] = None
+    wafer: str
+    source: str
+    count: int
+    obsids: List[str]
 
     def to_h5(self, group: h5py.Group):
         """
@@ -351,10 +353,7 @@ class Footprint:
         """
         group.attrs["target"] = self.target
         group.attrs["obs_id"] = self.obs_id
-        group.create_dataset("xi_p", data=self.xi_p)
-        group.create_dataset("eta_p", data=self.eta_p)
-        if self.bounds is not None:
-            group.create_dataset("bounds", data=self.bounds)
+        group.create_dataset("wafers", data=','.join(wafers.astype(str)))
 
     @classmethod
     def from_h5(cls, group: h5py.Group) -> "Footprint":
@@ -362,11 +361,8 @@ class Footprint:
         fp = cls(
             obs_id=group.attrs["obs_id"],
             target=group.attrs["target"],
-            xi_p=np.array(group["xi_p"]),
-            eta_p=np.array(group["eta_p"]),
+            wafers=np.array(group["wafers"]),
         )
-        if "bounds" in group:
-            fp.bounds = np.array(group["bounds"])
         return fp
 
 
@@ -394,7 +390,7 @@ class ReportData:
     cfg: ReportDataConfig
     obs_list: List[ObsInfo]
     pwv: np.ndarray
-    cal_footprints: Optional[List[Footprint]] = None
+    source_footprints: Optional[List[Footprint]] = None
     longterm_obs_df: Optional[pd.DataFrame] = None
 
     @classmethod
@@ -446,9 +442,10 @@ class ReportData:
             cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
         )
 
-        if cfg.load_cal_footprints:
-            logger.info("Loading Calibration Footprints")
-            data.cal_footprints = get_cal_footprints(data)
+        if cfg.load_source_footprints:
+            logger.info("Loading Source Footprints")
+            source_footprints = get_source_footprints(data)
+            data.source_footprints = source_footprints
         return data
 
     def save(self, path: str) -> None:
@@ -469,16 +466,21 @@ class ReportData:
             hdf.create_dataset("pwv", data=self.pwv)
             hdf.create_dataset("obs_list", data=obs_list_to_arr(self.obs_list))
 
-            if self.cal_footprints is not None:
-                fp_grp = hdf.create_group("cal_footprints")
-                for i, fp in enumerate(self.cal_footprints):
-                    grp = fp_grp.create_group(f"fp_{i}")
-                    grp.attrs["target"] = fp.target
-                    grp.attrs["obs_id"] = fp.obs_id
-                    grp.create_dataset("xi_p", data=fp.xi_p)
-                    grp.create_dataset("eta_p", data=fp.eta_p)
-                    if fp.bounds is not None:
-                        grp.create_dataset("bounds", data=fp.bounds)
+            if self.source_footprints is not None:
+                fp_grp = hdf.create_group("source_footprints")
+                wafers = np.array([fp.wafer for fp in self.source_footprints], dtype='S')
+                sources = np.array([fp.source for fp in self.source_footprints], dtype='S')
+                counts = np.array([fp.count for fp in self.source_footprints], dtype='i4')
+                obsids = np.array([','.join(fp.obsids).encode('utf-8') for fp in self.source_footprints], dtype=h5py.special_dtype(vlen=bytes))
+                fp_grp.create_dataset('wafer', data=wafers)
+                fp_grp.create_dataset('source', data=sources)
+                fp_grp.create_dataset('count', data=counts)
+                fp_grp.create_dataset('obsids', data=obsids)
+                # for i, fp in enumerate(self.source_footprints):
+                #     grp = fp_grp.create_group(f"fp_{i}")
+                #     grp.attrs["target"] = fp.target
+                #     grp.attrs["obs_id"] = fp.obs_id
+                #     grp.create_dataset("wafers", data=','.join(wafers.astype(str)))
 
     @classmethod
     def load(cls, path: str) -> "ReportData":
@@ -489,8 +491,19 @@ class ReportData:
             obs_list = arr_to_obs_list(hdf["obs_list"])
             pwv = np.array(hdf["pwv"])
 
-            if "cal_footprints" in hdf:
-                fps = [Footprint.from_h5(fp) for fp in hdf["cal_footprints"].values()]
+            if "source_footprints" in hdf:
+                fps = []
+                fp_grp = hdf["source_footprints"]
+                wafers = [w.decode() for w in fp_grp['wafer'][()]]
+                sources = [s.decode() for s in fp_grp['source'][()]]
+                counts = fp_grp['count'][()]
+                obsids_list = [o.decode().split(',') for o in fp_grp['obsids'][()]]
+
+                for wafer, source, count, obsids in zip(wafers, sources, counts, obsids_list):
+                    fps.append(Footprint(
+                        wafer=wafer, source=source, count=count, obsids=obsids
+                    ))
+                # fps = [Footprint.from_h5(fp) for fp in hdf["source_footprints"].values()]
             else:
                 fps = None
 
@@ -498,41 +511,41 @@ class ReportData:
             cfg=cfg,
             obs_list=obs_list,
             pwv=pwv,
-            cal_footprints=fps,
+            source_footprints=fps,
         )
 
 
-def get_cal_footprints(d: ReportData) -> List[Footprint]:
+def get_source_footprints(d: ReportData) -> List[Footprint]:
     fps: List[Footprint] = []
-    ctx = Context(d.cfg.ctx_path)
-    for o in d.obs_list:
-        if o.obs_type == "obs" and o.obs_subtype == "cmb":
-            try:
-                meta = ctx.get_meta(o.obs_id)
-            except Exception as e:
-                logger.error(f"{o.obs_id}: {e}")
-                continue
-            if meta.dets.count == 0:
-                continue
-            if 'sso_footprint' not in meta.preprocess:
-                    continue
-            for cal_target in d.cfg.cal_targets:
-                if cal_target in meta.preprocess.sso_footprint:
-                    fp = meta.preprocess.sso_footprint[cal_target]
-                    try:
-                        shape = alphashape.alphashape(
-                            np.vstack([fp["xi_p"], fp["eta_p"]]).T, alpha=5,
-                        )
-                        bounds = np.array(shape.boundary.coords)
-                    except:
-                        bounds = None
-                    fps.append(
-                        Footprint(
-                            obs_id=o.obs_id,
-                            target=cal_target,
-                            xi_p=np.array(fp["xi_p"]),
-                            eta_p=np.array(fp["eta_p"]),
-                            bounds=bounds,
-                        )
-                    )
+    db = ManifestDb(d.cfg.preprocess_sourcedb_path)
+    entries = db.inspect()
+    source_obs_list = []
+    for entry in db.inspect():
+        if (float(entry['obs:obs_id'].split('_')[1]) >= d.cfg.start_time.timestamp()) & \
+        (float(entry['obs:obs_id'].split('_')[1]) <= d.cfg.stop_time.timestamp()):
+            source_obs_list.append(entry['obs:obs_id'])
+            
+    coverage_data = defaultdict(lambda: defaultdict(lambda: {'count': 0, 'obsids': set()}))
+    
+    for obs in source_obs_list:
+        entry = db.inspect({'obs:obs_id': obs})
+        # coverage = np.array([hitpair.split(':') for hitpair in entry[0]['coverage'].split(',')])
+        # for source in d.cfg.cal_targets:
+        #     if source in coverage[:, 0]:
+        #         fps.append(Footprint(obs_id=obs,
+        #                              target=source,
+        #                              wafers=coverage[coverage[:, 0] == source, 1]))
+        for pair in entry[0]['coverage'].split(','):
+            source, wafer = pair.split(':')
+            if source in d.cfg.cal_targets:
+                coverage_data[wafer][source]['count'] += 1
+                coverage_data[wafer][source]['obsids'].add(obs)
+                
+    for wafer, sources in coverage_data.items():
+        for source, info in sources.items():
+            fps.append(Footprint(wafer=wafer,
+                                 source=source,
+                                 count=info['count'],
+                                 obsids=sorted(info['obsids'])))
+
     return fps
