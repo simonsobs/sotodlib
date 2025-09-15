@@ -704,6 +704,9 @@ def tau_model(fhwp, tau, AQ, AU, mode):
 
 def get_tau_hwp(
     aman,
+    signal='signal',
+    lpf_cfg=None,
+    bpf_cfg=None,
     width=1000,
     apodize_samps=2000,
     trim_samps=2000,
@@ -711,6 +714,7 @@ def get_tau_hwp(
     max_fhwp=2.,
     demod_mode=4,
     wn=None,
+    flags=None,
     full_output=False,
     merge=False,
     name='tau_hwp'
@@ -725,6 +729,12 @@ def get_tau_hwp(
     ----------
     aman : AxisManager
         AxisManager object containing the TOD data.
+    signal: std optional
+        Name of signal to process. Default is `signal`.
+    lpf_cfg: dict optional
+        Configuration for Low-pass filter applied before demodulation.
+    bpf_cfg: dict optional
+        Configuration for Band-pass filter applied before demodulation.
     width: int optional
         width of single section of TOD.
     apodize_samps: int optional
@@ -737,6 +747,8 @@ def get_tau_hwp(
         Maximum rotation frequency of hwp to be used for calculation.
     demod_mode: int, optional
         Demodulation mode. Default is 4.
+    flags: str optional
+        Name of flags in `aman.flags` to use for fitting.
     wn: str or None
         Precomputed white noise level of signal to be used for weights of
         fitting. If none, the fitting weights will be 1.
@@ -755,14 +767,16 @@ def get_tau_hwp(
         chi-squared statistics.
     """
 
-    lpf_cfg = {'type': 'sine2',
-               'cutoff': min_fhwp * 0.95,
-               'trans_width': 0.1}
-    # no band pass filter
-    bpf_cfg = {'type': 'sine2',
-               'center': 0,
-               'width': 200,
-               'trans_width': 0.1}
+    if lpf_cfg is None:
+        lpf_cfg = {'type': 'sine2',
+                   'cutoff': min_fhwp * 0.95,
+                   'trans_width': 0.1}
+    if bpf_cfg is None:
+        # no band pass filter
+        bpf_cfg = {'type': 'sine2',
+                   'center': 0,
+                   'width': 200,
+                   'trans_width': 0.1}
 
     hwp_rate = np.gradient(np.unwrap(aman.hwp_angle) * 200 / 2 / np.pi)
     if 'hwp_rate' not in aman:
@@ -774,13 +788,16 @@ def get_tau_hwp(
         s = aman.samps.offset + idx[0]
         e = aman.samps.offset + idx[-1]
         aman_short = aman.restrict('samps', (s, e), in_place=False)
-        freqs, Pxx, nseg = fft_ops.calc_psd(aman_short, noverlap=0,
+        freqs, Pxx, nseg = fft_ops.calc_psd(aman_short,
+                                            signal=aman_short.get(signal),
+                                            noverlap=0,
                                             full_output=True)
         wn = fft_ops.calc_wn(aman_short, pxx=Pxx, freqs=freqs, nseg=nseg)
 
-    tod_ops.detrend_tod(aman, "median")
-    tod_ops.apodize.apodize_cosine(aman, apodize_samps=apodize_samps)
-    demod_tod(aman, demod_mode=demod_mode,
+    tod_ops.detrend_tod(aman, signal_name=signal, method="median")
+    tod_ops.apodize.apodize_cosine(aman, signal_name=signal,
+                                   apodize_samps=apodize_samps)
+    demod_tod(aman, signal=signal, demod_mode=demod_mode,
               lpf_cfg=lpf_cfg, bpf_cfg=bpf_cfg, wrap=True)
 
     idx = np.where((min_fhwp < abs(hwp_rate)) & (abs(hwp_rate) < max_fhwp))[0]
@@ -797,12 +814,40 @@ def get_tau_hwp(
     hwp_rate = np.zeros(nsections)
     demodQ = np.zeros((nsections, aman.dets.count))
     demodU = np.zeros((nsections, aman.dets.count))
-    weights = np.sqrt(width/200)/wn
-    for i in range(nsections):
-        timestamps[i] = np.median(aman.timestamps[i*width:(i+1)*width])
-        hwp_rate[i] = np.median(aman.hwp_rate[i*width:(i+1)*width])
-        demodQ[i] = np.median(aman.demodQ[:, i*width:(i+1)*width], axis=1)
-        demodU[i] = np.median(aman.demodU[:, i*width:(i+1)*width], axis=1)
+    weights = np.zeros((nsections, aman.dets.count))
+    mask = np.ones((nsections, aman.dets.count), dtype=bool)
+    if isinstance(flags, str) and (flags in aman.flags):
+        flags = ~aman.flags[flags].mask()
+        if flags.ndim == 1:
+            for i in range(nsections):
+                msk = np.zeros(aman.samps.count, dtype=bool)
+                msk[i*width:(i+1)*width] = flags[i*width:(i+1)*width]
+                timestamps[i] = np.median(aman.timestamps[msk])
+                hwp_rate[i] = np.median(aman.hwp_rate[msk])
+                demodQ[i] = np.median(aman.demodQ[:, msk], axis=1)
+                demodU[i] = np.median(aman.demodU[:, msk], axis=1)
+                count = np.sum(msk)
+                weights[i] = np.sqrt(count/200)/wn
+                mask[i, :] = False if count == 0 else True
+        elif flags.ndim == 2:
+            for i in range(nsections):
+                timestamps[i] = np.median(aman.timestamps[i*width:(i+1)*width])
+                hwp_rate[i] = np.median(aman.hwp_rate[i*width:(i+1)*width])
+                for j in range(aman.dets.count):
+                    msk = np.zeros(aman.samps.count, dtype=bool)
+                    msk[i*width:(i+1)*width] = flags[j, i*width:(i+1)*width]
+                    demodQ[i, j] = np.median(aman.demodQ[j, msk])
+                    demodU[i, j] = np.median(aman.demodU[j, msk])
+                    count = np.sum(msk)
+                    weights[i, j] = np.sqrt(count/200)/wn[j]
+                    mask[i, j] = False if count == 0 else True
+    else:
+        for i in range(nsections):
+            timestamps[i] = np.median(aman.timestamps[i*width:(i+1)*width])
+            hwp_rate[i] = np.median(aman.hwp_rate[i*width:(i+1)*width])
+            demodQ[i] = np.median(aman.demodQ[:, i*width:(i+1)*width], axis=1)
+            demodU[i] = np.median(aman.demodU[:, i*width:(i+1)*width], axis=1)
+            weights[i] = np.sqrt(width/200)/wn
 
     logger.debug('Fit time constant')
     AQ = np.full(aman.dets.count, np.nan)
@@ -818,15 +863,15 @@ def get_tau_hwp(
             model.set_param_hint('mode', vary=False)
             params = model.make_params(
                 tau=1e-3,
-                AQ=np.median(demodQ[:, i]),
-                AU=np.median(demodU[:, i]),
+                AQ=np.median(demodQ[:, i][mask[:, i]]),
+                AU=np.median(demodU[:, i][mask[:, i]]),
                 mode=demod_mode,
             )
             fit = model.fit(
-                data=demodQ[:, i] + 1j * demodU[:, i],
+                data=demodQ[:, i][mask[:, i]] + 1j * demodU[:, i][mask[:, i]],
                 params=params,
-                fhwp=hwp_rate,
-                weights=np.full(nsections, weights[i])
+                fhwp=hwp_rate[mask[:, i]],
+                weights=weights[:, i][mask[:, i]]
             )
             AQ[i] = fit.params['AQ'].value
             AQ_error[i] = fit.params['AQ'].stderr
