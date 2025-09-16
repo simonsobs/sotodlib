@@ -247,7 +247,7 @@ class DarkTemplate(Operator):
 
         """
         if self.shared_flags is not None:
-            common_flags = obs.shared[self.shared_flags].data & self.shared_flag_mask
+            common_flags = ob.shared[self.shared_flags].data & self.shared_flag_mask
         else:
             common_flags = np.zeros(ob.n_local_samples, dtype=np.uint8)
 
