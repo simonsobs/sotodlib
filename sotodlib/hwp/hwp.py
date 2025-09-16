@@ -893,8 +893,10 @@ def get_tau_hwp(
                     axis_map=[(0, 'dets'), (1, 'sections')])
         result.wrap('demodU', np.transpose(demodU),
                     axis_map=[(0, 'dets'), (1, 'sections')])
-        result.wrap('weights', weights,
-                    axis_map=[(0, 'dets')])
+        result.wrap('weights', np.transpose(weights),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+        result.wrap('mask', np.transpose(mask),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
     else:
         result = core.AxisManager(aman.dets)
     result.wrap('AQ', AQ, axis_map=[(0, 'dets')])

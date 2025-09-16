@@ -21,7 +21,7 @@ def get_hwp_spin_up_down(tod, spin_up, sign):
 def make_hwp_spin_up_down_tod(
     taus=np.array([1e-3, 2e-3]),
     A=3e-2,
-    wn=1e-4,
+    wn=5e-5,
     spin_up=True,
     sign=1,
 ):
@@ -40,6 +40,7 @@ def make_hwp_spin_up_down_tod(
     hwp_rate = np.gradient(np.unwrap(tod.hwp_angle)) * 200
     signal = A * np.cos(4 * (tod.hwp_angle - hwp_rate * taus[:, None]))
     signal = np.float32(signal)
+    np.random.seed(0)
     signal += np.random.normal(0, wn * np.sqrt(200),
                                (tod.dets.count, tod.samps.count))
     tod.wrap('signal', signal, axis_map=[(0, 'dets'), (1, 'samps')])
@@ -52,7 +53,7 @@ class TauHWPTest(unittest.TestCase):
         taus = np.array([1e-3, 2e-3])
 
         tod = make_hwp_spin_up_down_tod(taus=taus, spin_up=True, sign=1)
-        result = get_tau_hwp(tod)
+        result = get_tau_hwp(tod, full_output=True)
         self.assertAlmostEqual(result.tau_hwp[0], taus[0], delta=1e-4)
         self.assertAlmostEqual(result.tau_hwp[1], taus[1], delta=1e-4)
 
