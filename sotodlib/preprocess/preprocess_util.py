@@ -1044,7 +1044,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
                 # remove fields found in aman.preprocess from proc_aman
                 for fld_init in init_fields:
-                    if fld_init in proc_aman and fld_init:
+                    if fld_init in proc_aman:
                         proc_aman.move(fld_init, None)
 
                 proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
