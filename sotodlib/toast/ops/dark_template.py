@@ -258,7 +258,7 @@ class DarkTemplate(Operator):
                 continue
             tod = ob.detdata[self.det_data][det]
             if self.det_flags is not None:
-                det_flags = ob.detdata[self.det_data][det] & self.det_flag_mask
+                det_flags = ob.detdata[self.det_flags][det] & self.det_flag_mask
             else:
                 det_flags = np.zeros(ob.n_local_samples, dtype=np.uint8)
             good = np.logical_and(common_flags == 0, det_flags == 0)
