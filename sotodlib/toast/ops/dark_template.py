@@ -1,7 +1,9 @@
 # Copyright (c) 2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
-"""Operator for interfacing with the Maximum Likelihood Mapmaker.
+"""Operator for constructing and subtracting dark templates from timestream data.
 
+This operator assembles a dark template signal from the data and projects it out,
+enabling improved analysis of detector timestreams by removing correlated noise.
 """
 
 import os
