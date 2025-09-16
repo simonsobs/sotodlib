@@ -39,6 +39,11 @@ class DarkTemplate(Operator):
         defaults.det_data, help="Observation detdata key for the timestream data"
     )
 
+    det_mask = Int(
+        defaults.det_mask_invalid,
+        help="Bit mask value for per-detector flagging",
+    )
+
     det_flags = Unicode(
         None, allow_none=True, help="Observation detdata key for flags to use"
     )
@@ -70,6 +75,13 @@ class DarkTemplate(Operator):
         help="If set, dark templates will be written out or loaded here.",
     )
 
+    @traitlets.validate("det_mask")
+    def _check_det_mask(self, proposal):
+        check = proposal["value"]
+        if check < 0:
+            raise traitlets.TraitError("Det mask should be a positive integer")
+        return check
+
     @traitlets.validate("shared_flag_mask")
     def _check_shared_flag_mask(self, proposal):
         check = proposal["value"]
@@ -95,7 +107,7 @@ class DarkTemplate(Operator):
         comm = ob.comm.comm_group
         dark_tod = []
         fp = ob.telescope.focalplane
-        for det in ob.local_detectors:
+        for det in ob.select_local_detectors(flagmask=self.det_mask):
             if fp[det]["det_info:wafer:type"] != "DARK":
                 continue
             tod = ob.detdata[self.det_data][det]
@@ -253,7 +265,7 @@ class DarkTemplate(Operator):
 
         fp = ob.telescope.focalplane
         last_good = None
-        for det in ob.local_detectors:
+        for det in ob.select_local_detectors(flagmask=self.det_mask):
             if fp[det]["det_info:wafer:type"] == "DARK":
                 continue
             tod = ob.detdata[self.det_data][det]
