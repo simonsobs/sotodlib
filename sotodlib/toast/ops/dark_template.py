@@ -332,8 +332,6 @@ class DarkTemplate(Operator):
 
     def _provides(self):
         prov = {"detdata": list()}
-        if self.det_out is not None:
-            prov["detdata"].append(self.det_out)
         return prov
 
     def _accelerators(self):
