@@ -58,7 +58,7 @@ class _Preprocess(object):
             Transfer Function simulations and determining which steps should be run.
         """
         if self.process_cfgs is None:
-            return
+            return aman, proc_aman
         raise NotImplementedError
         
     def calc_and_save(self, aman, proc_aman):
@@ -79,7 +79,7 @@ class _Preprocess(object):
             pipeline.
         """
         if self.calc_cfgs is None:
-            return
+            return aman, proc_aman
         raise NotImplementedError
     
     def save(self, proc_aman, *args):
@@ -246,23 +246,50 @@ def _ranges_match( o, n, oidx, nidx):
     omsk[oidx[0]] = nmsk[nidx[0]]
     return Ranges.from_mask(omsk)
 
-def _expand(new, full, wrap_valid=True):
-    """new will become a top level axismanager in full once it is matched to
-    size"""
+def _intersect(new, out):
+    '''Get detector and samples intersection between ``new`` and ``out``.'''
     if 'dets' in new._axes:
-        _, fs_dets, ns_dets = full.dets.intersection(
-            new.dets, 
+        _, fs_dets, ns_dets = out.dets.intersection(
+            new.dets,
             return_slices=True
         )
     else:
-        fs_dets = range(full.dets.count)
+        fs_dets = range(out.dets.count)
+        ns_dets = None
     if 'samps' in new._axes:
-        _, fs_samps, ns_samps = full.samps.intersection(
-            new.samps, 
+        _, fs_samps, ns_samps = out.samps.intersection(
+            new.samps,
             return_slices=True
         )
     else:
         fs_samps = slice(None)
+        ns_samps = None
+
+    return fs_dets, ns_dets, fs_samps, ns_samps
+
+def _wrap_valid_ranges(new, out, valid_name="valid"):
+    """Wraps in a new Ranges field into ``out`` that tracks the current number
+    of detectors and samples that intersect with ``new``.
+    """
+    fs_dets, _, fs_samps, _ = _intersect(new, out)
+
+    x = Ranges( out.samps.count )
+    m = x.mask()
+    m[fs_samps] = True
+    v = Ranges.from_mask(m)
+
+    valid = RangesMatrix(
+        [v if i in fs_dets else x for i in range(out.dets.count)]
+    )
+    if valid_name in out:
+        out.move(valid_name, None)
+    out.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
+
+def _expand(new, full, wrap_valid=True):
+    """new will become a top level axismanager in full once it is matched to
+    size"""
+
+    fs_dets, ns_dets, fs_samps, ns_samps = _intersect(new, full)
 
     out = core.AxisManager()
     for k, v in full._axes.items():
@@ -321,15 +348,8 @@ def _expand(new, full, wrap_valid=True):
                     # Skip expansion for scalar array with no axes.
                     out[k] = v
     if wrap_valid:
-        x = Ranges( full.samps.count )
-        m = x.mask()
-        m[fs_samps] = True
-        v = Ranges.from_mask(m)
+        _wrap_valid_ranges(new, out)
 
-        valid = RangesMatrix( 
-            [v if i in fs_dets else x for i in range(full.dets.count)]
-        )
-        out.wrap('valid',valid,[(0,'dets'),(1,'samps')])
     return out
 
 def update_full_aman(proc_aman, full, wrap_valid):
@@ -508,9 +528,9 @@ class Pipeline(list):
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
-            process.process(aman, proc_aman, sim)
+            aman, proc_aman = process.process(aman, proc_aman, sim)
             if run_calc:
-                process.calc_and_save(aman, proc_aman)
+                aman, proc_aman = process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full_aman, self.wrap_valid)
             if update_plot:
@@ -529,6 +549,8 @@ class Pipeline(list):
         if "frequency_cutoffs" in full_aman:
             full_aman.move("frequency_cutoffs", None)
         full_aman.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
+        if run_calc:
+           _wrap_valid_ranges(proc_aman, full_aman, valid_name='valid_data')
 
         return full_aman, success
         
@@ -598,32 +620,34 @@ class _FracFlaggedMixIn(object):
                 frac_flagged = np.array([
                     np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1][key2][subset]
                 ], dtype=float)
-                num_valid = np.array([
-                    np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1].valid[subset]
-                ])
-                with np.errstate(divide="ignore"):
-                    frac_flagged *= np.where(num_valid > 0, 1 / num_valid, 0)
 
-                # record percentiles over detectors and fraction of samples flagged
-                perc = np.percentile(frac_flagged, percentiles)
-                mean = frac_flagged.mean()
+                if len(frac_flagged) > 0:
+                    num_valid = np.array([
+                        np.dot(r.ranges(), [-1, 1]).sum() for r in proc_aman[key1].valid[subset]
+                    ])
+                    with np.errstate(divide="ignore"):
+                        frac_flagged *= np.where(num_valid > 0, 1 / num_valid, 0)
 
-                # get the tags for this wafer (all detectors in this subset share these)
-                tags_base = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_base["telescope"] = meta.obs_info.telescope
+                    # record percentiles over detectors and fraction of samples flagged
+                    perc = np.percentile(frac_flagged, percentiles)
+                    mean = frac_flagged.mean()
 
-                # add tags and values to respective lists in order
-                tags_perc = [tags_base.copy() for i in range(perc.size)]
-                for i, t in enumerate(tags_perc):
-                    t["det_stat"] = f"percentile_{percentiles[i]}"
-                vals += list(perc)
-                tags += tags_perc
-                tags_mean = tags_base.copy()
-                tags_mean["det_stat"] = "mean"
-                vals.append(mean)
-                tags.append(tags_mean)
+                    # get the tags for this wafer (all detectors in this subset share these)
+                    tags_base = {
+                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
+
+                    # add tags and values to respective lists in order
+                    tags_perc = [tags_base.copy() for i in range(perc.size)]
+                    for i, t in enumerate(tags_perc):
+                        t["det_stat"] = f"percentile_{percentiles[i]}"
+                    vals += list(perc)
+                    tags += tags_perc
+                    tags_mean = tags_base.copy()
+                    tags_mean["det_stat"] = "mean"
+                    vals.append(mean)
+                    tags.append(tags_mean)
 
         obs_time = [meta.obs_info.timestamp] * len(vals)
         return {
