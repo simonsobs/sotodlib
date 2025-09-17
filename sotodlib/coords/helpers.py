@@ -356,6 +356,13 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
 
+    # Unwind each detector in ra to avoid angle jumps
+    planar[:,:,0] = utils.unwind(planar[:,:,0])
+    # Harmonize them. This assumes that the detectors won't
+    # be more than 180° away from each other at any given time
+    offs = (planar[:,0,0]-planar[0,0,0]+np.pi)//(2*np.pi)*(2*np.pi)
+    planar[:,:,0] -= offs[:,None]
+
     # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
     delts  = wcs_kernel.wcs.cdelt * DEG
     ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
