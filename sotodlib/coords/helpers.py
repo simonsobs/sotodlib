@@ -356,12 +356,25 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
 
-    # Unwind each detector in ra to avoid angle jumps
-    planar[:,:,0] = utils.unwind(planar[:,:,0])
-    # Harmonize them. This assumes that the detectors won't
-    # be more than 180° away from each other at any given time
-    offs = (planar[:,0,0]-planar[0,0,0]+np.pi)//(2*np.pi)*(2*np.pi)
-    planar[:,:,0] -= offs[:,None]
+    # Sometimes a patch will end up straddling the edege of the
+    # map. For example, for a standard CAR projection with a
+    # reference point at ra=dec=0, a patch centered on ra=180
+    # would be half on one side of the map, half on the other,
+    # with a wide stretch of nothing between. For most projections
+    # there's nothing we can do about this, but for the special case
+    # of non-oblique cylindrical projections, we can modify crval
+    # and crpix to construct a compatible pixelization centered on
+    # the patch center.
+    recenter = wcsutils.is_separable(wcs_kernel)
+    if recenter:
+        # First part of recentering:
+        # Unwind each detector in ra to avoid angle jumps, letting
+        # us measure the actual extent of the patch.
+        planar[:,:,0] = utils.unwind(planar[:,:,0])
+        # Harmonize detectors. This assumes that the detectors won't
+        # be more than 180° away from each other at any given time
+        offs = (planar[:,0,0]-planar[0,0,0]+np.pi)//(2*np.pi)*(2*np.pi)
+        planar[:,:,0] -= offs[:,None]
 
     # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
     delts  = wcs_kernel.wcs.cdelt * DEG
@@ -384,6 +397,14 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     w = wcs_kernel.deepcopy()
     w.wcs.crpix -= corners[0]
     shape = tuple(corners[1] - corners[0] + 1)[::-1]
+
+    if recenter:
+        # Second part of recentering. Modify crval[0]
+        x_mid  = shape[-1]//2+1
+        ra_mid = w.wcs.crval[0] + (x_mid-w.wcs.crpix[0])*w.wcs.cdelt[0]
+        w.wcs.crpix[0] = x_mid
+        w.wcs.crval[0] = ra_mid
+
     return (shape, w)
 
 
