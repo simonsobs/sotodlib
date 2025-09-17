@@ -642,13 +642,30 @@ class G3tHWP():
         """
 
         logger.info('Remove offcentering effect from hwp angle and overwrite')
-        # Calculate offcentering from where the first reference slot was detected by the 2nd encoder.
-        if solved["ref_indexes_1"][0] > self._num_edges/2-1:
-            offcenter_idx1_start = int(solved["ref_indexes_1"][0]-self._num_edges/2)
-            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
+        # Find the first point where two encoder data are available
+        # and offcentering is calculable
+        for i in solved["ref_indexes_1"]:
+            if solved['fast_time_1'][i] > solved['fast_time_2'][0]:
+                offcenter_idx1_start = i
+                t1_start = solved['fast_time_1'][i]
+                break
         else:
-            offcenter_idx1_start = int(solved["ref_indexes_1"][1]-self._num_edges/2)
-            offcenter_idx2_start = int(solved["ref_indexes_2"][0])
+            raise ValueError('Cannot correct offcentering because '
+                             'two encoder data do not overlap')
+        for i in solved["ref_indexes_2"]:
+            if solved['fast_time_2'][i] > solved['fast_time_1'][0]:
+                offcenter_idx2_start = i
+                t2_start = solved['fast_time_2'][i]
+                break
+        else:
+            raise ValueError('Cannot correct offcentering because '
+                             'two encoder data do not overlap')
+
+        if t1_start < t2_start:
+            offcenter_idx2_start -= int(self._num_edges/2)
+        else:
+            offcenter_idx1_start -= int(self._num_edges/2)
+
         # Calculate offcentering to the end of the shorter encoder data.
         if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
             idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
