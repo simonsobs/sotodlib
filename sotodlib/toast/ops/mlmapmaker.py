@@ -598,6 +598,25 @@ class MLMapmaker(Operator):
         gcomm = data.comm.comm_group
         timer.start()
 
+        if data.comm.group_size != 1:
+            raise RuntimeError(
+                "The ML mapmaker requires the TOAST process group size to be exactly one."
+            )
+
+        if comm is not None:
+            num_obs = np.array(comm.allgather(len(data.obs)))
+        else:
+            num_obs = np.array([len(data.obs)])
+        if np.any(num_obs == 0):
+            # At least one TOAST group have no observation
+            if np.sum(num_obs) < data.comm.ngroups:
+                msg = "There are {} TOAST groups but only {} observations. ".format(data.comm.ngroups, np.sum(num_obs))
+                msg += "Therefore some TOAST groups have no observation in it. "
+                msg += "Please reduce the number of TOAST groups."
+                raise RuntimeError(msg)
+            else:
+                raise RuntimeError("Some TOAST groups have no observation.")
+
         if comm is None and self.tiled:
             log.info("WARNING: Tiled mapmaking not supported without MPI.")
             self.tiled = False
