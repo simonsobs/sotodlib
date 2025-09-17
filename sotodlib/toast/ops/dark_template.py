@@ -314,6 +314,11 @@ class DarkTemplate(Operator):
                 os.makedirs(self.cache_dir, exist_ok=True)
 
         for ob in data.obs:
+            if ob.dist.comm_col_size != 1:
+                raise RuntimeError(
+                    "DarkTemplate only works with observations distributed "
+                    "by detector"
+                )
             templates = self._load_dark_templates(ob)
             if templates is None:
                 # No precomputed templates found
