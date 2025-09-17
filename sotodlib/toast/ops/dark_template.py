@@ -314,7 +314,7 @@ class DarkTemplate(Operator):
                 os.makedirs(self.cache_dir, exist_ok=True)
 
         for ob in data.obs:
-            if ob.dist.comm_col_size != 1:
+            if ob.dist.comm_row_size != 1:
                 raise RuntimeError(
                     "DarkTemplate only works with observations distributed "
                     "by detector"
