@@ -1657,8 +1657,6 @@ class FourierFilter(_Preprocess):
     Example config file entry for one filter::
 
         - name: "fourier_filter"
-          wrap_name: "lpf_sig"
-          signal_name: "signal"
           process:
             filt_function: "timeconst_filter"
             filter_params:
@@ -1667,9 +1665,7 @@ class FourierFilter(_Preprocess):
 
     Example config file entry for two filters::
 
-        - name: "fourier_filter_chain"
-          wrap_name: "lpf_sig"
-          signal_name: "signal"
+        - name: "fourier_filter"
           process:
             filters:
               - name: "iir_filter"
@@ -1682,9 +1678,7 @@ class FourierFilter(_Preprocess):
 
     Or with params from a noise fit::
 
-        - name: "fourier_filter_chain"
-          wrap_name: "lpf_sig"
-          signal_name: "signal"
+        - name: "fourier_filter"
           process:
             noise_fit_array: "noiseQ_fit"
             filters:
