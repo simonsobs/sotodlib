@@ -1663,6 +1663,18 @@ class FourierFilter(_Preprocess):
               timeconst: "det_cal.tau_eff"
               invert: True
 
+    Example for passing in a different signal name and wrapping into a new
+    field::
+
+        - name: "fourier_filter"
+              wrap_name: "lpf_demodQ"
+              signal_name: "demodQ"
+              process:
+                filt_function: "sine2"
+                filter_params:
+                  cutoff: 1
+                  trans_width: 0.1
+
     Example config file entry for two filters::
 
         - name: "fourier_filter"
