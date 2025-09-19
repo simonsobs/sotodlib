@@ -125,7 +125,7 @@ class DarkTemplate(Operator):
         """ Derive dark templates from the dark TOD
 
         """
-        dark_tod = np.vstack(dark_tod)
+        dark_tod = np.vstack([x for x in dark_tod if len(x) > 0])
         nsample = dark_tod[0].size
         # PCA
         U, S, Vh = np.linalg.svd(dark_tod, full_matrices=False)
