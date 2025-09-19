@@ -355,28 +355,63 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
+    # planar is now [ndet,nsamp,{ira,idec}] in intermediate
+    # coordinates in radians. These will be 0 at the
+    # reference point, and span at most [-pi,pi] in ira
+    # and [-pi/2,pi/2] in idec
 
-    # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
-    delts  = wcs_kernel.wcs.cdelt * DEG
-    ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    # Sometimes a patch will end up straddling the edege of the
+    # map. For example, for a standard CAR projection with a
+    # reference point at ra=dec=0, a patch centered on ra=180
+    # would be half on one side of the map, half on the other,
+    # with a wide stretch of nothing between. For most projections
+    # there's nothing we can do about this, but for the special case
+    # of non-oblique cylindrical projections, we can modify crval
+    # and crpix to construct a compatible pixelization centered on
+    # the patch center.
+    recenter = wcsutils.is_separable(wcs_kernel)
+    if recenter:
+        # First part of recentering:
+        # Unwind each detector in ra to avoid angle jumps, letting
+        # us measure the actual extent of the patch.
+        planar[:,:,0] = utils.unwind(planar[:,:,0])
+        # Harmonize detectors. This assumes that the detectors won't
+        # be more than 180° away from each other at any given time
+        offs = np.round((planar[:,0,0]-planar[0,0,0])/(2*np.pi))*(2*np.pi)
+        planar[:,:,0] -= offs[:,None]
+
+    # Go from intermediate coordinates to pixel coordiantes.
+    # We add crpix because planar is relative to the ref-point.
+    # NB! This makes it 1-based!
+    delts   = wcs_kernel.wcs.cdelt * DEG
+    pixbox  = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    pixbox += wcs_kernel.wcs.crpix
     del planar
-
-    # These planar ranges are in units of pixels away from the
-    # reference point.  The reference point is not necessarily on a
-    # pixel center -- that depends on whether crpix is an integer.  So
-    # transform ranges by +(crpix - 1), making them relative to the
-    # bottom left pixel of wcs_kernel.  Note the -1 here accounts for
-    # FITS numbering of pixels starting at (1, 1).
-    ranges += (wcs_kernel.wcs.crpix - 1)
-
-    # Round ranges, which in pixel offset units, to nearest integer.
-    corners = utils.nint(ranges)
-
-    # Start a new WCS. Adjust crpix to put our footprint in the
-    # bottom-left pixel.
+    # Use these to construct a wcs with lower-left corner
+    # as close to pixbox[0] as possible. We don't want to
+    # change the pixel grid alignment though, so round to
+    # nearest whole pixel
+    p1, p2 = utils.floor(pixbox)
     w = wcs_kernel.deepcopy()
-    w.wcs.crpix -= corners[0]
-    shape = tuple(corners[1] - corners[0] + 1)[::-1]
+    # Adjust crpix so p1 → 1.
+    w.wcs.crpix -= p1-1
+    # If we cover the whole width of the sky, even after unwrapping,
+    # then this might end up being 1 pixel too wide, giving a sky
+    # slightly > 360° which can cause some minor problems.
+    # Can't remove the +1 though, as that would sometimes chop off
+    # a pixel from the exposed area. Either just ignore, since
+    # this is a hypothetical case very unlikely to actually happen,
+    # or add a special case. NB! This case *will* trigger regularly
+    # due to wrapping if recentering is turned off.
+    shape = (p2-p1+1)[::-1]
+
+    if recenter:
+        # Second part of recentering. Modify crval[0]
+        x_mid  = shape[-1]//2+1
+        ra_mid = w.wcs.crval[0] + (x_mid-w.wcs.crpix[0])*w.wcs.cdelt[0]
+        w.wcs.crpix[0] = x_mid
+        w.wcs.crval[0] = ra_mid
+
     return (shape, w)
 
 
