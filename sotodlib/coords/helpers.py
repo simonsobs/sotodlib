@@ -369,7 +369,7 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     # of non-oblique cylindrical projections, we can modify crval
     # and crpix to construct a compatible pixelization centered on
     # the patch center.
-    recenter = wcsutils.is_separable(wcs_kernel) and True
+    recenter = wcsutils.is_separable(wcs_kernel)
     if recenter:
         # First part of recentering:
         # Unwind each detector in ra to avoid angle jumps, letting
@@ -395,6 +395,14 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     w = wcs_kernel.deepcopy()
     # Adjust crpix so p1 → 1.
     w.wcs.crpix -= p1-1
+    # If we cover the whole width of the sky, even after unwrapping,
+    # then this might end up being 1 pixel too wide, giving a sky
+    # slightly > 360° which can cause some minor problems.
+    # Can't remove the +1 though, as that would sometimes chop off
+    # a pixel from the exposed area. Either just ignore, since
+    # this is a hypothetical case very unlikely to actually happen,
+    # or add a special case. NB! This case *will* trigger regularly
+    # due to wrapping if recentering is turned off.
     shape = (p2-p1+1)[::-1]
 
     if recenter:
