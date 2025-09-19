@@ -644,37 +644,44 @@ class G3tHWP():
         logger.info('Remove offcentering effect from hwp angle and overwrite')
         # Find the first point where two encoder data are available
         # and offcentering is calculable
-        for i in solved["ref_indexes_1"]:
-            if solved['fast_time_1'][i] > solved['fast_time_2'][0]:
-                offcenter_idx1_start = i
-                t1_start = solved['fast_time_1'][i]
+        t1_0 = solved['fast_time_1'][solved['ref_indexes_1']][0]
+        t2_0 = solved['fast_time_2'][solved['ref_indexes_2']][0]
+        for i1_start in solved["ref_indexes_1"]:
+            if solved['fast_time_1'][i1_start] > t2_0:
                 break
         else:
             raise ValueError('Cannot correct offcentering because '
                              'two encoder data do not overlap')
-        for i in solved["ref_indexes_2"]:
-            if solved['fast_time_2'][i] > solved['fast_time_1'][0]:
-                offcenter_idx2_start = i
-                t2_start = solved['fast_time_2'][i]
+        for i2_start in solved["ref_indexes_2"]:
+            if solved['fast_time_2'][i2_start] > t1_0:
                 break
         else:
             raise ValueError('Cannot correct offcentering because '
                              'two encoder data do not overlap')
-
-        if t1_start < t2_start:
-            offcenter_idx2_start -= int(self._num_edges/2)
+        t1_start = solved['fast_time_1'][i1_start]
+        t2_start = solved['fast_time_2'][i2_start]
+        if t1_start <= t2_start:
+            if i1_start >= int(self._num_edges/2):
+                i1_start -= int(self._num_edges/2)
+                i2_start -= self._num_edges
+            else:
+                i2_start -= int(self._num_edges/2)
         else:
-            offcenter_idx1_start -= int(self._num_edges/2)
+            if i2_start >= int(self._num_edges/2):
+                i1_start -= self._num_edges
+                i2_start -= int(self._num_edges/2)
+            else:
+                i1_start -= int(self._num_edges/2)
 
         # Calculate offcentering to the end of the shorter encoder data.
-        if len(solved["fast_time_1"][offcenter_idx1_start:]) > len(solved["fast_time_2"][offcenter_idx2_start:]):
-            idx_length = len(solved["fast_time_2"][offcenter_idx2_start:])
+        if len(solved["fast_time_1"][i1_start:]) > len(solved["fast_time_2"][i2_start:]):
+            idx_length = len(solved["fast_time_2"][i2_start:])
         else:
-            idx_length = len(solved["fast_time_1"][offcenter_idx1_start:])
+            idx_length = len(solved["fast_time_1"][i1_start:])
         offcenter_idx1 = np.arange(
-            offcenter_idx1_start, offcenter_idx1_start+idx_length-1)
+            i1_start, i1_start+idx_length-1)
         offcenter_idx2 = np.arange(
-            offcenter_idx2_start, offcenter_idx2_start+idx_length-1)
+            i2_start, i2_start+idx_length-1)
         # Calculate the offset time of the encoders induced by the offcentering.
         offset_time = (solved["fast_time_1"][offcenter_idx1] -
                        solved["fast_time_2"][offcenter_idx2])/2
