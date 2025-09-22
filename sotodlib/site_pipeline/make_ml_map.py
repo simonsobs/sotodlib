@@ -38,7 +38,7 @@ def main(**args):
     from sotodlib.core import Context, AxisManager, IndexAxis
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
-    from sotodlib.coords import pointing_model
+    from sotodlib.coords import pointing_model, planets
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
     from sotodlib.core import metadata
@@ -190,7 +190,7 @@ def main(**args):
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
                     obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
-                if obs.dets.count < 10:
+                if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     continue
                 # Check nans
@@ -236,19 +236,23 @@ def main(**args):
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
                     # Apply pointing model
-                    pointing_model.apply_pointing_model(obs)
+                    #pointing_model.apply_pointing_model(obs)
                     # Calibrate to pW
                     #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
                     # Calibrate to K_cmb
                     #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs,maxcut=0.5)
+                    good_dets = mapmaking.find_usable_detectors(obs)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
                         continue
                     # Gapfill glitches. This function name isn't the clearest
                     #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
+                    #positions = planets.get_nearby_sources(tod=obs, source_list=['moon'], distance=5)
+                    #for pos in positions:
+                    #    flags = tod_ops.flags.get_source_flags(obs, center_on=pos[0], mask={'shape':'circle', 'xyr':[0, 0, 5.0]}, max_pix=4000000)
+                    #    obs.flags.glitch_flags = obs.flags.glitch_flags + flags
                     # Gain calibration
                     #gain  = 1
                     #for gtype in ["relcal","abscal"]:

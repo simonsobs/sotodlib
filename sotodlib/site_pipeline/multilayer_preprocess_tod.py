@@ -148,6 +148,7 @@ def multilayer_preprocess_tod(obs_id,
                 outputs_init.append(outputs_grp_init)
 
             init_fields = aman.preprocess._fields.copy()
+            init_fields.pop('valid_data', None)
 
             outputs_grp_proc = pp_util.save_group(obs_id, configs_proc, dets,
                                       context_proc, subdir='temp_proc')

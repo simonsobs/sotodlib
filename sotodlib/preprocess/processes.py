@@ -456,23 +456,24 @@ class PSDCalc(_Preprocess):
 
 
 class GetStats(_Preprocess):
-    """ Get basic statistics from a TOD or its power spectrum.
-
-    Example config block:
-
-      - name : "tod_stats"
-        signal: "signal" # optional
-        wrap: "tod_stats" # optional
-        calc:
-          stat_names: ["median", "std"]
-          split_subscans: False # optional
-          psd_mask: # optional, for cutting a power spectrum in frequency
-            freqs: "psd.freqs"
-            low_f: 1
-            high_f: 10
-        save: True
-
     """
+    Get basic statistics from a TOD or its power spectrum.
+
+    Example config block::
+
+        - name : "tod_stats"
+          signal: "signal"  # optional
+          wrap: "tod_stats" # optional
+          calc:
+            stat_names: ["median", "std"]
+            split_subscans: False  # optional
+            psd_mask:  # optional, for cutting a power spectrum in frequency
+              freqs: "psd.freqs"
+              low_f: 1
+              high_f: 10
+          save: True
+    """
+
     name = "tod_stats"
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
@@ -522,48 +523,49 @@ class GetStats(_Preprocess):
             plot_signal(aman, signal_name=self.signal, x_name="timestamps", filename=filename, **self.plot_cfgs)
 
 class Noise(_Preprocess):
-    """Estimate the white noise levels in the data. Assumes the PSD has been
-    wrapped into the preprocessing AxisManager. All calculation configs goes to `calc_wn`.
+    """
+    Estimate the white noise levels in the data. Assumes the PSD has been
+    wrapped into the preprocessing AxisManager. All calculation configs go to
+    ``calc_wn``.
 
     Saves the results into the "noise" field of proc_aman.
 
     Can run data selection of a "max_noise" value.
 
     When ``fit: True``, the parameter ``wn_est`` can be a float or the name of an
-    axis manager containing an array named ``white_noise``.  If not specified
-    the white noise is calculated with ``calc_wn()`` and used
-    for ``wn_est``.  The calculated white noise will be stored in the noise fit
-    axis manager.
+    axis manager containing an array named ``white_noise``. If not specified,
+    the white noise is calculated with ``calc_wn()`` and used for ``wn_est``.
+    The calculated white noise will be stored in the noise fit axis manager.
 
     Example config block for fitting PSD::
 
-    - name: "noise"
-      fit: True
-      subscan: False
-      calc:
-        fwhite: (5, 10)
-        lowf: 1
-        f_max: 25
-        mask: True
-        wn_est: noise
-        fixed_param: 'wn'
-        binning: True
-      save: True
-      select:
-        max_noise: 2000
+        - name: "noise"
+          fit: True
+          subscan: False
+          calc:
+            fwhite: (5, 10)
+            lowf: 1
+            f_max: 25
+            mask: True
+            wn_est: noise
+            fixed_param: 'wn'
+            binning: True
+          save: True
+          select:
+            max_noise: 2000
 
     Example config block for calculating white noise only::
 
-    - name: "noise"
-      fit: False
-      subscan: False
-      calc:
-        low_f: 5
-        high_f: 20
-      save: True
-      select:
-        min_noise: 18e-6
-        max_noise: 80e-6
+        - name: "noise"
+          fit: False
+          subscan: False
+          calc:
+            low_f: 5
+            high_f: 20
+          save: True
+          select:
+            min_noise: 18e-6
+            max_noise: 80e-6
 
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
@@ -994,30 +996,33 @@ class Apodize(_Preprocess):
         return aman, proc_aman
 
 class Demodulate(_Preprocess):
-    """Demodulate the tod. All process confgis go to `demod_tod`.
+    """
+    Demodulate the TOD. All process configs go to ``demod_tod``.
 
     Example config block::
 
-      - name: "demodulate"
-        process:
-          trim_samps: 6000
-          demod_cfgs:
-            bpf_cfg: {'type': 'sine2', 'center': 8, 'width': 3.8, 'trans_width': 0.1}
-            lpf_cfg: {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
+        - name: "demodulate"
+          process:
+            trim_samps: 6000
+            demod_cfgs:
+              bpf_cfg: {'type': 'sine2', 'center': 8, 'width': 3.8, 'trans_width': 0.1}
+              lpf_cfg: {'type': 'sine2', 'cutoff': 1.9, 'trans_width': 0.1}
 
     If you want to set filters with respect to actual HWP rotation frequency,
-    you can pass string like below. `*` is needed after the number you want to multiply HWP freq by.
+    you can pass strings like below. ``*`` is needed after the number you want
+    to multiply HWP freq by::
 
-      - name: "demodulate"
-        process:
-          trim_samps: 6000
-          demod_cfgs:
-            # You can set float number or str(i.e., '4*f_HWP') as configs
-            bpf_cfg: {'type': 'sine2', 'center': '4*f_HWP', 'width': '3.8*f_HWP', 'trans_width': 0.1}
-            lpf_cfg: {'type': 'sine2', 'cutoff': '1.9*f_HWP', 'trans_width': 0.1}
+        - name: "demodulate"
+          process:
+            trim_samps: 6000
+            demod_cfgs:
+              # You can set float number or str (i.e., ``'4*f_HWP'``) as configs
+              bpf_cfg: {'type': 'sine2', 'center': '4*f_HWP', 'width': '3.8*f_HWP', 'trans_width': 0.1}
+              lpf_cfg: {'type': 'sine2', 'cutoff': '1.9*f_HWP', 'trans_width': 0.1}
 
     .. autofunction:: sotodlib.hwp.hwp.demod_tod
     """
+
     name = "demodulate"
 
     def process(self, aman, proc_aman, sim=False):
@@ -1647,51 +1652,59 @@ class HWPAngleModel(_Preprocess):
 
 class FourierFilter(_Preprocess):
     """
-    Applies a chain of fourier filters (defined in fft_ops) to the data.
+    Applies a chain of Fourier filters (defined in fft_ops) to the data.
 
     Example config file entry for one filter::
 
-    - name: "fourier_filter"
-      wrap_name: "lpf_sig"
-      signal_name: "signal"
-      process:
-        filt_function: "timeconst_filter"
-        filter_params:
-          timeconst: "det_cal.tau_eff"
-          invert: True
+        - name: "fourier_filter"
+          process:
+            filt_function: "timeconst_filter"
+            filter_params:
+              timeconst: "det_cal.tau_eff"
+              invert: True
+
+    Example for passing in a different signal name and wrapping into a new
+    field::
+
+        - name: "fourier_filter"
+              wrap_name: "lpf_demodQ"
+              signal_name: "demodQ"
+              process:
+                filt_function: "sine2"
+                filter_params:
+                  cutoff: 1
+                  trans_width: 0.1
 
     Example config file entry for two filters::
 
-    - name: "fourier_filter_chain"
-      wrap_name: "lpf_sig"
-      signal_name: "signal"
-      process:
-        filters:
-          - name: "iir_filter"
-            filter_params:
-              invert: True
-          - name: "timeconst_filter"
-            filter_params:
-              timeconst: "det_cal.tau_eff"
-              invert: True
+        - name: "fourier_filter"
+          process:
+            filters:
+              - name: "iir_filter"
+                filter_params:
+                  invert: True
+              - name: "timeconst_filter"
+                filter_params:
+                  timeconst: "det_cal.tau_eff"
+                  invert: True
 
-    or with params from a noise fit::
+    Or with params from a noise fit::
 
-    - name: "fourier_filter_chain"
-      wrap_name: "lpf_sig"
-      signal_name: "signal"
-      process:
-        noise_fit_array: "noiseQ_fit"
-        filters:
-          - name: "iir_filter"
-            filter_params:
-              invert: True
-          - name: "timeconst_filter"
-            filter_params:
-              timeconst: "det_cal.tau_eff"
-              invert: True
+        - name: "fourier_filter"
+          process:
+            noise_fit_array: "noiseQ_fit"
+            filters:
+              - name: "iir_filter"
+                filter_params:
+                  invert: True
+              - name: "timeconst_filter"
+                filter_params:
+                  timeconst: "det_cal.tau_eff"
+                  invert: True
+
     See :ref:`fourier-filters` documentation for more details.
     """
+
     name = 'fourier_filter'
 
     def __init__(self, step_cfgs):
