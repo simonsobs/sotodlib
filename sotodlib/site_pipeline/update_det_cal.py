@@ -18,10 +18,13 @@ from typing import Optional, Union, Dict, List, Any, Tuple, Literal, Callable
 from queue import Queue
 import argparse
 
+from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.hwp import hwp
+from sotodlib.hwp.hwp_angle_model import apply_hwp_angle_model
 import sotodlib.site_pipeline.util as sp_util
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
@@ -116,6 +119,7 @@ class DetCalCfg:
         *,
         raise_exceptions: bool = False,
         apply_cal_correction: bool = True,
+        hwpss_subtraction: bool = False,
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
         cache_failed_obsids: bool = True,
@@ -134,6 +138,7 @@ class DetCalCfg:
         ctx = core.Context(self.context_path)
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
+        self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
         self.show_pb = show_pb
         self.run_method = run_method
@@ -502,6 +507,36 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                     # This will edit IVA dicts in place
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
+
+        if cfg.hwpss_subtraction:
+            # Reanalyze biasstep with hwpss subtraction
+            ctx = core.Context(cfg.context_path)
+            bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
+
+            def biases_flags(bs, buffer=200):
+                mask = np.zeros((bs.am.dets.count, bs.am.samps.count),
+                                dtype=bool)
+                for i, bg in enumerate(bs.bgmap):
+                    if bg == -1:
+                        continue
+                    mask[i][bs.edge_idxs[bg][0]:bs.edge_idxs[bg][-1]] = 1
+                flags = RangesMatrix.from_mask(mask).buffer(buffer)
+                return flags
+
+            for dset, bsa in bsas.items():
+                oid = bias_step_obsids[dset]
+                am = ctx.get_obs(oid)
+                bsa.am = am
+                bsa._find_bias_edges()
+                flags = biases_flags(bsa)
+                apply_hwp_angle_model(am)
+                if np.all(am.hwp_angle == 0):
+                    continue
+                hwp.get_hwpss(am, flags=flags, merge_stats=True)
+                hwp.subtract_hwpss(am, subtract_name='signal')
+                bsa._get_step_response()
+                bsa._compute_dc_params()
+                bsa._fit_tau_effs()
 
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva.meta["rtm_bit_to_volt"]
