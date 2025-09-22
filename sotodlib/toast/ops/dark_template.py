@@ -204,7 +204,11 @@ class DarkTemplate(Operator):
             shape=(nsample, ntemplate),
             dtype=np.float64,
         )
-        ob.shared[self.key].set(templates.T, offset=(0, 0), fromrank=0)
+        if ob.comm.group_rank == 0:
+            temp_trans = templates.T
+        else:
+            temp_trans = None
+        ob.shared[self.key].set(temp_trans, offset=(0, 0), fromrank=0)
         return
 
     @function_timer
