@@ -110,12 +110,25 @@ class DarkTemplate(Operator):
         for det in ob.select_local_detectors(flagmask=self.det_mask):
             if fp[det]["det_info:wafer:type"] != "DARK":
                 continue
-            tod = ob.detdata[self.det_data][det]
+            tod = ob.detdata[self.det_data][det].copy()
+            if self.shared_flags is not None:
+                flags = ob.shared[self.shared_flags].data & self.shared_flag_mask
+            else:
+                flags = np.zeros(len(tod), dtype=np.uint8)
+            if self.det_flags is not None:
+                flags |= ob.detdata[self.det_flags] & self.det_flag_mask
             # Check for typical pathologies
             if np.any(np.isnan(tod)) or np.std(tod) == 0:
                 continue
+            if np.count_nonzero(flags) < 0.5 * len(tod):
+                continue
             # Subtract the mean
-            dark_tod.append(tod - np.mean(tod))
+            good = flags == 0
+            bad = np.logical_not(good)
+            avg = np.mean(tod[good])
+            tod -= avg
+            tod[bad] = 0
+            dark_tod.append(tod)
         if comm is not None:
             dark_tod = comm.gather(dark_tod)
         return dark_tod
