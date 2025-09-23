@@ -512,15 +512,68 @@ class ObsFileDb:
         return output
 
 
-def _reconcile_rs(rs0, rs1, sep='##'):
-    keys0 = np.array(['##'.join(map(str, r)) for r in rs0.rows])
-    keys1 = np.array(['##'.join(map(str, r)) for r in rs1.rows])
-    common, i0, i1 = util.get_coindices(keys0, keys1)
-    ex0 = np.ones(len(keys0), bool)
-    ex1 = np.ones(len(keys1), bool)
-    ex0[i0] = False
-    ex1[i1] = False
-    return (common, i0, i1), (ex0, ex1)
+def _reconcile_gen(c0, c1, order_keys=None):
+    """Generator used to compare rows in cursor c0 to those in cursor
+    c1. The cursors are assumed to return results sorted that are
+    sorted in the same way and sorted according to tuple(row) (or
+    row[k] or k in order_keys, if that is given).
+
+    Yields results of the form (mtype, item) where mtype is one of:
+    - 'left-only': the item was found in c0 only
+    - 'right-only': the item was found in c1 only
+    - 'both': the item was found in both c0 and c1.
+
+    """
+    def _cmpbl(row):
+        if row is None:
+            return None
+        if order_keys is None:
+            return tuple(row)
+        return tuple(row[k] for k in order_keys)
+
+    r0, r1 = None, None
+    while True:
+        if r0 is None:
+            r0 = c0.fetchone()
+            t0 = _cmpbl(r0)
+        if r1 is None:
+            r1 = c1.fetchone()
+            t1 = _cmpbl(r1)
+        if r0 is None and r1 is None:
+            break
+        if r1 is None or (r0 is not None and t0 < t1):
+            yield ('left-only', r0)
+            r0 = None
+        elif r0 is None or (r1 is not None and t1 < t0):
+            yield ('right-only', r1)
+            r1 = None
+        else:
+            assert t0 == t1
+            yield('both', r0)
+            r0 = r1 = None
+
+
+def _count_and_collect(c0, c1, collect=[], order_keys=None):
+    """Compare rows from cursors c0 and c1 using _reconcile_gen.  Count
+    how many rows are in classes "left-only", "right-only", or "both".
+    If any of those classes is listed in collect, then all rows
+    matching that class are gathered into a ResultSet and returned.
+
+    Returns:
+      counts: dict of number of events.
+      collections: dict with any ResultSet objects requested through
+        collect kw.
+
+    """
+    keys = [col[0] for col in c1.description]
+    collections = {k: ResultSet(keys=keys)
+                   for k in collect}
+    counts = {}
+    for mtype, item in _reconcile_gen(c0, c1, order_keys=order_keys):
+        counts[mtype] = counts.get(mtype, 0) + 1
+        if mtype in collections:
+            collections[mtype].rows.append(tuple(item))
+    return counts, collections
 
 
 def diff_obsfiledbs(db_left, db_right, return_detail=False):
@@ -571,13 +624,15 @@ def diff_obsfiledbs(db_left, db_right, return_detail=False):
                 'detail': detail}
 
     # Check meta.
-    metas = [ResultSet.from_cursor(db.conn.execute(
-        'select * from meta order by param')) for db in [db_left, db_right]]
-    (common, i0, i1), (ex0, ex1) = _reconcile_rs(*metas)
-    if not (len(metas[0]) == len(metas[1]) == len(common)):
+    cursors = [
+        db.conn.execute(
+            'select * from meta order by param') for db in [db_left, db_right]]
+    counts, collections = _count_and_collect(cursors[0], cursors[1],
+                                             collect=['left-only', 'right-only'])
+    if counts.get('left-only') or counts.get('right-only'):
         return failure_declaration(
             'Databases have different meta params.',
-            detail=metas)
+            detail=collections)
 
     # Check frame_offsets are not populated.
     foffs = [ResultSet.from_cursor(db.conn.execute(
@@ -588,30 +643,32 @@ def diff_obsfiledbs(db_left, db_right, return_detail=False):
             detail=metas)
 
     # The detsets table.
-    detsets = [ResultSet.from_cursor(db.conn.execute(
-        'select name, det from detsets order by name, det'))
-               for db in [db_left, db_right]]
-    (common, i0, i1), (ex0, ex1) = _reconcile_rs(*detsets)
-    if ex0.any():
-        bad_ds = detsets[0].subset(rows=ex0.nonzero()[0], keys=['name']).distinct()
+    cursors = [
+        db.conn.execute(
+            'select name, det from detsets order by name, det')
+        for db in [db_left, db_right]]
+    counts, collections = _count_and_collect(cursors[0], cursors[1], collect=['right-only'])
+    bad_count = counts.get('left-only', 0)
+    if bad_count > 0:
         return failure_declaration(
-            f'db_left contains {ex0.sum()} dets entries from {len(bad_ds)} detsets, '
-            ' not found in db_right.',
-            detail=bad_ds)
-    new_dets = detsets[1].subset(rows=ex1.nonzero()[0])
+            f'db_left contains {bad_count} dets entries not found in db_right.',
+            detail=collections.get('left-only'))
+    new_dets = collections['right-only']
 
     # The files table.
-    files = [ResultSet.from_cursor(db.conn.execute(
-        'select * from files order by obs_id, detset, name, sample_start'))
-            for db in [db_left, db_right]]
-    (common, i0, i1), (ex0, ex1) = _reconcile_rs(*files)
-    if ex0.any():
-        bad_obs = files[0].subset(rows=ex0.nonzero()[0], keys=['obs_id']).distinct()
+    cursors = [
+        db.conn.execute(
+            'select * from files order by obs_id, detset, name, sample_start')
+        for db in [db_left, db_right]]
+    counts, collections = _count_and_collect(
+        cursors[0], cursors[1], collect=['right-only'],
+        order_keys=['obs_id', 'detset', 'name', 'sample_start'])
+    bad_count = counts.get('left-only', 0)
+    if bad_count > 0:
         return failure_declaration(
-            f'db_left contains {ex0.sum()} files entries from {len(bad_obs)} obs_ids, '
-            'not found in db_right.',
-            detail=bad_obs)
-    new_files = files[1].subset(rows=ex1.nonzero()[0])
+            f'db_left contains {bad_count} files entries not found in db_right.',
+            detail=collections.get('left-only'))
+    new_files = collections['right-only']
     new_files.keys[new_files.keys.index('name')] = 'filename'
 
     # Ok finally
