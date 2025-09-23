@@ -17,7 +17,7 @@ import traitlets
 import toast
 from toast.traits import trait_docs, Unicode, Int, Instance, Bool, Float, List
 from toast.ops import Operator
-from toast.utils import Logger, Environment, rate_from_times
+from toast.utils import Logger, flagged_noise_fill
 from toast.timing import function_timer, Timer
 from toast.observation import default_values as defaults
 
@@ -101,24 +101,48 @@ class DarkTemplate(Operator):
 
     @function_timer
     def _gather_dark_tod(self, ob):
-        """ Gather dark tod to root process
+        """Gather dark tod to root process
 
         """
         comm = ob.comm.comm_group
+        rank = ob.comm.group_rank
         dark_tod = []
         fp = ob.telescope.focalplane
         for det in ob.select_local_detectors(flagmask=self.det_mask):
             if fp[det]["det_info:wafer:type"] != "DARK":
                 continue
-            tod = ob.detdata[self.det_data][det]
+            tod = ob.detdata[self.det_data][det].copy()
+            if self.shared_flags is not None:
+                flags = ob.shared[self.shared_flags].data & self.shared_flag_mask
+            else:
+                flags = np.zeros(len(tod), dtype=np.uint8)
+            if self.det_flags is not None:
+                flags |= ob.detdata[self.det_flags] & self.det_flag_mask
             # Check for typical pathologies
             if np.any(np.isnan(tod)) or np.std(tod) == 0:
                 continue
-            # Subtract the mean
-            dark_tod.append(tod - np.mean(tod))
+            if np.count_nonzero(flags) < 0.5 * len(tod):
+                continue
+            # Subtract the mean and fill flagged samples with noise.  For the gap
+            # filling, base the buffer size on the lowpass kernel size.
+            good = flags == 0
+            avg = np.mean(tod[good])
+            tod -= avg
+            flagged_noise_fill(tod, flags, self.naverage // 2, poly_order=5)
+            dark_tod.append(tod)
+        fail = False
         if comm is not None:
-            dark_tod = comm.gather(dark_tod)
-        return dark_tod
+            dark_tod = comm.gather(dark_tod, root=0)
+        if rank == 0:
+            total_dark = np.sum([len(x) for x in dark_tod])
+            if total_dark == 0:
+                fail = True
+        if comm is not None:
+            fail = comm.bcast(fail, root=0)
+        if fail:
+            return None
+        else:
+            return dark_tod
 
     @function_timer
     def _derive_templates(self, dark_tod):
@@ -163,6 +187,7 @@ class DarkTemplate(Operator):
         """
         log = Logger.get()
         comm = ob.comm.comm_group
+        rank = ob.comm.group_rank
 
         # See if the templates were already cached
 
@@ -171,8 +196,14 @@ class DarkTemplate(Operator):
                 self.cache_dir,
                 f"dark_templates.{ob.name}.pck",
             )
-            if os.path.isfile(fname_cache):
-                if comm is None or comm.rank == 0:
+            exists = False
+            if rank == 0:
+                if os.path.isfile(fname_cache):
+                    exists = True
+            if comm is not None:
+                exists = comm.bcast(exists, root=0)
+            if exists:
+                if rank == 0:
                     with open(fname_cache, "rb") as f:
                         templates = pickle.load(f)
                     log.debug(f"Loaded dark templates from {fname_cache}")
@@ -180,8 +211,10 @@ class DarkTemplate(Operator):
                     templates = None
                 self._share_templates(ob, templates)
                 return ob.shared[self.key]
-
-        return None
+            else:
+                return None
+        else:
+            return None
 
     @function_timer
     def _share_templates(self, ob, templates):
@@ -196,8 +229,11 @@ class DarkTemplate(Operator):
             ntemplate, nsample = templates.shape
 
         if comm is not None:
-            ntemplate = comm.bcast(ntemplate)
-            nsample = comm.bcast(nsample)
+            ntemplate = comm.bcast(ntemplate, root=0)
+            nsample = comm.bcast(nsample, root=0)
+
+        if ntemplate is None:
+            return
 
         ob.shared.create_column(
             self.key,
@@ -209,7 +245,6 @@ class DarkTemplate(Operator):
         else:
             temp_trans = None
         ob.shared[self.key].set(temp_trans, offset=(0, 0), fromrank=0)
-        return
 
     @function_timer
     def _save_dark_templates(self, ob, templates):
@@ -220,27 +255,31 @@ class DarkTemplate(Operator):
 
         log = Logger.get()
         comm = ob.comm.comm_group
+        rank = ob.comm.group_rank
 
         if self.cache_dir is None:
             return
 
-        if comm is None or comm.rank == 0:
-            fname_cache = os.path.join(
-                self.cache_dir,
-                f"dark_templates.{ob.name}.pck",
-            )
-            with open(fname_cache, "wb") as f:
-                pickle.dump(templates.data.T, f)
-            log.debug(f"Wrote dark templates to {fname_cache}")
-
-        return
+        if rank == 0:
+            if templates is not None:
+                fname_cache = os.path.join(
+                    self.cache_dir,
+                    f"dark_templates.{ob.name}.pck",
+                )
+                with open(fname_cache, "wb") as f:
+                    pickle.dump(templates.data.T, f)
+                log.debug(f"Wrote dark templates to {fname_cache}")
+        if comm is not None:
+            comm.barrier()
 
     @function_timer
     def _get_dark_templates(self, ob):
-        """ Construct low-passed dark bolometer templates
+        """ Construct low-passed dark bolometer templates.
+
+        If no good dark detector data is found, the return value is None.
         """
-        log = Logger.get()
         comm = ob.comm.comm_group
+        rank = ob.comm.group_rank
 
         # gather all dark TOD to the root process
 
@@ -248,20 +287,36 @@ class DarkTemplate(Operator):
 
         # Construct dark templates through PCA and lowpass
 
-        if comm is None or comm.rank == 0:
-            templates = self._derive_templates(dark_tod)
+        if rank == 0:
+            if dark_tod is None:
+                fail = True
+            else:
+                fail = False
+                templates = self._derive_templates(dark_tod)
         else:
+            fail = False
             templates = None
+        if comm is not None:
+            fail = comm.bcast(fail, root=0)
 
-        self._share_templates(ob, templates)
-
-        return ob.shared[self.key]
+        if fail:
+            return None
+        else:
+            self._share_templates(ob, templates)
+            return ob.shared[self.key]
 
     @function_timer
     def _project_dark_templates(self, ob, templates):
         """ Project the provided templates out of every optical detector
 
         """
+        log = Logger.get()
+        if templates is None:
+            # No templates available
+            msg = f"No dark templates available for {ob.name}"
+            log.info_rank(msg, comm=ob.comm.comm_group)
+            return
+        
         if self.shared_flags is not None:
             common_flags = ob.shared[self.shared_flags].data & self.shared_flag_mask
         else:
@@ -303,8 +358,6 @@ class DarkTemplate(Operator):
                 coeff = np.dot(cov, proj)
                 tod[ind] -= np.dot(coeff, templates_ind.T)
 
-        return
-
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
@@ -329,8 +382,6 @@ class DarkTemplate(Operator):
                 templates = self._get_dark_templates(ob)
                 self._save_dark_templates(ob, templates)
             self._project_dark_templates(ob, templates)
-
-        return
 
     @function_timer
     def _finalize(self, data, **kwargs):
