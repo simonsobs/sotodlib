@@ -123,7 +123,7 @@ def read_and_preprocess_wafers(
             if "pointing_model" in axtod:
                 if (
                     preconfig is None
-                    or "pointing_model" not in preconfig["process_pipe"]
+                    or "pointing_model" not in [i['name'] for i in preconfig["process_pipe"]]
                 ):
                     pointing_model.apply_pointing_model(axtod)
 
@@ -132,7 +132,7 @@ def read_and_preprocess_wafers(
                 # Did we already apply it in the preprocessing?
                 if (
                     preconfig is None
-                    or "hwp_angle_model" not in preconfig["process_pipe"]
+                    or "hwp_angle_model" not in [i['name'] for i in preconfig["process_pipe"]]
                 ):
                     axtod = apply_hwp_angle_model(axtod)
                     timer.stop()
