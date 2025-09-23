@@ -108,7 +108,7 @@ class DetTrendCuts(Operator):
 
         for ob in data.obs:
             # Relative timestamps within the observation
-            reltime = np.array(ob.shared[self.times].data)
+            reltime = ob.shared[self.times].data.copy()
             t_0 = reltime[0]
             reltime -= t_0
 
@@ -155,6 +155,8 @@ class DetTrendCuts(Operator):
         return slices
 
     def _compute_trend(self, obs, reltime, slices, det):
+        # This is a copy of the algorithm that is used in 
+        # sotodlib.tod_ops.flags.get_trending_flags()
         signal = obs.detdata[self.det_data][det]
         flags = obs.shared[self.shared_flags].data & self.shared_flag_mask
         if self.det_flags is not None:
