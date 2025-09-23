@@ -24,6 +24,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
+from toast.ops.pipeline import Pipeline
 from toast.utils import Logger
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
@@ -125,6 +126,11 @@ class LoadContext(Operator):
         None,
         allow_none=True,
         help="Apply site-pipeline pre-processing with this configuration",
+    )
+
+    ignore_preprocess_archive = Bool(
+        False,
+        help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 
     observations = List(list(), help="List of observation IDs to load")
@@ -389,7 +395,7 @@ class LoadContext(Operator):
             # If we are using preprocessing, load the archive DB and cut any
             # observations or wafer slots that do not exist.
             preproc_lookup = None
-            if preproc_conf is not None:
+            if (preproc_conf is not None) and (not self.ignore_preprocess_archive):
                 preproc_lookup = dict()
                 preproc_db = preproc_conf["archive"]["index"]
                 con = sqlite3.connect(preproc_db)
@@ -510,6 +516,7 @@ class LoadContext(Operator):
         # Every group loads its observations
         for obindx in range(group_firstobs, group_firstobs + group_numobs):
             obs_name = obs_props[obindx]["name"]
+            n_samp = obs_props[obindx]["n_samples"]
             otimer = Timer()
             otimer.start()
 
@@ -528,7 +535,7 @@ class LoadContext(Operator):
             # reader needs to do this step, in order to pull in unique metadata
             # that is per-wafer and merge.
             #
-            obs_meta, det_props, n_samp = self._load_metadata(
+            obs_meta, det_props = self._load_metadata(
                 obs_name,
                 obs_props[obindx]["session_name"],
                 comm.comm_group,
@@ -596,7 +603,7 @@ class LoadContext(Operator):
                 to cut detectors when loading.
 
         Returns:
-            (tuple):  The (observation metadata, detector property table, samples)
+            (tuple):  The (observation metadata, detector property table)
                 for the observation.
 
         """
@@ -610,7 +617,6 @@ class LoadContext(Operator):
 
         det_props = None
         obs_meta = None
-        n_samp = None
 
         # FIXME: This only works if there is one wafer per observation (and
         # hence one reader).
@@ -620,7 +626,6 @@ class LoadContext(Operator):
             meta = ctx.get_meta(session_name, dets=dets_select)
             if self.context_file is not None:
                 del ctx
-            n_samp = meta["samps"].count
 
             # Parse the axis manager metadata into observation metadata
             # and detector properties.
@@ -675,14 +680,13 @@ class LoadContext(Operator):
         if gcomm is not None:
             obs_meta = gcomm.bcast(obs_meta, root=0)
             det_props = gcomm.bcast(det_props, root=0)
-            n_samp = gcomm.bcast(n_samp, root=0)
 
         log.debug_rank(
             f"LoadContext {obs_name} metadata bcast took",
             comm=gcomm,
             timer=timer,
         )
-        return (obs_meta, det_props, n_samp)
+        return (obs_meta, det_props)
 
     @function_timer
     def _create_obs_instrument(self, obs_name, gcomm, det_props):
@@ -1025,6 +1029,7 @@ class LoadContext(Operator):
             wafer_readers,
             wafer_dets,
             preconfig=pconf,
+            ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
         )
