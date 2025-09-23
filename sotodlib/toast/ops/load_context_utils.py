@@ -41,6 +41,7 @@ def read_and_preprocess_wafers(
     wafer_readers,
     wafer_dets,
     preconfig=None,
+    ignore_preprocess_archive=False,
     context=None,
     context_file=None,
 ):
@@ -59,6 +60,7 @@ def read_and_preprocess_wafers(
             to read this wafer.
         wafer_dets (dict):  For each wafer name, the list of detectors.
         preconfig (dict):  The preprocessing configuration to apply (or None).
+        ignore_preprocess_db (bool): Ignore the 'archive' field in the preprocessing configuration.
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
 
@@ -78,7 +80,7 @@ def read_and_preprocess_wafers(
     for wf, reader in wafer_readers.items():
         if reader == rank:
             ctx = open_context(context=context, context_file=context_file)
-            if preconfig is not None:
+            if (preconfig is not None) and (not ignore_preprocess_archive):
                 # Ensure that the preprocessing archive is defined.  First
                 # check if it already exists in the context.
                 have_ctx_archive = False
@@ -101,7 +103,9 @@ def read_and_preprocess_wafers(
                 if not have_ctx_archive:
                     if not have_pre_archive:
                         msg = "Either the context or the preprocess config must "
-                        msg += "specify the preprocess archive."
+                        msg += "specify the preprocess archive. "
+                        msg += "If you want to ignore preprocessing archive, "
+                        msg += "please set ignore_preprocess_archive=True."
                         raise RuntimeError(msg)
                     else:
                         ctx["metadata"].append(
@@ -144,7 +148,10 @@ def read_and_preprocess_wafers(
 
             if preconfig is not None:
                 prepipe = PreProcPipe(preconfig["process_pipe"], logger=log)
-                prepipe.run(axtod, axtod.preprocess)
+                if not ignore_preprocess_archive:
+                    prepipe.run(axtod, axtod.preprocess)
+                else:
+                    prepipe.run(axtod)
                 timer.stop()
                 elapsed = timer.seconds()
                 timer.start()
