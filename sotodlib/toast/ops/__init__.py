@@ -26,3 +26,4 @@ from .mumux_crosstalk_util import detmap_available, pos_to_chi
 from .load_context import LoadContext
 from .readout_filter import ReadoutFilter
 from .dark_template import DarkTemplate
+from .trend_cut import DetTrendCuts
