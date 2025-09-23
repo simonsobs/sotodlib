@@ -760,7 +760,6 @@ def main():
                     if aman.dets.count == 0:
                         logger.info("\t\tNo high hits dets, skipping...")
                         continue
-
                 if "R2" in aman.pointing:
                     aman.restrict("dets", aman.pointing.R2 > config.get("min_r2", 0.7))
                     if aman.dets.count == 0:

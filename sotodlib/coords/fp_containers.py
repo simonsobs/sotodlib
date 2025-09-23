@@ -789,7 +789,6 @@ def plot_receiver(receiver, plot_dir):
             if fp.tot_weight is None:
                 continue
             msk = (fp.id_strs == valid_ids[i]) * fp.isfinite
-
             if np.sum(msk) < 3:
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
