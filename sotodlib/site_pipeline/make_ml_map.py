@@ -33,6 +33,21 @@ def get_parser(parser=None):
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     return parser
 
+sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
+
+def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
+    import numpy as np
+    # First reject detectors with unreasonably low noise
+    good     = rms_uKrts >= sens_lim
+    # Also reject far too noisy detectors
+    good    &= rms_uKrts <  sens_lim*max_lim
+    # Then reject outliers
+    if np.sum(good) == 0: return good
+    ref      = np.median(rms_uKrts[good])
+    good    &= rms_uKrts > ref*med_tol
+    good    &= rms_uKrts < ref/med_tol
+    return good
+
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
     from sotodlib.core import Context, AxisManager, IndexAxis
@@ -190,7 +205,7 @@ def main(**args):
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
                     obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
-                if obs.dets.count < 10:
+                if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     continue
                 # Check nans
@@ -235,14 +250,42 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
+                    # measure rms
+                    rms = np.std(obs.signal,-1)
+                    rms *= (1/srate)**0.5
+                    if args.unit=='K':
+                        good    = sensitivity_cut(rms*1e6, sens_limits[band])
+                    elif args.unit == 'uK':
+                        good    = sensitivity_cut(rms, sens_limits[band])
+                    #nrms    = np.sum(good)
+                    # Cut detectors with too big a fraction of samples cut,
+                    # or cuts occuring too often.
+                    #cuts = obs.flags.glitch_flags.mask()
+                    #cutfrac = cuts.sum()/np.prod(cuts.shape)
+                    #cutdens = (cuts.bins[:,1]-cuts.bins[:,0])/cuts.nsamp
+                    #good   &= np.array((cutfrac < 0.1))
+                    #ndens   = dev.np.sum(good)
+                    # Cut all detectors if too large a fraction is cut
+                    #good   &= dev.np.sum(good)/meta.ndet_full > 0.25
+                    #nfinal  = dev.np.sum(good)
+                    #signal = dev.np.ascontiguousarray(signal[good]) # 600 ms!
+                    #good   = dev.get(good) # cuts, dets, fplane etc. need this on the cpu
+                    #cuts   = cuts  [good]
+                    if np.logical_not(good).sum() / obs.dets.count > 0.5:
+                        L.debug("Skipped %s (more than 40pc of detectors cut by sens)" % (sub_id))
+                        continue
+                    else:
+                        obs.restrict("dets", good)
+                    #L.debug(f"{sub_id} has {good.sum()}/{obs.dets.count} detectors good")
+                    #obs.restrict("dets", good)
                     # Apply pointing model
-                    pointing_model.apply_pointing_model(obs)
+                    #pointing_model.apply_pointing_model(obs)
                     # Calibrate to pW
                     #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
                     # Calibrate to K_cmb
                     #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs,maxcut=0.5)
+                    good_dets = mapmaking.find_usable_detectors(obs)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
