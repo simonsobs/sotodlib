@@ -1,0 +1,40 @@
+context_path: satp1_context.yaml
+output_dir: /home/kyoheiy/scratch/metadata/satp1/manifests/tau_hwp/satp1_tau_hwp_250915m
+overwrite: True
+tags:
+    - 'hwp_spin_up=1'
+    - 'hwp_spin_down=1'
+    - 'hwp_change_ccw_to_stop=1'
+    - 'hwp_change_cw_to_stop=1'
+    - 'hwp_change_stop_to_cw=1'
+    - 'hwp_change_stop_to_ccw=1'
+min_ctime: None
+max_ctime: None
+hwp_angle_version_override: 2
+hwp_angle_encoder_override: 2
+nprocs: 1
+process_pipe:
+    - name: "hwp_angle_model"
+      process: True
+      calc:
+        on_sign_ambiguous: 'offcenter'
+      save: False
+
+    - name: "correct_iir_params"
+      process: True
+
+    - name: "fourier_filter"
+      process:
+        filt_function: "iir_filter"
+        filter_params:
+          invert: True
+
+    - name: "get_tau_hwp"
+      calc:
+        width: 1000
+        max_fhwp: 2.
+        min_fhwp: 1.
+        demod_mode: 4
+        name: "tau_hwp"
+        merge: True
+      save: False

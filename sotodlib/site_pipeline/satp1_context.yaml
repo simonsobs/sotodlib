@@ -1,0 +1,22 @@
+tags:
+  basedir:  /scratch/gpfs/SIMONSOBS/so/tracked/metadata/satp1
+  manifestdir: /scratch/gpfs/SIMONSOBS/so/tracked/metadata/satp1/manifests
+
+imports:
+  - sotodlib.io.load_book
+  - sotodlib.io.metadata
+
+obsfiledb: '{basedir}/satp1_obsfiledb_local.sqlite'
+obsdb: '{basedir}/satp1_obsdb_240911m_local.sqlite'
+
+obs_loader_type: 'obs-book'
+
+metadata:
+  - db: '{manifestdir}/hwp_angle_model/satp1_hwp_angle_model_250822r1/hwp_angle_model_local.sqlite'
+    label: hwp_model
+    unpack:
+    - 'hwp_angle_model'
+  - db: '{manifestdir}/hwp_angles/satp1_hwp_angles_250711m/hwp_angle_local.sqlite'
+    label: hwp_solution
+    unpack:
+    - 'hwp_solution'
