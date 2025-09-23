@@ -35,6 +35,19 @@ defaults = {"query": "1",
             "srcsamp": None,
             "unit": 'K',
            }
+sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
+
+def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
+    # First reject detectors with unreasonably low noise
+    good     = rms_uKrts >= sens_lim
+    # Also reject far too noisy detectors
+    good    &= rms_uKrts <  sens_lim*max_lim
+    # Then reject outliers
+    if np.sum(good) == 0: return good
+    ref      = np.median(rms_uKrts[good])
+    good    &= rms_uKrts > ref*med_tol
+    good    &= rms_uKrts < ref/med_tol
+    return good
 
 def get_parser(parser=None):
     if parser is None:
@@ -163,15 +176,28 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            tod = calibrate_obs(tod, site=site)
+            tod = calibrate_obs(tod, band, site=site)
             my_tods.append(tod)
             my_inds.append(ind)
         except RuntimeError: continue
     return my_tods, my_inds
 
-def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
+def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='K'):
     # The following stuff is very redundant with the normal mapmaker,
     # and should probably be factorized out
+    if obs.dets.count < 50:
+        return None
+    # Check nans
+    mask = np.logical_not(np.isfinite(obs.signal))
+    if mask.sum() > 0:
+        return None
+    # Check all 0s
+    zero_dets = np.sum(obs.signal, axis=1)
+    mask = zero_dets == 0.0
+    if mask.any():
+        obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
+    # Cut non-optical dets
+    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
     mapmaking.fix_boresight_glitches(obs, )
     srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
     # Add site and weather, since they're not in obs yet
@@ -194,12 +220,20 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
     
     if (not nocal) and (obs.signal is not None):
         # apply pointing model (here for now)
-        pointing_model.apply_pointing_model(obs)
+        #pointing_model.apply_pointing_model(obs)
+        rms = np.std(obs.signal,-1)
+        rms *= (1/srate)**0.5
+        if unit=='K':
+            good    = sensitivity_cut(rms*1e6, sens_limits[band])
+        elif unit == 'uK':
+            good    = sensitivity_cut(rms, sens_limits[band])
+        if np.logical_not(good).sum() / obs.dets.count > 0.5:
+            return None
+        else:
+            obs.restrict("dets", good)
         # Disqualify overly cut detectors
-        good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
+        good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.2)
         obs.restrict("dets", good_dets)
-        # Cut non-optical dets
-        obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
 
         #if len(good_dets) > 0:
             # Gapfill glitches. This function name isn't the clearest
@@ -229,7 +263,7 @@ def calibrate_obs(obs, site='so', dtype_tod=np.float32, nocal=True):
         utils.deslope(obs.signal, w=5, inplace=True)
     return obs
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None,):
+def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None, unit='K'):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
@@ -251,9 +285,10 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
         # which is pointless, but shouldn't cost that much time
         #obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
         obs = pp_util.load_and_preprocess(obs_id, preproc, dets={'wafer_slot':detset,'wafer.bandpass':band}, context=context,)
-        obs = calibrate_obs(obs, site=site, nocal=False)
-        #bools, nod_indices, obs = find_el_nods(obs)
-
+        obs = calibrate_obs(obs, band, site=site, nocal=False, unit=unit)
+        if obs is None:
+            # this means we skip the full obs on calibrate_obs
+            continue
         if downsample != 1:
             obs = mapmaking.downsample_obs(obs, downsample)
         if obs.dets.count == 0:
@@ -435,7 +470,7 @@ def main(config_file=None, defaults=defaults, **args):
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
                     subshape, subwcs, noise_model, L, preproc, comps=comps, t0=t, comm=comm_good, tag=tag,
                     niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0,
-                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=args['srcsamp'] )
+                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=args['srcsamp'], unit=args['unit'] )
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
         except DataMissing as e:
