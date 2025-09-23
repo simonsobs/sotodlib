@@ -374,36 +374,41 @@ def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None
     obs_list : list
         The list of obs found from the query.
     """
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
 
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
+    try:
+        with open(query, "r") as fname:
+            return [context.obsdb.get(line.split()[0]) for line in fname]
+    except FileNotFoundError:
+        if (min_ctime is None) and (update_delay is not None):
+            # If min_ctime is provided it will use that..
+            # Otherwise it will use update_delay to set min_ctime.
+            min_ctime = int(time.time()) - update_delay*86400
 
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tag.lower()
-            if '=' not in tag:
-                tags[i] += '=1'
+        if obs_id is not None:
+            tot_query = f"obs_id=='{obs_id}'"
+        else:
+            tot_query = "and "
+            if min_ctime is not None:
+                tot_query += f"timestamp>={min_ctime} and "
+            if max_ctime is not None:
+                tot_query += f"timestamp<={max_ctime} and "
+            if query is not None:
+                tot_query += query + " and "
+            tot_query = tot_query[4:-4]
+            if tot_query=="":
+                tot_query="1"
 
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
-    
-    return obs_list
+        if not(tags is None):
+            for i, tag in enumerate(tags):
+                tags[i] = tag.lower()
+                if '=' not in tag:
+                    tags[i] += '=1'
+
+        if planet_obs:
+            obs_list = []
+            for tag in tags:
+                obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+        else:
+            obs_list = context.obsdb.query(tot_query, tags=tags)
+        
+        return obs_list

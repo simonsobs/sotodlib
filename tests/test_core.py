@@ -514,10 +514,18 @@ class TestAxisManager(unittest.TestCase):
         aman.wrap('quantity', np.ones(5) << u.m)
         aman.wrap('quantity2', (np.ones(1) << u.m)[0])
 
+        aman.wrap('quantized', np.sin(np.linspace(0, 6, 10001)).round(2))
+        aman.wrap('quantized2', (aman['quantized'] * 100).astype('int32'))
+
         aman.wrap('subaman', core.AxisManager(
             aman.dets, core.LabelAxis('bands', ['f090', 'f150'])))
         aman['subaman'].wrap_new('subtest1', shape=[('dets', 'bands')])
         aman['subaman'].wrap_new('subtest2', shape=(100,))
+        aman['subaman'].wrap('also_q', np.cos(np.linspace(0, 6, 10001)))
+
+        encodings = {'quantized': {'type': 'flacarray', 'args': {'quanta': .01}},
+                     'quantized2': {'type': 'flacarray'},
+                     'subaman': {'also_q': {'type': 'flacarray', 'args': {'quanta': .2}}}}
 
         # Make sure the saving / clobbering / readback logic works
         # equally for simple group name, root group, None->root group.
@@ -527,8 +535,17 @@ class TestAxisManager(unittest.TestCase):
                 aman.save(filename, dataset)
                 # Overwrite
                 aman.save(filename, dataset, overwrite=True)
+                # Fail on encodings error.
+                with self.assertRaises(ValueError):
+                    aman.save(filename, dataset, overwrite=True,
+                              encodings={'something': {'type': 'whatever'}})
+                # Fail on encodings error.
+                with self.assertRaises(ValueError):
+                    aman.save(filename, dataset, overwrite=True,
+                              encodings={'quantity': {'type': 'flacarray'}})
                 # Compress and Overwrite
-                aman.save(filename, dataset, overwrite=True, compression='gzip')
+                aman.save(filename, dataset, overwrite=True, compression='gzip',
+                          encodings=encodings)
                 # Refuse to overwrite
                 with self.assertRaises(RuntimeError):
                     aman.save(filename, dataset)
@@ -539,7 +556,14 @@ class TestAxisManager(unittest.TestCase):
             # should be required for all AxisManager members!
             for k in aman._fields.keys():
                 self.assertEqual(aman[k].__class__, aman2[k].__class__)
-                if hasattr(aman[k], 'shape'):
+                if isinstance(aman[k], u.quantity.Quantity):
+                    np.testing.assert_array_equal(aman[k], aman2[k])
+                elif isinstance(aman[k], np.ndarray):
+                    if np.issubdtype(aman2[k].dtype, np.floating):
+                        np.testing.assert_almost_equal(aman[k], aman2[k])
+                    else:
+                        np.testing.assert_array_equal(aman[k], aman2[k])
+                elif hasattr(aman[k], 'shape'):
                     self.assertEqual(aman[k].shape, aman2[k].shape)
                 else:
                     self.assertEqual(aman[k], aman2[k])  # scalar
@@ -547,13 +571,13 @@ class TestAxisManager(unittest.TestCase):
         # Test field subset load
         with tempfile.TemporaryDirectory() as tempdir:
             filename = os.path.join(tempdir, 'test.h5')
-            aman.save(filename, dataset)
+            aman.save(filename, dataset, encodings=encodings)
             aman2 = aman.load(filename, dataset, fields=['test1', 'flags'])
             aman3 = aman.load(filename, dataset, fields=['test1', 'subaman'])
             aman4 = aman.load(filename, dataset, fields=['test1', 'subaman.subtest1'])
         for target, keys, subkeys in [
                 (aman2, ['test1', 'flags'], None),
-                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2']),
+                (aman3, ['test1', 'subaman'], ['subtest1', 'subtest2', 'also_q']),
                 (aman4, ['test1', 'subaman'], ['subtest1']),
         ]:
             self.assertCountEqual(target._fields.keys(),

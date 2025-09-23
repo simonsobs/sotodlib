@@ -16,6 +16,7 @@ from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
 
+from ...coords import pointing_model
 from ...core import Context, AxisManager
 from ...core.axisman import AxisInterface
 from ...preprocess import Pipeline as PreProcPipe
@@ -116,6 +117,15 @@ def read_and_preprocess_wafers(
             log.debug(
                 f"LoadContext {obs_name} loaded wafer {wf} in {elapsed} seconds",
             )
+
+            # Apply pointing model, UNLESS we are applying a preprocess config
+            # on load and that config includes the pointing model
+            if "pointing_model" in axtod:
+                if (
+                    preconfig is None
+                    or "pointing_model" not in preconfig["process_pipe"]
+                ):
+                    pointing_model.apply_pointing_model(axtod)
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
@@ -553,7 +563,7 @@ def distribute_detector_data(
                     else:
                         for idet in range(n_send_det):
                             obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[idet]
-                        # Update per-detector flags
+                    # Update per-detector flags
                     dflags = {
                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
                         for x in range(n_recv_det)
@@ -619,6 +629,17 @@ def distribute_detector_data(
     # Now safe to delete our dictionary of isend buffer handles, which might include
     # temporary buffers of ranges flags.
     del send_data
+
+    # Every process checks its local data for NaN values.  If any are found, a warning
+    # is printed and the detector is cut.
+    dflags = dict()
+    for det in obs.local_detectors:
+        nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+        if nnan > 0:
+            msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
+            log.warning(msg)
+            dflags[det] = defaults.det_mask_invalid
+    obs.update_local_detector_flags(dflags)
 
 
 @function_timer
@@ -792,7 +813,7 @@ def ax_name_fp_subst(var, fp_array, det=None):
     out = ""
     last = 0
     for match in re.finditer(r"(\{.*\})", var):
-        out += var[last:match.start()]
+        out += var[last : match.start()]
         colname = match.group()
         colname = colname.replace("{", "")
         colname = colname.replace("}", "")

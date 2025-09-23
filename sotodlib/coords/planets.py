@@ -327,13 +327,11 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         tod.wrap(wrap, signal, [(0, 'dets'), (1, 'samps')])
     return signal
 
-def _get_astrometric(source_name, timestamp, site="_default"):
+def _get_astrometric(source_name, timestamp, site="_default", planets=None):
     """
     Derive skyfield's Astrometric object of a celestial source at a
     specific timestamp and observing site, which is used to derive
     radec/azel in get_source_pos/get_source_azel.
-
-    Note that it will download a 16M ephemeris file on first use.
 
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
@@ -341,14 +339,37 @@ def _get_astrometric(source_name, timestamp, site="_default"):
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
+      planets (SpiceKernel): the ephemeris object for
+        skyfield.jpllib). If not passed in, a sensible default
+        ephemeris is used.
 
     Returns:
+      planets: SpiceKernel object (for re-use)
       astrometric: skyfield's astrometric object
-    """
-    # Get the ephemeris
-    de_filename = core.get_local_file("de421.bsp")
 
-    planets = jpllib.SpiceKernel(de_filename)
+    Notes:
+      The SpiceKernel holds the ephemeris file open. To close that
+      file, run planets.close().  Deleting the object is not enough,
+      as the garbage collection can be lazy.  After .close(), the
+      kernel can't be used for ephemeris stuff. Some operations on the
+      returned "astrometric" object will try to use the kernel, and
+      will fail. So keep planets around until you're done computing on
+      astrometric, then call close().
+
+      If you're doing lots of astrometric stuff, you can get the
+      kernel once and re-use it.
+
+      If the default ephemeris file (de421.bsp) is not found, it will
+      be downloaded (16M) and cached.
+
+    """
+    if planets is None:
+        # Get the ephemeris
+        de_filename = core.get_local_file("de421.bsp")
+        planets = jpllib.SpiceKernel(de_filename)
+    else:
+        assert len(planets.codes)  # Someone .closed this eph!
+
     for k in [
         source_name,
         source_name + " barycenter",
@@ -374,8 +395,7 @@ def _get_astrometric(source_name, timestamp, site="_default"):
         datetime.datetime.fromtimestamp(timestamp, tz=skyfield_api.utc)
     )
     astrometric = observatory.at(sf_timestamp).observe(target)
-    planets.close()
-    return astrometric
+    return planets, astrometric
 
 
 def get_source_pos(source_name, timestamp, site='_default'):
@@ -415,8 +435,9 @@ def get_source_pos(source_name, timestamp, site='_default'):
         return ra, dec, float('inf')
     
     # Derive from skyfield astrometric object
-    amet0 = _get_astrometric(source_name, timestamp, site)
+    planets, amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()
+    planets.close()
     return ra.to(units.rad).value, dec.to(units.rad).value, distance.to(units.au).value
 
 
@@ -439,8 +460,9 @@ def get_source_azel(source_name, timestamp, site='_default'):
       el (float): in radians.
       distance (float): in AU.
     """
-    amet0 = _get_astrometric(source_name, timestamp, site)
+    planets, amet0 = _get_astrometric(source_name, timestamp, site)
     el, az, distance = amet0.apparent().altaz()
+    planets.close()
     return az.to(units.rad).value, el.to(units.rad).value, distance.to(units.au).value
 
 

@@ -228,9 +228,10 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     configs, context = pp_util.get_preprocess_context(configs, context)
     if dets is not None:
         meta.restrict("dets", dets)
-    meta = pp_util.load_preprocess_det_select(
-        obs_id, configs=configs, context=context, meta=meta, logger=logger
+    det_vals = pp_util.load_preprocess_det_select(
+        obs_id, configs=configs, context=context, logger=logger
     )
+    meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -348,6 +349,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
                             subdir='temp', remove=overwrite)
 
+    # remove datasets from final archive file not found in db
+    pp_util.cleanup_archive(configs, logger)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
@@ -356,6 +360,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:
