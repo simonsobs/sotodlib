@@ -5,7 +5,7 @@ from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
 from sotodlib.tod_ops import filters, detrend_tod
 from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.coords import pointing_model
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory
+from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory, tilemap
 import yaml
 
 defaults = {"query": "1",
@@ -168,7 +168,7 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
 
 class DataMissing(Exception): pass
 
-def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, site='so'):
+def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, site='so', L=None):
     my_tods = []
     my_inds = []
     if inds is None: inds = list(range(comm.rank, len(obslist), comm.size))
@@ -176,26 +176,27 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            tod = calibrate_obs(tod, band, site=site)
+            tod = calibrate_obs(tod, band, site=site, L=L)
             my_tods.append(tod)
             my_inds.append(ind)
         except RuntimeError: continue
     return my_tods, my_inds
 
-def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='K'):
+def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='K', L=None):
     # The following stuff is very redundant with the normal mapmaker,
     # and should probably be factorized out
-    if obs.dets.count < 50:
+    if obs.signal is not None and obs.dets.count < 50:
         return None
-    # Check nans
-    mask = np.logical_not(np.isfinite(obs.signal))
-    if mask.sum() > 0:
-        return None
-    # Check all 0s
-    zero_dets = np.sum(obs.signal, axis=1)
-    mask = zero_dets == 0.0
-    if mask.any():
-        obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
+    if (not nocal) and (obs.signal is not None):
+        # Check nans
+        mask = np.logical_not(np.isfinite(obs.signal))
+        if mask.sum() > 0:
+            return None
+        # Check all 0s
+        zero_dets = np.sum(obs.signal, axis=1)
+        mask = zero_dets == 0.0
+        if mask.any():
+            obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
     # Cut non-optical dets
     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
     mapmaking.fix_boresight_glitches(obs, )
@@ -211,7 +212,7 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
     if 'flags' not in obs._fields:
         obs.wrap('flags', FlagManager.for_tod(obs))
     if "glitch_flags" not in obs.flags:
-        obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape),[(0,'dets'),(1,'samps')])
+        obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0,'dets'),(1,'samps')])
     
     if obs.signal is not None:
         #detrend_tod(obs, method='linear')
@@ -435,7 +436,7 @@ def main(config_file=None, defaults=defaults, **args):
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, site=SITE)
+            my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, site=SITE, L=L)
             my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod, maxcut=0.3)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
             valid     = np.where(my_costs>0)[0]
@@ -474,7 +475,7 @@ def main(config_file=None, defaults=defaults, **args):
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
         except DataMissing as e:
-            handle_empty(prefix, tag, comm_good, e)
+            handle_empty(prefix, tag, comm_good, e, L)
     return True
 
 if __name__ == '__main__':
