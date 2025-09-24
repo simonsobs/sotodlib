@@ -567,6 +567,82 @@ the ``focal_plane`` dataset. This can be done like so:
 This will give you a dict of ``Receiver`` dataclasses with all the focal plane data.
 The keys of this dict are the start times for combined focal planes and the ``obs_id`` for per-obs.
 
+make-relcal-model
+--------------------
+
+This script receives the fitted detector optical response 
+from the analyze-bright-ptsrc after the detmap has been applied, 
+and determines a 'flat field' for the detectors. The output is a 
+set of per-detector calibration factors of order 1 associated 
+with det_id to be multiplied to the detector response. 
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_relcal_model
+   :func: get_parser
+
+Config file format
+``````````````````
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # Context file for the observation
+  context_file: ./context_local.yaml
+
+  # Value used for calibration, Peak (amp) or Flux (amp*fwhm_eta*fwhm_xi)
+  value: 'Flux'
+
+  # Methods for averaging, Median, Mean or Weighted_average
+  method: 'Weighted_average'
+
+  # A .txt file with one obs_id per line
+  obs_id_file: './obs_ids.txt'
+
+  # Optional parameters for data cutting
+  min_cut: null
+  max_cut: null
+  max_obs_residue: null # This is the maximum offset between observations.
+  max_error_ratio: null # Allowed std/mean for each detector between observations
+  min_obs_per_det: 1
+  
+  archive:
+    index: 'archive.sqlite'
+    policy:
+      type: 'directory'
+      root_dir: './'
+      out_dir: './output/'
+
+Inputs
+``````
+
+The Context should include both the detector response 
+as output from analyze-bright-ptsrc and the detector mapping. 
+Here are the AxisManager fields required for this script. 
+
+- obs_info:
+
+  - ``'target'``
+  - ``'timestamp'``
+
+- ptsrc_params:
+
+  - Output of analyze-bright-ptsrc
+  - ``'amp'``
+  - ``'snr'``
+  - ``'fwhm_xi'``
+  - ``'fwhm_eta'``
+
+- det_info:
+
+  - ``'band'``
+  - ``'det_id'``
+  - ``'wafer_slot'``
+
+
 preprocess-tod
 --------------
 This script is set up to run a preprocessing pipeline using the preprocess
