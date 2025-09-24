@@ -52,10 +52,10 @@ def setup_simulate_observing(parser, operators):
         default=None,
         help="Comma-separated list of bands: LAT_f030 (27GHz), LAT_f040 (39GHz), "
         "LAT_f090 (93GHz), LAT_f150 (145GHz), "
-        "LAT_f230 (225GHz), LAT_f290 (285GHz), "
+        "LAT_f220 (225GHz), LAT_f280 (285GHz), "
         "SAT_f030 (27GHz), SAT_f040 (39GHz), "
         "SAT_f090 (93GHz), SAT_f150 (145GHz), "
-        "SAT_f230 (225GHz), SAT_f290 (285GHz). ",
+        "SAT_f220 (225GHz), SAT_f280 (285GHz). ",
     )
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
