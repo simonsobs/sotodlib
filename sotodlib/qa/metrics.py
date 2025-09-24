@@ -206,10 +206,16 @@ class PreprocessValidDets(PreprocessQA):
         # extract these tags for the metric
         tags = []
         vals = []
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+
+        if "wafer" in meta.det_info:
+            bandpasses = meta.det_info.wafer.bandpass
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 if len(subset) > 0:
@@ -271,7 +277,8 @@ class PreprocessArrayNET(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", [])
         self._noise_aman = process_args.get("noise_aman", "noise")
-        self._unit_factor = process_args.get("unit_factor", 1e6)
+        self._field_name = process_args.get("field_name", "")
+        self._unit_factor = process_args.get("unit_factor", 1)
 
     def _process(self, meta):
 
@@ -281,10 +288,16 @@ class PreprocessArrayNET(PreprocessQA):
         tag_keys += [t for t in self._tags if t not in tag_keys]
         tags = []
         vals = []
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+
+        if "wafer" in meta.det_info:
+            bandpasses = meta.det_info.wafer.bandpass
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
@@ -301,7 +314,7 @@ class PreprocessArrayNET(PreprocessQA):
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
-            "field": self._influx_field,
+            "field": f"{self._influx_field}{'_' + self._field_name.replace("_", "", 1) if self._field_name else ''}",
             "values": vals,
             "timestamps": obs_time,
             "tags": tags,
@@ -338,7 +351,8 @@ class PreprocessDetNET(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", [])
         self._noise_aman = process_args.get("noise_aman", "noise")
-        self._unit_factor = process_args.get("unit_factor", 1e6)
+        self._field_name = process_args.get("field_name", "")
+        self._unit_factor = process_args.get("unit_factor", 1)
 
     def _process(self, meta):
 
@@ -348,10 +362,16 @@ class PreprocessDetNET(PreprocessQA):
         tag_keys += [t for t in self._tags if t not in tag_keys]
         tags = []
         vals = []
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+
+        if "wafer" in meta.det_info:
+            bandpasses = meta.det_info.wafer.bandpass
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
@@ -368,7 +388,7 @@ class PreprocessDetNET(PreprocessQA):
 
         obs_time = [meta.obs_info.timestamp] * len(tags)
         return {
-            "field": self._influx_field,
+            "field": f"{self._influx_field}{'_' + self._field_name.replace("_", "", 1) else ''}",
             "values": vals,
             "timestamps": obs_time,
             "tags": tags,

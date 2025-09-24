@@ -595,14 +595,19 @@ class _FracFlaggedMixIn(object):
         tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
         tag_keys += [t for t in tags if t not in tag_keys]
 
+        if "wafer" in meta.det_info:
+            bandpasses = meta.det_info.wafer.bandpass
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+
         tags = []
         vals = []
         from ..qa.metrics import _get_tag, _has_tag
         # record one metric per wafer slot, per bandpass
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 # Compute the number of samples that were flagged
