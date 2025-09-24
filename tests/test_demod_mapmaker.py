@@ -45,7 +45,7 @@ def make_map(obs, nside=None, nside_tile=None, shape=None, wcs=None, comps='TQU'
 
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=NmatWhite(), comps=comps)
-    mapmaker.add_obs('obs0', obs, use_psd=False, apply_wobble=False)
+    mapmaker.add_obs('obs0', obs, use_psd=False, apply_wobble=True)
     imap = unweight_map(signal_map.rhs[0], signal_map.div[0])
     return imap
 
@@ -71,6 +71,16 @@ def get_tod(Q_stream, U_stream):
     tod.wrap('weather', np.full(1, 'toco'))
     tod.wrap('site', np.full(1, 'so_sat1'))
     tod.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(tod.shape), [(0, 'dets'), (1, 'samps')])
+    wobble_params = core.AxisManager(core.LabelAxis('dets',tod.dets.vals))
+    for k in ['amp','phase']:
+        wobble_params.wrap(k, np.zeros(tod.dets.count), [(0,'dets')])
+    tod.wrap('wobble_params', wobble_params)
+    det_info = core.AxisManager(core.LabelAxis('dets',tod.dets.vals))
+    det_info.wrap('wafer_slot', np.array(['ws0' for i in range(tod.dets.count)]))
+    wafer = core.AxisManager(core.LabelAxis('dets',tod.dets.vals))
+    wafer.wrap('bandpass', np.array(['f090' for i in range(tod.dets.count)]))
+    det_info.wrap('wafer', wafer)
+    tod.wrap('det_info', det_info)
 
     fp = so3g.proj.FocalPlane.from_xieta(
         tod.dets.vals, tod.focal_plane.xi, tod.focal_plane.eta, tod.focal_plane.gamma)

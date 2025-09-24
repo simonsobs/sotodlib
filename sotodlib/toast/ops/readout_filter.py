@@ -3,6 +3,7 @@
 
 import numpy as np
 
+from toast.fft import convolve
 from toast.utils import Logger, rate_from_times
 from toast.traits import trait_docs, Int, Unicode
 from toast.timing import function_timer
@@ -10,7 +11,6 @@ from toast.observation import default_values as defaults
 from toast.ops import Operator
 
 from sotodlib.tod_ops import filters
-from pixell import fft
 
 
 @trait_docs
@@ -37,6 +37,12 @@ class ReadoutFilter(Operator):
         "det_info:stream_id", help="Focalplane key for the wafer name"
     )
 
+    debug_root = Unicode(
+        None,
+        allow_none=True,
+        help="Optional root filename for debug plots",
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         return
@@ -44,20 +50,21 @@ class ReadoutFilter(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
-        gcomm = data.comm.comm_group
 
         for ob in data.obs:
+            if self.iir_params not in ob:
+                msg = "Cannot apply readout filter. "
+                msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
+                raise RuntimeError(msg)
+
             # Get the sample rate from the data.  We also have nominal sample rates
             # from the noise model and also from the focalplane.
             (rate, dt, dt_min, dt_max, dt_std) = rate_from_times(
                 ob.shared[self.times].data
             )
-            freq = fft.rfftfreq(ob.n_local_samples, dt)
-
-            if self.iir_params not in ob:
-                msg = f"Cannot apply readout filter. "
-                msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
-                raise RuntimeError(msg)
+            order = int(np.ceil(np.log(ob.n_local_samples) / np.log(2)))
+            n_fft = 2 ** (order + 1)
+            freq = np.fft.rfftfreq(n_fft, d=1.0 / rate)
 
             # Get valid local detectors
             local_dets = ob.select_local_detectors()
@@ -87,30 +94,27 @@ class ReadoutFilter(Operator):
                         ) if y == wf
                     ]
                     signal = ob.detdata[self.det_data][wafer_dets, :]
-                    self._filter_detectors(freq, signal, ob[wf])
+                    self._filter_detectors(rate, freq, signal, ob[wf])
             else:
                 # We are filtering all detectors at once
                 signal = ob.detdata[self.det_data][local_dets, :]
-                self._filter_detectors(freq, signal, ob[self.iir_params])
+                self._filter_detectors(rate, freq, signal, ob[self.iir_params])
 
-    def _filter_detectors(self, freq, det_array, iir_props):
-        ndet = len(det_array)
-        nsamp = len(det_array[0])
-
-        # Get the filter kernels for all detectors
+    def _filter_detectors(self, rate, freq, det_array, iir_props):
+        # Get the common filter kernel for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
 
-        # Re-use the same Fourier domain buffer
-        fsig = np.empty(nsamp // 2 + 1, dtype=np.complex128)
-        for idet in range(ndet):
-            # Forward
-            _ = fft.rfft(det_array[idet], ft=fsig)
-
-            # Apply iir filter kernel
-            fsig /= iir_filter[idet]
-
-            # Inverse fft
-            _ = fft.irfft(fsig, tod=det_array[idet], normalize=True)
+        # Deconvolve
+        convolve(
+            det_array,
+            rate,
+            kernel_freq=freq,
+            kernels=iir_filter,
+            kernel_func=None,
+            deconvolve=True,
+            algorithm="numpy",
+            debug=self.debug_root,
+        )
 
     def _finalize(self, data, **kwargs):
         return
