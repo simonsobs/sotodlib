@@ -838,18 +838,12 @@ class EstimateHWPSS(_Preprocess):
         tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
         tags = []
         vals = []
-
-        if "wafer" in meta.det_info:
-            bandpasses = meta.det_info.wafer.bandpass
-        else:
-            bandpasses = meta.det_info.det_cal.bandpass
-
         from ..qa.metrics import _get_tag, _has_tag
         import re
-        for bp in np.unique(bandpasses):
+        for bp in np.unique(meta.det_cal.bandpass):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
+                    (meta.det_info.wafer_slot == ws) & (meta.det_cal.bandpass == bp)
                 )[0]
 
                 if len(subset) > 0:
