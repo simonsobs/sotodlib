@@ -533,6 +533,7 @@ def get_source_footprints(d: ReportData) -> List[Footprint]:
             continue
         for pair in entry[0]['coverage'].split(','):
             source, wafer = pair.split(':')
+            source = source.casefold()
             if source in d.cfg.cal_targets:
                 coverage_data[wafer][source]['count'] += 1
                 coverage_data[wafer][source]['obsids'].add(obs)
