@@ -512,11 +512,13 @@ class ObsFileDb:
         return output
 
 
+# Support functions for diff / patch
+
 def _reconcile_gen(c0, c1, order_keys=None):
     """Generator used to compare rows in cursor c0 to those in cursor
-    c1. The cursors are assumed to return results sorted that are
-    sorted in the same way and sorted according to tuple(row) (or
-    row[k] or k in order_keys, if that is given).
+    c1. The cursors are assumed to return sorted results, and that the
+    sorting matches the sorting of tuple(row) (if order_keys is None)
+    or tuple(row[k] or k in order_keys).
 
     Yields results of the form (mtype, item) where mtype is one of:
     - 'left-only': the item was found in c0 only
