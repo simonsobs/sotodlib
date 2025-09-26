@@ -836,14 +836,17 @@ class EstimateHWPSS(_Preprocess):
         # record one metric per wafer_slot per bandpass
         # add specified tags
         from ..qa.metrics import _get_tag, _has_tag
-        tag_keys = ["wafer_slot", "tel_tube"]
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
 
         if _has_tag(meta.det_info, 'wafer.bandpass'):
             bandpasses = meta.det_info.wafer.bandpass
-            tag_keys += ["wafer.bandpass"]
+            tag_keys["bandpass"] = "wafer.bandpass"
         else:
             bandpasses = meta.det_info.det_cal.bandpass
-            tag_keys += ["det_cal.bandpass"]
+            tag_keys["bandpass"] = "det_cal.bandpass"
 
         tags = []
         vals = []
@@ -877,7 +880,7 @@ class EstimateHWPSS(_Preprocess):
                     mean = coeff_amp[nonzero].mean(axis=0)
 
                     tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_base["telescope"] = meta.obs_info.telescope
 

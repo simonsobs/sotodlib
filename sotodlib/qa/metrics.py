@@ -169,9 +169,11 @@ class PreprocessValidDets(PreprocessQA):
     The config entry supports a `process_args` block where the following options can be
     specified:
 
-    tags : list
-        Keys into `metadata.det_info` to record as tags with the Influx line.
-        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    tags : dict
+        The values are keys into `metadata.det_info` to record as tags with
+        the Influx line. The keys are addded to the default list
+        ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+        from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
     thresh : float
         The threshold for the fraction of valid samples above which a detector is
         deemed good (default 0.75)
@@ -192,23 +194,26 @@ class PreprocessValidDets(PreprocessQA):
         # bypass the PreprocessQA __init__
         super(PreprocessQA, self).__init__(*args, **kwargs)
         # extract parameters
-        self._tags = process_args.get("tags", [])
+        self._tags = process_args.get("tags", {})
         self._thresh = process_args.get("thresh", 0.75)
         self._key = process_args.get("process_name", "glitches")
 
     def _process(self, meta):
 
         # add specified tags
-        tag_keys = ["wafer_slot", "tel_tube"]
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
 
         if _has_tag(meta.det_info, 'wafer.bandpass'):
             bandpasses = meta.det_info.wafer.bandpass
-            tag_keys += ["wafer.bandpass"]
+            tag_keys["bandpass"] = "wafer.bandpass"
         else:
-            bandpasses = meta.det_cal.bandpass
-            tag_keys += ["det_cal.bandpass"]
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
 
-        tag_keys += [t for t in self._tags if t not in tag_keys]
+        tag_keys.update(self._tags)
 
         # record one metric per wafer slot, per bandpass
         # extract these tags for the metric
@@ -232,7 +237,7 @@ class PreprocessValidDets(PreprocessQA):
 
                     # get the tags for this wafer (all detectors in this subset share these)
                     tags_i = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_i["telescope"] = meta.obs_info.telescope
 
@@ -256,9 +261,11 @@ class PreprocessArrayNET(PreprocessQA):
     The config entry supports a `process_args` block where the following
     options can be specified:
 
-    tags : list
-        Keys into `metadata.det_info` to record as tags with the Influx line.
-        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    tags : dict
+        The values are keys into `metadata.det_info` to record as tags with
+        the Influx line. The keys are addded to the default list
+        ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+        from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
     noise_aman : str
         The name of the axis manager that holds the white noise array.
         (default 'noise')
@@ -277,7 +284,7 @@ class PreprocessArrayNET(PreprocessQA):
         # bypass the PreprocessQA __init__
         super(PreprocessQA, self).__init__(*args, **kwargs)
         # extract parameters
-        self._tags = process_args.get("tags", [])
+        self._tags = process_args.get("tags", {})
         self._noise_aman = process_args.get("noise_aman", "noise")
         self._field_name = process_args.get("field_name", "")
         self._unit_factor = process_args.get("unit_factor", 1)
@@ -286,16 +293,19 @@ class PreprocessArrayNET(PreprocessQA):
 
         # record one metric per wafer_slot per bandpass
         # extract these tags for the metric
-        tag_keys = ["wafer_slot", "tel_tube"]
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
 
         if _has_tag(meta.det_info, 'wafer.bandpass'):
             bandpasses = meta.det_info.wafer.bandpass
-            tag_keys += ["wafer.bandpass"]
+            tag_keys["bandpass"] = "wafer.bandpass"
         else:
             bandpasses = meta.det_info.det_cal.bandpass
-            tag_keys += ["det_cal.bandpass"]
+            tag_keys["bandpass"] = "det_cal.bandpass"
 
-        tag_keys += [t for t in self._tags if t not in tag_keys]
+        tag_keys.update(self._tags)
         tags = []
         vals = []
         for bp in np.unique(bandpasses):
@@ -311,7 +321,7 @@ class PreprocessArrayNET(PreprocessQA):
                     vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)))
 
                     tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_base["telescope"] = meta.obs_info.telescope
                     tags.append(tags_base)
@@ -332,9 +342,11 @@ class PreprocessDetNET(PreprocessQA):
     The config entry supports a `process_args` block where the following
     options can be specified:
 
-    tags : list
-        Keys into `metadata.det_info` to record as tags with the Influx line.
-        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    tags : dict
+        The values are keys into `metadata.det_info` to record as tags with
+        the Influx line. The keys are addded to the default list
+        ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+        from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
     noise_aman : str
         The name of the axis manager that holds the white noise array.
         (default 'noise')
@@ -353,7 +365,7 @@ class PreprocessDetNET(PreprocessQA):
         # bypass the PreprocessQA __init__
         super(PreprocessQA, self).__init__(*args, **kwargs)
         # extract parameters
-        self._tags = process_args.get("tags", [])
+        self._tags = process_args.get("tags", {})
         self._noise_aman = process_args.get("noise_aman", "noise")
         self._field_name = process_args.get("field_name", "")
         self._unit_factor = process_args.get("unit_factor", 1)
@@ -362,16 +374,19 @@ class PreprocessDetNET(PreprocessQA):
 
         # record one metric per wafer_slot per bandpass
         # extract these tags for the metric
-        tag_keys = ["wafer_slot", "tel_tube"]
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
 
         if _has_tag(meta.det_info, 'wafer.bandpass'):
             bandpasses = meta.det_info.wafer.bandpass
-            tag_keys += ["wafer.bandpass"]
+            tag_keys["bandpass"] = "wafer.bandpass"
         else:
             bandpasses = meta.det_info.det_cal.bandpass
-            tag_keys += ["det_cal.bandpass"]
+            tag_keys["bandpass"] = "det_cal.bandpass"
 
-        tag_keys += [t for t in self._tags if t not in tag_keys]
+        tag_keys.update(self._tags)
         tags = []
         vals = []
         for bp in np.unique(bandpasses):
@@ -387,7 +402,7 @@ class PreprocessDetNET(PreprocessQA):
                     vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)) * np.sqrt(len(good_indices)))
 
                     tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_base["telescope"] = meta.obs_info.telescope
                     tags.append(tags_base)
