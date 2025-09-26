@@ -582,7 +582,7 @@ def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
     """
     Identify and flag dark detectors in the given aman object.
 
-    Parameters:
+    Parameters
     ----------
     aman : AxisManager
         The tod.
@@ -593,13 +593,13 @@ def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
     dark_flags_name : str, optional
         The name to use for the dark detector flags in aman.flags. Default is 'darks'.
     
-    Returns:
+    Returns
     -------
     mskdarks: RangesMatrix
         A matrix of ranges indicating the dark detectors.
 
-    Raises:
-    -------
+    Raises
+    ------
     ValueError
         If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
     """
