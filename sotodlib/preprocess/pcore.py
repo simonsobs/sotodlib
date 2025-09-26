@@ -608,9 +608,9 @@ class _FracFlaggedMixIn(object):
         vals = []
         # record one metric per wafer slot, per bandpass
         for bp in np.unique(bandpasses):
-            for ws in np.unique(bandpasses):
+            for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_cal.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 # Compute the number of samples that were flagged
