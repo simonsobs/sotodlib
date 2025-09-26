@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib import tod_ops, coords, mapmaking
-from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager
+from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager, metadata
 from sotodlib.tod_ops import filters, detrend_tod
 from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.coords import pointing_model
@@ -35,6 +35,7 @@ defaults = {"query": "1",
             "srcsamp": None,
             "unit": 'K',
            }
+LoaderError = metadata.loader.LoaderError
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
 
 def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
@@ -285,7 +286,11 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time
         #obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
-        obs = pp_util.load_and_preprocess(obs_id, preproc, dets={'wafer_slot':detset,'wafer.bandpass':band}, context=context,)
+        try:
+            obs = pp_util.load_and_preprocess(obs_id, preproc, dets={'wafer_slot':detset,'wafer.bandpass':band}, context=context,)
+        except LoaderError:
+            # this means the obs is not on the preprocessing db, so we skip it
+            continue
         obs = calibrate_obs(obs, band, site=site, nocal=False, unit=unit)
         if obs is None:
             # this means we skip the full obs on calibrate_obs
