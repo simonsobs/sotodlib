@@ -199,17 +199,25 @@ class PreprocessValidDets(PreprocessQA):
     def _process(self, meta):
 
         # add specified tags
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys = ["wafer_slot", "tel_tube"]
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys += ["wafer.bandpass"]
+        else:
+            bandpasses = meta.det_cal.bandpass
+            tag_keys += ["det_cal.bandpass"]
+
         tag_keys += [t for t in self._tags if t not in tag_keys]
 
         # record one metric per wafer slot, per bandpass
         # extract these tags for the metric
         tags = []
         vals = []
-        for bp in np.unique(meta.det_cal.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_cal.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 if len(subset) > 0:
@@ -278,14 +286,22 @@ class PreprocessArrayNET(PreprocessQA):
 
         # record one metric per wafer_slot per bandpass
         # extract these tags for the metric
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys = ["wafer_slot", "tel_tube"]
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys += ["wafer.bandpass"]
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys += ["det_cal.bandpass"]
+
         tag_keys += [t for t in self._tags if t not in tag_keys]
         tags = []
         vals = []
-        for bp in np.unique(meta.det_cal.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_cal.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
@@ -346,14 +362,22 @@ class PreprocessDetNET(PreprocessQA):
 
         # record one metric per wafer_slot per bandpass
         # extract these tags for the metric
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        tag_keys = ["wafer_slot", "tel_tube"]
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys += ["wafer.bandpass"]
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys += ["det_cal.bandpass"]
+
         tag_keys += [t for t in self._tags if t not in tag_keys]
         tags = []
         vals = []
-        for bp in np.unique(meta.det_cal.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_cal.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor

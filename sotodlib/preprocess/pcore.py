@@ -592,15 +592,23 @@ class _FracFlaggedMixIn(object):
                 raise ValueError(f"Could not parse flags_key {flags_key}")
 
         # add specified tags
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        from ..qa.metrics import _get_tag, _has_tag
+        tag_keys = ["wafer_slot", "tel_tube"]
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys += ["wafer.bandpass"]
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys += ["det_cal.bandpass"]
+
         tag_keys += [t for t in tags if t not in tag_keys]
 
         tags = []
         vals = []
-        from ..qa.metrics import _get_tag, _has_tag
         # record one metric per wafer slot, per bandpass
-        for bp in np.unique(meta.det_cal.bandpass):
-            for ws in np.unique(meta.det_cal.bandpass):
+        for bp in np.unique(bandpasses):
+            for ws in np.unique(bandpasses):
                 subset = np.where(
                     (meta.det_info.wafer_slot == ws) & (meta.det_cal.bandpass == bp)
                 )[0]
