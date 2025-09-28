@@ -454,6 +454,48 @@ class PSDCalc(_Preprocess):
             plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
                      xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
 
+class PSDFit(_Preprocess):
+    """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
+    "psd" field.
+
+    Note: noverlap = 0 amd full_output = True are recommended to get unbiased
+        median white noise estimation by Noise.
+
+    Example config block::
+
+      - "name : "psdfit"
+        "freqs: "psd.freqs" # optional
+        "Pxx: "psd.Pxx" # optional
+        "wrap": "psdfit" # optional
+        "calc":
+          "fknee_est": 1 # optional
+          "wn_est": 4E-5 # optional
+          "alpha_est": 3.4 # optional
+          "f_max": 100 # optional
+        "save": True
+
+    .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
+    """
+    name = "psdfit"
+
+    def __init__(self, step_cfgs):
+        self.freqs = step_cfgs.get('freqs', 'psd.freqs')
+        self.Pxx = step_cfgs.get('Pxx', 'psd.Pxx')
+        self.wrap = step_cfgs.get('wrap', 'psdfit')
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        freqs = proc_aman[self.freqs]
+        Pxx = proc_aman[self.Pxx]
+        noise_fit_stats = tod_ops.fft_ops.fit_noise_model(aman, f=freqs, pxx=Pxx,
+                                                          **self.calc_cfgs)
+        self.save(proc_aman, noise_fit_stats)
+        return aman, proc_aman
+
+    def save(self, proc_aman, noise_fit_stats):
+        if not(self.save_cfgs is None):
+            proc_aman.wrap(self.wrap, noise_fit_stats)
 
 class GetStats(_Preprocess):
     """
