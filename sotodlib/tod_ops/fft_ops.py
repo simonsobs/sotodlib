@@ -1188,3 +1188,50 @@ def build_hpf_params_dict(
         filter_params = params_dict
     
     return filter_params
+
+def get_common_noise_params(
+    aman,
+    signal=None,
+    merge=False,
+    merge_name='common_mode',
+    **fit_args
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of common noise.
+    This can be applied to any 1D data with same size as aman.samps.
+
+    Args
+    ----
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    signal : nparray
+        Signal sized nsamps or ndets x nsamps.
+        When signal is given in 2D shape, the common mode across detectors
+        is calculated with median method.
+    merge : bool
+        If True, ``aman_common`` is added into axis manager with merge_name.
+    merge_name : str
+        ``aman_common`` is added with this name.
+    
+    Returns
+    -------
+    noise_fit_stats : AxisManager
+        The fit parameters of given common mode.
+
+    """
+
+    if signal is None:
+        signal = np.nanmedian(aman.signal, axis=0)
+    elif signal.shape == (aman.dets.count, aman.samps.count):
+        signal = np.nanmedian(signal, axis=0)
+    elif len(signal) != aman.samps.count:
+        raise ValueError(
+                        "The input signal is required to have same length as aman.samps."
+                    )
+    aman_common = core.AxisManager(core.LabelAxis('dets', ['0']), aman.samps)
+    aman_common.wrap('signal', np.array([signal]), [(0, 'dets'), (1, 'samps')])
+    aman_common.wrap('timestamps', aman.timestamps, [(0, 'samps')])
+    noise_fit_stats = fit_noise_model(aman_common, signal=None, merge_fit=True, **fit_args)
+    if merge:
+        aman.wrap(merge_name, aman_common)
+    return noise_fit_stats
