@@ -467,9 +467,11 @@ class PSDFit(_Preprocess):
         "freqs: "psd.freqs" # optional
         "Pxx: "psd.Pxx" # optional
         "wrap": "psdfit" # optional
+        "merge": True # optional
+        "merge_suffix": "demodQ" #optional
         "calc":
-          "fknee_est": 1 # optional
-          "wn_est": 4E-5 # optional
+          "fknee_est": 0.1 # optional
+          "wn_est": 2E-6 # optional
           "alpha_est": 3.4 # optional
           "f_max": 100 # optional
         "save": True
@@ -482,6 +484,8 @@ class PSDFit(_Preprocess):
         self.freqs = step_cfgs.get('freqs', 'psd.freqs')
         self.Pxx = step_cfgs.get('Pxx', 'psd.Pxx')
         self.wrap = step_cfgs.get('wrap', 'psdfit')
+        self.merge = step_cfgs.get('merge', False)
+        self.merge_suffix = step_cfgs.get('merge_suffix', '')
 
         super().__init__(step_cfgs)
 
@@ -490,7 +494,19 @@ class PSDFit(_Preprocess):
         Pxx = proc_aman[self.Pxx]
         noise_fit_stats = tod_ops.fft_ops.fit_noise_model(aman, f=freqs, pxx=Pxx,
                                                           **self.calc_cfgs)
-        self.save(proc_aman, noise_fit_stats)
+
+        fit_aman = core.AxisManager(fit_noise_stats.dets, fit_noise_stats.noise_model_coeffs)
+        fit_aman.wrap('sigma', fit_noise_stats.fit.T[0], [(0, 'dets')])
+        fit_aman.wrap('fk', fit_noise_stats.fit.T[1], [(0, 'dets')])
+        fit_aman.wrap('alpha', fit_noise_stats.fit.T[2], [(0, 'dets')])
+        fit_aman.wrap('cov', fit_noise_stats.cov, [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")])
+
+        if self.merge:
+            aman.wrap(f'sigma_{self.merge_suffix}', fit_noise_stats.fit.T[0], [(0, 'dets')])
+            aman.wrap(f'fk_{self.merge_suffix}', fit_noise_stats.fit.T[1], [(0, 'dets')])
+            aman.wrap(f'alpha_{self.merge_suffix}', fit_noise_stats.fit.T[2], [(0, 'dets')])
+
+        self.save(proc_aman, fit_aman)
         return aman, proc_aman
 
     def save(self, proc_aman, noise_fit_stats):
