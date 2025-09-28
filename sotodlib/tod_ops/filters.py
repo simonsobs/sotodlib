@@ -298,7 +298,7 @@ fft_apply_filter = FilterApplyFunc.deco
 # Filtering Functions
 #################
 @fft_filter
-def counter_1_over_f(freqs, tod, fk, n):
+def counter_1_over_f(freqs, tod, fk=None, n=None, noise_fit_stats=None):
     """
     Counter 1/f filter for noise w/ PSD that follows:
     
@@ -306,13 +306,12 @@ def counter_1_over_f(freqs, tod, fk, n):
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
     """
-    if isinstance(fk, str):
-        fk = tod[fk]
-    if isinstance(n, str):
-        n = tod[n]
-
     if np.isscalar(fk) and np.isscalar(n):
         return 1/(1+(fk/freqs)**n)
+
+    if fk is None and n is None and noise_fit_stats is not None:
+        fk = noise_fit_stats.fit.T[1]
+        n = noise_fit_stats.fit.T[2]
 
     if len(fk) == tod.dets.count and len(n) == tod.dets.count:
         return 1 / (1 + (fk[:, None]/freqs[None,:])**n[:, None])
