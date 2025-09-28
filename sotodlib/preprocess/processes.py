@@ -1935,16 +1935,21 @@ class PCAFilter(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.model_signal = step_cfgs.get('model_signal', None)
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
+        if self.model_signal is not None:
+            model_signal = aman.get(self.model_signal)
+        else:
+            model_signal = signal.copy()
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        model = tod_ops.pca.get_pca_model(aman, signal=signal, n_modes=n_modes)
+        model = tod_ops.pca.get_pca_model(aman, signal=model_signal, n_modes=n_modes)
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
         return aman, proc_aman
 
@@ -1955,6 +1960,7 @@ class GetCommonMode(_Preprocess):
     example config file entry::
 
       - name: "get_common_mode"
+        fit: True
         calc:
             signal: "signal"
             method: "median"
@@ -1964,11 +1970,20 @@ class GetCommonMode(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
     """
     name = 'get_common_mode'
+    def __init__(self, step_cfgs):
+        self.fit = step_cfgs.get('fit', False)
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
-        common_aman = core.AxisManager(aman.samps)
-        common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
+        if self.fit:
+            common_aman = tod_ops.fft_ops.get_common_noise_params(aman, signal=common_mode,
+                                                                  **self.fit_cfgs)
+            common_aman.wrap(self.calc_cfgs['wrap'], freqs, [(0, aman.samps)])
+        else:
+            common_aman = core.AxisManager(aman.samps)
+            common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
         self.save(proc_aman, common_aman)
         return aman, proc_aman
 
