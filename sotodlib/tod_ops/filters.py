@@ -306,9 +306,15 @@ def counter_1_over_f(freqs, tod, fk, n):
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
     """
+    if isinstance(fk, str):
+        fk = tod[fk]
+    if isinstance(n, str):
+        n = tod[n]
+
     if np.isscalar(fk) and np.isscalar(n):
         return 1/(1+(fk/freqs)**n)
-    elif len(fk) == tod.dets.count and len(n) == tod.dets.count:
+
+    if len(fk) == tod.dets.count and len(n) == tod.dets.count:
         return 1 / (1 + (fk[:, None]/freqs[None,:])**n[:, None])
     else:
         raise ValueError("The fk and n must be a float value or array-like with length of number of detectors")
