@@ -1145,17 +1145,24 @@ def build_hpf_params_dict(
     if noise_fit is not None:
 
         pars_mapping = {
-            "high_pass_butter4": {
-                "fc": "fknee",
-            },
             "counter_1_over_f": {
                 "fk": "fknee", 
                 "n": "alpha"
             },
+            "high_pass_butter4": {
+                "fc": "fknee",
+            },
             "high_pass_sine2": {
                 "cutoff": "fknee",
                 "width": None
-            }
+            },
+            "low_pass_butter4": {
+                "fc": "fknee",
+            },
+            "low_pass_sine2": {
+                "cutoff": "fknee",
+                "width": None
+            },
         }
 
         if filter_name not in pars_mapping.keys():
