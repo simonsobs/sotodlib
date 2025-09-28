@@ -310,6 +310,9 @@ def counter_1_over_f(freqs, tod, fk=None, n=None, noise_fit_stats=None):
         return 1/(1+(fk/freqs)**n)
 
     if fk is None and n is None and noise_fit_stats is not None:
+        if isinstance(noise_fit_stats, str):
+            _f = attrgetter(noise_fit_stats)
+            noise_fit_stats = _f(tod)
         fk = noise_fit_stats.fit.T[1]
         n = noise_fit_stats.fit.T[2]
 
