@@ -1404,6 +1404,8 @@ class SSOFootprint(_Preprocess):
 
             planet_aman.wrap('mean_distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
 
+            if "." in planet:
+                planet = planet.replace(".", "")
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
 

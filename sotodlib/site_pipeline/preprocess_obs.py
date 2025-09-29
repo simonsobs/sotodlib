@@ -55,6 +55,10 @@ def preprocess_obs(
             source_names.append(_s[0])
         else:
             raise ValueError('Invalid style of source')
+
+    for i, source in enumerate(source_names):
+        if "." in source:
+            source_names[i] = source_names[i].replace(".", "")
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
