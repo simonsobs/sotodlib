@@ -104,7 +104,7 @@ def pos_to_ind(pos, bp, pol, mapping, tol=1.0, verbose=False):
     return ind
 
 
-def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0):
+def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0, collision=1.0):
     """
         Calculate magnitude of crosstalk for all detector pairs given
         their physical positions and mapping
@@ -216,11 +216,16 @@ def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0):
                 df = freq1 - freq2
                 avg_f = (freq1 + freq2) / 2
                 chi = alpha * np.power(avg_f, 4) * np.power(df, -2) * 1e12
-                if chi > 1:
+                # Check for anomalously high chi in absense of resonator collision
+                if chi > 1 and np.abs(df) > collision:
                     msg = f"Anomalously high chi at"
                     msg += f" {det1}@({x1}, {y1}), {det2}@({x2}, {y2})"
+                    msg += f" df: {df}"
                     msg += f" : {chi}"
                     raise RuntimeError(msg)
+                # Check for resonator collision, if so set flag to zero TOD
+                if np.abs(df) < collision:
+                    chi = np.nan
                 chis[(det1, det2)] = chi
                 chis[(det2, det1)] = chi
 
