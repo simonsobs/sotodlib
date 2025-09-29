@@ -1734,6 +1734,7 @@ class FourierFilter(_Preprocess):
                 noise_fit=noise_fit,
                 filter_params=spec.get("filter_params")
             )
+
             ffun = getattr(tod_ops.filters, fname)
             filters.append(ffun(**params))
 
@@ -1960,30 +1961,35 @@ class GetCommonMode(_Preprocess):
     example config file entry::
 
       - name: "get_common_mode"
-        fit: True
+        noise_fit: True
+        f_max: 2.0
+        wrap_name: "common_demodQ"
         calc:
             signal: "signal"
             method: "median"
-            wrap: "signal_commonmode"
+        
         save: True
 
     .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
     """
     name = 'get_common_mode'
     def __init__(self, step_cfgs):
-        self.fit = step_cfgs.get('fit', False)
+        self.noise_fit = step_cfgs.get('noise_fit', False)
+        self.f_max = step_cfgs.get('f_max', None)
+        self.wrap_name = step_cfgs.get('wrap_name', 'common_mode')
 
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
-        if self.fit:
+        if self.noise_fit:
             common_aman = tod_ops.fft_ops.get_common_noise_params(aman, signal=common_mode,
-                                                                  **self.fit_cfgs)
-            common_aman.wrap(self.calc_cfgs['wrap'], freqs, [(0, aman.samps)])
+                                                                  f_max=self.f_max)
+            samps = core.OffsetAxis('samps', aman.samps.count)
+            common_aman.wrap(self.wrap_name, common_mode, [(0, samps)])
         else:
             common_aman = core.AxisManager(aman.samps)
-            common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
+            common_aman.wrap(self.wrap_name, common_mode, [(0, 'samps')])
         self.save(proc_aman, common_aman)
         return aman, proc_aman
 
@@ -1991,7 +1997,7 @@ class GetCommonMode(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs['wrap'], common_aman)
+            proc_aman.wrap(self.wrap_name, common_aman)
 
 class FilterForSources(_Preprocess):
     """
