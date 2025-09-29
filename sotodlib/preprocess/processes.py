@@ -1657,19 +1657,27 @@ class FourierFilter(_Preprocess):
     Example config file entry for one filter::
 
         - name: "fourier_filter"
-          wrap_name: "lpf_sig"
-          signal_name: "signal"
           process:
             filt_function: "timeconst_filter"
             filter_params:
               timeconst: "det_cal.tau_eff"
               invert: True
 
+    Example for passing in a different signal name and wrapping into a new
+    field::
+
+        - name: "fourier_filter"
+              wrap_name: "lpf_demodQ"
+              signal_name: "demodQ"
+              process:
+                filt_function: "sine2"
+                filter_params:
+                  cutoff: 1
+                  trans_width: 0.1
+
     Example config file entry for two filters::
 
-        - name: "fourier_filter_chain"
-          wrap_name: "lpf_sig"
-          signal_name: "signal"
+        - name: "fourier_filter"
           process:
             filters:
               - name: "iir_filter"
@@ -1682,9 +1690,7 @@ class FourierFilter(_Preprocess):
 
     Or with params from a noise fit::
 
-        - name: "fourier_filter_chain"
-          wrap_name: "lpf_sig"
-          signal_name: "signal"
+        - name: "fourier_filter"
           process:
             noise_fit_array: "noiseQ_fit"
             filters:
