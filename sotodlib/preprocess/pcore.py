@@ -553,7 +553,7 @@ class _FracFlaggedMixIn(object):
         proc_aman,
         flags_key=None,
         percentiles=[0, 50, 75, 90, 95, 100],
-        tags=[],
+        tags={},
     ):
         """ Generate a QA metric from the output of this process.
 
@@ -569,9 +569,11 @@ class _FracFlaggedMixIn(object):
             process name.
         percentiles : list
             Percentiles to compute across detectors
-        tags : list
-            Keys into `metadata.det_info` to record as tags with the Influx line.
-            Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+        tags : dict
+            The values are keys into `metadata.det_info` to record as tags with
+            the Influx line. The keys are addded to the default list
+            ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+            from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
 
         Returns
         -------
@@ -592,17 +594,28 @@ class _FracFlaggedMixIn(object):
                 raise ValueError(f"Could not parse flags_key {flags_key}")
 
         # add specified tags
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
-        tag_keys += [t for t in tags if t not in tag_keys]
+        from ..qa.metrics import _get_tag, _has_tag
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys["bandpass"] = "wafer.bandpass"
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
+
+        tag_keys.update(tags)
 
         tags = []
         vals = []
-        from ..qa.metrics import _get_tag, _has_tag
         # record one metric per wafer slot, per bandpass
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 # Compute the number of samples that were flagged
@@ -623,7 +636,7 @@ class _FracFlaggedMixIn(object):
 
                     # get the tags for this wafer (all detectors in this subset share these)
                     tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_base["telescope"] = meta.obs_info.telescope
 
