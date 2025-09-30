@@ -50,6 +50,16 @@ def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
     good    &= rms_uKrts < ref/med_tol
     return good
 
+def measure_rms(tod, dt=1, bsize=32, nblock=10):
+    tod = tod[:,:tod.shape[1]//bsize*bsize]
+    tod = tod.reshape(tod.shape[0],-1,bsize)
+    bstep = max(1,tod.shape[1]//nblock)
+    tod = tod[:,::bstep,:][:,:nblock,:]
+    rms = np.median(np.std(tod,-1),-1)
+    # to µK√s units
+    rms *= dt**0.5
+    return rms
+
 def get_parser(parser=None):
     if parser is None:
         parser = ArgumentParser()
@@ -223,8 +233,7 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
     if (not nocal) and (obs.signal is not None):
         # apply pointing model (here for now)
         #pointing_model.apply_pointing_model(obs)
-        rms = np.std(obs.signal,-1)
-        rms *= (1/srate)**0.5
+        rms = measure_rms(obs.signal, dt=1/srate)
         if unit=='K':
             good    = sensitivity_cut(rms*1e6, sens_limits[band])
         elif unit == 'uK':
@@ -234,8 +243,8 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
         else:
             obs.restrict("dets", good)
         # Disqualify overly cut detectors
-        good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.2)
-        obs.restrict("dets", good_dets)
+        #good_dets = mapmaking.find_usable_detectors(obs)
+        #obs.restrict("dets", good_dets)
 
         #if len(good_dets) > 0:
             # Gapfill glitches. This function name isn't the clearest
