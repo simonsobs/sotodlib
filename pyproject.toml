@@ -32,7 +32,6 @@ dependencies = [
   "sqlalchemy",
   "pydantic",
   "sqlmodel",
-  "fastapi",
 ]
 dynamic=["version"]
 classifiers = [
