@@ -31,7 +31,9 @@ dependencies = [
   "flacarray>=0.3.4",
   "sqlalchemy",
   "pydantic",
+  "pydantic-settings",
   "sqlmodel",
+  "alembic"
 ]
 dynamic=["version"]
 classifiers = [
