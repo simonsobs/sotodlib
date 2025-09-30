@@ -23,29 +23,26 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "depth_one_maps",
-        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("map_id", sa.Integer, primary_key=True),
         sa.Column("map_name", sa.String, unique=True, nullable=False),
         sa.Column("map_path", sa.String, nullable=False),
         sa.Column(
             "tube_slot", sa.String, nullable=False
         ),  # TODO: Maybe make this a literal?
-        sa.Column(
-            "wafers", sa.String, nullable=False
-        ),  # TODO: I'm not sure this field makes sense as a map may use TODs with different wafer availability. I.E., wafers 0,1,2 may be available for one TOD but only 0,2 for another
         sa.Column("frequency", sa.String, nullable=False),
-        sa.Column(
-            "ctime", sa.Float, nullable=False
-        ),  # TODO: should this be sa.Datetime?
+        sa.Column("ctime", sa.Float, nullable=False),
+        sa.Column("start_time", sa.Float, nullable=False),
+        sa.Column("stop_time", sa.Float, nullable=False),
     )
 
     op.create_table(
         "time_domain_processing",
-        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("processing_status_id", sa.Integer, primary_key=True),
         sa.Column(
-            "map_name",
-            sa.String,
+            "map_id",
+            sa.Integer,
             sa.ForeignKey(
-                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+                "depth_one_maps.map_id", ondelete="CASCADE", onupdate="CASCADE"
             ),
             nullable=False,
         ),
@@ -59,13 +56,13 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "depth_1_pointing_residuals",
-        sa.Column("id", sa.Integer, primary_key=True),
+        "depth_one_pointing_residuals",
+        sa.Column("pointing_residual_id", sa.Integer, primary_key=True),
         sa.Column(
-            "map_name",
-            sa.String,
+            "map_id",
+            sa.Integer,
             sa.ForeignKey(
-                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+                "depth_one_maps.map_id", ondelete="CASCADE", onupdate="CASCADE"
             ),
             nullable=False,
         ),
@@ -75,15 +72,7 @@ def upgrade() -> None:
 
     op.create_table(
         "tod_depth_one",
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column(
-            "map_name",
-            sa.String,
-            sa.ForeignKey(
-                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
-            ),
-            nullable=False,
-        ),
+        sa.Column("tod_id", sa.Integer, primary_key=True),
         sa.Column("obs_id", sa.String, nullable=False),
         sa.Column("pwv", sa.Float),
         sa.Column(
@@ -116,13 +105,26 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "pipeline_information",
-        sa.Column("id", sa.Integer, primary_key=True),
+        "link_tod_to_depth_one_map",
         sa.Column(
-            "map_name",
-            sa.String,
+            "tod_id", sa.Integer, sa.ForeignKey("tod_depth_one.tod_id"), primary_key=True
+        ),
+        sa.Column(
+            "map_id",
+            sa.Integer,
+            sa.ForeignKey("depth_one_maps.map_id"),
+            primary_key=True,
+        ),
+    )
+
+    op.create_table(
+        "pipeline_information",
+        sa.Column("pipeline_information_id", sa.Integer, primary_key=True),
+        sa.Column(
+            "map_id",
+            sa.Integer,
             sa.ForeignKey(
-                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
+                "depth_one_maps.map_id", ondelete="CASCADE", onupdate="CASCADE"
             ),
             nullable=False,
         ),
@@ -133,16 +135,43 @@ def upgrade() -> None:
 
     op.create_table(
         "depth_one_sky_coverage",
-        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("patch_id", sa.Integer, primary_key=True),
+        sa.Column("x", sa.CHAR, nullable=False),
+        sa.Column("y", sa.CHAR, nullable=False),
         sa.Column(
-            "map_name",
-            sa.String,
-            sa.ForeignKey(
-                "depth_one_maps.map_name", ondelete="CASCADE", onupdate="CASCADE"
-            ),
+            "map_id",
+            sa.Integer,
+            sa.ForeignKey("depth_one_maps.map_id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("patch_coverage", sa.String, nullable=False),
+    )
+
+    op.create_table(
+        "depth_one_coadds",
+        sa.Column("coadd_id", sa.Integer, primary_key=True),
+        sa.Column("coadd_name", sa.String, nullable=False),
+        sa.Column("coadd_type", sa.String, nullable=False),
+        sa.Column("coadd_path", sa.String, nullable=False),
+        sa.Column("frequency", sa.String, nullable=False),
+        sa.Column("ctime", sa.Float, nullable=False),
+        sa.Column("start_time", sa.Float, nullable=False),
+        sa.Column("stop_time", sa.Float, nullable=False),
+    )
+
+    op.create_table(
+        "link_depth_one_map_to_coadd",
+        sa.Column(
+            "map_id",
+            sa.Integer,
+            sa.ForeignKey("depth_one_maps.map_id"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "coadd_id",
+            sa.Integer,
+            sa.ForeignKey("depth_one_coadds.coadd_id"),
+            primary_key=True,
+        ),
     )
 
 
@@ -151,5 +180,6 @@ def downgrade() -> None:
     op.drop_table("time_domain_processing")
     op.drop_table("depth_1_pointing_offsets")
     op.drop_table("tod_depth_one")
+    op.drop_table("link_tod_to_depth_one_map")
     op.drop_table("pipelin_information")
     op.drop_table("depth_one_sky_coverage")
