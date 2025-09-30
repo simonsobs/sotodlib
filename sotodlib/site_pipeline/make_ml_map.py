@@ -1,3 +1,5 @@
+import numpy as np
+
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
     import argparse
@@ -35,8 +37,17 @@ def get_parser(parser=None):
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
 
+def measure_rms(tod, dt=1, bsize=32, nblock=10):
+    tod = tod[:,:tod.shape[1]//bsize*bsize]
+    tod = tod.reshape(tod.shape[0],-1,bsize)
+    bstep = max(1,tod.shape[1]//nblock)
+    tod = tod[:,::bstep,:][:,:nblock,:]
+    rms = np.median(np.std(tod,-1),-1)
+    # to µK√s units
+    rms *= dt**0.5
+    return rms
+
 def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
-    import numpy as np
     # First reject detectors with unreasonably low noise
     good     = rms_uKrts >= sens_lim
     # Also reject far too noisy detectors
@@ -251,8 +262,7 @@ def main(**args):
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
                     # measure rms
-                    rms = np.std(obs.signal,-1)
-                    rms *= (1/srate)**0.5
+                    rms = measure_rms(obs.signal, dt=1/srate)
                     if args.unit=='K':
                         good    = sensitivity_cut(rms*1e6, sens_limits[band])
                     elif args.unit == 'uK':
