@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import logging
 import time
 import yaml
@@ -23,30 +24,75 @@ def _get_engine(key, cfg):
     cls = ancil.ANCIL_ENGINES[key]
     return cls(cfg)
 
+
 def _engines_iter(cfg, args_datasets):
     if args_datasets is None or len(args_datasets) == 0:
         args_datasets = cfg['datasets'].keys()
     for k in args_datasets:
         yield (k, _get_engine(k, cfg['datasets'][k]))
-    
 
-def update_base_data(config_file, time_range=None, datasets=None):
+
+def update_base_data(config_file, time_range=None, datasets=None, full_scan=False):
     cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 
-    if time_range is None:
+    if full_scan:
+        logger.info(f'Performing full update of base data.')
+    elif time_range is None:
         now = time.time()
         time_range = (now - cfg['lookback_time'], now)
-    logger.info(f'Updating base data over time range {time_range}.')
+        logger.info(f'Updating base data over time range {time_range}.')
 
     for dataset, engine in _engines_iter(cfg, datasets):
         logger.info(f'Updating base data for {dataset}...')
         engine.update_base(time_range)
+
     logger.info(f'Finished updating base data.')
 
 
-def update_obsdb(config_file):
-    # Base dataset updates.
-    pass
+def update_obsdb(config_file, time_range=None, datasets=None):
+    cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+
+    tquery = None
+    if time_range is not None:
+        t0, t1 = time_range
+        if t0 is None:
+            tquery = f'timestamp < {t1}'
+        elif t1 is None:
+            tquery = f'timestamp >= {t0}'
+        else:
+            tquery = f'(timestamp >= {t0}) and (timestamp < {t1})'
+
+    logger.info(f'Updating obsdb')
+    for dataset, engine in _engines_iter(cfg, datasets):
+        logger.info(f'Processing {dataset}...')
+        engine.register_friends(cfg['datasets'])
+
+        # Ensure target columns are present in db.
+        obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
+        for k in engine.obsdb_fields:
+            obsdb.add_obs_columns([k + ' float'])
+
+        q = engine._get_obsdb_query()
+        if tquery:
+            q = f'{tquery} and {q}'
+        print(q)
+        recs = obsdb.query(q)
+        del obsdb
+
+        logger.info(f' ... identified {len(recs)} items to update.')
+        if len(recs) == 0:
+            continue
+
+        recs_it = iter(recs)
+        while rec_bunch := list(itertools.islice(recs_it, 200)):
+            results = engine.collect(rec_bunch, for_obsdb=True)
+            logger.info(f' ... updating obsdb.')
+            obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
+            for rec, result in zip(rec_bunch, results):
+                logger.debug(f"{rec['obs_id']} : {result}")
+                obsdb.update_obs(rec['obs_id'], result, commit=False)
+            obsdb.conn.commit()
+            del obsdb
 
 
 def get_parser(parser=None):
@@ -60,14 +106,17 @@ def get_parser(parser=None):
     p.add_argument('--config-file', '-c', default='cli.yaml')
     p.add_argument('--dataset', '-d', action='append')
     p.add_argument('--lookback-days', type=float)
+    p.add_argument('--full-scan', action='store_true')
 
     p = sps.add_parser('update-obsdb')
     p.add_argument('--config-file', '-c', default='cli.yaml')
     p.add_argument('--dataset', '-d', action='append')
+    p.add_argument('--lookback-days', type=float)
 
     p = sps.add_parser('check')
     p.add_argument('--config-file', '-c', default='cli.yaml')
     p.add_argument('--dataset', '-d', action='append')
+    p.add_argument('--lookback-days', type=float)
 
     p = sps.add_parser('test')
     p.add_argument('--config-file', '-c', default='cli.yaml')
@@ -78,64 +127,37 @@ def get_parser(parser=None):
     return parser
 
 def main(command=None, verbose=None, lookback_days=None,
-         obs_id=None, config_file=None, dataset=None, query=None):
+         obs_id=None, config_file=None, dataset=None, query=None,
+         full_scan=None):
     if verbose:
         ancil.logger.setLevel(logging.DEBUG)
 
+    time_range = None
+    if lookback_days is not None:
+        now = time.time()
+        time_range = (now - lookback_days * DAY, now)
+
     if command == 'update-base-data':
-        time_range = None
-        if lookback_days is not None:
-            now = time.time()
-            time_range = (now - lookback_days * DAY, now)
         update_base_data(config_file, datasets=dataset,
-                         time_range=time_range)
+                         time_range=time_range, full_scan=full_scan)
 
     elif command == 'update-obsdb':
-
-        cfgfile = 'cli.yaml'
-        cfg = DEFAULT_CONFIG | yaml.safe_load(open(cfgfile, 'rb'))
-
-        # Records
-        obsdb = core.metadata.ObsDb(cfg['source_obsdb'])
-
-        obs = obsdb.query("type='obs'")
-        sl = slice(6500, 6600)
-        recs = obs[sl]
-
-        trs = [(_o['start_time'], _o['start_time'] + _o['duration'])
-               for _o in recs]
-        obs_ids = recs['obs_id']
-
-        engines = []
-        gens = []
-        results = [{}] * len(recs)
-        for dataset, engine in _engines_iter(cfg, dataset):
-            print(dataset, engine)
-            engines.append(engine)
-            gens.append(engine.getter(targets=recs, results=results))
-
-        for obs_id, info in zip(obs_ids, results):
-            for g in gens:
-                info.update(next(g))
-            print(obs_id, info)
-
+        update_obsdb(config_file, datasets=dataset,
+                     time_range=time_range)
 
     elif command == 'check':
         # Just trial load the config, processors.
 
-        cfgfile = 'cli.yaml'
-        cfg = DEFAULT_CONFIG | yaml.safe_load(open(cfgfile, 'rb'))
+        cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 
         for dataset, engine in _engines_iter(cfg, dataset):
             print(dataset, engine)
 
     elif command == 'test':
         # Run on some obs_ids.
+        cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 
-        cfgfile = 'cli.yaml'
-        cfg = DEFAULT_CONFIG | yaml.safe_load(open(cfgfile, 'rb'))
-
-        obsdb = core.metadata.ObsDb(cfg['source_obsdb'])
+        obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
         if query:
             items = list(iter(obsdb.query(query)))
         else:

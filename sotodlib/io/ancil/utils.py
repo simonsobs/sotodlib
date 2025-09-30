@@ -1,3 +1,4 @@
+import functools
 import logging
 import os
 import string
@@ -88,10 +89,18 @@ def get_engine(key, cfg):
         class_name = cfg['class']
     else:
         class_name = key
-    #if 'dataset_name' not in _cfg:
-    #    _cfg['dataset_name'] = key
     cls = ANCIL_ENGINES[class_name]
     return cls(_cfg)
+
+
+def _get_time_range(*time_ranges, now=None):
+    if now is None:
+        now = time.time()
+    for time_range in time_ranges:
+        if time_range is None:
+            continue
+        return tuple(now if t is None else t for t in time_range)
+    return (now, now)
 
 
 class AncilEngine:
@@ -135,7 +144,7 @@ class AncilEngine:
         q = self.cfg.obsdb_query
         assert q is not None
         return q.format(**self._get_obsdb_map())
-        
+
     def update_base(self, time_range=None, reset=False):
         """Update the base dataset, for the indicated time_range.
 
@@ -150,7 +159,7 @@ class AncilEngine:
 
     def collect(self, targets=None, results=None, show_pbar=True, for_obsdb=False):
         output = list(self.getter(targets=tqdm(targets, disable=not show_pbar),
-                                results=results))
+                                  results=results))
         remap = self._get_obsdb_map()
         if for_obsdb and self.cfg.obsdb_format:
             for i in range(len(output)):
@@ -174,8 +183,6 @@ class LowResTable(AncilEngine):
     """
     def __init__(self, cfg):
         super().__init__(cfg)
-        if self.cfg.now is None:
-            self.cfg.now = time.time()
         if self.cfg.data_dir is None:
             self.cfg.data_dir = self.cfg.dataset_name + '/'
         if self.cfg.data_prefix is not None:
@@ -191,12 +198,11 @@ class LowResTable(AncilEngine):
 
         If reset is True, then the grabbed data replaces any archived
         data in that time_range.
-        
+
         See _get_raw for the specific activity of the subclass.
 
         """
-        if time_range is None:
-            time_range = self.cfg.big_bang, self.cfg.now
+        time_range = _get_time_range(time_range, self.cfg.dataset_time_range)
 
         dataset = self.cfg.dataset_name
 
@@ -205,7 +211,7 @@ class LowResTable(AncilEngine):
                 rs0 = ResultSet(keys=['timestamp', 'pwv'])
                 os.makedirs(os.path.dirname(filename), exist_ok=True)
             else:
-                rs0 = metadata.read_dataset(filename, dataset) 
+                rs0 = metadata.read_dataset(filename, dataset)
 
             if reset:
                 gap_ranges = [time_range]
@@ -222,7 +228,7 @@ class LowResTable(AncilEngine):
 
             if len(gap_ranges) == 0:
                 continue
-                
+
             # One query for this whole thing ...
             query_range = (gap_ranges[0][0], gap_ranges[-1][1])
             logger.info(f'Pulling {dataset} data for %s (%.1f, %1.f) ...' % (
@@ -261,10 +267,19 @@ class LowResTable(AncilEngine):
         return rows
 
     def _load(self, time_range):
+        # If you don't cache, the dataset reads can be very
+        # inefficient, especially when looping over a bunch of obs
+        # from the same time period.
+        @functools.lru_cache(maxsize=4)
+        def _get_dataset(filename, dataset):
+            if not os.path.exists(filename):
+                return None
+            return metadata.read_dataset(filename, dataset)
+
         rs = ResultSet(keys=['timestamp', 'pwv'])
         for t0, t1, filename in self._get_filenames(time_range):
-            if os.path.exists(filename):
-                _rs = metadata.read_dataset(filename, self.cfg.dataset_name)
+            _rs = _get_dataset(filename, self.cfg.dataset_name)
+            if _rs is not None:
                 rs.rows.extend(_rs.rows)
         t = rs['timestamp']
         s = (time_range[0] <= t) * (t < time_range[1])
@@ -283,8 +298,6 @@ class HkExtract(AncilEngine):
     def __init__(self, cfg):
         super().__init__(cfg)
 
-        if self.cfg.now is None:
-            self.cfg.now = time.time()
         if self.cfg.data_dir is None:
             self.cfg.data_dir = self.cfg.dataset_name + '/'
         if self.cfg.data_prefix is not None:
@@ -348,11 +361,8 @@ class HkExtract(AncilEngine):
         starting from the end of that.
 
         """
-        if time_range is None:
-            time_range = self.cfg.big_bang, self.cfg.now
-        else:
-            time_range = (max(self.cfg.big_bang, time_range[0]),
-                          min(self.cfg.now, time_range[1]))
+        time_range = _get_time_range(time_range, self.cfg.dataset_time_range)
+        time_range = intersect_ranges(time_range, self.cfg.dataset_time_range)
 
         field_list = list(self.cfg.aliases.keys())
         tbuf = 120.
@@ -464,8 +474,7 @@ class HkExtract(AncilEngine):
                                 fa.hdf5.write_array(output[k][1],
                                                 g1.create_group('value'),
                                                 quanta=.001)
-                                                
-                            
+
                 except Exception as e:
                     logger.error(f'Problem storing {dataset} in {filename}, removing')
                     raise e
@@ -473,7 +482,7 @@ class HkExtract(AncilEngine):
     def _load(self, time_range):
         field_list = list(self.cfg.aliases.keys())
         output = {k: [[], []] for k in field_list}
-        
+
         for _, _, filename, dataset in self._get_datasets(time_range):
             if not os.path.exists(filename):
                 continue
@@ -502,7 +511,7 @@ class HkExtract(AncilEngine):
                              np.zeros(0, dtype='float32')]
 
         return output
-                    
+
     def getter(self, targets=None, **kwargs):
         raise NotImplementedError()
 

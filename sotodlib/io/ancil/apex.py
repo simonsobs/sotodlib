@@ -35,7 +35,7 @@ def _to_timestamp(targets):
             raise ValueError(f"Cannot interpret as timestamp: '{a}'")
     return np.array(out)
 
-        
+
 def _str_to_timestamp(d):
     t = dt.datetime.fromisoformat(d)
     if t.tzinfo is None:
@@ -90,15 +90,17 @@ class ApexPwv(utils.LowResTable):
     def _get_raw(self, time_range):
         return get_apex(time_range[0], time_range[1])
 
-    def getter(self, targets=None, results=None, **kwargs):
+    def getter(self, targets=None, results=None, io_cache=None, **kwargs):
         """Compute reduced APEX PWV stats for a bunch of time ranges.  Each
         entry in targets is a time range.
 
         """
         time_ranges = self._target_time_ranges(targets)
         for time_range in time_ranges:
-            rs = self._load(time_range)
+            buf_range = (time_range[0] - 3600, time_range[1] + 3600)
+            rs = self._load(buf_range, io_cache=io_cache)
             s = np.isfinite(rs['pwv'])
+            s1 = (time_range[0] <= rs['timestamp']) * (rs['timestamp'] < time_range[1])
             if not np.any(s):
                 data = {
                     'mean': math.nan,
@@ -107,6 +109,8 @@ class ApexPwv(utils.LowResTable):
                     'span': math.nan,
                 }
             else:
+                if (s1 * s).any():
+                    s = s1 * s
                 p = rs['pwv'][s]
                 data = {
                     'mean': np.median(p).round(3),

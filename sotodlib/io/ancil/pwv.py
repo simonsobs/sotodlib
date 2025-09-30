@@ -21,7 +21,25 @@ def _times_inside(t, ints):
 def _buffered_times(t, buffer_t):
     return so3g.IntervalsDouble.from_array(
         np.array([t - buffer_t, t + buffer_t], dtype='float64').T)
-    
+
+
+params_250721 = [
+    # Linear model for rescaling apex to toco scale
+    [0.78, 0.04],
+    # Gaussian params for removing bias bump from toco radiometer
+    [-0.20, 1.43, 0.33],
+]
+
+def _gaussian(v, amp, mu, sigma):
+    return amp * np.exp(-0.5 * (v - mu)**2 / sigma**2)
+
+def defeature_toco_250721(v):
+    return v + _gaussian(v, *params_250721[1])
+
+def apex_to_tocolin_250721(v):
+    m, b = params_250721[0]
+    return m * v + b
+
 
 def combine_pwv(rs_toco, rs_apex, time_range):
     """
@@ -30,40 +48,52 @@ def combine_pwv(rs_toco, rs_apex, time_range):
 
     # Create intervals around all toco points.
     buffer_t = 5 * 60
-    
+
     # Start with toco.
     t, p = rs_toco['timestamp'], rs_toco['pwv']
     s = np.isfinite(p) * (p > .3) * (p < 3.)
     toco_i = _buffered_times(t[s], buffer_t)
-    
+
     # Keep APEX points in ranges not covered by toco.
     keep_apex = (_times_inside(rs_apex['timestamp'], ~toco_i)
                  * np.isfinite(rs_apex['pwv']))
 
-    rs0 = rs_toco.subset(rows=s)
-    rs1 = rs_apex.subset(rows=keep_apex)
+    # Apply models to the data.
+    toco_cor = rs_toco.subset(rows=s).asarray()
+    apex_cor = rs_apex.subset(rows=keep_apex).asarray()
+    del rs_toco, rs_apex
 
-    utils.merge_rs(rs0, rs1)
-    if len(rs0.rows) == 0:
+    toco_cor['pwv'] = defeature_toco_250721(toco_cor['pwv'])
+    apex_cor['pwv'] = apex_to_tocolin_250721(apex_cor['pwv'])
+
+    times = np.hstack((toco_cor['timestamp'], apex_cor['timestamp']))
+    pwv = np.hstack((toco_cor['pwv'], apex_cor['pwv']))
+    dataset_idx = np.array([0] * len(toco_cor) +
+                           [1] * len(apex_cor))
+
+    if len(times) == 0:
         return {'mean': np.nan,
                 'std': np.nan,
                 'qual': 0.}
 
-    t, p = np.array(rs0.rows).T
+    ii = np.argsort(times)
+    times = times[ii]
+    pwv = pwv[ii]
+    dataset_idx = dataset_idx[ii]
 
     # How much of time_range is actually covered by measurements?
-    coverage_i = _buffered_times(t, buffer_t)
+    coverage_i = _buffered_times(times, buffer_t)
     tr_i = so3g.IntervalsDouble.from_array(np.array([time_range]))
     tr_i = tr_i * coverage_i
     t_total = np.sum(tr_i.array() * [-1, 1])
     q = t_total / (time_range[1] - time_range[0])
-    
+
     # Make an interpolator from those...
-    pwv_i = interp1d(t, p)
-    
+    pwv_i = interp1d(times, pwv)
+
     # Probe times...
     ptimes = np.arange(time_range[0], time_range[1], 60)
-    s = (t[0] <= ptimes) * (ptimes <= t[-1])
+    s = (times[0] <= ptimes) * (ptimes <= times[-1])
     y = pwv_i(ptimes[s])
     return {'mean': y.mean().round(3),
             'std': y.std().round(3),
@@ -81,15 +111,15 @@ class PwvCombo(utils.AncilEngine):
             self.cfg.apex_dataset: None,
         }
 
-    def getter(self, targets=None, results=None, raw=False, **kwargs):
+    def getter(self, targets=None, results=None, raw=False, io_cache=None, **kwargs):
         time_ranges = self._target_time_ranges(targets)
         toco_src = self._get_friend(self.cfg.toco_dataset)
         apex_src = self._get_friend(self.cfg.apex_dataset)
 
         for time_range in time_ranges:
-            buffered = (time_range[0] - 4 * 3600,
-                        time_range[1] + 4 * 3600)
-            rs_toco = toco_src._load(buffered)
-            rs_apex = apex_src._load(buffered)
+            buffered = (time_range[0] - 1 * 3600,
+                        time_range[1] + 1 * 3600)
+            rs_toco = toco_src._load(buffered, io_cache=io_cache)
+            rs_apex = apex_src._load(buffered, io_cache=io_cache)
             x = combine_pwv(rs_toco, rs_apex, time_range)
             yield utils.denumpy(x)

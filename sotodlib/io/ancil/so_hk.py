@@ -32,23 +32,37 @@ class WeatherStation(utils.AncilEngine):
             hkdb=db,
         )
         for time_range in time_ranges:
+            output = {
+                'wind_speed': np.nan,
+                'wind_dir': np.nan,
+                'uv': np.nan,
+                'ambient_temp': np.nan,
+            }
+
             lspec.start, lspec.end = time_range
             result = hkdb.load_hk(lspec, show_pb=False)
 
-            s = (np.isfinite(result.wind_speed[1])
-                 * np.isfinite(result.wind_dir[1]))
-            wspd = result.wind_speed[1][s] * 1.609 # miles to km.
-            wphi = np.radians(result.wind_dir[1][s])
-            vx, vy = wspd * np.cos(wphi), wspd * np.sin(wphi)
-            speed = ((np.mean(vx)**2 + np.mean(vy)**2)**.5).round(1)
-            direc = (np.rad2deg(np.arctan2(np.mean(vy),
-                                          np.mean(vx))) % 360.).round(1)
-            yield utils.denumpy({
-                'wind_speed': speed,
-                'wind_dir': direc,
-                'uv': np.nanmedian(result.UV[1]).round(1),
-                'ambient_temp': np.nanmedian(result.temp_outside[1]).round(2),
-            })
+            if hasattr(result, 'temp_outside'):
+                output['ambient_temp'] = np.nanmedian(result.temp_outside[1]).round(2)
+
+            if hasattr(result, 'wind_speed'):
+                s = (np.isfinite(result.wind_speed[1])
+                     * np.isfinite(result.wind_dir[1]))
+                wspd = result.wind_speed[1][s] * 1.609 # miles to km.
+                wphi = np.radians(result.wind_dir[1][s])
+                vx, vy = wspd * np.cos(wphi), wspd * np.sin(wphi)
+                speed = ((np.mean(vx)**2 + np.mean(vy)**2)**.5).round(1)
+                direc = (np.rad2deg(np.arctan2(np.mean(vy),
+                                               np.mean(vx))) % 360.).round(1)
+                output.update({
+                    'wind_speed': speed,
+                    'wind_dir': direc,
+                })
+
+            if hasattr(result, 'uv'):
+                output['uv'] = np.nanmedian(result.UV[1]).round(1),
+
+            yield utils.denumpy(output)
 
 
 # Model for converting APEX PWV to Toco PWV.
@@ -65,7 +79,7 @@ def apex_pwv_to_toco_pwv(v):
 @cc.register_engine('toco-pwv', cc.TocoPwvConfig)
 class TocoPwv(utils.LowResTable):
     result_fields = ['mean', 'start', 'end', 'span']
-    
+
     def _get_raw(self, time_range):
         cfg = hkdb.HkConfig.from_yaml(self.cfg.hkdb_config)
         cfg.aliases['pwv'] = 'env-radiometer-class.pwvs.pwv'
@@ -87,7 +101,8 @@ class TocoPwv(utils.LowResTable):
     def getter(self, targets=None, results=None, raw=False, **kwargs):
         time_ranges = self._target_time_ranges(targets)
         for time_range in time_ranges:
-            rs = self._load(time_range)
+            buf_range = (time_range[0] - 3600, time_range[1] + 3600)
+            rs = self._load(buf_range)
             p = rs['pwv']
             if len(p) == 0:
                 yield {
@@ -97,7 +112,7 @@ class TocoPwv(utils.LowResTable):
                     'span': math.nan,
                 }
                 continue
-                
+
             # Replace out-of-bounds negative with 0.15
             p[p<0.3] = 0.15
             # Note any out-of-bounds positive points
@@ -109,7 +124,11 @@ class TocoPwv(utils.LowResTable):
             # But if there aren't too many, just replace them with pwv=3.
             p[high] = 3.
 
-            print(np.median(p).round(3))
+            # Prefer values in time range.
+            s1 = (time_range[0] <= rs['timestamp']) * (rs['timestamp'] < time_range[1])
+            if s1.any():
+                p = p[s1]
+
             yield utils.denumpy({
                 'mean': np.median(p).round(3),
                 'start': p[0].round(3),

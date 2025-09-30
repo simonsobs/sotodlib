@@ -63,11 +63,8 @@ class LowResTableConfig(AncilEngineConfig):
     #: Number of seconds in archive block.
     archive_block_seconds: int = 2000000
 
-    #: Dawn of dataset.
-    big_bang: int = 1704000000
-
-    #: Now?
-    now: int = None
+    #: Time range for this dataset to consider.
+    dataset_time_range = (1704000000, None)
 
     gap_size: float = 300.
     filename_pattern: str = '{dataset_name}_{timestamp}.h5'
@@ -98,9 +95,8 @@ class HkExtractConfig(AncilEngineConfig):
     #: archive_block_seconds evenly).
     dataset_block_seconds: int = 1000000
 
-    #: Fix me.
-    big_bang: int = 1704000000
-    now: int = None
+    #: Time range for this dataset to consider.
+    dataset_time_range = (1704000000, None)
 
     #: Pattern for generating filenames.
     filename_pattern: str = '{dataset_name}_{timestamp}.h5'
@@ -119,6 +115,7 @@ class ApexPwvConfig(LowResTableConfig):
     # Overrides.
     dataset_name: str = 'apex_pwv'
     obsdb_format: str = '{dataset}_{field}'
+    obsdb_query: str = '{mean} is null'
 
 
 @dataclass
@@ -126,12 +123,16 @@ class PwvComboConfig(AncilEngineConfig):
     # Overrides.
     dataset_name: str = 'pwv'
     obsdb_format: str = '{dataset}_{field}'
+    obsdb_query: str = '{mean} is null'
+
     toco_dataset: str = 'toco-pwv'
     apex_dataset: str = 'apex-pwv'
 
 @dataclass
 class ScanPropsConfig(HkExtractConfig):
     # Overrides.
+    obsdb_query: str = '{data_found} is null or {data_found} == 0'
+
     archive_block_seconds: int = 2000000
     dataset_block_seconds: int = 100000
     aliases: dict = field(default_factory=lambda: {
@@ -144,6 +145,7 @@ class ScanPropsConfig(HkExtractConfig):
 class WeatherStationConfig(LowResTableConfig):
     # Overrides.
     dataset_name: str = 'weather-station'
+    obsdb_query: str = '{wind_speed} is null'
 
     #: hkdb config filename to target.
     hkdb_config: str = None
@@ -151,6 +153,8 @@ class WeatherStationConfig(LowResTableConfig):
 
 @dataclass
 class TocoPwvConfig(LowResTableConfig):
+    obsdb_query: str = '{mean} is null'
+
     dataset_name: str = 'toco_pwv'
     obsdb_format: str = '{dataset}_{field}'
     hkdb_config: str = None

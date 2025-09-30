@@ -159,7 +159,10 @@ class ResultSet(object):
             keys = [k.split('.')[-1] for k in keys]
             assert(len(set(keys)) == len(keys))  # distinct.
         _dtypes = {k: None for k in self.keys} | (dtypes if dtypes is not None else {})
-        cdata = zip(*self.rows)
+        if len(self.rows):
+            cdata = zip(*self.rows)
+        else:
+            cdata = [[] for k in keys]
         columns = [_smart_array_cast(c, dtype=_dtypes[k], field_detail=k)
                    for k, c in zip(keys, cdata)]
 
