@@ -26,6 +26,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats")
     parser.add_argument(      "--nmat-mode", type=str, default="build", help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat-dir, otherwise build and save. 'load': Load from nmat-dir, error if missing. 'save': Build from tod and save.")
     parser.add_argument("-d", "--downsample", type=str, default="1",  help="Downsample TOD by this factor. ,-sep")
+    parser.add_argument("-D", "--downgrade", type=int, default=1,  help="Downgrade the input area by this factor")
     parser.add_argument(      "--maxiter",    type=str, default="500",help="Max number of CG steps per pass. ,-sep")
     parser.add_argument(      "--interpol",   type=str, default="nearest", help="Pmat interpol per pass. ,-sep")
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
@@ -72,6 +73,9 @@ def main(**args):
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args.area)
+
+    if args.downgrade > 1:
+        shape, wcs = enmap.downgrade_geometry(shape, wcs, args.downgrade)
 
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
