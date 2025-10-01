@@ -15,9 +15,7 @@ from sotodlib.tod_ops import filters
 
 @trait_docs
 class ReadoutFilter(Operator):
-    """Apply a readout filter to the signal
-
-    """
+    """Apply a readout filter to the signal"""
 
     # Class traits
 
@@ -33,9 +31,7 @@ class ReadoutFilter(Operator):
         "iir_params", help="Observation key for readout filter parameters"
     )
 
-    wafer_key = Unicode(
-        "det_info:stream_id", help="Focalplane key for the wafer name"
-    )
+    wafer_key = Unicode("det_info:stream_id", help="Focalplane key for the wafer name")
 
     debug_root = Unicode(
         None,
@@ -83,15 +79,15 @@ class ReadoutFilter(Operator):
             # The IIR filter parameters will either be in a single,
             # top-level dictionary or they are organized per-UFM.
             if (
-                "per_stream" in ob[self.iir_params] and
-                ob[self.iir_params]["per_stream"]
+                "per_stream" in ob[self.iir_params]
+                and ob[self.iir_params]["per_stream"]
             ):
                 # We need to filter one wafer at a time.
                 for wf in all_wafers:
                     wafer_dets = [
-                        x for x, y in zip(
-                            local_dets, det_table[self.wafer_key][fp_rows]
-                        ) if y == wf
+                        x
+                        for x, y in zip(local_dets, det_table[self.wafer_key][fp_rows])
+                        if y == wf
                     ]
                     signal = ob.detdata[self.det_data][wafer_dets, :]
                     self._filter_detectors(rate, freq, signal, ob[wf])
@@ -121,7 +117,7 @@ class ReadoutFilter(Operator):
 
     def _requires(self):
         req = {
-            "shared" : self.times,
+            "shared": self.times,
             "detdata": self.det_data,
         }
         return req

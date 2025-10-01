@@ -205,8 +205,15 @@ class DetBiasCuts(Operator):
         return
 
     def _requires(self):
-        return dict()
+        req = {
+            "meta": list(),
+            "shared": [self.times],
+            "detdata": [self.det_data],
+            "intervals": list(),
+        }
+        if self.det_flags is not None:
+            req["detdata"].append(self.det_flags)
+        return req
 
     def _provides(self):
-        prov = {}
-        return prov
+        return dict()

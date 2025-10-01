@@ -529,14 +529,11 @@ def get_source_footprints(d: ReportData) -> List[Footprint]:
     
     for obs in source_obs_list:
         entry = db.inspect({'obs:obs_id': obs})
-        # coverage = np.array([hitpair.split(':') for hitpair in entry[0]['coverage'].split(',')])
-        # for source in d.cfg.cal_targets:
-        #     if source in coverage[:, 0]:
-        #         fps.append(Footprint(obs_id=obs,
-        #                              target=source,
-        #                              wafers=coverage[coverage[:, 0] == source, 1]))
+        if entry[0]['coverage'] == '':
+            continue
         for pair in entry[0]['coverage'].split(','):
             source, wafer = pair.split(':')
+            source = source.casefold()
             if source in d.cfg.cal_targets:
                 coverage_data[wafer][source]['count'] += 1
                 coverage_data[wafer][source]['obsids'].add(obs)
