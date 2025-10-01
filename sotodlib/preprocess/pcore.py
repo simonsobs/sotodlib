@@ -267,7 +267,7 @@ def _intersect(new, out):
 
     return fs_dets, ns_dets, fs_samps, ns_samps
 
-def _wrap_valid_ranges(new, out, valid_name="valid"):
+def _wrap_valid_ranges(new, out, valid_name="valid", wrap_name=None):
     """Wraps in a new Ranges field into ``out`` that tracks the current number
     of detectors and samples that intersect with ``new``.
     """
@@ -281,9 +281,16 @@ def _wrap_valid_ranges(new, out, valid_name="valid"):
     valid = RangesMatrix(
         [v if i in fs_dets else x for i in range(out.dets.count)]
     )
-    if valid_name in out:
-        out.move(valid_name, None)
-    out.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
+    if wrap_name:
+        if wrap_name in out:
+            out.move(wrap_name, None)
+        valid_aman = core.AxisManager(out.dets, out.samps)
+        valid_aman.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
+        out.wrap(wrap_name, valid_aman)
+    else:
+        if valid_name in out:
+            out.move(valid_name, None)
+        out.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
 
 def _expand(new, full, wrap_valid=True):
     """new will become a top level axismanager in full once it is matched to
@@ -534,7 +541,8 @@ class Pipeline(list):
                 break
 
         if run_calc:
-           _wrap_valid_ranges(proc_aman, full, valid_name='valid_data')
+           _wrap_valid_ranges(proc_aman, full, valid_name='valid_data',
+                              wrap_name='valid_data')
 
         # copy updated frequency cutoffs to full
         if "frequency_cutoffs" in full:
