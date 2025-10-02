@@ -396,11 +396,13 @@ def get_glitch_flags(aman,
         subscan_indices = np.array([[0, fvec.shape[-1]]])
 
     msk = np.zeros_like(fvec, dtype='bool')
+    iqr_ranges = np.zeros_like(fvec)
     if fvec.ndim == 1:
         for ss in subscan_indices:
             iqr_range = 0.741 * stats.iqr(fvec[ss[0]:ss[1]:ds])
             # get flags
             msk[ss[0]:ss[1]] = fvec[ss[0]:ss[1]] > iqr_range * n_sig
+            iqr_ranges[ss[0]:ss[1]] = iqr_range
         msk[:edge_guard] = False
         msk[-edge_guard:] = False
         flag = Ranges.from_bitmask(msk)
@@ -409,6 +411,7 @@ def get_glitch_flags(aman,
             iqr_range = 0.741 * stats.iqr(fvec[:,ss[0]:ss[1]:ds], axis=1)
             # get flags
             msk[:,ss[0]:ss[1]] = fvec[:,ss[0]:ss[1]] > iqr_range[:, None] * n_sig
+            iqr_ranges[:,ss[0]:ss[1]] = iqr_range[:, None]
         msk[:,:edge_guard] = False
         msk[:,-edge_guard:] = False
         flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
@@ -427,7 +430,7 @@ def get_glitch_flags(aman,
             # do not compress into csr_array
             glitches = core.AxisManager(aman.samps)
             data = np.zeros_like(fvec)
-            data[msk] = fvec[msk] / iqr_range
+            data[msk] = fvec[msk] / iqr_ranges[msk]
             glitches.wrap("glitch_flags", flag, [(0, "samps")])
             glitches.wrap("glitch_detection", data, [(0, "samps")])
         else:
@@ -436,7 +439,7 @@ def get_glitch_flags(aman,
             )
             indices = np.concatenate([np.where(msk[i])[0] for i in range(aman.dets.count)])
             data = np.concatenate(
-                [fvec[i][msk[i]] / iqr_range[i] for i in range(aman.dets.count)]
+                [fvec[i][msk[i]] / iqr_ranges[i][msk[i]] for i in range(aman.dets.count)]
             )
             smat = csr_array(
                 (data, indices, indptr), shape=(aman.dets.count, aman.samps.count)
