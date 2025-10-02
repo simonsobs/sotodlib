@@ -52,8 +52,7 @@ def get_state_file(out_root, obs, name="state"):
 
 
 def get_obs_state(out_root, obs):
-    """Find the current processing state of an observation.
-    """
+    """Find the current processing state of an observation."""
     state_file = get_state_file(out_root, obs)
     if os.path.isfile(state_file):
         with open(state_file, "r") as f:
@@ -63,8 +62,7 @@ def get_obs_state(out_root, obs):
 
 
 def clear_obs_state(out_root, obs):
-    """Clear the current processing state of an observation.
-    """
+    """Clear the current processing state of an observation."""
     obs_dir = os.path.join(out_root, obs)
     if not os.path.isdir(obs_dir):
         return
@@ -74,8 +72,7 @@ def clear_obs_state(out_root, obs):
 
 
 def set_obs_state(out_root, obs, state):
-    """Set the current processing state of an observation.
-    """
+    """Set the current processing state of an observation."""
     obs_dir = os.path.join(out_root, obs)
     if not os.path.exists(obs_dir):
         os.makedirs(obs_dir)
@@ -196,13 +193,22 @@ def main():
         default=False,
         help="Remove the running state from all observations",
     )
+    parser.add_argument(
+        "--ignore_running",
+        required=False,
+        action="store_true",
+        default=False,
+        help="Ignore stale running state when considering observations",
+    )
 
     args = parser.parse_args()
 
     if args.get_batch is not None:
         # We are getting the next batch of observations
         all_obs = load_obs_file(args.observations)
-        batch_obs = find_obs(all_obs, args.get_batch, args.out_root)
+        batch_obs = find_obs(
+            all_obs, args.get_batch, args.out_root, ignore_running=args.ignore_running
+        )
         if args.batch_list:
             batch_str = ",".join(batch_obs)
             print(f"{batch_str}", flush=True)
