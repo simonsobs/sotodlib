@@ -1970,6 +1970,8 @@ class GetCommonMode(_Preprocess):
         
         save: True
 
+    If ``noise_fit`` is True, the 1/f noise fit parameters of the common mode
+    is wrapped together.
     .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
     """
     name = 'get_common_mode'
