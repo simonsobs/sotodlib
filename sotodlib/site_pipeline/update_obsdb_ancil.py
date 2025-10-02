@@ -49,7 +49,7 @@ def update_base_data(config_file, time_range=None, datasets=None, full_scan=Fals
     logger.info(f'Finished updating base data.')
 
 
-def update_obsdb(config_file, time_range=None, datasets=None):
+def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
     cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 
     tquery = None
@@ -72,10 +72,16 @@ def update_obsdb(config_file, time_range=None, datasets=None):
         for k in engine.obsdb_fields:
             obsdb.add_obs_columns([k + ' float'])
 
-        q = engine._get_obsdb_query()
+        # Find records that need to be updated.
+        if redo:
+            q = '1'
+        else:
+            q = engine._get_obsdb_query()
+
         if tquery:
             q = f'{tquery} and {q}'
-        print(q)
+
+        logger.debug(f'Query for records to update is: "{q}"')
         recs = obsdb.query(q)
         del obsdb
 
@@ -112,6 +118,7 @@ def get_parser(parser=None):
     p.add_argument('--config-file', '-c', default='cli.yaml')
     p.add_argument('--dataset', '-d', action='append')
     p.add_argument('--lookback-days', type=float)
+    p.add_argument('--redo', action='store_true')
 
     p = sps.add_parser('check')
     p.add_argument('--config-file', '-c', default='cli.yaml')
@@ -128,7 +135,7 @@ def get_parser(parser=None):
 
 def main(command=None, verbose=None, lookback_days=None,
          obs_id=None, config_file=None, dataset=None, query=None,
-         full_scan=None):
+         full_scan=None, redo=None):
     if verbose:
         ancil.logger.setLevel(logging.DEBUG)
 
@@ -143,17 +150,17 @@ def main(command=None, verbose=None, lookback_days=None,
 
     elif command == 'update-obsdb':
         update_obsdb(config_file, datasets=dataset,
-                     time_range=time_range)
+                     time_range=time_range, redo=redo)
 
     elif command == 'check':
+
         # Just trial load the config, processors.
-
         cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
-
         for dataset, engine in _engines_iter(cfg, dataset):
             print(dataset, engine)
 
     elif command == 'test':
+
         # Run on some obs_ids.
         cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 

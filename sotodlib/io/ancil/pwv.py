@@ -111,7 +111,7 @@ class PwvCombo(utils.AncilEngine):
             self.cfg.apex_dataset: None,
         }
 
-    def getter(self, targets=None, results=None, raw=False, io_cache=None, **kwargs):
+    def getter(self, targets=None, results=None, raw=False, **kwargs):
         time_ranges = self._target_time_ranges(targets)
         toco_src = self._get_friend(self.cfg.toco_dataset)
         apex_src = self._get_friend(self.cfg.apex_dataset)
@@ -119,7 +119,7 @@ class PwvCombo(utils.AncilEngine):
         for time_range in time_ranges:
             buffered = (time_range[0] - 1 * 3600,
                         time_range[1] + 1 * 3600)
-            rs_toco = toco_src._load(buffered, io_cache=io_cache)
-            rs_apex = apex_src._load(buffered, io_cache=io_cache)
+            rs_toco = toco_src._load(buffered)
+            rs_apex = apex_src._load(buffered)
             x = combine_pwv(rs_toco, rs_apex, time_range)
             yield utils.denumpy(x)
