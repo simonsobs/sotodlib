@@ -276,7 +276,7 @@ def calc_psd(
     overwrite=True,
     subscan=False,
     full_output=False,
-    LabelAxis='dets',
+    label_axis='dets',
     **kwargs
 ):
     """Calculates the power spectrum density of an input signal using signal.welch().
@@ -301,6 +301,8 @@ def calc_psd(
         subscan (bool): if True, compute psd on subscans.
         full_output: if True this also outputs nseg, the number of segments used for
             welch, for correcting bias of median white noise estimation by calc_wn.
+        label_axis (str): The name of LabelAxis in the input aman.
+            Default is ``dets``.
         **kwargs: keyword args to be passed to signal.welch().
 
     Returns:
@@ -329,7 +331,7 @@ def calc_psd(
             freqs, Pxx = _calc_psd_subscan(aman, signal=signal,
                                            freq_spacing=freq_spacing,
                                            **kwargs)
-        axis_map_pxx = [(0, LabelAxis), (1, "nusamps"), (2, "subscans")]
+        axis_map_pxx = [(0, label_axis), (1, "nusamps"), (2, "subscans")]
         axis_map_nseg = [(0, "subscans")]
     else:
         if timestamps is None:
@@ -365,7 +367,7 @@ def calc_psd(
             nseg = int(max_samples / kwargs["nperseg"])
 
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
-        axis_map_pxx = [(0, aman[LabelAxis]), (1, "nusamps")]
+        axis_map_pxx = [(0, aman[label_axis]), (1, "nusamps")]
         axis_map_nseg = None
 
     if merge:
@@ -695,7 +697,7 @@ def fit_noise_model(
     base=1.05,
     freq_spacing=None,
     subscan=False,
-    LabelAxis='dets'
+    label_axis='dets'
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -758,6 +760,9 @@ def fit_noise_model(
         The approximate desired frequency spacing of the PSD. Passed to calc_psd.
     subscan : bool
         If True, fit noise on subscans.
+    label_axis : str
+        The name of LabelAxis in the input aman.
+        Default is ``dets``.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -779,7 +784,7 @@ def fit_noise_model(
             merge=merge_psd,
             subscan=subscan,
             full_output=True,
-            LabelAxis=LabelAxis,
+            label_axis=label_axis,
             **psdargs,
         )
     if np.any(mask):
@@ -803,8 +808,8 @@ def fit_noise_model(
                                   "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
                                   "freq_spacing": freq_spacing}
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
-        axis_map_fit = [(0, LabelAxis), (1, "noise_model_coeffs"), (2, aman.subscans)]
-        axis_map_cov = [(0, LabelAxis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs"), (2, aman.subscans)]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
     else:
         eix = np.argmin(np.abs(f - f_max))
         if lowf is None:
@@ -818,22 +823,22 @@ def fit_noise_model(
         if binning == True:
             f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                               base=base, merge=False)
-        fitout = np.zeros((aman[LabelAxis].count, 3))
+        fitout = np.zeros((aman[label_axis].count, 3))
         # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-        covout = np.zeros((aman[LabelAxis].count, 3, 3))
+        covout = np.zeros((aman[label_axis].count, 3, 3))
         if isinstance(wn_est, (int, float)):
-            wn_est = np.full(aman[LabelAxis].count, wn_est)
-        elif len(wn_est)!=aman[LabelAxis].count:
+            wn_est = np.full(aman[label_axis].count, wn_est)
+        elif len(wn_est)!=aman[label_axis].count:
             print('Size of wn_est must be equal to aman.dets.count or a single value.')
             return
         if isinstance(fknee_est, (int, float)):
-            fknee_est = np.full(aman[LabelAxis].count, fknee_est)
-        elif len(fknee_est)!=aman[LabelAxis].count:
+            fknee_est = np.full(aman[label_axis].count, fknee_est)
+        elif len(fknee_est)!=aman[label_axis].count:
             print('Size of fknee_est must be equal to aman.dets.count or a single value.')
             return
         if isinstance(alpha_est, (int, float)):
-            alpha_est = np.full(aman[LabelAxis].count, alpha_est)
-        elif len(alpha_est)!=aman[LabelAxis].count:
+            alpha_est = np.full(aman[label_axis].count, alpha_est)
+        elif len(alpha_est)!=aman[label_axis].count:
             print('Size of alpha_est must be equal to aman.dets.count or a single value.')
             return
         if fixed_param == None:
@@ -866,17 +871,17 @@ def fit_noise_model(
                     covout_i = np.linalg.inv(hessian_ndt)            
                 except np.linalg.LinAlgError:
                     print(
-                        f"Cannot calculate Hessian for detector {aman[LabelAxis].vals[i]} skipping. (LinAlgError)"
+                        f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (LinAlgError)"
                     )
                     covout_i = np.full((len(p0), len(p0)), np.nan)
                 except IndexError:
                     print(
-                        f"Cannot calculate Hessian for detector {aman[LabelAxis].vals[i]} skipping. (IndexError)"
+                        f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (IndexError)"
                     )
                     covout_i = np.full((len(p0), len(p0)), np.nan)
                 except RuntimeWarning as e:
                     covout_i = np.full((len(p0), len(p0)), np.nan)
-                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman[LabelAxis].vals[i]}')
+                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman[label_axis].vals[i]}')
             fitout_i = res.x
             if fixed_param == "wn":
                 covout_i = np.insert(covout_i, 0, 0, axis=0)
@@ -890,13 +895,13 @@ def fit_noise_model(
                 fitout_i = np.insert(fitout_i, 2, alpha_est[i])
             covout[i] = covout_i
             fitout[i] = fitout_i
-        axis_map_fit = [(0, LabelAxis), (1, "noise_model_coeffs")]
-        axis_map_cov = [(0, LabelAxis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs")]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
 
     noise_model_coeffs = ["white_noise", "fknee", "alpha"]
 
     noise_fit_stats = core.AxisManager(
-        aman[LabelAxis],
+        aman[label_axis],
         core.LabelAxis(
             name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
         ),
@@ -1242,7 +1247,7 @@ def get_common_noise_params(
     aman_common.wrap('signal', np.array([signal]), [(0, 'common'), (1, 'samps')])
     aman_common.wrap('timestamps', aman.timestamps, [(0, 'samps')])
     noise_fit_stats = fit_noise_model(aman_common, signal=None, merge_fit=True, 
-                                      LabelAxis='common', **fit_args)
+                                      label_axis='common', **fit_args)
     if merge:
         aman.wrap(merge_name, aman_common)
     return noise_fit_stats
