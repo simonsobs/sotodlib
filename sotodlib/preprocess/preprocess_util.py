@@ -14,7 +14,6 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
-from so3g.proj import RangesMatrix
 
 from .. import core
 
