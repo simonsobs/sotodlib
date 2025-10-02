@@ -305,11 +305,23 @@ def counter_1_over_f(freqs, tod, fk=None, n=None, noise_fit_stats=None):
     w*(1 + (fk/f)**n) 
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
+    You need the (fk, n) pair or noise_fit_stats to apply this filter.
+
+    Arguments
+    ---------
+        fk : float or nparray
+            The knee frequency of the noise.
+        n : float or nparray
+            The 1/f index of the noise.
+        noise_fit_stats : str
+            The name of the 1/f fit result that is wrapped in the tod.
+            This is an output of ``fft_ops.fit_noise_model``.
     """
     if np.isscalar(fk) and np.isscalar(n):
         return 1/(1+(fk/freqs)**n)
-
-    if fk is None and n is None and noise_fit_stats is not None:
+    elif (fk is None or n is None) and noise_fit_stats is None:
+        raise ValueError("You must input the (fk, n) or noise_fit_stats.")
+    elif (fk is None or n is None) and noise_fit_stats is not None:
         if isinstance(noise_fit_stats, str):
             _f = attrgetter(noise_fit_stats)
             noise_fit_stats = _f(tod)
