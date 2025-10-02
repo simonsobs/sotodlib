@@ -1220,9 +1220,11 @@ def get_common_noise_params(
     aman : AxisManager
         Axis manager which has samps axis aligned with signal.
     signal : nparray
-        Signal sized nsamps or ndets x nsamps.
+        The pre-computed common mode sized 1 x nsamps, or
+        the signal sized ndets x nsamps.
         When signal is given in 2D shape, the common mode across detectors
         is calculated with median method.
+        
     merge : bool
         If True, ``aman_common`` is added into axis manager with merge_name.
     merge_name : str
