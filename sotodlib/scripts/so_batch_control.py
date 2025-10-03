@@ -173,6 +173,13 @@ def main():
         help="Set the state of this observation to 'done'",
     )
     parser.add_argument(
+        "--set_state_failed",
+        required=False,
+        type=str,
+        default=None,
+        help="Set the state of this observation to 'failed'",
+    )
+    parser.add_argument(
         "--set_state_running",
         required=False,
         type=str,
@@ -222,6 +229,8 @@ def main():
         clear_obs_state(args.out_root, args.clear_state)
     elif args.set_state_done is not None:
         set_obs_state(args.out_root, args.set_state_done, "done")
+    elif args.set_state_failed is not None:
+        set_obs_state(args.out_root, args.set_state_done, "failed")
     elif args.set_state_running is not None:
         set_obs_state(args.out_root, args.set_state_running, "running")
     elif args.cleanup:
