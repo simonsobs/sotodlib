@@ -367,7 +367,10 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
     configs, context = get_preprocess_context(configs, context)
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    if 'valid_data' in meta.preprocess:
+    if (
+        'valid_data' in meta.preprocess and
+        isinstance(meta.preprocess.valid_data, core.AxisManager)
+       ):
         keep = has_any_cuts(meta.preprocess.valid_data.valid_data)
         meta.restrict("dets", keep)
     else:
@@ -453,7 +456,10 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all proc pipeline processes")
-            if 'valid_data' in meta_proc.preprocess:
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
                 keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
             else:
                 keep_all = np.ones(meta_proc.dets.count, dtype=bool)
