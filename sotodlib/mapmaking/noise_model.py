@@ -528,10 +528,14 @@ def write_nmat(fname, nmat):
 
 def read_nmat(fname):
     data = bunch.read(fname)
-    typ  = data.type.decode()
-    if   typ == "NmatDetvecs": return NmatDetvecs.from_bunch(data)
-    elif typ == "NmatUncorr":  return NmatUncorr .from_bunch(data)
-    elif typ == "NmatWhite":   return NmatWhite  .from_bunch(data)
-    elif typ == "NmatUnit":    return NmatUnit   .from_bunch(data)
-    elif typ == "Nmat":        return Nmat       .from_bunch(data)
+    if isinstance(data.type, bytes):
+        typ  = data.type.decode()
+    elif isinstance(data.type, str):
+        typ  = data.type
+    if   typ == "NmatDetvecsDCT": return NmatDetvecsDCT.from_bunch(data)
+    elif typ == "NmatDetvecs":    return NmatDetvecs   .from_bunch(data)
+    elif typ == "NmatUncorr":     return NmatUncorr    .from_bunch(data)
+    elif typ == "NmatWhite":      return NmatWhite     .from_bunch(data)
+    elif typ == "NmatUnit":       return NmatUnit      .from_bunch(data)
+    elif typ == "Nmat":           return Nmat          .from_bunch(data)
     else: raise IOError("Unrecognized noise matrix type '%s' in '%s'" % (str(typ), fname))
