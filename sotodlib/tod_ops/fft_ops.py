@@ -504,12 +504,35 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     return wn
 
 def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=False):
+    """Compute the ratio of the mean PSD in two frequency regions to evaluate the noise.
+
+    Arguments
+    ---------
+        aman: AxisManager
+            Only used for matching the dets and subscans dimensions in the output aman.
+        pxx: np.ndarray[float]
+            Input PSD. Can be [dets, nufreq] or [dets, nufreq, subscans] (NOT just [nufreq]).
+        freqs: np.ndarray[float]
+            frequency information related to the psd.
+        f_sel: tuple
+            2-tuple of frequencies giving the range of the numerator ("signal band")
+        f_wn: tuple
+            2-tuple of frequencies giving the range of the denominator ("white noise")
+        subscan: bool
+            True if the PSD is split by subscans
+
+    Returns
+    -------
+        calc_aman: AxisManager
+            Axis manager with fields "rdets" giving the per-detector ratio and
+            "rmean" giving the ratio for the mean (over detectors) PSD.
+    """
 
     fselect = np.logical_and(freqs >= f_sel[0], freqs <= f_sel[1])
     fwn = np.logical_and(freqs >= f_wn[0], freqs <= f_wn[1])
 
     pxxmean = np.mean(pxx, axis=0)
-    rmean = np.mean(pxxmean[:, fselect], axis=0) / np.mean(pxxmean[:, fwn], axis=0)
+    rmean = np.mean(pxxmean[fselect], axis=0) / np.mean(pxxmean[fwn], axis=0)
     rdets = np.mean(pxx[:, fselect], axis=1) / np.mean(pxx[:, fwn], axis=1)
 
     if not subscan:
@@ -521,8 +544,8 @@ def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=F
         calc_aman.wrap("rdets", rdets, [(0,"dets"), (1,"subscans")])
         calc_aman.wrap("rmean", rmean, [(0, "subscans")])
 
-    calc_aman.wrap("fselect", fselect)
-    calc_aman.wrap("fwn", fwn)
+    calc_aman.wrap("f_sel", np.array(f_sel))
+    calc_aman.wrap("f_wn", np.array(f_wn))
     return calc_aman
 
 def noise_model(f, params, **fixed_param):

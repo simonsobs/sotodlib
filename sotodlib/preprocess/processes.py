@@ -460,7 +460,7 @@ class NoiseRatio(_Preprocess):
     Example config block::
 
     - name: "noise_ratio"
-      signal: "demodQ"
+      psd: "psdQ"
       wrap: "noise_ratio_Q"
       calc:
         f_sel: [0.04, 0.14]
@@ -2704,7 +2704,7 @@ class AtomicInfo(_Preprocess):
 
         - name: "atomic_info"
           process:
-            noise_ratioQ.rmean: rmeanQ
+            noise_ratio_Q.rmean: rmeanQ
 
     """
     name = "atomic_info"
