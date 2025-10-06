@@ -471,7 +471,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
         if sys == "cel" or sys == "equ":
             return lonlat
         elif sys == "hor":
-            return so3g.proj.CelestialSightLine.az_el(ctime, lonlat[0], lonlat[1], site=site, weather=weather).coords()[0,:2]
+            return so3g.proj.CelestialSightLine.az_el(ctime, -1*lonlat[0], np.pi/2 - lonlat[1], site=site, weather=weather).coords()[0,:2]
         else:
             raise NotImplementedError
     def get_pos(name, ctime, sys=None):
@@ -481,10 +481,16 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
             elif name == "auto":
                 return np.array([0,0]) # would use geom here
             else:
-                obj = getattr(ephem, name)()
-                djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
-                obj.compute(djd)
-                return np.array([obj.a_ra, obj.a_dec])
+                try:
+                    planet = coords.planets.SlowSource.for_named_source(
+                        name, ctime)
+                    ra0, dec0 = planet.pos(tod.timestamps.mean())
+                except:
+                    obj = getattr(ephem, name)()
+                    djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
+                    obj.compute(djd)
+                    ra0, dec0 = obj.a_ra, obj.a_dec
+                return np.array([ra0, dec0])
         else:
             return to_cel(name, sys, ctime, site, weather)
     p1 = get_pos(info["from"], ctime, info["from_sys"])
