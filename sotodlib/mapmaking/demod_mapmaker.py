@@ -624,6 +624,10 @@ def make_demod_map(context, obslist, noise_model, info,
     n_dets = comm.allreduce(n_dets)
     for subinfo in info:
         subinfo['number_dets'] = n_dets
+        if 'atomic_info' in obs:
+            for info_entry in obs.atomic_info:
+                sub_info[info_entry] = obs.atomic_info[info_entry]
+
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
         return errors, outputs, None

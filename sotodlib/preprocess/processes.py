@@ -454,6 +454,76 @@ class PSDCalc(_Preprocess):
             plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
                      xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
 
+class NoiseRatio(_Preprocess):
+    """ Compute ratios of "signal band" to white noise in PSDs.
+
+    Example config block::
+
+    - name: "noise_ratio"
+      signal: "demodQ"
+      wrap: "noise_ratio_Q"
+      calc:
+        f_sel: [0.04, 0.14]
+        f_wn: [0.6, 1.0]
+      save: True
+      select:
+        r_max: 1.19
+        select_per_detector: True
+
+    .. autofunction:: sotodlib.tod_ops.fft_ops.noise_ratio
+"""
+    name = "noise_ratio"
+
+    def __init__(self, step_cfgs):
+        self.psd = step_cfgs.get('psd', 'psd')
+        self.wrap = step_cfgs.get('wrap', 'noise_ratio')
+        self.per_detector = step_cfgs.get('per_detector', True)
+        self.subscan = step_cfgs.get('subscan', False)
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.psd not in proc_aman:
+            raise ValueError("PSD is not saved in Preprocessing AxisManager")
+        psd = proc_aman[self.psd]
+        pxx = psd.Pxx_ss if self.subscan else psd.Pxx
+
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+
+        calc_aman = tod_ops.fft_ops.noise_ratio(proc_aman, pxx, psd.freqs, subscan=self.subscan, **self.calc_cfgs)
+        self.save(proc_aman, calc_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, calc_aman):
+        if self.save_cfgs is None:
+            return
+        else:
+            proc_aman.wrap(self.wrap, calc_aman)
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        per_detector = self.select_cfgs.get("select_per_detector", True)
+        if per_detector:
+            noise_ratio = proc_aman[self.wrap]["rdets"]
+        else:
+            noise_ratio = proc_aman[self.wrap]["rmean"]
+
+        if self.subscan:
+            noise_ratio = np.nanmean(noise_ratio, axis=-1) # Mean over subscans
+        keep = np.ones_like(meta.dets.vals, dtype=bool)
+        keep &= (noise_ratio <= np.float64(self.select_cfgs["r_max"]))
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+
 
 class GetStats(_Preprocess):
     """
@@ -2627,6 +2697,26 @@ class GetTauHWP(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
 
+class AtomicInfo(_Preprocess):
+    """Add a sub-aman containing information to be saved in the atomic info.
+
+    Example config block::
+
+        - name: "atomic_info"
+          process:
+            noise_ratioQ.rmean: rmeanQ
+
+    """
+    name = "atomic_info"
+    def process(self, aman, proc_aman, sim=False):
+        atomic_info_aman = core.AxisManager()
+        for item in self.process_cfgs:
+            val = proc_aman[item]
+            if not (np.issubdtype(type(val), np.number) or np.issubdtype(type(val), np.str_)):
+                raise TypeError(f"Items of type {type(val)} cannot be added to atomic info")
+            atomic_info_aman.wrap(self.process_cfgs[item], val)
+        aman.wrap("atomic_info", atomic_info_aman)
+        return aman, proc_aman
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -2645,6 +2735,7 @@ _Preprocess.register(GlitchDetection)
 _Preprocess.register(Jumps)
 _Preprocess.register(FixJumps)
 _Preprocess.register(PSDCalc)
+_Preprocess.register(NoiseRatio)
 _Preprocess.register(Noise)
 _Preprocess.register(Calibrate)
 _Preprocess.register(EstimateHWPSS)
@@ -2676,3 +2767,4 @@ _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
 _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
+_Preprocess.register(AtomicInfo)

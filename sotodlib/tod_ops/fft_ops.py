@@ -503,6 +503,28 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
+def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=False):
+
+    fselect = np.logical_and(freqs >= f_sel[0], freqs <= f_sel[1])
+    fwn = np.logical_and(freqs >= f_wn[0], freqs <= f_wn[1])
+
+    pxxmean = np.mean(pxx, axis=0)
+    rmean = np.mean(pxxmean[:, fselect], axis=0) / np.mean(pxxmean[:, fwn], axis=0)
+    rdets = np.mean(pxx[:, fselect], axis=1) / np.mean(pxx[:, fwn], axis=1)
+
+    if not subscan:
+        calc_aman = core.AxisManager(aman.dets)
+        calc_aman.wrap("rdets", rdets, [(0,"dets")])
+        calc_aman.wrap("rmean", rmean)
+    else:
+        calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
+        calc_aman.wrap("rdets", rdets, [(0,"dets"), (1,"subscans")])
+        calc_aman.wrap("rmean", rmean, [(0, "subscans")])
+
+    calc_aman.wrap("fselect", fselect)
+    calc_aman.wrap("fwn", fwn)
+    return calc_aman
+
 def noise_model(f, params, **fixed_param):
     """
     Noise model for power spectrum with white noise, and 1/f noise.
