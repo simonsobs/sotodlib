@@ -403,7 +403,6 @@ def main(**args):
             new_comm = comm.Create(new_group)
             if nkept == 0:
                 L.info("No tods assigned to this process. Pruning")
-                MPI.Finalize()
                 sys.exit(0)
             comm = new_comm
             for signal in mapmaker.signals:
