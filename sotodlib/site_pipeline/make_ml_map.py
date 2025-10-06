@@ -144,6 +144,7 @@ def main(**args):
         sys.exit(1)
 
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
+    to_skip = []
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
         pass_prefix = prefix + "pass%d_" % (ipass+1)
@@ -206,6 +207,10 @@ def main(**args):
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
+            if sub_id in to_skip:
+                L.debug("Skipped %s (Cut in last pass)" % (sub_id))
+                continue
+
             try:
                 meta = context.get_meta(sub_id)
                 # Optionally restrict to maximum number of detectors. This is mainly
@@ -223,12 +228,14 @@ def main(**args):
                 if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
                     continue
                 # Check nans
                 mask = np.logical_not(np.isfinite(obs.signal))
                 if mask.sum() > 0:
                     L.debug("Skipped %s (a nan in signal)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
                     continue
                 # Check all 0s
                 zero_dets = np.sum(obs.signal, axis=1)
@@ -290,6 +297,7 @@ def main(**args):
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
                         L.debug("Skipped %s (more than 50pc of detectors cut by sens)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
+                        to_skip += [sub_id]
                         continue
                     else:
                         obs.restrict("dets", good)
@@ -303,6 +311,7 @@ def main(**args):
                     good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
+                        to_skip += [sub_id]
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
                         continue
