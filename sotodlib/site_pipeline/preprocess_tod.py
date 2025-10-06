@@ -372,30 +372,35 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     futures = []
-    futures_kargs = {}
+    job_details = {}
     for r in run_list:
-        futures_kargs[r[0]["obs_id"]] = {
-            "obs_id": r[0]["obs_id"],
+        obs_id = r[0]["obs_id"]
+        kwargs = {
+            "obs_id": obs_id,
             "group_list": r[1],
             "verbosity": verbosity,
             "configs": configs,
             "overwrite": overwrite,
-            "run_parallel": True,
+            "run_parallel": True,}
+        job_details[obs_id] = {
+            "future_kargs": kwargs,
             "try": 1,
         }
-        kwargs = {k: v for k, v in futures_kargs[r[0]["obs_id"]].items() if k != "try"}
-        fut = executor.submit(
-            preprocess_tod,
-            **kwargs
-        )
+        fut = executor.submit(preprocess_tod, **kwargs)
         fut.obs_id = r[0]["obs_id"]
         futures.append(fut)
 
     while futures:
-        future_to_check = futures.pop(0)
-        kwargs = {k: v for k, v in futures_kargs[future_to_check.obs_id].items() if k != "try"}
-        if future_to_check.done() and future_to_check.exception() is None:
-            err, db_datasets = future_to_check.result()
+        future = futures.pop(0)
+        obs_id = future.obs_id
+        kwargs = job_details[obs_id]["future_kargs"]
+        total_tries = job_details[obs_id]["try"]
+        if not future.done():
+            futures.append(future)
+            continue
+        ex = future.exception()
+        if ex is None:
+            err, db_datasets = future.result()
             if err is not None:
                 n_fail += 1
             if db_datasets:
@@ -405,35 +410,23 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         pp_util.cleanup_mandb(err, db_dataset, configs, logger)
                 else:
                     pp_util.cleanup_mandb(err, db_datasets, configs, logger)
-        elif future_to_check.done() and (
-            isinstance(future_to_check.exception(), OSError)
-            and future_to_check.kargs["try"] <= 3
-        ):
-            logger.info(f"Future raised an OSError: {future_to_check.exception()}, resubmitting")
-            
-            new_future = executor.submit(
-                preprocess_tod,
-                **kwargs
-            )
-            new_future.obs_id = future_to_check.obs_id
-            futures_kargs[new_future.obs_id]["try"] += 1
-            futures.append(new_future)
-        elif future_to_check.done() and ((
-            isinstance(future_to_check.exception(), ValueError)
-            and future_to_check.kargs["try"] > 3
-        ) or not isinstance(future_to_check.exception(), ValueError)):
-            logger.info(f"Future failed after 3 attempts: {future_to_check.exception()}")
-            errmsg = f'{type(future_to_check.exception())}: {future_to_check.exception()}'
-            tb = ''.join(traceback.format_tb(future_to_check.exception().__traceback__))
+        elif isinstance(ex, OSError) and total_tries <= 3:
+            logger.info(f"Future raised an OSError: {ex}, resubmitting")
+            new_fut = executor.submit(preprocess_tod, **kwargs)
+            new_fut.obs_id = obs_id
+            job_details[new_fut.obs_id]["try"] += 1
+            futures.append(new_fut)
+        elif (isinstance(ex, ValueError) and total_tries > 3) or not isinstance(ex, ValueError):
+            logger.info(f"Future failed after 3 attempts: {ex}")
+            errmsg = f'{type(ex)}: {ex}'
+            tb = ''.join(traceback.format_tb(ex.__traceback__))
             logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
             f = open(errlog, 'a')
             f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
             f.close()
             n_fail+=1
-        else:
-            futures.append(future_to_check)
 
-    if raise_error and n_fail > 0:
+    if n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
 
 def main(configs: str,
