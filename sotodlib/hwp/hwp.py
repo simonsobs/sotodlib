@@ -699,7 +699,7 @@ def demod_tod(aman, signal=None, demod_mode=4,
 
 
 def tau_model(fhwp, tau, AQ, AU, mode):
-    return (AQ + 1j*AU) * np.exp(1j * mode * 2 * np.pi * tau * fhwp)
+    return (AQ + 1j*AU) / (1 - 1j* mode * 2 * np.pi * tau * fhwp )
 
 
 def get_tau_hwp(
