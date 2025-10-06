@@ -71,6 +71,7 @@ def main(**args):
     from sotodlib.core import metadata
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
+    from mpi4py import MPI
 
     LoaderError = metadata.loader.LoaderError
 
@@ -196,6 +197,7 @@ def main(**args):
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
 
         nkept = 0
+        to_skip_all = comm.allreduce(to_skip)
         # TODO: Fix the task distribution. The current one doesn't care which mpi
         # task gets which tods, which sabotages the pixel-saving effects of tiled maps!
         # To be able to distribute the tods sensibly, we need a rough estimate of where
@@ -207,8 +209,8 @@ def main(**args):
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
-            if sub_id in to_skip:
-                L.debug("Skipped %s (Cut in last pass)" % (sub_id))
+            if sub_id in to_skip_all:
+                L.debug("Skipped %s (Cut in previous pass)" % (sub_id))
                 continue
 
             try:
@@ -389,11 +391,25 @@ def main(**args):
                 L.debug("Datacount: %s full" % (sub_id))
                 continue
 
-        nkept = comm.allreduce(nkept)
-        if nkept == 0:
+        nkept_all = np.array(comm.allgather(nkept))
+        if np.sum(nkept_all) == 0:
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
             sys.exit(1)
+           
+        if np.any(nkept_all == 0):
+            group = comm.Get_group()
+            new_group = group.Incl(np.where(nkept_all > 0)[0])
+            new_comm = comm.Create(new_group)
+            if nkept == 0:
+                L.info("No tods assigned to this process. Pruning")
+                MPI.Finalize()
+                sys.exit(0)
+            comm = new_comm
+            for signal in mapmaker.signals:
+                if hasattr(signal, "comm"):
+                    signal.comm = comm
+
 
         L.info("Done building")
 
