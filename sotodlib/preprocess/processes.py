@@ -2704,17 +2704,19 @@ class AtomicInfo(_Preprocess):
 
         - name: "atomic_info"
           process:
-            noise_ratio_Q.rmean: rmeanQ
+            rmeanQ: noise_ratio_Q.rmean
 
     """
     name = "atomic_info"
     def process(self, aman, proc_aman, sim=False):
         atomic_info_aman = core.AxisManager()
-        for item in self.process_cfgs:
-            val = proc_aman[item]
+        # Format is "name_for_atomic_info": "name_in_proc_aman"
+        for atomic_name in self.process_cfgs:
+            aman_key = self.process_cfgs[atomic_name]
+            val = proc_aman[aman_key]
             if not (np.issubdtype(type(val), np.number) or np.issubdtype(type(val), np.str_)):
                 raise TypeError(f"Items of type {type(val)} cannot be added to atomic info")
-            atomic_info_aman.wrap(self.process_cfgs[item], val)
+            atomic_info_aman.wrap(atomic_name, val)
         aman.wrap("atomic_info", atomic_info_aman)
         return aman, proc_aman
 
