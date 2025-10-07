@@ -765,6 +765,7 @@ class AtomicInfo(Base):
     wind_speed: Mapped[Optional[float]]
     wind_direction: Mapped[Optional[float]]
     rmeanQ: Mapped[Optional[float]]
+    rmeanU: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
