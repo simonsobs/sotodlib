@@ -298,15 +298,40 @@ fft_apply_filter = FilterApplyFunc.deco
 # Filtering Functions
 #################
 @fft_filter
-def counter_1_over_f(freqs, tod, fk, n):
+def counter_1_over_f(freqs, tod, fk=None, n=None, noise_fit_stats=None):
     """
     Counter 1/f filter for noise w/ PSD that follows:
     
     w*(1 + (fk/f)**n) 
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
+    You need the (fk, n) pair or noise_fit_stats to apply this filter.
+
+    Arguments
+    ---------
+        fk : float or nparray
+            The knee frequency of the noise.
+        n : float or nparray
+            The 1/f index of the noise.
+        noise_fit_stats : str
+            The name of the 1/f fit result that is wrapped in the tod.
+            This is an output of ``fft_ops.fit_noise_model``.
     """
-    return 1/(1+(fk/freqs)**n)
+    if np.isscalar(fk) and np.isscalar(n):
+        return 1/(1+(fk/freqs)**n)
+    elif (fk is None or n is None) and noise_fit_stats is None:
+        raise ValueError("You must input the (fk, n) or noise_fit_stats.")
+    elif (fk is None or n is None) and noise_fit_stats is not None:
+        if isinstance(noise_fit_stats, str):
+            _f = attrgetter(noise_fit_stats)
+            noise_fit_stats = _f(tod)
+        fk = noise_fit_stats.fit.T[1]
+        n = noise_fit_stats.fit.T[2]
+
+    if len(fk) == tod.dets.count and len(n) == tod.dets.count:
+        return 1 / (1 + (fk[:, None]/freqs[None,:])**n[:, None])
+    else:
+        raise ValueError("The fk and n must be a float value or array-like with length of number of detectors")
 
 @fft_filter
 def identity_filter(freqs, tod, invert=False):

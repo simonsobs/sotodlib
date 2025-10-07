@@ -375,7 +375,6 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
             plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
 
-
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
     "psd" field.
@@ -453,7 +452,6 @@ class PSDCalc(_Preprocess):
 
             plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
                      xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
-
 
 class GetStats(_Preprocess):
     """
@@ -1747,6 +1745,7 @@ class FourierFilter(_Preprocess):
                 noise_fit=noise_fit,
                 filter_params=spec.get("filter_params")
             )
+
             ffun = getattr(tod_ops.filters, fname)
             filters.append(ffun(**params))
 
@@ -1948,16 +1947,21 @@ class PCAFilter(_Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
+        self.model_signal = step_cfgs.get('model_signal', None)
 
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
+        if self.model_signal is not None:
+            model_signal = aman.get(self.model_signal)
+        else:
+            model_signal = signal.copy()
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        model = tod_ops.pca.get_pca_model(aman, signal=signal, n_modes=n_modes)
+        model = tod_ops.pca.get_pca_model(aman, signal=model_signal, n_modes=n_modes)
         _ = tod_ops.pca.add_model(aman, model, signal=signal, scale=-1)
         return aman, proc_aman
 
@@ -1968,20 +1972,37 @@ class GetCommonMode(_Preprocess):
     example config file entry::
 
       - name: "get_common_mode"
+        noise_fit: True
+        f_max: 2.0
+        wrap_name: "common_demodQ"
         calc:
             signal: "signal"
             method: "median"
-            wrap: "signal_commonmode"
+        
         save: True
 
+    If ``noise_fit`` is True, the 1/f noise fit parameters of the common mode
+    is wrapped together.
     .. autofunction:: sotodlib.tod_ops.pca.get_common_mode
     """
     name = 'get_common_mode'
+    def __init__(self, step_cfgs):
+        self.noise_fit = step_cfgs.get('noise_fit', False)
+        self.f_max = step_cfgs.get('f_max', None)
+        self.wrap_name = step_cfgs.get('wrap_name', 'common_mode')
+
+        super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
         common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
-        common_aman = core.AxisManager(aman.samps)
-        common_aman.wrap(self.calc_cfgs['wrap'], common_mode, [(0, 'samps')])
+        if self.noise_fit:
+            common_aman = tod_ops.fft_ops.get_common_noise_params(aman, signal=common_mode,
+                                                                  f_max=self.f_max)
+            samps = core.OffsetAxis('samps', aman.samps.count)
+            common_aman.wrap(self.wrap_name, common_mode, [(0, samps)])
+        else:
+            common_aman = core.AxisManager(aman.samps)
+            common_aman.wrap(self.wrap_name, common_mode, [(0, 'samps')])
         self.save(proc_aman, common_aman)
         return aman, proc_aman
 
@@ -1989,7 +2010,7 @@ class GetCommonMode(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs['wrap'], common_aman)
+            proc_aman.wrap(self.wrap_name, common_aman)
 
 class FilterForSources(_Preprocess):
     """

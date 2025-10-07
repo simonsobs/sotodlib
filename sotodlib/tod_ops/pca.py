@@ -129,7 +129,8 @@ def get_pca(tod=None, cov=None, signal=None, wrap=None, mask=None):
 
     E, R = np.linalg.eigh(cov)
     E[np.isnan(E)] = 0.
-    E, R = E.real, R.real
+    if np.isrealobj(signal):
+        E, R = E.real, R.real
 
     idx = np.argsort(-E)
 
