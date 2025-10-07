@@ -577,8 +577,11 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
-    ncut  = rangemat_sum(obs[glitch_flags])
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags", to_null : str = "flags.expected_flags"):
+    flag = obs[glitch_flags]
+    if to_null != "":
+        flag *= ~obs[to_null]
+    ncut  = rangemat_sum(flag)
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
