@@ -377,7 +377,7 @@ def expand_ids(obs_ids, context=None, bands=None):
                         sub_ids.append("%s:ws%d:%s" % (obs_id, si, band))
     return sub_ids
 
-def filter_subids(subids, wafers=None, bands=None):
+def filter_subids(subids, wafers=None, bands=None, ots=None):
     subids = np.asarray(subids)
     if wafers is not None:
         wafs   = astr_tok(subids,":",1)
@@ -385,6 +385,11 @@ def filter_subids(subids, wafers=None, bands=None):
     if bands is not None:
         bpass  = astr_tok(subids,":",2)
         subids = subids[np.isin(bpass, bands)]
+    if ots is not None:
+        # Somewhat hacky implementation
+        obs_ids = astr_tok(subids, ":",0)
+        has_ot = np.prod([np.char.find(obs_ids, ot) for ot in ots], 0)
+        subids = subids[has_ot >= 0]
     return subids
 
 def astr_cat(*arrs):
