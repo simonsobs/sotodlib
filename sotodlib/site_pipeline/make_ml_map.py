@@ -12,6 +12,7 @@ def get_parser(parser=None):
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
+    parser.add_argument("-O", "--ots",  type=str, default=None, help="Opics tubes to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
@@ -113,10 +114,11 @@ def main(**args):
     with bench.mark('context'):
         context = Context(args.context)
 
+    ots = args.ots.split(",") if args.ots else None
     wafers  = args.wafers.split(",") if args.wafers else None
     bands   = args.bands .split(",") if args.bands  else None
     sub_ids = mapmaking.get_subids(args.query, context=context)
-    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands)
+    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands, ots=ots)
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if args.tods:
