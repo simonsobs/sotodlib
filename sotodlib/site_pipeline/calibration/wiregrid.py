@@ -59,18 +59,18 @@ def load_data(config: DataSourceConfig) -> dict:
     -----
         We assume wg_cfg is a yaml file, which has the following structure.
 
-        hk_root :  {path to house-keeping data directory}, e.g. ../data/satp1/hk/
-        db_file :  {path to sqlite database file}, e.g. ./hkdb-satp1.db
-        aliases :
-            enc_rad_raw : wg-encoder.wgencoder_full.reference_count
-            LSL1 : wg-actuator.wgactuator.limitswitch_LSL1
-            LSL2 : wg-actuator.wgactuator.limitswitch_LSL2
-            LSR1 : wg-actuator.wgactuator.limitswitch_LSR1
-            LSR2 : wg-actuator.wgactuator.limitswitch_LSR2
-            angleX : wg-tilt-sensor.wgtiltsensor.angleX
-            angleY : wg-tilt-sensor.wgtiltsensor.angleY
-            tempX : wg-tilt-sensor.wgtiltsensor.tempX
-            tempY : wg-tilt-sensor.wgtiltsensor.tempY
+        - hk_root. path to house-keeping data directory, e.g. ``'../data/satp1/hk/'``
+        - db_file.  path to sqlite database file, e.g. ``'./hkdb-satp1.db'``
+        - aliases:
+            - enc_rad_raw :` `'wg-encoder.wgencoder_full.reference_count'``
+            - LSL1 : ``'wg-actuator.wgactuator.limitswitch_LSL1'``
+            - LSL2 : ``'wg-actuator.wgactuator.limitswitch_LSL2'``
+            - LSR1 : ``'wg-actuator.wgactuator.limitswitch_LSR1'``
+            - LSR2 : ``'wg-actuator.wgactuator.limitswitch_LSR2'``
+            - angleX : ``'wg-tilt-sensor.wgtiltsensor.angleX'``
+            - angleY : ``'wg-tilt-sensor.wgtiltsensor.angleY'``
+            - tempX : ``'wg-tilt-sensor.wgtiltsensor.tempX'``
+            - tempY : ``'wg-tilt-sensor.wgtiltsensor.tempY'``
     """
     if isinstance(config, L2Config):
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
