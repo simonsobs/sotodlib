@@ -2178,6 +2178,13 @@ class EstimateT2P(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("t2p", t2p_aman)
 
+    def process(self, meta, proc_aman=None, sim=False):
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if 't2p' not in proc_aman._fields:
+            raise ValueError("No t2p field found in proc_aman. Please run estimate_t2p first.")
+        return meta, proc_aman
+
 class SubtractT2P(_Preprocess):
     """Subtract T to P leakage.
 

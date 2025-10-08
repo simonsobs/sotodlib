@@ -330,8 +330,9 @@ def subtract_t2p(aman, t2p_aman, T_signal=None):
     else:
         raise ValueError('no leakage coefficients found in axis manager')
 
-def restrict_dets_from_t2p_fit(aman, t2p_aman=None, redchi2s=True, error=True, lam=False, 
-                               redchi2s_lims=(0.1, 3), error_lims=(0, 0.03), lam_lims=(0, 0.01)):
+def get_t2p_cuts(aman, t2p_aman=None, redchi2s=True, error=True, lam=False, 
+                 redchi2s_lims=(0.1, 3), error_lims=(0, 0.03), lam_lims=(0, 0.01),
+                 in_place=False):
     """
     Restrict detectors based on the t2p fit stats or t2p coefficient.
 
@@ -359,6 +360,8 @@ def restrict_dets_from_t2p_fit(aman, t2p_aman=None, redchi2s=True, error=True, l
         The lower and upper limit of acceptable leakage coefficient.
     """
     if t2p_aman is None:
+        if 't2p_stats' not in aman:
+            raise ValueError('t2p_aman must be provided or already in aman')
         t2p_aman = aman.t2p_stats
     mask = np.ones(aman.dets.count, dtype=bool)
     if redchi2s:
@@ -373,4 +376,7 @@ def restrict_dets_from_t2p_fit(aman, t2p_aman=None, redchi2s=True, error=True, l
         lam_t2p = np.sqrt(t2p_aman.lamQ**2 + t2p_aman.lamU**2)
         mask_lam = (lam_lims[0] < lam_t2p) & (lam_t2p < lam_lims[1])
         mask = np.logical_and(mask, mask_lam)
-    aman.restrict('dets', aman.dets.vals[mask])
+    if in_place:
+        aman.restrict('dets', aman.dets.vals[mask])
+    else:
+        return mask
