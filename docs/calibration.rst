@@ -13,10 +13,11 @@ Command line interface
 Usage
 -----
 
-To get calibrated angles for detectors, ``'gamma'``, users have to load an axismanger,
-which corresponds to the target run of the wire grid operation in this pipeline.
+To get calibrated detector polarization angle, ``'gamma'``,
+pipeline below will be applied to an axismanger,
+which corresponds to the target wire grid operation.
 And the calibration script of the wire grid requires the HWP preprocess,
-that is, ``hwp.demod_tod``.
+that is, ``apply_hwp_angle_model`` and ``hwp.demod_tod``.
 
 ``'gamma'`` here is the same definition as in the coords module:
     orientation of the detector, measured clockwise from
@@ -24,30 +25,42 @@ that is, ``hwp.demod_tod``.
     parallel to the xi axis.
 
 
-The main functions of the wire grid consists of 4 functions:
+The main functions of the wire grid consists of 8 functions:
 
+ - load_data
+ - wrap_wg_hk
  - correct_wg_angle
- - wrap_qu_cal
+ - find_operation_range
+ - wrap_wiregrid_data
+ - calc_calibration_data_set
  - fit_with_circle
  - get_cal_gamma
 
 One can get calibration results by calling these functions.
 ``tod`` here stands for an AxisManager. For example::
 
-  # Get wires' direction in a single operation with hardware correction
-  _, idx_wg_inside = correct_wg_angle(tod)
+  # Apply HWP angle model, IIR Filtering, and demodulation before this pipeline
 
-  # May have to restrict the AxisManger into the opration rangle
-  tod.restrict('samps', (idx_wg_inside[0], idx_wg_inside[-1]), in_place=True)
+  # Load house-keeping data of the wire grid, L3Config as an exmaple
+  raw_data_dict = load_data(L3Config(
+      path='./satp1_wg_hkdb.yaml',
+      start_time=tod.timestamps[0],
+      stop_time=tod.timestamps[-1],))
+  tod = wrap_wg_hk(tod, raw_data_dict, is_merge=True)
 
-  # Wrap Q and U signal related to the steps of the wire grid
-  # stopped_time can be changed for each calibration
-  wrap_qu_cal(tod, stopped_time=10)
+  # Correct the hardware specific constants of the wire grid
+  correct_wg_angle(tod)
 
-  # Fit the stepped QU signal by a circle
-  fit_with_circle(tod)
+  # Find the wire grid operation range in the tod and wrap the calibration data set
+  idxi, idxf = find_operation_range(
+    tod, stopped_time=10, is_restrict=True, remove_trembling=True)
+  wrap_wiregrid_data(tod, idxi, idxf)
 
-  # Get calibrated polarization response direction, gamma
+  # Analyze the calibration data set and fit them with circles
+  calc_calibration_data_set(tod)
+  _ = fit_with_circle(tod)
+
+  # Get gamma and wrap it into the tod
   get_cal_gamma(tod, wrap_aman=True, remove_cal_data=True)
 
 Finally, the AxisManager has the field of ``gamma_cal`` that has:
@@ -66,28 +79,24 @@ Wire grid calibration is based on the model
 
 .. math::
 
-    \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}\ e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}\ e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB, sky}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
+    \mathrm{d} = \mathrm{I}_{\mathrm{in}} + \left[A_{\mathrm{wire}}\ e^{2i\theta_\mathrm{wire}} + A_{\mathrm{background}}\ e^{2i\theta_\mathrm{bg}} +\mathcal{O}(\varepsilon) \left(\mathrm{CMB}\right)\right]\exp i\left[-4\theta_{\mathrm{HWP}} + 2\theta_{\mathrm{det}}\right] + c.c.
 
-In this representation, :math:`\mathrm{d` is a time-ordered measurements consists of
-the Intensity of the input power, :math:`\mathrm{I}_\mathrm{in}` and the polarization terms of
-some static background :math:`A_\mathrm{background}`, wires power :math:`A_\mathrm{wire}`,
-sky signal, and tiny amount of CMB.
+In this representation, :math:`\mathrm{d}` is a raw time-ordered data which consists of
+the intensity term and the polrization term.
+The intensity of the input signal is represented as :math:`\mathrm{I}_\mathrm{in}`.
+The polarization terms includes wires power :math:`A_\mathrm{wire}`, static background :math:`A_\mathrm{background}`, and tiny amount of the CMB.
 
-The static background polarization and the wire signal have polarization angle dependencies,
-:math:`2\theta_\mathrm{wire}`, and :math:`2\theta_\mathrm{background}`, respectively.
-The demodulation by the HWP and the projection by the detector polarization response directions
-are multiplied as the overall factor in the polarization term.
+The wire grid signal and the static background polarization have dependencies of
+:math:`2\theta_\mathrm{wire}` and :math:`2\theta_\mathrm{background}`, respectively.
 
-Unwrapping the charateristic of HWP from the TOD (Demodulation) gives the static background
-polarization and the polarized signal by wires independently
+Demodulation of the HWP provides two independent polarization term:
 
 .. math::
 
-    \mathcal{F}_{\mathrm{BP}}\left[\mathrm{d}\right] \times \exp(4i\theta_{\mathrm{HWP}}) & \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}} \\
+    \mathcal{F}_{\mathrm{LP}}\left[\mathcal{F}_{\mathrm{BP}}\left[\mathrm{d}\right] \times \exp(4i\theta_{\mathrm{HWP}})\right] & \simeq A_{\mathrm{background}}\ e^{2i\theta_{\mathrm{bg}}+2i\theta_\mathrm{det}} + A_{\mathrm{wire}}\ e^{2i\theta_{\mathrm{wire}}+2i\theta_\mathrm{det}} \\
     & = (Q_\mathrm{offset} + iU_\mathrm{offset}) + (Q_\mathrm{wire} + iU_\mathrm{wire})
 
-The calibrated polarization response directions, ``'gamma'``, can be obtained by removing
-the direction of wires from the input polarization
+We call the static background polarization the offset term. The calibrated polarization response directions, ``'gamma'``, can be obtained by removing the direction of wires from the input polarization
 
 .. math::
 
@@ -96,12 +105,14 @@ the direction of wires from the input polarization
 
 This module gives the result of calibration as fields like:
 
- - ``'gamma'``: :math:`\theta_\mathrm{det}` the calibrated angle by the wire grid,
- - ``'gamma_err'``: :math:`\sigma (\theta_\mathrm{det})` the statistical error of the calibration,
- - ``'wires_relative_power'``: :math:`\arctan([(U_{\mathrm{wire}} - U_\mathrm{offset}) / (Q_{\mathrm{wire}} - Q_\mathrm{offset})])`,
- - ``'background_pol_relative_power'``: :math:`\sqrt{Q_\mathrm{offset}^2 + U_\mathrm{offset}^2}`
- - ``'background_pol_rad'``: :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})` in radian,
- - ``'theta_det_instr'``: :math:`0.5\pi - \theta_\mathrm{det}`
+ - ``'gamma_raw'``: the calibrated angle at the j-th measurement step of the wire grid, :math:`\theta^{(j)}_\mathrm{det}`
+ - ``'gamma_raw_err'``: the set of the standard deviation of the calibrated angle for each measurement step,
+ - ``'gamma'``: the calibrated angle by the wire grid, :math:`\theta_\mathrm{det}`
+ - ``'gamma_err'``: the statistical error of the calibration, :math:`\sigma (\theta_\mathrm{det})`
+ - ``'wires_relative_power'``: radius of the circle used for the fitting (arbitrary unit),:math:`\arctan([(U_{\mathrm{wire}} - U_\mathrm{offset}) / (Q_{\mathrm{wire}} - Q_\mathrm{offset})])`
+ - ``'background_pol_rad'``: direction of the background polarization in radian, :math:`\arctan(U_\mathrm{offset} / Q_\mathrm{offset})`
+ - ``'background_pol_relative_power'``: deviation to the origin of the background polarization, :math:`\sqrt{Q_\mathrm{offset}^2 + U_\mathrm{offset}^2}`
+ - ``'theta_det_instr'``: polarization angle for the instrumental definition, :math:`0.5\pi - \theta_\mathrm{det}`
 
 .. automodule:: sotodlib.site_pipeline.calibration.wiregrid
     :members:
