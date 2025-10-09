@@ -247,8 +247,7 @@ def get_each_detcen_P(tod, az, el, sight=None, boresight_centered=False, **kw):
         sight = so3g.proj.CelestialSightLine.for_horizon(tod.timestamps, tod.boresight.az, tod.boresight.el, roll= tod.boresight.roll)
     pq = so3g.proj.quat.rotation_lonlat(-az, el)
 
-    # xieta quaternion for a given detector
-    xieta_gamma0 = so3g.proj.quat.rotation_xieta(tod.focal_plane.xi[0],tod.focal_plane.eta[0],0) # assumed axis manager include one detector
+    xieta_gamma0 = so3g.proj.quat.rotation_xieta(tod.focal_plane.xi[0],tod.focal_plane.eta[0],0) # assumed axis manager include one detector.
     if boresight_centered:
         detQ = ~sight.Q * pq # fixed Boresight center instead of detector center
     else:
