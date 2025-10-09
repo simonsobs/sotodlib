@@ -18,6 +18,7 @@ from sotodlib.core.flagman import has_any_cuts
 from .. import core
 
 from . import _Preprocess, Pipeline, processes
+from .pcore import update_full_aman
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -333,7 +334,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None, logger=None):
+                        no_signal=None, logger=None, return_full_aman=False):
     """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -367,6 +368,12 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
     configs, context = get_preprocess_context(configs, context)
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
+
+    if return_full_aman:
+        full_aman = core.AxisManager(meta.dets, meta.samps)
+    else:
+        full_aman = None
+
     if 'valid_data' in meta.preprocess:
         keep = has_any_cuts(meta.preprocess.valid_data)
         meta.restrict("dets", keep)
@@ -382,7 +389,11 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
         pipe.run(aman, aman.preprocess, select=False)
-        return aman
+        if return_full_aman:
+            update_full_aman(aman.preprocess, full_aman, wrap_valid=True)
+            return aman, full_aman
+        else:
+            return aman, None
 
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
@@ -484,11 +495,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                 return aman
 
             logger.info("Running dependent pipeline")
-            proc_aman = context_proc.get_meta(obs_id, meta=aman)
-
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
-            aman.preprocess.merge(proc_aman.preprocess)
+            aman.preprocess.merge(meta_proc.preprocess)
             pipe_proc.run(aman, aman.preprocess, select=False)
 
             return aman
@@ -1010,8 +1019,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         else:
             try:
                 logger.info(f"init db exists for {obs_id} {dets} loading data and applying preprocessing.")
-                aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
-                                           context=context_init, logger=logger)
+                aman, proc_aman, _ = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
+                                                         context=context_init, logger=logger,
+                                                         return_full_aman=return_proc_aman)
             except Exception as e:
                 error = f'Failed to load: {obs_id} {dets}'
                 errmsg = f'{type(e)}: {e}'
@@ -1042,6 +1052,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                     aman.wrap('tags', tags_proc)
 
                     proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
+                    proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+
                     # copy proc_aman so we can return proc_aman with full dimensions
                     # and preprocess metadata for both layers
                     proc_aman_copy = proc_aman.copy()
@@ -1050,8 +1062,6 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                     for fld_init in init_fields:
                         if fld_init in proc_aman_copy:
                             proc_aman_copy.move(fld_init, None)
-
-                    proc_aman_copy.wrap('pcfg_ref', aman_cfgs_ref)
 
                 except Exception as e:
                     error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
@@ -1122,6 +1132,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 aman.wrap('tags', tags_proc)
 
                 proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
+                proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
 
                 # copy proc_aman so we can return proc_aman with full dimensions
                 # and preprocess metadata for both layers
@@ -1131,8 +1142,6 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 for fld_init in init_fields:
                     if fld_init in proc_aman_copy:
                         proc_aman_copy.move(fld_init, None)
-
-                proc_aman_copy.wrap('pcfg_ref', aman_cfgs_ref)
 
             except Exception as e:
                 error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
@@ -1146,7 +1155,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 return success, [obs_id, dets], [obs_id, dets], None, None
 
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-            proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+            proc_aman_copy.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
