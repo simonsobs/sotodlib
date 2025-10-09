@@ -103,10 +103,13 @@ def preprocess_obs(
         nearby_source_names = []
         for _source in proc_aman.sso_footprint._assignments.keys():
             nearby_source_names.append(_source)
+        nearby_source_names_map = {key.casefold(): key for key in nearby_source_names}
         coverage = []
         distances = []
         for source_name in source_names:
-            if source_name in nearby_source_names:
+            source_name_l = source_name.casefold()
+            if source_name_l in nearby_source_names_map:
+                source_name = nearby_source_names_map.get(source_name_l)
                 for key in proc_aman.sso_footprint[source_name]._assignments.keys():
                     if 'ws' in key:
                         if proc_aman.sso_footprint[source_name][key]:

@@ -361,6 +361,9 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     logger: PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
+    return_full_aman: bool
+        Optional. Return unrestricted axis manager alongside restricted aman
+        if True, otherwise return None.
     """
 
     if logger is None:
@@ -370,12 +373,14 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
 
     if return_full_aman:
-        full_aman = core.AxisManager(meta.dets, meta.samps)
+        full_aman = meta.preprocess.copy()
     else:
         full_aman = None
-
-    if 'valid_data' in meta.preprocess:
-        keep = has_any_cuts(meta.preprocess.valid_data)
+    if (
+        'valid_data' in meta.preprocess and
+        isinstance(meta.preprocess.valid_data, core.AxisManager)
+       ):
+        keep = has_any_cuts(meta.preprocess.valid_data.valid_data)
         meta.restrict("dets", keep)
     else:
         det_vals = load_preprocess_det_select(obs_id, configs=configs, context=context,
@@ -389,16 +394,13 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
         pipe.run(aman, aman.preprocess, select=False)
-        if return_full_aman:
-            update_full_aman(aman.preprocess, full_aman, wrap_valid=True)
-            return aman, full_aman
-        else:
-            return aman, None
+        return aman, full_aman
 
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
-                                   logger=None, init_only=False):
+                                   logger=None, init_only=False,
+                                   return_full_aman=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -429,6 +431,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only: bool
         Optional. If True, do not run the dependent pipeline.
+    return_full_aman: bool
+        Optional. Return unrestricted axis manager alongside restricted aman
+        if True, otherwise return None.
     """
 
     if logger is None:
@@ -454,8 +459,16 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
     if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
         logger.info(f"No detectors in obs {obs_id}")
-        return None
+        return None, None
     else:
+        if return_full_aman:
+            full_aman = meta_init.preprocess.copy()
+            if 'valid_data' in full_aman:
+                full_aman.move('valid_data', None)
+            full_aman.merge(meta_proc.preprocess)
+        else:
+            full_aman = None
+
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
         aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
@@ -464,8 +477,11 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all init pipeline processes")
-            if 'valid_data' in meta_init.preprocess:
-              keep_all = has_any_cuts(meta_init.preprocess.valid_data)
+            if (
+                'valid_data' in meta_init.preprocess and
+                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
             else:
               keep_all = np.ones(meta_init.dets.count,dtype=bool)
               for process in pipe_init[:]:
@@ -476,8 +492,11 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             meta_proc.restrict("dets", meta_init.dets.vals)
 
             logger.info("Restricting detectors on all proc pipeline processes")
-            if 'valid_data' in meta_proc.preprocess:
-                keep_all = has_any_cuts(meta_proc.preprocess.valid_data)
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
             else:
                 keep_all = np.ones(meta_proc.dets.count, dtype=bool)
                 for process in pipe_proc[:]:
@@ -492,7 +511,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, select=False)
             if init_only:
-                return aman
+                return aman, full_aman
 
             logger.info("Running dependent pipeline")
             if 'valid_data' in aman.preprocess:
@@ -500,7 +519,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             aman.preprocess.merge(meta_proc.preprocess)
             pipe_proc.run(aman, aman.preprocess, select=False)
 
-            return aman
+            return aman, full_aman
         else:
             raise ValueError('Dependency check between configs failed.')
 
@@ -1007,7 +1026,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             try:
                 logger.info(f"both db and depdendent db exist for {obs_id} {dets} loading data and applying preprocessing.")
                 aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                                      configs_proc=configs_proc, logger=logger)
+                                                      configs_proc=configs_proc, logger=logger,
+                                                      return_full_aman=return_proc_aman)
                 error = 'load_success'
                 return error, [obs_id, dets], [obs_id, dets], aman, None
             except Exception as e:
