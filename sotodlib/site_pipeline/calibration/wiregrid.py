@@ -1,26 +1,17 @@
 # fundamental functions for the det_gamma calibration by the wire grid
 # Please contact hnakata_JP(zhongtianjiaxin@gmail.com) if you have questions.
 
-# import modules
-# python standard
+# import python standard libraries
 import numpy as np
-
 from dataclasses import dataclass
 from typing import Union
-
-from scipy import odr
-from scipy.stats import mode
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
-# from matplotlib.patches import Ellipse, Circle
 
 # SO specific
 from so3g.hk import load_range
-
 from sotodlib import core
 from sotodlib.io import hkdb
-
-# for house-keeping data
 from sotodlib.io import hk_utils
 from sotodlib.site_pipeline import util
 logger = util.init_logger('wiregrid', 'wiregrid: ')
@@ -62,7 +53,7 @@ def load_data(config: DataSourceConfig) -> dict:
         - hk_root. path to house-keeping data directory, e.g. ``'../data/satp1/hk/'``
         - db_file.  path to sqlite database file, e.g. ``'./hkdb-satp1.db'``
         - aliases:
-            - enc_rad_raw :` `'wg-encoder.wgencoder_full.reference_count'``
+            - enc_rad_raw : ``'wg-encoder.wgencoder_full.reference_count'``
             - LSL1 : ``'wg-actuator.wgactuator.limitswitch_LSL1'``
             - LSL2 : ``'wg-actuator.wgactuator.limitswitch_LSL2'``
             - LSR1 : ``'wg-actuator.wgactuator.limitswitch_LSR1'``
@@ -110,27 +101,25 @@ def load_l2_data(config: L2Config) -> dict:
     )
 
     if len(_data) == 0:
-        # logger.error("No available wire grid data with this tod.")
+        logger.error("No available wire grid data with this tod.")
         raise ValueError("No available wire grid data with this tod.")
 
     if 'enc_rad_raw' not in _data:
-        # logger.error("No available ENCODER data with this tod.")
+        logger.error("No available ENCODER data with this tod.")
         raise ValueError("No available ENCODER data with this tod.")
 
     if 'angleX' not in _data or \
         'angleY' not in _data or \
         'tempX' not in _data or \
         'tempY' not in _data:
-            pass
-        # logger.warning("Lack of tilt sensor data.")
+        logger.warning("Lack of tilt sensor data.")
 
     if 'LSL1' not in _data or \
         'LSL2' not in _data or \
         'LSR1' not in _data or \
         'LSR2' not in _data:
-            pass
-        # logger.warning("The actuator data is not correctly stored in house-keeping. \
-        #                 \n inside/outside status is not certificated so far.")
+        logger.warning("The actuator data is not correctly stored in house-keeping. \
+                        \n inside/outside status is not certificated so far.")
     raw_data_dict = _data
     _in_radians = raw_data_dict['enc_rad_raw'][1] * WG_COUNTS2RAD
     raw_data_dict['enc_rad_raw'] = (
@@ -158,26 +147,28 @@ def load_l3_data(config: L3Config) -> dict:
     return raw_data_dict
 
 # Wrap house-keeping data
-def wrap_wg_hk(tod, raw_data_dict, is_merge=True):
+def wrap_wg_hk(tod, raw_data_dict, merge=True):
     """
     Wrap the house-keeping data about the wire grid operation.
 
     Parameters
     ----------
         tod : AxisManager
-        telescope : telescope type, e.g. satp1, satp3, etc.
-            this parameter will basically be filled by the obs_info wrapped in the axismanager.
 
     Returns
     -------
         tod : AxisManager
             This includes fields, which are related with the wire grid hardware.
-            enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder):
 
+                - enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
                 - LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
                 - LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
                 - LSR1 : ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
                 - LSR2 : ON/OFF status of the limit switch RIGHT 2 (inside) of the actuator
+                - angleX : tilt angle X of the tilt sensor in degree
+                - angleY : tilt angle Y of the tilt sensor in degree
+                - tempX : temperature sensor X of the tilt sensor in Celsius
+                - tempY : temperature sensor Y of the tilt sensor in Celsius
 
     """
     if not hasattr(tod, 'timestamps'):
@@ -198,7 +189,7 @@ def wrap_wg_hk(tod, raw_data_dict, is_merge=True):
     for _f in interp_func.keys():
         _cosamp_data = interp_func[_f](timestamps)
         hk_aman.wrap(_f, _cosamp_data, [(0, 'samps')])
-    if is_merge:
+    if merge:
         _ax_instrument = core.AxisManager(tod.samps)
         _ax_instrument.wrap('instrument', hk_aman)
         tod.wrap('wg', _ax_instrument)
@@ -208,15 +199,11 @@ def wrap_wg_hk(tod, raw_data_dict, is_merge=True):
 # Correct wires' direction for each telescope
 def correct_wg_angle(tod):
     """
-    Correct offset of wires' direction by the mechanical design and hardware testing. Users can use this first, but developers need to implement offsets of other SATs as well.
+    Correct offset of wires' direction with value confirmed in the hardware testing.
 
     Parameters
     ----------
         tod : AxisManager
-        telescope : telescope type, e.g. satp1, satp3, etc.
-            this parameter will basically be filled by the obs_info wrapped in the axismanager.
-        restrict : bool (default, True)
-            this parameter restricts the sample of the axismanger by the operation range of the wire grid.
 
     """
     _tel = tod.obs_info.telescope
@@ -267,7 +254,7 @@ def _detect_motion(count, flag=0):
     return right-left
 
 # Define the timestamp and the wire angle in each step
-def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
+def _detect_steps(tod, steps_thresholds=(10, 300)):
     """
     Detect all steps of the stepwise operation
 
@@ -286,12 +273,6 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
         idx_steps_start, idx_steps_stop : sample index of the start/stop for each step
 
     """
-    if stopped_time is None:
-        stopped_time = 10
-
-    if steps_thresholds is None:
-        steps_thresholds = (10, 300) # upper bound of the static, lower bound of its diff
-
     cdiff0 = np.where(_detect_motion(tod.wg.instrument.enc_rad/WG_COUNTS2RAD) < steps_thresholds[0], 1, 0)
     cdiff1 = np.where(_detect_motion(cdiff0, flag=1) > steps_thresholds[1], 0, 1)
     cdiff2 = cdiff1[1:] - cdiff1[:-1]
@@ -311,9 +292,8 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
             \n Trying to fix the index by the average step size."
             )
         if idx_step_start[0] < idx_step_stop[0]:
-            idx_step_start = idx_step_start[1:] # correct?
-        # else:
-        #     idx_step_start = idx_step_start[:-1]
+            idx_step_start = idx_step_start[1:]
+        # the other case has to be implemented in the future
         step_size = np.average(idx_step_stop[1:] - idx_step_start[:-1]).astype(int)
         idx_step_stop = np.append(idx_step_stop, idx_step_start[-1]+step_size)
 
@@ -329,7 +309,7 @@ def _detect_steps(tod, stopped_time=None, steps_thresholds=None):
     return idx_step_start, idx_step_stop
 
 # Find the nominal operation range of the wire grid
-def find_operation_range(tod, stopped_time=10, ls_margin=2000, is_restrict=True, \
+def find_operation_range(tod, steps_thresholds=(10, 300), ls_margin=2000, is_restrict=True, \
                         remove_trembling=True, tremble_threshold=1.):
     """
     Define the range of the wire grid operation by the limit switches
@@ -373,7 +353,7 @@ def find_operation_range(tod, stopped_time=10, ls_margin=2000, is_restrict=True,
                         \n This module doesn't guarantee that the wire grid was inside.")
         # detect typical motion of the calibrator just in case
         try:
-            _idx_step_start, _ = _detect_steps(tod, stopped_time=stopped_time, steps_thresholds=None)
+            _idx_step_start, _ = _detect_steps(tod, steps_thresholds=steps_thresholds)
         except IndexError:
             logger.error("The rotation couldn't be detected in this obs.")
         _ts_margin = 30
@@ -387,7 +367,7 @@ def find_operation_range(tod, stopped_time=10, ls_margin=2000, is_restrict=True,
         tod.restrict('samps', (idx_wg_oper[0], idx_wg_oper[-1]), in_place=True)
 
     # detect typical motion of the calibrator
-    idx_steps_start, idx_steps_stop = _detect_steps(tod, stopped_time=stopped_time, steps_thresholds=None)
+    idx_steps_start, idx_steps_stop = _detect_steps(tod, steps_thresholds=steps_thresholds)
 
     # remove the rattling in the detected steps with the threshold of tremble_threshold
     if remove_trembling:
@@ -406,9 +386,11 @@ def find_operation_range(tod, stopped_time=10, ls_margin=2000, is_restrict=True,
     return idx_steps_start, idx_steps_stop[1:]
 
 # Wrap the data specified from the operation range of the wire grid
-def wrap_wiregrid_data(tod, idx_steps_start, idx_steps_stop):
+def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
     """
-    Wrap the operation information of the target calibration.
+    Interpret the Q_cal, U_cal data from the wrapped calibration data.
+    This method is based on both of demodQ and demodU, which are calculated by the HWP demodulation process.
+    Users have to apply some HWP process before calling this.
 
     Parameters
     ----------
@@ -421,39 +403,7 @@ def wrap_wiregrid_data(tod, idx_steps_start, idx_steps_stop):
 
     Returns
     -------
-        tod : AxisManger
-            including the opration information of the target calibration
-    """
-
-    if 'cal_data' in tod.wg._fields.keys():
-        tod.wg.move('cal_data', None)
-    _cal_data = core.AxisManager(tod.samps, tod.dets, core.IndexAxis('wg_steps'))
-    _cal_data.wrap('idx_steps_start', idx_steps_start, [(0, 'wg_steps')])
-    _cal_data.wrap('idx_steps_stop',  idx_steps_stop,  [(0, 'wg_steps')])
-    tod.wg.wrap('cal_data', _cal_data)
-
-    #return _tod, idx_steps, theta_wire
-    return tod
-
-# Wrap the QU response during the operation of the Grid Loader
-def calc_calibration_data_set(tod):
-    """
-    Interpret the Q_cal, U_cal data from the wrapped calibration data.
-    This method is based on both of demodQ and demodU, which are calculated by the HWP demodulation process.
-    Users have to apply some HWP process before calling this.
-
-    Parameters
-    ----------
-        tod : AxisManager
-
-    Returns
-    -------
-        tod : AxisManger
-            This includes the characterics of the wire grid operation and the Q/U signal
-            related with it.
-
-    Notes
-    -----
+        axes : AxisManger
         return includes fields as follows:
 
             - wg.cal_data.theta_wire_rad is the average direction of wires in each step
@@ -462,57 +412,56 @@ def calc_calibration_data_set(tod):
             - wg.cal_data.Q, wg.cal_data.U : Q (and U) signal by wires
             - wg.cal_data.Qerr, wg.cal_data.Uerr : the standard deviations of Q (and U) signal
     """
-    if 'demodQ' in tod._fields.keys():
-        _theta_wire = tod.wg.instrument.enc_rad
-        _idx_start = tod.wg.cal_data.idx_steps_start
-        _idx_stop = tod.wg.cal_data.idx_steps_stop
+    _theta_wire = tod.wg.instrument.enc_rad
 
-        ts_step_mid = []
-        theta_wire_av = []
-        theta_wire_std = []
-        step_Q = []
-        step_U = []
-        step_Qerr = []
-        step_Uerr = []
-        for _i, _ in enumerate(_idx_start):
-            _idx_frame = np.arange(tod.samps.count)
-            instep = np.where(_idx_start[_i] < _idx_frame, True, False)
-            instep = np.where(_idx_frame < _idx_stop[_i], instep, False)
-            ts_step_mid.append(np.average(tod.timestamps[instep]))
-            theta_wire_av.append(np.average(_theta_wire[instep]))
-            theta_wire_std.append(np.std(_theta_wire[instep]))
-            step_Q.append(np.average(tod.demodQ, axis=1, weights=instep))
-            step_U.append(np.average(tod.demodU, axis=1, weights=instep))
-            step_Qerr.append(np.std(tod.demodQ[:, instep == True], axis=1))
-            step_Uerr.append(np.std(tod.demodU[:, instep == True], axis=1))
-        ts_step_mid = np.array(ts_step_mid)
-        theta_wire_av = np.array(theta_wire_av)
-        theta_wire_std = np.array(theta_wire_std)
-        step_Q = np.array(step_Q)
-        step_U = np.array(step_U)
-        step_Qerr = np.array(step_Qerr)
-        step_Uerr = np.array(step_Uerr)
+    ts_step_mid = []
+    theta_wire_av = []
+    theta_wire_std = []
+    step_Q = []
+    step_U = []
+    step_Qerr = []
+    step_Uerr = []
+    for _i, _ in enumerate(idx_steps_start):
+        _idx_frame = np.arange(tod.samps.count)
+        instep = np.where(idx_steps_start[_i] < _idx_frame, True, False)
+        instep = np.where(_idx_frame < idx_steps_stop[_i], instep, False)
+        ts_step_mid.append(np.average(tod.timestamps[instep]))
+        theta_wire_av.append(np.average(_theta_wire[instep]))
+        theta_wire_std.append(np.std(_theta_wire[instep]))
+        step_Q.append(np.average(tod.demodQ, axis=1, weights=instep))
+        step_U.append(np.average(tod.demodU, axis=1, weights=instep))
+        step_Qerr.append(np.std(tod.demodQ[:, instep == True], axis=1))
+        step_Uerr.append(np.std(tod.demodU[:, instep == True], axis=1))
+    ts_step_mid = np.array(ts_step_mid)
+    theta_wire_av = np.array(theta_wire_av)
+    theta_wire_std = np.array(theta_wire_std)
+    step_Q = np.array(step_Q)
+    step_U = np.array(step_U)
+    step_Qerr = np.array(step_Qerr)
+    step_Uerr = np.array(step_Uerr)
 
-        # wrap the data for each step
-        tod.wg.cal_data.wrap('theta_wire_rad', theta_wire_av , [(0, 'wg_steps')])
-        tod.wg.cal_data.wrap('theta_wire_std', theta_wire_std, [(0, 'wg_steps')])
-        tod.wg.cal_data.wrap('ts_step_mid',    ts_step_mid,    [(0, 'wg_steps')])
-        tod.wg.cal_data.wrap('Q',              step_Q,         [(0, 'wg_steps'), (1, 'dets')])
-        tod.wg.cal_data.wrap('U',              step_U,         [(0, 'wg_steps'), (1, 'dets')])
-        tod.wg.cal_data.wrap('Qerr',           step_Qerr,      [(0, 'wg_steps'), (1, 'dets')])
-        tod.wg.cal_data.wrap('Uerr',           step_Uerr,      [(0, 'wg_steps'), (1, 'dets')])
-        return tod
-    else:
-        print("This AxisManager does not have demodQ/demodU. Please call hwp.demod_tod before using this method.")
-        logger.error("Attribution check of demod signal was failed in site_pipeline.calibrate.wiregrid.wrap_QUcal")
-        return False
+    # wrap the data for each step
+    if 'cal_data' in tod.wg._fields.keys():
+        tod.wg.move('cal_data', None)
+    axes = core.AxisManager(tod.samps, tod.dets, core.IndexAxis('wg_steps'))
+    axes.wrap('idx_steps_start', idx_steps_start, [(0, 'wg_steps')])
+    axes.wrap('idx_steps_stop',  idx_steps_stop,  [(0, 'wg_steps')])
+    axes.wrap('theta_wire_rad', theta_wire_av , [(0, 'wg_steps')])
+    axes.wrap('theta_wire_std', theta_wire_std, [(0, 'wg_steps')])
+    axes.wrap('ts_step_mid',    ts_step_mid,    [(0, 'wg_steps')])
+    axes.wrap('Q',              step_Q,         [(0, 'wg_steps'), (1, 'dets')])
+    axes.wrap('U',              step_U,         [(0, 'wg_steps'), (1, 'dets')])
+    axes.wrap('Qerr',           step_Qerr,      [(0, 'wg_steps'), (1, 'dets')])
+    axes.wrap('Uerr',           step_Uerr,      [(0, 'wg_steps'), (1, 'dets')])
+    tod.wg.wrap('cal_data', axes)
+    return axes
 
 ### Circle fitting functions start from here ###
 def _circle_model(params, x, y, xerr, yerr):
     cx, cy, r = params
     dx = x - cx
     dy = y - cy
-    rho = np.sqrt(dx**2 + dy**2) + 1e-15
+    rho = np.sqrt(dx**2 + dy**2) + 1e-15 # to avoid zero division
     model = rho - r
     sigma_m2 = (dx/rho)**2 * xerr**2 + (dy/rho)**2 * yerr**2
     return model / np.sqrt(sigma_m2)
@@ -568,11 +517,11 @@ def fit_with_circle(tod):
         )
         fit_results.append(out)
 
-        # Jacobian matrix and covariance matrix, correct me.
+        # Jacobian matrix and covariance matrix
         J = out.jac
         RSS = float(out.fun @ out.fun)
         sigma2_hat = RSS / (out.fun.size - len(_init_params))
-        cov = np.linalg.inv(J.T @ J)# * sigma2_hat, correct me.
+        cov = np.linalg.inv(J.T @ J)
         se = np.sqrt(np.diag(cov))
 
         params_val.append(out.x)
@@ -581,8 +530,6 @@ def fit_with_circle(tod):
         res_vars.append(sigma2_hat)
         is_success.append(out.success)
 
-    if 'cfit_result' in tod.wg._fields.keys():
-        tod.wg.move('cfit_result', None)
     ax = core.AxisManager(tod.dets)
     pvals = np.array(params_val)  # shape (ndet, 3)
     perrs = np.array(params_err)  # shape (ndet, 3)
@@ -640,7 +587,6 @@ def fit_with_ellipse(tod):
     covs       = []
     res_vars   = []
     is_success = []
-    # stopped    = []
 
     for i in range(tod.dets.count):
         obs = np.array([_cal.Q[:, i], _cal.U[:, i]])
@@ -671,8 +617,6 @@ def fit_with_ellipse(tod):
         is_success.append(out.success)
 
     # wrap results into the axis manager
-    if 'efit_result' in tod.wg._fields:
-        tod.wg.move('efit_result', None)
     ax = core.AxisManager(tod.dets)
     vals = np.array(params_val)  # shape (ndet, 5)
     errs = np.array(params_err)  # shape (ndet, 5)
@@ -694,14 +638,14 @@ def fit_with_ellipse(tod):
 ### Elliptical fitting functions to here ###
 
 # Get and wrap the calibration angle by the wire grid
-def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=18, gap_size=np.deg2rad(5.)):
+def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=np.deg2rad(5.)):
     """
     Calibrate detector polarization angle with a circle model
 
     Parameters
     ----------
         tod : AxisManager
-        wrap_aman : bool (default, True)
+        merge : bool (default, True)
         remove_cal_data : bool (defalut) False
         num_bins : int
             see _ignore_outlier_angle
@@ -710,7 +654,7 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=18, gap_s
 
     Returns
     -------
-        tod (or ax) : AxisManager
+        ax : AxisManager
             which includes the calibrated angle of gamma in the sky coordinate, etc.
 
     Notes
@@ -742,7 +686,7 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=18, gap_s
                 (_cd.Uerr.T[:,_i]**2 + _cd.Qerr.T[:,_i]**2) * 0.5
                 + (_cfr.cy0_err[_i]**2 + _cfr.cx0_err[_i]**2) * 0.5 / _cfr.cr[_i]
             )
-        ) # need to be corrected
+        )
 
     _det_angle = np.unwrap(np.array(_det_angle).T, period=np.pi)
     _det_angle_err = np.array(_det_angle_err).T
@@ -766,13 +710,9 @@ def get_cal_gamma(tod, wrap_aman=True, remove_cal_data=False, num_bins=18, gap_s
     ax.wrap('theta_det_instr',               0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
     if remove_cal_data:
         tod.move('wg', None)
-    if wrap_aman:
-        if 'gamma_cal' in tod._fields.keys():
-            tod.move('gamma_cal', None)
+    if merge:
         tod.wrap('gamma_cal', ax)
-        return tod
-    else:
-        return ax
+    return ax
 
 def get_ecal_gamma(tod):
     """
@@ -815,134 +755,5 @@ def get_ecal_gamma(tod):
     ax.wrap('theta_det_instr',  0.5*np.pi - gamma, [(0, 'dets')])
     ax.wrap('gamma',            gamma,             [(0, 'dets')])
     ax.wrap('gamma_err',        gammga_err,        [(0, 'dets')])
-    if 'gamma_ecal' in tod._fields.keys():
-        tod.move('gamma_ecal', None)
     tod.wrap('gamma_ecal', ax)
-    return tod
-
-# Find the sample index where the HWP speed is crossing 1 Hz
-def find_1hz_idx(tod, hwp_speed):
-    """
-    Get the sample index where the speed of HWP is crossing 1 Hz.
-    """
-    idx_1hz_min = np.argmin(np.abs(hwp_speed) > 1)
-    idx_1hz_max = np.argmax(np.abs(hwp_speed) > 1)
-    cmin = np.abs(tod.samps.count / 2 - idx_1hz_min)
-    cmax = np.abs(tod.samps.count / 2 - idx_1hz_max)
-    if cmin < cmax:
-        return idx_1hz_min
-    else:
-        return idx_1hz_max
-
-
-def binning_data(ref_data, target_data, num_bin=100):
-    """
-    a function binning given data against a reference data
-    """
-    _hist = np.histogram(ref_data, bins=num_bin)
-    _bins = np.digitize(ref_data, _hist[1][1:], right=True)
-    if len(np.shape(target_data)) == 1:
-        _binned = []
-        _binned_err = []
-        for _j in range(num_bin):
-            _sig_abin = target_data[_bins == _j]
-            _binned.append(np.mean(_sig_abin))
-            _binned_err.append(np.std(_sig_abin))
-        _binned = np.array(_binned)
-        _binned_err = np.array(_binned_err)
-    elif len(np.shape(target_data)) == 2:
-        _binned = []
-        _binned_err = []
-        for _j in range(num_bin):
-            _sig_abin = target_data[:,_bins == _j]
-            _binned.append(np.mean(_sig_abin, axis=1))
-            _binned_err.append(np.std(_sig_abin, axis=1))
-        _binned = np.array(_binned).T
-        _binned_err = np.array(_binned_err).T
-    return _binned, _binned_err
-
-
-def binning_speed_and_angle(tod, hwp_speed, raw_estimation, idx1hz,
-                            to_edges=300, num_bin=100, return_aman=True):
-    """
-    Binning the HWP speed and the estimated raw angle for the data with HWP spinning up/down.
-    """
-    if np.abs(hwp_speed[0]) > np.abs(hwp_speed[-1]):
-        # slices for spinning down HWP
-        s = slice(to_edges, idx1hz)
-    else:
-        # slices for spinning up HWP
-        s = slice(idx1hz, -to_edges)
-
-    bin_hwp_speed, bin_hwp_speed_err = binning_data(
-        tod.timestamps[s], hwp_speed[s], num_bin=num_bin)
-    bin_angle, bin_angle_err = binning_data(
-        tod.timestamps[s], raw_estimation[:,s], num_bin=num_bin)
-
-    if return_aman:
-        # wrap the binned data into a new AxisManager
-        _ax = core.AxisManager(tod.dets)
-        _ax.wrap('hwp_speed', bin_hwp_speed)
-        _ax.wrap('hwp_speed_err', bin_hwp_speed_err)
-        _ax.wrap('angle', bin_angle, [(0, 'dets')])
-        _ax.wrap('angle_err', bin_angle_err, [(0, 'dets')])
-        return _ax
-
-    return bin_hwp_speed, bin_hwp_speed_err, bin_angle, bin_angle_err
-
-
-def _linear_model(params, xval, yval, yerr):
-    a, b = params[0], params[1]
-    # mathematicall, we want to keep this formula as 2 * tau * 2*np.pi * hwp_speed_hz
-    model = 2*a*2*np.pi*xval + b
-    chi = (yval - model) / yerr
-    return chi
-
-
-def fit_time_const(binned_aman, ptp_threshold=np.deg2rad(10)):
-    """
-    A function to fit how the estimated angle changes related to the hwp speed
-
-    Parameters
-    ----------
-        binned_aman : AxisManager
-            the binned data of the HWP speed and the estimated angle.
-
-    Returns
-    -------
-        fres : fit results
-            gradient of the slope and the y-section
-        ferr : fit error
-        fchi2 : chi square of the fitting
-
-    """
-    _x = binned_aman.hwp_speed
-    _y = binned_aman.angle
-    _yerr = binned_aman.angle_err
-    _invalid = np.ptp(_y, axis=1) > ptp_threshold
-
-    _y[_invalid,:] = np.nan
-    _yerr[_invalid,:] = np.nan
-
-    fres = []
-    ferr = []
-    fchi2 = []
-    for _i in range(np.shape(_y)[0]):
-        if np.logical_not(np.isnan(_y[_i][0])):
-            iparams = np.array([1e-3, -2e-2])
-            bounds = ([0, -2*np.pi], [1e-1, 2*np.pi])
-            _res = least_squares(_linear_model, x0=iparams, bounds=bounds, \
-                                    args=(_x, _y[_i], _yerr[_i]))
-            # calculate fit error
-            _J = _res.jac
-            _cov = np.linalg.inv(_J.T.dot(_J))
-            _err = np.sqrt(np.diag(_cov))
-
-            fres.append([_res.x[0], _res.x[1]])
-            ferr.append([_err[0], _err[1]])
-            fchi2.append(np.mean(_linear_model(_res.x, _x, _y[_i], _yerr[_i])**2))
-        else:
-            fres.append([np.nan, np.nan])
-            ferr.append([np.nan, np.nan])
-            fchi2.append(np.nan)
-    return np.array(fres), np.array(ferr), np.array(fchi2)
+    return True

@@ -31,7 +31,6 @@ The main functions of the wire grid consists of 8 functions:
  - wrap_wg_hk
  - correct_wg_angle
  - find_operation_range
- - wrap_wiregrid_data
  - calc_calibration_data_set
  - fit_with_circle
  - get_cal_gamma
@@ -46,22 +45,21 @@ One can get calibration results by calling these functions.
       path='./satp1_wg_hkdb.yaml',
       start_time=tod.timestamps[0],
       stop_time=tod.timestamps[-1],))
-  tod = wrap_wg_hk(tod, raw_data_dict, is_merge=True)
+  tod = wrap_wg_hk(tod, raw_data_dict, merge=True)
 
   # Correct the hardware specific constants of the wire grid
   correct_wg_angle(tod)
 
   # Find the wire grid operation range in the tod and wrap the calibration data set
   idxi, idxf = find_operation_range(
-    tod, stopped_time=10, is_restrict=True, remove_trembling=True)
-  wrap_wiregrid_data(tod, idxi, idxf)
+    tod, is_restrict=True, remove_trembling=True)
 
   # Analyze the calibration data set and fit them with circles
-  calc_calibration_data_set(tod)
+  calc_calibration_data_set(tod, idxi, idxf)
   _ = fit_with_circle(tod)
 
   # Get gamma and wrap it into the tod
-  get_cal_gamma(tod, wrap_aman=True, remove_cal_data=True)
+  get_cal_gamma(tod, merge=True, remove_cal_data=True)
 
 Finally, the AxisManager has the field of ``gamma_cal`` that has:
 
