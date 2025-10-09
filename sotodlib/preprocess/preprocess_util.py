@@ -18,7 +18,6 @@ from sotodlib.core.flagman import has_any_cuts
 from .. import core
 
 from . import _Preprocess, Pipeline, processes
-from .pcore import update_full_aman
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
