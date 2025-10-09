@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, exc
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
+import scipy
 import so3g
 from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
 
@@ -221,6 +222,207 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbos
         vecs = np.concatenate([vecs,v],1)
     return vecs
 
+def block_scale(tod, bscale, bsize=1, inplace=False):
+	if not inplace: tod = tod.copy()
+	nblock = tod.shape[-1]//bsize
+	btod   = tod[...,:nblock*bsize].reshape(tod.shape[:-1]+(nblock,bsize))
+	btod  *= bscale[...,:nblock,None]
+	# incomplete last block
+	if tod.shape[-1] > nblock*bsize:
+		tod[...,nblock*bsize:] *= bscale[...,-1,None]
+	return tod
+
+def logint(arr, x):
+	ix = np.floor(x).astype(int)
+	ix = np.clip(ix, 0, arr.shape[-1]-2)
+	# in log-log, it makes sense to start counting from 1 instead of
+	# 0 to avoid log(0), hence the +1.
+	rx   = (np.log(x+1)-np.log(ix+1))/(np.log(ix+2)-np.log(ix+1))
+	larr = np.log(arr)
+	return np.exp(larr[...,ix]*(1-rx) + larr[...,ix+1]*rx)
+
+def find_spikes(rel_ps, tol=10, pad=2):
+	"""Find narrow spikes tol above 1 in rel_ps. Cpu"""
+	mask       = np.zeros(len(rel_ps)+2, bool)
+	mask[1:-1] = rel_ps > tol
+	edges      = np.where(np.diff(mask))[0]
+	bins       = np.array([edges[0::2],edges[1::2]]).T
+	bins       = putils.pad_bins(bins, pad, min=0, max=len(rel_ps))
+	bins       = np.asarray(putils.merge_bins(bins))
+	return bins
+
+
+def find_atm_bins(ps, bsize=1, nmin=10, step=2., off=2):
+	ifloor = len(ps)/off
+	# translate to full-resolution indices
+	ifloor *= bsize
+	# Make log-spaced bins
+	edges   = []
+	while ifloor >= nmin:
+		edges.append(putils.floor(ifloor))
+		ifloor /= step
+	edges.append(0)
+	edges = edges[::-1]
+	bins  = putils.edges2bins(edges)
+	return bins
+
+def find_modes_merged(ft, bins, eig_lim=None, single_lim=0., nmax_frac=0.1, verbose=False, dtype=np.float32, return_eigs=False):
+	cov  = 0
+	ndof = 0
+	for _, b in enumerate(bins):
+		cov  += measure_cov(ft[:,b[0]:b[1]])
+		ndof += 2*(b[1]-b[0])
+	return find_modes_single(cov, ndof, eig_lim=eig_lim, single_lim=single_lim, nmax_frac=nmax_frac, verbose=verbose, dtype=dtype, return_eigs=return_eigs)
+
+def find_modes_individual(ft, bins, eig_lim=None, single_lim=0, nmax_frac=0.1, verbose=False, dtype=np.float32):
+	vecs = []
+	for _, b in enumerate(bins):
+		cov  = measure_cov(ft[:,b[0]:b[1]])
+		ndof = 2*(b[1]-b[0])
+		bin_vecs = find_modes_single(cov, ndof, eig_lim=eig_lim, single_lim=single_lim, nmax_frac=nmax_frac, verbose=verbose, dtype=dtype)
+		vecs.append(bin_vecs)
+	return vecs
+
+def first_nonempty(vecs):
+	for vec in vecs:
+		if vec.size > 0:
+			return vec
+
+def fallback_modes(vecs, vec_fallback):
+	return [(vec if vec.size > 0 else vec_fallback) for vec in vecs]
+
+def find_modes_single(cov, ndof, eig_lim=None, single_lim=0., nmax_frac=0.1, deproj=None, verbose=False, verb_prefix="", dtype=np.float32, return_eigs=False):
+	"""Find strong eigenmodes given a covmat measured from data with ndof samples per detector.
+	For complex data, ndof would be twice that."""
+	ndet = len(cov)
+	ndof = min(ndof, ndet)
+	if deproj is not None:
+		cov   = project_out_from_matrix(cov, deproj)
+		ndof -= deproj.shape[1]
+	if ndof <= 0:
+		e = np.zeros(0, dtype)
+		v = np.zeros((ndet,0), dtype)
+	else:
+		e, v = np.linalg.eigh(cov)
+		# skip the invalid ones
+		e, v = e[-ndof:], v[:,-ndof:]
+		del cov
+		accept = np.full(len(e), True, bool)
+		if eig_lim is not None:
+			# Only accept modes at least eig_lim times the median e
+			median_e = np.median(e)
+			accept  &= e/median_e >= eig_lim
+		if verbose: print("%s%4d modes above eig_lim" % (verb_prefix, np.sum(accept)))
+		if single_lim is not None and e.size:
+			# Reject modes too concentrated into a single mode. Since v is normalized,
+			# values close to 1 in a single component must mean that all other components are small
+			singleness = np.max(np.abs(v),0)
+			accept    &= singleness < single_lim
+		if verbose: print("%s%4d modes also above single_lim" % (verb_prefix, np.sum(accept)))
+		e, v = e[accept], v[:,accept]
+	if return_eigs: return v, e
+	else: return v
+
+def noise_modes_hybrid(ft, bins, weight=None, mask=None, eig_lim=16, single_lim=0.55, nper=50, nmax=100, D_tol=0.1, wtype=np.float32):
+	"""Decompose the noise covariance per bin into D+VEV'.
+	For narrow bins, eigenvectors are measured globally,
+	and a few strong ones are used per bin. For wide bins,
+	the strongest N modes are used directly."""
+	ndet = len(ft)
+	dtype= putils.real_dtype(ft.dtype)
+	# 1. First find vectors globally. These will be used for
+	#    narrow bins.
+	if weight is not None: ft *= weight # avoids copy, at cost of weight=0 breaking
+	gV    = np.array(find_modes_merged(ft, bins, eig_lim=eig_lim, single_lim=single_lim)).astype(wtype, copy=False)
+	if weight is not None: ft /= weight
+	# nglob = gV.shape[1]
+	nmax  = min(nmax, ndet//2)
+	# Output arrays
+	Ds, Es, Vs = [], [], []
+	for _, b in enumerate(bins):
+		cov  = measure_cov(ft[:,b[0]:b[1]]).real.astype(wtype, copy=False)
+		bsize= b[1]-b[0]
+		ndof = 2*bsize*ndet
+		if mask is not None:
+			# Compensate for missing power and lower statistics
+			nmask  = np.sum(mask[b[0]:b[1]]==0)
+			# Ignore mask if it would make our bin completely empty
+			if nmask < bsize:
+				ndof  -= 2*nmask
+				cov   *= (bsize-nmask)/bsize
+		budget_E = bsize
+		# How many vectors can we afford to measure?
+		# Measure as many amplitudes as we can afford
+		# C = VEV' => E = (V'V)"V'CV(V'V)"'. V ortho, so this is just E = V'CV
+		E     = np.einsum("dm,de,em->m", gV, cov, gV)
+		E     = np.diag(gV.T.dot(cov).dot(gV))
+		inds  = np.argsort(E)[-budget_E:][-nmax:]
+		E, V  = E[inds], gV[:,inds]
+		# Finally measure the remaining uncorrelated power
+		cov  = project_out_from_matrix(cov, V)
+		D    = np.diag(cov)
+		# Disallow unrealistically low per-detector noise. This can happen if we
+		# have overfitted the vectors. That shouldn't happen, and I try to avoid it above,
+		# but if it does happen, we don't want things to break
+		D    = np.maximum(D, np.median(D[D>0])*D_tol)
+		# budget_V = max(0,utils.floor((ndof/nper-ndet)/(ndet+1)))
+		#print("A %3d %6d %6d %12.3e %12.3e %12.3e %12.3e %5d %5d %4d" % (bi, b[0], b[1], ap.min(D), ap.quantile(D, 0.9), ap.min(E), ap.max(E), budget_E, budget_V, V.shape[1]))
+		Ds.append(D.astype(dtype, copy=False))
+		Es.append(E.astype(dtype, copy=False))
+		Vs.append(V.astype(dtype, copy=False))
+	return bunch.Bunch(Vs=Vs, Es=Es, Ds=Ds)
+
+def override_bins(binss):
+	# keep track of end of previous bin and progress
+	# into each list. We will maintain the invariant that
+	# the current bin in each list ends after prev_end
+	# and starts on or before it.
+	binss    = [bins.copy() for bins in binss]
+	nlist    = len(binss)
+	inds     = [0]*nlist
+	active   = list(range(nlist))
+	prev_end = 0
+	obins, ofrom, oinds = [], [], []
+	# Helper functions
+	def get(li): return binss[li][inds[li]]
+	def isort(startend):
+		vals = [(get(li)[startend],li) for li in active]
+		vals = sorted(vals, key=lambda a:a[0])
+		return [a[1] for a in vals]
+	while len(active) > 0:
+		# 1. Find the one with the earliest start
+		order  = isort(0)
+		istart = order[0]
+		vstart = get(istart)[0]
+		vstart = max(vstart, prev_end)
+		# 2. Find the first interruption. This is ether
+		#    our bin's end, or the start of another bin
+		vend   = get(istart)[1]
+		interrupt = len(order) > 1 and get(order[1])[0] < vend
+		if interrupt:
+			# Other interrupts us
+			vend = get(order[1])[0]
+		# 3. Output bin if non-empty
+		if vstart < vend:
+			obins.append((vstart, vend))
+			ofrom.append(istart)
+			oinds.append(inds[istart])
+		# 4. Update our state
+		if interrupt:
+			# We're not done, but update our starting point
+			get(istart)[0] = min(get(order[1])[1],get(istart)[1])
+		else:
+			# We ended. Advance us
+			inds[istart] += 1
+			# Remove list from active if done with it
+			if inds[istart] >= len(binss[istart]):
+				active.remove(istart)
+		prev_end = vend
+	return obins, ofrom, oinds
+
+def pick_data(datas, srcs, sinds):
+	return [datas[src][sind] for src, sind in zip(srcs, sinds)]
+
 def measure_detvecs(ft, vecs, nper=2):
     # Allow too narrow bins
     nfull = vecs.shape[1]
@@ -260,7 +462,7 @@ def woodbury_invert(D, V, s=1):
     corresponding representation for inv(C) using the Woodbury
     formula."""
     V, D = map(np.asarray, [V,D])
-    ishape = D.shape[:-1]
+    # ishape = D.shape[:-1]
     # Flatten everything so we can be dimensionality-agnostic
     D = D.reshape(-1, D.shape[-1])
     V = V.reshape(-1, V.shape[-2], V.shape[-1])
@@ -269,6 +471,7 @@ def woodbury_invert(D, V, s=1):
     iD = safe_inv(D)
     iV = V*0
     # Invert each
+    sout = 0
     for i in range(len(D)):
         core = I*s + (V[i].T*iD[i,None,:]).dot(V[i])
         core, sout = sichol(core)
@@ -283,6 +486,78 @@ def apply_window(tod, nsamp, exp=1):
     taper **= exp
     tod[...,:nsamp]  *= taper
     tod[...,-nsamp:] *= taper[::-1]
+
+def sdgmm(side, m, n, A, ldA, X, incX, C, ldC, handle=None):
+    """
+    To minimize confusion when comparing the sogma we keep the
+    cublas like interface here.
+    """
+    _ = m, n, ldA, incX, ldC, handle
+    assert A.dtype == np.float32, "sdgmm needs single precision"
+    assert X.dtype == np.float32, "sdgmm needs single precision"
+    assert C.dtype == np.float32, "sdgmm needs single precision"
+    # side=='r': C = A.dot(diag(X))
+    # side=='l': C = diag(X).dot(A)
+    # But cublas is column-major, so it thinks our matrices are transposed.
+    # In row-major terms, we're instead doing
+    # side=='r': C' = A'.dot(diag(X)) => C = diag(X).dot(A)
+    # side=='l': C' = diag(X).dot(A') => C = A.dot(diag(X))
+    # Sadly, we don't have a blas version of this it seems, which
+    # means we don't get any thread speedup if we don't implement it
+    # ourself.
+    if   side.lower() == 'r': C[:] = X[:,None]*A
+    elif side.lower() == 'l': C[:] = A*X[None,:]
+    else: raise ValueError("Unrecognized side '%s'" % str(side))
+
+def sgemm(opA, opB, m, n, k, alpha, A, ldA, B, ldB, beta, C, ldC, handle=None):
+    _ = m, n, k, ldA, ldB, ldC, handle
+    assert A.dtype == np.float32, "sgemm needs single precision"
+    assert B.dtype == np.float32, "sgemm needs single precision"
+    assert C.dtype == np.float32, "sgemm needs single precision"
+    # Hack: We ignore m, n, k, ldA, ldB, ldC here and assume that
+    # these match the array objects passed! This wouldn't be necessary
+    # if scipy made the underlying blas interface directly available.
+    # Alternatively one could construct proxy arrays using ldA etc,
+    # and pass those in
+    scipy.linalg.blas.sgemm(alpha, A.T, B.T, beta=beta, c=C.T, overwrite_c=True,
+                            trans_a = opA.lower()=="t", trans_b=opB.lower()=="t")
+
+def apply_vecs2(ftod, iD, V, Kh, bins, tmp, vtmp, divtmp, out=None):
+	"""Jon's core for the noise matrix. Does not allocate any memory itself. Takes the work
+	memory as arguments instead. This is like apply_vecs, but Kh can be jagged and
+	there's a separate V per bin.
+
+	ftod: The fourier-transform of the TOD, cast to float32. [ndet,nfreq]
+	iD:   The inverse white noise variance. [nbin,ndet]
+	V:    The eigenvectors. [nbin][ndet,nmode]
+	Kh:   The square root of the Woodbury kernel (E"+V'DV)**-0.5. [nbin][nmode,nmode]
+	bins: The frequency ranges for each bin. [nbin,{from,to}]
+	tmp, vtmp, divtmp: Work arrays
+	"""
+	if out    is None: out = ftod
+	nfreq = ftod.shape[1]
+	maxnmode = divtmp.shape[1]
+	for bi, (i1,i2) in enumerate(2*bins):
+		bsize = i2-i1
+		ndet, nmode = V[bi].shape
+		# cublas doesn't like zero-length operations, so handle that specially
+		if nmode == 0:
+			out[:,i1:i2]  = ftod[:,i1:i2]
+			out[:,i1:i2] *= iD[bi,:,None]
+		else:
+			# We want to perform out = iD ftod - (iD V Kh)(iD V Kh)' ftod
+			# 1. divtmp = iD V      [ndet,nmode]
+			# Cublas is column-major though, so to it we're doing divtmp = V iD [nmode,ndet]. OK
+			sdgmm("R", nmode, ndet, V[bi], nmode, iD[bi], 1, divtmp[:,:nmode], maxnmode)
+			# 2. vtmp   = iD V Kh   [ndet,nmode] -> vtmp = Kh divtmp [nmode,ndet]. OK
+			sgemm("N", "N", nmode, ndet, nmode, 1, Kh[bi], nmode, divtmp, maxnmode, 0, vtmp, maxnmode)
+			# 3. tmp    = (iD V Kh)' ftod  [nmode,bsize] -> tmp = ftod vtmp.T [bsize,nmode]. OK
+			sgemm("N", "T", bsize, nmode, ndet, 1, ftod[:,i1:i2], nfreq, vtmp, maxnmode, 0, tmp[:,:bsize], tmp.shape[1])
+			# 4. out    = iD ftod  [ndet,bsize] -> out = ftod iD [bsize,ndet]. OK
+			sdgmm("R", bsize, ndet, ftod[:,i1:i2], nfreq, iD[bi], 1, out[:,i1:i2], nfreq)
+			# 5. out    = iD ftod - (iD V Kh)(iD V Kh)' ftod [ndet,bsize] -> out = ftod iD - ftod vtmp.T vtmp [bsize,ndet]. OK
+			sgemm("N", "N", bsize, ndet, nmode, -1, tmp[:,:bsize], tmp.shape[1], vtmp, maxnmode, 1, out[:,i1:i2], nfreq)
+
 
 ########################
 ###### Utilities #######
