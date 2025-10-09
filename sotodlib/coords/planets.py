@@ -225,6 +225,53 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
     P = coords.P.for_tod(tod, sight, **kw)
     return P
 
+def get_each_detcen_P(tod, azpl, elpl, sight=None, size=None, res=None, proj='car', flags=None, boresight_centered=False):
+    """Get a standard Projection Matrix for detector-centered/boresight-centered coordinates.
+    Currently this function is assumed to apply axismanager that include one detector.
+    Args:
+      tod (float): axis manager that include one detector.
+      azpl (float): planet azimuth, in radians.
+      elpl (float): planet elevation, in radians.
+      sight: CelestialSightLine object.
+      size (float): size of output Projection Matrix, in radians.
+      res (float): resolution output Projection Matrix, in radians.
+      proj (str): Default is CAR.
+      flags: flags that use for map-making
+      boresight_centered (bool): if True, the output map is in boresight-centered coordinate system instead.
+
+    Return:
+         a Projection Matrix
+
+    """
+    if res is None:
+        res = 0.01 * coords.DEG
+    if size is None:
+        size = 5 * coords.DEG
+
+    xi = tod.focal_plane.xi[0]
+    eta = tod.focal_plane.eta[0]
+    if sight is None:
+        sight = so3g.proj.CelestialSightLine.for_horizon(tod.timestamps, tod.boresight.az, tod.boresight.el, roll= tod.boresight.roll)
+
+    # planet quaternion in Az/El coordinate
+    pq = so3g.proj.quat.rotation_lonlat(-azpl, elpl)
+    # xieta quaternion for a given detector
+    xieta_gamma0 = so3g.proj.quat.rotation_xieta(xi,eta,0)
+    if boresight_centered:
+        detQ = ~sight.Q * pq # fixed Boresight center instead of detector center
+    else:
+        detQ = ~xieta_gamma0 * ~sight.Q * pq # First xieta for moving to center for each detector, and the last one for canceling out
+    xis, etas, _  = so3g.proj.quat.decompose_xieta(detQ)
+    sight.Q = so3g.proj.quat.rotation_xieta(xis, etas, 0) * ~xieta_gamma0
+    # cut the gamma so that reference/cross polarization follows Ludwig 3-I definition.
+    # Ludwig 3-I definition is gamma of 0 at all xi, eta in the xi-eta coordinate system.
+    # additional `~xieta_gamma0` here is used for cancelling the one that will be accounted for in so3g by default.
+    rot = so3g.proj.quat.rotation_lonlat(0, 0)
+    box = np.array([[-1, -1], [1, 1]]) * size
+    geom = enmap.geometry(pos=box, res=res, proj = proj)
+    P = coords.P.for_tod(tod, sight=sight, rot=rot,  geom=geom, hwp=True, comps='TQU', cuts=flags)
+
+    return P
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
