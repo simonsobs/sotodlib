@@ -26,29 +26,19 @@ import re
 import sys
 import traceback
 
-import numpy as np
-
-from astropy import units as u
-
 from pshmem import MPIBatch
 
-# Import sotodlib.toast first, since that sets default object names
-# to use in toast.
-import sotodlib.toast as sotoast
-
 import toast
-import toast.ops
-from toast.mpi import MPI, Comm
-from toast.observation import default_values as defaults
-
+from toast.timing import Timer
 from toast.scripts.toast_run import main as toast_run_main
 
 from ...core import Context
 
 
 def get_context_tasks(
-    comm, out_root, context_file, obs_file, det_select, by_obs, by_wafer
+    comm, out_root, context_file, obs_file, dets_select, by_obs, by_wafer
 ):
+    """Get the list of tasks, given the observations and selections."""
     tasks = None
     if comm is None or comm.rank == 0:
         olist = list()
@@ -56,6 +46,11 @@ def get_context_tasks(
             for line in f:
                 if re.match(r"^#.*", line) is None:
                     olist.append(line.rstrip())
+
+        if dets_select is None:
+            dets_select = dict()
+        else:
+            dets_select = eval(dets_select)
 
         # Query the obsdb directly so that we only have one DB query,
         # rather than doing one query per observation.
@@ -76,10 +71,14 @@ def get_context_tasks(
 
         tasks = list()
         single_task = {
+            "name": "all",
             "obs_ids": list(),
-            "select": det_select,
+            "select": dets_select,
             "telescope": None,
+            "index": 0,
+            "desc": "All observations",
         }
+        itask = 0
         for row in query_result:
             obs_id = str(row["obs_id"])
             wafer_slots = list(row["wafer_slots_list"].split(","))
@@ -90,29 +89,39 @@ def get_context_tasks(
                 # Building per-obs tasks
                 tasks.append(
                     {
+                        "name": f"{obs_id}",
                         "obs_id": obs_id,
                         "telescope": telescope,
                         "n_samp": n_samp,
                         "stream_ids": stream_ids,
                         "wafer_slots": wafer_slots,
-                        "select": det_select,
+                        "select": dets_select,
                         "outdir": os.path.join(out_root, obs_id),
+                        "index": itask,
+                        "desc": f"{telescope}:{obs_id}",
                     }
                 )
+                itask += 1
             elif by_wafer:
                 # Per wafer tasks
                 for strm, waf in zip(stream_ids, wafer_slots):
+                    dselect = dict(dets_select)
+                    dselect["stream_id"] = [strm]
                     tasks.append(
                         {
+                            "name": f"{obs_id}-{strm}",
                             "obs_id": obs_id,
                             "telescope": telescope,
                             "n_samp": n_samp,
                             "stream_id": strm,
                             "wafer_slot": waf,
-                            "select": det_select,
+                            "select": dselect,
                             "outdir": os.path.join(out_root, f"{obs_id}-{strm}"),
+                            "index": itask,
+                            "desc": f"{telescope}:{obs_id}:{strm}",
                         }
                     )
+                    itask += 1
             else:
                 # One task
                 if single_task["telescope"] is None:
@@ -137,15 +146,51 @@ def get_task_args(task_args, parsed, task):
     based on the properties of the current task.
 
     """
+    new_args = list()
     subst = {
-        "{out_dir}": task["outdir"],
-        "{output_dir}": task["outdir"],
+        "{run_dir}": task["outdir"],
+        "{telescope}": task["telescope"],
         "{context_file}": parsed.context_file,
-        "{det_select}": parsed.det_select,
+        "{dets_select}": str(task["select"]).replace(" ", ""),
     }
-    for targ in task_args:
-        for sbkey, sbval in subst.items():
 
+    if parsed.task_per_obs or parsed.task_per_wafer:
+        # Single obs
+        subst["{observations}"] = str([task["obs_id"]])
+        subst["{samples}"] = str(task["n_samp"])
+    else:
+        # Multiple obs
+        subst["{observations}"] = str(",".join(task["obs_ids"]))
+        subst["{samples}"] = str(task["n_samp"])
+    for targ in task_args:
+        temp = str(targ)
+        for sbkey, sbval in subst.items():
+            temp = temp.replace(sbkey, sbval)
+        new_args.append(temp)
+    return new_args
+
+
+def cleanup_states(parsed):
+    """Cleanup any stale states.
+    """
+    in_state = MPIBatch.state_to_string(MPIBatch.RUNNING)
+    if parsed.cleanup_running_open:
+        out_state = MPIBatch.state_to_string(MPIBatch.OPEN)
+    elif parsed.cleanup_running_failed:
+        out_state = MPIBatch.state_to_string(MPIBatch.FAILED)
+    else:
+        # Nothing to do
+        return
+    for root, dirs, files in os.walk(parsed.out_root):
+        for dir in dirs:
+            task_dir = os.path.join(root, dir)
+            state_file = os.path.join(task_dir, "state")
+            with open(state_file, "r") as f:
+                state_str = f.readline().rstrip()
+            if state_str == in_state:
+                with open(state_file, "w") as f:
+                    f.write(f"{out_state}\n")
+        break
 
 
 def main():
@@ -159,28 +204,57 @@ def main():
     )
 
     parser.add_argument(
-        "--worker_size", required=False, default=None, help="The number of procs per worker"
-    )
-
-    parser.add_argument(
-        "--out_root", required=True, default=None, help="The top-level output directory"
-    )
-
-    parser.add_argument(
-        "--guard_file",
-        required=True,
+        "--worker_size",
+        required=False,
+        type=int,
         default=None,
-        help="Per-task filename whose presence indicates task completion",
+        help="The number of procs per worker",
     )
 
-    parser_group = parser.add_mutually_exclusive_group(required=False)
-    parser_group.add_argument(
+    parser.add_argument(
+        "--out_root",
+        required=True,
+        type=str,
+        default=None,
+        help="The top-level output directory",
+    )
+
+    parser.add_argument(
+        "--retry_running",
+        action="store_true",
+        default=False,
+        help="Consider jobs marked as RUNNING to be available",
+    )
+
+    parser.add_argument(
+        "--retry_failed",
+        action="store_true",
+        default=False,
+        help="Consider jobs marked as FAILED to be available",
+    )
+
+    cleanup_group = parser.add_mutually_exclusive_group(required=False)
+    cleanup_group.add_argument(
+        "--cleanup_running_open",
+        action="store_true",
+        default=False,
+        help="Mark RUNNING jobs as OPEN and exit",
+    )
+    cleanup_group.add_argument(
+        "--cleanup_running_failed",
+        action="store_true",
+        default=False,
+        help="Mark RUNNING jobs as FAILED and exit",
+    )
+
+    task_group = parser.add_mutually_exclusive_group(required=False)
+    task_group.add_argument(
         "--task_per_obs",
         action="store_true",
         default=False,
         help="Create one task per observation",
     )
-    parser_group.add_argument(
+    task_group.add_argument(
         "--task_per_wafer",
         action="store_true",
         default=False,
@@ -190,16 +264,25 @@ def main():
     # Options for real data
 
     parser.add_argument(
-        "--obs_file", required=False, default=None, help="File with observation IDs"
-    )
-
-    parser.add_argument(
-        "--context_file", required=False, default=None, help="Context file to use"
-    )
-
-    parser.add_argument(
-        "--det_select",
+        "--obs_file",
         required=False,
+        type=str,
+        default=None,
+        help="File with observation IDs",
+    )
+
+    parser.add_argument(
+        "--context_file",
+        required=False,
+        type=str,
+        default=None,
+        help="Context file to use",
+    )
+
+    parser.add_argument(
+        "--dets_select",
+        required=False,
+        type=str,
         default=None,
         help="Det selection (as a string) common to all tasks",
     )
@@ -207,12 +290,17 @@ def main():
     # Options for pure synthetic data
 
     parser.add_argument(
-        "--sim_telescope", required=False, default=None, help="Synthetic telescope file"
+        "--sim_telescope",
+        required=False,
+        type=str,
+        default=None,
+        help="Synthetic telescope file",
     )
 
     parser.add_argument(
         "--sim_schedule",
         required=False,
+        type=str,
         default=None,
         help="Synthetic observing schedule",
     )
@@ -226,7 +314,9 @@ def main():
         log.info_rank(msg, comm=comm)
         # Using real data loader
         if args.sim_telescope is not None or args.sim_schedule is not None:
-            raise RuntimeError("If context file specified, sim parameters should be unset")
+            raise RuntimeError(
+                "If context file specified, sim parameters should be unset"
+            )
         if args.obs_file is None:
             raise RuntimeError("If using a context, must also specify obs_file")
         tasks = get_context_tasks(
@@ -234,7 +324,7 @@ def main():
             args.out_root,
             args.context_file,
             args.obs_file,
-            args.det_select,
+            args.dets_select,
             args.task_per_obs,
             args.task_per_wafer,
         )
@@ -242,9 +332,16 @@ def main():
         msg = f"Working with synthetic data from schedule {args.sim_schedule}"
         log.info_rank(msg, comm=comm)
         if args.sim_telescope is None or args.sim_schedule is None:
-            raise RuntimeError("If using simulated observing, both telescope and schedule required")
+            raise RuntimeError(
+                "If using simulated observing, both telescope and schedule required"
+            )
         raise NotImplementedError("Sim case not yet implemented")
-        #tasks = get_sim_tasks()
+        # tasks = get_sim_tasks()
+
+    if args.cleanup_running_open or args.cleanup_running_failed:
+        # We are just manipulating states and returning.
+        cleanup_states(args)
+        return
 
     # Make any substitutions into the remaining commandline arguments based
 
@@ -262,7 +359,14 @@ def main():
 
     # Create the batch setup
     n_task = len(tasks)
-    batch = MPIBatch(comm, worker_size, n_task, debug=True)
+    batch = MPIBatch(
+        comm,
+        worker_size,
+        n_task,
+        task_fs_root=args.out_root,
+        task_fs_names=[x["name"] for x in tasks],
+        debug=False,
+    )
 
     msg = f"Using {batch.n_worker} workers"
     log.info_rank(msg, comm=comm)
@@ -273,36 +377,37 @@ def main():
         log.warning_rank(msg, comm=comm)
 
     # Run the tasks
+    task_timer = Timer()
+    task_timer.start()
 
     task_indx = batch.INVALID
     while task_indx is not None:
-        task_indx = batch.next_task()
+        # This call will also mark the task as running.
+        task_indx = batch.next_task(
+            ignore_running=args.retry_running, ignore_failed=args.retry_failed
+        )
         if task_indx is None:
             msg = f"Worker {batch.worker} has no more tasks, waiting"
             log.info_rank(msg, comm=batch.worker_comm)
             continue
 
         tprops = tasks[task_indx]
+        task_desc = tprops["desc"]
 
-        if args.task_per_obs:
-            task_desc = f"{tprops['telescope']}:{tprops['obs_id']}"
-        elif args.task_per_wafer:
-            task_desc = f"{tprops['telescope']}:{tprops['obs_id']}"
-            task_desc += f":{tprops['stream_id']}"
-        else:
-            task_desc = "single task with all observations"
-
-        task_args = list(remaining)
-
-        get_task_args(task_args, args, tprops)
-
-        os.makedirs(tprops["outdir"], exist_ok=True)
+        # Perform any per-task substitutions on the args passed to toast_run
+        task_args = get_task_args(remaining, args, tprops)
 
         msg = f"Worker {batch.worker} starting {task_desc}"
         log.info_rank(msg, comm=batch.worker_comm)
 
         try:
-            toast_run_main(opts=task_args)
+            log.debug_rank(
+                f"Worker {batch.worker} task {task_indx}: toast_run_main({task_args})",
+                comm=batch.worker_comm,
+            )
+            # FIXME: We should redirect stdout to a per-task log
+            toast_run_main(opts=task_args, comm=batch.worker_comm)
+            batch.set_task_state(task_indx, batch.DONE)
         except Exception as e:
             # The task failed
             exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -311,11 +416,10 @@ def main():
             msg = f"Worker {batch.worker} {task_desc} FAILED: "
             msg += "".join(lines)
             log.error_rank(msg, comm=batch.worker_comm)
-            if batch.worker_rank == 0:
-                batch.set_task_state(task_indx, batch.FAILED)
+            batch.set_task_state(task_indx, batch.FAILED)
 
-        if batch.worker_rank == 0:
-            batch.set_task_state(task_indx, batch.DONE)
+        msg = f"Worker {batch.worker} finished {task_desc} in"
+        log.info_rank(msg, comm=batch.worker_comm, timer=task_timer)
 
     if comm is not None:
         comm.barrier()
