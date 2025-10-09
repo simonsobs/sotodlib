@@ -1129,7 +1129,7 @@ def _fit_noise_model_subscan(
 def build_hpf_params_dict(
     filter_name,
     noise_fit=None,
-    filter_params=None
+    filter_params=None,
 ):
     """
     Build the filter parameter dictionary from a provided
@@ -1180,12 +1180,21 @@ def build_hpf_params_dict(
         
         noise_fit_array = noise_fit.fit
         noise_fit_params = noise_fit.noise_model_coeffs.vals
-        
-        median_params = np.median(noise_fit_array, axis=0)
-        median_dict = {
-            k: median_params[i]
-            for i, k in enumerate(noise_fit_params)
-        }
+
+        each_detector = False
+        if filter_params is not None:
+            each_detector = filter_params.get('each_detector', False)
+        if each_detector:
+            noise_fit_dict = {
+                k: noise_fit_array[:, i]
+                for i, k in enumerate(noise_fit_params)
+            }
+        else:
+            median_params = np.median(noise_fit_array, axis=0)
+            noise_fit_dict = {
+                k: median_params[i]
+                for i, k in enumerate(noise_fit_params)
+            }
 
         params_dict = {}
         for k, v in pars_mapping[filter_name].items():
@@ -1198,7 +1207,7 @@ def build_hpf_params_dict(
                 else:
                     params_dict.update({k: filter_params[k]})
             else:
-                params_dict[k] = median_dict[v]
+                params_dict[k] = noise_fit_dict[v]
 
         filter_params = params_dict
     
