@@ -38,8 +38,6 @@ class _Preprocess(object):
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
         self.skip_on_sim = step_cfgs.get("skip_on_sim")
-        if self.skip_on_sim is None:
-            raise ValueError(f"Process {step_cfgs.get('name')} must have `skip_on_sim` key set to True or False")
         self.use_data_aman = step_cfgs.get("use_data_aman", False)
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         """ This function makes changes to the time ordered data AxisManager.
@@ -537,6 +535,8 @@ class Pipeline(list):
 
         success = 'end'
         for step, process in enumerate(self):
+            if sim and (process.skip_on_sim is None):
+                raise ValueError(f"Process {process.name} missing required field `skip_on_sim`")
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
