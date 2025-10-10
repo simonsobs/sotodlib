@@ -30,7 +30,9 @@ class FFTTrim(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.fft_trim
     """
     name = "fft_trim"
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         start_stop = tod_ops.fft_trim(aman, **self.process_cfgs)
         proc_aman.restrict(self.process_cfgs.get('axis', 'samps'), (start_stop))
 
@@ -48,7 +50,9 @@ class Detrend(_Preprocess):
 
         super().__init__(step_cfgs)
     
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.detrend_tod(aman, signal_name=self.signal,
                             **self.process_cfgs)
         return aman, proc_aman
@@ -275,7 +279,9 @@ class FixJumps(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         field = self.process_cfgs['jumps_aman']
         aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
             aman[self.signal], proc_aman[field].jump_flag.mask(),
@@ -749,7 +755,9 @@ class Calibrate(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if self.process_cfgs["kind"] == "single_value":
             if self.process_cfgs.get("divide", False):
                 aman[self.signal] /= self.process_cfgs["val"]
@@ -926,7 +934,9 @@ class SubtractHWPSS(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if not(proc_aman[self.hwpss_stats] is None):
             modes = [int(m[1:]) for m in proc_aman[self.hwpss_stats].modes.vals[::2]]
             if sim:
@@ -1002,7 +1012,9 @@ class Apodize(_Preprocess):
     """
     name = "apodize"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.apodize.apodize_cosine(aman, **self.process_cfgs)
         return aman, proc_aman
 
@@ -1036,7 +1048,9 @@ class Demodulate(_Preprocess):
 
     name = "demodulate"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         hwp.demod_tod(aman, **self.process_cfgs["demod_cfgs"])
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
@@ -1134,7 +1148,9 @@ class AzSS(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if 'subtract_in_place' in self.calc_cfgs:
             raise ValueError('calc_cfgs.subtract_in_place is not allowed use process_cfgs.subtract')
         if self.process_cfgs is None:
@@ -1183,7 +1199,9 @@ class SubtractAzSSTemplate(_Preprocess):
     """
     name = "subtract_azss_template"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         process_cfgs = copy.deepcopy(self.process_cfgs)
         if sim:
             process_cfgs["azss"] = proc_aman.get(process_cfgs["azss"])
@@ -1219,7 +1237,9 @@ class GlitchFill(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if self.flags is not None:
             glitch_flags=proc_aman.get(self.flags)
             tod_ops.gapfill.fill_glitches(
@@ -1273,7 +1293,9 @@ class FlagTurnarounds(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("turnaround_flags", turn_aman)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
         return aman, proc_aman
 
@@ -1285,7 +1307,9 @@ class SubPolyf(_Preprocess):
     """
     name = 'sub_polyf'
     
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         tod_ops.sub_polyf.subscan_polyfilter(aman, **self.process_cfgs)
         return aman, proc_aman
 
@@ -1641,7 +1665,9 @@ class HWPAngleModel(_Preprocess):
     """
     name = "hwp_angle_model"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
             aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
                       [(0, 'samps')])
@@ -1725,7 +1751,9 @@ class FourierFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         field = self.process_cfgs.get("noise_fit_array", None)
         if field:
             noise_fit = proc_aman[field]
@@ -1951,7 +1979,9 @@ class PCAFilter(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         if aman.dets.count < n_modes:
@@ -2015,7 +2045,9 @@ class FilterForSources(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
@@ -2171,9 +2203,23 @@ class SubtractT2P(_Preprocess):
     """
     name = "subtract_t2p"
 
-    def process(self, aman, proc_aman, sim=False):
-        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
-                                        **self.process_cfgs)
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            data_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
+            data_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
+
+            t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(
+                data_aman,
+                merge_stats=False
+            )
+            tod_ops.t2pleakage.subtract_t2p(
+                aman,
+                t2p_aman,
+                T_signal=data_aman.dsT
+            )
+        else:
+            tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
+                                            **self.process_cfgs)
         return aman, proc_aman
 
 class SplitFlags(_Preprocess):
@@ -2230,7 +2276,9 @@ class UnionFlags(_Preprocess):
     """
     name = "union_flags"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         warnings.warn("UnionFlags function is deprecated and only kept to allow loading of old process archives. Use generalized method CombineFlags")
 
         from so3g.proj import RangesMatrix
@@ -2266,7 +2314,9 @@ class CombineFlags(_Preprocess):
     """
     name = "combine_flags"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from so3g.proj import RangesMatrix
         if isinstance(self.process_cfgs['method'], list):
             if len(self.process_cfgs['flag_labels']) != len(self.process_cfgs['method']):
@@ -2315,7 +2365,9 @@ class RotateFocalPlane(_Preprocess):
     """
     name = "rotate_focal_plane"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.coords import demod
         demod.rotate_focal_plane(aman, **self.process_cfgs)
         return aman, proc_aman
@@ -2335,7 +2387,9 @@ class RotateQU(_Preprocess):
     """
     name = "rotate_qu"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.coords import demod
         demod.rotate_demodQU(aman, **self.process_cfgs)
         return aman, proc_aman
@@ -2373,7 +2427,9 @@ class SubtractQUCommonMode(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         if 'qu_common_mode_coeffs' in proc_aman:
             tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q, self.signal_name_U,
                                                       coeff_aman=proc_aman['qu_common_mode_coeffs'], 
@@ -2440,7 +2496,9 @@ class PointingModel(_Preprocess):
     """
     name = "pointing_model"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.coords import pointing_model
         if self.process_cfgs:
             pointing_model.apply_pointing_model(aman)
@@ -2519,7 +2577,9 @@ class CorrectIIRParams(_Preprocess):
     """
     name = "correct_iir_params"
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         from sotodlib.obs_ops import correct_iir_params
         correct_iir_params(aman)
 
@@ -2552,7 +2612,9 @@ class TrimFlagEdge(_Preprocess):
     """
     name = 'trim_flag_edge'
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         flags = aman.flags.get(self.process_cfgs.get('flags'))
         trimst, trimen = core.flagman.find_common_edge_idx(flags)
         aman.restrict('samps', (aman.samps.offset + trimst,

@@ -390,7 +390,8 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
-                                   logger=None, init_only=False):
+                                   logger=None, init_only=False,
+                                   stop_for_sims=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -421,6 +422,11 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only: bool
         Optional. If True, do not run the dependent pipeline.
+    stop_for_sims: bool
+        Optinal. If True, will stop before each step of the pipeline
+        with the flag `use_data_aman` set to True. The intended use is
+        to prepare all necessary data products that cannot be stored in
+        the preprocessing database, to process simulations.
     """
 
     if logger is None:
@@ -482,9 +488,29 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
-            pipe_proc.run(aman, aman.preprocess, select=False)
+            if stop_for_sims:
+                batch_idx = [
+                    (step, process.name)
+                    for step, process in enumerate(pipe_proc)
+                    if process.use_data_aman
+                ]
+                batch_idx = [(0, pipe_proc[0].name)] + batch_idx
+                pipes = {}
+                for idx in range(len(batch_idx)-1):
+                    start, start_name = batch_idx[idx]
+                    end, end_name = batch_idx[idx+1]
+                    pipes[end, end_name] = pipe_proc[start:end]
 
-            return aman
+                out_amans = {}
+                loc_aman = aman.copy()
+                for (step, name), pipe in pipes.items():
+                    pipe.run(loc_aman, aman.preprocess, select=False)
+                    out_amans[step, name] = loc_aman.copy()
+                return out_amans
+
+            else:
+                pipe_proc.run(aman, aman.preprocess, select=False)
+                return aman
         else:
             raise ValueError('Dependency check between configs failed.')
 
@@ -492,7 +518,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
-                                       t2ptemplate_aman=None):
+                                       data_amans=None):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -524,9 +550,11 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only: bool
         Optional. Whether or not to run the dependent pipeline.
-    t2ptemplate_aman: AxisManager
-        Optional. AxisManager to use as a template for t2p leakage
-        deprojection.
+    data_amans: dict (Optional)
+        A dictionary of AxisManagers with keys (step, process.name)
+        filled with AxisManager processed up to step-1. This is used
+        to pre-load all data AxisManager which could be required when
+        processing simulations (e.g. to provide a T2P template)
     """
     if logger is None:
         logger = init_logger("preprocess")
@@ -580,28 +608,13 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             if init_only:
                 return aman
-            
-            if t2ptemplate_aman is not None:
-                # Replace Q,U with simulated timestreams
-                t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
-                t2ptemplate_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
-
-                t2p_aman = t2pleakage.get_t2p_coeffs(
-                    t2ptemplate_aman,
-                    merge_stats=False
-                )
-                t2pleakage.subtract_t2p(
-                    aman,
-                    t2p_aman,
-                    T_signal=t2ptemplate_aman.dsT
-                )
 
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
-            pipe_proc.run(aman, aman.preprocess, sim=True)
+            pipe_proc.run(aman, aman.preprocess, sim=True, data_amans=data_amans)
 
             return aman
         else:
