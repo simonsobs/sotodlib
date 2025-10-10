@@ -37,7 +37,9 @@ class _Preprocess(object):
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
-        self.skip_on_sim = step_cfgs.get("skip_on_sim", False)
+        self.skip_on_sim = step_cfgs.get("skip_on_sim")
+        if self.skip_on_sim is None:
+            raise ValueError(f"Process {step_cfgs.get('name')} must have `skip_on_sim` key set to True or False")
         self.use_data_aman = step_cfgs.get("use_data_aman", False)
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         """ This function makes changes to the time ordered data AxisManager.
