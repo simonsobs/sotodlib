@@ -1063,6 +1063,9 @@ class BookBinder:
         if np.all( [x==0 for x in self.dropped.values()] ):
             ## no dropped samples from any slot
             return
+
+        ## do not change the format of these messages without also changing the 
+        ## autofixing behavior that is built off these messages.
         msg = '\n'.join([
             f"\t{self.streams[u].obs_id}: {x}" for u, x in self.dropped.items()
         ])
