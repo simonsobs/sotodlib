@@ -58,7 +58,7 @@ class _Preprocess(object):
             Transfer Function simulations and determining which steps should be run.
         """
         if self.process_cfgs is None:
-            return
+            return aman, proc_aman
         raise NotImplementedError
         
     def calc_and_save(self, aman, proc_aman):
@@ -79,7 +79,7 @@ class _Preprocess(object):
             pipeline.
         """
         if self.calc_cfgs is None:
-            return
+            return aman, proc_aman
         raise NotImplementedError
     
     def save(self, proc_aman, *args):
@@ -246,23 +246,57 @@ def _ranges_match( o, n, oidx, nidx):
     omsk[oidx[0]] = nmsk[nidx[0]]
     return Ranges.from_mask(omsk)
 
-def _expand(new, full, wrap_valid=True):
-    """new will become a top level axismanager in full once it is matched to
-    size"""
+def _intersect(new, out):
+    '''Get detector and samples intersection between ``new`` and ``out``.'''
     if 'dets' in new._axes:
-        _, fs_dets, ns_dets = full.dets.intersection(
-            new.dets, 
+        _, fs_dets, ns_dets = out.dets.intersection(
+            new.dets,
             return_slices=True
         )
     else:
-        fs_dets = range(full.dets.count)
+        fs_dets = range(out.dets.count)
+        ns_dets = None
     if 'samps' in new._axes:
-        _, fs_samps, ns_samps = full.samps.intersection(
-            new.samps, 
+        _, fs_samps, ns_samps = out.samps.intersection(
+            new.samps,
             return_slices=True
         )
     else:
         fs_samps = slice(None)
+        ns_samps = None
+
+    return fs_dets, ns_dets, fs_samps, ns_samps
+
+def _wrap_valid_ranges(new, out, valid_name="valid", wrap_name=None):
+    """Wraps in a new Ranges field into ``out`` that tracks the current number
+    of detectors and samples that intersect with ``new``.
+    """
+    fs_dets, _, fs_samps, _ = _intersect(new, out)
+
+    x = Ranges( out.samps.count )
+    m = x.mask()
+    m[fs_samps] = True
+    v = Ranges.from_mask(m)
+
+    valid = RangesMatrix(
+        [v if i in fs_dets else x for i in range(out.dets.count)]
+    )
+    if wrap_name:
+        if wrap_name in out:
+            out.move(wrap_name, None)
+        valid_aman = core.AxisManager(out.dets, out.samps)
+        valid_aman.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
+        out.wrap(wrap_name, valid_aman)
+    else:
+        if valid_name in out:
+            out.move(valid_name, None)
+        out.wrap(valid_name, valid, [(0,'dets'),(1,'samps')])
+
+def _expand(new, full, wrap_valid=True):
+    """new will become a top level axismanager in full once it is matched to
+    size"""
+
+    fs_dets, ns_dets, fs_samps, ns_samps = _intersect(new, full)
 
     out = core.AxisManager()
     for k, v in full._axes.items():
@@ -321,15 +355,8 @@ def _expand(new, full, wrap_valid=True):
                     # Skip expansion for scalar array with no axes.
                     out[k] = v
     if wrap_valid:
-        x = Ranges( full.samps.count )
-        m = x.mask()
-        m[fs_samps] = True
-        v = Ranges.from_mask(m)
+        _wrap_valid_ranges(new, out)
 
-        valid = RangesMatrix( 
-            [v if i in fs_dets else x for i in range(full.dets.count)]
-        )
-        out.wrap('valid',valid,[(0,'dets'),(1,'samps')])
     return out
 
 def update_full_aman(proc_aman, full, wrap_valid):
@@ -496,9 +523,9 @@ class Pipeline(list):
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
-            process.process(aman, proc_aman, sim)
+            aman, proc_aman = process.process(aman, proc_aman, sim)
             if run_calc:
-                process.calc_and_save(aman, proc_aman)
+                aman, proc_aman = process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
                 update_full_aman( proc_aman, full, self.wrap_valid)
             if update_plot:
@@ -512,6 +539,10 @@ class Pipeline(list):
             if aman.dets.count == 0:
                 success = process.name
                 break
+
+        if run_calc:
+           _wrap_valid_ranges(proc_aman, full, valid_name='valid_data',
+                              wrap_name='valid_data')
 
         # copy updated frequency cutoffs to full
         if "frequency_cutoffs" in full:
@@ -530,7 +561,7 @@ class _FracFlaggedMixIn(object):
         proc_aman,
         flags_key=None,
         percentiles=[0, 50, 75, 90, 95, 100],
-        tags=[],
+        tags={},
     ):
         """ Generate a QA metric from the output of this process.
 
@@ -546,9 +577,11 @@ class _FracFlaggedMixIn(object):
             process name.
         percentiles : list
             Percentiles to compute across detectors
-        tags : list
-            Keys into `metadata.det_info` to record as tags with the Influx line.
-            Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+        tags : dict
+            The values are keys into `metadata.det_info` to record as tags with
+            the Influx line. The keys are addded to the default list
+            ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+            from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
 
         Returns
         -------
@@ -569,17 +602,28 @@ class _FracFlaggedMixIn(object):
                 raise ValueError(f"Could not parse flags_key {flags_key}")
 
         # add specified tags
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
-        tag_keys += [t for t in tags if t not in tag_keys]
+        from ..qa.metrics import _get_tag, _has_tag
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys["bandpass"] = "wafer.bandpass"
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
+
+        tag_keys.update(tags)
 
         tags = []
         vals = []
-        from ..qa.metrics import _get_tag, _has_tag
         # record one metric per wafer slot, per bandpass
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 # Compute the number of samples that were flagged
@@ -600,7 +644,7 @@ class _FracFlaggedMixIn(object):
 
                     # get the tags for this wafer (all detectors in this subset share these)
                     tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_base["telescope"] = meta.obs_info.telescope
 
