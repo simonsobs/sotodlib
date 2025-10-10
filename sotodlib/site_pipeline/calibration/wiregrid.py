@@ -261,8 +261,6 @@ def _detect_steps(tod, steps_thresholds=(10, 300)):
     Parameters
     ----------
         tod : AxisManager
-        stopped_time : int (default, 10 sec)
-            the stopped time of your target calibration run
         steps_thresholds : Tuple
             the thresholds on the encoder counts.
             the first element is the upper bound for the static state,
@@ -317,8 +315,6 @@ def find_operation_range(tod, steps_thresholds=(10, 300), ls_margin=2000, is_res
     Parameters
     ----------
         tod : AxisManager
-        stopped_time : int (default, 10 sec)
-            see also _detect_steps
         ls_margin : int (default, 2000 samples)
             the offsets to define the operation range of the wire grid calibration.
         is_restrict : bool (default, True)
@@ -443,18 +439,18 @@ def calc_calibration_data_set(tod, idx_steps_start, idx_steps_stop):
     # wrap the data for each step
     if 'cal_data' in tod.wg._fields.keys():
         tod.wg.move('cal_data', None)
-    axes = core.AxisManager(tod.samps, tod.dets, core.IndexAxis('wg_steps'))
-    axes.wrap('idx_steps_start', idx_steps_start, [(0, 'wg_steps')])
-    axes.wrap('idx_steps_stop',  idx_steps_stop,  [(0, 'wg_steps')])
-    axes.wrap('theta_wire_rad', theta_wire_av , [(0, 'wg_steps')])
-    axes.wrap('theta_wire_std', theta_wire_std, [(0, 'wg_steps')])
-    axes.wrap('ts_step_mid',    ts_step_mid,    [(0, 'wg_steps')])
-    axes.wrap('Q',              step_Q,         [(0, 'wg_steps'), (1, 'dets')])
-    axes.wrap('U',              step_U,         [(0, 'wg_steps'), (1, 'dets')])
-    axes.wrap('Qerr',           step_Qerr,      [(0, 'wg_steps'), (1, 'dets')])
-    axes.wrap('Uerr',           step_Uerr,      [(0, 'wg_steps'), (1, 'dets')])
-    tod.wg.wrap('cal_data', axes)
-    return axes
+    ax = core.AxisManager(tod.samps, tod.dets, core.IndexAxis('wg_steps'))
+    ax.wrap('idx_steps_start', idx_steps_start, [(0, 'wg_steps')])
+    ax.wrap('idx_steps_stop',  idx_steps_stop,  [(0, 'wg_steps')])
+    ax.wrap('theta_wire_rad', theta_wire_av , [(0, 'wg_steps')])
+    ax.wrap('theta_wire_std', theta_wire_std, [(0, 'wg_steps')])
+    ax.wrap('ts_step_mid',    ts_step_mid,    [(0, 'wg_steps')])
+    ax.wrap('Q',              step_Q,         [(0, 'wg_steps'), (1, 'dets')])
+    ax.wrap('U',              step_U,         [(0, 'wg_steps'), (1, 'dets')])
+    ax.wrap('Qerr',           step_Qerr,      [(0, 'wg_steps'), (1, 'dets')])
+    ax.wrap('Uerr',           step_Uerr,      [(0, 'wg_steps'), (1, 'dets')])
+    tod.wg.wrap('cal_data', ax)
+    return ax
 
 ### Circle fitting functions start from here ###
 def _circle_model(params, x, y, xerr, yerr):
@@ -488,7 +484,7 @@ def fit_with_circle(tod):
             - cr(_err) : Estimated radius vaule(, and its fit err).
             - covariance : covariance matrix of the estimated parameters.
             - residual_var : Residual variance.
-            - is_normally_stopped : the status of how fits end.
+            - is_success : the status of how fits end.
 
     """
     _cal = tod.wg.cal_data
@@ -747,13 +743,13 @@ def get_ecal_gamma(tod):
 
     # gamma calibrated with ellipse model
     gamma = np.nanmean(det_angle, axis=1)%np.pi
-    gammga_err = std_err
+    gamma_err = std_err
 
     ax = core.AxisManager(tod.dets, tod.wg.wg_steps)
     ax.wrap('gamma_raw',        det_angle%np.pi,   [(0, 'dets'), (1, 'wg_steps')])
     ax.wrap('gamma_raw_err',    det_angle_err,     [(0, 'dets'), (1, 'wg_steps')])
     ax.wrap('theta_det_instr',  0.5*np.pi - gamma, [(0, 'dets')])
     ax.wrap('gamma',            gamma,             [(0, 'dets')])
-    ax.wrap('gamma_err',        gammga_err,        [(0, 'dets')])
+    ax.wrap('gamma_err',        gamma_err,        [(0, 'dets')])
     tod.wrap('gamma_ecal', ax)
-    return True
+    return ax
