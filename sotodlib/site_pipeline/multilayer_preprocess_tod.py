@@ -142,8 +142,9 @@ def multilayer_preprocess_tod(obs_id,
         logger.info(f"Beginning run for {obs_id}:{group}")
         dets = {gb:gg for gb, gg in zip(group_by_proc, group)}
         try:
-            error, outputs_grp_init, _, aman = pp_util.preproc_or_load_group(obs_id, configs_init,
-                                                                             dets=dets, logger=logger)
+            error, outputs_grp_init, _, aman, proc_aman = pp_util.preproc_or_load_group(obs_id, configs_init,
+                                                                                        dets=dets, logger=logger,
+                                                                                        return_proc_aman=True)
             if error is None:
                 outputs_init.append(outputs_grp_init)
 
@@ -161,7 +162,7 @@ def multilayer_preprocess_tod(obs_id,
 
             # now run the pipeline on the processed axis manager
             logger.info(f"Beginning processing pipeline for {obs_id}:{group}")
-            proc_aman, success = pipe_proc.run(aman)
+            proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
             proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_init))
 
             # remove fields found in aman.preprocess from proc_aman
@@ -176,8 +177,8 @@ def multilayer_preprocess_tod(obs_id,
             n_fail += 1
             continue
         if success != 'end':
-            # If a single group fails we don't log anywhere just mis an entry in the db.
-            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}") 
+            # If a single group fails we don't log anywhere just miss an entry in the db.
+            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}")
             n_fail += 1
             continue
 
@@ -282,7 +283,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs_init: str,
           configs_proc: str,
-          query: Optional[str] = None,
+          query: str = '',
           obs_id: Optional[str] = None,
           overwrite: bool = False,
           min_ctime: Optional[int] = None,
@@ -392,7 +393,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
 def main(configs_init: str,
          configs_proc: str,
-         query: Optional[str] = None,
+         query: str = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
