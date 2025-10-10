@@ -375,6 +375,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         full_aman = meta.preprocess.copy()
     else:
         full_aman = None
+    logger.info("Restricting detectors on all pipeline processes")
     if (
         'valid_data' in meta.preprocess and
         isinstance(meta.preprocess.valid_data, core.AxisManager)
@@ -1024,11 +1025,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         if db_proc_exist:
             try:
                 logger.info(f"both db and depdendent db exist for {obs_id} {dets} loading data and applying preprocessing.")
-                aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                                      configs_proc=configs_proc, logger=logger,
-                                                      return_full_aman=return_proc_aman)
+                aman, proc_aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
+                                                                 configs_proc=configs_proc, logger=logger,
+                                                                 return_full_aman=return_proc_aman)
                 error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman, None
+                return error, [obs_id, dets], [obs_id, dets], aman, proc_aman
             except Exception as e:
                 error = f'Failed to load: {obs_id} {dets}'
                 errmsg = f'{type(e)}: {e}'
@@ -1038,9 +1039,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         else:
             try:
                 logger.info(f"init db exists for {obs_id} {dets} loading data and applying preprocessing.")
-                aman, proc_aman, _ = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
-                                                         context=context_init, logger=logger,
-                                                         return_full_aman=return_proc_aman)
+                aman, proc_aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
+                                                      context=context_init, logger=logger,
+                                                      return_full_aman=return_proc_aman)
             except Exception as e:
                 error = f'Failed to load: {obs_id} {dets}'
                 errmsg = f'{type(e)}: {e}'
@@ -1050,7 +1051,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
             if configs_proc is None:
                 error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman, None
+                return error, [obs_id, dets], [obs_id, dets], aman, proc_aman
             else:
                 try:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
@@ -1075,7 +1076,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
                     # copy proc_aman so we can return proc_aman with full dimensions
                     # and preprocess metadata for both layers
-                    proc_aman_copy = proc_aman.copy()
+                    if return_proc_aman:
+                        proc_aman_copy = proc_aman.copy()
+                    else:
+                        proc_aman_copy = proc_aman
 
                     # remove fields found in aman.preprocess from proc_aman
                     for fld_init in init_fields:
@@ -1155,7 +1159,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
                 # copy proc_aman so we can return proc_aman with full dimensions
                 # and preprocess metadata for both layers
-                proc_aman_copy = proc_aman.copy()
+                if return_proc_aman:
+                    proc_aman_copy = proc_aman.copy()
+                else:
+                    proc_aman_copy = proc_aman
 
                 # remove fields found in aman.preprocess from proc_aman
                 for fld_init in init_fields:
