@@ -13,7 +13,7 @@ from sotodlib.core.metadata.loader import LoaderError
 
 
 dtype = [
-    ('readout_id', '<U40'),
+    ('dets:readout_id', '<U40'),
     ('tau_hwp', 'f4'),
     ('tau_hwp_error', 'f4'),
     ('AQ', 'f4'),
@@ -55,7 +55,7 @@ def run(
                 process.process(tod, proc)
                 process.calc_and_save(tod, proc)
             for i in range(tod.dets.count):
-                dic = {'readout_id': tod.dets.vals[i]}
+                dic = {'dets:readout_id': tod.dets.vals[i]}
                 dic.update({v[0]: tod.tau_hwp[v[0]][i] for v in dtype[1:]})
                 rset.append(dic)
         assert len(rset) == meta.dets.count
@@ -81,8 +81,7 @@ def _main(
     n_split: Optional[int] = 10,
     nprocs: Optional[int] = 1,
     max_retry: Optional[int] = 3,
-    stale: Optional[float] = 3600.
-
+    stale: Optional[float] = 60.
 ):
     """
     Main function for making tau_hwp metadata
