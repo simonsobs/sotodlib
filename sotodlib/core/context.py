@@ -18,7 +18,7 @@ class Context(odict):
     hook_sets = {}
 
     def __init__(self, filename=None, site_file=None, user_file=None,
-                 data=None, load_list='all'):
+                 data=None, load_list='all', metadata_list='all'):
         """Construct a Context object.  Note this is an ordereddict with a few
         attributes added on.
 
@@ -41,6 +41,9 @@ class Context(odict):
           load_list (str or list): A list of databases to load; some
             combination of 'obsdb', 'detdb', 'obsfiledb', or the
             string 'all' to load all of them (default).
+          metadata_list (str or list): A list of metadata labels to load;
+            some combinations of metadata labels, or the string 'all' to
+            load all of them (default).
 
         """
         super().__init__()
@@ -55,18 +58,18 @@ class Context(odict):
         logger.info(f'Using user_file={user_file}.')
 
         self.update(site_cfg)
-        self.update_context(user_cfg)
+        self.update_context(user_cfg, metadata_list)
 
         ok, full_filename, context_cfg = _read_cfg(filename)
         if filename is not None and not ok:
             raise RuntimeError(
                 'Could not load requested context file %s' % filename)
         logger.info(f'Using context_file={full_filename}.')
-        self.update_context(context_cfg)
+        self.update_context(context_cfg, metadata_list)
 
         # Update with anything the user passed in.
         if data is not None:
-            self.update_context(data)
+            self.update_context(data, metadata_list)
 
         self.site_file = site_file
         self.user_file = user_file
@@ -111,11 +114,15 @@ class Context(odict):
             return default
         return self[k]
 
-    def update_context(self, new_stuff):
+    def update_context(self, new_stuff, metadata_list='all'):
         appendable = ['metadata']
         mergeable = ['tags']
 
         for k, v in new_stuff.items():
+            if k == 'metadata':
+                if metadata_list != 'all':
+                    v = [m for m in v if 'label'
+                         in m and m['label'] in metadata_list]
             if k in appendable and k in self:
                 self[k].extend(v)
             elif k in mergeable and k in self:
