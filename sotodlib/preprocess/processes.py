@@ -2594,6 +2594,40 @@ class SmurfGapsFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("smurfgaps", flag_aman)
 
+class GetTauHWP(_Preprocess):
+    """Analyze observation with hwp spinning up or spinning down and
+    compute the timeconstant of detectors from hwp speed dependence of
+    the angle of half-wave plate synchronous signal.
+
+    Example config block::
+
+        - name: "get_tau_hwp"
+          calc:
+            width: 1000
+            apodize_samps: 2000
+            trim_samps: 2000
+            min_fhwp: 1
+            max_fhwp: 2
+            demod_mode: 4
+            name: "tau_hwp"
+            merge: False
+          save: True
+
+    .. autofunction:: sotodlib.hwp.hwp.get_tau_hwp
+    """
+    name = "get_tau_hwp"
+
+    def calc_and_save(self, aman, proc_aman):
+        tau_hwp_aman = hwp.get_tau_hwp(aman, **self.calc_cfgs)
+        self.save(proc_aman, tau_hwp_aman)
+
+    def save(self, proc_aman, tau_hwp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2641,3 +2675,4 @@ _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
 _Preprocess.register(SmurfGapsFlags)
+_Preprocess.register(GetTauHWP)

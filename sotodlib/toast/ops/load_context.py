@@ -128,6 +128,11 @@ class LoadContext(Operator):
         help="Apply site-pipeline pre-processing with this configuration",
     )
 
+    ignore_preprocess_archive = Bool(
+        False,
+        help="If True alway compute preprocess on the fly, don't load from archive.",
+    )
+
     observations = List(list(), help="List of observation IDs to load")
 
     readout_ids = List(list(), help="Only load this list of readout_id values")
@@ -390,7 +395,7 @@ class LoadContext(Operator):
             # If we are using preprocessing, load the archive DB and cut any
             # observations or wafer slots that do not exist.
             preproc_lookup = None
-            if preproc_conf is not None:
+            if (preproc_conf is not None) and (not self.ignore_preprocess_archive):
                 preproc_lookup = dict()
                 preproc_db = preproc_conf["archive"]["index"]
                 con = sqlite3.connect(preproc_db)
@@ -1024,6 +1029,7 @@ class LoadContext(Operator):
             wafer_readers,
             wafer_dets,
             preconfig=pconf,
+            ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
         )
