@@ -8,6 +8,7 @@ import os
 import os.path as op
 import shutil
 import time
+import numpy as np
 
 from sotodlib.io.imprinter import ( 
     Books,
@@ -238,6 +239,42 @@ def block_fix_bad_timing(imprint):
             f"Binding book {book.bid} while accepting bad timing"
         )
         imprint.bind_book(book, allow_bad_timing=True)
+
+def report_smurf_timestamp_error(imprint, book):
+    set_book_rebind(imprint, book)
+    binder = imprint._get_binder_for_book(book)
+
+    for sid, stream in binder.streams.items():
+        try:
+            stream.preprocess()
+        except Exception as e:
+            print(f"Did not finish preprocessing {sid} received error: {e}")
+
+    binder.set_min_max_ctime()
+    error_time = []
+
+    msg="          \t error ctime  \t missed time \t time since start \t time until stop\n"
+    for sid, stream in binder.streams.items():
+        msk = np.all([
+            stream.times >= binder.min_ctime,
+            stream.times <= binder.max_ctime,
+        ], axis=0)
+        idxs = np.where(np.diff(stream.times[msk]) <= 0)[0]
+        msg += f"{sid}"
+        if len(idxs) == 0:
+            msg += "\tNo Errors"
+        for x in idxs:
+            error_time.append(stream.times[msk][x])
+            msg += f"\t{stream.times[msk][x]:5f}\t{np.diff(stream.times[msk])[x]:5f}"
+            msg += f"\t{stream.times[msk][x]-binder.min_ctime:5f}"
+            msg += f"\t{binder.max_ctime-stream.times[msk][x]:5f}\n"
+    
+    ## reset to failed
+    book.status = FAILED
+    imprint.get_session().commit()
+    
+    del binder
+    return msg
 
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for
