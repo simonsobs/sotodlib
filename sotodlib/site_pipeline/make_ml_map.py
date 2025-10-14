@@ -222,11 +222,13 @@ def main(**args):
                     obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
                 if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                    L.debug("Datacount: %s full" % (sub_id))
                     continue
                 # Check nans
                 mask = np.logical_not(np.isfinite(obs.signal))
                 if mask.sum() > 0:
                     L.debug("Skipped %s (a nan in signal)" % (sub_id))
+                    L.debug("Datacount: %s full" % (sub_id))
                     continue
                 # Check all 0s
                 zero_dets = np.sum(obs.signal, axis=1)
@@ -286,12 +288,11 @@ def main(**args):
                     #good   = dev.get(good) # cuts, dets, fplane etc. need this on the cpu
                     #cuts   = cuts  [good]
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
-                        L.debug("Skipped %s (more than 40pc of detectors cut by sens)" % (sub_id))
+                        L.debug("Skipped %s (more than 50pc of detectors cut by sens)" % (sub_id))
+                        L.debug("Datacount: %s full" % (sub_id))
                         continue
                     else:
                         obs.restrict("dets", good)
-                    #L.debug(f"{sub_id} has {good.sum()}/{obs.dets.count} detectors good")
-                    #obs.restrict("dets", good)
                     # Apply pointing model
                     #pointing_model.apply_pointing_model(obs)
                     # Calibrate to pW
@@ -299,10 +300,11 @@ def main(**args):
                     # Calibrate to K_cmb
                     #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
+                        L.debug("Datacount: %s full" % (sub_id))
                         continue
                     # Gapfill glitches. This function name isn't the clearest
                     #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
@@ -342,6 +344,8 @@ def main(**args):
 
                 if passinfo.downsample != 1:
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
+                mmask = obs.flags.glitch_flags.mask()
+                L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
@@ -373,6 +377,7 @@ def main(**args):
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
             except (DataMissing,IndexError,ValueError,LoaderError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
+                L.debug("Datacount: %s full" % (sub_id))
                 continue
 
         nkept = comm.allreduce(nkept)
