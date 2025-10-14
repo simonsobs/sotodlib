@@ -108,14 +108,11 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     else:
         raise NoTODFound("Invalid mode!")
 
-    if not per_tube:
-        # We will make one map per period-detset-band
-        obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
-                                     wafer=wafer, freq=freq, per_tube=False)
-    else:
-        # We will make one map per period-band (looping over all available wafers)
-        obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
-                                     wafer=wafer, freq=freq, per_tube=True)
+    
+    # We will make one map per period-detset-band if per_tube=False
+    # or per period-band if per_tube=True
+    obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
+                                     wafer=wafer, freq=freq, per_tube=per_tube)
     obskeys  = sorted(obslists.keys())
     return obslists, obskeys, periods, obs_infos
 
