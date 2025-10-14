@@ -128,8 +128,6 @@ def _main(
             obs_ids.append(obs['obs_id'])
 
     db_path = os.path.join(output_dir, 'tau_hwp.sqlite')
-    h5_fn = 'tau_hwp.h5'
-    h5_path = os.path.join(output_dir, 'tau_hwp.h5')
     if os.path.exists(db_path):
         logger.info(f"Mapping {db_path} for the "
                     "archive index.")
@@ -183,6 +181,9 @@ def _main(
             if rset is not None:
                 try:
                     logger.info(f'saving {obs_id}...')
+                    unix = obs_id.split('_')[1][:4]  # first 4 digits
+                    h5_fn = f'tau_hwp_{unix}.h5'
+                    h5_path = os.path.join(output_dir, h5_fn)
                     write_dataset(
                         data=rset,
                         filename=h5_path,
