@@ -28,6 +28,7 @@ def run(
     logger,
     context_path,
     process_pipe,
+    metadata_list,
     obs_id,
     n_split,
 ):
@@ -40,7 +41,7 @@ def run(
     rset = core.metadata.ResultSet.from_friend(res_arr)
 
     try:
-        ctx = core.Context(context_path)
+        ctx = core.Context(context_path, metadata_list=metadata_list)
         meta = ctx.get_meta(obs_id)
         nper = int(np.ceil(meta.dets.count/n_split))
         logger.info(f'process {obs_id}, dets {meta.dets.count}')
@@ -74,6 +75,7 @@ def _main(
     context_path: str,
     process_pipe: dict,
     output_dir: str,
+    metadata_list: Optional[List[str]] = 'all',
     verbosity: Optional[int] = 2,
     overwrite: Optional[bool] = False,
     tags: Optional[List[str]] = None,
@@ -94,6 +96,8 @@ def _main(
         Dictionary of process pipeline config
     output_dir: str
         Path to the output directory
+    metadata_list: str or list of str
+        List of metadata labels to load
     verbosity: int
         0: Error, 1: Warning, 2: Info, 3: Debug
     overwrite: bool
@@ -116,7 +120,7 @@ def _main(
     logger = util.init_logger(
         __name__, 'make_tau_hwp: ', verbosity=verbosity)
 
-    ctx = core.Context(context_path)
+    ctx = core.Context(context_path, metadata_list=metadata_list)
     obs_ids = []
     for tag in tags:
         obslist = ctx.obsdb.query("subtype = 'cal'", tags=[tag])
@@ -167,6 +171,7 @@ def _main(
                 logger,
                 context_path,
                 process_pipe,
+                metadata_list,
                 obs_id=job.tags['obs_id'],
                 n_split=n_split,
             ))
