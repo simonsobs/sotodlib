@@ -303,6 +303,21 @@ class ContextTest(unittest.TestCase):
         tod = ctx.get_obs(obs_id, dets=det_info)
         self.assertEqual(tod.signal.shape, (n_det // 2, n_samp))
 
+        context_with_metadata = {
+            'tags': {},
+            'imports': [],
+            'metadata': [
+                {'db': 'test0.sqlite', 'label': 'test0'},
+                {'db': 'test1.sqlite', 'label': 'test1'},
+                {'db': 'test2.sqlite', 'label': 'test2'},
+            ],
+        }
+        ctx_file = self._write_context(context_with_metadata)
+        ctx = Context(ctx_file)
+        self.assertEqual(len(ctx['metadata']), 3)
+        ctx = Context(ctx_file, metadata_list=['test0'])
+        self.assertEqual(len(ctx['metadata']), 1)
+
     def test_120_load_fields(self):
         dataset_sim = DatasetSim()
         obs_id = dataset_sim.obss['obs_id'][1]

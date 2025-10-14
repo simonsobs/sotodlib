@@ -366,7 +366,11 @@ class FocalPlane:
         if fp_full.keys is None:
             raise ValueError("fp_full somehow has no keys")
         det_ids = fp_full["dets:det_id"]
-        id_strs = fp_full["id_strs"]
+        if "id_strs" in fp_full.keys:
+            id_strs = fp_full["id_strs"]
+        else:
+            logger.warning("No id strings found in this focal plane, may be old.")
+            id_strs = np.zeros(len(fp_full), str)
         avg_fp = np.column_stack(
             (
                 np.array(fp_full["xi_m"]),
