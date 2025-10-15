@@ -312,10 +312,18 @@ def run_match(runner: Runner, detset: str) -> bool:
         else:
             wafer_slot = None
 
-        match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
-        fpath = os.path.join(runner.match_dir, f"{ds}.h5")
-        match.save(fpath)
-        logger.info(f"Saved match to file: {fpath}")
+        try:
+            match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
+            fpath = os.path.join(runner.match_dir, f"{ds}.h5")
+            match.save(fpath)
+            logger.info(f"Saved match to file: {fpath}")
+        except Exception as e:
+            add_to_failed_cache(
+                runner.failed_detset_cache_path, ds, "MATCH_FAILED",
+                runner.cfg
+            )
+            logger.error(f"deset {ds} failed with {e}")
+            continue
 
     return True
 
