@@ -333,7 +333,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None, logger=None):
+                        no_signal=None, logger=None, return_full_aman=False):
     """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -360,6 +360,9 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     logger: PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
+    return_full_aman: bool
+        Optional. Return unrestricted axis manager alongside restricted aman
+        if True, otherwise return None.
     """
 
     if logger is None:
@@ -367,6 +370,12 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
     configs, context = get_preprocess_context(configs, context)
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
+
+    if return_full_aman:
+        full_aman = meta.preprocess.copy()
+    else:
+        full_aman = None
+    logger.info("Restricting detectors on all pipeline processes")
     if (
         'valid_data' in meta.preprocess and
         isinstance(meta.preprocess.valid_data, core.AxisManager)
@@ -385,12 +394,13 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
         pipe.run(aman, aman.preprocess, select=False)
-        return aman
+        return aman, full_aman
 
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
-                                   logger=None, init_only=False):
+                                   logger=None, init_only=False,
+                                   return_full_aman=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -421,6 +431,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only: bool
         Optional. If True, do not run the dependent pipeline.
+    return_full_aman: bool
+        Optional. Return unrestricted axis manager alongside restricted aman
+        if True, otherwise return None.
     """
 
     if logger is None:
@@ -446,14 +459,37 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
     if meta_init.dets.count == 0 or meta_proc.dets.count == 0:
         logger.info(f"No detectors in obs {obs_id}")
-        return None
+        return None, None
     else:
+        if return_full_aman:
+            full_aman = meta_init.preprocess.copy()
+            if 'valid_data' in full_aman:
+                full_aman.move('valid_data', None)
+            full_aman.merge(meta_proc.preprocess)
+        else:
+            full_aman = None
+
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
         aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+
+            logger.info("Restricting detectors on all init pipeline processes")
+            if (
+                'valid_data' in meta_init.preprocess and
+                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
+            else:
+              keep_all = np.ones(meta_init.dets.count,dtype=bool)
+              for process in pipe_init[:]:
+                  keep = process.select(meta_init, in_place=False)
+                  if isinstance(keep, np.ndarray):
+                      keep_all &= keep
+            meta_init.restrict("dets", meta_init.dets.vals[keep_all])
+            meta_proc.restrict("dets", meta_init.dets.vals)
 
             logger.info("Restricting detectors on all proc pipeline processes")
             if (
@@ -467,6 +503,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                     keep = process.select(meta_proc, in_place=False)
                     if isinstance(keep, np.ndarray):
                         keep_all &= keep
+
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
 
@@ -474,17 +511,15 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, select=False)
             if init_only:
-                return aman
+                return aman, full_aman
 
             logger.info("Running dependent pipeline")
-            proc_aman = context_proc.get_meta(obs_id, meta=aman)
-
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
-            aman.preprocess.merge(proc_aman.preprocess)
+            aman.preprocess.merge(meta_proc.preprocess)
             pipe_proc.run(aman, aman.preprocess, select=False)
 
-            return aman
+            return aman, full_aman
         else:
             raise ValueError('Dependency check between configs failed.')
 
@@ -880,7 +915,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False):
+                          logger=None, overwrite=False, return_proc_aman=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -911,6 +946,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Optional. Logger object or None will generate a new one.
     overwrite: bool
         Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
+    return_proc_aman: bool
+        Optional. Return proc_aman if True, otherwise return None.  proc_aman is still merged
+        into aman, where it will be restricted even if return_proc_aman is True.
 
     Returns
     -------
@@ -928,6 +966,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         See output_init for possible values.
     aman: Core.AxisManager
         Processed axis manager only returned if ``error`` is ``None`` or ``'load_success'``.
+    proc_aman: Core.AxisManager or None
+        If return_proc_aman is ``True``, the unrestricted preprocessing axis manager
+        is returned when the pipelines are run.  None is returned when loading
+        from only the first layer or from both layers, when an error occurs,
+        or when return_proc_aman is ``False``.
     """
 
     if logger is None:
@@ -950,7 +993,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         group_by, groups, error = get_groups(obs_id, configs_init, context_init)
 
     if error is not None:
-        return error[0], [error[1], error[2]], [error[1], error[2]], None
+        return error[0], [error[1], error[2]], [error[1], error[2]], None, None
 
     all_groups = groups.copy()
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
@@ -963,7 +1006,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                            f"groups in observation: {obs_id}:{cur_groups}. "
                            f"No analysis to run.")
             error = 'no_group_overlap'
-            return error, [obs_id, dets], [obs_id, dets], None
+            return error, [obs_id, dets], [obs_id, dets], None, None
 
     db_init_exist = find_db(obs_id, configs_init, dets, context_init,
                             logger=logger)
@@ -976,37 +1019,39 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     if (not db_init_exist) and db_proc_exist and (not overwrite):
         logger.info('dependent db requires initial db if not overwriting')
         error = 'no_init_db'
-        return error, [obs_id, dets], [obs_id, dets], None
+        return error, [obs_id, dets], [obs_id, dets], None, None
 
     if db_init_exist and (not overwrite):
         if db_proc_exist:
             try:
                 logger.info(f"both db and depdendent db exist for {obs_id} {dets} loading data and applying preprocessing.")
-                aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                                      configs_proc=configs_proc, logger=logger)
+                aman, proc_aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
+                                                                 configs_proc=configs_proc, logger=logger,
+                                                                 return_full_aman=return_proc_aman)
                 error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman
+                return error, [obs_id, dets], [obs_id, dets], aman, proc_aman
             except Exception as e:
                 error = f'Failed to load: {obs_id} {dets}'
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
+                return error, [errmsg, tb], [errmsg, tb], None, None
         else:
             try:
                 logger.info(f"init db exists for {obs_id} {dets} loading data and applying preprocessing.")
-                aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
-                                           context=context_init, logger=logger)
+                aman, proc_aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
+                                                      context=context_init, logger=logger,
+                                                      return_full_aman=return_proc_aman)
             except Exception as e:
                 error = f'Failed to load: {obs_id} {dets}'
                 errmsg = f'{type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
+                return error, [errmsg, tb], [errmsg, tb], None, None
 
             if configs_proc is None:
                 error = 'load_success'
-                return error, [obs_id, dets], [obs_id, dets], aman
+                return error, [obs_id, dets], [obs_id, dets], aman, proc_aman
             else:
                 try:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
@@ -1026,33 +1071,43 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                         aman.move("tags", None)
                     aman.wrap('tags', tags_proc)
 
-                    proc_aman, success = pipe_proc.run(aman)
+                    proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
+                    proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+
+                    # copy proc_aman so we can return proc_aman with full dimensions
+                    # and preprocess metadata for both layers
+                    if return_proc_aman:
+                        proc_aman_copy = proc_aman.copy()
+                    else:
+                        proc_aman_copy = proc_aman
 
                     # remove fields found in aman.preprocess from proc_aman
                     for fld_init in init_fields:
-                        if fld_init in proc_aman:
-                            proc_aman.move(fld_init, None)
-
-                    proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+                        if fld_init in proc_aman_copy:
+                            proc_aman_copy.move(fld_init, None)
 
                 except Exception as e:
                     error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
                     errmsg = f'Dependent pipeline failed with {type(e)}: {e}'
                     tb = ''.join(traceback.format_tb(e.__traceback__))
                     logger.info(f"{error}\n{errmsg}\n{tb}")
-                    return error, [errmsg, tb], [errmsg, tb], None
+                    return error, [errmsg, tb], [errmsg, tb], None, None
+
                 if success != 'end':
                     # If a single group fails we don't log anywhere just mis an entry in the db.
-                    return success, [obs_id, dets], [obs_id, dets], None
+                    return success, [obs_id, dets], [obs_id, dets], None, None
 
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                proc_aman_copy.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
                 if 'valid_data' in aman.preprocess:
                     aman.preprocess.move('valid_data', None)
-                aman.preprocess.merge(proc_aman)
+                aman.preprocess.merge(proc_aman_copy)
 
-                return error, [obs_id, dets], outputs_proc, aman
+                if return_proc_aman:
+                    return error, [obs_id, dets], outputs_proc, aman, proc_aman
+                else:
+                    return error, [obs_id, dets], outputs_proc, aman, None
     else:
         # pipeline for init config
         logger.info(f"Generating new preproc db entry for {obs_id} {dets}")
@@ -1070,16 +1125,20 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             errmsg = f'Initial pipeline failed with {type(e)}: {e}'
             tb = ''.join(traceback.format_tb(e.__traceback__))
             logger.info(f"{error}\n{errmsg}\n{tb}")
-            return error, [errmsg, tb], [errmsg, tb], None
+            return error, [errmsg, tb], [errmsg, tb], None, None
+
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
-            return success, [obs_id, dets], [obs_id, dets], None
+            return success, [obs_id, dets], [obs_id, dets], None, None
 
         logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
         proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
 
         if configs_proc is None:
-            return error, outputs_init, [obs_id, dets], aman
+            if return_proc_aman:
+                return error, outputs_init, [obs_id, dets], aman, proc_aman
+            else:
+                return error, outputs_init, [obs_id, dets], aman, None
         else:
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
@@ -1095,33 +1154,43 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                     aman.move("tags", None)
                 aman.wrap('tags', tags_proc)
 
-                proc_aman, success = pipe_proc.run(aman)
+                proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
+                proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+
+                # copy proc_aman so we can return proc_aman with full dimensions
+                # and preprocess metadata for both layers
+                if return_proc_aman:
+                    proc_aman_copy = proc_aman.copy()
+                else:
+                    proc_aman_copy = proc_aman
 
                 # remove fields found in aman.preprocess from proc_aman
                 for fld_init in init_fields:
-                    if fld_init in proc_aman:
-                        proc_aman.move(fld_init, None)
-
-                proc_aman.wrap('pcfg_ref', aman_cfgs_ref)
+                    if fld_init in proc_aman_copy:
+                        proc_aman_copy.move(fld_init, None)
 
             except Exception as e:
                 error = f'Failed to run dependent processing pipeline: {obs_id} {dets}'
                 errmsg = f'Dependent pipeline failed with {type(e)}: {e}'
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.info(f"{error}\n{errmsg}\n{tb}")
-                return error, [errmsg, tb], [errmsg, tb], None
+                return error, [errmsg, tb], [errmsg, tb], None, None
+
             if success != 'end':
                 # If a single group fails we don't log anywhere just mis an entry in the db.
-                return success, [obs_id, dets], [obs_id, dets], None
+                return success, [obs_id, dets], [obs_id, dets], None, None
 
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-            proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+            proc_aman_copy.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
-            aman.preprocess.merge(proc_aman)
+            aman.preprocess.merge(proc_aman_copy)
 
-            return error, outputs_init, outputs_proc, aman
+            if return_proc_aman:
+                return error, outputs_init, outputs_proc, aman, proc_aman
+            else:
+                return error, outputs_init, outputs_proc, aman, None
 
 
 def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
