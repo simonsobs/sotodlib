@@ -251,7 +251,6 @@ def report_smurf_timestamp_error(imprint, book):
             print(f"Did not finish preprocessing {sid} received error: {e}")
 
     binder.set_min_max_ctime()
-    error_time = []
 
     msg="          \t error ctime  \t missed time \t time since start \t time until stop\n"
     for sid, stream in binder.streams.items():
@@ -264,10 +263,44 @@ def report_smurf_timestamp_error(imprint, book):
         if len(idxs) == 0:
             msg += "\tNo Errors"
         for x in idxs:
-            error_time.append(stream.times[msk][x])
             msg += f"\t{stream.times[msk][x]:5f}\t{np.diff(stream.times[msk])[x]:5f}"
             msg += f"\t{stream.times[msk][x]-binder.min_ctime:5f}"
             msg += f"\t{binder.max_ctime-stream.times[msk][x]:5f}\n"
+    
+    ## reset to failed
+    book.status = FAILED
+    imprint.get_session().commit()
+    
+    del binder
+    return msg
+
+def report_acu_timestamp_error(imprint, book, max_dt=10):
+    set_book_rebind(imprint, book)
+    binder = imprint._get_binder_for_book(book)
+    binder.preprocess()
+    ancil = binder.ancil
+
+    msg="          \t error ctime  \t missed time \t time since start \t time until stop\n"
+
+    for fld in ['az', 'el', 'boresight', 'corotator_enc']:
+        f = getattr(ancil.hkdata, fld)
+        if f is None:
+            continue
+        msk = np.all([
+            f.times >= binder.min_ctime,
+            f.times <= binder.max_ctime,
+        ], axis=0)
+        msg += f"{f.addr}"
+        if np.sum(msk) <= 2:
+            msg += f"does not overlap detector data\n"
+            continue
+        idxs = np.where(np.diff(f.times[msk])>max_dt)[0]
+        if len(idxs) == 0:
+            msg += f"\t has no drops\n"
+        for x in idxs:
+            msg += f"\t{f.times[msk][x]:5f}\t{np.diff(f.times[msk])[x]:5f}"
+            msg += f"\t{f.times[msk][x]-binder.min_ctime:5f}"
+            msg += f"\t{binder.max_ctime-f.times[msk][x]:5f}\n"
     
     ## reset to failed
     book.status = FAILED
