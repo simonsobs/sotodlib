@@ -294,92 +294,6 @@ def _load_ctx(config):
     return amans, obs_ids, ot_sid
 
 
-def _load_rset_single(config):
-    obs_id = config["resultsets"].get("obs_id", "")
-    pointing_rset = read_dataset(*config["resultsets"]["pointing"])
-    pointing_aman = pointing_rset.to_axismanager(axis_key="dets:readout_id")
-    aman = AxisManager(pointing_aman.dets)
-    aman = aman.wrap("pointing", pointing_aman)
-
-    if "polarization" in config["resultsets"]:
-        polarization_rset = read_dataset(*config["resultsets"]["polarization"])
-        polarization_aman = polarization_rset.to_axismanager(axis_key="dets:readout_id")
-        aman = aman.wrap("polarization", polarization_aman)
-
-    det_info = AxisManager(aman.dets)
-    dm_rset = read_dataset(*config["resultsets"]["detmap"])
-    dm_aman = dm_rset.to_axismanager(axis_key="readout_id")
-    det_info.wrap("wafer", dm_aman)
-    det_info.wrap("readout_id", det_info.dets.vals, [(0, det_info.dets)])
-    det_info.wrap("det_id", det_info.wafer.det_id, [(0, det_info.dets)])
-    det_info.wrap(
-        "stream_id",
-        np.array([config["stream_id"].lower()] * det_info.dets.count),
-        [(0, det_info.dets)],
-    )
-    det_info.wrap(
-        "wafer_slot",
-        np.array([config["wafer_slot"].lower()] * det_info.dets.count),
-        [(0, det_info.dets)],
-    )
-    det_info.restrict("dets", det_info.dets.vals[det_info.det_id != ""])
-    det_info.det_id = np.char.strip(det_info.det_id)  # Needed for some old results
-    aman = aman.wrap("det_info", det_info)
-    aman.restrict("dets", aman.dets.vals[aman.det_info.det_id != "NO_MATCH"])
-
-    obs_info = AxisManager()
-    obs_info.wrap("telescope_flavor", config["telescope_flavor"].lower())
-    obs_info.wrap("tube_slot", config["tube_slot"].lower())
-    aman.wrap("obs_info", obs_info)
-
-    smurf = AxisManager(aman.dets)
-    if "band" in aman.pointing:
-        smurf.wrap("band", np.array(aman.pointing.band, dtype=int), [(0, smurf.dets)])
-    elif "wafer" in det_info and "smurf_band" in det_info.wafer:
-        smurf.wrap(
-            "band", np.array(det_info.wafer.smurf_band, dtype=int), [(0, smurf.dets)]
-        )
-    if "channel" in aman.pointing:
-        smurf.wrap(
-            "channel", np.array(aman.pointing.channel, dtype=int), [(0, smurf.dets)]
-        )
-    elif "wafer" in det_info and "smurf_channel" in det_info.wafer:
-        smurf.wrap(
-            "channel",
-            np.array(det_info.wafer.smurf_channel, dtype=int),
-            [(0, smurf.dets)],
-        )
-    aman.det_info.wrap("smurf", smurf)
-
-    return aman, obs_id
-
-
-def _load_rset(config):
-    stream_id = config["stream_id"]
-    telescope_flavor = config["telescope_flavor"].lower()
-    ot = config["tube_slot"].lower()
-    ws = config["wafer_slot"].lower()
-    obs = config["resultsets"]
-    _config = config.copy()
-    obs_ids = np.array(list(obs.keys()))
-    amans: List[Optional[AxisManager]] = [None] * len(obs_ids)
-    obs_info = AxisManager()
-    obs_info.wrap("stream_id", stream_id)
-    for i, (obs_id, rsets) in enumerate(obs.items()):
-        _config["resultsets"] = rsets
-        _config["resultsets"]["obs_id"] = obs_id
-        aman, _ = _load_rset_single(_config)
-        if "det_info" not in aman or "det_id" not in aman.det_info:
-            raise ValueError(f"No detmap for {obs_id}")
-        amans[i] = aman
-
-    return (
-        amans,
-        obs_ids,
-        [(telescope_flavor, ot, ws, stream_id)],
-    )
-
-
 def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     config_dir = config.get("pipeline_config_dir", os.environ["PIPELINE_CONFIG_DIR"])
     config_path = os.path.join(config_dir, "shared/focalplane/ufm_to_fp.yaml")
@@ -600,8 +514,6 @@ def main():
     # Load data
     if "context" in config:
         amans, obs_ids, ot_sids = _load_ctx(config)
-    elif "resultsets" in config:
-        amans, obs_ids, ot_sids = _load_rset(config)
     else:
         raise ValueError("No valid inputs provided")
     if len(ot_sids) == 0:
@@ -625,14 +537,6 @@ def main():
     sha = f"{repo.head.object.hexsha}{'_dirty'*repo.is_dirty()}"
     config["git_sha"] = sha
     cfg_str = str(yaml.dump(config))
-
-    # Need to move installed OT and WS of array to templace for this
-    # if config.get("pad", False):
-    #     logger.info("Padding missing arrays with template, getting complete list of arrays from template")
-    #     if not have_template:
-    #         logger.warning("\tNo template provided, arrays not found in any observations will be missing")
-    #     with h5py.File(template_path) as f:
-    #         stream_ids = list(f.keys())
 
     # Split up into batches
     # Right now either per_obs or all at once
