@@ -119,6 +119,7 @@ class DetCalCfg:
         raise_exceptions: bool = False,
         apply_cal_correction: bool = True,
         hwpss_subtraction: bool = False,
+        metadata_list: Union[str, List[str]] = 'all',
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
         cache_failed_obsids: bool = True,
@@ -134,7 +135,7 @@ class DetCalCfg:
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
-        ctx = core.Context(self.context_path)
+        self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
         self.hwpss_subtraction = hwpss_subtraction
@@ -352,7 +353,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     res = ObsInfoResult(obs_id)
 
     try:
-        ctx = core.Context(cfg.context_path)
+        ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
         am = ctx.get_obs(
             obs_id,
             samples=(0, 1),
@@ -553,7 +554,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
 
         if cfg.hwpss_subtraction:
             # Reanalyze biasstep with hwpss subtraction
-            ctx = core.Context(cfg.context_path)
+            ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
             bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
 
             for dset, bsa in bsas.items():
@@ -729,7 +730,7 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
     This will included non-processed obs-ids that are not found in the fail cache,
     and will be limitted to cfg.num_obs.
     """
-    ctx = core.Context(cfg.context_path)
+    ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
     # Find all obs_ids that have not been processed
     with open(cfg.failed_cache_file, "r") as f:
         failed_cache = yaml.safe_load(f)
