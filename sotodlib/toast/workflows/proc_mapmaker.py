@@ -88,14 +88,6 @@ def setup_mapmaker(operators, templates):
         )
     )
     templates.append(
-        toast.templates.Hwpss(
-            name="hwpss",
-            hwp_angle=defaults.hwp_angle,
-            harmonics=5,
-            enabled=False,
-        )
-    )
-    templates.append(
         toast.templates.Fourier2D(
             name="fourier2d",
             correlation_length=5.0 * u.second,
