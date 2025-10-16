@@ -329,3 +329,54 @@ def subtract_t2p(aman, t2p_aman, T_signal=None):
         aman.demodU -= np.multiply(T_signal.T, t2p_aman.coeffsU).T
     else:
         raise ValueError('no leakage coefficients found in axis manager')
+
+def get_t2p_cuts(aman, t2p_aman=None, redchi2s=True, error=True, lam=False, 
+                 redchi2s_lims=(0.1, 3), error_lims=(0, 0.03), lam_lims=(0, 0.01),
+                 in_place=False):
+    """
+    Restrict detectors based on the t2p fit stats or t2p coefficient.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod.
+    t2p_aman : AxisManager
+        Axis manager with Q and U leakage coeffients.
+        If joint fitting was used in get_t2p_coeffs, Q coeffs are in 
+        fields ``lamQ`` and ``AQ`` and U coeffs are in ``lamU`` and 
+        ``AU``. Otherwise Q coeff is in field ``coeffsQ`` and U coeff 
+        in ``coeffsU``.
+    redchi2s : bool
+        If True, restrict detectors based on redchi2s values.
+    error : bool
+        If True, restrict detectors based on fit errors of lamQ and lamU.
+    lam : bool
+        If True, restrict detectors based on the amplitude of lamQ and lamU.
+    redchi2s_lims : tuple
+        The lower and upper limit of acceptable redchi2s.
+    error_lims : tuple
+        The lower and upper limit of acceptable errors.
+    lam_lims : tuple
+        The lower and upper limit of acceptable leakage coefficient.
+    """
+    if t2p_aman is None:
+        if 't2p_stats' not in aman:
+            raise ValueError('t2p_aman must be provided or already in aman')
+        t2p_aman = aman.t2p_stats
+    mask = np.ones(aman.dets.count, dtype=bool)
+    if redchi2s:
+        redchi2s_t2p = t2p_aman.redchi2s
+        mask_redchi2s = (redchi2s_lims[0] < redchi2s_t2p) & (redchi2s_t2p < redchi2s_lims[1])
+        mask = np.logical_and(mask, mask_redchi2s)
+    if error:
+        error_t2p = np.sqrt(t2p_aman.lamQ_error**2+t2p_aman.lamU_error**2)
+        mask_error = (error_lims[0] < error_t2p) & (error_t2p < error_lims[1])
+        mask = np.logical_and(mask, mask_error)
+    if lam:
+        lam_t2p = np.sqrt(t2p_aman.lamQ**2 + t2p_aman.lamU**2)
+        mask_lam = (lam_lims[0] < lam_t2p) & (lam_t2p < lam_lims[1])
+        mask = np.logical_and(mask, mask_lam)
+    if in_place:
+        aman.restrict('dets', aman.dets.vals[mask])
+    else:
+        return mask
