@@ -243,8 +243,8 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
         else:
             obs.restrict("dets", good)
         # Disqualify overly cut detectors
-        #good_dets = mapmaking.find_usable_detectors(obs)
-        #obs.restrict("dets", good_dets)
+        good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
+        obs.restrict("dets", good_dets)
 
         #if len(good_dets) > 0:
             # Gapfill glitches. This function name isn't the clearest
@@ -429,7 +429,7 @@ def main(config_file=None, defaults=defaults, **args):
     elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
 
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'])
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'],per_tube=True)
     
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
