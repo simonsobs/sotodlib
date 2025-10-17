@@ -217,7 +217,8 @@ class MLMapmaker(Operator):
         help="Truncate TOD to an easily factorizable length to ensure efficient FFT.",
     )
 
-    write_div = Bool(True, help="Write out the noise weight map")
+    write_div = Bool(True, help="Write out the full noise weight map")
+    write_div_TT = Bool(True, help="Write out the TT component noise weight map")
     write_hits= Bool(True, help="Write out the hitcount map")
 
     write_rhs = Bool(
@@ -513,15 +514,18 @@ class MLMapmaker(Operator):
                 fname = signal_map.write(prefix, "rhs", signal_map.rhs)
                 log.info_rank(f"Wrote rhs to {fname}", comm=comm)
 
-        if self.write_div:
-            fname = f"{prefix}sky_div.fits"
-            if self.skip_existing and os.path.isfile(fname):
-                log.info_rank(f"Skipping existing div in {fname}", comm=comm)
-            else:
-                # FIXME : only writing the TT variance to avoid integer overflow in communication
-                fname = signal_map.write(prefix, "div", signal_map.div)
-                # fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
-                log.info_rank(f"Wrote div to {fname}", comm=comm)
+        if self.write_div or self.write_div_TT:
+            # Write each covariance element seperately, to reduce peak memory.
+            for i in range(signal_map.div.shape[0]):
+                for j in range(signal_map.div.shape[1]):
+                    if self.write_div_TT and not self.write_div and i+j > 0:
+                        continue
+                    fname = f"{prefix}sky_div{i}{j}.fits"
+                    if self.skip_existing and os.path.isfile(fname):
+                        log.info_rank(f"Skipping existing div{i}{j} in {fname}", comm=comm)
+                    else:
+                        fname = signal_map.write(prefix, f"div{i}{j}", signal_map.div[i, j])
+                        log.info_rank(f"Wrote div{i}{j} to {fname}", comm=comm)
 
         if self.write_hits:
             fname = f"{prefix}sky_hits.fits"
