@@ -778,6 +778,10 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         msg = result.fail_msg
         if msg is None:
             msg = "unknown error"
+        if 'sotodlib.core.metadata.loader.LoaderError' in msg:
+            logger.error(f"obs_id {obs_id} failed due to medatada loader "
+                         "error, try again later")
+            return
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
