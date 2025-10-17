@@ -18,10 +18,12 @@ from typing import Optional, Union, Dict, List, Any, Tuple, Literal, Callable
 from queue import Queue
 import argparse
 
+from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.hwp import get_hwpss, subtract_hwpss
 import sotodlib.site_pipeline.util as sp_util
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
@@ -116,6 +118,8 @@ class DetCalCfg:
         *,
         raise_exceptions: bool = False,
         apply_cal_correction: bool = True,
+        hwpss_subtraction: bool = False,
+        metadata_list: Union[str, List[str]] = 'all',
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
         cache_failed_obsids: bool = True,
@@ -131,9 +135,10 @@ class DetCalCfg:
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
-        ctx = core.Context(self.context_path)
+        self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
+        self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
         self.show_pb = show_pb
         self.run_method = run_method
@@ -348,7 +353,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     res = ObsInfoResult(obs_id)
 
     try:
-        ctx = core.Context(cfg.context_path)
+        ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
         am = ctx.get_obs(
             obs_id,
             samples=(0, 1),
@@ -457,6 +462,50 @@ class CalRessetResult:
     result_set: Optional[np.ndarray] = None
 
 
+def biases_flags(bsa, buffer=200):
+    """
+    Make flags that mask bias steps
+
+    Args
+        bsa: BiasStepAnalysis object
+        buffer: buffet to apply on result flags
+    Returns
+        RangesMatrix
+    """
+    mask = np.zeros((bsa.am.dets.count, bsa.am.samps.count),
+                    dtype=bool)
+    for i, bg in enumerate(bsa.bgmap):
+        if bg == -1:
+            continue
+        mask[i][bsa.edge_idxs[bg][0]:bsa.edge_idxs[bg][-1]] = 1
+    flags = RangesMatrix.from_mask(mask).buffer(buffer)
+    return flags
+
+
+def load_and_reanalyze_bs(bsa, ctx, obs_id):
+    """
+    Load raw data of biassteps and reanalyze it with hwpss subtraction
+
+    Args
+        bsa: BiasStepAnalysis object
+        ctx: Context object
+        obs_id: observation id of bias steps
+    """
+    am = ctx.get_obs(obs_id)
+    am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
+            [(0, 'samps')])
+    if np.all(am.hwp_angle == 0):
+        return
+    bsa.am = am
+    bsa._find_bias_edges()
+    flags = biases_flags(bsa)
+    get_hwpss(am, flags=flags, merge_stats=True)
+    subtract_hwpss(am, subtract_name='signal')
+    bsa._get_step_response()
+    bsa._compute_dc_params()
+    bsa._fit_tau_effs()
+
+
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                    executor=None, as_completed_callable=None) -> CalRessetResult:
     """
@@ -502,6 +551,15 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                     # This will edit IVA dicts in place
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
+
+        if cfg.hwpss_subtraction:
+            # Reanalyze biasstep with hwpss subtraction
+            ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
+            bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
+
+            for dset, bsa in bsas.items():
+                oid = bias_step_obsids[dset]
+                load_and_reanalyze_bs(bsa, ctx, oid)
 
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva.meta["rtm_bit_to_volt"]
@@ -672,7 +730,7 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
     This will included non-processed obs-ids that are not found in the fail cache,
     and will be limitted to cfg.num_obs.
     """
-    ctx = core.Context(cfg.context_path)
+    ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
     # Find all obs_ids that have not been processed
     with open(cfg.failed_cache_file, "r") as f:
         failed_cache = yaml.safe_load(f)
@@ -720,6 +778,10 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         msg = result.fail_msg
         if msg is None:
             msg = "unknown error"
+        if 'sotodlib.core.metadata.loader.LoaderError' in msg:
+            logger.error(f"obs_id {obs_id} failed due to medatada loader "
+                         "error, try again later")
+            return
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
