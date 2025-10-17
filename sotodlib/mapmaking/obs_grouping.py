@@ -109,7 +109,6 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
             #then we do 24 hrs by default and it will be the same as depth_1
     else:
         raise NoTODFound("Invalid mode!")
-
     
     # We will make one map per period-detset-band if per_tube=False
     # or per period-band if per_tube=True
