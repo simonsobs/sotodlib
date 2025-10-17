@@ -8,6 +8,7 @@ import copy
 import argparse
 import yaml
 import copy
+import requests
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -412,3 +413,54 @@ def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None
             obs_list = context.obsdb.query(tot_query, tags=tags)
         
         return obs_list
+
+def send_alert(webhook=None, alertname='', tag='', error='', timestamp=None):
+    if webhook is None:
+        return False
+    
+    if timestamp is None:
+        timestamp = time.time()
+    
+    # Directly to Slack channel
+    if 'slack.com' in webhook:
+        from slack_sdk.webhook import WebhookClient
+        
+        webhook = WebhookClient(webhook)
+        
+        response = webhook.send(
+            text="Pipeline alert",
+            attachments=[
+                {
+                    "mrkdwn_in": ["text"],
+                    "color": "danger",
+                    "title": f"[FIRING] {tag} ({alertname})",
+                    "text": f"error: {error}",
+                    "footer": "Pipeline",
+                    "ts": f"{timestamp}"
+                }
+            ]
+        )
+        if response.status_code != 200:
+            LOG.info("Issue with Slack webhook. Alert not sent.")
+            return False
+        
+        return True
+    # Campana
+    else:
+        data = {
+                'status': 'firing',
+                'alerts': [
+                    {
+                        'status': 'firing',
+                        'labels': {'alertname': alertname, 'tag': tag},
+                        'annotations': {'error': error, 'groups': 'pipeline', 'timestamp': timestamp},
+                    }
+                ],
+        }
+        try:
+            response = requests.post(webhook, json=data)
+            response.raise_for_status()
+            return response.status_code == requests.codes.ok
+        except BaseException:
+            return False
+    

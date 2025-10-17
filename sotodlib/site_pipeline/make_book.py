@@ -1,11 +1,14 @@
 import os
 import traceback
 import argparse
+import time
 
 import datetime as dt
 from typing import Optional
 from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
+import sotodlib.site_pipeline.util as sp_util
+import sys
 
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -36,7 +39,7 @@ def _bookbinding_helper(platform, bid ):
     return imprint._run_book_binding(bid)
 
 
-def main(config: str, n_proc:int=1):
+def main(config: str, n_proc:int=1, alert_webhook: str='', test_alert: bool=False):
     """Make books based on imprinter db
     
     Parameters
@@ -44,6 +47,11 @@ def main(config: str, n_proc:int=1):
     config : str
         path to imprinter configuration file
     """
+    if test_alert:
+        alert = sp_util.send_alert(webhook=alert_webhook, alertname='book-id', tag='bookbinder', error='this is the error', timestamp=time.time())
+        if not alert:
+            print("Failed to send alert")
+        sys.exit(0)
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}}
@@ -93,6 +101,9 @@ def main(config: str, n_proc:int=1):
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
             print(traceback.format_exc())
+            alert = sp_util.send_alert(webhook=alert_webhook, alertname=book.bid, tag='bookbinder', error=e, timestamp=time.time())
+            if not alert:
+                print("Failed to send alert")
             # it has failed twice, ideally we want people to look at it now
             # do something here
 
@@ -108,6 +119,14 @@ def get_parser(parser=None):
     parser.add_argument(
         "--n-proc", type=int, default=1,
         help="The number of processes to run for operations books"
+    )
+    parser.add_argument(
+        "--alert-webhook", type=str, default='http://daq-services1:5001/v1/pipeline/',
+        help="Webhook address to send error alerts"
+    )
+    parser.add_argument(
+        '--test-alert',
+        action='store_true',
     )
     return parser
 
