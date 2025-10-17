@@ -514,14 +514,15 @@ class MLMapmaker(Operator):
                 log.info_rank(f"Wrote rhs to {fname}", comm=comm)
 
         if self.write_div:
-            fname = f"{prefix}sky_div.fits"
-            if self.skip_existing and os.path.isfile(fname):
-                log.info_rank(f"Skipping existing div in {fname}", comm=comm)
-            else:
-                # FIXME : only writing the TT variance to avoid integer overflow in communication
-                fname = signal_map.write(prefix, "div", signal_map.div)
-                # fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
-                log.info_rank(f"Wrote div to {fname}", comm=comm)
+            # Write each covariance element seperately, to reduce peak memory.
+            for i in range(signal_map.div.shape[0]):
+                for j in range(signal_map.div.shape[1]):
+                    fname = f"{prefix}sky_div{i}{j}.fits"
+                    if self.skip_existing and os.path.isfile(fname):
+                        log.info_rank(f"Skipping existing div{i}{j} in {fname}", comm=comm)
+                    else:
+                        fname = signal_map.write(prefix, f"div{i}{j}", signal_map.div[i, j])
+                        log.info_rank(f"Wrote div{i}{j} to {fname}", comm=comm)
 
         if self.write_hits:
             fname = f"{prefix}sky_hits.fits"
