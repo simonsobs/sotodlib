@@ -254,7 +254,7 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
                     wtele_file = waf_tele_files[waf]
                     task_dir = os.path.join(out_root, f"{obs_id}-{waf}")
                     os.makedirs(task_dir, exist_ok=True)
-                    task_schedule_file = os.path.join(task_dir, "schedule.txt")
+                    task_schedule_file = os.path.join(task_dir, "schedule.ecsv")
                     task_schedule.write(task_schedule_file)
                     tasks.append(
                         {
