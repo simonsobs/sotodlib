@@ -84,6 +84,10 @@ class DetCalCfg:
     h5_path: str
         Path to the HDF5 file to use for the det_cal database. Default to
         "det_cal.h5".
+    h5_unix_digits: 0
+        Number of digits of unixtime to be added to h5_path. For example if
+        h5_unix_digits = 4, h5_path will be modified to "det_cal_1700.h5".
+        Defaults to 0.
     cache_failed_obsids: bool
         If True, will cache failed obs-ids to avoid re-running them. Defaults to
         True.
@@ -122,6 +126,7 @@ class DetCalCfg:
         metadata_list: Union[str, List[str]] = 'all',
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
+        h5_unix_digits: int = 0,
         cache_failed_obsids: bool = True,
         failed_cache_file: str = "failed_obsids.yaml",
         show_pb: bool = True,
@@ -165,6 +170,7 @@ class DetCalCfg:
 
         self.index_path = parse_path(index_path)
         self.h5_path = parse_path(h5_path)
+        self.h5_unix_digits = h5_unix_digits
         self.failed_cache_file = parse_path(failed_cache_file)
 
         kw = {"show_pb": False, "default_nprocs": self.nprocs_result_set}
@@ -504,6 +510,7 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
     bsa._get_step_response()
     bsa._compute_dc_params()
     bsa._fit_tau_effs()
+    del bsa.am
 
 
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
@@ -787,9 +794,14 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
 
     logger.info(f"Adding obs_id {obs_id} to dataset")
     rset = ResultSet.from_friend(result.result_set)
-    write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
+    h5_path = cfg.h5_path
+    if cfg.h5_unix_digits:
+        name, ext = os.path.splitext(cfg.h5_path)
+        unixtime = obs_id.split('_')[1][:cfg.h5_unix_digits]
+        h5_path = f"{name}_{unixtime}{ext}"
+    write_dataset(rset, h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
-    relpath = os.path.relpath(cfg.h5_path, start=os.path.dirname(cfg.index_path))
+    relpath = os.path.relpath(h5_path, start=os.path.dirname(cfg.index_path))
     db.add_entry(
         {"obs:obs_id": obs_id, "dataset": obs_id}, filename=relpath, replace=True
     )
