@@ -473,8 +473,8 @@ def biases_flags(bsa, buffer=200):
     Make flags that mask bias steps
 
     Args
-        bsa: BiasStepAnalysis object
-        buffer: buffet to apply on result flags
+        bsa: sodetlib BiasStepAnalysis object
+        buffer: Number of samples to buffer flags
     Returns
         RangesMatrix
     """
@@ -493,7 +493,7 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
     Load raw data of biassteps and reanalyze it with hwpss subtraction
 
     Args
-        bsa: BiasStepAnalysis object
+        bsa: sodetlib BiasStepAnalysis object
         ctx: Context object
         obs_id: observation id of bias steps
     """
