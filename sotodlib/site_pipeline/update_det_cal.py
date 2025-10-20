@@ -84,7 +84,7 @@ class DetCalCfg:
     h5_path: str
         Path to the HDF5 file to use for the det_cal database. Default to
         "det_cal.h5".
-    h5_unix_digits: 0
+    h5_unix_digits: int
         Number of digits of unixtime to be added to h5_path. For example if
         h5_unix_digits = 4, h5_path will be modified to "det_cal_1700.h5".
         Defaults to 0.
