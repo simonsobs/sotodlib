@@ -29,7 +29,10 @@ def compute_summary_stats(snippet):
 
     tstart, tstop = snippet.timestamps[0], snippet.timestamps[-1]
 
-    x_wnans, y_wnans = snippet.det_info.wafer.x, snippet.det_info.wafer.y
+    roll_corr = -np.mean(snippet.boresight.roll)  # roll correction
+    xi, eta = snippet.focal_plane.xi, snippet.focal_plane.eta
+    x_wnans = np.rad2deg(xi * np.cos(roll_corr) - eta * np.sin(roll_corr))
+    y_wnans = np.rad2deg(eta * np.cos(roll_corr) + xi * np.sin(roll_corr))
 
     x_t, y_t = x_wnans[np.logical_not(np.isnan(x_wnans))], y_wnans[np.logical_not(np.isnan(y_wnans))]
 
