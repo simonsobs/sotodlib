@@ -355,6 +355,16 @@ class AxisManager:
         """Rename or remove a data field.  To delete the field, pass
         new_name=None.
 
+        **Example usage:**
+
+            1. ``aman.move('hwp_angle', None)``
+                Deletes the field ``hwp_angle`` from ``aman``.
+            2. ``aman.move('hwp_angle', 'angle')``
+                Renames the field ``hwp_angle`` to ``angle``.
+            3. ``aman.move('preprocess.t2p.t2p_stats', None)``
+                Deletes the field ``t2p_stats`` from the sub-AxisManager
+                ``aman.preprocess.t2p``.
+
         """
         if name and '.' in name:
             tmp, name = name.rsplit('.', 1)
