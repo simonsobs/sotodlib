@@ -1,14 +1,12 @@
 import os
 import traceback
 import argparse
-import time
 
 import datetime as dt
 from typing import Optional
 from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
 import sotodlib.site_pipeline.util as sp_util
-import sys
 
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
