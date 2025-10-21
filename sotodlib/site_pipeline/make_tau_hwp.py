@@ -205,7 +205,9 @@ def _main(
                 logger.error(f'Failed {obs_id}, try again later')
 
 
-def main(cfg):
+def main(config):
+    with open(config, "r") as f:
+        cfg = yaml.safe_load(f)
     rank, executor, as_completed_callable = get_exec_env(nprocs=cfg['nprocs'])
     if rank == 0:
         _main(
@@ -222,8 +224,4 @@ def get_parser():
 
 
 if __name__ == '__main__':
-    parser = get_parser()
-    args = parser.parse_args()
-    with open(args.config, "r") as f:
-        cfg = yaml.safe_load(f)
-    main(cfg)
+    util.main_launcher(main, get_parser)
