@@ -39,24 +39,23 @@ def _bookbinding_helper(platform, bid ):
     return imprint._run_book_binding(bid)
 
 
-def main(config: str, n_proc:int=1, alert_webhook: str='', test_alert: bool=False):
+def main(config: str, n_proc:int=1, alert_webhook: str=''):
     """Make books based on imprinter db
     
     Parameters
     ----------
     config : str
         path to imprinter configuration file
+    n_proc : int
+        Number of processes
+    alert_webhook : str
+        Webhook URL to send alerts
     """
-    if test_alert:
-        alert = sp_util.send_alert(webhook=alert_webhook, alertname='book-id', tag='bookbinder', error='this is the error', timestamp=time.time())
-        if not alert:
-            print("Failed to send alert")
-        sys.exit(0)
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}}
     )
-
+    
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
@@ -101,11 +100,10 @@ def main(config: str, n_proc:int=1, alert_webhook: str='', test_alert: bool=Fals
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
             print(traceback.format_exc())
-            alert = sp_util.send_alert(webhook=alert_webhook, alertname=book.bid, tag='bookbinder', error=e, timestamp=time.time())
-            if not alert:
-                print("Failed to send alert")
             # it has failed twice, ideally we want people to look at it now
             # do something here
+            alert = sp_util.send_alert(alert_webhook, alertname=book.bid, tag='bookbinder', error=str(e), timestamp=dt.datetime.now(tz=dt.timezone.utc))
+            print(alert)
 
 
 def get_parser(parser=None):
@@ -121,12 +119,8 @@ def get_parser(parser=None):
         help="The number of processes to run for operations books"
     )
     parser.add_argument(
-        "--alert-webhook", type=str, default='http://daq-services1:5001/v1/pipeline/',
+        "--alert-webhook", type=str, default='',
         help="Webhook address to send error alerts"
-    )
-    parser.add_argument(
-        '--test-alert',
-        action='store_true',
     )
     return parser
 
