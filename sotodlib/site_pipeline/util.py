@@ -436,12 +436,19 @@ def send_alert(webhook, alertname='', tag='', error='', timestamp=None):
         
     if isinstance(timestamp, type(None)):
         timestamp = round(dt.datetime.now(tz=dt.timezone.utc).timestamp())
-    if isinstance(timestamp, str):
-        timestamp = round(dt.datetime.fromisoformat(timestamp).timestamp())
+    elif isinstance(timestamp, str):
+        ts = dt.datetime.fromisoformat(timestamp)
+        if ts.tzinfo is None:
+            timestamp = round(ts.replace(tzinfo=dt.timezone.utc).timestamp())
+        else:
+            timestamp = round(ts.timestamp())
     elif isinstance(timestamp, (int, float)):
         timestamp = round(timestamp)
     elif isinstance(timestamp, dt.datetime):
-        timestamp = round(timestamp.timestamp())
+        if timestamp.tzinfo is None:
+            timestamp = round(timestamp.replace(tzinfo=dt.timezone.utc).timestamp())
+        else:
+            timestamp = round(timestamp.timestamp())
     else:
         return f"Could not convert timestamp type {type(timestamp)}"
     
