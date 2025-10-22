@@ -129,7 +129,7 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
     if job_ops.mapmaker.enabled:
         job_ops.mapmaker.binning = job_ops.binner
         job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
-            templates=[job_tmpls.baselines, job_tmpls.azss, job_tmpls.hwpss]
+            templates=[job_tmpls.baselines, job_tmpls.azss]
         )
         job_ops.mapmaker.map_binning = job_ops.binner_final
         job_ops.mapmaker.output_dir = otherargs.out_dir
