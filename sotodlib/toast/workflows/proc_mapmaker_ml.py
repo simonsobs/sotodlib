@@ -24,6 +24,7 @@ def setup_mapmaker_ml(operators):
 
     """
     operators.append(so_ops.MLMapmaker(name="mlmapmaker", enabled=False, comps="TQU"))
+    operators.append(so_ops.MLMapmaker(name="median_detrend", enabled=False, method="median"))
 
 
 @workflow_timer
@@ -49,6 +50,7 @@ def mapmaker_ml(job, otherargs, runargs, data):
             msg += " size to be exactly one, since it uses"
             msg += " threads for parallelism."
             raise RuntimeError(msg)
+        job_ops.median_detrend.apply(data)
         job_ops.mlmapmaker.out_dir = otherargs.out_dir
         job_ops.mlmapmaker.apply(data)
 
