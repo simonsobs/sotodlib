@@ -15,38 +15,38 @@ class CoaddAtomicConfig:
     """
     Class to configure make-coadd-atomic-map
     
-    Args
-    --------
-    platform: str
+    Arguments
+    ---------
+    platform : str
         Telescope platform. Choices: ["satp1", "satp2", "satp3", "lat"]
-    interval: str
+    interval : str
         Interval to group atomic maps for coadding.
         Choices: ["daily", "weekly", "monthly"]
-    start_time: str
+    start_time : str
         Start time for querying atomic maps, in format "%Y-%m-%dT%H:%M:%S%z"
         Example: "2025-08-19T12:00:00+00:00"
-    stop_time: str
+    stop_time : str
         Stop time for querying atomic maps, in same format as start_time.
-    start_weekday: int
+    start_weekday : int
         Starting weekday for "weekly" interval. Integers ranging from 0 to 6,
         where Monday = 0, Sunday = 6.
-    atomic_db: str
+    atomic_db : str
         Path to input atomic maps database.
-    output_db: str
+    output_db : str
         Path to output coadded maps database.
-    bands: List[str]
+    bands : List[str]
         List of bands to coadd, where '+' combines both bands.
         Choices: ["f090", "f150", "f090+f150"]
-    split_label: str
+    split_label : str
         Split label from atomic map files.
-    geom_file_prefix: str
+    geom_file_prefix : str
         Prefix path to geometry file, omitting the band.
-    unit: str
+    unit : str
         Temperature unit.
-    overwrite: bool
+    overwrite : bool
         Set to True to re-run coadding and overwrite database if time interval
         found in database.
-    output_root: str
+    output_root : str
         Path to directory for output map files.
     """
     def __init__(

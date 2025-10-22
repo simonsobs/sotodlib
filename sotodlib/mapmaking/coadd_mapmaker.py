@@ -1,3 +1,12 @@
+"""
+This submodule contains classes to coadd atomic maps produced by the
+make_atomic_filterbin_map site-pipeline script. The CoaddMapmaker class
+creates a mapmaker object. Provided the atomic maps and related database,
+this will coadd observations within some time interval. This is primarily meant
+to be used by the make_coadd_atomic_map site-pipeline script, which calls
+make_coadd_map.
+"""
+__all__ = ['CoaddMapmaker','make_coadd_map','setup_coadd_map','write_coadd_map']
 import numpy as np
 from pixell import enmap
 import sqlite3
@@ -6,9 +15,31 @@ from tqdm import tqdm
 import datetime as dt
 import logging
 
-from sotodlib import mapmaking
+from . import utils
 
 class CoaddMapmaker:
+    """
+    Class to initialize, create, and write coadded atomic maps
+    
+    Arguments
+    ---------
+    data : dict
+        Data returned from atomic database query.
+    shape : numpy.ndarray
+        Shape of the output map geometry.
+    wcs : wcs
+        WCS of the output map geometry.
+    geom_file_path : str
+        Full path to geometry file to use.
+    wmap_coadd : pixell.enmap
+        Initial wmap to be populated
+    weights_coadd : pixell.enmap
+        Initial weights to be populated
+    hits_coadd : pixell.enmap
+        Initial hits to be populated
+    logger : Logger, optional
+        Logger for printing on the screen.
+    """
     def __init__(self, data, shape, wcs, geom_file_path, 
                  wmap_coadd, weights_coadd, hits_coadd, logger=None):
         self.data = data
@@ -25,6 +56,15 @@ class CoaddMapmaker:
         self.logger = logger
         
     def add_map(self, file):
+        """
+        Accumulates an obs into the CoaddMapmaker object, adding to wmap,
+        weights, and hits.
+        
+        Arguments
+        ---------
+        file : str
+            Path to atomic map file.
+        """
         file = os.path.normpath(file)
         wmap = enmap.read_map(file+'_wmap.fits', geometry=(self.shape,self.wcs))
         weights = enmap.read_map(file+'_weights.fits', geometry=(self.shape,self.wcs))
@@ -67,6 +107,9 @@ class CoaddMapmaker:
 def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
                     start_time, stop_time, interval, geom_file_prefix, 
                     overwrite=False, logger=None):
+    """
+    Queries the atomic database and setup the CoaddMapmaker object.
+    """
     columns = ['obs_id', 'telescope', 'freq_channel', 'ctime', 'split_label', 'prefix_path']
     if isinstance(start_time, dt.datetime):
         start_time = start_time.timestamp()
@@ -116,12 +159,50 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     
 def write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
                     start_time, stop_time, interval, unit='K'):
+    """
+    Wrapper for CoaddMapmaker write function.
+    """
     mapmaker.write(output_root, output_db, band, platform, split_label, start_time, 
                    stop_time, interval, unit=unit)
         
 def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_label,
                    start_time, stop_time, interval, geom_file_prefix, overwrite=False,
                    unit='K', logger=None):
+    """
+    Makes coadded atomic maps from a given time interval.
+    
+    Arguments
+    ---------
+    atomic_db : str
+        Path to input atomic maps database.
+    output_root : str
+        Path to directory for output map files.
+    output_db : str
+        Path to output coadded maps database.
+    band : str
+        Band to coadd.
+        Examples: ["f090", "f150", "f090+f150"]
+    platform : str
+        Telescope platform.
+    split_label : str
+        Split label from atomic map files.
+    start_time : dt.datetime
+        Start time for querying atomic maps.
+    stop_time : dt.datetime
+        Stop time for querying atomic maps.
+    interval : str
+        Interval to group atomic maps for coadding.
+        Examples: ["daily", "weekly", "monthly"]
+    geom_file_prefix : str
+        Prefix path to geometry file, omitting the band.
+    overwrite : bool
+        Set to True to re-run coadding and overwrite database if time interval
+        found in database.
+    unit : str
+        Temperature unit.
+    logger : Logger, optional
+        Logger for printing on the screen.
+    """
     mapmaker = setup_coadd_map(atomic_db, output_db, band, platform, 
                                split_label, start_time, stop_time, interval, 
                                geom_file_prefix, overwrite=overwrite, logger=logger)
@@ -134,7 +215,7 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     for file in tqdm(mapmaker.data['prefix_path'], total=len(mapmaker.data['prefix_path'])):
         mapmaker.add_map(file)
 
-    iweights = mapmaking.safe_invert_div(mapmaker.weights_coadd)
+    iweights = utils.safe_invert_div(mapmaker.weights_coadd)
     mapmaker.map_coadd = enmap.map_mul(iweights, mapmaker.wmap_coadd)
 
     write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
