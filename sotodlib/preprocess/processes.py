@@ -2,6 +2,7 @@ import numpy as np
 from operator import attrgetter
 import copy
 import warnings
+import re
 
 from so3g.proj import Ranges, RangesMatrix
 
@@ -1415,6 +1416,7 @@ class SSOFootprint(_Preprocess):
 
             planet_aman.wrap('mean_distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
 
+            planet = re.sub('[^0-9a-zA-Z]+', '', planet)
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
 
@@ -2627,6 +2629,25 @@ class GetTauHWP(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
 
+class Move(_Preprocess):
+    """Rename or remove a data field.
+    To delete the field, pass new_name=None.
+
+    Example config block::
+
+        - name: "move"
+          process:
+            name: "name"
+            new_name: "new_name"
+
+    .. autofunction:: sotodlib.core.axisman.AxisManager.move
+    """
+    name = 'move'
+
+    def process(self, aman, proc_aman, sim=False):
+        aman.move(**self.process_cfgs)
+        return aman, proc_aman
+
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -2676,3 +2697,4 @@ _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
 _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
+_Preprocess.register(Move)

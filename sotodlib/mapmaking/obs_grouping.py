@@ -6,13 +6,15 @@ one after the other that will be mapped together, we could request per-obs
 which will be individual observations mapped individually, etc. See the main
 interface function build_obslists for more information and definitions. An
 obslist is a dictionary where each element is a list of
-(obs_id,detset,band,index) to be mapped. index maps to the list of individual
-obs. For example, an atomic map will be a single id, a depth-1 map will be
-multiple ids. The keys of the obslist will be (pid,detset,band). Here pid
-maps into the periods list, which is simply the periods ranges that will be
-mapped. For example, for atomic maps these periods will be simply the ctimes
-dividing individual obs, for depth-1 maps it will be the ctimes dividing
-depth-1 maps, etc.
+(obs_id,detset,band,index) to be mapped. A detset is a wafer_slot by default,
+unless per_tube=True in which case the detset will be over the entire
+optical tube, meaning we will loop over all available wafer_slots.
+Index maps to the list of individual obs. For example, an atomic map will be
+a single id, a depth-1 map will be multiple ids. The keys of the obslist will
+be (pid,detset,band). Here pid maps into the periods list, which is simply
+the periods ranges that will be mapped. For example, for atomic maps these
+periods will be simply the ctimes dividing individual obs, for depth-1 maps
+it will be the ctimes dividing depth-1 maps, etc.
 """
 
 __all__ = ['build_obslists','NoTODFound']
@@ -108,14 +110,10 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     else:
         raise NoTODFound("Invalid mode!")
 
-    if not per_tube:
-        # We will make one map per period-detset-band
-        obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
-                                     wafer=wafer, freq=freq, per_tube=False)
-    else:
-        # We will make one map per period-band (looping over all available wafers)
-        obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
-                                     wafer=wafer, freq=freq, per_tube=True)
+    # We will make one map per period-detset-band if per_tube=False
+    # or per period-band if per_tube=True
+    obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
+                                     wafer=wafer, freq=freq, per_tube=per_tube)
     obskeys  = sorted(obslists.keys())
     return obslists, obskeys, periods, obs_infos
 
