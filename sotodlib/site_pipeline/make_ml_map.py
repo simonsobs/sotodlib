@@ -15,7 +15,7 @@ def get_parser(parser=None):
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
     parser.add_argument("-n", "--ntod",    type=int, default=None, help="Keep at most this many tods")
-    parser.add_argument("-N", "--nmat",    type=str, default="corr", help="Noise model to use. corr or uncorr")
+    parser.add_argument("-N", "--nmat",    type=str, default="corr", help="Noise model to use. corr, uncorr, or adap")
     parser.add_argument(      "--max-dets",type=int, default=None,   help="Keep at most this many detectors")
     parser.add_argument("-S", "--site",    type=str, default="so_lat")
     parser.add_argument("-v", "--verbose", action="count", default=0)
@@ -178,6 +178,7 @@ def main(**args):
         # building blocks would be very reusable, and the full thing is more general.
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
         elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args.window)
+        elif args.nmat == "adap":   noise_model = mapmaking.NmatAdaptive(window=args.window)
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)

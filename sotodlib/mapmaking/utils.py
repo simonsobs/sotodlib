@@ -489,7 +489,7 @@ def apply_window(tod, nsamp, exp=1):
 
 def sdgmm(side, m, n, A, ldA, X, incX, C, ldC, handle=None):
     """
-    To minimize confusion when comparing the sogma we keep the
+    To minimize confusion when comparing to sogma we keep the
     cublas like interface here.
     """
     _ = m, n, ldA, incX, ldC, handle
@@ -550,7 +550,7 @@ def apply_vecs2(ftod, iD, V, Kh, bins, tmp, vtmp, divtmp, out=None):
 			# Cublas is column-major though, so to it we're doing divtmp = V iD [nmode,ndet]. OK
 			sdgmm("R", nmode, ndet, V[bi], nmode, iD[bi], 1, divtmp[:,:nmode], maxnmode)
 			# 2. vtmp   = iD V Kh   [ndet,nmode] -> vtmp = Kh divtmp [nmode,ndet]. OK
-			sgemm("N", "N", nmode, ndet, nmode, 1, Kh[bi], nmode, divtmp, maxnmode, 0, vtmp, maxnmode)
+			sgemm("N", "N", nmode, ndet, nmode, 1, Kh[bi], nmode, divtmp[:,:nmode], maxnmode, 0, vtmp[:,:nmode], maxnmode)
 			# 3. tmp    = (iD V Kh)' ftod  [nmode,bsize] -> tmp = ftod vtmp.T [bsize,nmode]. OK
 			sgemm("N", "T", bsize, nmode, ndet, 1, ftod[:,i1:i2], nfreq, vtmp, maxnmode, 0, tmp[:,:bsize], tmp.shape[1])
 			# 4. out    = iD ftod  [ndet,bsize] -> out = ftod iD [bsize,ndet]. OK
