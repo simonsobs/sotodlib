@@ -54,6 +54,7 @@ site_pipeline = [
   "plotly",
   "pandas",
   "alphashape",
+  "slack-sdk",
 ]
 tests = [
   "socs",
