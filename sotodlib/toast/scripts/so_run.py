@@ -459,8 +459,6 @@ def main(opts=None, comm=None):
     )
 
     # Parse just the args we are using in this wrapper
-    if opts is None:
-        opts = sys.argv[1:]
     args, remaining = parser.parse_known_args(args=opts)
 
     if args.context_file is not None:
