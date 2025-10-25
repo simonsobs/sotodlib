@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional, List
+import re
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -55,6 +56,9 @@ def preprocess_obs(
             source_names.append(_s[0])
         else:
             raise ValueError('Invalid style of source')
+
+    for i, source in enumerate(source_names):
+        source_names[i] = re.sub('[^0-9a-zA-Z]+', '', source)
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
