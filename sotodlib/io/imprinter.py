@@ -252,6 +252,7 @@ class Imprinter:
         self.daq_node = self.config.get("daq_node")        
         self.output_root = self.config.get("output_root")
         self.g3tsmurf_config = self.config.get("g3tsmurf")
+        self.require_hwp = self.config.get("require_hwp", True)
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         self.lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
@@ -797,10 +798,6 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
-        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
-        ## or if we ever plan to run the SATs without HWPs
-        if 'lat' in self.daq_node:
-            require_hwp = False
         err = None
         try:
             # find appropriate binder for the book type
@@ -853,7 +850,7 @@ class Imprinter:
         ignore_tags=False,
         ancil_drop_duplicates=False,
         allow_bad_timing=False,
-        require_hwp=True,
+        require_hwp=None,
         require_acu=True,
         require_monotonic_times=True,
         min_ctime=None, max_ctime=None,
@@ -899,7 +896,8 @@ class Imprinter:
         """
         if session is None:
             session = self.get_session()
-
+        if require_hwp is None:
+            require_hwp = self.require_hwp
         bid, status, message, err = self._run_book_binding(
             book,
             session=session,
