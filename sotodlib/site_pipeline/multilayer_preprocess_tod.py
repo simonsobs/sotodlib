@@ -146,6 +146,8 @@ def multilayer_preprocess_tod(obs_id,
                                                                              dets=dets, logger=logger)
             if error is None:
                 outputs_init.append(outputs_grp_init)
+            elif error is not "load_success":
+                raise RuntimeError(f"Initial layer failed with {error}")
 
             init_fields = aman.preprocess._fields.copy()
             init_fields.pop('valid_data', None)
