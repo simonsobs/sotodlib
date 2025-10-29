@@ -1,4 +1,42 @@
 import numpy as np
+import h5py
+import time
+
+from contextlib import contextmanager
+
+@contextmanager
+def load_h5(filename, *args, max_retries=3, delay=5, **kwargs):
+    """
+    Context manager to open an HDF5 file after a delay until a maximum number
+    of retries is reached.
+
+    Arguments
+    ----------
+    filename (str):
+        Path to the HDF5 file.
+    *args:
+        Additional positional args for h5py.File.
+    max_retries (int):
+        Number of times to retry opening the file.
+    delay (int):
+        Delay in seconds between retries.
+    **kwargs:
+        Keyword args for h5py.File.
+    """
+    for attempt in range(max_retries):
+        try:
+            with h5py.File(filename, *args, **kwargs) as f:
+                yield f
+            return
+        # If the file is locked
+        except (OSError, BlockingIOError) as e:
+            if attempt + 1 < max_retries:
+                time.sleep(delay)
+            else:
+                raise RuntimeError(f"Failed to open {filename} after {max_retries} attempts") from e
+        except Exception as e:
+            # Other error should fail immediately
+            raise e
 
 def tag_substr(dest, tags, max_recursion=20):
     """ Do string substitution of all our tags into dest (in-place
