@@ -132,7 +132,7 @@ class Monitor:
             True if calculation already performed, False otherwise
 
         """
-        query_where = f"select {field} from \"{log}\" WHERE observation = '{observation}'"
+        query_where = f"SELECT observation FROM \"{log}\" WHERE \"metric_type\" = '{field}'"
 
         for tag_name, tag_value in tags.items():
             and_term = f" AND {tag_name} = '{tag_value}'"
@@ -140,8 +140,8 @@ class Monitor:
 
         result = self.client.query(query_where)
 
-        if list(result.get_points(measurement=log)):
-            print(f"field {field} for observation {observation} " +
+        if list(result.get_points()):
+            print(f"observation {observation} for metric_type {field} " +
                   f"and tags {tags} already recorded in {log}")
             return True
 
@@ -183,7 +183,10 @@ class Monitor:
             tag_string = f',{tag}={tag_value}'
             influxdata += tag_string
 
-        influxdata += f' {field}={value}'
+        if isinstance(value, str):
+            influxdata += f' {field}="{value}"'
+        else:
+            influxdata += f' {field}={value}'
 
         if timestamp is not None:
             time_ns = int(timestamp*1e9)
@@ -191,7 +194,7 @@ class Monitor:
 
         return influxdata
 
-    def record(self, field, values, timestamps, tags, measurement, log='obs_process_log', log_tags=None):
+    def record(self, field, values, timestamps, tags, measurement, log='obs_process_log', log_tags=None, obs_id=''):
         """Record a monitored statistic to the InfluxDB. Values not written to
         DB until ``Monitor.write()`` is called.
 
@@ -213,6 +216,8 @@ class Monitor:
             Tags to use for the log, typically you won't want to record you've
             completed a calculation for each individual detector, but maybe some higher
             level group. If this is None tags will be used.
+        obs_id : str
+            Obs_id to use for value of "observation" field in logging measurement.
 
         """
         assert len(timestamps) == len(values) == len(tags)
@@ -224,9 +229,9 @@ class Monitor:
 
         # Log into obs_process_log measurement in InfluxDB
         if log_tags is None:
-            log_tags = tags
+            log_tags = {"metric_type": field}
 
-        log_msg = Monitor._build_single_line_entry(field, 1, None, log_tags, log)
+        log_msg = Monitor._build_single_line_entry("observation", obs_id, None, log_tags, log)
         self.queue.append(log_msg)
 
     def write(self):
