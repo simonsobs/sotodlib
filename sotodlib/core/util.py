@@ -2,11 +2,6 @@ import numpy as np
 import h5py
 import time
 
-import h5py
-import time
-from contextlib import AbstractContextManager
-
-import h5py, time
 
 class H5ContextManager:
     """
