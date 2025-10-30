@@ -15,7 +15,7 @@ class H5ContextManager:
             print(list(f.keys()))
 
     Direct function call:
-        f = H5ContextManager("data.h5", "r")._open()
+        f = H5ContextManager("data.h5", "r").open()
         print(list(f.keys()))
         f.close()
 
@@ -26,9 +26,9 @@ class H5ContextManager:
     *args :
         Additional positional arguments passed to `h5py.File`.
     max_retries : int, optional
-        Number of times to retry opening the file if it is locked (default: 3).
+        Number of times to retry opening the file if it is locked.
     delay : int or float, optional
-        Delay in seconds between retries (default: 5).
+        Delay in seconds between retries.
     **kwargs :
         Additional keyword arguments passed to `h5py.File`.
     """
@@ -43,41 +43,31 @@ class H5ContextManager:
         assert self.max_retries > 0
         assert self.delay >= 0
 
-        # Check if called from within a while loop
-        import inspect
-        caller = inspect.stack()[1].code_context or [""]
-        if not any("with " in line for line in caller):
-            self._open()
-
-    def _open(self):
+    def open(self):
         for attempt in range(self.max_retries):
             try:
                 self.f = h5py.File(self.filename, *self.args, **self.kwargs)
                 return self.f
-            except (OSError, BlockingIOError) as e:
+            except BlockingIOError as e:
                 # If the file is locked, retry opening it after a delay
                 if attempt + 1 < self.max_retries:
                     time.sleep(self.delay)
                 else:
-                    raise RuntimeError(f"Failed to open {filename} after "
-                                   f"{max_retries} attempts") from e
+                    raise RuntimeError(f"Failed to open {self.filename} after"
+                                   f" {self.max_retries} attempts") from e
             except Exception as e:
                 # Other errors should fail immediately
                 raise e
 
     def __enter__(self):
         if self.f is None:
-            self._open()
+            self.open()
         return self.f
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.f:
             self.f.close()
             self.f = None
-
-    def __getattr__(self, name):
-        if self.f is not None:
-            return getattr(self.f, name)
 
 
 def tag_substr(dest, tags, max_recursion=20):
