@@ -10,16 +10,16 @@ based on spectral properties.
 
 import argparse
 import os
-import sys
-import traceback
 
 import numpy as np
+import healpy as hp
 from matplotlib import pyplot as plt
 from astropy import units as u
-from astropy.table import QTable
+from astropy.table import QTable, Column
 
 import toast
-from toast.timing import Timer
+from toast.pixels_io_healpix import read_healpix
+from toast.pixels_io_wcs import read_wcs
 from toast.scripts.toast_healpix_coadd import main as toast_hpx_coadd_main
 
 
@@ -136,6 +136,82 @@ def get_weights(args, obs):
                 f.write(f"{fname} {wt:0.12e}\n")
 
 
+def compute_coadd_spectra(args):
+    hits_file = f"{args.coadd_root}_hits.h5"
+    map_file = f"{args.coadd_root}_map.h5"
+    invcov_file = f"{args.coadd_root}_invcov.h5"
+    try:
+        hits = read_healpix(hits_file, nest=False)
+        use_healpix = True
+    except Exception as ehpx:
+        try:
+            hits = read_wcs(hits_file)
+            use_healpix = False
+        except Exception as ewcs:
+            msg = "Cannot read hits file as either healpix or WCS format"
+            raise RuntimeError(msg)
+
+    if not use_healpix:
+        raise NotImplementedError("WCS processing not yet implemented")
+
+    good = hits > 3
+    bad = np.logical_not(good)
+    nside = hp.get_nside(hits)
+    data_map, data_header = read_healpix(map_file, field=None, nest=False, h=True)
+
+    if "UNITS" in data_header:
+        map_units = u.Unit(data_header["UNITS"])
+    else:
+        map_units = u.K
+    spec_units = map_units**2
+
+    # We just use the intensity covariance for weighting
+    invcov = read_healpix(invcov_file, field=(0,), nest=False)
+    invcov /= np.amax(invcov)
+    invcov[bad] = 0.0
+
+    fsky = np.mean(invcov**2)
+    weighted_map = data_map * invcov
+    weighted_map[:, bad] = 0.0
+    mono = np.mean(weighted_map[0, good])
+    weighted_map[0, good] -= mono
+
+    lmax = 3 * nside
+    cl = hp.anafast(weighted_map, lmax=lmax, iter=3) / fsky
+    cl_file_fits = f"{args.coadd_root}_cl.fits"
+    hp.write_cl(cl_file_fits, cl, dtype=np.float64, overwrite=True)
+
+    cl_file = f"{args.coadd_root}_cl.ecsv"
+    cl_table = QTable(
+        [
+            Column(name="cl_TT", data=cl[0], unit=spec_units),
+            Column(name="cl_EE", data=cl[1], unit=spec_units),
+            Column(name="cl_BB", data=cl[2], unit=spec_units),
+            Column(name="cl_TE", data=cl[3], unit=spec_units),
+            Column(name="cl_EB", data=cl[4], unit=spec_units),
+            Column(name="cl_TB", data=cl[5], unit=spec_units),
+        ]
+    )
+    cl_table.meta["toast_version"] = toast.__version__
+    cl_table.write(cl_file, format="ascii.ecsv", overwrite=True)
+
+    # Plot in uK
+    scale = 1.0 * spec_units
+    cl_uK = cl * scale.to_value(u.uK**2)
+
+    img_file = f"{args.coadd_root}_cl.pdf"
+    fig = plt.figure(figsize=(12, 12), dpi=100)
+    ell = np.arange(cl[0].size)
+    for icomp, comp in enumerate(["TT", "EE", "BB"]):
+        ax = fig.add_subplot(3, 1, icomp + 1)
+        ax.loglog(ell[2:], cl_uK[icomp][2:], color="black")
+        ax.set_xlabel(r"Multipole, $\ell$")
+        ax.set_ylabel(r"C$_\ell^{" + comp + r"}$ [$\mu$K$^2$]")
+    fig.tight_layout()
+    plt.savefig(img_file)
+    plt.close()
+
+
 def main(opts=None, comm=None):
     log = toast.utils.Logger.get()
 
@@ -229,6 +305,9 @@ def main(opts=None, comm=None):
         f"{args.coadd_root}_files.txt",
     ]
     toast_hpx_coadd_main(opts=opts, comm=comm)
+
+    # Compute the pseudo spectra of the coadd
+    compute_coadd_spectra(args)
 
 
 def cli():
