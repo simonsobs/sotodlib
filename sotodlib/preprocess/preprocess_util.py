@@ -14,7 +14,7 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
-from sotodlib.core.util import load_h5
+from sotodlib.core.util import H5ContextManager
 
 from .. import core
 
@@ -694,7 +694,7 @@ def cleanup_archive(configs, logger=None):
                               key=lambda t: t[0])[1]
 
             db_datasets = [d['dataset'] for d in db.inspect()]
-            with load_h5(latest_file, mode="r+") as f:
+            with H5ContextManager(latest_file, mode="r+") as f:
                 keys = list(f.keys())
                 for key in keys:
                     if key not in db_datasets:
@@ -1183,8 +1183,8 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         logger.debug(f"Source file: {src_file}")
         logger.debug(f"Destination file: {dest_file}")
 
-        with load_h5(dest_file, mode='a') as f_dest:
-            with load_h5(src_file, mode='r') as f_src:
+        with H5ContextManager(dest_file, mode='a') as f_dest:
+            with H5ContextManager(src_file, mode='r') as f_src:
                 for dts in f_src.keys():
                     logger.debug(f"\t{dts}")
                     # If the dataset or group already exists, delete it to overwrite

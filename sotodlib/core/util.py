@@ -2,41 +2,88 @@ import numpy as np
 import h5py
 import time
 
-from contextlib import contextmanager
+import h5py
+import time
+from contextlib import AbstractContextManager
 
-@contextmanager
-def load_h5(filename, *args, max_retries=3, delay=5, **kwargs):
+import h5py, time
+
+class H5ContextManager:
     """
-    Context manager to open an HDF5 file after a delay until a maximum number
-    of retries is reached.
+    Class to open an HDF5 file with retry logic on file locking.  This class
+    can be used either as a context manager or as a regular function.
 
-    Arguments
+    Examples
+    --------
+    As a context manager
+        with H5ContextManager("data.h5", "r") as f:
+            print(list(f.keys()))
+
+    Direct function call:
+        f = H5ContextManager("data.h5", "r")._open()
+        print(list(f.keys()))
+        f.close()
+
+    Parameters
     ----------
-    filename (str):
+    filename : str
         Path to the HDF5 file.
-    *args:
-        Additional positional args for h5py.File.
-    max_retries (int):
-        Number of times to retry opening the file.
-    delay (int):
-        Delay in seconds between retries.
-    **kwargs:
-        Keyword args for h5py.File.
+    *args :
+        Additional positional arguments passed to `h5py.File`.
+    max_retries : int, optional
+        Number of times to retry opening the file if it is locked (default: 3).
+    delay : int or float, optional
+        Delay in seconds between retries (default: 5).
+    **kwargs :
+        Additional keyword arguments passed to `h5py.File`.
     """
-    for attempt in range(max_retries):
-        try:
-            with h5py.File(filename, *args, **kwargs) as f:
-                yield f
-            return
-        # If the file is locked
-        except (OSError, BlockingIOError) as e:
-            if attempt + 1 < max_retries:
-                time.sleep(delay)
-            else:
-                raise RuntimeError(f"Failed to open {filename} after {max_retries} attempts") from e
-        except Exception as e:
-            # Other error should fail immediately
-            raise e
+    def __init__(self, filename, *args, max_retries=3, delay=5, **kwargs):
+        self.filename = filename
+        self.args = args
+        self.kwargs = kwargs
+        self.max_retries = max_retries
+        self.delay = delay
+        self.f = None
+
+        assert self.max_retries > 0
+        assert self.delay >= 0
+
+        # Check if called from within a while loop
+        import inspect
+        caller = inspect.stack()[1].code_context or [""]
+        if not any("with " in line for line in caller):
+            self._open()
+
+    def _open(self):
+        for attempt in range(self.max_retries):
+            try:
+                self.f = h5py.File(self.filename, *self.args, **self.kwargs)
+                return self.f
+            except (OSError, BlockingIOError) as e:
+                # If the file is locked, retry opening it after a delay
+                if attempt + 1 < self.max_retries:
+                    time.sleep(self.delay)
+                else:
+                    raise RuntimeError(f"Failed to open {filename} after "
+                                   f"{max_retries} attempts") from e
+            except Exception as e:
+                # Other errors should fail immediately
+                raise e
+
+    def __enter__(self):
+        if self.f is None:
+            self._open()
+        return self.f
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.f:
+            self.f.close()
+            self.f = None
+
+    def __getattr__(self, name):
+        if self.f is not None:
+            return getattr(self.f, name)
+
 
 def tag_substr(dest, tags, max_recursion=20):
     """ Do string substitution of all our tags into dest (in-place
