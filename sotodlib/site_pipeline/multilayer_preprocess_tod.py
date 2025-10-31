@@ -373,18 +373,22 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if db_datasets_init:
             if err is None:
                 for db_dataset in db_datasets_init:
-                    logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+                    logger.info(f'Processing init future result')
+                    pp_util.cleanup_mandb(err, db_dataset, configs_init,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
+                pp_util.cleanup_mandb(err, db_datasets_init, configs_init,
+                                      logger, overwrite)
 
         if db_datasets_proc:
             if err is None:
-                logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
+                logger.info(f'Processing future proc result')
                 for db_dataset in db_datasets_proc:
-                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+                    pp_util.cleanup_mandb(err, db_dataset, configs_proc,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
+                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"multilayer_preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
