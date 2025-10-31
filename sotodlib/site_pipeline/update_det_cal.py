@@ -14,15 +14,19 @@ from dataclasses import dataclass, astuple, fields
 import numpy as np
 from tqdm.auto import tqdm
 import logging
-from typing import Optional, Union, Dict, List, Any, Tuple, Literal
+from typing import Optional, Union, Dict, List, Any, Tuple, Literal, Callable
 from queue import Queue
 import argparse
 
+from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
+from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.hwp import get_hwpss, subtract_hwpss
 import sotodlib.site_pipeline.util as sp_util
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
 from sodetlib.operations.iv import IVAnalysis
 from sodetlib.operations.bias_steps import BiasStepAnalysis
@@ -33,18 +37,27 @@ DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
 DEFAULT_pA_per_phi0 = 9e6
 TES_BIAS_COUNT = 12  # per detset / primary file group
 
+# For converting bias group to bandpass.
+BGS = {'lb': [0, 1, 4, 5, 8, 9], 'hb': [2, 3, 6, 7, 10, 11]}
+BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
+            'uhf': {'lb': 'f220', 'hb': 'f280'},
+            'lf': {'lb': 'f030', 'hb': 'f040'}}
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
     sp_util.init_logger("det_cal")
 
 
-def get_data_root(ctx: core.Context) -> str:
+def get_data_root(ctx: core.Context, obs_id:str) -> str:
     "Get root data directory based on context file"
     c = ctx.obsfiledb.conn.execute("select name from files limit 1")
     res = [r[0] for r in c][0]
     # split out <data_root>/obs/<timecode>/<obsid>/fname
-    for _ in range(4):
+    for _ in range(5):
         res = os.path.dirname(res)
+    # add telescope str to path
+    tel_str = obs_id.split(('_'))[2]
+    res = os.path.join(res, tel_str)
     return res
 
 
@@ -59,9 +72,6 @@ class DetCalCfg:
         Path to the root of the results directory.
     context_path: str
         Path to the context file to use.
-    data_root: Optional[str]
-        Root path of L3 data. If this is not specified, will automatically
-        determine it based on the context.
     raise_exceptions: bool
         If Exceptions should be raised in the get_cal_resset function.
         Defaults to False.
@@ -74,6 +84,10 @@ class DetCalCfg:
     h5_path: str
         Path to the HDF5 file to use for the det_cal database. Default to
         "det_cal.h5".
+    h5_unix_digits: int
+        Number of digits of unixtime to be added to h5_path. For example if
+        h5_unix_digits = 4, h5_path will be modified to "det_cal_1700.h5".
+        Defaults to 0.
     cache_failed_obsids: bool
         If True, will cache failed obs-ids to avoid re-running them. Defaults to
         True.
@@ -106,11 +120,13 @@ class DetCalCfg:
         root_dir: str,
         context_path: str,
         *,
-        data_root: Optional[str] = None,
         raise_exceptions: bool = False,
         apply_cal_correction: bool = True,
+        hwpss_subtraction: bool = False,
+        metadata_list: Union[str, List[str]] = 'all',
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
+        h5_unix_digits: int = 0,
         cache_failed_obsids: bool = True,
         failed_cache_file: str = "failed_obsids.yaml",
         show_pb: bool = True,
@@ -124,11 +140,10 @@ class DetCalCfg:
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
-        ctx = core.Context(self.context_path)
-        if data_root is None:
-            self.data_root = get_data_root(ctx)
+        self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
+        self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
         self.show_pb = show_pb
         self.run_method = run_method
@@ -155,6 +170,7 @@ class DetCalCfg:
 
         self.index_path = parse_path(index_path)
         self.h5_path = parse_path(h5_path)
+        self.h5_unix_digits = h5_unix_digits
         self.failed_cache_file = parse_path(failed_cache_file)
 
         kw = {"show_pb": False, "default_nprocs": self.nprocs_result_set}
@@ -248,6 +264,8 @@ class CalInfo:
         Current responsivity of the TES [1/V] computed using bias steps at the
         bias point. This is based on the naive bias step estimation without
         using any additional corrections.
+    bandpass: str
+        Detector bandpass, computed from bias group information.
     """
 
     readout_id: str = ""
@@ -269,6 +287,7 @@ class CalInfo:
     naive_r_frac: float = np.nan
     naive_p_bias: float = np.nan
     naive_s_i: float = np.nan
+    bandpass: str = "NC"
 
     @classmethod
     def dtype(cls) -> List[Tuple[str, Any]]:
@@ -277,6 +296,9 @@ class CalInfo:
         for field in fields(cls):
             if field.name == "readout_id":
                 dt: Tuple[str, Any] = ("dets:readout_id", "<U40")
+            elif field.name == 'bandpass':
+                # Our bandpass str is max 4 characters
+                dt: Tuple[str, Any] = ("bandpass", "<U4")
             else:
                 dt = (field.name, field.type)
             dtype.append(dt)
@@ -293,8 +315,6 @@ class ObsInfo:
     ------------
     obs_id: str
         Obs id.
-    am: AxisManager
-        AxisManager containing metadata for the given observation.
     iv_obsids: dict
         Dict mapping detset to iv obs-id.
     bs_obsids: dict
@@ -303,16 +323,28 @@ class ObsInfo:
         Dict mapping detset to IV analysis file path.
     bsa_files: dict
         Dict mapping detset to bias step analysis file path.
+    det_info: dict
+        Dict which contains det readout id, band, channel, stream id, detset.
+    bias_lines: list
+        List which stores bias lines
+    biases: ndarray
+        Array of detector biases for each bias line
+    tube_flavor: str
+        Type of optics tube (MF, LF, or UHF)
     """
 
     obs_id: str
-    am: core.AxisManager
 
     iv_obsids: Dict[str, str]
     bs_obsids: Dict[str, str]
 
     iva_files: Dict[str, str]
     bsa_files: Dict[str, str]
+
+    det_info: Dict[str, List[str]]
+    bias_lines: List[str]
+    biases: np.ndarray
+    tube_flavor: str
 
 
 @dataclass
@@ -327,12 +359,13 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     res = ObsInfoResult(obs_id)
 
     try:
-        ctx = core.Context(cfg.context_path)
+        ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
         am = ctx.get_obs(
             obs_id,
             samples=(0, 1),
             ignore_missing=True,
             no_signal=True,
+            no_headers=False,
             on_missing={"det_cal": "skip"},
         )
 
@@ -357,7 +390,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             if oid is not None:
                 timecode = oid.split("_")[1][:5]
                 zsmurf_dir = os.path.join(
-                    cfg.data_root, "oper", timecode, oid, f"Z_smurf"
+                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
                 )
                 for f in os.listdir(zsmurf_dir):
                     if "iv" in f:
@@ -377,7 +410,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
             if oid is not None:
                 timecode = oid.split("_")[1][:5]
                 zsmurf_dir = os.path.join(
-                    cfg.data_root, "oper", timecode, oid, f"Z_smurf"
+                    get_data_root(ctx, obs_id), "oper", timecode, oid, f"Z_smurf"
                 )
                 for f in os.listdir(zsmurf_dir):
                     if "bias_step" in f:
@@ -394,9 +427,19 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
         if pA_per_phi0 is None:
             pA_per_phi0 = DEFAULT_pA_per_phi0
 
+        # Pass through specific fields from our axismanager so that the result
+        # is Picklable.
         res.obs_info = ObsInfo(
             obs_id=obs_id,
-            am=am,
+            det_info ={"stream_id": am.det_info.stream_id,
+                       "detset": am.det_info.detset,
+                       "readout_id": am.det_info.readout_id,
+                       "band": am.det_info.smurf.band,
+                       "channel": am.det_info.smurf.channel,},
+            bias_lines=am.bias_lines.vals,
+            biases=am.biases,
+            tube_flavor=am.obs_info.tube_flavor,
+
             iv_obsids=iv_obsids,
             bs_obsids=bias_step_obsids,
             iva_files=iva_files,
@@ -425,7 +468,53 @@ class CalRessetResult:
     result_set: Optional[np.ndarray] = None
 
 
-def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetResult:
+def biases_flags(bsa, buffer=200):
+    """
+    Make flags that mask bias steps
+
+    Args
+        bsa: sodetlib BiasStepAnalysis object
+        buffer: Number of samples to buffer flags
+    Returns
+        RangesMatrix
+    """
+    mask = np.zeros((bsa.am.dets.count, bsa.am.samps.count),
+                    dtype=bool)
+    for i, bg in enumerate(bsa.bgmap):
+        if bg == -1:
+            continue
+        mask[i][bsa.edge_idxs[bg][0]:bsa.edge_idxs[bg][-1]] = 1
+    flags = RangesMatrix.from_mask(mask).buffer(buffer)
+    return flags
+
+
+def load_and_reanalyze_bs(bsa, ctx, obs_id):
+    """
+    Load raw data of biassteps and reanalyze it with hwpss subtraction
+
+    Args
+        bsa: sodetlib BiasStepAnalysis object
+        ctx: Context object
+        obs_id: observation id of bias steps
+    """
+    am = ctx.get_obs(obs_id)
+    am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
+            [(0, 'samps')])
+    if np.all(am.hwp_angle == 0):
+        return
+    bsa.am = am
+    bsa._find_bias_edges()
+    flags = biases_flags(bsa)
+    get_hwpss(am, flags=flags, merge_stats=True)
+    subtract_hwpss(am, subtract_name='signal')
+    bsa._get_step_response()
+    bsa._compute_dc_params()
+    bsa._fit_tau_effs()
+    del bsa.am
+
+
+def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
+                   executor=None, as_completed_callable=None) -> CalRessetResult:
     """
     Returns calibration ResultSet for a given ObsId. This pulls IV and bias step
     data for each detset in the observation, and uses that to compute CalInfo
@@ -452,7 +541,6 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
         ch.setLevel(getattr(logging, cfg.log_level.upper()))
 
     try:
-        am = obs_info.am
 
         ivas = {
             dset: IVAnalysis.load(iva_file)
@@ -471,18 +559,27 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
 
+        if cfg.hwpss_subtraction:
+            # Reanalyze biasstep with hwpss subtraction
+            ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
+            bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
+
+            for dset, bsa in bsas.items():
+                oid = bias_step_obsids[dset]
+                load_and_reanalyze_bs(bsa, ctx, oid)
+
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva.meta["rtm_bit_to_volt"]
         pA_per_phi0 = iva.meta["pA_per_phi0"]
-        cals = [CalInfo(rid) for rid in am.det_info.readout_id]
+        cals = [CalInfo(rid) for rid in obs_info.det_info["readout_id"]]
         if len(cals) == 0:
             raise ValueError(f"No detectors found for {obs_id}")
 
         # Add IV info
         for i, cal in enumerate(cals):
-            band = am.det_info.smurf.band[i]
-            chan = am.det_info.smurf.channel[i]
-            detset = am.det_info.detset[i]
+            band = obs_info.det_info["band"][i]
+            chan = obs_info.det_info["channel"][i]
+            detset = obs_info.det_info["detset"][i]
             iva = ivas[detset]
 
             if iva is None:  # No IV analysis for this detset
@@ -499,7 +596,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             cal.p_sat = iva.p_sat[ridx]  # type: ignore
 
         obs_biases = dict(
-            zip(am.bias_lines.vals, am.biases[:, 0] * 2 * rtm_bit_to_volt)
+            zip(obs_info.bias_lines, obs_info.biases[:, 0] * 2 * rtm_bit_to_volt)
         )
         bias_line_is_valid = {k: True for k in obs_biases.keys()}
 
@@ -530,7 +627,7 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             for dset in bsas:
                 # logger.debug(f"Applying correction for {dset}")
                 rs = []
-                if pool is None:
+                if executor is None:
                     for b, c in zip(ivas[dset].bands, ivas[dset].channels):
                         chdata = tpc.RpFitChanData.from_data(
                             ivas[dset], bsas[dset], b, c
@@ -540,8 +637,8 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
                         )
                 else:
                     rs = tpc.run_corrections_parallel(
-                        ivas[dset], bsas[dset], cfg.param_correction_config, pool=pool
-                    )
+                        ivas[dset], bsas[dset], cfg.param_correction_config, executor=executor,
+                        as_completed_callable=as_completed_callable)
                 correction_results[dset] = rs
         res.correction_results = correction_results
 
@@ -552,10 +649,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             return None
 
         for i, cal in enumerate(cals):
-            band = am.det_info.smurf.band[i]
-            chan = am.det_info.smurf.channel[i]
-            detset = am.det_info.detset[i]
-            stream_id = am.det_info.stream_id[i]
+            band = obs_info.det_info["band"][i]
+            chan = obs_info.det_info["channel"][i]
+            detset = obs_info.det_info["detset"][i]
+            stream_id = obs_info.det_info["stream_id"][i]
             bg = cal.bg
             bsa = bsas[detset]
 
@@ -617,6 +714,13 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo, pool=None) -> CalRessetRes
             else:
                 cal.phase_to_pW = pA_per_phi0 / (2 * np.pi) / cal.s_i * cal.polarity
 
+            # Add bandpass informaton from bias group
+            tube_flavor = obs_info.tube_flavor
+            if cal.bg in BGS['lb']:
+                cal.bandpass = BAND_STR[tube_flavor]['lb']
+            elif cal.bg in BGS['hb']:
+                cal.bandpass = BAND_STR[tube_flavor]['hb']
+
         res.result_set = np.array([astuple(c) for c in cals], dtype=CalInfo.dtype())
         res.success = True
     except Exception as e:
@@ -633,7 +737,7 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
     This will included non-processed obs-ids that are not found in the fail cache,
     and will be limitted to cfg.num_obs.
     """
-    ctx = core.Context(cfg.context_path)
+    ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
     # Find all obs_ids that have not been processed
     with open(cfg.failed_cache_file, "r") as f:
         failed_cache = yaml.safe_load(f)
@@ -681,20 +785,32 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         msg = result.fail_msg
         if msg is None:
             msg = "unknown error"
+        if 'sotodlib.core.metadata.loader.LoaderError' in msg:
+            logger.error(f"obs_id {obs_id} failed due to medatada loader "
+                         "error, try again later")
+            return
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
     logger.info(f"Adding obs_id {obs_id} to dataset")
     rset = ResultSet.from_friend(result.result_set)
-    write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
+    h5_path = cfg.h5_path
+    if cfg.h5_unix_digits:
+        name, ext = os.path.splitext(cfg.h5_path)
+        unixtime = obs_id.split('_')[1][:cfg.h5_unix_digits]
+        h5_path = f"{name}_{unixtime}{ext}"
+    write_dataset(rset, h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
-    relpath = os.path.relpath(cfg.h5_path, start=os.path.dirname(cfg.index_path))
+    relpath = os.path.relpath(h5_path, start=os.path.dirname(cfg.index_path))
     db.add_entry(
         {"obs:obs_id": obs_id, "dataset": obs_id}, filename=relpath, replace=True
     )
 
 
-def run_update_site(cfg: DetCalCfg) -> None:
+def run_update_site(
+        cfg: DetCalCfg,
+        executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+        as_completed_callable: Callable) -> None:
     """
     Main run script for computing det-cal results at the site. This will
     loop over obs-ids and serially gather the ObsInfo from the filesystem and
@@ -716,19 +832,18 @@ def run_update_site(cfg: DetCalCfg) -> None:
 
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
-    mp.set_start_method(cfg.multiprocess_start_method)
-    with mp.Pool(cfg.nprocs_result_set) as pool:
-        for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
-            res = get_obs_info(cfg, oid)
-            if not res.success:
-                logger.info(f"Could not get obs info for obs id: {oid}")
-                logger.error(res.traceback)
+    for oid in tqdm(obs_ids, disable=(not cfg.show_pb)):
+        res = get_obs_info(cfg, oid)
+        if not res.success:
+            logger.info(f"Could not get obs info for obs id: {oid}")
+            logger.error(res.traceback)
 
-            if res.obs_info is None:
-                continue
+        if res.obs_info is None:
+            continue
 
-            result_set = get_cal_resset(cfg, res.obs_info, pool=pool)
-            handle_result(result_set, cfg)
+        result_set = get_cal_resset(cfg, res.obs_info, executor=executor,
+                                    as_completed_callable=as_completed_callable)
+        handle_result(result_set, cfg)
 
 
 def run_update_nersc(cfg: DetCalCfg) -> None:
@@ -754,11 +869,13 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
     obs_ids = get_obsids_to_run(cfg)
     # obs_ids = ['obs_1713962395_satp1_0000100']
     # obs_ids = ['obs_1713758716_satp1_1000000']
+    # obs_ids = ['obs_1701383445_satp3_1000000']
     logger.info(f"Processing {len(obs_ids)} obsids...")
 
     pb = tqdm(total=len(obs_ids), disable=(not cfg.show_pb))
 
-    def callback(result: CalRessetResult):
+    def callback(fut: Future):
+        result = fut.result()
         pb.update()
         handle_result(result, cfg)
 
@@ -768,72 +885,56 @@ def run_update_nersc(cfg: DetCalCfg) -> None:
 
     # We split into multiple pools because:
     # - we don't want to overload sqlite files with too much concurrent access
-    # - we want to be able to continue getting the next obs_info data while ressets are being computed
-    mp.set_start_method(cfg.multiprocess_start_method)
-    pool1 = mp.Pool(cfg.nprocs_obs_info)
-    pool2 = mp.Pool(cfg.nprocs_result_set)
+    # - we want to be able to continue getting the next obs_info data while
+    # ressets are being computed
+    executor1 = ProcessPoolExecutor(max_workers=cfg.nprocs_obs_info)
+    executor2 = ProcessPoolExecutor(max_workers=cfg.nprocs_result_set)
 
-    resset_async_results: Queue = Queue()
-    obsinfo_async_results: Queue = Queue()
+    resset_futures: list[Future] = []
+    obsinfo_futures: list[Future] = []
 
-    def get_obs_info_callback(result: ObsInfoResult):
-        if result.success:
-            r = pool2.apply_async(
-                get_cal_resset,
-                args=(cfg, result.obs_info),
-                callback=callback,
-                error_callback=errback,
-            )
-            resset_async_results.put(r)
-        else:
-            pb.update()
-            add_to_failed_cache(cfg, result.obs_id, result.traceback)
-            logger.error(
-                f"Failed to get obs_info for {result.obs_id}:\n{result.traceback}"
-            )
+
+    def get_obs_info_callback(fut: Future):
+        try:
+            result = fut.result()
+            if result.success:
+                future = executor2.submit(get_cal_resset, cfg, result.obs_info)
+                future.add_done_callback(callback)
+                resset_futures.append(future)
+            else:
+                pb.update()
+                add_to_failed_cache(cfg, result.obs_id, result.traceback)
+                logger.error(f"Failed to get obs_info for {result.obs_id}:\n{result.traceback}")
+        except Exception as e:
+            errback(e)
 
     try:
         for obs_id in obs_ids:
-            a = pool1.apply_async(
-                get_obs_info,
-                args=(cfg, obs_id),
-                callback=get_obs_info_callback,
-                error_callback=errback,
-            )
-            obsinfo_async_results.put(a)
+            future = executor1.submit(get_obs_info, cfg, obs_id)
+            future.add_done_callback(get_obs_info_callback)
+            obsinfo_futures.append(future)
 
-        while not obsinfo_async_results.empty():
-            obsinfo_async_results.get().wait()
-        while not resset_async_results.empty():
-            resset_async_results.get().wait()
+        # Wait for all obsinfo tasks to complete
+        for fut in as_completed(obsinfo_futures):
+            pass  # results handled in callback
+
+        # Wait for all resset tasks to complete
+        for fut in as_completed(resset_futures):
+            try:
+                fut.result()  # Force exceptions to be raised here if any
+            except Exception as e:
+                errback(e)
 
     finally:
-        pool1.terminate()
-        pool1.join()
-        pool2.terminate()
-        pool2.join()
+        executor1.shutdown(wait=True, cancel_futures=True)
+        executor2.shutdown(wait=True, cancel_futures=True)
+
     pb.close()
     logger.info("Finished updates")
 
 
-def main(config_file: str) -> None:
-    """
-    Run update function. This will chose the correct method to run based on
-    ``cfg.run_method``.
-    """
-    cfg = DetCalCfg.from_yaml(config_file)
-
-    if cfg.run_method == "site":
-        run_update_site(cfg)
-    elif cfg.run_method == "nersc":
-        run_update_nersc(cfg)
-    else:
-        raise ValueError(f"Unknown run_method: {cfg.run_method}")
-
-
 def get_parser(
-    parser: Optional[argparse.ArgumentParser] = None,
-) -> argparse.ArgumentParser:
+    parser: Optional[argparse.ArgumentParser] = None,) -> argparse.ArgumentParser:
     if parser is None:
         p = argparse.ArgumentParser()
     else:
@@ -844,7 +945,30 @@ def get_parser(
     return p
 
 
+def _main(
+    cfg: DetCalCfg,
+    executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+    as_completed_callable: Callable) -> None:
+    """
+    Run update function. This will chose the correct method to run based on
+    ``cfg.run_method``.
+    """
+
+    if cfg.run_method == "site":
+        run_update_site(cfg, executor, as_completed_callable)
+    elif cfg.run_method == "nersc":
+        # Instantiate our own separate pools when running on NERSC.
+        executor.shutdown(wait=True)
+        run_update_nersc(cfg)
+    else:
+        raise ValueError(f"Unknown run_method: {cfg.run_method}")
+
+
+def main(config_file: str):
+    cfg = DetCalCfg.from_yaml(config_file)
+    rank, executor, as_completed_callable = get_exec_env(cfg.nprocs_result_set)
+    if rank == 0:
+        _main(cfg, executor, as_completed_callable)
+
 if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
-    main(config_file=args.config_file)
+    sp_util.main_launcher(main, get_parser)

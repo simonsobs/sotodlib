@@ -8,9 +8,12 @@ import numpy as np
 import h5py
 import traceback
 import inspect
+from pathlib import Path
+import re
 from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
+from sotodlib.core.flagman import has_any_cuts
 
 from .. import core
 
@@ -165,7 +168,7 @@ def get_preprocess_context(configs, context=None):
         context["metadata"] = []
 
     for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
+        if key.get("name") == "preprocess" or key.get("label") == "preprocess":
             found=True
             break
     if not found:
@@ -318,10 +321,15 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
-    meta = context.get_meta(obs_id, dets=dets, meta=meta)
-    logger.info(f"Cutting on the last process: {pipe[-1].name}")
-    pipe[-1].select(meta)
-    return meta
+    if meta is None:
+        meta = context.get_meta(obs_id, dets=dets)
+    logger.info("Restricting detectors on all processes")
+    keep_all = np.ones(meta.dets.count,dtype=bool)
+    for process in pipe[:]:
+        keep = process.select(meta, in_place=False)
+        if isinstance(keep, np.ndarray):
+            keep_all &= keep
+    return meta.dets.vals[keep_all]
 
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
@@ -358,8 +366,17 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         logger = init_logger("preprocess")
 
     configs, context = get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
-                                      dets=dets, meta=meta, logger=logger)
+    meta = context.get_meta(obs_id, dets=dets, meta=meta)
+    if (
+        'valid_data' in meta.preprocess and
+        isinstance(meta.preprocess.valid_data, core.AxisManager)
+       ):
+        keep = has_any_cuts(meta.preprocess.valid_data.valid_data)
+        meta.restrict("dets", keep)
+    else:
+        det_vals = load_preprocess_det_select(obs_id, configs=configs, context=context,
+                                              dets=dets, meta=meta, logger=logger)
+        meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -367,7 +384,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
-        pipe.run(aman, aman.preprocess)
+        pipe.run(aman, aman.preprocess, select=False)
         return aman
 
 
@@ -436,21 +453,36 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
+            logger.info("Restricting detectors on all proc pipeline processes")
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
+            else:
+                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+                for process in pipe_proc[:]:
+                    keep = process.select(meta_proc, in_place=False)
+                    if isinstance(keep, np.ndarray):
+                        keep_all &= keep
+            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
+
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess)
+            pipe_init.run(aman, aman.preprocess, select=False)
             if init_only:
                 return aman
 
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
-
-            pipe_proc.run(aman, aman.preprocess)
+            pipe_proc.run(aman, aman.preprocess, select=False)
 
             return aman
         else:
@@ -526,6 +558,16 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
         if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
                            logger=logger):
+            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
+
+            logger.info("Restricting detectors on all proc pipeline processes")
+            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+            for process in pipe_proc[:]:
+                keep = process.select(meta_proc, in_place=False)
+                if isinstance(keep, np.ndarray):
+                    keep_all &= keep
+            meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
+            meta_init.restrict('dets', meta_proc.dets.vals)
             aman = context_init.get_obs(meta_proc, no_signal=True)
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
             aman.move("signal", None)
@@ -554,12 +596,11 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                     T_signal=t2ptemplate_aman.dsT
                 )
 
-            pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
-            proc_aman.preprocess.noisy_dets_flags.move("valid_dets", None)
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
-
             pipe_proc.run(aman, aman.preprocess, sim=True)
 
             return aman
@@ -613,6 +654,53 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         dbexist = False
 
     return dbexist
+
+
+def cleanup_archive(configs, logger=None):
+    """This function finds the final preprocess archive file and deletes any
+    datasets that are not found in the preprocess database.  This helps avoid
+    cases where the database writing was interrupted in a previous run.
+
+    Arguments
+    ----------
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    """
+
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+
+    if logger is None:
+        logger = init_logger("preprocess")
+
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+
+        basename = os.path.splitext(os.path.basename(configs["archive"]["policy"]["filename"]))[0]
+
+        # remove datasets from last archive file if they are not in db
+        archive_files = list(
+            Path(os.path.dirname(configs["archive"]["policy"]["filename"])).rglob(f"{basename}*.h5")
+        )
+        pattern = re.compile(r"\d+")
+        archive_files = [p for p in archive_files if pattern.findall(p.stem)]
+
+        if archive_files:
+            latest_file = max([(int(pattern.findall(p.stem)[-1]), p)
+                               for p in archive_files if pattern.findall(p.stem)],
+                              key=lambda t: t[0])[1]
+
+            db_datasets = [d['dataset'] for d in db.inspect()]
+            with h5py.File(latest_file, "r+") as f:
+                keys = list(f.keys())
+                for key in keys:
+                    if key not in db_datasets:
+                        logger.debug(f"{key} not found in db. deleting it from {latest_file}.")
+                        del f[key]
+
+        db.conn.close()
 
 
 def save_group(obs_id, configs, dets, context=None, subdir='temp'):
@@ -709,6 +797,12 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     group_by, groups, error = get_groups(obs_id, configs, context)
 
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+        x = db.inspect({'obs:obs_id': obs_id})
+    else:
+        x = None
+
     all_groups = groups.copy()
     for g in all_groups:
         if 'wafer.bandpass' in group_by:
@@ -716,16 +810,26 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                 groups.remove(g)
                 continue
 
+    # get groups in db
+    db_groups = []
+    if x is not None and len(x) > 0:
+        [db_groups.append([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+
     for g in groups:
         dets = {gb:gg for gb, gg in zip(group_by, g)}
         outputs_grp = save_group(obs_id, configs, dets, context, subdir)
 
         if os.path.exists(outputs_grp['temp_file']):
             try:
-                if not remove:
+                if not remove and g not in db_groups:
                     cleanup_mandb(None, outputs_grp, configs, logger)
                 else:
-                    # if we're overwriting, remove file so it will re-run
+                    # if we're overwriting
+                    if remove:
+                        logger.info(f"remove={remove}: removing {outputs_grp['temp_file']}")
+                    # if found in database already
+                    elif g in db_groups:
+                        logger.info(f"{outputs_grp['temp_file']} found in db, removing")
                     os.remove(outputs_grp['temp_file'])
             except OSError as e:
                 # remove if it can't be opened
@@ -907,6 +1011,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 try:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
                     init_fields = aman.preprocess._fields.copy()
+                    init_fields.pop('valid_data', None)
                     logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                     # pipeline for init config
                     pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
@@ -943,6 +1048,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
                 proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
+                if 'valid_data' in aman.preprocess:
+                    aman.preprocess.move('valid_data', None)
                 aman.preprocess.merge(proc_aman)
 
                 return error, [obs_id, dets], outputs_proc, aman
@@ -977,6 +1084,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             try:
                 outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
                 init_fields = aman.preprocess._fields.copy()
+                init_fields.pop('valid_data', None)
                 logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                 # pipeline for processing config
                 pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
@@ -1009,6 +1117,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
             proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman)
 
             return error, outputs_init, outputs_proc, aman
@@ -1088,6 +1198,8 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
         db = get_preprocess_db(configs, group_by, logger)
         if len(db.inspect(outputs['db_data'])) == 0:
             db.add_entry(outputs['db_data'], h5_path)
+        # make sure we close the db each time
+        db.conn.close()
         os.remove(src_file)
     elif error == 'load_success':
         return
@@ -1175,7 +1287,7 @@ def check_cfg_match(ref, loaded, logger=None):
                 logger.warning('Config check fails due to ordered pipeline element names not matching.')
                 return False
             else:
-                if type(ref[ri]) is core.AxisManager:
+                if type(ref[ri]) is core.AxisManager and type(loaded[li]) is core.AxisManager:
                     check_cfg_match(ref[ri], loaded[li], logger)
                 elif ref[ri] == loaded[li]:
                     continue

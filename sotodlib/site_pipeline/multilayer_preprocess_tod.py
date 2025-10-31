@@ -2,12 +2,12 @@ import os
 import yaml
 import time
 import logging
+from typing import Optional, Union, Callable
 import numpy as np
 import argparse
 import traceback
 from typing import Optional
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
 from sotodlib.coords import demod as demod_mm
@@ -148,6 +148,7 @@ def multilayer_preprocess_tod(obs_id,
                 outputs_init.append(outputs_grp_init)
 
             init_fields = aman.preprocess._fields.copy()
+            init_fields.pop('valid_data', None)
 
             outputs_grp_proc = pp_util.save_group(obs_id, configs_proc, dets,
                                       context_proc, subdir='temp_proc')
@@ -269,20 +270,29 @@ def get_parser(parser=None):
         type=int,
         default=4
     )
+    parser.add_argument(
+        '--raise-error',
+        help="Raise an error upon completion if any obsids or groups fail.",
+        type=bool,
+        default=False
+    )
     return parser
 
-def main(configs_init: str,
-         configs_proc: str,
-         query: Optional[str] = None, 
-         obs_id: Optional[str] = None, 
-         overwrite: bool = False,
-         min_ctime: Optional[int] = None,
-         max_ctime: Optional[int] = None,
-         update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
-         planet_obs: bool = False,
-         verbosity: Optional[int] = None,
-         nproc: Optional[int] = 4):
+def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+          as_completed_callable: Callable,
+          configs_init: str,
+          configs_proc: str,
+          query: Optional[str] = None,
+          obs_id: Optional[str] = None,
+          overwrite: bool = False,
+          min_ctime: Optional[int] = None,
+          max_ctime: Optional[int] = None,
+          update_delay: Optional[int] = None,
+          tags: Optional[str] = None,
+          planet_obs: bool = False,
+          verbosity: Optional[int] = None,
+          nproc: Optional[int] = 4,
+          raise_error: Optional[bool] = False):
 
     logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -291,7 +301,6 @@ def main(configs_init: str,
 
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog.txt')
-    multiprocessing.set_start_method('spawn')
 
     obs_list = sp_util.get_obslist(context_proc, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
@@ -309,6 +318,10 @@ def main(configs_init: str,
         pp_util.cleanup_obs(obs_id, policy_dir_proc, errlog, configs_proc, context_proc,
                             subdir='temp_proc', remove=overwrite)
 
+    # remove datasets from final archive file not found in init db
+    pp_util.cleanup_archive(configs_init, logger)
+    pp_util.cleanup_archive(configs_proc, logger)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
@@ -319,6 +332,7 @@ def main(configs_init: str,
             group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs_proc['archive']['index'])
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:
@@ -331,42 +345,83 @@ def main(configs_init: str,
 
     logger.info(f'Run list created with {len(run_list)} obsids')
 
+    n_fail = 0
+
     # run write_block obs-ids in parallel at once then write all to the sqlite db.
-    with ProcessPoolExecutor(nproc) as exe:
-        futures = [exe.submit(multilayer_preprocess_tod, obs_id=r[0]['obs_id'],
-                    group_list=r[1], verbosity=verbosity,
-                    configs_init=configs_init,
-                    configs_proc=configs_proc,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
-        for future in as_completed(futures):
-            logger.info('New future as_completed result')
-            try:
-                err, db_datasets_init, db_datasets_proc = future.result()
-            except Exception as e:
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-                f.close()
-                continue
-            futures.remove(future)
+    futures = [executor.submit(multilayer_preprocess_tod, obs_id=r[0]['obs_id'],
+                group_list=r[1], verbosity=verbosity,
+                configs_init=configs_init,
+                configs_proc=configs_proc,
+                overwrite=overwrite, run_parallel=True) for r in run_list]
+    for future in as_completed_callable(futures):
+        logger.info('New future as_completed result')
+        try:
+            err, db_datasets_init, db_datasets_proc = future.result()
+            if err is not None:
+                n_fail += 1
+        except Exception as e:
+            errmsg = f'{type(e)}: {e}'
+            tb = ''.join(traceback.format_tb(e.__traceback__))
+            logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+            f.close()
+            n_fail += 1
+            continue
+        futures.remove(future)
 
-            if db_datasets_init:
-                if err is None:
-                    for db_dataset in db_datasets_init:
-                        logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                        pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
-                else:
-                    pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
+        if db_datasets_init:
+            if err is None:
+                for db_dataset in db_datasets_init:
+                    logger.info(f'Processing future result db_dataset: {db_datasets_init}')
+                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+            else:
+                pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
 
-            if db_datasets_proc:
-                if err is None:
-                    logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
-                    for db_dataset in db_datasets_proc:
-                        pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
-                else:
-                    pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
+        if db_datasets_proc:
+            if err is None:
+                logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
+                for db_dataset in db_datasets_proc:
+                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+            else:
+                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
+
+    if raise_error and n_fail > 0:
+        raise RuntimeError(f"multilayer_preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
+
+
+def main(configs_init: str,
+         configs_proc: str,
+         query: Optional[str] = None,
+         obs_id: Optional[str] = None,
+         overwrite: bool = False,
+         min_ctime: Optional[int] = None,
+         max_ctime: Optional[int] = None,
+         update_delay: Optional[int] = None,
+         tags: Optional[str] = None,
+         planet_obs: bool = False,
+         verbosity: Optional[int] = None,
+         nproc: Optional[int] = 4,
+         raise_error: Optional[bool] = False):
+
+    rank, executor, as_completed_callable = get_exec_env(nproc)
+    if rank == 0:
+        _main(executor=executor,
+              as_completed_callable=as_completed_callable,
+              configs_init=configs_init,
+              configs_proc=configs_proc,
+              query=query,
+              obs_id=obs_id,
+              overwrite=overwrite,
+              min_ctime=min_ctime,
+              max_ctime=max_ctime,
+              update_delay=update_delay,
+              tags=tags,
+              planet_obs=planet_obs,
+              verbosity=verbosity,
+              nproc=nproc,
+              raise_error=raise_error)
+
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)

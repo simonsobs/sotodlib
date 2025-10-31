@@ -13,7 +13,9 @@ understood issues
 """
 
 import os
+import re
 import argparse
+import numpy as np
 import datetime as dt
 from typing import Optional
 
@@ -143,7 +145,17 @@ class MissingReadoutIDs(BookError):
     def has_error(book):
         return 'MissingReadoutIDError' in book.message
     def fix_book(self):
-        utils.set_book_wont_bind(self.imprint, self.book)
+        if self.book.type == "oper":
+            utils.set_book_wont_bind(self.imprint, self.book)
+            return
+        remove_oid = re.findall(r"obs_ufm\S*_\S*", self.book.message)
+        if len(remove_oid) == self.book.bid.split("_")[-1].count('1'):
+            utils.set_book_wont_bind(self.imprint, self.book)
+            return
+        for oid in remove_oid:
+                self.book = utils.remove_level2_obs_from_book(
+                    self.imprint, self.book, oid
+                )
     def report_error(self):
         return f"{self.book.bid} does not have readout ids"
 
@@ -152,7 +164,21 @@ class NoScanFrames(BookError):
     def has_error(book):
         return 'NoScanFrames' in book.message
     def fix_book(self):
-        utils.set_book_wont_bind(self.imprint, self.book)
+        if (
+            self.book.type == "oper" or 
+            self.book.stop-self.book.start < dt.timedelta(minutes=5)
+        ):
+            utils.set_book_wont_bind(self.imprint, self.book)
+        else :
+            remove_oid = re.findall(r"obs_ufm\S*_\S*", self.book.message)
+            if len(remove_oid) == self.book.bid.split("_")[-1].count('1'):
+                utils.set_book_wont_bind(self.imprint, self.book)
+                return
+            for oid in remove_oid:
+                self.book = utils.remove_level2_obs_from_book(
+                    self.imprint, self.book,
+                    oid
+                )
     def report_error(self):
         return f"{self.book.bid} does not have detector data"
 
@@ -181,14 +207,14 @@ class NoMountData(BookError):
     def has_error(book):
         return "NoMountData" in book.message
     def fix_book(self):
-        if book.type == 'obs':
+        if self.book.type == 'obs':
             print("Cannot autofix obs books where the ACU was not reading out")
             return
-        elif book.type == 'oper':
+        elif self.book.type == 'oper':
             utils.set_book_rebind(self.imprint, self.book)
             self.imprint.bind_book(self.book, require_acu=False,)
         else: 
-            raise ValueError(f"What book got me here? {book.bid}")
+            raise ValueError(f"What book got me here? {self.book.bid}")
     def report_error(self):
         return f"{self.book.bid} does not ACU data reading out"
 
@@ -203,30 +229,32 @@ class TimingSystemOff(BookError):
         return 'TimingSystemOff' in book.message
 
     def fix_book(self):
-        if "Timing counters not incrementing" in book.message:
-            if book.type == 'obs':
+        if "Timing counters not incrementing" in self.book.message:
+            if self.book.type == 'obs':
                 print(
                     "Cannot autofix obs books where timing counters aren't" 
                     " incrementing"
                 )
-            elif book.type == 'oper':
-                utils.set_book_rebind(imprint, book, update_level2=True)
-                imprint.bind_book(book)
+            elif self.book.type == 'oper':
+                utils.set_book_rebind(
+                    self.imprint, self.book, update_level2=True
+                )
+                self.imprint.bind_book(self.book)
             else:
-                raise ValueError(f"What book got me here? {book.bid}")
+                raise ValueError(f"What book got me here? {self.book.bid}")
         else:
             utils.set_book_rebind(self.imprint, self.book)
             self.imprint.bind_book(self.book, allow_bad_timing=True,)
     
     def report_error(self):
-        if "Timing counters not incrementing" in book.message:
-            msg = f"{book.bid} has timing system errors not caught at level 2"
-            if book.type == 'obs':
+        if "Timing counters not incrementing" in self.book.message:
+            msg = f"{self.book.bid} has timing system errors not caught at level 2"
+            if self.book.type == 'obs':
                 msg += "\n\t LEVEL2-FAIL: probably have to delete book, update"
                 msg += "update level 2, and replan books"
             return msg
         else:
-            return f"{book.bid} has low precision timing"
+            return f"{self.book.bid} has low precision timing"
 
 class FileTooLargeError(BookError):
     @staticmethod
@@ -242,16 +270,45 @@ class FileTooLargeError(BookError):
         return msg
 
 class BadTimeSamples(BookError):
+    max_drops_to_fix = 10000
+    dropped = None
+
     @staticmethod
     def has_error(book):
         return "BadTimeSamples" in book.message
+
     def fix_book(self):
-        utils.set_book_rebind(self.imprint, self.book)        
-        self.imprint.bind_book(self.book, allow_bad_timing=True,)
+        if "time samples not increasing" in self.book.message:
+            print("cannot autofix samples not increasing")
+            return
+        
+        if self.dropped is None:
+            self.report_error()
+        
+        ## if all our dropped values are less than the limit. Fix
+        if np.all([x<=self.max_drops_to_fix for x in self.dropped.values()]):
+            utils.set_book_rebind(self.imprint, self.book)        
+            self.imprint.bind_book(self.book, allow_bad_timing=True,)
+        ## if all our dropped values are more than the limit. Don't Bind
+        elif np.all([x>self.max_drops_to_fix for x in self.dropped.values()]):
+            print(f"All obs_ids have more than {self.max_drops_to_fix}"
+                   " will not bind book")
+            utils.set_book_wont_bind(self.imprint, self.book)
+        ## if only some of the observations have dropped timing. remove them
+        else:
+            remove_oid = [k for k,x in self.dropped.items() 
+                          if x>self.max_drops_to_fix]
+            for oid in remove_oid:
+                self.book = utils.remove_level2_obs_from_book(
+                    self.imprint, self.book, oid
+                )
+                
     def report_error(self):
         msg = f"{self.book.bid} has dropped time samples\n"
+        self.dropped = {}
         for l in self.book.message.split('\n'):
             if len(l)>0 and l[0] == '\t':
+                self.dropped[l.split("\t")[1].split(":")[0]] = int(l.split("\t")[1].split(":")[-1])
                 msg += l + "\n"
         return msg
 

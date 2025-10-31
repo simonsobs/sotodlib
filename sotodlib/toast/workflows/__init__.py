@@ -29,6 +29,8 @@ from .proc_filters import (
     deconvolve_detector_timeconstant,
     setup_filter_hwpss,
     filter_hwpss,
+    setup_filter_hwpss_model,
+    filter_hwpss_model,
     setup_filter_ground,
     filter_ground,
     setup_filter_poly1d,
