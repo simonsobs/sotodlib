@@ -25,36 +25,36 @@ class H5ContextManager:
         Path to the HDF5 file.
     *args :
         Additional positional arguments passed to `h5py.File`.
-    max_retries : int, optional
+    max_attempts : int, optional
         Number of times to retry opening the file if it is locked.
     delay : int or float, optional
         Delay in seconds between retries.
     **kwargs :
         Additional keyword arguments passed to `h5py.File`.
     """
-    def __init__(self, filename, *args, max_retries=3, delay=5, **kwargs):
+    def __init__(self, filename, *args, max_attempts=3, delay=5, **kwargs):
         self.filename = filename
         self.args = args
         self.kwargs = kwargs
-        self.max_retries = max_retries
+        self.max_attempts = max_attempts
         self.delay = delay
         self.f = None
 
-        assert self.max_retries > 0
+        assert self.max_attempts > 0
         assert self.delay >= 0
 
     def open(self):
-        for attempt in range(self.max_retries):
+        for attempt in range(self.max_attempts):
             try:
                 self.f = h5py.File(self.filename, *self.args, **self.kwargs)
                 return self.f
             except BlockingIOError as e:
                 # If the file is locked, retry opening it after a delay
-                if attempt + 1 < self.max_retries:
+                if attempt + 1 < self.max_attempts:
                     time.sleep(self.delay)
                 else:
                     raise RuntimeError(f"Failed to open {self.filename} after"
-                                   f" {self.max_retries} attempts") from e
+                                   f" {self.max_attempts} attempts") from e
             except Exception as e:
                 # Other errors should fail immediately
                 raise e
