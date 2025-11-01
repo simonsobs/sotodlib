@@ -181,6 +181,11 @@ def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0, collision=1.0):
                     is_north_subset.append(None)
                     mux_band_subset.append(None)
                     bond_pad_subset.append(None)
+        # Convert to numpy objects
+        freq_subset     = np.array(freq_subset)
+        is_north_subset = np.array(is_north_subset)
+        mux_band_subset = np.array(mux_band_subset)
+        bond_pad_subset = np.array(bond_pad_subset)
         # Compute chi for all detector pairs in this subset
         ndet = len(detector_subset)
         for idet1, det1 in enumerate(detector_subset):
@@ -210,6 +215,14 @@ def pos_to_chi(focalplane, dets, alpha=9.64e-30, tol=1.0, collision=1.0):
                 if mux_band1 != mux_band2:
                     continue
                 if np.abs(bond_pad1 - bond_pad2) != 4:
+                    continue
+                # Check that this truly is the nearly frequency neighbor
+                neighbors = np.argwhere((is_north_subset == is_north1) & \
+                                        (mux_band_subset == mux_band1)).flatten()
+                freq_neighbors = np.argsort(np.abs(freq_subset[neighbors] - freq1)).flatten()
+                if not idet2 in neighbors[freq_neighbors[1:3]]:
+                    # freq_neighbors[0] is idet1
+                    # frequency neighbors on either side
                     continue
                 x2, y2 = position_subset[idet2]
                 # Translate frequencies to chi
