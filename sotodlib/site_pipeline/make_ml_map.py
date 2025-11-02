@@ -35,7 +35,7 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
-    parser.add_argument(      "--maxcut", type=float, default=.1, help="Maximum fraction of cut samples in a detector.")
+    parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
     return parser
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
@@ -73,7 +73,6 @@ def main(**args):
     from sotodlib.core import metadata
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
-    from mpi4py import MPI
 
     LoaderError = metadata.loader.LoaderError
 
