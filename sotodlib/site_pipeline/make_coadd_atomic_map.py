@@ -9,6 +9,7 @@ from typing import Literal, Union, Dict, Any, Optional, Tuple, List
 
 from sotodlib import mapmaking
 import sotodlib.site_pipeline.util as sp_util
+from pixell import utils as putils
 
 
 class CoaddAtomicConfig:
@@ -48,6 +49,8 @@ class CoaddAtomicConfig:
         found in database.
     output_root : str
         Path to directory for output map files.
+    plot : bool
+        Set to True to also output PNG plots when writing maps.
     """
     def __init__(
         self,
@@ -64,6 +67,7 @@ class CoaddAtomicConfig:
         unit: str = 'K',
         overwrite: bool = False,
         output_root: str = None,
+        plot: bool = False
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.interval = interval
@@ -75,6 +79,7 @@ class CoaddAtomicConfig:
         self.unit = unit
         self.overwrite = overwrite
         self.output_root = output_root
+        self.plot = plot
         
         def convert_to_datetime(
             time: Union[dt.datetime, float, str, None],
@@ -128,6 +133,8 @@ def main(config_file: str, verbosity: int) -> None:
     cfg = CoaddAtomicConfig.from_yaml(config_file)
     logger.info(f"Setup {cfg.interval} intervals")
     logger.debug(cfg.time_intervals)
+    
+    putils.mkdir(cfg.output_root)
 
     logger.info(f"Database initialized at {cfg.output_db}")
     init_output_db(cfg.output_db, cfg.interval)
@@ -139,14 +146,14 @@ def main(config_file: str, verbosity: int) -> None:
         for band in cfg.bands:
             logger.info(f'Coadding band {band}')
             try:
-                success = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
+                success, err = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
                                                    cfg.output_db, band, cfg.platform, 
                                                    cfg.split_label, start_time, stop_time, 
                                                    cfg.interval, cfg.geom_file_prefix, 
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
-                                                   logger=logger)
+                                                   logger=logger, plot=cfg.plot)
                 if not success:
-                    logger.warning(f"Map found in database and overwrite=False. Skipping.")
+                    logger.warning(err)
             except Exception as e:
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.error(f"Failed to coadd map for {time_str}, {band}: {tb} {e}")

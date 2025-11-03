@@ -6,16 +6,29 @@ this will coadd observations within some time interval. This is primarily meant
 to be used by the make_coadd_atomic_map site-pipeline script, which calls
 make_coadd_map.
 """
-__all__ = ['CoaddMapmaker','make_coadd_map','setup_coadd_map','write_coadd_map']
+__all__ = ['CoaddMapmaker','make_coadd_map','setup_coadd_map','write_coadd_map','eplot']
 import numpy as np
-from pixell import enmap
+from pixell import enmap, enplot, utils as putils
 import sqlite3
 import os
 from tqdm import tqdm
 import datetime as dt
 import logging
 
-from . import utils
+from . import safe_invert_div
+
+def eplot(mapdata, fname_prefix, **kwargs): 
+    """Function to help us plot the maps neatly
+    
+    Arguments
+    ---------
+    mapdata : pixell.enmap
+        Map data to plot
+    fname_prefix : str
+        Path prefix to write output plot. Pixell will add '.png' to the end.
+    """
+    plots = enplot.get_plots(mapdata, **kwargs)
+    enplot.write(fname_prefix, plots)
 
 class CoaddMapmaker:
     """
@@ -76,7 +89,7 @@ class CoaddMapmaker:
         self.hits_coadd += hits
             
     def write(self, output_root, output_db, band, platform, split_label, start_time, 
-              stop_time, interval, unit='K'):
+              stop_time, interval, unit='K', plot=False):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         if isinstance(start_time, dt.datetime):
             start_time = start_time.timestamp()
@@ -103,6 +116,16 @@ class CoaddMapmaker:
         conn.commit()
         conn.close()
         self.logger.info(f'added entry to {interval} table in {output_db}')
+        
+        if plot:
+            params = {"downgrade":4, "colorbar":True, "ticks":20, "color":"planck", 'mask':0, 'range':2000 }
+            eplot(self.map_coadd[0] * 1e6, oname+'_T', **params)
+            params['range'] = 200
+            eplot(self.map_coadd[1] * 1e6, oname+'_Q', **params)
+            eplot(self.map_coadd[2] * 1e6, oname+'_U', **params)
+            params = {"downgrade":4, "colorbar":True, "ticks":20, "color":"viridis" }
+            eplot(self.hits_coadd[0], oname+'_hits', **params)
+            self.logger.info('wrote PNG plots')
         
 def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
                     start_time, stop_time, interval, geom_file_prefix, 
@@ -158,16 +181,16 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     return mapmaker
     
 def write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
-                    start_time, stop_time, interval, unit='K'):
+                    start_time, stop_time, interval, unit='K', plot=False):
     """
     Wrapper for CoaddMapmaker write function.
     """
     mapmaker.write(output_root, output_db, band, platform, split_label, start_time, 
-                   stop_time, interval, unit=unit)
+                   stop_time, interval, unit=unit, plot=plot)
         
 def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_label,
                    start_time, stop_time, interval, geom_file_prefix, overwrite=False,
-                   unit='K', logger=None):
+                   unit='K', logger=None, plot=False):
     """
     Makes coadded atomic maps from a given time interval.
     
@@ -202,24 +225,28 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
         Temperature unit.
     logger : Logger, optional
         Logger for printing on the screen.
+    plot : bool
+        Set to True to also output PNG plots when writing maps.
     """
     mapmaker = setup_coadd_map(atomic_db, output_db, band, platform, 
                                split_label, start_time, stop_time, interval, 
                                geom_file_prefix, overwrite=overwrite, logger=logger)
     
     if not mapmaker:
-        return False
+        return False, "Map found in database and overwrite=False. Skipping."
 
     mapmaker.logger.info(f"# of fits files: {len(mapmaker.data['prefix_path'])}")
+    if len(mapmaker.data['prefix_path']) == 0:
+        return False, "No fits files found to coadd. Skipping."
     mapmaker.logger.info(f"Using geometry from {mapmaker.geom_file_path}")
     for file in tqdm(mapmaker.data['prefix_path'], total=len(mapmaker.data['prefix_path'])):
         mapmaker.add_map(file)
 
-    iweights = utils.safe_invert_div(mapmaker.weights_coadd)
+    iweights = safe_invert_div(mapmaker.weights_coadd)
     mapmaker.map_coadd = enmap.map_mul(iweights, mapmaker.wmap_coadd)
 
     write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
-                    start_time, stop_time, interval, unit=unit)
+                    start_time, stop_time, interval, unit=unit, plot=plot)
 
     
-    return True
+    return True, "Done."
