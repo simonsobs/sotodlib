@@ -538,6 +538,9 @@ class Noise(_Preprocess):
     the white noise is calculated with ``calc_wn()`` and used for ``wn_est``.
     The calculated white noise will be stored in the noise fit axis manager.
 
+    When ``std_units: True``, the white noise will be converted to std units from
+    PSD units (i.e. multiply K/sqrt(Hz) by sqrt(Delta freq)). ``fit`` must be False.
+
     Example config block for fitting PSD::
 
         - name: "noise"
@@ -563,7 +566,7 @@ class Noise(_Preprocess):
           calc:
             low_f: 5
             high_f: 20
-            std_units: True
+            std_units: False
           save: True
           select:
             min_noise: 18e-6
