@@ -194,7 +194,7 @@ class Monitor:
 
         return influxdata
 
-    def record(self, field, values, timestamps, tags, measurement, log='obs_process_log', log_tags=None, obs_id=''):
+    def record(self, field, values, timestamps, tags, measurement, log='obs_process_log', log_tags=None, qa_metrics=False, obs_id=''):
         """Record a monitored statistic to the InfluxDB. Values not written to
         DB until ``Monitor.write()`` is called.
 
@@ -216,6 +216,8 @@ class Monitor:
             Tags to use for the log, typically you won't want to record you've
             completed a calculation for each individual detector, but maybe some higher
             level group. If this is None tags will be used.
+        qa_metrics : bool
+            If called from QA metrics related scripts, use special logging. Default is false.
         obs_id : str
             Obs_id to use for value of "observation" field in logging measurement.
 
@@ -228,10 +230,16 @@ class Monitor:
             self.queue.append(data_line)
 
         # Log into obs_process_log measurement in InfluxDB
-        if log_tags is None:
-            log_tags = {"metric_type": field}
+        if qa_metrics:
+            if log_tags is None:
+                log_tags = {"metric_type": field}
 
-        log_msg = Monitor._build_single_line_entry("observation", obs_id, None, log_tags, log)
+            log_msg = Monitor._build_single_line_entry("observation", obs_id, None, log_tags, log)
+        else:
+            if log_tags is None:
+                log_tags = tags
+
+            log_msg = Monitor._build_single_line_entry(field, 1, None, log_tags, log)
         self.queue.append(log_msg)
 
     def write(self):

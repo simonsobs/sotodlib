@@ -102,7 +102,7 @@ class QAMetric(object):
             raise Exception(f"Metadata does not correspond to obs_id {obs_id}.")
         line = self._process(meta)
         log_tags = {"metric_type": self._influx_field}  # used to identify this entry
-        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags, obs_id=obs_id)
+        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags, qa_metrics=True, obs_id=obs_id)
         self.monitor.write()
 
     def get_new_obs(self):
