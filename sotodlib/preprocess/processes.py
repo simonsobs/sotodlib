@@ -663,7 +663,7 @@ class Noise(_Preprocess):
             else:
                 calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
                 calc_aman.wrap("white_noise", wn, [(0,"dets"), (1,"subscans")])
-            if self.calc_cfgs.get("std"):
+            if self.calc_cfgs.get("std","False"):
                 if not self.subscan:
                     calc_aman = core.AxisManager(aman.dets)
                     calc_aman.wrap("std", wn*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets")])
