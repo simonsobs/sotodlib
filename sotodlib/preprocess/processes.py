@@ -2,6 +2,7 @@ import numpy as np
 from operator import attrgetter
 import copy
 import warnings
+import re
 
 from so3g.proj import Ranges, RangesMatrix
 
@@ -834,16 +835,27 @@ class EstimateHWPSS(_Preprocess):
             `site_pipeline.monitor.Monitor.record`
         """
         # record one metric per wafer_slot per bandpass
-        # extract these tags for the metric
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
+        # add specified tags
+        from ..qa.metrics import _get_tag, _has_tag
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys["bandpass"] = "wafer.bandpass"
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
+
         tags = []
         vals = []
-        from ..qa.metrics import _get_tag, _has_tag
         import re
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
                 if len(subset) > 0:
@@ -869,7 +881,7 @@ class EstimateHWPSS(_Preprocess):
                     mean = coeff_amp[nonzero].mean(axis=0)
 
                     tags_base = {
-                        k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
                     }
                     tags_base["telescope"] = meta.obs_info.telescope
 
@@ -1404,6 +1416,7 @@ class SSOFootprint(_Preprocess):
 
             planet_aman.wrap('mean_distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
 
+            planet = re.sub('[^0-9a-zA-Z]+', '', planet)
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
 
@@ -2583,6 +2596,59 @@ class SmurfGapsFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("smurfgaps", flag_aman)
 
+class GetTauHWP(_Preprocess):
+    """Analyze observation with hwp spinning up or spinning down and
+    compute the timeconstant of detectors from hwp speed dependence of
+    the angle of half-wave plate synchronous signal.
+
+    Example config block::
+
+        - name: "get_tau_hwp"
+          calc:
+            width: 1000
+            apodize_samps: 2000
+            trim_samps: 2000
+            min_fhwp: 1
+            max_fhwp: 2
+            demod_mode: 4
+            name: "tau_hwp"
+            merge: False
+          save: True
+
+    .. autofunction:: sotodlib.hwp.hwp.get_tau_hwp
+    """
+    name = "get_tau_hwp"
+
+    def calc_and_save(self, aman, proc_aman):
+        tau_hwp_aman = hwp.get_tau_hwp(aman, **self.calc_cfgs)
+        self.save(proc_aman, tau_hwp_aman)
+
+    def save(self, proc_aman, tau_hwp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
+
+class Move(_Preprocess):
+    """Rename or remove a data field.
+    To delete the field, pass new_name=None.
+
+    Example config block::
+
+        - name: "move"
+          process:
+            name: "name"
+            new_name: "new_name"
+
+    .. autofunction:: sotodlib.core.axisman.AxisManager.move
+    """
+    name = 'move'
+
+    def process(self, aman, proc_aman, sim=False):
+        aman.move(**self.process_cfgs)
+        return aman, proc_aman
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2630,3 +2696,5 @@ _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
 _Preprocess.register(SmurfGapsFlags)
+_Preprocess.register(GetTauHWP)
+_Preprocess.register(Move)
