@@ -276,77 +276,122 @@ def calc_psd(
     overwrite=True,
     subscan=False,
     full_output=False,
-    aggregate=None,  # <-- NEW: None | 'mean' | 'median' | callable(arr, axis=0)->1D
+    aggregate=None,          # None | 'mean' | 'median' | callable(arr, axis=0)->1D
+    label_axis='dets',
     **kwargs
 ):
-    """Calculates the power spectrum density of an input signal using signal.welch().
-    Data defaults to aman.signal and times defaults to aman.timestamps.
-    By default the nperseg will be set to power of 2 closest to the 1/50th of
-    the samples used, this can be overridden by providing nperseg or freq_spacing.
+    """
+    Calculates the power spectrum density of an input signal using scipy.signal.welch().
+    Data defaults to aman.signal and timestamps to aman.timestamps.
 
-    Arguments:
-        aman (AxisManager): with (dets, samps) OR (channels, samps)axes.
-        signal (float ndarray): data signal to pass to scipy.signal.welch().
-        timestamps (float ndarray): timestamps associated with the data signal.
-        max_samples (int): maximum samples along sample axis to send to welch.
-        prefer (str): One of ['left', 'right', 'center'], indicating what
-            part of the array we would like to send to welch if cuts are
-            required.
-        freq_spacing (float): The approximate desired frequency spacing of the PSD.
-            If None the default nperseg of ~1/50th the signal length is used.
-            If an nperseg is explicitly passed then that will be used.
-        merge (bool): if True merge results into axismanager.
-        merge_suffix (str, optional): Suffix to append to the Pxx field name in aman. Defaults to None (merged as Pxx).
-        overwrite (bool): if true will overwrite f, Pxx axes.
-        subscan (bool): if True, compute psd on subscans.
-        full_output: if True this also outputs nseg, the number of segments used for
-            welch, for correcting bias of median white noise estimation by calc_wn.
-        aggregate: None (default) to keep per-detector PSDs, or:
-            - 'mean'  -> PSD of mean over detectors
-            - 'median'-> PSD of median over detectors
-            - callable -> will be called as aggregate(arr, axis=0) to reduce to 1D
-          NOTE: When aggregate is not None and merge=True with merge_suffix=None,
-          the field name defaults to 'Pxx_agg' to avoid clobbering 'Pxx'.
-        **kwargs: keyword args to be passed to signal.welch().
+    By default the nperseg will be ~power of 2 closest to 1/50 of the samples used,
+    unless explicitly overridden by nperseg or freq_spacing.
 
-    Returns:
-        freqs: array of frequencies corresponding to PSD calculated from welch.
-        Pxx: array of PSD values.
-            If aggregate is None: Pxx shape is (dets, nfreqs).
-            If aggregate is set:  Pxx shape is (nfreqs,) (i.e., 1D).
-        [nseg]: number of segments used for welch. this is returned if full_output is True.
+    Arguments
+    ---------
+        aman : AxisManager
+            with (dets, samps) OR (channels, samps) axes.
+
+        signal : ndarray, optional
+            Data signal to pass to scipy.signal.welch(). Defaults to aman.signal.
+
+        timestamps : ndarray, optional
+            Timestamps corresponding to the data signal. Defaults to aman.timestamps.
+
+        max_samples : int
+            Max samples along sample axis to send to Welch.
+
+        prefer : {'left','right','center'}
+            How to select a slice if trimming to max_samples.
+
+        freq_spacing : float, optional
+            Approximate desired frequency spacing of the PSD. If None the default
+            nperseg (~1/50th the length) is used unless nperseg is passed directly.
+
+        merge : bool
+            If True, merge results (freqs and Pxx) into aman.
+
+        merge_suffix : str or None
+            Suffix for the Pxx field name (Pxx_{suffix}). If None:
+              - When aggregate is None: field name 'Pxx'
+              - When aggregate is set: field name 'Pxx_agg'
+
+        overwrite : bool
+            If True, overwrite existing 'freqs' / 'Pxx*' / 'nseg' fields.
+
+        subscan : bool
+            If True, compute PSD on subscans and stack results.
+
+        full_output : bool
+            If True also return nseg (segments used by Welch) for debiasing.
+
+        aggregate : None | 'mean' | 'median' | callable
+            If None (default), keep per-detector PSDs.
+              - Regular path  : Pxx shape (dets, nfreqs)
+              - Subscan path  : Pxx shape (dets, nfreqs, nsubscans)
+            If set, reduce over detectors (axis=0):
+              - Regular path  : Pxx shape (nfreqs,)
+              - Subscan path  : Pxx shape (nfreqs, nsubscans)
+
+        label_axis : str
+            Name of label axis for detectors/channels. Default 'dets'.
+
+        **kwargs :
+            Passed through to scipy.signal.welch() (e.g., nperseg, noverlap, window, axis).
+
+    Returns
+    -------
+        freqs : ndarray
+        Pxx   : ndarray
+        nseg  : int or ndarray (only if full_output=True)
+
+    Notes
+    -----
+    - For unbiased median white-noise estimates via calc_wn, use noverlap=0 and full_output=True.
     """
     if signal is None:
         signal = aman.signal
 
-    if ("noverlap" not in kwargs) or \
-            ("noverlap" in kwargs and kwargs["noverlap"] != 0):
-        warnings.warn('calc_wn will be biased. noverlap argument of welch '
-                      'needs to be 0 to get unbiased median white noise estimate.')
+    if ("noverlap" not in kwargs) or ("noverlap" in kwargs and kwargs["noverlap"] != 0):
+        warnings.warn(
+            'calc_wn will be biased. noverlap argument of welch needs to be 0 '
+            'to get an unbiased median white noise estimate.'
+        )
     if not full_output:
-        warnings.warn('calc_wn will be biased. full_output argument of calc_psd '
-                      'needs to be True to get unbiased median white noise estimate.')
+        warnings.warn(
+            'calc_wn will be biased. full_output argument of calc_psd needs to be True '
+            'to get an unbiased median white noise estimate.'
+        )
 
     if subscan:
+        # --- Subscan path (delegates to helper and supports aggregate) ---
         if full_output:
-            freqs, Pxx, nseg = _calc_psd_subscan(aman, signal=signal,
-                                                 freq_spacing=freq_spacing,
-                                                 full_output=True,
-                                                 **kwargs)
+            freqs, Pxx, nseg = _calc_psd_subscan(
+                aman, signal=signal, freq_spacing=freq_spacing,
+                full_output=True, aggregate=aggregate, **kwargs
+            )
         else:
-            freqs, Pxx = _calc_psd_subscan(aman, signal=signal,
-                                           freq_spacing=freq_spacing,
-                                           **kwargs)
-        axis_map_pxx = [(0, "dets"), (1, "nusamps"), (2, "subscans")]
+            freqs, Pxx = _calc_psd_subscan(
+                aman, signal=signal, freq_spacing=freq_spacing,
+                full_output=False, aggregate=aggregate, **kwargs
+            )
+
+        # Axis maps depend on aggregation
+        if aggregate is None:
+            axis_map_pxx = [(0, label_axis), (1, "nusamps"), (2, "subscans")]
+        else:
+            # aggregated over detectors -> (nusamps, subscans)
+            axis_map_pxx = [(0, "nusamps"), (1, "subscans")]
         axis_map_nseg = [(0, "subscans")]
+
     else:
+        # --- Regular (non-subscan) path ---
         if timestamps is None:
             timestamps = aman.timestamps
 
         n_samps = signal.shape[-1]
         if n_samps <= max_samples:
-            start = 0
-            stop = n_samps
+            start, stop = 0, n_samps
         else:
             offset = n_samps - max_samples
             if prefer == "left":
@@ -357,8 +402,8 @@ def calc_psd(
                 pass
             else:
                 raise ValueError(f"Invalid choice prefer='{prefer}'")
-            start = offset
-            stop = offset + max_samples
+            start, stop = offset, offset + max_samples
+
         fs = 1 / np.nanmedian(np.diff(timestamps[start:stop]))
         if "nperseg" not in kwargs:
             if freq_spacing is not None:
@@ -373,32 +418,56 @@ def calc_psd(
             nseg = int(max_samples / kwargs["nperseg"])
 
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
-        axis_map_pxx = [(0, aman.dets), (1, "nusamps")]
-        axis_map_nseg = None
 
+        # Aggregate (reduce detectors) if requested
+        if aggregate is not None:
+            if aggregate == 'mean':
+                Pxx = np.nanmean(Pxx, axis=0)      # -> (nfreqs,)
+            elif aggregate == 'median':
+                Pxx = np.nanmedian(Pxx, axis=0)    # -> (nfreqs,)
+            elif callable(aggregate):
+                Pxx = aggregate(Pxx, axis=0)       # -> (nfreqs,)
+            else:
+                raise ValueError("aggregate must be None, 'mean', 'median', or a callable(arr, axis=0)->1D")
+
+        # Axis maps depend on aggregation
+        if aggregate is None:
+            axis_map_pxx = [(0, aman[label_axis]), (1, "nusamps")]
+        else:
+            axis_map_pxx = [(0, "nusamps")]
+        axis_map_nseg = None if aggregate is None else None  # nseg is scalar here
+
+    # --- Merge into aman if requested ---
     if merge:
+        # ensure 'nusamps' axis and 'freqs'
         if 'nusamps' not in aman:
             aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
-            aman.wrap("freqs", freqs, [(0,"nusamps")])
+            aman.wrap("freqs", freqs, [(0, "nusamps")])
         else:
             if len(freqs) != aman.nusamps.count:
-                raise ValueError('New freqs does not match the shape of nusamps\
-                                To avoid this, use the same value for nperseg')
+                raise ValueError(
+                    "New freqs does not match the shape of existing nusamps. "
+                    "Use the same nperseg (or freq_spacing) to keep consistency."
+                )
 
+        # name selection
         if merge_suffix is None:
-            Pxx_name = 'Pxx'
+            Pxx_name = 'Pxx' if aggregate is None else 'Pxx_agg'
         else:
             Pxx_name = f'Pxx_{merge_suffix}'
 
-        if overwrite:
-            if Pxx_name in aman._fields:
-                aman.move("Pxx", None)
+        if overwrite and (Pxx_name in aman._fields):
+            aman.move(Pxx_name, None)
         aman.wrap(Pxx_name, Pxx, axis_map_pxx)
 
         if full_output:
-            if overwrite and "nseg" in aman._fields:
+            if overwrite and ("nseg" in aman._fields):
                 aman.move("nseg", None)
-            aman.wrap("nseg", nseg, axis_map_nseg)
+            # For subscan path nseg is (subscans,), else it's scalar
+            if subscan:
+                aman.wrap("nseg", nseg, axis_map_nseg)
+            else:
+                aman.wrap("nseg", nseg, None)
 
     if full_output:
         return freqs, Pxx, nseg
@@ -406,14 +475,39 @@ def calc_psd(
         return freqs, Pxx
 
 
-def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, **kwargs):
+def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False,
+                      aggregate=None, **kwargs):
     """
-    Calculate the power spectrum density of subscans using signal.welch().
-    Data defaults to aman.signal. aman.timestamps is used for times.
-    aman.subscan_info is used to identify subscans.
-    See calc_psd for arguments.
+    Calculate PSD on each subscan using scipy.signal.welch().
+    Data defaults to aman.signal. Timestamps from aman.timestamps.
+    Subscan windows from aman.subscan_info.
+
+    Parameters
+    ----------
+    aman : AxisManager
+    signal : ndarray, optional
+        Defaults to aman.signal
+    freq_spacing : float, optional
+        If provided, sets nperseg ~ 2**round(log2(fs / freq_spacing)).
+    full_output : bool
+        If True, also return nseg per subscan.
+    aggregate : None | 'mean' | 'median' | callable
+        If None: return per-detector PSDs with shape (dets, nusamps, subscans).
+        Otherwise: reduce over detectors (axis=0) and return shape (nusamps, subscans).
+    **kwargs :
+        Passed to scipy.signal.welch (e.g., nperseg, noverlap, window, axis).
+
+    Returns
+    -------
+    freqs : ndarray
+    Pxx   : ndarray
+        (dets, nusamps, subscans) if aggregate is None;
+        (nusamps, subscans) otherwise.
+    nseg  : ndarray
+        Number of segments per subscan (only if full_output=True).
     """
     from .flags import get_subscan_signal
+
     if signal is None:
         signal = aman.signal
 
@@ -422,30 +516,54 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, *
         if freq_spacing is not None:
             nperseg = int(2 ** (np.around(np.log2(fs / freq_spacing))))
         else:
-            duration_samps = np.asarray([np.ptp(x.ranges()) if x.ranges().size > 0 else 0 for x in aman.subscan_info.subscan_flags])
+            # use typical subscan duration / 4
+            duration_samps = np.asarray([
+                np.ptp(x.ranges()) if x.ranges().size > 0 else 0
+                for x in aman.subscan_info.subscan_flags
+            ])
             duration_samps = duration_samps[duration_samps > 0]
-            nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
+            if duration_samps.size == 0:
+                # fallback
+                nperseg = int(2 ** (np.around(np.log2(signal.shape[-1] / 50.0))))
+            else:
+                nperseg = int(2 ** (np.around(np.log2(np.median(duration_samps) / 4))))
         kwargs["nperseg"] = nperseg
 
-    Pxx, nseg = [], []
+    Pxx_list, nseg_list = [], []
     for iss in range(aman.subscan_info.subscans.count):
         signal_ss = get_subscan_signal(aman, signal, iss)
         axis = -1 if "axis" not in kwargs else kwargs["axis"]
         nsamps = signal_ss.shape[axis]
+
         if nsamps >= kwargs["nperseg"]:
-            freqs, pxx_sub = welch(signal_ss, fs, **kwargs)
-            Pxx.append(pxx_sub)
-            nseg.append(int(nsamps / kwargs["nperseg"]))
+            freqs, pxx_sub = welch(signal_ss, fs, **kwargs)  # pxx_sub: (dets, nfreqs)
+            Pxx_list.append(pxx_sub)
+            nseg_list.append(int(nsamps / kwargs["nperseg"]))
         else:
-            Pxx.append(np.full((signal.shape[0], kwargs["nperseg"]//2+1), np.nan)) # Add nans if subscan is too short
-            nseg.append(np.nan)
-    nseg = np.array(nseg)
-    Pxx = np.array(Pxx)
-    Pxx = Pxx.transpose(1, 2, 0) # Dets, nusamps, subscans
+            # too short: fill with NaNs to keep shapes consistent
+            Pxx_list.append(np.full((signal.shape[0], kwargs["nperseg"]//2 + 1), np.nan))
+            nseg_list.append(np.nan)
+
+    nseg = np.array(nseg_list)                             # (subscans,)
+    Pxx = np.array(Pxx_list)                                # (subscans, dets, nfreqs)
+    Pxx = Pxx.transpose(1, 2, 0)                            # -> (dets, nfreqs, subscans)
+
+    # Aggregate over detectors if requested
+    if aggregate is not None:
+        if aggregate == 'mean':
+            Pxx = np.nanmean(Pxx, axis=0)                   # -> (nfreqs, subscans)
+        elif aggregate == 'median':
+            Pxx = np.nanmedian(Pxx, axis=0)                 # -> (nfreqs, subscans)
+        elif callable(aggregate):
+            Pxx = aggregate(Pxx, axis=0)                    # -> (nfreqs, subscans)
+        else:
+            raise ValueError("aggregate must be None, 'mean', 'median', or a callable(arr, axis=0)->1D")
+
     if full_output:
         return freqs, Pxx, nseg
     else:
         return freqs, Pxx
+
 
 def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     """
@@ -512,6 +630,7 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
+'''
 def noise_model(f, params, **fixed_param):
     """
     Noise model for power spectrum with white noise, and 1/f noise.
@@ -646,15 +765,6 @@ def noise_model(f, params, **fixed_param):
     return wn**2 * (1 + (fknee_eff / f_safe) ** alpha_eff)
 
 
-
-def neglnlike(params, x, y, bin_size=1, **fixed_param):
-    model = noise_model(x, params, **fixed_param)
-    output = np.sum((np.log(model) + y / model)*bin_size)
-    if not np.isfinite(output):
-        return 1.0e30
-    return output
-
-
 def noise_model_stable(f, params, **fixed_param):
     """
     Stable version of wn^2 * (1 + (fknee/f)^alpha), parameterized in log-space.
@@ -689,6 +799,182 @@ def neglnlike_stable(params, x, y, bin_size=1, **fixed_param):
     if not np.isfinite(out):
         return 1e30
     return out
+'''
+
+def noise_model(
+    f,
+    params,
+    *,
+    fixed_param=None,           # None, or {'wn': <float>} or {'alpha': <float>}
+    use_logspace=False,         # False -> linear params [wn, fknee, alpha]
+                                # True  -> log-space params [log_wn, log_fknee, alpha]
+    fknee_floor_frac=0.25,      # floor fknee at this fraction of lowest fitted f
+    alpha_bounds=(0.0, 10.0),   # clip alpha into these bounds
+):
+    """
+    Unified noise model:
+        P(f) = wn^2 * [1 + (fknee / f)^alpha]
+
+    Parameters
+    ----------
+    f : array-like
+        Frequencies.
+    params : array-like
+        If use_logspace == False (linear):
+            - fixed_param is None -> [wn, fknee, alpha]
+            - fixed_param == {'wn': wn0} -> [fknee, alpha]
+            - fixed_param == {'alpha': a0} -> [wn, fknee]
+        If use_logspace == True (stable/log-space):
+            - fixed_param is None -> [log_wn, log_fknee, alpha]
+            - fixed_param == {'wn': wn0} -> [log_fknee, alpha]
+            - fixed_param == {'alpha': a0} -> [log_wn, log_fknee]
+
+    Keyword-only options
+    --------------------
+    fixed_param : dict or None
+        Fix 'wn' or 'alpha' during evaluation.
+    use_logspace : bool
+        If True, interpret params in log-space (numerically stable).
+    fknee_floor_frac : float
+        Floor fknee at max(1e-6, fknee_floor_frac * f_min_pos) where f_min_pos is
+        the smallest positive frequency used (protects against fknee -> 0).
+    alpha_bounds : (float, float)
+        Clip alpha to this range.
+
+    Returns
+    -------
+    ndarray
+        PSD model evaluated at f.
+    """
+    f = np.asarray(f, dtype=float)
+    f_safe = np.maximum(f, 1e-21)  # avoid div-by-zero and log(0)
+    fpos = f_safe[f_safe > 0]
+    fmin_pos = float(np.nanmin(fpos)) if fpos.size else 1e-6
+    fknee_floor = max(1e-6, fknee_floor_frac * fmin_pos)
+
+    # --- Unpack parameters depending on space and fixed_param ---
+    if use_logspace:
+        if fixed_param is None:
+            if len(params) != 3:
+                raise ValueError("use_logspace=True expects [log_wn, log_fknee, alpha].")
+            log_wn, log_fknee, alpha = params
+        elif 'wn' in fixed_param:
+            if len(params) != 2:
+                raise ValueError("use_logspace=True with fixed wn expects [log_fknee, alpha].")
+            log_fknee, alpha = params
+            log_wn = np.log(float(fixed_param['wn']))
+        elif 'alpha' in fixed_param:
+            if len(params) != 2:
+                raise ValueError("use_logspace=True with fixed alpha expects [log_wn, log_fknee].")
+            log_wn, log_fknee = params
+            alpha = float(fixed_param['alpha'])
+        else:
+            raise ValueError("fixed_param must be None, {'wn': val}, or {'alpha': val}.")
+
+        # Guard / clip
+        alpha_eff = float(np.clip(alpha, *alpha_bounds))
+        fknee = float(np.exp(log_fknee))
+        fknee_eff = fknee if fknee >= fknee_floor else fknee_floor
+        log_fknee_eff = np.log(fknee_eff)
+
+        # Stable computation in log space: log P = 2*log_wn + log(1 + exp(alpha*(log_fknee - log f)))
+        t = alpha_eff * (log_fknee_eff - np.log(f_safe))
+        t = np.clip(t, -50.0, 50.0)                # avoid overflow
+        log_model = 2.0 * float(log_wn) + np.log1p(np.exp(t))
+        P = np.exp(log_model)
+        return P
+
+    else:
+        # Linear parameterization
+        if fixed_param is None:
+            if len(params) != 3:
+                raise ValueError("Linear mode expects [wn, fknee, alpha].")
+            wn, fknee, alpha = params
+        elif 'wn' in fixed_param:
+            if len(params) != 2:
+                raise ValueError("Linear mode with fixed wn expects [fknee, alpha].")
+            wn = float(fixed_param['wn'])
+            fknee, alpha = params
+        elif 'alpha' in fixed_param:
+            if len(params) != 2:
+                raise ValueError("Linear mode with fixed alpha expects [wn, fknee].")
+            alpha = float(fixed_param['alpha'])
+            wn, fknee = params
+        else:
+            raise ValueError("fixed_param must be None, {'wn': val}, or {'alpha': val}.")
+
+        wn = float(wn)
+        fknee = float(fknee)
+        alpha_eff = float(np.clip(alpha, *alpha_bounds))
+        fknee_eff = fknee if fknee >= fknee_floor else fknee_floor
+
+        return wn**2 * (1.0 + (fknee_eff / f_safe) ** alpha_eff)
+
+
+def neglnlike(
+    params,
+    x,
+    y,
+    *,
+    bin_size=1.0,
+    fixed_param=None,
+    use_logspace=False,
+    fknee_floor_frac=0.25,
+    alpha_bounds=(0.0, 10.0),
+    fail_value=1.0e30,
+):
+    """
+    Negative log-likelihood for PSD data under the Whittle approximation:
+
+        -ln L ~ sum_{bins} bin_size * [ ln M(f) + Pxx(f) / M(f) ]
+
+    where M is the model P(f) and Pxx is the observed PSD.
+
+    Parameters
+    ----------
+    params : array-like
+        See `noise_model` for parameter expectations (depends on use_logspace / fixed_param).
+    x : ndarray
+        Frequencies.
+    y : ndarray
+        Observed PSD samples at x.
+    bin_size : float
+        Optional multiplicity/weight per bin (e.g., size of log-bins).
+    fixed_param : dict or None
+        Forwarded to `noise_model`.
+    use_logspace : bool
+        Forwarded to `noise_model`.
+    fknee_floor_frac : float
+        Forwarded to `noise_model`.
+    alpha_bounds : (float, float)
+        Forwarded to `noise_model`.
+    fail_value : float
+        Return value if numerical issues occur.
+
+    Returns
+    -------
+    float
+        The negative log-likelihood value.
+    """
+    try:
+        m = noise_model(
+            x,
+            params,
+            fixed_param=fixed_param,
+            use_logspace=use_logspace,
+            fknee_floor_frac=fknee_floor_frac,
+            alpha_bounds=alpha_bounds,
+        )
+    except Exception:
+        return fail_value
+
+    if (not np.all(np.isfinite(m))) or np.any(m <= 0):
+        return fail_value
+
+    out = np.sum((np.log(m) + (y / m)) * bin_size)
+    if not np.isfinite(out):
+        return fail_value
+    return float(out)
 
 
 def get_psd_mask(aman, psd_mask=None, f=None,
@@ -920,7 +1206,8 @@ def fit_noise_model(
     unbinned_mode=3,
     base=1.05,
     freq_spacing=None,
-    subscan=False
+    subscan=False,
+    label_axis='dets'
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -983,6 +1270,9 @@ def fit_noise_model(
         The approximate desired frequency spacing of the PSD. Passed to calc_psd.
     subscan : bool
         If True, fit noise on subscans.
+    label_axis : str
+        The name of LabelAxis in the input aman.
+        Default is ``dets``.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -1004,6 +1294,7 @@ def fit_noise_model(
             merge=merge_psd,
             subscan=subscan,
             full_output=True,
+            label_axis=label_axis,
             **psdargs,
         )
     if np.any(mask):
@@ -1027,8 +1318,8 @@ def fit_noise_model(
                                   "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
                                   "freq_spacing": freq_spacing}
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs"), (2, aman.subscans)]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
     else:
         eix = np.argmin(np.abs(f - f_max))
         if lowf is None:
@@ -1050,22 +1341,22 @@ def fit_noise_model(
         if binning == True:
             f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                               base=base, merge=False)
-        fitout = np.zeros((aman.dets.count, 3))
+        fitout = np.zeros((aman[label_axis].count, 3))
         # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-        covout = np.zeros((aman.dets.count, 3, 3))
+        covout = np.zeros((aman[label_axis].count, 3, 3))
         if isinstance(wn_est, (int, float)):
-            wn_est = np.full(aman.dets.count, wn_est)
-        elif len(wn_est)!=aman.dets.count:
+            wn_est = np.full(aman[label_axis].count, wn_est)
+        elif len(wn_est)!=aman[label_axis].count:
             print('Size of wn_est must be equal to aman.dets.count or a single value.')
             return
         if isinstance(fknee_est, (int, float)):
-            fknee_est = np.full(aman.dets.count, fknee_est)
-        elif len(fknee_est)!=aman.dets.count:
+            fknee_est = np.full(aman[label_axis].count, fknee_est)
+        elif len(fknee_est)!=aman[label_axis].count:
             print('Size of fknee_est must be equal to aman.dets.count or a single value.')
             return
         if isinstance(alpha_est, (int, float)):
-            alpha_est = np.full(aman.dets.count, alpha_est)
-        elif len(alpha_est)!=aman.dets.count:
+            alpha_est = np.full(aman[label_axis].count, alpha_est)
+        elif len(alpha_est)!=aman[label_axis].count:
             print('Size of alpha_est must be equal to aman.dets.count or a single value.')
             return
         if fixed_param == None:
@@ -1117,17 +1408,17 @@ def fit_noise_model(
                     covout_i = np.linalg.pinv(hessian_ndt + 1e-12 * np.eye(hessian_ndt.shape[0]))          
                 except np.linalg.LinAlgError:
                     print(
-                        f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
+                        f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (LinAlgError)"
                     )
                     covout_i = np.full((len(p0), len(p0)), np.nan)
                 except IndexError:
                     print(
-                        f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
+                        f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (IndexError)"
                     )
                     covout_i = np.full((len(p0), len(p0)), np.nan)
                 except RuntimeWarning as e:
                     covout_i = np.full((len(p0), len(p0)), np.nan)
-                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman.dets.vals[i]}')
+                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman[label_axis].vals[i]}')
             fitout_i = res.x
             if fixed_param == "wn":
                 covout_i = np.insert(covout_i, 0, 0, axis=0)
@@ -1210,13 +1501,13 @@ def fit_noise_model(
             
             covout[i] = covout_i
             fitout[i] = fitout_i
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs")]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs")]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
 
     noise_model_coeffs = ["white_noise", "fknee", "alpha"]
 
     noise_fit_stats = core.AxisManager(
-        aman.dets,
+        aman[label_axis],
         core.LabelAxis(
             name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
         ),
@@ -1788,88 +2079,213 @@ def _fit_noise_model_subscan(
 def build_hpf_params_dict(
     filter_name,
     noise_fit=None,
-    filter_params=None
+    filter_params=None,
 ):
     """
-    Build the filter parameter dictionary from a provided
-    dictionary or from noise fit results.
+    Build the filter parameter dictionary from a provided dictionary or from
+    noise-fit results.
+
+    Parameters
+    ----------
+    filter_name : str
+        One of:
+          - "counter_1_over_f" -> expects {"fk": ..., "n": ...}
+          - "high_pass_butter4" -> expects {"fc": ...}
+          - "high_pass_sine2"   -> expects {"cutoff": ..., "width": ...}
+          - "low_pass_butter4"  -> expects {"fc": ...}
+          - "low_pass_sine2"    -> expects {"cutoff": ..., "width": ...}
+    noise_fit : AxisManager or None
+        AxisManager with fields:
+          - .fit: (ndet, 3) array ordered like noise_fit.noise_model_coeffs
+          - .noise_model_coeffs.vals: list/array of names, e.g. ["white_noise","fknee","alpha"]
+        If provided, mapped parameters are pulled from this.
+    filter_params : dict or None
+        Optional user-specified parameters. Used to:
+          - Provide required params not derivable from noise_fit (e.g. "width").
+          - Toggle per-detector output via 'each_detector': True/False.
+          - For "counter_1_over_f": override field names via:
+                'fk_field' (default "fknee"), 'n_field' (default "alpha"),
+            and optionally scale fk via 'fk_scale' (default 1.0).
+
+    Returns
+    -------
+    dict
+        Parameter dict ready for the requested filter.
+
+    Behavior
+    --------
+    - If noise_fit is None: returns filter_params unchanged (no inference).
+    - If noise_fit is given:
+        * Default: returns median parameters across detectors.
+        * If filter_params['each_detector'] is True: returns per-detector vectors.
+        * Special override for "counter_1_over_f":
+            - If 'fk_field' or 'n_field' present, build from those columns (per-detector vectors);
+              apply optional 'fk_scale' to fk values.
+    """
+    # Mapping from filter param names -> noise_fit model coefficient names
+    pars_mapping = {
+        "counter_1_over_f": {
+            "fk": "fknee",    # knee frequency
+            "n":  "alpha",    # 1/f slope
+        },
+        "high_pass_butter4": {
+            "fc": "fknee",
+        },
+        "high_pass_sine2": {
+            "cutoff": "fknee",
+            "width":  None,   # must be supplied by user filter_params
+        },
+        "low_pass_butter4": {
+            "fc": "fknee",
+        },
+        "low_pass_sine2": {
+            "cutoff": "fknee",
+            "width":  None,   # must be supplied by user filter_params
+        },
+    }
+
+    if filter_name not in pars_mapping:
+        raise NotImplementedError(
+            f"{filter_name} params from noise fit are not implemented"
+        )
+
+    # If we cannot infer from noise_fit, just return provided params
+    if noise_fit is None:
+        if filter_params is None:
+            raise ValueError(
+                "noise_fit is None and no filter_params provided; nothing to build."
+            )
+        return filter_params
+
+    if filter_params is None:
+        filter_params = {}
+
+    # Extract fit array and coefficient names
+    coeff_names = list(noise_fit.noise_model_coeffs.vals)   # e.g., ["white_noise","fknee","alpha"]
+    fit_arr     = np.asarray(noise_fit.fit)                 # shape (ndet, 3)
+
+    # Helper: median or per-detector vectors from noise_fit
+    each_detector = bool(filter_params.get("each_detector", False))
+    if each_detector:
+        # Return per-detector vectors for each coefficient name
+        noise_fit_dict = {k: fit_arr[:, i] for i, k in enumerate(coeff_names)}
+    else:
+        # Return medians across detectors
+        med = np.nanmedian(fit_arr, axis=0)
+        noise_fit_dict = {k: med[i] for i, k in enumerate(coeff_names)}
+
+    # Special HEAD feature: field-driven per-detector overrides for counter_1_over_f
+    # If the user specifies fk_field/n_field, use those columns (always per-detector vectors)
+    # and apply optional fk_scale.
+    if filter_name == "counter_1_over_f" and (
+        ("fk_field" in filter_params) or ("n_field" in filter_params)
+    ):
+        fk_field = filter_params.get("fk_field", "fknee")
+        n_field  = filter_params.get("n_field",  "alpha")
+        if fk_field not in coeff_names:
+            raise ValueError(f"fk_field '{fk_field}' not found in noise_fit.noise_model_coeffs {coeff_names}")
+        if n_field not in coeff_names:
+            raise ValueError(f"n_field '{n_field}' not found in noise_fit.noise_model_coeffs {coeff_names}")
+
+        fk_idx = coeff_names.index(fk_field)
+        n_idx  = coeff_names.index(n_field)
+
+        fk_vec = np.asarray(fit_arr[:, fk_idx], dtype=float)
+        n_vec  = np.asarray(fit_arr[:, n_idx],  dtype=float)
+
+        fk_scale = float(filter_params.get("fk_scale", 1.0))
+        fk_vec = fk_vec * fk_scale
+
+        params_dict = {}
+        for k, v in pars_mapping[filter_name].items():
+            if v is None:
+                if k not in filter_params:
+                    raise ValueError(
+                        f"Required parameter '{k}' not found in filter_params and cannot be derived from noise_fit."
+                    )
+                params_dict[k] = filter_params[k]
+            else:
+                if v == "fknee":
+                    params_dict[k] = fk_vec
+                elif v == "alpha":
+                    params_dict[k] = n_vec
+                else:
+                    raise ValueError(f"Unexpected mapping target '{v}' for {filter_name}")
+        return params_dict
+
+    # General path: build params from noise_fit_dict according to mapping
+    # Optionally apply fk_scale to any parameter sourced from 'fknee'.
+    fk_scale_global = float(filter_params.get("fk_scale", 1.0)) if "fk_scale" in filter_params else 1.0
+
+    params_dict = {}
+    for param_name, source_coeff in pars_mapping[filter_name].items():
+        if source_coeff is None:
+            # Must be provided by user
+            if param_name not in filter_params:
+                raise ValueError(
+                    f"Required parameter '{param_name}' not found in filter_params and cannot be derived from noise_fit."
+                )
+            params_dict[param_name] = filter_params[param_name]
+        else:
+            if source_coeff not in noise_fit_dict:
+                raise ValueError(
+                    f"Coefficient '{source_coeff}' not present in noise_fit_dict keys {list(noise_fit_dict.keys())}"
+                )
+            val = noise_fit_dict[source_coeff]
+            # Apply global scaling to fknee-derived values if requested
+            if source_coeff == "fknee" and ("fk_scale" in filter_params):
+                val = np.asarray(val, dtype=float) * fk_scale_global
+            params_dict[param_name] = val
+
+    return params_dict
+
+
+def get_common_noise_params(
+    aman,
+    signal=None,
+    merge=False,
+    merge_name='common_mode',
+    **fit_args
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of common noise.
+    This can be applied to any 1D data with same size as aman.samps.
 
     Args
     ----
-    filter_name : str
-        Name of the filter to build the parameter dict for.
-    noise_fit: AxisManager
-        AxisManager containing the result of the noise model fit sized nparams x ndets.
-    filter_params: dict
-        Filter parameters dictionary to complement parameters
-        derived from the noise fit (or to be used if noise fit is None).
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    signal : nparray
+        The pre-computed common mode sized 1 x nsamps, or
+        the signal sized ndets x nsamps.
+        When signal is given in 2D shape, the common mode across detectors
+        is calculated with median method.
+        
+    merge : bool
+        If True, ``aman_common`` is added into axis manager with merge_name.
+    merge_name : str
+        ``aman_common`` is added with this name.
+    
     Returns
     -------
-    filter_params : dict
-        Returns a dictionary of the median values of the noise model fit parameters
-        if noise_fit is not None, otherwise return the provided filter_params.
+    noise_fit_stats : AxisManager
+        The fit parameters of given common mode.
+
     """
-    if noise_fit is not None:
 
-        pars_mapping = {
-            "high_pass_butter4": {
-                "fc": "fknee",
-            },
-            "counter_1_over_f": {
-                "fk": "fknee", 
-                "n": "alpha"
-            },
-            "high_pass_sine2": {
-                "cutoff": "fknee",
-                "width": None
-            }
-        }
-
-        if filter_name not in pars_mapping.keys():
-            raise NotImplementedError(
-                f"{filter_name} params from noise fit is not implemented"
-            )
-        
-        # If user asked for fields, pass per-det vectors instead of medians.
-        if filter_name == "counter_1_over_f" and filter_params and (
-            ("fk_field" in filter_params) or ("n_field" in filter_params)
-            ):
-            coeff = list(noise_fit.noise_model_coeffs.vals)
-            idx = {name: i for i, name in enumerate(coeff)}
-            #fk_vec = noise_fit.fit[:, idx[filter_params.get("fk_field", "fknee")]]
-            #n_vec  = noise_fit.fit[:, idx[filter_params.get("n_field",  "alpha")]]
-            #fk_field = filter_params.get("fk_field", "fknee")
-            #n_field  = filter_params.get("n_field",  "alpha")
-            fk_scale = float(filter_params.get("fk_scale", 1.0))
-            fk_idx, n_idx = 1, 2  # matches noise.fit[:,1] (fknee), [:,2] (alpha)
-            fk_vec = np.asarray(noise_fit.fit[:, fk_idx], dtype=float)
-            n_vec  = np.asarray(noise_fit.fit[:, n_idx],  dtype=float)
-            filter_params = {"fk": fk_vec, "n": n_vec, "fk_scale": fk_scale}
-            return filter_params
-        else:
-            # original median behavior (kept)
-            noise_fit_array = noise_fit.fit
-            noise_fit_params = noise_fit.noise_model_coeffs.vals
-            
-            median_params = np.median(noise_fit_array, axis=0)
-            median_dict = {
-                k: median_params[i]
-                for i, k in enumerate(noise_fit_params)
-            }
-
-            params_dict = {}
-            for k, v in pars_mapping[filter_name].items():
-                if v is None:
-                    if (filter_params is None) or (k not in filter_params):
-                        raise ValueError(
-                            f"Required parameters {k} not found in config "
-                            "and cannot be derived from noise fit."
-                        )
-                    else:
-                        params_dict.update({k: filter_params[k]})
-                else:
-                    params_dict[k] = median_dict[v]
-
-            filter_params = params_dict
-    
-    return filter_params
+    if signal is None:
+        signal = np.nanmedian(aman.signal, axis=0)
+    elif signal.shape == (aman.dets.count, aman.samps.count):
+        signal = np.nanmedian(signal, axis=0)
+    elif len(signal) != aman.samps.count:
+        raise ValueError(
+                        "The input signal is required to have same length as aman.samps."
+                    )
+    aman_common = core.AxisManager(core.LabelAxis('common', ['common']), aman.samps)
+    aman_common.wrap('signal', np.array([signal]), [(0, 'common'), (1, 'samps')])
+    aman_common.wrap('timestamps', aman.timestamps, [(0, 'samps')])
+    noise_fit_stats = fit_noise_model(aman_common, signal=None, merge_fit=True, 
+                                      label_axis='common', **fit_args)
+    if merge:
+        aman.wrap(merge_name, aman_common)
+    return noise_fit_stats
