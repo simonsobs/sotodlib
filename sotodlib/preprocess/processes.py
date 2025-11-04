@@ -538,8 +538,9 @@ class Noise(_Preprocess):
     the white noise is calculated with ``calc_wn()`` and used for ``wn_est``.
     The calculated white noise will be stored in the noise fit axis manager.
 
-    When ``std_units: True``, the white noise will be converted to std units from
-    PSD units (i.e. multiply K/sqrt(Hz) by sqrt(Delta freq)). ``fit`` must be False.
+    When ``std: True``, a new std field is also added, which is the white noise
+    converted to std units from PSD units (i.e. multiply K/sqrt(Hz) by sqrt(bandwidth)). 
+    ``fit`` must be False for this
 
     Example config block for fitting PSD::
 
@@ -566,7 +567,7 @@ class Noise(_Preprocess):
           calc:
             low_f: 5
             high_f: 20
-            std_units: False
+            std: False
           save: True
           select:
             min_noise: 18e-6
@@ -651,10 +652,6 @@ class Noise(_Preprocess):
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
             wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
-            if self.calc_cfgs.get("std_units"):
-                factor = np.sqrt(psd.freqs[-1])
-            else:
-                factor = 1
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          nseg=psd.get('nseg'),
@@ -662,10 +659,17 @@ class Noise(_Preprocess):
                                          high_f=wn_f_high)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
-                calc_aman.wrap("white_noise", wn*factor, [(0,"dets")])
+                calc_aman.wrap("white_noise", wn, [(0,"dets")])
             else:
                 calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
-                calc_aman.wrap("white_noise", wn*factor, [(0,"dets"), (1,"subscans")])
+                calc_aman.wrap("white_noise", wn, [(0,"dets"), (1,"subscans")])
+            if self.calc_cfgs.get("std"):
+                if not self.subscan:
+                    calc_aman = core.AxisManager(aman.dets)
+                    calc_aman.wrap("std", wn*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets")])
+                else:
+                    calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
+                    calc_aman.wrap("std", wn*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets"), (1,"subscans")])
 
         self.save(proc_aman, calc_aman)
         return aman, proc_aman
