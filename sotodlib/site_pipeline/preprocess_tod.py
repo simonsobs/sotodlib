@@ -401,11 +401,13 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         if db_datasets:
             if err is None:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
+                logger.info(f'Processing future result')
                 for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                    pp_util.cleanup_mandb(err, db_dataset, configs,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+                pp_util.cleanup_mandb(err, db_datasets, configs,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
