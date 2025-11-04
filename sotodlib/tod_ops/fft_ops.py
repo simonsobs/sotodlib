@@ -438,7 +438,7 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, *
     else:
         return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, std_units=False):
+def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
@@ -467,10 +467,6 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, std_units
 
         high_f (float):
             high frequency cutoff to calculate median psd value. Defaults to 10Hz
-
-        std_units(bool):
-            if True, wn is returned in standard deviation units rather than PSD,
-            meaning we multiply by sqrt(Delta freq).
 
     Returns
     -------
@@ -505,8 +501,6 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, std_units
         else:
             wn2 *= debias
     wn = np.sqrt(wn2)
-    if std_units:
-        wn*=np.sqrt(np.median(np.diff(freqs)))
     return wn
 
 def noise_model(f, params, **fixed_param):

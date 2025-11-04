@@ -651,19 +651,21 @@ class Noise(_Preprocess):
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
             wn_f_high = check_frequency_cutoff(wn_f_low, wn_f_high)
-            std_units = self.calc_cfgs.get("std_units", False)
+            if self.calc_cfgs.get("std_units"):
+                factor = np.sqrt(psd.freqs[-1])
+            else:
+                factor = 1
             wn = tod_ops.fft_ops.calc_wn(aman, pxx=pxx,
                                          freqs=psd.freqs,
                                          nseg=psd.get('nseg'),
                                          low_f=wn_f_low,
-                                         high_f=wn_f_high,
-                                         std_units=std_units)
+                                         high_f=wn_f_high)
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
-                calc_aman.wrap("white_noise", wn, [(0,"dets")])
+                calc_aman.wrap("white_noise", wn*factor, [(0,"dets")])
             else:
                 calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
-                calc_aman.wrap("white_noise", wn, [(0,"dets"), (1,"subscans")])
+                calc_aman.wrap("white_noise", wn*factor, [(0,"dets"), (1,"subscans")])
 
         self.save(proc_aman, calc_aman)
         return aman, proc_aman
