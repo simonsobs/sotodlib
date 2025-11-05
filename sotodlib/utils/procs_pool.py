@@ -34,7 +34,7 @@ def _get_mpi_comm() -> (
             MPICommExecutor(comm, root=0, max_workers=max_workers).__enter__(),
             as_completed,
         )
-    except (NameError, ImportError):
+    except (NameError, ImportError, ValueError):
         return False, 0, None, None
 
 

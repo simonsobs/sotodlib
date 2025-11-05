@@ -89,23 +89,22 @@ def simulate_data(job, otherargs, runargs, data):
 def reduce_data(job, otherargs, runargs, data):
     log = toast.utils.Logger.get()
 
-    wrk.simple_jumpcorrect(job, otherargs, runargs, data)
-    wrk.simple_deglitch(job, otherargs, runargs, data)
+    wrk.preprocess(job, otherargs, runargs, data)
 
-    wrk.flag_diff_noise_outliers(job, otherargs, runargs, data)
-    wrk.flag_noise_outliers(job, otherargs, runargs, data)
-    wrk.deconvolve_detector_timeconstant(job, otherargs, runargs, data)
     wrk.raw_statistics(job, otherargs, runargs, data)
 
-    wrk.filter_hwpss(job, otherargs, runargs, data)
-    wrk.filter_common_mode(job, otherargs, runargs, data)
-    wrk.filter_ground(job, otherargs, runargs, data)
-    wrk.filter_poly1d(job, otherargs, runargs, data)
-    wrk.filter_poly2d(job, otherargs, runargs, data)
     wrk.diff_noise_estimation(job, otherargs, runargs, data)
     wrk.noise_estimation(job, otherargs, runargs, data)
 
     data = wrk.demodulate(job, otherargs, runargs, data)
+
+    wrk.filter_ground(job, otherargs, runargs, data)
+    wrk.filter_common_mode(job, otherargs, runargs, data)
+    wrk.filter_poly1d(job, otherargs, runargs, data)
+    wrk.filter_poly2d(job, otherargs, runargs, data)
+
+    wrk.diff_noise_estimation(job, otherargs, runargs, data)
+    wrk.noise_estimation(job, otherargs, runargs, data)
 
     wrk.processing_mask(job, otherargs, runargs, data)
     wrk.flag_sso(job, otherargs, runargs, data)
@@ -193,6 +192,19 @@ def main():
         action="store_true",
         help="Zero out detector data loaded from disk",
     )
+    parser.add_argument(
+        "--preprocess_copy",
+        required=False,
+        default=False,
+        action="store_true",
+        help="Perform preprocessing on a copy of the data.",
+    )
+    parser.add_argument(
+        "--log_config",
+        required=False,
+        default=None,
+        help="Dump out config log to this yaml file",
+    )
 
     # The operators and templates we want to configure from the command line
     # or a parameter file.
@@ -201,6 +213,7 @@ def main():
     templates = list()
 
     wrk.setup_load_or_simulate_observing(parser, operators)
+    wrk.setup_preprocess(parser, operators)
 
     wrk.setup_simulate_atmosphere_signal(operators)
     wrk.setup_simulate_sky_map_signal(operators)
@@ -220,15 +233,8 @@ def main():
     wrk.setup_simulate_readout_effects(operators)
     wrk.setup_save_data_hdf5(operators)
 
-    wrk.setup_simple_jumpcorrect(operators)
-    wrk.setup_simple_deglitch(operators)
-
-    wrk.setup_flag_diff_noise_outliers(operators)
-    wrk.setup_flag_noise_outliers(operators)
-    wrk.setup_deconvolve_detector_timeconstant(operators)
     wrk.setup_raw_statistics(operators)
 
-    wrk.setup_filter_hwpss(operators)
     wrk.setup_filter_common_mode(operators)
     wrk.setup_filter_ground(operators)
     wrk.setup_filter_poly1d(operators)
@@ -260,8 +266,13 @@ def main():
             os.makedirs(otherargs.out_dir, exist_ok=True)
 
     # Log the config that was actually used at runtime.
-    outlog = os.path.join(otherargs.out_dir, "config_log.toml")
-    toast.config.dump_toml(outlog, config, comm=comm)
+    if otherargs.log_config is not None:
+        # User wants to specify the location of the yaml config log
+        toast.config.dump_yaml(otherargs.log_config, config, comm=comm)
+    else:
+        # Log a toml file in the output directory
+        outlog = os.path.join(otherargs.out_dir, "config_log.toml")
+        toast.config.dump_toml(outlog, config, comm=comm)
 
     # If this is a dry run, exit
     if otherargs.dry_run:

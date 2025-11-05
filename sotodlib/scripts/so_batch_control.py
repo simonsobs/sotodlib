@@ -12,27 +12,9 @@ script inside a slurm script.
 """
 
 import argparse
-import datetime
 import os
 import re
-import sys
 import time
-
-import numpy as np
-
-from astropy import units as u
-
-# Import sotodlib.toast first, since that sets default object names
-# to use in toast.
-import sotodlib.toast as sotoast
-
-import toast
-import toast.ops
-from toast.mpi import MPI, Comm
-from toast.observation import default_values as defaults
-
-from .. import ops as so_ops
-from .. import workflows as wrk
 
 
 def load_obs_file(path):
@@ -152,9 +134,6 @@ def find_obs(all_obs, n_job_obs, out_root, ignore_running=False, timeout_hours=2
 
 
 def main():
-    # Get optional MPI parameters
-    comm, procs, rank = toast.get_world()
-
     parser = argparse.ArgumentParser(description="Get observation IDs for a job")
     parser.add_argument(
         "--out_root",
@@ -220,42 +199,32 @@ def main():
 
     args = parser.parse_args()
 
-    if rank == 0:
-        if args.get_batch is not None:
-            # We are getting the next batch of observations
-            all_obs = load_obs_file(args.observations)
-            batch_obs = find_obs(all_obs, args.get_batch, args.out_root)
-            if args.batch_list:
-                batch_str = ",".join(batch_obs)
-                print(f"{batch_str}", flush=True)
-            else:
-                for obs in batch_obs:
-                    print(f"{obs}", flush=True)
-        elif args.get_state is not None:
-            state = get_obs_state(args.out_root, args.get_state)
-            print(f"{state}", flush=True)
-        elif args.clear_state is not None:
-            clear_obs_state(args.out_root, args.clear_state)
-        elif args.set_state_done is not None:
-            set_obs_state(args.out_root, args.set_state_done, "done")
-        elif args.set_state_running is not None:
-            set_obs_state(args.out_root, args.set_state_running, "running")
-        elif args.cleanup:
-            all_obs = load_obs_file(args.observations)
-            for obs in all_obs:
-                state = get_obs_state(args.out_root, obs)
-                if state is not None and state == "running":
-                    clear_obs_state(args.out_root, obs)
-
-    if comm is not None:
-        comm.barrier()
-
-
-def cli():
-    world, procs, rank = toast.mpi.get_world()
-    with toast.mpi.exception_guard(comm=world):
-        main()
+    if args.get_batch is not None:
+        # We are getting the next batch of observations
+        all_obs = load_obs_file(args.observations)
+        batch_obs = find_obs(all_obs, args.get_batch, args.out_root)
+        if args.batch_list:
+            batch_str = ",".join(batch_obs)
+            print(f"{batch_str}", flush=True)
+        else:
+            for obs in batch_obs:
+                print(f"{obs}", flush=True)
+    elif args.get_state is not None:
+        state = get_obs_state(args.out_root, args.get_state)
+        print(f"{state}", flush=True)
+    elif args.clear_state is not None:
+        clear_obs_state(args.out_root, args.clear_state)
+    elif args.set_state_done is not None:
+        set_obs_state(args.out_root, args.set_state_done, "done")
+    elif args.set_state_running is not None:
+        set_obs_state(args.out_root, args.set_state_running, "running")
+    elif args.cleanup:
+        all_obs = load_obs_file(args.observations)
+        for obs in all_obs:
+            state = get_obs_state(args.out_root, obs)
+            if state is not None and state == "running":
+                clear_obs_state(args.out_root, obs)
 
 
 if __name__ == "__main__":
-    cli()
+    main()

@@ -3,6 +3,7 @@
 
 import numpy as np
 
+from toast.fft import convolve
 from toast.utils import Logger, rate_from_times
 from toast.traits import trait_docs, Int, Unicode
 from toast.timing import function_timer
@@ -10,14 +11,11 @@ from toast.observation import default_values as defaults
 from toast.ops import Operator
 
 from sotodlib.tod_ops import filters
-from pixell import fft
 
 
 @trait_docs
 class ReadoutFilter(Operator):
-    """Apply a readout filter to the signal
-
-    """
+    """Apply a readout filter to the signal"""
 
     # Class traits
 
@@ -33,8 +31,12 @@ class ReadoutFilter(Operator):
         "iir_params", help="Observation key for readout filter parameters"
     )
 
-    wafer_key = Unicode(
-        "det_info:stream_id", help="Focalplane key for the wafer name"
+    wafer_key = Unicode("det_info:stream_id", help="Focalplane key for the wafer name")
+
+    debug_root = Unicode(
+        None,
+        allow_none=True,
+        help="Optional root filename for debug plots",
     )
 
     def __init__(self, **kwargs):
@@ -44,20 +46,21 @@ class ReadoutFilter(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
-        gcomm = data.comm.comm_group
 
         for ob in data.obs:
+            if self.iir_params not in ob:
+                msg = "Cannot apply readout filter. "
+                msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
+                raise RuntimeError(msg)
+
             # Get the sample rate from the data.  We also have nominal sample rates
             # from the noise model and also from the focalplane.
             (rate, dt, dt_min, dt_max, dt_std) = rate_from_times(
                 ob.shared[self.times].data
             )
-            freq = fft.rfftfreq(ob.n_local_samples, dt)
-
-            if self.iir_params not in ob:
-                msg = f"Cannot apply readout filter. "
-                msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
-                raise RuntimeError(msg)
+            order = int(np.ceil(np.log(ob.n_local_samples) / np.log(2)))
+            n_fft = 2 ** (order + 1)
+            freq = np.fft.rfftfreq(n_fft, d=1.0 / rate)
 
             # Get valid local detectors
             local_dets = ob.select_local_detectors()
@@ -65,58 +68,56 @@ class ReadoutFilter(Operator):
 
             # Get the rows of the focalplane table containing these dets
             det_table = ob.telescope.focalplane.detector_data
-            fp_rows = np.array(
-                [x for x, y in enumerate(det_table["name"]) if y in local_set_dets]
-            )
+            det_to_row = {
+                y: x for x, y in enumerate(det_table["name"]) if y in local_set_dets
+            }
+            fp_rows = np.array([det_to_row[x] for x in local_dets])
 
             # Get the set of all stream IDs
             all_wafers = set(det_table[self.wafer_key][fp_rows])
 
-            # The IIR filter parameters will either be in a single, top-level dictionary
-            # or they are organized per-UFM.
+            # The IIR filter parameters will either be in a single,
+            # top-level dictionary or they are organized per-UFM.
             if (
-                "per_stream" in ob[self.iir_params] and
-                ob[self.iir_params]["per_stream"]
+                "per_stream" in ob[self.iir_params]
+                and ob[self.iir_params]["per_stream"]
             ):
                 # We need to filter one wafer at a time.
                 for wf in all_wafers:
                     wafer_dets = [
-                        x for x, y in zip(
-                            local_dets, det_table[self.wafer_key][fp_rows]
-                        ) if y == wf
+                        x
+                        for x, y in zip(local_dets, det_table[self.wafer_key][fp_rows])
+                        if y == wf
                     ]
                     signal = ob.detdata[self.det_data][wafer_dets, :]
-                    self._filter_detectors(freq, signal, ob[wf])
+                    self._filter_detectors(rate, freq, signal, ob[wf])
             else:
                 # We are filtering all detectors at once
                 signal = ob.detdata[self.det_data][local_dets, :]
-                self._filter_detectors(freq, signal, ob[self.iir_params])
+                self._filter_detectors(rate, freq, signal, ob[self.iir_params])
 
-    def _filter_detectors(self, freq, det_array, iir_props):
-        ndet = len(det_array)
-        nsamp = len(det_array[0])
-
-        # Get the filter kernels for all detectors
+    def _filter_detectors(self, rate, freq, det_array, iir_props):
+        # Get the common filter kernel for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
 
-        # Re-use the same Fourier domain buffer
-        fsig = np.empty(nsamp // 2 + 1, dtype=np.complex128)
-        for idet in range(ndet):
-            # Forward
-            _ = fft.rfft(det_array[idet], ft=fsig)
-
-            # Apply iir filter kernel
-            fsig /= iir_filter[idet]
-
-            # Inverse fft
-            _ = fft.irfft(fsig, tod=det_array[idet], normalize=True)
+        # Deconvolve
+        convolve(
+            det_array,
+            rate,
+            kernel_freq=freq,
+            kernels=iir_filter,
+            kernel_func=None,
+            deconvolve=True,
+            algorithm="numpy",
+            debug=self.debug_root,
+        )
 
     def _finalize(self, data, **kwargs):
         return
 
     def _requires(self):
         req = {
-            "shared" : self.times,
+            "shared": self.times,
             "detdata": self.det_data,
         }
         return req

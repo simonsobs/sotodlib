@@ -1,17 +1,17 @@
 [build-system]
-requires = ["setuptools", "versioneer[toml]==0.29"]
+requires = ["setuptools", "versioneer[toml]==0.29", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sotodlib"
 readme = "README.md"
 description = "Simons Observatory TOD Simulation and Processing"
-license = {file = "LICENSE"}
+license = "MIT"
 maintainers = [
   {name = "Simons Observatory Collaboration"},
   {email = "so_software@simonsobservatory.org"},
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9, <3.13"
 dependencies = [
   "numpy",
   "scipy",
@@ -21,20 +21,20 @@ dependencies = [
   "toml",
   "skyfield",
   "so3g",
-  "pixell",
+  "pixell>=0.23.0",
   "pytest",
   "scikit-image",
   "pyfftw",
   "numdifftools",
   "psycopg2-binary",
   "lmfit",
+  "flacarray>=0.3.4",
 ]
 dynamic=["version"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: BSD License",
   "Topic :: Scientific/Engineering :: Astronomy",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
@@ -50,8 +50,11 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
-  "sodetlib @ git+https://github.com/simonsobs/sodetlib",
   "let-me-scroll-it",
+  "plotly",
+  "pandas",
+  "alphashape",
+  "slack-sdk",
 ]
 tests = [
   "socs",
@@ -62,6 +65,7 @@ so_hardware_sim = "sotodlib.scripts.hardware_sim:main"
 so_hardware_plot = "sotodlib.scripts.hardware_plot:main"
 so_hardware_trim = "sotodlib.scripts.hardware_trim:main"
 so_hardware_info = "sotodlib.scripts.hardware_info:main"
+so_batch_control = "sotodlib.scripts.so_batch_control:main"
 so-metadata = "sotodlib.core.metadata.cli:main"
 so-site-pipeline = "sotodlib.site_pipeline.cli:main"
 so-data-package = "sotodlib.io.imprinter_cli:main"
@@ -69,7 +73,6 @@ toast_so_sim = "sotodlib.toast.scripts.so_sim:cli"
 toast_so_map = "sotodlib.toast.scripts.so_map:cli"
 toast_so_transfer = "sotodlib.toast.scripts.so_transfer:cli"
 toast_so_convert = "sotodlib.toast.scripts.so_convert:cli"
-toast_so_batch_control = "sotodlib.toast.scripts.so_batch_control:cli"
 get_wafer_offset = "sotodlib.toast.scripts.get_wafer_offset:main"
 
 [tool.versioneer]

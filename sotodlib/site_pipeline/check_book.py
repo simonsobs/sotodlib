@@ -118,7 +118,7 @@ def scan_book_dir(book_dir, logger, config, prep_obsfiledb=False):
     (Note this function is used by update-obsdb, as well.)
     """
     logger.info(f'Examining {book_dir}')
-    bs = check_book.BookScanner(book_dir, config)
+    bs = check_book.BookScanner(book_dir, config, logger=logger)
 
     bs.go()
     bs.report()
@@ -128,7 +128,7 @@ def scan_book_dir(book_dir, logger, config, prep_obsfiledb=False):
         return False, None
 
     if prep_obsfiledb:
-        detset_rows, file_rows = bs.prep_obsfiledb(config.get('root_path', '/'))
+        detset_rows, file_rows = bs.get_obsfiledb_info(config.get('root_path', '/'))
         return True, {
             'detset_rows': detset_rows,
             'file_rows': file_rows,

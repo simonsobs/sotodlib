@@ -116,7 +116,9 @@ class MLMapmaker:
             tod = evaluator.evaluate(data)
             data.nmat.apply(tod)
             accumulator.accumulate(data, tod)
-        return accumulator.finish()
+        accumulator.finish()
+        self.prior(evaluator.x, accumulator.x)
+        return self.dof.zip(*accumulator.x)
 
     def M(self, x_zip):
         iwork = self.dof.unzip(x_zip)
@@ -167,6 +169,10 @@ class MLMapmaker:
             # x_zip is the raw solution, as a 1d vector.
             yield bunch.Bunch(i=solver.i, err=solver.err, x=self.dof.unzip(solver.x), x_zip=solver.x)
 
+    def prior(self, xins, xouts):
+        for signal, xin, xout in zip(self.signals, xins, xouts):
+            signal.prior(xin, xout)
+
     def translate(self, other, x_zip):
         """Translate degrees of freedom x from some other mapamaker to the current one.
         The other mapmaker must have the same list of signals, except that they can have
@@ -184,9 +190,10 @@ class MLEvaluator:
     def __init__(self, x_zip, signals, dof, dtype=np.float32):
         self.signals = signals
         self.x_zip   = x_zip
+        self.x       = dof.unzip(x_zip)
         self.dof     = dof
         self.dtype   = dtype
-        self.iwork = [signal.to_work(m) for signal, m in zip(self.signals, self.dof.unzip(x_zip))]
+        self.iwork = [signal.to_work(m) for signal, m in zip(self.signals, self.x)]
     def evaluate(self, data, tod=None):
         """Evaluate Px for one tod"""
         if tod is None: tod = np.zeros([data.ndet, data.nsamp], self.dtype)
@@ -206,9 +213,9 @@ class MLAccumulator:
             signal.backward(data.id, tod, self.owork[si])
     def finish(self):
         """Return the full P'd based on the previous accumulation"""
-        return self.dof.zip(
-            *[signal.from_work(w) for signal, w in zip(self.signals, self.owork)]
-        )
+        self.x = [signal.from_work(w) for signal, w in zip(self.signals, self.owork)]
+        self.x_zip = self.dof.zip(*self.x)
+        return self.x_zip
 
 class Signal:
     """This class represents a thing we want to solve for, e.g. the sky, ground, cut samples, etc."""
@@ -532,8 +539,8 @@ class SignalCut(Signal):
         """Process the added observations, determining our degrees of freedom etc.
         Should be done before calling forward and backward."""
         if self.ready: return
-        self.rhs = np.concatenate(self.rhs)
-        self.div = np.concatenate(self.div)
+        self.rhs = np.concatenate(self.rhs) if len(self.rhs) > 0 else np.zeros(0, self.dtype)
+        self.div = np.concatenate(self.div) if len(self.div) > 0 else np.zeros(0, self.dtype)
         self.dof = smutils.ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
 
@@ -638,13 +645,13 @@ class SignalSrcsamp(SignalCut):
         # First scan our mask to find which samples need this
         # treatment
         if self.recenter:
-            rec = evaluate_recentering(self.recenter, ctime=ctime[len(ctime) // 2],
-                    geom=(self.mask.shape, self.mask.wcs), site=unarr(obs.site))
-            rot = recentering_to_quat_lonlat(*rec)
+            rec = smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime) // 2],
+                    geom=(self.mask.shape, self.mask.wcs), site=smutils.unarr(obs.site))
+            rot = smutils.recentering_to_quat_lonlat(*rec)
         else: rot = None
         pmap = coords.pmat.P.for_tod(obs, comps="T", geom=self.mask.geometry,
-            rot=rot, threads="domdir", weather=unarr(obs.weather),
-            site=unarr(obs.site), interpol="nearest")
+            rot=rot, threads="domdir", weather=smutils.unarr(obs.weather),
+            site=smutils.unarr(obs.site), interpol="nearest")
         tod = np.zeros((obs.dets.count, obs.samps.count), Nd.dtype)
         pmap.from_map(self.mask, dest=tod)
         cuts= so3g.proj.RangesMatrix.from_mask(tod>0.5)
@@ -675,7 +682,7 @@ class SignalSrcsamp(SignalCut):
         Should be done before calling forward and backward."""
         if self.ready: return
         SignalCut.prepare(self)
-        self.distsamps= np.concatenate(self.distsamps)
+        self.distsamps = np.concatenate(self.distsamps) if len(self.distsamps) > 0 else np.zeros(0, self.dtype)
         x             = np.minimum(self.distsamps/self.redge, 1)
         self.epsilon  = np.exp(np.log(self.eps_edge) * (1-x) + np.log(self.eps_core) * x)
         self.epsilon *= self.div
@@ -777,7 +784,7 @@ def get_pmap(obs, geom, recenter=None, **kwargs):
     if recenter:
         t0  = obs.timestamps[obs.samps.count//2]
         rot = recentering_to_quat_lonlat(*evaluate_recentering(recenter,
-            ctime=t0, geom=geom, site=unarr(obs.site)))
+            ctime=t0, geom=geom, site=smutils.unarr(obs.site)))
     else: rot = None
     if "multibeam" in obs:
         return PmatMultibeam.for_tod(obs, focal_planes=obs.multibeam, geom=geom, rot=rot, **kwargs)

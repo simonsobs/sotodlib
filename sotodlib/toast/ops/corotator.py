@@ -149,7 +149,7 @@ class CoRotator(Operator):
                 quats = obs.shared[name]
                 new_quats = None
                 if obs.comm_col_rank == 0:
-                    new_quats = qa.mult(rot, quats)
+                    new_quats = qa.mult(quats, rot)
                 quats.set(new_quats, offset=(0, 0), fromrank=0)
 
         return

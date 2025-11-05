@@ -1,5 +1,6 @@
 import numpy as np
 from collections import OrderedDict
+import warnings
 
 
 class ResultSet(object):
@@ -154,7 +155,7 @@ class ResultSet(object):
         if simplify_keys:  # remove prefixes
             keys = [k.split('.')[-1] for k in keys]
             assert(len(set(keys)) == len(keys))  # distinct.
-        columns = tuple(map(np.array, zip(*self.rows)))
+        columns = tuple(map(_smart_array_cast, zip(*self.rows)))
         if hdf_compat:
             # Translate any Unicode columns to strings.
             new_cols = []
@@ -276,7 +277,8 @@ class ResultSet(object):
         # Look-up by column...
         if isinstance(item, str):
             index = self.keys.index(item)
-            return np.array([x[index] for x in self.rows])
+            return _smart_array_cast([x[index] for x in self.rows],
+                                     field_detail=f"Key {item}:")
         # Slicing.
         output = self.__class__(self.keys, self.rows[item])
         return output
@@ -311,3 +313,51 @@ class ResultSet(object):
         new_keys = self.keys + src.keys
         new_rows = [r0 + r1 for r0, r1 in zip(self.rows, src.rows)]
         self.keys, self.rows = new_keys, new_rows
+
+
+def _smart_array_cast(values, dtype=None, field_detail=None):
+    """Convert a list of values to a numpy array.  Let numpy casting do
+    its job, but replace any Nones in the list with some better value,
+    first.  The better value is nan, for floats.  For strings and
+    ints, the best we can do is '' and 0 -- in which case a warning is
+    issued.
+
+    For string and int table columns it would be much better to set
+    sensible default values in the schema rather than have null vals
+    persist in the db.
+
+    """
+    non_null = [v for v in values if v is not None]
+    if len(non_null) == 0:
+        return np.full(len(values), np.nan)
+    if len(non_null) == len(values):
+        return np.array(values, dtype=dtype)
+
+    warn = None
+    trial = np.array(non_null)
+    if trial.dtype == np.float32:
+        fill = np.float32(np.nan)
+    elif trial.dtype == np.float64:
+        fill = np.float64(np.nan)
+    elif np.issubdtype(trial.dtype, np.str_):
+        fill = ''
+        warn = 'Replacing null entries with "".'
+    elif np.issubdtype(trial.dtype, np.integer):
+        fill = 0
+        warn = 'Replacing null entries with 0.'
+    else:
+        fill = None
+        warn = 'No patch value for null (dtype=%s).' % (str(trial.dtype))
+
+    revalues = np.array([fill if v is None else v
+                         for v in values])
+    if revalues.dtype != trial.dtype:
+        warn = ('' if warn is None else warn + ' ') + \
+        warnings.warn("Unexpected dtype change.")
+
+    if warn:
+        if field_detail:
+            warn = field_detail + ' ' + warn
+        warnings.warn(warn)
+
+    return revalues
