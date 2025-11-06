@@ -934,7 +934,7 @@ def get_hwpss_subscan(
 
     At the boundary of subscan_1 and subscan_2 (with constant coefficients c_s1, c_s2, respectively):
     c(t)_i = {c_s1 for s < s_pivot - n_buf
-              c_s2 + (c_s1 - c_s2)*wn(s) for  s_pivot - n_buf >= s >= s_pivot + n_buf
+              c_s2 + (c_s1 - c_s2)*wn(s) for  s_pivot - n_buf <= s <= s_pivot + n_buf
               c_s2 for s > s_pivot + n_buf}
 
     Here, wn(s) is the window function chosen to span 2*n_buf for a smooth transition between coefficients, 
