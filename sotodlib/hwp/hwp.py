@@ -966,7 +966,8 @@ def get_hwpss_subscan(
         else:
             sub_flag = RangesMatrix.from_mask(flags.mask()[:, i[0]:i[1]])
 
-        hwp.get_hwpss(
+        
+        get_hwpss(
             aman=sub_aman,
             flags=sub_flag,
             signal=signal,

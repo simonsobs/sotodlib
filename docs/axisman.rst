@@ -144,6 +144,17 @@ The output of the ``wrap`` cal should be::
 Note the boresight entry is marked with a ``*``, indicating that it's
 an AxisManager rather than a numpy array.
 
+Data access under an AxisManager is done based on field names. For example::
+
+    >>> print(dset.boresight.az)
+    [0. 0. 0. ... 0. 0. 0.]
+
+Advanced data access is possible by a path like syntax. This is especially useful when
+data access is dynamic and the field name is not known in advance. For example::
+
+    >>> print(dset["boresight.az"])
+    [0. 0. 0. ... 0. 0. 0.]
+
 To slice this object, use the restrict() method.  First, let's
 restrict in the 'dets' axis.  Since it's an Axis of type LabelAxis,
 the restriction selector must be a list of strings::
@@ -180,6 +191,32 @@ use h5py to load the saved arrays::
     >>> f = h5py.File('output.h5')
     >>> f['my_axismanager/dset/tod'][:]
     <HDF5 dataset "tod": shape (2,290), type "<f8">
+
+To save data with `flacarray`_ compression, pass the "encodings"
+argument, and use a nested dict to identify the field you want to save
+and to specify the storage details.  For example, suppose container
+``dset`` has field ``dset.thermometers.diode1`` that is a float array that
+can be safely compressed with precision 1e-4, and field
+``dset.thermometers.flags`` is an integer array.  Then sensible
+encodings request is::
+
+    >>> encodings = {
+         'thermometers': {
+            'diode1': {
+              'type': 'flacarray',
+              'args': {
+                'quanta': 1e-4
+              }
+            },
+            'flags': {
+              'type': 'flacarray'
+            }
+         }
+       }
+   >>> dset.save('output.h5', encodings=encodings)
+
+
+.. _`flacarray`: https://github.com/hpc4cmb/flacarray
 
 
 --------------------

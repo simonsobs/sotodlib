@@ -11,13 +11,14 @@ from .axisman import AxisManager, OffsetAxis, AxisInterface
 
 logger = logging.getLogger(__name__)
 
+
 class Context(odict):
     # Sets of special handlers may be registered in this class variable, then
     # requested by name in the context.yaml key "context_hooks".
     hook_sets = {}
 
     def __init__(self, filename=None, site_file=None, user_file=None,
-                 data=None, load_list='all'):
+                 data=None, load_list='all', metadata_list='all'):
         """Construct a Context object.  Note this is an ordereddict with a few
         attributes added on.
 
@@ -40,6 +41,9 @@ class Context(odict):
           load_list (str or list): A list of databases to load; some
             combination of 'obsdb', 'detdb', 'obsfiledb', or the
             string 'all' to load all of them (default).
+          metadata_list (str or list): A list of metadata labels to load;
+            some combinations of metadata labels, or the string 'all' to
+            load all of them (default).
 
         """
         super().__init__()
@@ -54,18 +58,18 @@ class Context(odict):
         logger.info(f'Using user_file={user_file}.')
 
         self.update(site_cfg)
-        self.update_context(user_cfg)
+        self.update_context(user_cfg, metadata_list)
 
         ok, full_filename, context_cfg = _read_cfg(filename)
         if filename is not None and not ok:
             raise RuntimeError(
                 'Could not load requested context file %s' % filename)
         logger.info(f'Using context_file={full_filename}.')
-        self.update_context(context_cfg)
+        self.update_context(context_cfg, metadata_list)
 
         # Update with anything the user passed in.
         if data is not None:
-            self.update_context(data)
+            self.update_context(data, metadata_list)
 
         self.site_file = site_file
         self.user_file = user_file
@@ -110,11 +114,15 @@ class Context(odict):
             return default
         return self[k]
 
-    def update_context(self, new_stuff):
+    def update_context(self, new_stuff, metadata_list='all'):
         appendable = ['metadata']
         mergeable = ['tags']
 
         for k, v in new_stuff.items():
+            if k == 'metadata':
+                if metadata_list != 'all':
+                    v = [m for m in v if 'label'
+                         in m and m['label'] in metadata_list]
             if k in appendable and k in self:
                 self[k].extend(v)
             elif k in mergeable and k in self:
@@ -164,6 +172,8 @@ class Context(odict):
                 on_missing=None,
                 free_tags=None,
                 no_signal=None,
+                no_headers=None,
+                special_channels=None,
                 loader_type=None,
     ):
         """Load TOD and supporting metadata for some observation.
@@ -203,6 +213,10 @@ class Context(odict):
           no_signal (bool): If True, the .signal will be set to None.
             This is a way to get the axes and pointing info without
             the (large) TOD blob.  Not all loaders may support this.
+          no_headers (bool): If True, avoid loading "header"
+            information that tags along with the signal.
+          special_channels (bool): If True, load "special" readout
+            channels that are normally skipped (e.g. fixed tones).
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
@@ -285,7 +299,9 @@ class Context(odict):
             loader_type = self.get('obs_loader_type', 'default')
         loader_func = OBSLOADER_REGISTRY[loader_type]  # Register your loader?
         aman = loader_func(self.obsfiledb, obs_id, dets=dets,
-                           samples=samples, no_signal=no_signal)
+                           samples=samples, no_signal=no_signal,
+                           no_headers=no_headers,
+                           special_channels=special_channels)
 
         if aman is None:
             return meta
@@ -326,7 +342,8 @@ class Context(odict):
                  check=False,
                  ignore_missing=False,
                  on_missing=None,
-                 det_info_scan=False):
+                 det_info_scan=False
+    ):
         """Load supporting metadata for an observation and return it in an
         AxisManager.
 
@@ -538,7 +555,9 @@ def _read_cfg(filename=None, envvar=None, default=None):
     filename = os.path.abspath(filename)
     if not os.path.exists(filename):
         return False, filename, odict()
-    return True, filename, yaml.safe_load(open(filename, 'r'))
+    with open(filename, 'r') as file:
+        yaml_file = yaml.safe_load(file)
+    return True, filename, yaml_file
 
 
 def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
@@ -565,6 +584,11 @@ def obsloader_template(db, obs_id, dets=None, prefix=None, samples=None,
       no_signal (bool): If True, loader should avoid reading signal
         data (if possible) and should set .signal=None in the output.
         Passing None is equivalent to passing False.
+      no_headers (bool): If True, loader should avoid loading "header"
+        information that tags along with the signal (such as frame
+        counters, biases, etc.)
+      special_channels (bool): If True, load additional special /
+        diagnostic readout channels that are normally skipped.
 
     Notes:
       This interface is subject to further extension.  When possible

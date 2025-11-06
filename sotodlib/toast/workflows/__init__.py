@@ -29,6 +29,8 @@ from .proc_filters import (
     deconvolve_detector_timeconstant,
     setup_filter_hwpss,
     filter_hwpss,
+    setup_filter_hwpss_model,
+    filter_hwpss_model,
     setup_filter_ground,
     filter_ground,
     setup_filter_poly1d,
@@ -82,7 +84,12 @@ from .proc_characterize import (
     setup_crosslinking_map,
     crosslinking_map,
 )
-from .scripting import setup_load_or_simulate_observing, load_or_simulate_observing
+from .scripting import (
+    setup_load_or_simulate_observing,
+    load_or_simulate_observing,
+    setup_preprocess,
+    preprocess,
+)
 from .sim_observe import setup_simulate_observing, simulate_observing
 from .sim_noise_model import setup_simple_noise_models, simple_noise_models
 from .sim_sky import (

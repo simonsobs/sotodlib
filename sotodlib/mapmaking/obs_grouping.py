@@ -6,13 +6,15 @@ one after the other that will be mapped together, we could request per-obs
 which will be individual observations mapped individually, etc. See the main
 interface function build_obslists for more information and definitions. An
 obslist is a dictionary where each element is a list of
-(obs_id,detset,band,index) to be mapped. index maps to the list of individual
-obs. For example, an atomic map will be a single id, a depth-1 map will be
-multiple ids. The keys of the obslist will be (pid,detset,band). Here pid
-maps into the periods list, which is simply the periods ranges that will be
-mapped. For example, for atomic maps these periods will be simply the ctimes
-dividing individual obs, for depth-1 maps it will be the ctimes dividing
-depth-1 maps, etc.
+(obs_id,detset,band,index) to be mapped. A detset is a wafer_slot by default,
+unless per_tube=True in which case the detset will be over the entire
+optical tube, meaning we will loop over all available wafer_slots.
+Index maps to the list of individual obs. For example, an atomic map will be
+a single id, a depth-1 map will be multiple ids. The keys of the obslist will
+be (pid,detset,band). Here pid maps into the periods list, which is simply
+the periods ranges that will be mapped. For example, for atomic maps these
+periods will be simply the ctimes dividing individual obs, for depth-1 maps
+it will be the ctimes dividing depth-1 maps, etc.
 """
 
 __all__ = ['build_obslists','NoTODFound']
@@ -20,14 +22,14 @@ import numpy as np
 from pixell import utils
 from scipy import ndimage
 
-from .utilities import get_ids
+from .utils import get_ids
 
 class NoTODFound(Exception):
     def __init__(self, msg):
         self.msg = msg
 
 def build_obslists(context, query, mode=None, nset=None, wafer=None,
-        freq=None, ntod=None, tods=None, fixed_time=None, mindur=None, ):
+        freq=None, ntod=None, tods=None, fixed_time=None, mindur=None, per_tube=False ):
     """ 
     Return an obslists dictionary (described in the submodule docstring), 
     along with all ancillary data necessary for the mapmaker
@@ -42,6 +44,9 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     mode : str or none, optional
             Optional, mode for selecting tods. Can be 'per_obs', 
             'fixed_interval', 'depth_1'. Default is 'per_obs'
+    per_tube : bool, optional
+            If True, depth-1 maps will be returned over tube rather than
+            per wafer. Overrides nset and wafer
     nset : int or None, optional
             Optional, the first nset sets will be mapped
     wafer : str or None, optional
@@ -105,9 +110,10 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     else:
         raise NoTODFound("Invalid mode!")
     
-    # We will make one map per period-detset-band
-    obslists = build_period_obslists(obs_infos, periods, context, nset=nset, 
-                                     wafer=wafer, freq=freq)
+    # We will make one map per period-detset-band if per_tube=False
+    # or per period-band if per_tube=True
+    obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
+                                     wafer=wafer, freq=freq, per_tube=per_tube)
     obskeys  = sorted(obslists.keys())
     return obslists, obskeys, periods, obs_infos
 
@@ -202,18 +208,22 @@ def split_periods(periods, maxdur):
     return np.array([t1,t2]).T
 
 def build_period_obslists(obs_info, periods, context, nset=None, 
-                          wafer=None, freq=None):
-    """For each period for each detset-band, make a list of (id,detset,band)
+                          wafer=None, freq=None, per_tube=False):
+    """
+    For each period for each detset-band, make a list of (id,detset,band)
     for the ids that fall inside that period. Returns the obslist dictionary
     that maps (pid,deset,band) to those lists. pid is here the index into
-    the periods, where periods is [nperiod,{ctime_from,ctime_to}]."""
+    the periods, where periods is [nperiod,{ctime_from,ctime_to}].
+    If per_tube=True, then we loop over all available wafers (which will
+    override nset and wafer).
+    """
     obslists = {}
     # 1. Figure out which period each obs belongs to
     ctimes_mid = obs_info.timestamp + obs_info.duration/2
     pids       = np.searchsorted(periods[:,0], ctimes_mid)-1
     # 2. Build our lists. Not sure how to do this without looping
     for i, row in enumerate(obs_info):
-        if wafer is not None:
+        if wafer is not None and not per_tube:
             wafer_list = [wafer]
         else:
             wafer_list = row.wafer_slots_list.split(',')
@@ -223,12 +233,19 @@ def build_period_obslists(obs_info, periods, context, nset=None,
             if row.tube_flavor in ['mf','MF']:
                 band_list = ['f090', 'f150']
             elif row.tube_flavor in ['uhf','UHF']:
-                band_list = ['f230', 'f280']
+                band_list = ['f220', 'f280']
             elif row.tube_flavor in ['lf','LF']:
                 raise ValueError('Band list for lf not implemented yet.')
-        for detset in wafer_list[:nset]:
+        if per_tube:
             for band in band_list:
-                key = (pids[i], detset, band)
+                key = (pids[i], row.tube_slot, band)
                 if key not in obslists: obslists[key] = []
-                obslists[key].append((row.obs_id, detset, band, i))
+                for detset in wafer_list:
+                    obslists[key].append((row.obs_id, detset, band, i))
+        else:
+            for detset in wafer_list[:nset]:
+                for band in band_list:
+                    key = (pids[i], detset, band)
+                    if key not in obslists: obslists[key] = []
+                    obslists[key].append((row.obs_id, detset, band, i))
     return obslists

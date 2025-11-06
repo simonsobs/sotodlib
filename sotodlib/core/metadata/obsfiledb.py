@@ -6,7 +6,10 @@ from collections import OrderedDict
 import numpy as np
 
 from . import common
+from .. import util
 from .resultset import ResultSet
+
+_DB_VERSION = 3
 
 TABLE_DEFS = {
     'detsets': [
@@ -32,6 +35,10 @@ TABLE_DEFS = {
     'meta': [
         "`param` varchar(32) UNIQUE",
         "`value` varchar",
+    ],
+    '_indices': [
+        "CREATE INDEX IF NOT EXISTS idx_obs_id_column ON files(obs_id)",
+        "CREATE INDEX IF NOT EXISTS idx_detset_column ON detsets(name)",
     ],
 }
 
@@ -161,8 +168,8 @@ class ObsFileDb:
     def _get_version(self, conn=None):
         if conn is None:
             conn = self.conn
-        rows = conn.execute('select value from meta where '
-                            'param="obsfiledb_version"').fetchall()
+        rows = conn.execute("select value from meta where "
+                            "param='obsfiledb_version'").fetchall()
         if len(rows) == 0:
             return None
         return int(rows[0][0])
@@ -172,25 +179,30 @@ class ObsFileDb:
         Create the database tables if they do not already exist.
         """
         # Create the tables:
-        table_defs = TABLE_DEFS.items()
         c = self.conn.cursor()
-        for table_name, column_defs in table_defs:
+        for table_name, column_defs in TABLE_DEFS.items():
+            if table_name.startswith('_'):
+                continue
             q = ('create table if not exists `%s` (' % table_name  +
                  ','.join(column_defs) + ')')
             c.execute(q)
 
+        for index in TABLE_DEFS['_indices']:
+            c.execute(index)
+
         if self._get_version(conn=c) is None:
             c.execute('insert or ignore into meta (param,value) values (?,?)',
-                      ('obsfiledb_version', 2))
+                      ('obsfiledb_version', _DB_VERSION))
 
         self.conn.commit()
 
     def add_detset(self, detset_name, detector_names, commit=True):
-        """Add a detset to the detsets table.
+        """Add a detset to the detsets table (by adding detectors with
+        specific names to it).
 
         Arguments:
-          detset_name (str): The (unique) name of this detset.
-          detector_names (list of str): The detectors belonging to
+          detset_name (str): The name of the detset.
+          detector_names (list of str): New detectors belonging to
             this detset.
 
         """
@@ -500,6 +512,203 @@ class ObsFileDb:
         return output
 
 
+# Support functions for diff / patch
+
+def _reconcile_gen(c0, c1, order_keys=None):
+    """Generator used to compare rows in cursor c0 to those in cursor
+    c1. The cursors are assumed to return sorted results, and that the
+    sorting matches the sorting of tuple(row) (if order_keys is None)
+    or tuple(row[k] or k in order_keys).
+
+    Yields results of the form (mtype, item) where mtype is one of:
+    - 'left-only': the item was found in c0 only
+    - 'right-only': the item was found in c1 only
+    - 'both': the item was found in both c0 and c1.
+
+    """
+    def _cmpbl(row):
+        if row is None:
+            return None
+        if order_keys is None:
+            return tuple(row)
+        return tuple(row[k] for k in order_keys)
+
+    r0, r1 = None, None
+    while True:
+        if r0 is None:
+            r0 = c0.fetchone()
+            t0 = _cmpbl(r0)
+        if r1 is None:
+            r1 = c1.fetchone()
+            t1 = _cmpbl(r1)
+        if r0 is None and r1 is None:
+            break
+        if r1 is None or (r0 is not None and t0 < t1):
+            yield ('left-only', r0)
+            r0 = None
+        elif r0 is None or (r1 is not None and t1 < t0):
+            yield ('right-only', r1)
+            r1 = None
+        else:
+            assert t0 == t1
+            yield('both', r0)
+            r0 = r1 = None
+
+
+def _count_and_collect(c0, c1, collect=[], order_keys=None):
+    """Compare rows from cursors c0 and c1 using _reconcile_gen.  Count
+    how many rows are in classes "left-only", "right-only", or "both".
+    If any of those classes is listed in collect, then all rows
+    matching that class are gathered into a ResultSet and returned.
+
+    Returns:
+      counts: dict of number of events.
+      collections: dict with any ResultSet objects requested through
+        collect kw.
+
+    """
+    keys = [col[0] for col in c1.description]
+    collections = {k: ResultSet(keys=keys)
+                   for k in collect}
+    counts = {}
+    for mtype, item in _reconcile_gen(c0, c1, order_keys=order_keys):
+        counts[mtype] = counts.get(mtype, 0) + 1
+        if mtype in collections:
+            collections[mtype].rows.append(tuple(item))
+    return counts, collections
+
+
+def diff_obsfiledbs(db_left, db_right, return_detail=False):
+    """Examine all records in two obsfiledbs and construct a list of
+    changes that could made to db_left in order to make it match
+    db_right.
+
+    Returns a dict with following entries:
+
+    - ``different`` (bool): whether the two databases carry different
+      information.
+    - ``patchable`` (bool): whether the function was able to construct
+      patching instructions.
+    - ``unpatchable_reason`` (str): if not patchable, a string
+      explaining why.
+    - ``detail`` (various): if not patchable, and return_detail, then
+      this will contain detail about the offending data (e.g. obs rows
+      in the two dbs that contain discrepant data).
+    - ``patch_data`` (dict): if patchable, the data needed to patch
+      db_left.  The fields are:
+
+      - ``remove_files`` (list): entries to remove from obs table.
+      - ``remove_dets`` (list): entries to remove from tags table.
+      - ``new_files`` (ResultSet): new data for obs table -- iteration
+        will yield dict that can be passed directly to db.update_obs.
+      - ``new_dets`` (ResultSet): new data for dets table.
+
+
+    Notes:
+
+    In the present implementation, only changes involving adding rows
+    to db_left (either whole obs rows or tag rows) will yield a
+    patchable result.  Cases where some data has changed, or rows
+    deleted, will simply return as unpatchable.
+
+    """
+    if isinstance(db_left, str):
+        db_left = ObsFileDb.from_file(db_left, force_new_db=False)
+    if isinstance(db_right, str):
+        obsdb_right = ObsFileDb.from_file(db_right, force_new_db=False)
+
+    def failure_declaration(reason, detail=None):
+        if not return_detail:
+            detail = None
+        return {'different': True,
+                'patchable': False,
+                'unpatchable_reason': reason,
+                'detail': detail}
+
+    # Check meta.
+    cursors = [
+        db.conn.execute(
+            'select * from meta order by param') for db in [db_left, db_right]]
+    counts, collections = _count_and_collect(cursors[0], cursors[1],
+                                             collect=['left-only', 'right-only'])
+    if counts.get('left-only') or counts.get('right-only'):
+        return failure_declaration(
+            'Databases have different meta params.',
+            detail=collections)
+
+    # Check frame_offsets are not populated.
+    foffs = [ResultSet.from_cursor(db.conn.execute(
+        'select * from frame_offsets')) for db in [db_left, db_right]]
+    if not (len(foffs[0]) == len(foffs[1]) == 0):
+        return failure_declaration(
+            'One or other database has non-empty frame_offsets table.',
+            detail=metas)
+
+    # The detsets table.
+    cursors = [
+        db.conn.execute(
+            'select name, det from detsets order by name, det')
+        for db in [db_left, db_right]]
+    counts, collections = _count_and_collect(cursors[0], cursors[1], collect=['right-only'])
+    bad_count = counts.get('left-only', 0)
+    if bad_count > 0:
+        return failure_declaration(
+            f'db_left contains {bad_count} dets entries not found in db_right.',
+            detail=collections.get('left-only'))
+    new_dets = collections['right-only']
+
+    # The files table.
+    cursors = [
+        db.conn.execute(
+            'select * from files order by obs_id, detset, name, sample_start')
+        for db in [db_left, db_right]]
+    counts, collections = _count_and_collect(
+        cursors[0], cursors[1], collect=['right-only'],
+        order_keys=['obs_id', 'detset', 'name', 'sample_start'])
+    bad_count = counts.get('left-only', 0)
+    if bad_count > 0:
+        return failure_declaration(
+            f'db_left contains {bad_count} files entries not found in db_right.',
+            detail=collections.get('left-only'))
+    new_files = collections['right-only']
+    new_files.keys[new_files.keys.index('name')] = 'filename'
+
+    # Ok finally
+    pd = {
+        'remove_files': [],
+        'remove_dets': [],
+        'new_files': new_files,
+        'new_dets': new_dets,
+    }
+    different = len(new_files) > 0 or len(new_dets) > 0
+    return {
+        'different': different,
+        'patchable': True,
+        'patch_data': pd,
+    }
+
+
+def patch_obsfiledb(patch_data, target_db):
+    """Update an ObsFileDb with a batch of changes.
+
+    Args:
+      target_db (ObsFileDb): the database where changes should be made.
+      patch_data (dict): patch information, as returned by
+        diff_obsfiledbs.
+
+    """
+    assert len(patch_data['remove_files']) == 0
+    assert len(patch_data['remove_dets']) == 0
+
+    for file_entry in patch_data['new_files']:
+        target_db.add_obsfile(**file_entry, commit=False)
+
+    for det_entry in patch_data['new_dets']:
+        target_db.add_detset(det_entry['name'], [det_entry['det']], commit=False)
+
+    target_db.conn.commit()
+
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser(
@@ -566,6 +775,18 @@ Examples:
                    "Store modified database in this file.")
     p.add_argument('--dry-run', action='store_true', help=
                    "Run the conversion steps but do not write the results anywhere.")
+
+    # "diff"
+    p = cmdsubp.add_parser(
+        'diff', help=
+        "Check database against some upstream target; report diff/patchability.",
+        usage="""Syntax:
+
+    %(prog)s [output options]
+        """)
+    p.add_argument('upstream_db')
+    p.add_argument('--patch', action='store_true', help=
+                   "If possible, patch target to match the upstream.")
 
     # "fix-db"
     p = cmdsubp.add_parser(
@@ -664,6 +885,26 @@ def main(args=None, parser=None):
             c.execute('vacuum')
             db.to_file(args.output_db)
 
+    elif args.mode == 'diff':
+        print(f'Comparing to {args.upstream_db} ...')
+        db = ObsFileDb(args.filename)
+        db_right = ObsFileDb(args.upstream_db)
+        report = diff_obsfiledbs(db, db_right)
+        if not report['different']:
+            print(' ... databases are in sync.')
+        elif report['patchable']:
+            print(' ... upstream is different, but the target db can be patched to match.')
+        else:
+            print(' ... upstream and target have irreconcilable differences.')
+            parser.exit(1)
+
+        if args.patch and report['different']:
+            print()
+            print('Patching ...')
+            patch_obsfiledb(report['patch_data'], db)
+            print(' ... done')
+            print()
+
     elif args.mode == 'fix-db':
         # Reconnect with write?
         if args.overwrite:
@@ -702,6 +943,19 @@ def main(args=None, parser=None):
                 print(f'Running: {line}')
                 db.conn.execute(line)
             print()
+
+            for index in TABLE_DEFS['_indices']:
+                print('Adding indexes...')
+                db.conn.execute(index)
+
+        elif v == 2:
+            changes = True
+            for index in TABLE_DEFS['_indices']:
+                print('Adding indexes...')
+                db.conn.execute(index)
+            print('Bumping version')
+            db.conn.execute('insert or replace into meta (param,value) values (?,?)',
+                            ('obsfiledb_version', 3))
 
         if changes:
             print('Saving to %s' % args.output_db)

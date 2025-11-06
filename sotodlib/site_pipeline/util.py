@@ -7,12 +7,9 @@ import sys
 import copy
 import argparse
 import yaml
-import numpy as np
 import copy
-
-from astropy import units as u
-
-from .. import core
+import requests
+import datetime as dt
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -38,6 +35,43 @@ class ArchivePolicy:
         """
         return self.filename, product_id
 
+class ArgumentParser(argparse.ArgumentParser):
+    """A variant of ArgumentParser that allows the defaults
+    to be overriden by values in a yaml config files. Thus the
+    priority order becomes, from highest to lowest:
+
+    1. Arguments passed on the command line
+    2. The config file
+    3. Defaults defined with add_argument()
+
+    The config file is specified using the --config-file option,
+    which this class adds automatically. It should therefore not
+    be added manually.
+    """
+    def __init__(self, *args, **kwargs):
+        argparse.ArgumentParser.__init__(self, *args, **kwargs)
+        self.add_argument("--config-file", type=str, default=None,
+            help="Optional yaml file containing overrides for the default values")
+    def parse_args(self, argv=None):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--config-file", type=str, default=None)
+        args, _ = parser.parse_known_args()
+        if args.config_file != None:
+            # Ok, we have a config file, parse it and use it to
+            # replace our defaults
+            with open(args.config_file, "r") as ifile:
+                config = yaml.safe_load(ifile)
+            for action in self._actions:
+                try:
+                    action.default  = config[action.dest]
+                    # We mark it as non-required so we can run
+                    # without even normally required arguments
+                    # if they're provided by the config file
+                    action.required = False
+                except (KeyError, AttributeError) as e:
+                    pass
+        # Then parse again, taking into account any default update
+        return argparse.ArgumentParser.parse_args(self, argv)
 
 class DirectoryArchivePolicy:
     """Storage policy for stuff organized directly on the filesystem.
@@ -95,6 +129,11 @@ def parse_quantity(val, default_units=None):
       <Quantity 100. m>
 
     """
+    # Heavy to import, and we want this module to be fast to import
+    # because it provides an ArgumentParser that should inform us
+    # of incorrect arguments with as low latency as possible
+    from astropy import units as u
+
     if default_units is not None:
         default_units = u.Unit(default_units)
 
@@ -248,13 +287,14 @@ class _ReltimeFormatter(logging.Formatter):
             datefmt = '%8.3f'
         return datefmt % (record.created - self.start_time)
 
-def init_logger(name, announce='', verbosity=2):
+def init_logger(name, announce='', verbosity=2, logger=None):
     """Configure and return a logger for site_pipeline elements.  It is
     disconnected from general sotodlib (propagate=False) and displays
     relative instead of absolute timestamps.
 
     """
-    logger = logging.getLogger(name)
+    if logger is None:
+        logger = logging.getLogger(name)
 
     if verbosity == 0:
         level = logging.ERROR
@@ -336,36 +376,121 @@ def get_obslist(context, query=None, obs_id=None, min_ctime=None, max_ctime=None
     obs_list : list
         The list of obs found from the query.
     """
-    if (min_ctime is None) and (update_delay is not None):
-        # If min_ctime is provided it will use that..
-        # Otherwise it will use update_delay to set min_ctime.
-        min_ctime = int(time.time()) - update_delay*86400
 
-    if obs_id is not None:
-        tot_query = f"obs_id=='{obs_id}'"
-    else:
-        tot_query = "and "
-        if min_ctime is not None:
-            tot_query += f"timestamp>={min_ctime} and "
-        if max_ctime is not None:
-            tot_query += f"timestamp<={max_ctime} and "
-        if query is not None:
-            tot_query += query + " and "
-        tot_query = tot_query[4:-4]
-        if tot_query=="":
-            tot_query="1"
+    try:
+        with open(query, "r") as fname:
+            return [context.obsdb.get(line.split()[0]) for line in fname]
+    except FileNotFoundError:
+        if (min_ctime is None) and (update_delay is not None):
+            # If min_ctime is provided it will use that..
+            # Otherwise it will use update_delay to set min_ctime.
+            min_ctime = int(time.time()) - update_delay*86400
 
-    if not(tags is None):
-        for i, tag in enumerate(tags):
-            tags[i] = tag.lower()
-            if '=' not in tag:
-                tags[i] += '=1'
+        if obs_id is not None:
+            tot_query = f"obs_id=='{obs_id}'"
+        else:
+            tot_query = "and "
+            if min_ctime is not None:
+                tot_query += f"timestamp>={min_ctime} and "
+            if max_ctime is not None:
+                tot_query += f"timestamp<={max_ctime} and "
+            if query is not None:
+                tot_query += query + " and "
+            tot_query = tot_query[4:-4]
+            if tot_query=="":
+                tot_query="1"
 
-    if planet_obs:
-        obs_list = []
-        for tag in tags:
-            obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
-    else:
-        obs_list = context.obsdb.query(tot_query, tags=tags)
+        if not(tags is None):
+            for i, tag in enumerate(tags):
+                tags[i] = tag.lower()
+                if '=' not in tag:
+                    tags[i] += '=1'
+
+        if planet_obs:
+            obs_list = []
+            for tag in tags:
+                obs_list.extend(context.obsdb.query(tot_query, tags=[tag]))
+        else:
+            obs_list = context.obsdb.query(tot_query, tags=tags)
+        
+        return obs_list
+
+def send_alert(webhook, alertname='', tag='', error='', timestamp=None):
+    """Send an alert to the given webhook.
     
-    return obs_list
+    Parameters
+    ----------
+    webhook : str
+        Webhook URL to send alert.
+    alertname : str, optional
+        Name of alert.
+    tag : str, optional
+        Tag to differentiate types of alerts.
+    error : str, optional
+        Error message to send as the main body of the alert.
+    timestamp : str, optional
+        The timestamp to attach to alert.
+    """
+    if not webhook:
+        return "No webhook provided"
+        
+    if isinstance(timestamp, type(None)):
+        timestamp = round(dt.datetime.now(tz=dt.timezone.utc).timestamp())
+    elif isinstance(timestamp, str):
+        ts = dt.datetime.fromisoformat(timestamp)
+        if ts.tzinfo is None:
+            timestamp = round(ts.replace(tzinfo=dt.timezone.utc).timestamp())
+        else:
+            timestamp = round(ts.timestamp())
+    elif isinstance(timestamp, (int, float)):
+        timestamp = round(timestamp)
+    elif isinstance(timestamp, dt.datetime):
+        if timestamp.tzinfo is None:
+            timestamp = round(timestamp.replace(tzinfo=dt.timezone.utc).timestamp())
+        else:
+            timestamp = round(timestamp.timestamp())
+    else:
+        return f"Could not convert timestamp type {type(timestamp)}"
+    
+    try:
+        # Directly to Slack channel
+        if 'slack.com' in webhook:
+            from slack_sdk.webhook import WebhookClient
+
+            webhook = WebhookClient(webhook)
+            response = webhook.send(
+                text="Pipeline alert",
+                attachments=[
+                    {
+                        "mrkdwn_in": ["text"],
+                        "color": "danger",
+                        "title": f"[FIRING] {tag} ({alertname})",
+                        "text": f"error: {error}\ntimestamp: {timestamp}",
+                        "footer": "Pipeline",
+                        "ts": f"{time.time()}"
+                    }
+                ]
+            )
+            if response.status_code != 200:
+                raise Exception("Issue with Slack webhook.")
+
+        # Custom webhook (Campana)
+        else:
+            data = {
+                    'status': 'firing',
+                    'alerts': [
+                        {
+                            'status': 'firing',
+                            'labels': {'alertname': alertname, 'tag': tag},
+                            'annotations': {'error': error, 'groups': 'pipeline', 'timestamp': timestamp},
+                        }
+                    ],
+            }
+            response = requests.post(webhook, json=data)
+            if response.status_code != requests.codes.ok:
+                raise Exception("Issue with custom webhook.")
+                
+        return "Alert sent"
+    except Exception as e:
+        return f"Failed to send alert: {e}"
+    

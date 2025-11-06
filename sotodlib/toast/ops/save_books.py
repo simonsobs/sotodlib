@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2024 Simons Observatory.
+# Copyright (c) 2022-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import os
@@ -186,10 +186,12 @@ class SaveBooks(Operator):
                     n_set = ob.dist.samp_sets[ob.comm.group_rank].n_elem
                     for sset in range(first_set, first_set + n_set):
                         for chunk in ob.dist.sample_sets[sset]:
+                            first = offset
+                            last = min(offset + chunk, ob.n_local_samples - 1)
                             timespans.append(
                                 (
-                                    ob.shared[self.times][offset],
-                                    ob.shared[self.times][offset + chunk - 1],
+                                    ob.shared[self.times][first],
+                                    ob.shared[self.times][last],
                                 )
                             )
                             n_frames += 1
@@ -205,12 +207,8 @@ class SaveBooks(Operator):
                         local_sets = list()
                         offset = 0
                         for intr in ob.intervals[frame_intervals]:
-                            chunk = intr.last - offset + 1
-                            local_sets.append(
-                                [
-                                    chunk,
-                                ]
-                            )
+                            chunk = intr.last - offset
+                            local_sets.append([chunk])
                             offset += chunk
                         if offset != ob.n_local_samples:
                             local_sets.append([ob.n_local_samples - offset])

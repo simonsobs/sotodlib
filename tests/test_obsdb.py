@@ -7,19 +7,21 @@ import time
 from ._helpers import mpi_multi
 
 
-def get_example():
+def get_example(stuff_missing=False):
     # Create a new Db and add two columns.
     obsdb = metadata.ObsDb()
     obsdb.add_obs_columns(['timestamp float', 'hwp_speed float', 'drift string'])
 
     # Add 10 rows.
     for i in range(10):
+        if stuff_missing and i in [2, 4]:
+            continue
         tags = []
         if i == 6:
             tags.append('cryo_problem')
         if i > 7:
             tags.append('planet')
-        else:
+        elif not stuff_missing:
             tags.append('cmb_survey')
         obsdb.update_obs(f'myobs{i}', {'timestamp': 1900000000. + i * 100,
                                        'hwp_speed': 2.0,
@@ -38,17 +40,20 @@ class TestObsDb(unittest.TestCase):
         """Basic functionality."""
         db = get_example()
         all_obs = db.query()
-        db.get(all_obs[0])
         db.get(all_obs[0]['obs_id'])
         db.query('timestamp > 0')
         db.query('timestamp > 0', tags=['cryo_problem=1'])
 
     def test_query(self):
         db = get_example()
-        r0 = db.query('drift == "rising"')
-        r1 = db.query('drift == "setting"')
+        r0 = db.query("drift == 'rising'")
+        r1 = db.query("drift == 'setting'")
         self.assertGreater(len(r0), 0)
         self.assertEqual(len(r0) + len(r1), len(db))
+
+        # Grumbles about double quotes?
+        with self.assertWarns(UserWarning):
+            r1 = db.query('drift == "setting"')
 
     def test_tags(self):
         db = get_example()
@@ -82,6 +87,18 @@ class TestObsDb(unittest.TestCase):
         """Check the .info method."""
         db0 = get_example()
         db0.info()
+
+    def test_diff_patch(self):
+        """Use diff/patch to update one obsdb to match another."""
+        db0 = get_example(stuff_missing=True)
+        db1 = get_example()
+        diff = metadata.obsdb.diff_obsdbs(db0, db1)
+        assert diff['different']
+        assert diff['patchable']
+
+        metadata.obsdb.patch_obsdb(diff['patch_data'], db0)
+        diff = metadata.obsdb.diff_obsdbs(db0, db1)
+        assert not diff['different']
 
 
 if __name__ == '__main__':

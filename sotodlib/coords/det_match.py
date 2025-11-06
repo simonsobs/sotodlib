@@ -1,6 +1,6 @@
 import warnings
 from dataclasses import dataclass, fields, asdict, field
-from typing import List, Optional, Tuple, Iterator
+from typing import List, Optional, Tuple, Iterator, Union
 from copy import deepcopy
 import h5py
 
@@ -71,11 +71,20 @@ class PointingConfig:
         Tel type for the optics model. Either "SAT" or "LAT"
     zemax_path: str
         If running for a "LAT" tel_type, the path to the zemax file must be specified.
+    roll: float
+        Rotation about the line of sight.
+        For the LAT this is elev - 60 - corotator.
+        For the SAT this is -1*boresight.
+    tube_slot: str/int
+        If running for a "LAT" tel_type, the tube slot must be specified.
+        Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
     wafer_slot: str
     tel_type: str
     zemax_path: Optional[str] = None
+    roll: Optional[float] = 0
+    tube_slot: Optional[Union[str, int]] = None
 
     dx: float = field(init=False)
     dy: float = field(init=False)
@@ -83,30 +92,34 @@ class PointingConfig:
     fp_pars: dict = field(init=False)
 
     def __post_init__(self):
-        if self.tel_type == 'LAT' and (self.zemax_path is None):
-            return ValueError("zemax path must be set for 'LAT' tel_type")
-        
+        if self.tel_type == 'LAT':
+            if self.zemax_path is None:
+                raise ValueError("zemax path must be set for 'LAT' tel_type")
+            if self.tube_slot is None:
+                raise ValueError("tube slot must be set for 'LAT' tel_type")
+
         if self.tel_type not in ['SAT', 'LAT']:
-            raise ValueError("tel_typ ")
-        
+            raise ValueError("tel_type should be 'SAT' or 'LAT' ")
+
         self.fp_pars = optics.get_ufm_to_fp_pars(
             self.tel_type, self.wafer_slot, self.fp_file
         )
         self.dx = self.fp_pars['dx']
         self.dy = self.fp_pars['dy']
         self.theta = np.deg2rad(self.fp_pars['theta'])
-    
+
     def get_pointing(self, x, y, pol=0):
         xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
         yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
 
         if self.tel_type.upper() == 'SAT':
             xi, eta, gamma = optics.SAT_focal_plane(
-                None, x=xp, y=yp, pol=pol
+                None, x=xp, y=yp, pol=pol, roll=self.roll
             )
         elif self.tel_type.upper() == 'LAT':
             xi, eta, gamma = optics.LAT_focal_plane(
-                None, zemax_path, x=xp, y=yp, pol=pol,
+                None, self.zemax_path, x=xp, y=yp, pol=pol,
+                roll=self.roll, tube_slot=self.tube_slot
             )
         return xi, eta, gamma
 
@@ -154,7 +167,7 @@ class Resonator:
 
     matched: int = 0
     match_idx: int = -1
- 
+
 
 def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointing=True):
     """
@@ -175,7 +188,7 @@ def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointin
         r = smurf_res
     else:
         r = deepcopy(smurf_res)
-    
+
     design_props = [
         'bg', 'det_x', 'det_y', 'det_row', 'det_col', 'pixel_num', 'det_rhomb',
         'det_pol', 'det_freq', 'det_bandpass', 'det_angle_raw_deg',
@@ -419,9 +432,9 @@ class ResSet:
             idx += 1
 
         return cls(resonators, name=name)
-        
+
     @classmethod
-    def from_solutions(cls, sol_file, north_is_highband=True, name=None, 
+    def from_solutions(cls, sol_file, north_is_highband=True, name=None,
                        fp_pars=None, platform='SAT', zemax_path=None):
         """
         Creates an instance from an input-solution file. This will include both design data, along with smurf-band
@@ -624,7 +637,7 @@ class MatchingStats:
 
 
 class Match:
-    """ 
+    """
     Class for performing a Resonance Matching between two sets of resonators,
     labeled `src` and `dst`. In the matching algorithm there is basically no
     difference between `src` and `dst` res-sets, except:
@@ -644,7 +657,7 @@ class Match:
         apply_dst_pointing (bool):
             If True, the ``merged`` res-set will take its pointing information
             from ``dst`` instead of ``src``.
-    
+
     Attributes:
         src (ResSet):
             The source resonator set
@@ -925,7 +938,7 @@ class Match:
             match_pars = MatchParams(**match_pars)
         match = cls(src, dst, match_pars=match_pars)
         return match
-    
+
 
 def plot_match_freqs(m: Match, is_north=True, show_offset=False, xlim=None):
     """

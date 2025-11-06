@@ -239,6 +239,10 @@ class MetadataTest(unittest.TestCase):
                          'obs:timestamp': (1300000000, 1400000001),
                          'dataset': 'early'}, filename='y')
 
+        # Does .get_entries work?
+        entries = mandb.get_entries(['obs:timestamp__lo', 'obs:timestamp__hi'])
+        print(entries)
+
         # Does .inspect work properly?
         entries = mandb.inspect({'wafer': 'A'})
         self.assertEqual(len(entries), 3)
@@ -261,14 +265,14 @@ class MetadataTest(unittest.TestCase):
         entries = mandb.inspect({'dets:band': 'f220'})
         mandb.remove_entry(entries[0])
         ## check file unreg'd
-        c = mandb.conn.execute('select count(id) from files where name="y"')
+        c = mandb.conn.execute("select count(id) from files where name='y'")
         self.assertEqual(c.fetchall()[0][0], 0)
 
         # Delete another entry
         entries = mandb.inspect()
         mandb.remove_entry(entries[0])
         ## check file not unreg'd (because it's used twice)
-        c = mandb.conn.execute('select count(id) from files where name="x"')
+        c = mandb.conn.execute("select count(id) from files where name='x'")
         self.assertEqual(1, c.fetchone()[0])
 
 

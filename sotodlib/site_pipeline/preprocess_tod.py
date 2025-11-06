@@ -2,12 +2,12 @@ import os
 import yaml
 import time
 import logging
+from typing import Optional, Union, Callable
 import numpy as np
 import argparse
 import traceback
 from typing import Optional
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from sotodlib.utils.procs_pool import get_exec_env
 import h5py
 import copy
 from sotodlib.coords import demod as demod_mm
@@ -29,7 +29,7 @@ def dummy_preproc(obs_id, group_list, logger,
     error = None
     outputs = []
     context = core.Context(configs["context_file"])
-    group_by, groups = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -76,6 +76,7 @@ def preprocess_tod(obs_id,
         If true preprocess_tod is called in a parallel process which returns
         dB info and errors and does no sqlite writing inside the function.
     """
+
     outputs = []
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -83,7 +84,14 @@ def preprocess_tod(obs_id,
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
-    group_by, groups = pp_util.get_groups(obs_id, configs, context)
+    group_by, groups, error = pp_util.get_groups(obs_id, configs, context)
+
+    if error is not None:
+        if run_parallel:
+            return error[0], [None, None]
+        else:
+            return
+
     all_groups = groups.copy()
     for g in all_groups:
         if group_list is not None:
@@ -125,6 +133,8 @@ def preprocess_tod(obs_id,
         make_lmsi = True
     else:
         make_lmsi = False
+
+    new_plots = None
 
     n_fail = 0
     for group in groups:
@@ -172,7 +182,7 @@ def preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        if os.path.exists(new_plots):
+        if new_plots is not None and os.path.exists(new_plots):
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
@@ -192,7 +202,7 @@ def preprocess_tod(obs_id,
 def load_preprocess_tod_sim(obs_id, sim_map,
                             configs="preprocess_configs.yaml",
                             context=None, dets=None,
-                            meta=None, modulated=True):
+                            meta=None, modulated=True, logger=logger):
     """Loads the saved information from the preprocessing pipeline and runs the
     processing section of the pipeline on simulated data
 
@@ -218,9 +228,12 @@ def load_preprocess_tod_sim(obs_id, sim_map,
         If False, scan the simulation into demodulated timestreams.
     """
     configs, context = pp_util.get_preprocess_context(configs, context)
-    meta = pp_util.load_preprocess_det_select(obs_id, configs=configs,
-                                              context=context, dets=dets,
-                                              meta=meta)
+    if dets is not None:
+        meta.restrict("dets", dets)
+    det_vals = pp_util.load_preprocess_det_select(
+        obs_id, configs=configs, context=context, logger=logger
+    )
+    meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -294,28 +307,35 @@ def get_parser(parser=None):
         type=int,
         default=4
     )
+    parser.add_argument(
+        '--raise-error',
+        help="Raise an error upon completion if any obsids or groups fail.",
+        type=bool,
+        default=False
+    )
     return parser
 
 
-def main(
-        configs: str,
-        query: Optional[str] = None,
-        obs_id: Optional[str] = None,
-        overwrite: bool = False,
-        min_ctime: Optional[int] = None,
-        max_ctime: Optional[int] = None,
-        update_delay: Optional[int] = None,
-        tags: Optional[str] = None,
-        planet_obs: bool = False,
-        verbosity: Optional[int] = None,
-        nproc: Optional[int] = 4
- ):
+def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+          as_completed_callable: Callable,
+          configs: str,
+          query: Optional[str] = None,
+          obs_id: Optional[str] = None,
+          overwrite: bool = False,
+          min_ctime: Optional[int] = None,
+          max_ctime: Optional[int] = None,
+          update_delay: Optional[int] = None,
+          tags: Optional[str] = None,
+          planet_obs: bool = False,
+          verbosity: Optional[int] = None,
+          nproc: Optional[int] = 4,
+          raise_error: Optional[bool] = False):
+
     configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
-    multiprocessing.set_start_method('spawn')
 
     obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
@@ -325,70 +345,100 @@ def main(
         logger.warning(f"No observations returned from query: {query}")
 
     # clean up lingering files from previous incomplete runs
+    policy_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']), 'temp')
     for obs in obs_list:
         obs_id = obs['obs_id']
-        pp_util.save_group_and_cleanup(obs_id, configs, context,
-                                       subdir='temp', remove=overwrite)
+        pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
+                            subdir='temp', remove=overwrite)
+
+    # remove datasets from final archive file not found in db
+    pp_util.cleanup_archive(configs, logger)
 
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
         #run on all if database doesn't exist
-        for obs in obs_list:
-            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
-            run_list.append( (obs, groups) )# = [ (o, groups) for o in obs_list]
+        run_list = [ (o,None) for o in obs_list]
+        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
-            group_by, groups = pp_util.get_groups(obs["obs_id"], configs, context)
             if x is None or len(x) == 0:
                 run_list.append( (obs, None) )
-            elif len(x) != len(groups):
-                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-                run_list.append( (obs, groups) )
+            else:
+                group_by, groups, _ = pp_util.get_groups(obs["obs_id"], configs, context)
+                if len(x) != len(groups):
+                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    run_list.append( (obs, groups) )
 
     logger.info(f'Run list created with {len(run_list)} obsids')
 
-    # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-    # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
-    # whenever the file size exceeds 10 GB.
-    nfile = 0
-    folder = os.path.dirname(configs['archive']['policy']['filename'])
-    basename = os.path.splitext(configs['archive']['policy']['filename'])[0]
-    dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-    if not(os.path.exists(folder)):
-            os.makedirs(folder)
-    while os.path.exists(dest_file) and os.path.getsize(dest_file) > 10e9:
-        nfile += 1
-        dest_file = basename + '_' + str(nfile).zfill(3) + '.h5'
-
-    logger.info(f'Starting dest_file set to {dest_file}')
+    n_fail = 0
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    with ProcessPoolExecutor(nproc) as exe:
-        futures = [exe.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                     group_list=r[1], verbosity=verbosity,
-                     configs=configs,
-                     overwrite=overwrite, run_parallel=True) for r in run_list]
-        for future in as_completed(futures):
-            logger.info('New future as_completed result')
-            try:
-                err, db_datasets = future.result()
-            except Exception as e:
-                errmsg = f'{type(e)}: {e}'
-                tb = ''.join(traceback.format_tb(e.__traceback__))
-                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-                f.close()
-                continue
-            futures.remove(future)
+    futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+                    group_list=r[1], verbosity=verbosity,
+                    configs=configs,
+                    overwrite=overwrite, run_parallel=True) for r in run_list]
+    for future in as_completed_callable(futures):
+        logger.info('New future as_completed result')
+        try:
+            err, db_datasets = future.result()
+            if err is not None:
+                n_fail += 1
+        except Exception as e:
+            errmsg = f'{type(e)}: {e}'
+            tb = ''.join(traceback.format_tb(e.__traceback__))
+            logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+            f = open(errlog, 'a')
+            f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+            f.close()
+            n_fail+=1
+            continue
+        futures.remove(future)
 
-            logger.info(f'Processing future result db_dataset: {db_datasets}')
-            if err is None and db_datasets:
+        if db_datasets:
+            if err is None:
+                logger.info(f'Processing future result db_dataset: {db_datasets}')
                 for db_dataset in db_datasets:
                     pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+            else:
+                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+
+    if raise_error and n_fail > 0:
+        raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
+
+def main(configs: str,
+         query: Optional[str] = None,
+         obs_id: Optional[str] = None,
+         overwrite: bool = False,
+         min_ctime: Optional[int] = None,
+         max_ctime: Optional[int] = None,
+         update_delay: Optional[int] = None,
+         tags: Optional[str] = None,
+         planet_obs: bool = False,
+         verbosity: Optional[int] = None,
+         nproc: Optional[int] = 4,
+         raise_error: Optional[bool] = False):
+
+    rank, executor, as_completed_callable = get_exec_env(nproc)
+    if rank == 0:
+        _main(executor=executor,
+              as_completed_callable=as_completed_callable,
+              configs=configs,
+              query=query,
+              obs_id=obs_id,
+              overwrite=overwrite,
+              min_ctime=min_ctime,
+              max_ctime=max_ctime,
+              update_delay=update_delay,
+              tags=tags,
+              planet_obs=planet_obs,
+              verbosity=verbosity,
+              nproc=nproc,
+              raise_error=raise_error)
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)

@@ -18,8 +18,7 @@ class DemodMapmakingTest(unittest.TestCase):
         TOL = 0.0001
 
         tod = quick_tod(10, 10000)
-        fp = so3g.proj.FocalPlane.from_xieta(
-            tod.dets.vals, tod.focal_plane.xi, tod.focal_plane.eta, tod.focal_plane.gamma)
+        fp  = coords.helpers.get_fplane(tod)
         csl = so3g.proj.CelestialSightLine.az_el(
             tod.timestamps, tod.boresight.az, tod.boresight.el, roll=tod.boresight.roll,
             site='so_sat1', weather='toco')
@@ -27,8 +26,8 @@ class DemodMapmakingTest(unittest.TestCase):
         for k in ['dsT', 'demodQ', 'demodU']:
             tod.wrap_new(k, shape=('dets', 'samps'), dtype='float32')
 
-        for i, det in enumerate(tod.dets.vals):
-            q_total = csl.Q * fp[det]
+        for i, qdet in enumerate(tod.dets.vals):
+            q_total = csl.Q * fp.quats[i]
             ra, dec, alpha = so3g.proj.quat.decompose_lonlat(q_total)
             GAMMA = alpha - 2 * tod.focal_plane.gamma[i]
             tod.demodQ[i] = Q_stream * np.cos(2 * GAMMA) + U_stream * np.sin(2 * GAMMA)
@@ -53,15 +52,14 @@ class DemodMapmakingTest(unittest.TestCase):
         TOL = .01
 
         tod = quick_tod(10, 10000)
-        fp = so3g.proj.FocalPlane.from_xieta(
-            tod.dets.vals, tod.focal_plane.xi, tod.focal_plane.eta, tod.focal_plane.gamma)
+        fp  = coords.helpers.get_fplane(tod)
         csl = so3g.proj.CelestialSightLine.az_el(
             tod.timestamps, tod.boresight.az, tod.boresight.el, roll=tod.boresight.roll,
             site='so_sat1', weather='toco')
 
         c_4chi, s_4chi = np.cos(tod.hwp_angle * 4), np.sin(tod.hwp_angle * 4)
         for i, det in enumerate(tod.dets.vals):
-            q_total = csl.Q * fp[det]
+            q_total = csl.Q * fp.quats[i]
             ra, dec, alpha = so3g.proj.quat.decompose_lonlat(q_total)
             GAMMA = alpha - 2 * tod.focal_plane.gamma[i]
             c, s = np.cos(2*GAMMA), np.sin(2*GAMMA)
@@ -109,14 +107,18 @@ class DemodMapmakingTest(unittest.TestCase):
 
         shape, wcs = enmap.fullsky_geometry(res=0.5*coords.DEG)
         signal_map = enmap.zeros((3, *shape), wcs)
-        
+
         T_stream, Q_stream, U_stream = 1., 0.25, 0.01
         signal_map[0] += T_stream
         signal_map[1] += Q_stream
         signal_map[2] += U_stream
 
+        # from_map expects and outputs float64
         _ = coords.demod.from_map(tod, signal_map, modulated=True, wrap=True)
         hwp.demod_tod(tod)
+        # make_map expects float32
+        for signal in ['signal', 'dsT', 'demodQ', 'demodU']:
+           tod[signal] = tod[signal].astype('float32')
         results = coords.demod.make_map(tod)
 
         m0 = results['map']
