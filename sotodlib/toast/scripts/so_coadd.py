@@ -124,6 +124,7 @@ def get_weights(args, obs):
         axs[-2].axvline(noise_med, color="green", label="Median Noise Magnitude")
         axs[-2].axvline(noise_cut, color="red", label="Cutoff for Coadd")
         axs[-2].legend(loc="best")
+        axs[-2].set_xlabel(r"Spectral Range Noise Magnitude")
 
         # Apply cuts and relative weights
         remove = noise > noise_cut
@@ -133,8 +134,8 @@ def get_weights(args, obs):
 
         # Plot weight values
         counts, bins = np.histogram(weights[keep], bins=50)
-        axs[-1].stairs(counts, bins, color="blue", label="Coadd Weights")
-        axs[-1].legend(loc="best")
+        axs[-1].stairs(counts, bins, color="blue")
+        axs[-1].set_xlabel(r"Extra Inverse Noise Weight (High / Low Ell)")
 
         # The weights expected by the coadd tool are inverse noise weights.
         # If the user does not want relative weighting, set to 1.0
