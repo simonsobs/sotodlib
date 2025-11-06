@@ -238,13 +238,13 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
             good    = sensitivity_cut(rms*1e6, sens_limits[band])
         elif unit == 'uK':
             good    = sensitivity_cut(rms, sens_limits[band])
-        if np.logical_not(good).sum() / obs.dets.count > 0.5:
-            return None
-        else:
-            obs.restrict("dets", good)
+        #if np.logical_not(good).sum() / obs.dets.count > 0.5:
+        #    return None
+        #else:
+        #    obs.restrict("dets", good)
         # Disqualify overly cut detectors
-        good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
-        obs.restrict("dets", good_dets)
+        #good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
+        #obs.restrict("dets", good_dets)
 
         #if len(good_dets) > 0:
             # Gapfill glitches. This function name isn't the clearest
