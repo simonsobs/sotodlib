@@ -468,7 +468,7 @@ def main(opts=None, comm=None):
     args, remaining = parser.parse_known_args(args=opts)
 
     if args.context_file is not None:
-        msg = f"Working with real data from context {args.context_file}"
+        msg = f"Working with data from context {args.context_file}"
         log.info_rank(msg, comm=comm)
         # Using real data loader
         if args.sim_telescope is not None or args.sim_schedule is not None:

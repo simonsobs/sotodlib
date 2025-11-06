@@ -55,31 +55,48 @@ def get_weights(args, obs):
     ell_max = args.ell_weight_max
 
     files = [None for x in range(len(obs))]
+    noise = -1 * np.ones(len(obs), dtype=np.float64)
     weights = -1 * np.ones(len(obs), dtype=np.float64)
 
-    fig, axs = plt.subplots(nrows=4, ncols=1, figsize=(6, 16), dpi=100)
+    fig, axs = plt.subplots(nrows=5, ncols=1, figsize=(6, 20), dpi=100)
 
     for oname, oprops in obs.items():
-        files[oprops["index"]] = oprops["map"]
+        oindex = oprops["index"]
+        files[oindex] = oprops["map"]
         if oprops["cl"] is None:
             continue
         # Load spectra
         spec = QTable.read(oprops["cl"], format="ascii.ecsv")
+        ell = np.arange(len(spec))
 
-        # Compute the inverse noise weights
+        # The ell range for estimating the high-ell noise, which should
+        # be well constrained.  Use the largest 10% of ell values.
+        n_ell = len(ell)
+        n_high = n_ell // 10
+        ell_high = slice(n_ell - n_high, n_ell, 1)
+
+        # Compute the mean spectral values at high and low ell and use these
+        # to estimate any low-ell noise contribution that is not captured
+        # by the pixel noise covariance.  This additional noise weight is
+        # stored as map noise weight written to the coadd file.
+
         ell_slc = slice(int(ell_min), int(ell_max), 1)
-        spc_mean = np.mean(spec["cl_BB"].to_value(u.uK**2)[ell_slc])
-        weights[oprops["index"]] = spc_mean
-        tt_mean = np.mean(spec["cl_TT"].to_value(u.uK**2)[ell_slc])
-        ee_mean = np.mean(spec["cl_EE"].to_value(u.uK**2)[ell_slc])
-        print(f"{oname}:  {tt_mean} {ee_mean} {spc_mean}", flush=True)
+        cl_tt = spec["cl_TT"].to_value(u.uK**2)
+        cl_ee = spec["cl_EE"].to_value(u.uK**2)
+        cl_bb = spec["cl_BB"].to_value(u.uK**2)
+        high_mean = np.mean(cl_bb[ell_high])
+        low_mean = np.mean(cl_bb[ell_slc])
+        noise[oindex] = low_mean
+        weights[oindex] = high_mean / low_mean
+        print(
+            f"{oname}:  low-ell inverse noise weight = {weights[oindex]}", flush=True
+        )
 
         # Plot spectra
-        ell = np.arange(len(spec))
-        for icomp, comp in enumerate([spec["cl_TT"], spec["cl_EE"], spec["cl_BB"]]):
+        for icomp, comp in enumerate([cl_tt, cl_ee, cl_bb]):
             axs[icomp].loglog(
                 ell[2:],
-                comp.to_value(u.uK**2)[2:],
+                comp[2:],
                 color="black",
                 label=oname,
                 linewidth=0.5,
@@ -93,33 +110,37 @@ def get_weights(args, obs):
         axs[icomp].set_ylabel(r"C$_\ell^{" + comp + r"}$ [$\mu$K$^2$]")
 
     # Compute histogram and add plot
-    bad = weights < 0
+    bad = noise < 0
     good = np.logical_not(bad)
     if len(good) > 0:
         # We have some spectra
-        wt_med = np.median(weights[good])
-        cutfactor = 3
-        wt_cut = cutfactor * wt_med
+        noise_med = np.median(noise[good])
+        cutfactor = args.ell_weight_cut
+        noise_cut = cutfactor * noise_med
 
-        # Plot spectral values
-        counts, bins = np.histogram(weights[good], bins=50, range=(0.0, wt_cut))
-        axs[-1].stairs(counts, bins, color="black")
-        axs[-1].axvline(wt_med, color="green", label="Median Weight")
-        axs[-1].axvline(wt_cut, color="red", label="Cutoff for Coadd")
-        axs[-1].legend(loc="best")
+        # Plot noise values
+        counts, bins = np.histogram(noise[good], bins=50, range=(0.0, 1.5 * noise_cut))
+        axs[-2].stairs(counts, bins, color="black")
+        axs[-2].axvline(noise_med, color="green", label="Median Noise Magnitude")
+        axs[-2].axvline(noise_cut, color="red", label="Cutoff for Coadd")
+        axs[-2].legend(loc="best")
 
         # Apply cuts and relative weights
-        remove = weights > wt_cut
+        remove = noise > noise_cut
         keep = np.logical_not(remove)
+        noise[remove] = -1
         weights[remove] = -1
 
-        # FIXME: Investigate whether this noise weighting actually does anything
-        # weights[keep] /= wt_med
-        weights[keep] = 1.0
+        # Plot weight values
+        counts, bins = np.histogram(weights[keep], bins=50)
+        axs[-1].stairs(counts, bins, color="blue", label="Coadd Weights")
+        axs[-1].legend(loc="best")
 
-        # Handle maps with no spectra available.  We assign these the median
-        # value.
-        # weights[bad] = wt_med
+        # The weights expected by the coadd tool are inverse noise weights.
+        # If the user does not want relative weighting, set to 1.0
+        if not args.coadd_weights:
+            weights[keep] = 1.0
+        # Handle maps with no spectra available.
         weights[bad] = 1.0
     else:
         # Set all weights to 1.0
@@ -267,7 +288,7 @@ def main(opts=None, comm=None):
         required=False,
         type=float,
         default=80.0,
-        help="The minimum ell value to consider for spectral noise weights",
+        help="The minimum low-ell value to consider for spectral noise weights",
     )
 
     parser.add_argument(
@@ -275,7 +296,23 @@ def main(opts=None, comm=None):
         required=False,
         type=float,
         default=120.0,
-        help="The maximum ell value to consider for spectral noise weights",
+        help="The maximum low-ell value to consider for spectral noise weights",
+    )
+
+    parser.add_argument(
+        "--ell_weight_cut",
+        required=False,
+        type=float,
+        default=3.0,
+        help="The factor above the median low-ell noise level to cut",
+    )
+
+    parser.add_argument(
+        "--coadd_weights",
+        required=False,
+        action="store_true",
+        default=False,
+        help="Write spectral noise weights to the coadd file, rather than 1.0.",
     )
 
     args = parser.parse_args(args=opts)
