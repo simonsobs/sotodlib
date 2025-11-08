@@ -2174,7 +2174,7 @@ class EstimateT2P(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.t2pleakage.get_t2p_coeffs
     """
     name = "estimate_t2p"
-
+    '''
     def calc_and_save(self, aman, proc_aman):
         t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
         self.save(proc_aman, t2p_aman)
@@ -2193,6 +2193,37 @@ class EstimateT2P(_Preprocess):
         if 't2p' not in proc_aman._fields:
             raise ValueError("No t2p field found in proc_aman. Please run estimate_t2p first.")
         return meta, proc_aman
+    '''
+
+    def calc_and_save(self, aman, proc_aman):
+        # Compute and store t2p in proc_aman
+        t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **(self.calc_cfgs or {}))
+        self.save(proc_aman, t2p_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, t2p_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("t2p", t2p_aman)
+
+    def process(self, meta, proc_aman=None, sim=False):
+        # Don’t hard-fail; compute on demand if missing (unless sim)
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        if 't2p' in proc_aman._fields:
+            return meta, proc_aman
+
+        if sim or bool(getattr(self, "skip_on_sim", False)):
+            # On sims we skip; just no-op
+            return meta, proc_aman
+
+        # Auto-compute and save
+        t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(meta, **(self.calc_cfgs or {}))
+        self.save(proc_aman, t2p_aman)
+        return meta, proc_aman
+    
 
 class SubtractT2P(_Preprocess):
     """Subtract T to P leakage.
@@ -2241,7 +2272,6 @@ class SplitFlags(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         split_flg_aman = obs_ops.splits.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
-
         self.save(proc_aman, split_flg_aman)
         return aman, proc_aman
 
