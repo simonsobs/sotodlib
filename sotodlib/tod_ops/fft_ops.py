@@ -806,7 +806,7 @@ def noise_model(
     params,
     *,
     fixed_param=None,           # None, or {'wn': <float>} or {'alpha': <float>}
-    use_logspace=False,         # False -> linear params [wn, fknee, alpha]
+    use_logspace=True,          # False -> linear params [wn, fknee, alpha]
                                 # True  -> log-space params [log_wn, log_fknee, alpha]
     fknee_floor_frac=0.25,      # floor fknee at this fraction of lowest fitted f
     alpha_bounds=(0.0, 10.0),   # clip alpha into these bounds
@@ -1186,6 +1186,7 @@ def _perdet_log_bounds_from_estimates(
         return log_wn_bounds, log_fknee_bounds, alpha_bounds
 
 
+'''
 def fit_noise_model(
     aman,
     signal=None,
@@ -1518,6 +1519,271 @@ def fit_noise_model(
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
     return noise_fit_stats
+'''
+
+def fit_noise_model(
+    aman,
+    signal=None,
+    f=None,
+    pxx=None,
+    psdargs={},
+    fknee_est=1,
+    wn_est=4E-5,
+    alpha_est=3.4,
+    merge_fit=False,
+    lowf=None,
+    f_max=100,
+    merge_name="noise_fit_stats",
+    merge_psd=True,
+    mask=False,
+    fixed_param=None,          # None | "wn" | "alpha"
+    binning=False,
+    unbinned_mode=3,
+    base=1.05,
+    freq_spacing=None,
+    subscan=False,
+    label_axis='dets',
+    use_logspace=False,        # NEW: optimize in log-space if True
+    method="L-BFGS-B",         # NEW: optimizer method (respects bounds)
+    options=None               # NEW: scipy.optimize.minimize options
+):
+    """
+    Fits noise model P(f) = wn^2 * [1 + (fknee / f)^alpha] to the PSD.
+
+    If use_logspace=True, parameters are optimized in log space and
+    neglnlike(..., use_logspace=True) is used internally.
+    """
+    if options is None:
+        options = {"maxiter": 200}
+
+    if signal is None:
+        signal = aman.signal
+
+    # --- PSD (compute if not provided) ---
+    if f is None or pxx is None:
+        psdargs['noverlap'] = psdargs.get('noverlap', 0)
+        f, pxx, nseg = calc_psd(
+            aman,
+            signal=signal,
+            timestamps=aman.timestamps,
+            freq_spacing=freq_spacing,
+            merge=merge_psd,
+            subscan=subscan,
+            full_output=True,
+            label_axis=label_axis,
+            **psdargs,
+        )
+
+    # --- Optional mask handling ---
+    if np.any(mask):
+        if isinstance(mask, np.ndarray):
+            pass
+        elif isinstance(mask, Ranges):
+            mask = ~mask.mask()
+        elif mask is True:
+            if 'psd_mask' in aman:
+                mask = ~aman.psd_mask.mask()
+            else:
+                mask = ~(get_psd_mask(aman, f=f, merge=False).mask())
+        else:
+            raise ValueError("mask should be an ndarray or True")
+        f = f[mask]
+        pxx = pxx[:, mask]
+
+    # --- Subscan path delegates to helper (propagate use_logspace/method/options) ---
+    if subscan:
+        fit_noise_model_kwargs = {
+            "fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
+            "lowf": lowf, "f_max": f_max, "fixed_param": fixed_param,
+            "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
+            "freq_spacing": freq_spacing, "use_logspace": use_logspace,
+            "method": method, "options": options, "merge_psd": False,
+            "label_axis": label_axis,
+        }
+        fitout, covout = _fit_noise_model_subscan(aman, signal, f, pxx, fit_noise_model_kwargs)
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs"), (2, aman.subscans)]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
+
+    else:
+        # --- Frequency window selection ---
+        eix = np.argmin(np.abs(f - f_max))
+        six = 1 if lowf is None else np.argmin(np.abs(f - lowf))
+        f = f[six:eix]
+        pxx = pxx[:, six:eix]
+
+        # --- Optional log binning ---
+        bin_size = 1.0
+        if binning:
+            f, pxx, bin_size = get_binned_psd(
+                aman, f=f, pxx=pxx,
+                unbinned_mode=unbinned_mode, base=base, merge=False
+            )
+
+        # --- fknee lower bound from fitted band ---
+        fpos = f[f > 0]
+        fmin_pos = float(np.nanmin(fpos)) if fpos.size else 1e-6
+        fknee_lb = max(1e-6, 0.10 * fmin_pos)
+        fknee_ub = None
+
+        ndet = pxx.shape[0]
+        fitout = np.zeros((ndet, 3), dtype=float)
+        covout = np.zeros((ndet, 3, 3), dtype=float)
+
+        def _as_arr(x, n, name):
+            if isinstance(x, (int, float)): return np.full(n, float(x))
+            x = np.asarray(x, dtype=float)
+            if x.size != n:
+                raise ValueError(f"{name} must be scalar or length {n}")
+            return x
+
+        def _clip1(v, lo, hi):
+            v2 = float(v)
+            if lo is not None: v2 = max(v2, lo)
+            if hi is not None: v2 = min(v2, hi)
+            return v2
+
+        wn_est_arr    = _as_arr(wn_est,    ndet, "wn_est")
+        fknee_est_arr = _as_arr(fknee_est, ndet, "fknee_est")
+        alpha_est_arr = _as_arr(alpha_est, ndet, "alpha_est")
+
+        for i in range(ndet):
+            p = pxx[i]
+
+            # --- Build initial guess and bounds in chosen space ---
+            if not use_logspace:
+                if fixed_param is None:
+                    p0 = np.array([wn_est_arr[i], fknee_est_arr[i], alpha_est_arr[i]], float)
+                    bnds = ((np.finfo(float).tiny, None), (fknee_lb, fknee_ub), (0.0, 4.0))
+                elif fixed_param == "wn":
+                    p0 = np.array([fknee_est_arr[i], alpha_est_arr[i]], float)
+                    bnds = ((fknee_lb, fknee_ub), (0.0, 4.0))
+                elif fixed_param == "alpha":
+                    p0 = np.array([wn_est_arr[i], fknee_est_arr[i]], float)
+                    bnds = ((np.finfo(float).tiny, None), (fknee_lb, fknee_ub))
+                else:
+                    raise ValueError("fixed_param must be None, 'wn', or 'alpha'")
+                p0 = np.array([_clip1(p0[j], *bnds[j]) for j in range(len(p0))], float)
+            else:
+                log_wn0    = np.log(max(wn_est_arr[i],    1e-30))
+                log_fknee0 = np.log(max(fknee_est_arr[i], 1e-30))
+                if fixed_param is None:
+                    p0 = np.array([log_wn0, log_fknee0, alpha_est_arr[i]], float)
+                    log_wn_lo, log_wn_hi       = np.log(1e-12), np.log(1e-2)
+                    log_fknee_lo, log_fknee_hi = np.log(fknee_lb), (np.log(fknee_ub) if fknee_ub else np.inf)
+                    bnds = ((log_wn_lo, log_wn_hi), (log_fknee_lo, log_fknee_hi), (0.5, 4.0))
+                elif fixed_param == "wn":
+                    p0 = np.array([log_fknee0, alpha_est_arr[i]], float)
+                    log_fknee_lo, log_fknee_hi = np.log(fknee_lb), (np.log(fknee_ub) if fknee_ub else np.inf)
+                    bnds = ((log_fknee_lo, log_fknee_hi), (0.5, 4.0))
+                elif fixed_param == "alpha":
+                    p0 = np.array([log_wn0, log_fknee0], float)
+                    log_wn_lo, log_wn_hi       = np.log(1e-12), np.log(1e-2)
+                    log_fknee_lo, log_fknee_hi = np.log(fknee_lb), (np.log(fknee_ub) if fknee_ub else np.inf)
+                    bnds = ((log_wn_lo, log_wn_hi), (log_fknee_lo, log_fknee_hi))
+                else:
+                    raise ValueError("fixed_param must be None, 'wn', or 'alpha'")
+                p0 = np.array([_clip1(p0[j], *bnds[j]) for j in range(len(p0))], float)
+
+            fixed_dict = {}
+            if fixed_param == "wn":
+                fixed_dict = {"wn": wn_est_arr[i]}
+            elif fixed_param == "alpha":
+                fixed_dict = {"alpha": alpha_est_arr[i]}
+
+            # --- Optimize unified Whittle NLL in chosen space ---
+            res = minimize(
+                lambda params: neglnlike(
+                    params, f, p,
+                    bin_size=bin_size,
+                    fixed_param=(fixed_dict if fixed_dict else None),
+                    use_logspace=use_logspace,
+                    fknee_floor_frac=0.25,
+                    alpha_bounds=(0.0, 10.0),
+                ),
+                p0, bounds=bnds, method=method, options=options
+            )
+
+            # --- Map solution to linear [wn, fknee, alpha] ---
+            if not use_logspace:
+                if fixed_param is None:
+                    wn, fknee, alpha = res.x
+                elif fixed_param == "wn":
+                    fknee, alpha = res.x
+                    wn = wn_est_arr[i]
+                else:
+                    wn, fknee = res.x
+                    alpha = alpha_est_arr[i]
+            else:
+                if fixed_param is None:
+                    log_wn, log_fknee, alpha = res.x
+                    wn, fknee = np.exp(log_wn), np.exp(log_fknee)
+                elif fixed_param == "wn":
+                    log_fknee, alpha = res.x
+                    wn, fknee = wn_est_arr[i], np.exp(log_fknee)
+                else:
+                    log_wn, log_fknee = res.x
+                    wn, fknee = np.exp(log_wn), np.exp(log_fknee)
+
+            fitout[i] = [wn, fknee, alpha]
+
+            # --- Covariance via Hessian in chosen space, then -> linear 3×3 ---
+            Cfull = np.full((3, 3), np.nan, dtype=float)
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error")
+                    Hfun = ndt.Hessian(lambda params: neglnlike(
+                        params, f, p,
+                        bin_size=bin_size,
+                        fixed_param=(fixed_dict if fixed_dict else None),
+                        use_logspace=use_logspace,
+                        fknee_floor_frac=0.25,
+                        alpha_bounds=(0.0, 10.0),
+                    ), full_output=True)
+                    H, _ = Hfun(res.x)
+                    C_param = np.linalg.pinv(H + 1e-12*np.eye(H.shape[0]))
+
+                if not use_logspace:
+                    if fixed_param is None:
+                        Cfull = C_param
+                    elif fixed_param == "wn":
+                        Cfull[1:, 1:] = C_param
+                    else:
+                        Cfull[:2, :2] = C_param
+                else:
+                    if fixed_param is None:
+                        J = np.diag([wn, fknee, 1.0])  # d(wn)/d(log_wn)=wn, d(fknee)/d(log_fknee)=fknee
+                        Cfull = J @ C_param @ J.T
+                    elif fixed_param == "wn":
+                        J = np.array([[fknee, 0.0],
+                                      [0.0,   1.0]])
+                        C_lin = J @ C_param @ J.T
+                        Cfull[1:, 1:] = C_lin
+                    else:
+                        J = np.array([[wn,    0.0],
+                                      [0.0, fknee]])
+                        C_lin = J @ C_param @ J.T
+                        Cfull[:2, :2] = C_lin
+            except Exception:
+                pass
+
+            covout[i] = Cfull
+
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs")]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
+
+    # --- Wrap outputs ---
+    noise_model_coeffs = ["white_noise", "fknee", "alpha"]
+    noise_fit_stats = core.AxisManager(
+        aman[label_axis],
+        core.LabelAxis(name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")),
+    )
+    noise_fit_stats.wrap("fit", fitout, axis_map_fit)
+    noise_fit_stats.wrap("cov", covout, axis_map_cov)
+
+    if merge_fit:
+        aman.wrap(merge_name, noise_fit_stats)
+    return noise_fit_stats
+
 
 
 def fit_noise_model_test(
@@ -2038,7 +2304,7 @@ def log_binning(psd, unbinned_mode=3, base=1.05, mask=None,
         return binned_psd, bin_size
     return binned_psd
 
-
+'''
 def _fit_noise_model_subscan(
     aman,
     signal,
@@ -2074,8 +2340,49 @@ def _fit_noise_model_subscan(
             covout[..., isub] = noise_model.cov
 
     return fitout, covout
+'''
+
+def _fit_noise_model_subscan(
+    aman,
+    signal,
+    f,
+    pxx,
+    fit_noise_model_kwargs,
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of signal subscans.
+    Propagates use_logspace/method/options into per-subscan fits.
+    """
+    fitout = np.empty((aman.dets.count, 3, aman.subscan_info.subscans.count))
+    covout = np.empty((aman.dets.count, 3, 3, aman.subscan_info.subscans.count))
+
+    per_subscan = {}
+    for entry in ["fknee_est", "wn_est", "alpha_est"]:
+        if (entry in fit_noise_model_kwargs):
+            val = fit_noise_model_kwargs[entry]
+            if isinstance(val, np.ndarray) and val.ndim > 1 and val.shape[-1] == aman.subscan_info.subscans.count:
+                per_subscan[entry] = fit_noise_model_kwargs.pop(entry)
+
+    kwargs = fit_noise_model_kwargs.copy() if len(per_subscan) > 0 else fit_noise_model_kwargs
+    for isub in range(aman.subscan_info.subscans.count):
+        if np.all(np.isnan(pxx[..., isub])):  # Subscan fully cut
+            fitout[..., isub] = np.full((aman.dets.count, 3), np.nan)
+            covout[..., isub] = np.full((aman.dets.count, 3, 3), np.nan)
+        else:
+            for entry in list(per_subscan.keys()):
+                kwargs[entry] = per_subscan[entry][..., isub]
+            # Ensure we do NOT merge PSD again or recurse into subscan
+            noise_model_stats = fit_noise_model(
+                aman, f=f, pxx=pxx[..., isub],
+                merge_fit=False, merge_psd=False, subscan=False, **kwargs
+            )
+            fitout[..., isub] = noise_model_stats.fit
+            covout[..., isub] = noise_model_stats.cov
+
+    return fitout, covout
 
 
+'''
 def build_hpf_params_dict(
     filter_name,
     noise_fit=None,
@@ -2238,6 +2545,94 @@ def build_hpf_params_dict(
             params_dict[param_name] = val
 
     return params_dict
+'''
+
+def build_hpf_params_dict(
+    filter_name,
+    noise_fit=None,
+    filter_params=None,
+):
+    """
+    Build the filter parameter dictionary from a provided
+    dictionary or from noise fit results.
+
+    Args
+    ----
+    filter_name : str
+        Name of the filter to build the parameter dict for.
+    noise_fit: AxisManager
+        AxisManager containing the result of the noise model fit sized nparams x ndets.
+    filter_params: dict
+        Filter parameters dictionary to complement parameters
+        derived from the noise fit (or to be used if noise fit is None).
+    Returns
+    -------
+    filter_params : dict
+        Returns a dictionary of the median values of the noise model fit parameters
+        if noise_fit is not None, otherwise return the provided filter_params.
+    """
+    if noise_fit is not None:
+
+        pars_mapping = {
+            "counter_1_over_f": {
+                "fk": "fknee", 
+                "n": "alpha"
+            },
+            "high_pass_butter4": {
+                "fc": "fknee",
+            },
+            "high_pass_sine2": {
+                "cutoff": "fknee",
+                "width": None
+            },
+            "low_pass_butter4": {
+                "fc": "fknee",
+            },
+            "low_pass_sine2": {
+                "cutoff": "fknee",
+                "width": None
+            },
+        }
+
+        if filter_name not in pars_mapping.keys():
+            raise NotImplementedError(
+                f"{filter_name} params from noise fit is not implemented"
+            )
+        
+        noise_fit_array = noise_fit.fit
+        noise_fit_params = noise_fit.noise_model_coeffs.vals
+
+        each_detector = False
+        if filter_params is not None:
+            each_detector = filter_params.get('each_detector', False)
+        if each_detector:
+            noise_fit_dict = {
+                k: noise_fit_array[:, i]
+                for i, k in enumerate(noise_fit_params)
+            }
+        else:
+            median_params = np.median(noise_fit_array, axis=0)
+            noise_fit_dict = {
+                k: median_params[i]
+                for i, k in enumerate(noise_fit_params)
+            }
+
+        params_dict = {}
+        for k, v in pars_mapping[filter_name].items():
+            if v is None:
+                if (filter_params is None) or (k not in filter_params):
+                    raise ValueError(
+                        f"Required parameters {k} not found in config "
+                         "and cannot be derived from noise fit."
+                    )
+                else:
+                    params_dict.update({k: filter_params[k]})
+            else:
+                params_dict[k] = noise_fit_dict[v]
+
+        filter_params = params_dict
+    
+    return filter_params
 
 
 def get_common_noise_params(
