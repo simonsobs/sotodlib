@@ -35,6 +35,7 @@ from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
 
 from ..instrument import SOSite
+from ..hkmanager import HKManager
 
 from .load_context_utils import (
     compute_boresight_pointing,
@@ -120,6 +121,46 @@ class LoadContext(Operator):
         None,
         allow_none=True,
         help="Text file containing observation IDs to load",
+    )
+
+    hk_site_root = Unicode(
+        None,
+        allow_none=True,
+        help="Load site housekeeping from this path",
+    )
+
+    hk_site_db = Unicode(
+        None,
+        allow_none=True,
+        help="Path to DB for site housekeeping",
+    )
+
+    hk_site_fields = List(
+        list(), help="Restrict loading to only these site fields"
+    )
+
+    hk_site_aliases = Dict(
+        dict(), help="Optional convenience aliases for site fields"
+    )
+
+    hk_platform_root = Unicode(
+        None,
+        allow_none=True,
+        help="Load telescope platform housekeeping from this path",
+    )
+
+    hk_platform_db = Unicode(
+        None,
+        allow_none=True,
+        help="Path to DB for telescope platform housekeeping",
+    )
+
+    hk_platform_fields = List(
+        list(), help="Restrict loading to only these platform fields"
+    )
+
+    hk_platform_aliases = Dict(
+        dict(), help="Optional convenience aliases for platform fields"
     )
 
     preprocess_config = Unicode(
@@ -563,6 +604,21 @@ class LoadContext(Operator):
 
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
+
+            # Optionally load housekeeping data
+            if self.hk_site_root is not None or self.hk_platform_root is not None:
+                ob.hk = HKManager(
+                    ob.comm.comm_group,
+                    ob.shared[self.times].data,
+                    site_root=self.hk_site_root,
+                    site_db=self.hk_site_db,
+                    site_fields=self.hk_site_fields,
+                    site_aliases=self.hk_site_aliases,
+                    plat_root=self.hk_platform_root,
+                    plat_db=self.hk_platform_db,
+                    plat_fields=self.hk_platform_fields,
+                    plat_aliases=self.hk_platform_aliases,
+                )
 
             # Compute the boresight pointing and observatory position
             if have_pointing:
@@ -1047,7 +1103,6 @@ class LoadContext(Operator):
         ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
         ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
         ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
-        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
         ax_flags = list()
         for axname, bit in self.ax_flags:
             full_name = ax_name_fp_subst(axname, fp_array)
