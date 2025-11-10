@@ -398,9 +398,10 @@ def main(config_file=None, defaults=defaults, **args):
     SITE    = args['site']
     verbose = args['verbose'] - args['quiet']
     shape, wcs = enmap.read_map_geometry(args['area'])
-    mapcat_settings = {"database_type": defaults["mapcat_database_type"],
-                       "database_name": defaults["mapcat_database_name"],
-                       "depth_one_parent": defaults["mapcat_depth_one_parent"],}
+    mapcat_settings = {"database_type": args["mapcat_database_type"],
+                       "database_name": args["mapcat_database_name"],
+                       "depth_one_parent": args["mapcat_depth_one_parent"],}
+
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
     # can cause is_compatible failures.
@@ -446,12 +447,11 @@ def main(config_file=None, defaults=defaults, **args):
         prefix  = "%s/%s/depth1_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         utils.mkdir(os.path.dirname(prefix))
-        meta_done = os.path.isfile(prefix + "_info.hdf")
         maps_done = os.path.isfile(prefix + ".empty") or (
             os.path.isfile(prefix + "_time.fits") and
             os.path.isfile(prefix + "_map.fits") and
             os.path.isfile(prefix + "_ivar.fits"))
-        if args['cont'] and meta_done and (maps_done or meta_only): continue
+        if args['cont'] and (maps_done or meta_only): continue
         if comm_intra.rank == 0:
             L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
         try:
