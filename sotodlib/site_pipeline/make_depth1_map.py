@@ -8,7 +8,7 @@ from sotodlib.coords import pointing_model
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory, tilemap
 import yaml
 
-from mapcat.helper import settings
+from mapcat.helper import Settings
 from mapcat.database import DepthOneMapTable, TODDepthOneTable
 
 defaults = {"query": "1",
@@ -37,6 +37,9 @@ defaults = {"query": "1",
             "bin": False,
             "srcsamp": None,
             "unit": 'K',
+            "mapcat_database_type": "sqlite",
+            "mapcat_database_name": "mapcat.db",
+            "mapcat_depth_one_parent": "./",
            }
 LoaderError = metadata.loader.LoaderError
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
@@ -395,6 +398,9 @@ def main(config_file=None, defaults=defaults, **args):
     SITE    = args['site']
     verbose = args['verbose'] - args['quiet']
     shape, wcs = enmap.read_map_geometry(args['area'])
+    mapcat_settings = {"database_type": defaults["mapcat_database_type"],
+                       "database_name": defaults["mapcat_database_name"],
+                       "depth_one_parent": defaults["mapcat_depth_one_parent"],}
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
     # can cause is_compatible failures.
@@ -467,7 +473,7 @@ def main(config_file=None, defaults=defaults, **args):
             # 3. Write out the depth1 metadata
 
             if comm_intra.rank == 0:
-                with settings.session() as session:
+                with Settings(**mapcat_settings).session() as session:
                     depth1map_obsids = np.unique([obslist[ind][0] for ind in all_inds])
                     tods = []
                     for obs_id in depth1map_obsids:
@@ -516,7 +522,7 @@ def main(config_file=None, defaults=defaults, **args):
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
             if comm_intra.rank == 0 :
-                with settings.session() as session:
+                with Settings(**mapcat_settings).session() as session:
                         depth1map_meta = DepthOneMapTable(map_name=f"{t5}/depth1_{t:010d}_{detset}_{band}",
                                                         map_path=prefix + "_map.fits",
                                                         ivar_path=prefix + "_ivar.fits",
