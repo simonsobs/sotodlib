@@ -121,7 +121,7 @@ class DarkTemplate(Operator):
             # Check for typical pathologies
             if np.any(np.isnan(tod)) or np.std(tod) == 0:
                 continue
-            if np.count_nonzero(flags) < 0.5 * len(tod):
+            if np.count_nonzero(flags) > 0.5 * len(tod):
                 continue
             # Subtract the mean and fill flagged samples with noise.  For the gap
             # filling, base the buffer size on the lowpass kernel size.
