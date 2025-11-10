@@ -55,6 +55,7 @@ site_pipeline = [
   "pandas",
   "alphashape",
   "slack-sdk",
+  "mapcat",
 ]
 tests = [
   "socs",
