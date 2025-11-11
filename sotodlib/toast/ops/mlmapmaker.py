@@ -460,7 +460,8 @@ class MLMapmaker(Operator):
         axobs.wrap("weather", np.full(1, self.weather))
         axobs.wrap("site",    np.full(1, "so"))
 
-        axobs.signal -= np.median(axobs.signal, axis=-1, keepdims=True)
+        # median detrend added to TOAST workflow script
+        #axobs.signal -= np.median(axobs.signal, axis=-1, keepdims=True)
 
         if self.truncate_tod:
             # FFT-truncate for faster fft ops
