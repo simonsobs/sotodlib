@@ -10,10 +10,17 @@ from sotodlib.io.metadata import write_dataset
 from sotodlib.site_pipeline import util, jobdb
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.core.metadata.loader import LoaderError
+from sotodlib.hwp.hwp_angle_model import apply_hwp_angle_model
+import sotodlib.hwp.hwp as hwp
+from sotodlib.tod_ops import apodize, detrend, filters, fourier_filter
+from sotodlib.site_pipeline.calibration.wiregrid import *
 
 
+## Tentative data type for result
 dtype = [
-
+    ('dets:readout_id', '<U40'),
+    ('gamma', 'f4'),
+    ('gamma_err', 'f4'),
 ]
 
 
@@ -41,19 +48,39 @@ def run(
         for i in range(n_split):
             dets = meta.dets.vals[i*nper:(i+1)*nper]
             meta_short = meta.restrict('dets', dets, in_place=False)
+
+            ## ---- restrict invalid detectors start ---- ##
+            isvalid = np.sum(np.isnan([meta_short.focal_plane.xi, meta_short.focal_plane.eta, meta_short.focal_plane.gamma]).astype(int), axis=0) == 0
+            meta_short = meta_short.restrict('dets', meta_short.dets.vals[isvalid], in_place=False)
+
+            meta_short = meta_short.restrict('dets', meta_short.dets.vals[(0.05 < meta_short.det_cal.r_frac) & (meta_short.det_cal.r_frac < 0.95)], in_place=False)
+            meta_short = meta_short.restrict('dets', meta_short.dets.vals[meta_short.det_cal.phase_to_pW > 0], in_place=False)
+            ## ---- restrict invalid detectors end ---- ##
+
             tod = ctx.get_obs(meta_short)
-            pipe = preprocess.Pipeline(process_pipe)
-            proc = core.AxisManager(tod.dets, tod.samps)
-            for process in pipe:
-                logger.info(f'{process.name}, dets {tod.dets.count}')
-                process.process(tod, proc)
-                process.calc_and_save(tod, proc)
+            # pipe = preprocess.Pipeline(process_pipe)
+            # proc = core.AxisManager(tod.dets, tod.samps)
+
+            ## ---- Preprocess start ---- ##
+            apply_hwp_angle_model(tod)
+            iir_filt = filters.iir_filter(iir_params = tod.iir_params[f'{dir(tod.iir_params)[-1]}'], invert=True)
+            tod.signal = fourier_filter(tod, iir_filt)
+            hwp.demod_tod(tod, signal='signal')
+            ## ---- Preprocess end ---- ##
+
+            ## ---- Wire grid calibration start ---- ##
+            correct_wg_angle(tod)
+            idx_steps_starts, idx_steps_ends = find_operation_range(tod)
+            calc_calibration_data_set(tod, idx_steps_starts, idx_steps_ends)
+            fit_with_circle(tod)
+            get_cal_gamma(tod)
+            ## ---- Wire grid calibration end ---- ##
+
             for i in range(tod.dets.count):
                 dic = {'dets:readout_id': tod.dets.vals[i]}
-                
-                ## IMPLEMENT THE WG CALIBRATION HERE
-
+                dic.update({v[0] : tod.gamma_cal[v[0]][i] for v in dtype[1:]})
                 rset.append(dic)
+
         assert len(rset) == meta.dets.count
         return obs_id, rset
     except (LoaderError, OSError) as e:
@@ -81,7 +108,7 @@ def _main(
     stale: Optional[float] = 60.
 ):
     """
-    Main function for making tau_hwp metadata
+    Main function for making gamma_wg metadata
 
     Arguments
     ---------

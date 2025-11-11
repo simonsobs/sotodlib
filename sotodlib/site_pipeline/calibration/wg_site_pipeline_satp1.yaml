@@ -1,28 +1,12 @@
 ### TENTATIVE YAML CONFIG FOR SATP1 WIREGRID PIPELINE
 
 # NERSC CONTEXT FILE
-context_file: /global/cfs/cdirs/sobs/metadata/satp1/contexts/use_this_local.yaml
-
+context_path: /so/metadata/satp1/contexts/use_this.yaml
 metadata_list:
-    - 'hwp_solution'
-    - 'hwp_model'
-output_dir: /so/metadata/satp1/manifests/tau_hwp/satp1_wg_gamma_20251109m/
+    - 'wg'
+output_dir: /so/metadata/satp1/manifests/gamma_wg/satp1_wg_gamma_20251109m/
 overwrite: False
 tags:
     - 'wiregrid=1'
     - 'wg_stepwise=1'
-## Memo: I AM NOT SURE WHAT IS NPROCS
 nprocs: 1
-process_pipe:
-    - name: "hwp_angle_mode"
-      process: True
-      calc: 
-        on_sign_ambiguous: "offcenter"
-      save: False
-    - name: "correct_iir_params"
-      process: True
-    - name: "fourier_filter"
-      process:
-        filt_function: "iir_filter"
-        filter_params:
-          invert: True
