@@ -29,7 +29,6 @@ dependencies = [
   "psycopg2-binary",
   "lmfit",
   "flacarray>=0.3.4",
-  "requests",
 ]
 dynamic=["version"]
 classifiers = [
@@ -56,6 +55,7 @@ site_pipeline = [
   "pandas",
   "alphashape",
   "slack-sdk",
+  "requests",
 ]
 tests = [
   "socs",
