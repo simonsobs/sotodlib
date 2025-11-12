@@ -441,31 +441,35 @@ def main(config_file=None, defaults=defaults, **args):
                     tods = []
                     for obs_id in depth1map_obsids:
                         obs_info = obs_infos[obs_infos["obs_id"] == obs_id][0]
-                        tod = TODDepthOneTable(map_name=f"{t5}/depth1_{t:010d}_{detset}_{band}", 
-                                            obs_id=obs_id,
-                                            ctime=obs_info["timestamp"],
-                                            start_time=obs_info["start_time"],
-                                            stop_time=obs_info["stop_time"],
-                                            nsamples=int(obs_info["n_samples"]),
-                                            telescope=obs_info["telescope"],
-                                            telescope_flavor=obs_info["telescope_flavor"],
-                                            tube_slot=obs_info["tube_slot"],
-                                            tube_flavor=obs_info["tube_flavor"],
-                                            frequency=band,
-                                            scan_type=obs_info["type"],
-                                            subtype=obs_info["subtype"],
-                                            wafer_count=obs_info["wafer_count"],
-                                            duration=obs_info["duration"],
-                                            az_center=obs_info["az_center"],
-                                            az_throw=obs_info["az_throw"],
-                                            el_center=obs_info["el_center"],
-                                            el_throw=obs_info["el_throw"],
-                                            roll_center=obs_info["roll_center"],
-                                            roll_throw=obs_info["roll_throw"],
-                                            wafer_slots_list=obs_info["wafer_slots_list"],
-                                            stream_ids_list=obs_info["stream_ids_list"])
-                        session.add(tod)
-                        tods.append(tod)
+                        tod_depth1_entry = {"obs_id": obs_id,
+                                            "ctime": obs_info["timestamp"],
+                                            "start_time": obs_info["start_time"],
+                                            "stop_time": obs_info["stop_time"],
+                                            "nsamples": int(obs_info["n_samples"]),
+                                            "telescope": obs_info["telescope"],
+                                            "telescope_flavor": obs_info["telescope_flavor"],
+                                            "tube_slot": obs_info["tube_slot"],
+                                            "tube_flavor": obs_info["tube_flavor"],
+                                            "frequency": band,
+                                            "scan_type": obs_info["type"],
+                                            "subtype": obs_info["subtype"],
+                                            "wafer_count": int(obs_info["wafer_count"]),
+                                            "duration": obs_info["duration"],
+                                            "az_center": obs_info["az_center"],
+                                            "az_throw": obs_info["az_throw"],
+                                            "el_center": obs_info["el_center"],
+                                            "el_throw": obs_info["el_throw"],
+                                            "roll_center": obs_info["roll_center"],
+                                            "roll_throw": obs_info["roll_throw"],
+                                            "wafer_slots_list": obs_info["wafer_slots_list"],
+                                            "stream_ids_list": obs_info["stream_ids_list"]}
+                        existing_tod = session.query(TODDepthOneTable).filter_by(**tod_depth1_entry).first()
+                        tod = TODDepthOneTable(map_name=f"{t5}/depth1_{t:010d}_{detset}_{band}", **tod_depth1_entry)
+                        if existing_tod is None:
+                            session.add(tod)
+                            tods.append(tod)
+                        else:
+                            tods.append(existing_tod)
                     session.commit()
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
@@ -486,19 +490,23 @@ def main(config_file=None, defaults=defaults, **args):
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
             if comm_intra.rank == 0 :
+                L.info(f"Finished map {t5}/depth1_{t:010d}_{detset}_{band}")
                 with Settings(**mapcat_settings).session() as session:
-                        depth1map_meta = DepthOneMapTable(map_name=f"{t5}/depth1_{t:010d}_{detset}_{band}",
-                                                        map_path=prefix + "_map.fits",
-                                                        ivar_path=prefix + "_ivar.fits",
-                                                        time_path=prefix + "_time.fits",
-                                                        tube_slot=detset,
-                                                        frequency=band,
-                                                        ctime=periods[pid][0],
-                                                        start_time=periods[pid][0],
-                                                        stop_time=periods[pid][1],
-                                                        tods=tods
-                                                        )
-                        session.add(depth1map_meta)
+                        map_name = f"{t5}/depth1_{t:010d}_{detset}_{band}"
+                        existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
+                        depth1map_meta = DepthOneMapTable(map_id=existing_map.map_id if existing_map else None,
+                                                          map_name=map_name,
+                                                          map_path=prefix + "_map.fits",
+                                                          ivar_path=prefix + "_ivar.fits",
+                                                          time_path=prefix + "_time.fits",
+                                                          tube_slot=detset,
+                                                          frequency=band,
+                                                          ctime=periods[pid][0],
+                                                          start_time=periods[pid][0],
+                                                          stop_time=periods[pid][1],
+                                                          tods=tods
+                                                          )
+                        session.merge(depth1map_meta)
                         session.commit()
 
         except DataMissing as e:
