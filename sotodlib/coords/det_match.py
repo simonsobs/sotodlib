@@ -740,7 +740,7 @@ class Match:
 
         # BG mismatch
         bgs_mismatch = src_arr['bg'][:, None] != dst_arr['bg'][None, :]
-        bgs_unassigned = (src_arr['bg'][:, None] == 1) | (dst_arr['bg'][None, :] == -1)
+        bgs_unassigned = (src_arr['bg'][:, None] == -1) | (dst_arr['bg'][None, :] == -1)
 
         m = bgs_mismatch & bgs_unassigned
         mat[m] += self.match_pars.unassigned_bg_mismatch_pen
