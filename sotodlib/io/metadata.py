@@ -18,6 +18,7 @@ import h5py
 
 from sotodlib.core import AxisManager
 from sotodlib.core.metadata import ResultSet, SuperLoader, LoaderInterface
+from sotodlib.core.util import H5ContextManager
 import warnings
 
 def write_dataset(data, filename, address, overwrite=False, mode='a'):
@@ -44,7 +45,7 @@ def write_dataset(data, filename, address, overwrite=False, mode='a'):
         raise TypeError("I do not know how to write type %s" % data.__class__)
 
     if isinstance(filename, str):
-        context = h5py.File(filename, mode)
+        context = H5ContextManager(filename, mode).open()
     else:
         # Wrap in a nullcontext so that the block below doesn't
         # close the File on exit.
