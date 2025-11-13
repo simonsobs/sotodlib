@@ -341,6 +341,20 @@ class ObsDb(object):
         this is used by the CLI.
 
         """
+        def _distinct(items):
+            # Using "set" to collapse lists of floats will fail to
+            # round up inf and nan, because they are never equal.
+            if np.issubdtype(items.dtype, np.floating):
+                keepers = np.ones(len(items), bool)
+                for _test in [np.isnan, np.isneginf, np.isposinf]:
+                    is_special = _test(items)
+                    if is_special.any():
+                        # Only keep one of them.
+                        keepers *= ~is_special
+                        keepers[is_special.nonzero()[0][0]] = True
+                items = items[keepers]
+            return list(set(items))
+
         def _short_list(items, max_len=40):
             i, acc, keepers = 0, 0, []
             while (len(keepers) < 1 or acc < max_len) and i < len(items):
@@ -354,7 +368,7 @@ class ObsDb(object):
         rs = self.query()
         fields = {}
         for k in rs.keys:
-            items = list(set(rs[k]))
+            items = _distinct(rs[k])
             fields[k] = (len(items), _short_list(items))
 
         # Count occurances of each tag ...

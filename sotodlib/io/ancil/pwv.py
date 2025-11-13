@@ -102,7 +102,11 @@ def combine_pwv(rs_toco, rs_apex, time_range):
 
 @cc.register_engine('pwv-combo', cc.PwvComboConfig)
 class PwvCombo(utils.AncilEngine):
-    result_fields = ['mean', 'std', 'qual']
+    _fields = [
+        ('mean', 'float'),
+        ('std', 'float'),
+        ('qual', 'float'),
+    ]
 
     def __init__(self, cfg):
         super().__init__(cfg)

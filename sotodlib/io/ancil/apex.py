@@ -85,7 +85,12 @@ def get_apex(t0, t1, url=None, raw=False):
 
 @cc.register_engine('apex-pwv', cc.ApexPwvConfig)
 class ApexPwv(utils.LowResTable):
-    result_fields = ['mean', 'start', 'end', 'span']
+    _fields = [
+        ('mean', 'float'),
+        ('start', 'float'),
+        ('end', 'float'),
+        ('span', 'float'),
+    ]
 
     def _get_raw(self, time_range):
         return get_apex(time_range[0], time_range[1])

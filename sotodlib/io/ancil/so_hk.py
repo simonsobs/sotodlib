@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 
 @cc.register_engine('weather-station', cc.WeatherStationConfig)
 class WeatherStation(utils.AncilEngine):
-    result_fields = ['wind_speed', 'wind_dir', 'uv', 'ambient_temp']
+    _fields = [
+        ('wind_speed', 'float'),
+        ('wind_dir', 'float'),
+        ('uv', 'float'),
+        ('ambient_temp', 'float'),
+    ]
 
     def getter(self, targets=None, results=None, **kwargs):
         time_ranges = self._target_time_ranges(targets)
@@ -78,7 +83,12 @@ def apex_pwv_to_toco_pwv(v):
 
 @cc.register_engine('toco-pwv', cc.TocoPwvConfig)
 class TocoPwv(utils.LowResTable):
-    result_fields = ['mean', 'start', 'end', 'span']
+    _fields = [
+        ('mean', 'float'),
+        ('start', 'float'),
+        ('end', 'float'),
+        ('span', 'float'),
+    ]
 
     def _get_raw(self, time_range):
         cfg = hkdb.HkConfig.from_yaml(self.cfg.hkdb_config)

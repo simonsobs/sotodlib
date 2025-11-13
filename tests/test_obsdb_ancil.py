@@ -22,7 +22,7 @@ class _ExampleEngineConfig(ancil.configcls.LowResTableConfig):
 
 @ancil.configcls.register_engine('example-dataset', _ExampleEngineConfig)
 class _ExampleEngine(ancil.utils.LowResTable):
-    result_fields = ['pwv']
+    _fields = [('pwv', 'float')]
 
     def __init__(self, cfg):
         super().__init__(cfg)

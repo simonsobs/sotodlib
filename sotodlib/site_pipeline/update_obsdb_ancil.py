@@ -52,16 +52,6 @@ def update_base_data(config_file, time_range=None, datasets=None, full_scan=Fals
 def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
     cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 
-    tquery = None
-    if time_range is not None:
-        t0, t1 = time_range
-        if t0 is None:
-            tquery = f'timestamp < {t1}'
-        elif t1 is None:
-            tquery = f'timestamp >= {t0}'
-        else:
-            tquery = f'(timestamp >= {t0}) and (timestamp < {t1})'
-
     logger.info(f'Updating obsdb')
     for dataset, engine in _engines_iter(cfg, datasets):
         logger.info(f'Processing {dataset}...')
@@ -69,17 +59,10 @@ def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
 
         # Ensure target columns are present in db.
         obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
-        for k in engine.obsdb_fields:
-            obsdb.add_obs_columns([k + ' float'])
+        engine.obsdb_check(obsdb, create_cols=True)
 
         # Find records that need to be updated.
-        if redo:
-            q = '1'
-        else:
-            q = engine._get_obsdb_query()
-
-        if tquery:
-            q = f'{tquery} and {q}'
+        q = engine.obsdb_query(time_range=time_range, redo=redo)
 
         logger.debug(f'Query for records to update is: "{q}"')
         recs = obsdb.query(q)
@@ -125,11 +108,13 @@ def get_parser(parser=None):
     p.add_argument('--dataset', '-d', action='append')
     p.add_argument('--lookback-days', type=float)
 
-    p = sps.add_parser('test')
+    p = sps.add_parser('test', help=
+                       "Run analysis, printing results to terminal, "
+                       "and without updating obsdb.")
     p.add_argument('--config-file', '-c', default='cli.yaml')
     p.add_argument('--dataset', '-d', action='append')
     p.add_argument('--query', '-q')
-    p.add_argument('obs_id', nargs='+')
+    p.add_argument('obs_id', nargs='*')
 
     return parser
 
@@ -138,6 +123,7 @@ def main(command=None, verbose=None, lookback_days=None,
          full_scan=None, redo=None):
     if verbose:
         ancil.logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
 
     time_range = None
     if lookback_days is not None:
@@ -166,9 +152,15 @@ def main(command=None, verbose=None, lookback_days=None,
 
         obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
         if query:
+            assert len(obs_id) == 0, "User passed --query and obs_id"
             items = list(iter(obsdb.query(query)))
         else:
-            items = [obsdb.get(o) for o in obs_id]
+            items = []
+            for o in obs_id:
+                if (oi := obsdb.get(o)) is None:
+                    print(f'No obsdb record for "{o}", skipping test.')
+                else:
+                    items.append(oi)
 
         results = [{} for r in items]
         for dataset, engine in _engines_iter(cfg, dataset):

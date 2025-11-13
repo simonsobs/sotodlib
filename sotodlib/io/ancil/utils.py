@@ -38,9 +38,9 @@ def denumpy(output):
 
 
 def intersect_ranges(r1, r2, empty_as_none=False):
-    """Return the intersection of semi-open intervals r1 = [a, b) and
-    r2 = [c, d).  If empty_as_none, then empty intervals are returned
-    as None instead of [e, e).
+    """Return the intersection of semi-open intervals r1 = [a, b) and r2 =
+    [c, d).  If empty_as_none, then empty intervals are returned as
+    None instead of [e, e).
 
     """
     if r2[0] < r1[0]:
@@ -105,7 +105,7 @@ def _get_time_range(*time_ranges, now=None):
 
 class AncilEngine:
     config_class = None
-    result_fields = []
+    _fields = []
 
     def __init__(self, cfg):
         if isinstance(cfg, dict):
@@ -127,23 +127,63 @@ class AncilEngine:
             return get_engine(friend, self.friends[friend])
         return self.friends[friend]
 
-
     @property
     def obsdb_fields(self):
         if self.cfg.obsdb_format:
+            # transform (bare_field, ...) into (obsdb_field, ...)
             return [
-                self.cfg.obsdb_format.format(
-                    dataset=self.cfg.dataset_name, field=k)
-                for k in self.result_fields]
-        return self.result_fields
+                (self.cfg.obsdb_format.format(
+                    dataset=self.cfg.dataset_name, field=item[0]),) + item[1:]
+                for item in self._fields]
+        return self._fields
 
-    def _get_obsdb_map(self):
-        return dict(zip(self.result_fields, self.obsdb_fields))
+    def _obsdb_map(self, target=None):
+        if target:
+            return {v[0]: target[k[0]]
+                    for k, v in zip(self._fields, self.obsdb_fields)}
+        return {k[0]: v[0] for k, v in zip(self._fields, self.obsdb_fields)}
 
-    def _get_obsdb_query(self):
-        q = self.cfg.obsdb_query
-        assert q is not None
-        return q.format(**self._get_obsdb_map())
+    def obsdb_query(self, time_range=None, redo=False):
+        """Get obsdb query string to identify records that need recomputation.
+        If time_range is not None, then screening on timestamp will be
+        included.  If redo is True, then the engine-specific value
+        testing will be skipped and all records in the time_range will
+        be queried.
+
+        """
+        if redo:
+            vquery = '1'
+        else:
+            vquery = self.cfg.obsdb_query
+            assert vquery is not None
+
+        if time_range is not None:
+            t0, t1 = time_range
+            if t0 is None:
+                tquery = f'timestamp < {t1}'
+            elif t1 is None:
+                tquery = f'timestamp >= {t0}'
+            else:
+                tquery = f'(timestamp >= {t0}) and (timestamp < {t1})'
+
+            vquery = f'{tquery} and {vquery}'
+
+        return vquery.format(**self._obsdb_map())
+
+    def obsdb_check(self, obsdb, create_cols=False):
+        ok = False
+        try:
+            obsdb.conn.execute('select %s from obs limit 1' % (
+                ','.join(['`%s`' % f[0] for f in self.obsdb_fields])))
+            ok = True
+        except:
+            pass
+        if not ok and create_cols:
+            for field_row in self.obsdb_fields:
+                k, t = field_row[:2]
+                obsdb.add_obs_columns([f'{k} {t}'])
+            return True
+        return ok
 
     def update_base(self, time_range=None, reset=False):
         """Update the base dataset, for the indicated time_range.
@@ -160,7 +200,7 @@ class AncilEngine:
     def collect(self, targets=None, results=None, show_pbar=True, for_obsdb=False):
         output = list(self.getter(targets=tqdm(targets, disable=not show_pbar),
                                   results=results))
-        remap = self._get_obsdb_map()
+        remap = self._obsdb_map()
         if for_obsdb and self.cfg.obsdb_format:
             for i in range(len(output)):
                 output[i] = {remap[k]: v for k, v in output[i].items()}
@@ -361,8 +401,13 @@ class HkExtract(AncilEngine):
         starting from the end of that.
 
         """
-        time_range = _get_time_range(time_range, self.cfg.dataset_time_range)
-        time_range = intersect_ranges(time_range, self.cfg.dataset_time_range)
+        # Validate archive time range...
+        now = time.time()
+        _tr = self.cfg.dataset_time_range
+        _tr = ((0  if _tr[0] is None else _tr[0]),
+               (now if _tr[1] is None else _tr[1]))
+        time_range = _get_time_range(time_range, _tr)
+        time_range = intersect_ranges(time_range, _tr)
 
         field_list = list(self.cfg.aliases.keys())
         tbuf = 120.

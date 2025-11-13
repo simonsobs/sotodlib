@@ -57,6 +57,8 @@ def get_scan_params(enc_az, cmd_az, fail_on_return=False):
         'vel': math.nan,
         'accel': math.nan,
         'az_drift': math.nan,
+        'type': -1,
+        'turntype': -1,
         'solved': False,
         'data_found': False,
     }
@@ -217,12 +219,22 @@ def get_scan_params(enc_az, cmd_az, fail_on_return=False):
         'vel': vel,
         'accel': accel,
         'az_drift': az_drift.round(6),
+        'type': 0,
+        'turntype': 0,
     })
 
 
 @cc.register_engine('scan-props', cc.ScanPropsConfig)
 class ScanProps(utils.HkExtract):
-    result_fields = ['vel', 'accel', 'az_drift', 'solved', 'data_found']
+    _fields = [
+        ('vel', 'float'),
+        ('accel', 'float'),
+        ('az_drift', 'float'),
+        ('type', 'int'),
+        ('turntype', 'int'),
+        ('solved', 'bool'),
+        ('data_found', 'bool'),
+    ]
 
     def getter(self, targets=None, results=None, **kwargs):
         time_ranges = self._target_time_ranges(targets)
