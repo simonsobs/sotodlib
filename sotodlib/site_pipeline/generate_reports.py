@@ -47,6 +47,7 @@ class GenerateReportConfig:
     def __init__(
         self,
         platform: Literal["satp1", "satp2", "satp3", "lat"],
+        site_url: str,
         report_interval: Literal["weekly", "monthly"],
         start_time: Union[dt.datetime, float, str],
         output_root: str,
@@ -58,6 +59,7 @@ class GenerateReportConfig:
         template_dir: Optional[str] = None,
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
+        self.site_url: str = site_url
         self.report_interval = report_interval
 
         def convert_to_datetime(
@@ -93,8 +95,8 @@ class GenerateReportConfig:
         now = dt.datetime.now(tz=dt.timezone.utc)
         while start < self.stop_time:
             stop: dt.datetime = start + delta
-            if stop > now - dt.timedelta(days=1):
-                # Give a buffer of 1 day to compile report for previous interval
+            if stop > now - dt.timedelta(hours=1):
+                # Give a buffer of 1 hour to compile report for previous interval
                 break
             self.time_intervals.append((start, stop))
             start += delta
@@ -119,6 +121,7 @@ def main(cfg: str) -> None:
             start_time=start_time,
             stop_time=stop_time,
             platform=cfg.platform,
+            site_url=cfg.site_url,
             **cfg.data_config,
         )
 
@@ -140,6 +143,7 @@ def main(cfg: str) -> None:
                     longterm_data = ReportData.load(data.cfg.longterm_obs_file)
                     longterm_path = data.cfg.longterm_obs_file
                 render_report(
+                    cfg,
                     data,
                     report_file,
                     template_dir=cfg.template_dir,
@@ -153,6 +157,7 @@ def main(cfg: str) -> None:
 
 
 def render_report(
+    cfg: GenerateReportConfig,
     data: ReportData,
     output_path: str,
     template_dir=None,
@@ -165,12 +170,14 @@ def render_report(
     template = env.get_template("report.html")
 
     obs_efficiency_plots = plots.wafer_obs_efficiency(data)
+    source_footprint_plots = plots.source_footprints(data)
     figures: Dict[str, go.Figure] = {
         "obs_efficiency_heatmap": obs_efficiency_plots.heatmap,
         "obs_efficiency_pie": obs_efficiency_plots.pie,
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
-        "cal_footprints": plots.cal_footprints(data),
+        "source_focalplane": source_footprint_plots.focalplane,
+        "source_table": source_footprint_plots.table
     }
 
     html_kw = dict(full_html=False, include_plotlyjs=False)
@@ -184,6 +191,7 @@ def render_report(
         stop_time_str = data.cfg.stop_time.isoformat()
     jinja_data = {
         "data": data,
+        "report_interval": cfg.report_interval.capitalize(),
         "plots": {k: v.to_html(**html_kw) for k, v in figures.items()},
         "general_stats": {
             "Start time": dt.datetime.fromisoformat(start_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),

@@ -1,0 +1,2 @@
+
+sodetlib @ git+https://github.com/simonsobs/sodetlib

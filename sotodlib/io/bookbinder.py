@@ -33,7 +33,7 @@ class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
     pass
 
-MAX_DROPPED_SAMPLES = 100
+MAX_DROPPED_SAMPLES = 200
 class BadTimeSamples(Exception):
     """Exception raised when there are drops in the time samples in the 
     UFM timestreams"""
@@ -517,7 +517,8 @@ class AncilProcessor:
 
 class SmurfStreamProcessor:
     def __init__(self, obs_id, files, book_id, readout_ids,
-                 log=None, allow_bad_timing=False):
+                 log=None, allow_bad_timing=False, min_ctime=None,
+                 max_ctime=None):
         self.files = files
         self.obs_id = obs_id
         self.stream_id = None
@@ -535,6 +536,8 @@ class SmurfStreamProcessor:
         self.out_files = []
         self.book_id = book_id
         self.allow_bad_timing = allow_bad_timing
+        self.min_ctime = min_ctime
+        self.max_ctime = max_ctime
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -585,11 +588,21 @@ class SmurfStreamProcessor:
 
         if len(ts) == 0:
             raise NoScanFrames(f"{self.obs_id} has no detector data")
+
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
  
-        if np.any( np.diff(self.times) < 0):
+        if self.min_ctime is None:
+            self.min_ctime = np.min(self.times)
+        if self.max_ctime is None:
+            self.max_ctime = np.max(self.times)
+        
+        msk = np.all([
+            self.times >= self.min_ctime,
+            self.times <= self.max_ctime,
+        ], axis=0)
+        if np.any(np.diff(self.times[msk]) <= 0):
             raise BadTimeSamples(
                 f"{self.obs_id} has time samples not increasing"
             )
@@ -881,6 +894,8 @@ class BookBinder:
         self.max_file_size = max_file_size
         self.ignore_tags = ignore_tags
         self.allow_bad_timing = allow_bad_timing
+        self.min_ctime = min_ctime
+        self.max_ctime = max_ctime
 
         if os.path.exists(outdir):
             # don't count hidden files, possibly from NFS processes
@@ -941,16 +956,43 @@ class BookBinder:
                 )
             self.streams[stream_id] = SmurfStreamProcessor(
                 obs_id, files, book.bid, readout_ids[obs_id], log=self.log,
-                allow_bad_timing=self.allow_bad_timing,
+                allow_bad_timing=self.allow_bad_timing, 
+                min_ctime=self.min_ctime, max_ctime=self.max_ctime,
             )
 
-        self.min_ctime = min_ctime
-        self.max_ctime = max_ctime
         self.times = None
         self.frame_idxs = None
         self.file_idxs = None
         self.meta_files = None
-        
+
+    def set_min_max_ctime(self):
+        """Function to be run after stream.preprocess is finished to set the ctimes.
+        Splitting this out because it is useful for debugging purposes as well
+        """   
+        for stream in self.streams.values():
+            assert stream.times is not None, "All streams must be preprocessed"
+        t0 = np.max([s.times[0] for s in self.streams.values()])
+        if self.min_ctime is not None:
+            assert self.min_ctime >= t0, \
+                f"{self.min_ctime} is less than the first time found in"\
+                f" the detector data {t0}"
+            self.log.warning(
+                f"Over-riding minimum ctime from {t0} to {self.min_ctime}"
+            )
+        else:
+            self.min_ctime = t0
+
+        t1 = np.min([s.times[-1] for s in self.streams.values()])
+        if self.max_ctime is not None:
+            assert self.max_ctime <= t1, \
+                f"{self.max_ctime} is greater than the last time found in"\
+                f" the detector data {t1}"
+            self.log.warning(
+                f"Over-riding maximum ctime from {t1} to {self.max_ctime}"
+            )
+        else:
+            self.max_ctime = t1
+
     def preprocess(self):
         """
         Runs preprocessing steps for the book. Preprocesses smurf and ancillary
@@ -962,33 +1004,13 @@ class BookBinder:
 
         for stream in self.streams.values():
             stream.preprocess()
+        self.set_min_max_ctime()
 
-        t0 = np.max([s.times[0] for s in self.streams.values()])
-        if self.min_ctime is not None:
-            assert self.min_ctime >= t0, \
-                f"{self.min_ctime} is less than the first time found in"\
-                f" the detector data {t0}"
-            self.log.warning(
-                f"Over-riding minimum ctime from {t0} to {self.min_ctime}"
-            )
-            t0 = self.min_ctime
-        else:
-            self.min_ctime = t0
-        t1 = np.min([s.times[-1] for s in self.streams.values()])
-        if self.max_ctime is not None:
-            assert self.max_ctime <= t1, \
-                f"{self.max_ctime} is greater than the last time found in"\
-                f" the detector data {t1}"
-            self.log.warning(
-                f"Over-riding maximum ctime from {t1} to {self.max_ctime}"
-            )
-        else:
-            self.max_ctime = t1
         # prioritizes the last stream
         # implicitly assumes co-sampled (this is where we could throw errors
         # after looking for co-sampled data)
         ts, _ = fill_time_gaps(stream.times) 
-        m = (t0 <= ts) & (ts <= t1)
+        m = (self.min_ctime <= ts) & (ts <= self.max_ctime)
         ts = ts[m]
 
         self.ancil.preprocess()
@@ -1047,6 +1069,9 @@ class BookBinder:
         if np.all( [x==0 for x in self.dropped.values()] ):
             ## no dropped samples from any slot
             return
+
+        ## do not change the format of these messages without also changing the 
+        ## autofixing behavior that is built off these messages.
         msg = '\n'.join([
             f"\t{self.streams[u].obs_id}: {x}" for u, x in self.dropped.items()
         ])

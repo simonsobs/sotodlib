@@ -2,7 +2,7 @@ import os
 import yaml
 import time
 import logging
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, List
 import numpy as np
 import argparse
 import traceback
@@ -19,11 +19,11 @@ import sotodlib.site_pipeline.util as sp_util
 
 logger = pp_util.init_logger("preprocess")
 
-def multilayer_preprocess_tod(obs_id, 
+def multilayer_preprocess_tod(obs_id,
                               configs_init,
                               configs_proc,
                               verbosity=0,
-                              group_list=None, 
+                              group_list=None,
                               overwrite=False,
                               run_parallel=False):
     """Meant to be run as part of a batched script. Given a single
@@ -136,6 +136,9 @@ def multilayer_preprocess_tod(obs_id,
     else:
         make_lmsi = False
 
+    new_plots_init = None
+    new_plot_proc = None
+
     # loop through and reduce each group
     n_fail = 0
     for group in groups_proc:
@@ -146,8 +149,13 @@ def multilayer_preprocess_tod(obs_id,
                                                                              dets=dets, logger=logger)
             if error is None:
                 outputs_init.append(outputs_grp_init)
+                if make_lmsi:
+                    new_plots_init = os.path.join(configs_init["plot_dir"],
+                            f'{str(aman.timestamps[0])[:5]}',
+                            aman.obs_info.obs_id)
 
             init_fields = aman.preprocess._fields.copy()
+            init_fields.pop('valid_data', None)
 
             outputs_grp_proc = pp_util.save_group(obs_id, configs_proc, dets,
                                       context_proc, subdir='temp_proc')
@@ -163,6 +171,11 @@ def multilayer_preprocess_tod(obs_id,
             proc_aman, success = pipe_proc.run(aman)
             proc_aman.wrap('pcfg_ref', pp_util.get_pcfg_check_aman(pipe_init))
 
+            if make_lmsi:
+                new_plots_proc = os.path.join(configs_init["plot_dir"],
+                         f'{str(aman.timestamps[0])[:5]}',
+                         aman.obs_info.obs_id)
+
             # remove fields found in aman.preprocess from proc_aman
             for fld_init in init_fields:
                 if fld_init in proc_aman:
@@ -176,7 +189,7 @@ def multilayer_preprocess_tod(obs_id,
             continue
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
-            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}") 
+            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}")
             n_fail += 1
             continue
 
@@ -196,10 +209,11 @@ def multilayer_preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        if os.path.exists(new_plots):
-            lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
-                      Path(configs1["lmsi_config"]),
-                      Path(os.path.join(new_plots, 'index.html')))
+        for configs, new_plots in zip([configs_init, configs_proc], [new_plots_init, new_plots_proc]):
+            if new_plots is not None and os.path.exists(new_plots):
+                lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
+                          Path(configs["lmsi_config"]),
+                          Path(os.path.join(new_plots, 'index.html')))
 
     if run_parallel:
         if n_fail == len(groups_proc):
@@ -219,9 +233,9 @@ def get_parser(parser=None):
     parser.add_argument('configs_init', help="Preprocessing Configuration File for existing database")
     parser.add_argument('configs_proc', help="Preprocessing Configuration File for new database")
     parser.add_argument(
-        '--query', 
+        '--query',
         help="Query to pass to the observation list. Use \\'string\\' to "
-             "pass in strings within the query.",  
+             "pass in strings within the query.",
         type=str
     )
     parser.add_argument(
@@ -287,7 +301,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           min_ctime: Optional[int] = None,
           max_ctime: Optional[int] = None,
           update_delay: Optional[int] = None,
-          tags: Optional[str] = None,
+          tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
@@ -317,6 +331,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         pp_util.cleanup_obs(obs_id, policy_dir_proc, errlog, configs_proc, context_proc,
                             subdir='temp_proc', remove=overwrite)
 
+    # remove datasets from final archive file not found in init db
+    pp_util.cleanup_archive(configs_init, logger)
+    pp_util.cleanup_archive(configs_proc, logger)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
@@ -327,6 +345,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs_proc['archive']['index'])
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:
@@ -392,7 +411,7 @@ def main(configs_init: str,
          min_ctime: Optional[int] = None,
          max_ctime: Optional[int] = None,
          update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
+         tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,
