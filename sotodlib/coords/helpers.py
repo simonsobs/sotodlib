@@ -377,7 +377,7 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         planar[:,:,0] = utils.unwind(planar[:,:,0])
         # Harmonize detectors. This assumes that the detectors won't
         # be more than 180° away from each other at any given time
-        offs = np.round((planar[:,0,0]-planar[0,0,0]+np.pi)/(2*np.pi))*(2*np.pi)
+        offs = np.round((planar[:,0,0]-planar[0,0,0])/(2*np.pi))*(2*np.pi)
         planar[:,:,0] -= offs[:,None]
 
     # Go from intermediate coordinates to pixel coordiantes.
