@@ -115,6 +115,12 @@ class PwvCombo(utils.AncilEngine):
             self.cfg.apex_dataset: None,
         }
 
+    def check_base(self):
+        info = {'constituents': []}
+        for k, v in self.friends.items():
+            info['constituents'].append(k)
+        return info
+
     def getter(self, targets=None, results=None, raw=False, **kwargs):
         time_ranges = self._target_time_ranges(targets)
         toco_src = self._get_friend(self.cfg.toco_dataset)

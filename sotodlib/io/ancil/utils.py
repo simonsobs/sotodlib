@@ -1,5 +1,6 @@
 import functools
 import logging
+import glob
 import os
 import string
 import time
@@ -185,6 +186,9 @@ class AncilEngine:
             return True
         return ok
 
+    def check_base(self):
+        return {}
+
     def update_base(self, time_range=None, reset=False):
         """Update the base dataset, for the indicated time_range.
 
@@ -292,6 +296,21 @@ class LowResTable(AncilEngine):
                 rs0_a = rs0.asarray(dtypes=self.cfg.dtypes)
                 metadata.write_dataset(rs0_a, filename, dataset, overwrite=True)
 
+    def check_base(self):
+        """Check the base data -- determine output directory, count files
+        therein, take note of extra files, etc.
+
+        """
+        info = {
+            'output_dir': self.cfg.data_dir,
+            'files_found': 0,
+        }
+        time_range = _get_time_range(self.cfg.dataset_time_range)
+        for t0, t1, filename in self._get_filenames(time_range):
+            if os.path.exists(filename):
+                info['files_found'] += 1
+        return info
+
     def _get_filenames(self, time_range):
         ns = int(self.cfg.archive_block_seconds)
         t0 = int((time_range[0] // ns) * ns)
@@ -373,6 +392,29 @@ class HkExtract(AncilEngine):
                         t0, t0 + nb, fn, ds))
                 t0 += nb
         return rows
+
+    def check_base(self):
+        """Check the base data -- determine output directory, count files
+        therein, take note of extra files, etc.
+
+        """
+        info = {
+            'output_dir': self.cfg.data_dir,
+            'files_found': 0,
+        }
+        time_range = _get_time_range(self.cfg.dataset_time_range)
+        ds_count = {}
+        for t0, t1, filename, _ in self._get_datasets(time_range):
+            if filename in ds_count:
+                if ds_count[filename] == -1:
+                    continue
+            else:
+                if os.path.exists(filename):
+                    ds_count[filename] = 0
+                else:
+                    ds_count[filename] = -1
+        info['files_found'] = len([v for v in ds_count.values() if v == 0])
+        return info
 
     def update_base(self, time_range=None, reset=False):
         """Update data by grabbing for HK archive.  Only data in time_range

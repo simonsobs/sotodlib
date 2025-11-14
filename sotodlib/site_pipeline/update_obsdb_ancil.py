@@ -141,9 +141,13 @@ def main(command=None, verbose=None, lookback_days=None,
     elif command == 'check':
 
         # Just trial load the config, processors.
+        print(f'Loading config file {config_file} ...')
         cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
         for dataset, engine in _engines_iter(cfg, dataset):
-            print(dataset, engine)
+            print(f'  dataset={dataset}')
+            for k, v in engine.check_base().items():
+                print(f'    {k}: {v}')
+
 
     elif command == 'test':
 
@@ -175,5 +179,5 @@ def main(command=None, verbose=None, lookback_days=None,
         print()
 
     else:
-        print('Pass -h for uage.')
+        print('Pass -h for usage.')
         return False
