@@ -129,7 +129,7 @@ class CoaddAtomicConfig:
 
 
 def main(config_file: str, verbosity: int) -> None:
-    logger = sp_util.init_logger("Coadd atomic mapmaking", verbosity=verbosity)
+    logger = sp_util.init_logger("make_coadd_atomic_map", verbosity=verbosity)
     cfg = CoaddAtomicConfig.from_yaml(config_file)
     logger.info(f"Setup {cfg.interval} intervals")
     logger.debug(cfg.time_intervals)
