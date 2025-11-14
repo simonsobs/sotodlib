@@ -125,11 +125,12 @@ def apply_pointing_model_lat(vers, params, ancil):
     
     if vers == 'lat_naive':
         return _new_boresight(ancil.samps, az=az, el=el, roll=roll)
-        
-    if vers == "lat_v1":
+    elif vers == "lat_v1":
         az1, el1, roll1 = model_lat_v1(params, az, el, roll)
         return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
-
+    elif vers == "lat_v2":
+        az1, el1, roll1 = model_lat_v2(params, az, el, roll)
+        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
     else:
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
@@ -225,6 +226,66 @@ def model_lat_v1(params, az, el, roll):
 
     return az, el, roll
 
+def model_lat_v2(params, az, el, roll):
+    """Applies pointing model to (az, el, roll).
+    This adds a base tilt and a quadradtic elevation sag to v1.
+
+    Args:
+      params: AxisManager (or dict) of pointing parameters.
+      az, el, roll: naive horizon coordinates, in radians, of the
+        boresight.
+
+    This model has the same parameters as v1 plus these additional params:
+      - base_tilt_{cos,sin}: Base tilt coefficients, in radians. 
+      - el_sag_{quad,lin}: Dimensionless coefficients for the quadradtic
+        and linear components of the elevation sag.
+      - el_sag_pivot: The elevation in radians to treat as the sag's zero point.
+
+    """
+    _p = dict(param_defaults['lat_v2'])
+    if isinstance(params, dict):
+        _p.update(params)
+    else:
+        _p.update({k: params[k] for k in params._fields.keys()})
+    params, _p = _p, None   
+         
+    for k, v in params.items():
+        if k == 'version':
+            continue
+        if k not in param_defaults['lat_v2'] and v != 0.:
+            raise ValueError(f'Handling of model param "{k}" is not implemented.')
+    params_v1 = {k:v for k, v in params.items() if k in param_defaults['lat_v1']}
+    params_v1["version"] = "lat_v1"
+
+    # Apply v1 model
+    az_orig = az.copy()
+    az, el, roll = model_lat_v1(params_v1, az, el, roll)
+    cr = el - roll - np.deg2rad(60)    
+
+    # Base tilt
+    q_base_tilt = get_base_tilt_q(params['base_tilt_cos'], params['base_tilt_sin'])
+
+    # El sag
+    el_sag = params['el_sag_quad']*(el - params['el_sag_pivot'])**2
+    el_sag += params['el_sag_lin']*(el - params['el_sag_pivot'])
+    el += el_sag
+
+    # Lonlat rotation after v1 model and el sag is applied 
+    q_lonlat = quat.rotation_lonlat(-1 * az, el) * quat.euler(2, roll)
+
+    # Horizon Coordinates
+    q_hs = q_base_tilt * q_lonlat
+    new_az, el, _ = quat.decompose_lonlat(q_hs)* np.array([-1, 1, 1])[..., None]
+
+    # Get new roll with the modified el
+    roll = el - cr - np.deg2rad(60)
+    
+    # Make corrected az as close as possible to the input az.    
+    change = ((new_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
+    az = az_orig + change
+
+    return az, el, roll
+    
 
 #
 # SAT model(s)
@@ -310,6 +371,22 @@ param_defaults={
         'cr_center_eta0': 0,
         'mir_center_xi0': 0,
         'mir_center_eta0': 0,
+    },
+    'lat_v2' : {
+        'enc_offset_az': 0,
+        'enc_offset_el': 0,
+        'enc_offset_cr': 0,
+        'el_axis_center_xi0': 0,
+        'el_axis_center_eta0': 0,
+        'cr_center_xi0': 0,
+        'cr_center_eta0': 0,
+        'mir_center_xi0': 0,
+        'mir_center_eta0': 0,
+        'base_tilt_cos': 0,
+        'base_tilt_sin': 0,
+        'el_sag_quad': 0,
+        'el_sag_lin': 0,
+        'el_sag_pivot': np.pi/2.,
     },
     'sat_v1' : {
         'enc_offset_az': 0.,
