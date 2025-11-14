@@ -82,9 +82,9 @@ class QAMetric(object):
         """
         # query influx log measurement for observations of this field
         res = self.monitor.client.query(
-            f"select {self._influx_field}, observation from {self._influx_log}"
+            f"SELECT observation FROM {self._influx_log} WHERE \"metric_type\" = '{self._influx_field}'"
         ).get_points()
-        return [r["observation"] for r in res]
+        return [r["observation"] for r in list(res)]
 
     def process_and_record(self, obs_id, meta=None):
         """ Generate a metric for this obs_id and record it to InfluxDB.
@@ -101,8 +101,8 @@ class QAMetric(object):
         if meta.obs_info.obs_id != obs_id:
             raise Exception(f"Metadata does not correspond to obs_id {obs_id}.")
         line = self._process(meta)
-        log_tags = {"observation": obs_id}  # used to identify this entry
-        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags)
+        log_tags = {"metric_type": self._influx_field}  # used to identify this entry
+        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags, qa_metrics=True, obs_id=obs_id)
         self.monitor.write()
 
     def get_new_obs(self):

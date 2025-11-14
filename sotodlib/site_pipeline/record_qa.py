@@ -19,6 +19,7 @@ def main(config):
 
     monitor = Monitor.from_configs(config["monitor"])
     context = core.Context(config["context_file"])
+    influx_log = config.get("influx_log", "qa_metrics_log")
 
     # get JobDB configuration
     jdb_max_retry = 5  # mark a job as failed after this number of tries
@@ -38,7 +39,7 @@ def main(config):
         except AttributeError:
             raise Exception(f"No metric named {name} was found.")
         # Instantiate class with remaining elements as kwargs
-        metrics.append(metric_class(context=context, monitor=monitor, **m))
+        metrics.append(metric_class(context=context, monitor=monitor, log=influx_log, **m))
 
     # get a list of obs_id to process and add to the JobDB
     jobs = []
