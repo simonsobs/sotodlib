@@ -349,6 +349,10 @@ class TestAxisManager(unittest.TestCase):
         np.testing.assert_array_equal(aman["child.child2.tod"], np.ones((2, 1500)))
         np.testing.assert_array_equal(aman.child.child2.tod, np.ones((2, 1500)))
 
+        aman.move('child.child2.tod', 'child.child2.tod_new')
+        aman.move('child.child2.tod_new', 'child.tod')
+        aman.move('child.child2', None)
+
     # Multi-dimensional restrictions.
 
     def test_200_multid(self):

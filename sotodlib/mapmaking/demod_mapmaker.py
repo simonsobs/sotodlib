@@ -65,7 +65,7 @@ class DemodMapmaker:
         self.singlestream = singlestream
 
     def add_obs(self, id, obs, noise_model=None, split_labels=None,
-                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
+                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
                 apply_wobble=True):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
@@ -503,7 +503,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
+                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
                     apply_wobble=True):
     """
     Make a demodulated map from the list of observations in obslist.
