@@ -378,36 +378,62 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     n_fail = 0
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                    group_list=r[1], verbosity=verbosity,
-                    configs=configs,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
-    for future in as_completed_callable(futures):
-        logger.info('New future as_completed result')
-        try:
+    futures = []
+    job_details = {}
+    for r in run_list:
+        obs_id = r[0]["obs_id"]
+        kwargs = {
+            "obs_id": obs_id,
+            "group_list": r[1],
+            "verbosity": verbosity,
+            "configs": configs,
+            "overwrite": overwrite,
+            "run_parallel": True,}
+        job_details[obs_id] = {
+            "future_kargs": kwargs,
+            "try": 1,
+        }
+        fut = executor.submit(preprocess_tod, **kwargs)
+        fut.obs_id = r[0]["obs_id"]
+        futures.append(fut)
+
+    while futures:
+        future = futures.pop(0)
+        obs_id = future.obs_id
+        kwargs = job_details[obs_id]["future_kargs"]
+        total_tries = job_details[obs_id]["try"]
+        if not future.done():
+            futures.append(future)
+            continue
+        ex = future.exception()
+        if ex is None:
             err, db_datasets = future.result()
             if err is not None:
                 n_fail += 1
-        except Exception as e:
-            errmsg = f'{type(e)}: {e}'
-            tb = ''.join(traceback.format_tb(e.__traceback__))
+            if db_datasets:
+                if err is None:
+                    logger.info(f'Processing future result db_dataset: {db_datasets}')
+                    for db_dataset in db_datasets:
+                        pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                else:
+                    pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+        elif isinstance(ex, OSError) and total_tries <= 3:
+            logger.info(f"Future raised an OSError: {ex}, resubmitting")
+            new_fut = executor.submit(preprocess_tod, **kwargs)
+            new_fut.obs_id = obs_id
+            job_details[new_fut.obs_id]["try"] += 1
+            futures.append(new_fut)
+        elif (isinstance(ex, ValueError) and total_tries > 3) or not isinstance(ex, ValueError):
+            logger.info(f"Future failed after 3 attempts: {ex}")
+            errmsg = f'{type(ex)}: {ex}'
+            tb = ''.join(traceback.format_tb(ex.__traceback__))
             logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
             f = open(errlog, 'a')
             f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
             f.close()
             n_fail+=1
-            continue
-        futures.remove(future)
 
-        if db_datasets:
-            if err is None:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
-                for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
-            else:
-                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
-
-    if raise_error and n_fail > 0:
+    if n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
 
 def main(configs: str,
