@@ -5,6 +5,7 @@ import importlib
 import numpy as np
 import so3g
 from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
+from scipy.sparse import csr_array
 
 from .. import coords, core, tod_ops
 
@@ -643,6 +644,12 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
             res.wrap(key, downsample_cut(obs[key], down))
         elif isinstance(obs[key], so3g.RangesInt32):
             res.wrap(key, downsample_ranges(obs[key], down))
+        elif isinstance(obs[key], csr_array):
+            ax_idx = np.where(np.array(axes) == "samps")[0]
+            dat = np.moveaxis(obs[key].toarray(), ax_idx, -1)
+            # Resample and return to original order
+            dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
+            res.wrap(key, csr_array(dat), [(i, ax) for i, ax in enumerate(axes)])
         elif key in fft_resample:
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
