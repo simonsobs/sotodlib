@@ -913,7 +913,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
     save_archive :
         Call cleanup_mandb if True to save to the archive and database files
-        in configs_init and configs_proc
+        in configs_init and configs_proc. Should be False if preproc_or_load_group
+        is being called from within a parallelized script (i.e. python multiprocessing or MPI).
 
     Returns
     -------
