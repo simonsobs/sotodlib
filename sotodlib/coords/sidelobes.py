@@ -9,7 +9,7 @@ def sidelobe_cut(obs, args, sidelobe_cutters, object_list=None):
     from a binary sidelobe mask with an arbitrary shape.
     The masks MUST BE full sky and relatively low resolution since
     the map is loaded as a non-tiled enmap.
-
+    
     Parameters
     ----------
     obs : sotodlib.core.AxisManager
@@ -25,25 +25,25 @@ def sidelobe_cut(obs, args, sidelobe_cutters, object_list=None):
     object_list : list, optional
         A list of the objects we want to mask. If None, sun and moon
         will be run.
-
+    
     Returns
     -------
     cutss : list
         A list where the elements are the cuts for the objects requested.
         Each will be a RangesMatrix with shape (ndets,nsamps).
     """
-
-	if object_list is None: object_list = ["sun", "moon"]
-	cutss = []
-	for name in object_list:
-		if name not in sidelobe_cutters:
-			fname = args[name + "_mask"]
-			if not fname: raise ValueError("config setting %s_mask missing for sidelobe cut" % name)
-			sidelobe_cutters[name] = SidelobeCutter(fname, objname=name, dtype=obs.signal.dtype)
-		cutter = sidelobe_cutters[name]
-		cuts   = cutter.make_cuts(obs)
-		cutss.append(cuts)
-	return cutss
+    
+    if object_list is None: object_list = ["sun", "moon"]
+    cutss = []
+    for name in object_list:
+        if name not in sidelobe_cutters:
+            fname = args[name + "_mask"]
+            if not fname: raise ValueError("config setting %s_mask missing for sidelobe cut" % name)
+            sidelobe_cutters[name] = SidelobeCutter(fname, objname=name, dtype=obs.signal.dtype)
+        cutter = sidelobe_cutters[name]
+        cuts   = cutter.make_cuts(obs)
+        cutss.append(cuts)
+    return cutss
 
 def Simplecut(ndets, nsamps):
     return so3g.proj.RangesMatrix.zeros((ndets,nsamps))
@@ -57,7 +57,7 @@ class SidelobeCutter:
         self.sys_pixell = "hor,on=%s" % objname
         self.rise_tol = rise_tol
         self.dtype = dtype
-
+    
     def make_cuts(self, obs):
         # First check if the object is above the horizon. We just check the endpoints
         # to keep things simple
