@@ -154,6 +154,9 @@ def multilayer_preprocess_tod(obs_id,
                             f'{str(aman.timestamps[0])[:5]}',
                             aman.obs_info.obs_id)
 
+            elif error not in ["load_success", "end"]:
+                raise RuntimeError(f"Initial layer failed with {error}")
+
             init_fields = aman.preprocess._fields.copy()
             init_fields.pop('valid_data', None)
 
