@@ -248,6 +248,25 @@ class HkData:
                     require_monotonic_times=require_monotonic_times,
                 )
 
+def validate_mount_field(hk_field: HkDataField, times):
+        diff_times = hk_field.times[:-1] + 0.5*np.diff(hk_field.times)
+        m = (times[0] <= diff_times) & (diff_times <= times[-1])
+        err = None
+        if m.sum() < 2:
+            err= NoMountData(
+                f"No mount data overlapping with detector data: {hk_field.addr}"
+            )
+        arr = np.diff(hk_field.times)/np.median(np.diff(hk_field.times))            
+        if np.any(arr[m] > MAX_DROPPED_HK):
+            ## don't change error message without changing imprinter CLI
+            err= DroppedMountData(
+                f"{hk_field.addr} dropped "
+                f"{arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
+                f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
+                "seconds. Interpolation may be questionable."
+            )
+        return arr > 2, err
+
 class AncilProcessor:
     """
     Processor for ancillary (ACU) data
@@ -390,31 +409,13 @@ class AncilProcessor:
         cur_file_idx = None
         out_files = []
 
-        def validate_mount_field(hk_field: HkDataField):
-            diff_times = hk_field.times[:-1] + 0.5*np.diff(hk_field.times)
-            m = (times[0] <= diff_times) & (diff_times <= times[-1])
-            err = None
-            if m.sum() < 2:
-                err= NoMountData(
-                    f"No mount data overlapping with detector data: {hk_field.addr}"
-                )
-            arr = np.diff(hk_field.times)/np.median(np.diff(hk_field.times))            
-            if np.any(arr[m] > MAX_DROPPED_HK):
-                err= DroppedMountData(
-                    f"{hk_field.addr} dropped "
-                    f" {arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
-                    f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
-                    "seconds. Interpolation may be questionable."
-                )
-            return arr > 2, err
-
         # go through and interpolate ACU times to detector times
         acu_interp_data = {}
         acu_invalid_data = {}
         for fld in ['az', 'el', 'boresight', 'corotator_enc']:
             f = getattr(self.hkdata, fld)
             if f is not None:
-                invalid, err = validate_mount_field(f)
+                invalid, err = validate_mount_field(f, times)
                 acu_interp_data[fld] = np.interp(
                     times, f.times, f.data
                 )
