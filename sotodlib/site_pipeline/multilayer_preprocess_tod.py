@@ -2,7 +2,7 @@ import os
 import yaml
 import time
 import logging
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, List
 import numpy as np
 import argparse
 import traceback
@@ -19,11 +19,11 @@ import sotodlib.site_pipeline.util as sp_util
 
 logger = pp_util.init_logger("preprocess")
 
-def multilayer_preprocess_tod(obs_id, 
+def multilayer_preprocess_tod(obs_id,
                               configs_init,
                               configs_proc,
                               verbosity=0,
-                              group_list=None, 
+                              group_list=None,
                               overwrite=False,
                               run_parallel=False):
     """Meant to be run as part of a batched script. Given a single
@@ -189,7 +189,7 @@ def multilayer_preprocess_tod(obs_id,
             continue
         if success != 'end':
             # If a single group fails we don't log anywhere just mis an entry in the db.
-            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}") 
+            logger.info(f"ERROR: {obs_id} {group}\nFailed at step {success}")
             n_fail += 1
             continue
 
@@ -233,9 +233,9 @@ def get_parser(parser=None):
     parser.add_argument('configs_init', help="Preprocessing Configuration File for existing database")
     parser.add_argument('configs_proc', help="Preprocessing Configuration File for new database")
     parser.add_argument(
-        '--query', 
+        '--query',
         help="Query to pass to the observation list. Use \\'string\\' to "
-             "pass in strings within the query.",  
+             "pass in strings within the query.",
         type=str
     )
     parser.add_argument(
@@ -301,7 +301,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           min_ctime: Optional[int] = None,
           max_ctime: Optional[int] = None,
           update_delay: Optional[int] = None,
-          tags: Optional[str] = None,
+          tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
@@ -386,18 +386,22 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if db_datasets_init:
             if err is None:
                 for db_dataset in db_datasets_init:
-                    logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+                    logger.info(f'Processing init future result')
+                    pp_util.cleanup_mandb(err, db_dataset, configs_init,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
+                pp_util.cleanup_mandb(err, db_datasets_init, configs_init,
+                                      logger, overwrite)
 
         if db_datasets_proc:
             if err is None:
-                logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
+                logger.info(f'Processing future proc result')
                 for db_dataset in db_datasets_proc:
-                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+                    pp_util.cleanup_mandb(err, db_dataset, configs_proc,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
+                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"multilayer_preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
@@ -411,7 +415,7 @@ def main(configs_init: str,
          min_ctime: Optional[int] = None,
          max_ctime: Optional[int] = None,
          update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
+         tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,
