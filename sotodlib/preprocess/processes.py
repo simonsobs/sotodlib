@@ -2156,6 +2156,7 @@ class EstimateT2P(_Preprocess):
      Example config block::
 
         - name : "estimate_t2p"
+          fit_in_freq : False
           calc:
             T_sig_name: 'dsT'
             Q_sig_name: 'demodQ'
@@ -2173,8 +2174,16 @@ class EstimateT2P(_Preprocess):
     """
     name = "estimate_t2p"
 
+    def __init__(self, step_cfgs):
+        self.fit_in_freq = step_cfgs.get('fit_in_freq', False)
+
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
-        t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
+        if self.fit_in_freq:
+            t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs_in_freq(aman, **self.calc_cfgs)
+        else:
+            t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(aman, **self.calc_cfgs)
         self.save(proc_aman, t2p_aman)
 
         return aman, proc_aman
@@ -2416,6 +2425,35 @@ class SubtractQUCommonMode(_Preprocess):
         else:
             tod_ops.deproject.subtract_qu_common_mode(aman, self.signal_name_Q,
                                                       self.signal_name_U, merge=True)
+        return aman, proc_aman
+
+class ScanFreqCut(_Preprocess):
+    """Apply high-pass cut at the scan frequency.
+
+    Example config block::
+
+        - name : 'scan_freq_cut'
+          signal_name_T: 'dsT'
+          signal_name_Q: 'demodQ'
+          signal_name_U: 'demodU'
+          process: True
+
+    """
+    name = "scan_freq_cut"
+
+    def __init__(self, step_cfgs):
+        self.signal_name_T = step_cfgs.get('signal_name_T', 'dsT')
+        self.signal_name_Q = step_cfgs.get('signal_name_Q', 'demodQ')
+        self.signal_name_U = step_cfgs.get('signal_name_U', 'demodU')
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False):
+        scan_freq = tod_ops.utils.get_scan_freq(aman)
+        hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
+        filt = filters.get_hpf(hpf_cfg)
+        aman[self.signal_name_T] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_T, detrend='linear')
+        aman[self.signal_name_Q] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_Q, detrend='linear')
+        aman[self.signal_name_U] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_U, detrend='linear')
         return aman, proc_aman
 
 class FocalplaneNanFlags(_Preprocess):
