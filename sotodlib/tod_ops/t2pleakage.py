@@ -485,15 +485,24 @@ def get_t2p_cuts(aman, t2p_aman=None, redchi2s=True, error=True, lam=False,
         t2p_aman = aman.t2p_stats
     mask = np.ones(aman.dets.count, dtype=bool)
     if redchi2s:
-        redchi2s_t2p = t2p_aman.redchi2s
+        if 'redchi2s' in t2p_aman:
+            redchi2s_t2p = t2p_aman.redchi2s
+        elif 'redchi2sQ' in t2p_aman:
+            redchi2s_t2p = t2p_aman.redchi2sQ + t2p_aman.redchi2sU
         mask_redchi2s = (redchi2s_lims[0] < redchi2s_t2p) & (redchi2s_t2p < redchi2s_lims[1])
         mask = np.logical_and(mask, mask_redchi2s)
     if error:
-        error_t2p = np.sqrt(t2p_aman.lamQ_error**2+t2p_aman.lamU_error**2)
+        if 'lamQ_error' in t2p_aman:
+            error_t2p = np.sqrt(t2p_aman.lamQ_error**2+t2p_aman.lamU_error**2)
+        elif 'errorsQ' in t2p_aman:
+            error_t2p = np.sqrt(t2p_aman.errorsQ**2+t2p_aman.errorsU**2)
         mask_error = (error_lims[0] < error_t2p) & (error_t2p < error_lims[1])
         mask = np.logical_and(mask, mask_error)
     if lam:
-        lam_t2p = np.sqrt(t2p_aman.lamQ**2 + t2p_aman.lamU**2)
+        if 'lamQ' in t2p_aman:
+            lam_t2p = np.sqrt(t2p_aman.lamQ**2 + t2p_aman.lamU**2)
+        elif 'coeffsQ' in t2p_aman:
+            lam_t2p = np.sqrt(t2p_aman.coeffsQ**2 + t2p_aman.coeffsU**2)
         mask_lam = (lam_lims[0] < lam_t2p) & (lam_t2p < lam_lims[1])
         mask = np.logical_and(mask, mask_lam)
     if in_place:
