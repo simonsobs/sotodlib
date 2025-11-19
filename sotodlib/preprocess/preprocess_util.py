@@ -880,7 +880,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False, save_temp=True,
+                          logger=None, overwrite=False, save_proc_aman=True,
                           save_archive=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
@@ -891,7 +891,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     processed tod calling either the ``load_and_preprocess`` or
     ``multilayer_load_and_preprocess`` functions. If the db entry does not exist or
     the overwrite flag is set to True then the full preprocessing steps defined in
-    the configs are run and if save_temp is True, the outputs are written to a
+    the configs are run and if save_proc_aman is True, the outputs are written to a
     unique h5 file. Any errors, the info to populate the database, the file path of
     the h5 file, and the process tod are returned from this function. Processed axis
     managers can be written to an archive and database by using cleanup_mandb
@@ -913,8 +913,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Optional. Logger object or None will generate a new one.
     overwrite: bool
         Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
-    save_temp : bool
-        Whether or not to save the preprocessing axis manager to a temporary file.
+    save_proc_aman : bool
+        Whether or not to save the preprocessing axis manager.  Required for to save to into
+        an archive.
     save_archive : bool
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc. Should be False if preproc_or_load_group
@@ -930,7 +931,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     output_init: list
         Varies depending on the value of ``error``.
         If ``error == None`` then output is the info needed to update the manifest db.
-        If ``error == 'load_success'`` or save_temp is ``False``, then output is just ``[obs_id, dets]``.
+        If ``error == 'load_success'`` or save_proc_aman is ``False``, then output is just ``[obs_id, dets]``.
         If ``error`` is anything else then output stores what to save in the error log.
     output_proc: list:
         See output_init for possible values.
@@ -1017,7 +1018,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 return error, [obs_id, dets], [obs_id, dets], aman
             else:
                 try:
-                    if save_temp:
+                    if save_proc_aman:
                         outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
                     else:
                         outputs_proc = [obs_id, dets]
@@ -1056,7 +1057,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                     # If a single group fails we don't log anywhere just mis an entry in the db.
                     return success, [obs_id, dets], [obs_id, dets], None
 
-                if save_temp:
+                if save_proc_aman:
                     logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
                     proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
@@ -1075,7 +1076,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         try:
             pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
             aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
-            if save_temp:
+            if save_proc_aman:
                 outputs_init = save_group(obs_id, configs_init, dets, context_init, subdir='temp')
             else:
                 outputs_init = [obs_id, dets]
@@ -1094,7 +1095,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             # If a single group fails we don't log anywhere just mis an entry in the db.
             return success, [obs_id, dets], [obs_id, dets], None
 
-        if save_temp:
+        if save_proc_aman:
             logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
             proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
 
@@ -1106,7 +1107,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             return error, outputs_init, [obs_id, dets], aman
         else:
             try:
-                if save_temp:
+                if save_proc_aman:
                     outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
                 else:
                     outputs_proc = [obs_id, dets]
@@ -1141,7 +1142,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 # If a single group fails we don't log anywhere just mis an entry in the db.
                 return success, [obs_id, dets], [obs_id, dets], None
 
-            if save_temp:
+            if save_proc_aman:
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
                 proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
