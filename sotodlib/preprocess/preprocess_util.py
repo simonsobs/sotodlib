@@ -914,8 +914,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     overwrite: bool
         Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
     save_proc_aman : bool
-        Whether or not to save the preprocessing axis manager.  Required for to save to into
-        an archive.
+        Whether or not to save the preprocessing axis manager.  Required if saving into
+        a preprocessing archive.
     save_archive : bool
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc. Should be False if preproc_or_load_group
