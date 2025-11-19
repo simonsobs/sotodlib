@@ -246,8 +246,7 @@ def get_groups(obs_id, configs, context=None):
         return group_by, groups, None
     except Exception as e:
         error = PreprocessErrors.GetGroupsError
-        errmsg = f'{type(e)}: {e}'
-        tb = ''.join(traceback.format_tb(e.__traceback__))
+        errmsg, tb = PreprocessErrors.get_errors(e)
         return [], [], [error, errmsg, tb]
 
 
