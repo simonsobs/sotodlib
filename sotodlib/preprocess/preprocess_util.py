@@ -19,6 +19,7 @@ from .. import core
 
 from . import _Preprocess, Pipeline, processes
 
+
 class PreprocessErrors:
     """Stores the various errors that can occur from the preprocessing
     functions.
@@ -945,7 +946,6 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Error from PreprocessError or None if preproc_or_load_group finished
         successfully.
     """
-
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
 
@@ -1003,13 +1003,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 logger.error(f"Initial layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
                 return None, out_dict_init, (obs_id, group), PreprocessErrors.SingleLayerPipelineLoadError
 
-            # Return if not running or loading proc db
+            # Return if not running proc db
             if configs_proc is None:
                 logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
                 return aman, out_dict_init, (obs_id, group), PreprocessErrors.LoadSuccess
 
         # Load first and second layer
-        if db_init_exist and db_proc_exist:
+        elif db_init_exist and db_proc_exist:
             try:
                 logger.info(f"Loading and applying preprocessing for both dbs on {obs_id}:{group}")
                 aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
@@ -1051,7 +1051,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                        overwrite)
         if save_archive:
             cleanup_mandb(out_dict_init, (obs_id, group), None, configs_init,
-                          logger=logger, overwrite=False)
+                          logger=logger, overwrite=overwrite)
         # Return if not running proc db
         if configs_proc is None:
             logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
@@ -1062,6 +1062,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         try:
             logger.info(f"Starting proc pipeline on {obs_id}: {group}")
             init_fields = aman.preprocess._fields.copy()
+            init_fields.pop('valid_data', None)
             tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id,
                                                         tags=True)['tags'])
             if "tags" in aman._fields:
@@ -1095,7 +1096,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                        overwrite)
         if save_archive:
             cleanup_mandb(out_dict_proc, (obs_id, group), None, configs_proc,
-                          logger=logger, overwrite=False)
+                          logger=logger, overwrite=overwrite)
+        if 'valid_data' in aman.preprocess:
+            aman.preprocess.move('valid_data', None)
         aman.preprocess.merge(proc_aman)
 
     logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
@@ -1166,7 +1169,6 @@ def cleanup_mandb(out_dict, out_meta, error, configs, logger=None, overwrite=Fal
                     for member in f_src[dts]:
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-        logger.info(f"Saving to database under {out_dict['db_data']}")
         db = get_preprocess_db(configs, group_by, logger)
         if len(db.inspect(out_dict['db_data'])) == 0:
             db.add_entry(out_dict['db_data'], h5_path)

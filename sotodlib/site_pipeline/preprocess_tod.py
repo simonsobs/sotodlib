@@ -81,8 +81,12 @@ def load_preprocess_tod_sim(obs_id,
         return aman
 
 
-def preprocess_tod(obs_id, configs, group, verbosity=0, overwrite=False,
-                   run_parallel=False):
+def preprocess_tod(obs_id: str,
+                   configs: Union[str, dict],
+                   group: dict,
+                   verbosity: int = 0,
+                   overwrite: bool = False,
+                   run_parallel: bool = False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
     and saves the results in the ManifestDb specified in the configs.
@@ -93,8 +97,8 @@ def preprocess_tod(obs_id, configs, group, verbosity=0, overwrite=False,
         obs_id or obs entry that is passed to context.get_obs
     configs: string or dictionary
         config file or loaded config directory
-    group: list
-        Group to run if you only want to run a partial update
+    group: dict
+        Group to run
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
     verbosity: log level
@@ -105,22 +109,21 @@ def preprocess_tod(obs_id, configs, group, verbosity=0, overwrite=False,
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
-    if configs.get("lmsi_config", None) is not None:
-        make_lmsi = True
-    else:
-        make_lmsi = False
+    make_lmsi = configs.get("lmsi_config") is not None
 
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     dets = {gb:gg for gb, gg in zip(group_by, group)}
-    aman, out_dict, _, error = pp_util.preproc_or_load_group(obs_id=obs_id,
-                                                             configs_init=configs,
-                                                             dets=dets,
-                                                             configs_proc=None,
-                                                             logger=logger,
-                                                             overwrite=overwrite,
-                                                             save_archive=not run_parallel)
+    aman, out_dict, _, error = pp_util.preproc_or_load_group(
+        obs_id=obs_id,
+        configs_init=configs,
+        dets=dets,
+        configs_proc=None,
+        logger=logger,
+        overwrite=overwrite,
+        save_archive=not run_parallel
+    )
 
-    if make_lmsi:
+    if make_lmsi and error is None:
         new_plots = os.path.join(configs["plot_dir"],
                                  f'{str(aman.timestamps[0])[:5]}',
                                  aman.obs_info.obs_id)
@@ -138,7 +141,7 @@ def preprocess_tod(obs_id, configs, group, verbosity=0, overwrite=False,
 def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs: str,
-          query: Optional[str] = '',
+          query: str = '',
           obs_id: Optional[str] = None,
           overwrite: bool = False,
           min_ctime: Optional[int] = None,
@@ -147,8 +150,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           tags: Optional[str] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
-          nproc: Optional[int] = 4,
-          raise_error: Optional[bool] = False):
+          nproc: int = 4,
+          raise_error: bool = False):
 
     temp_subdir = "temp"
 
@@ -174,12 +177,17 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         return
 
     # clean up lingering files from previous incomplete runs
-    policy_dir = os.path.join(os.path.dirname(configs['archive']['policy']['filename']),
-                              temp_subdir)
+    policy_dir = os.path.join(os.path.dirname(
+            configs['archive']['policy']['filename']),
+            temp_subdir
+    )
     for obs in obs_list:
         obs_id = obs['obs_id']
         pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
                             subdir=temp_subdir, remove=overwrite)
+
+    # remove datasets from final archive file not found in db
+    pp_util.cleanup_archive(configs, logger)
 
     run_list = []
 
@@ -243,7 +251,6 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     run_parallel = nproc > 1
 
-    # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     for r, j in zip(run_list, jobs):
         futures.append(executor.submit(preprocess_tod,
                                        obs_id=r[0]['obs_id'],
@@ -280,7 +287,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         if run_parallel:
             logger.info(f"Adding future result to db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict, out_meta, error, configs, logger)
+            pp_util.cleanup_mandb(out_dict, out_meta, error, configs,
+                                  logger, overwrite)
 
         if jobdb_path is not None:
             with jdb.locked(job) as j:
@@ -371,7 +379,7 @@ def get_parser(parser=None):
 
 
 def main(configs: str,
-         query: Optional[str] = '',
+         query: str = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
@@ -380,8 +388,8 @@ def main(configs: str,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
-         nproc: Optional[int] = 4,
-         raise_error: Optional[bool] = False):
+         nproc: int = 4,
+         raise_error: bool = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:

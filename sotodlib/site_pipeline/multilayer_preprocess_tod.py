@@ -24,13 +24,13 @@ import sotodlib.site_pipeline.util as sp_util
 logger = pp_util.init_logger("preprocess")
 
 
-def multilayer_preprocess_tod(obs_id,
-                              configs_init,
-                              configs_proc,
-                              group,
-                              verbosity=0,
-                              overwrite=False,
-                              run_parallel=False):
+def multilayer_preprocess_tod(obs_id: str,
+                              configs_init: Union[str, dict],
+                              configs_proc: Union[str, dict],
+                              group: dict,
+                              verbosity: int = 0,
+                              overwrite: bool = False,
+                              run_parallel: bool = False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
     and saves the results in the ManifestDb specified in the configs.
@@ -43,8 +43,8 @@ def multilayer_preprocess_tod(obs_id,
         config file or loaded config directory for existing database
     configs_proc: string or dictionary
         config file or loaded config directory for processing database
-    group: list
-        Group to run if you only want to run a partial update
+    group: dict
+        Group to run
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
     verbosity: log level
@@ -55,21 +55,24 @@ def multilayer_preprocess_tod(obs_id,
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
-    if configs_init.get("lmsi_config", None) is not None or configs_proc.get("lmsi_config", None) is not None:
-        make_lmsi = True
-    else:
-        make_lmsi = False
+    make_lmsi = any(
+        cfg.get("lmsi_config") is not None
+        for cfg in (configs_init, configs_proc)
+    )
 
     group_by = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     dets = {gb:gg for gb, gg in zip(group_by, group)}
-    aman, out_dict_init, out_dict_proc, error = pp_util.preproc_or_load_group(obs_id=obs_id,
-                                                                              configs_init=configs_init,
-                                                                              dets=dets,
-                                                                              configs_proc=configs_proc,
-                                                                              logger=logger,
-                                                                              overwrite=overwrite,
-                                                                              save_archive=not run_parallel)
-    if make_lmsi:
+    aman, out_dict_init, out_dict_proc, error = pp_util.preproc_or_load_group(
+        obs_id=obs_id,
+        configs_init=configs_init,
+        dets=dets,
+        configs_proc=configs_proc,
+        logger=logger,
+        overwrite=overwrite,
+        save_archive=not run_parallel
+    )
+
+    if make_lmsi and error is not None:
         from pathlib import Path
         import lmsi.core as lmsi
         for configs in [configs_init, configs_proc]:
@@ -89,7 +92,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs_init: str,
           configs_proc: str,
-          query: Optional[str] = None,
+          query: str = '',
           obs_id: Optional[str] = None,
           overwrite: bool = False,
           min_ctime: Optional[int] = None,
@@ -129,10 +132,14 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         return
 
     # clean up lingering files from previous incomplete runs
-    init_policy_dir = os.path.join(os.path.dirname(configs_init['archive']['policy']['filename']),
-                                  init_temp_subdir)
-    proc_policy_dir = os.path.join(os.path.dirname(configs_proc['archive']['policy']['filename']),
-                                   proc_temp_subdir)
+    init_policy_dir = os.path.join(os.path.dirname(
+            configs_init['archive']['policy']['filename']),
+            init_temp_subdir
+    )
+    proc_policy_dir = os.path.join(os.path.dirname(
+        configs_proc['archive']['policy']['filename']),
+        proc_temp_subdir
+    )
 
     for obs in obs_list:
         obs_id = obs['obs_id']
@@ -140,6 +147,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                             context_init, subdir=init_temp_subdir, remove=overwrite)
         pp_util.cleanup_obs(obs_id, proc_policy_dir, errlog, configs_proc,
                             context_proc, subdir=proc_temp_subdir, remove=overwrite)
+
+    # remove datasets from final archive file not found in init db
+    pp_util.cleanup_archive(configs_init, logger)
+    pp_util.cleanup_archive(configs_proc, logger)
 
     run_list = []
 
@@ -202,7 +213,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     futures_dict = {}
     obs_errors = {}
 
-    run_parallel = True #nproc > 1
+    run_parallel = nproc > 1
 
     # Run write_block obs-ids in parallel at once then write all to the sqlite db.
     for r, j in zip(run_list, jobs):
@@ -245,10 +256,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if run_parallel:
             logger.info(f"Adding future result to init db for {obs_id}: {group}")
             pp_util.cleanup_mandb(out_dict_init, out_meta, error,
-                                  configs_init, logger)
+                                  configs_init, logger, overwrite)
             logger.info(f"Adding future result to proc db for {obs_id}: {group}")
             pp_util.cleanup_mandb(out_dict_proc, out_meta, error,
-                                  configs_proc, logger)
+                                  configs_proc, logger, overwrite)
 
         if jobdb_path is not None:
             with jdb.locked(job) as j:
