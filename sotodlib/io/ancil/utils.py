@@ -335,11 +335,16 @@ class LowResTable(AncilEngine):
                 return None
             return metadata.read_dataset(filename, dataset)
 
-        rs = ResultSet(keys=['timestamp', 'pwv'])
+        rs = None
         for t0, t1, filename in self._get_filenames(time_range):
             _rs = _get_dataset(filename, self.cfg.dataset_name)
             if _rs is not None:
-                rs.rows.extend(_rs.rows)
+                if rs is None:
+                    rs = _rs
+                else:
+                    rs.rows.extend(_rs.rows)
+        if rs is None:
+            rs = ResultSet(keys=['timestamp', 'pwv'])
         t = rs['timestamp']
         s = (time_range[0] <= t) * (t < time_range[1])
         if not np.all(s):

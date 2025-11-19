@@ -155,7 +155,7 @@ class WeatherStationConfig(LowResTableConfig):
 
 @dataclass
 class TocoPwvConfig(LowResTableConfig):
-    obsdb_query: str = '{mean} is null'
+    obsdb_query: str = '{mean} is null and {start} is null and {end} is null'
 
     dataset_name: str = 'toco_pwv'
     obsdb_format: str = '{dataset}_{field}'

@@ -61,6 +61,7 @@ def combine_pwv(rs_toco, rs_apex, time_range):
     # Apply models to the data.
     toco_cor = rs_toco.subset(rows=s).asarray()
     apex_cor = rs_apex.subset(rows=keep_apex).asarray()
+
     del rs_toco, rs_apex
 
     toco_cor['pwv'] = defeature_toco_250721(toco_cor['pwv'])
@@ -92,9 +93,14 @@ def combine_pwv(rs_toco, rs_apex, time_range):
     pwv_i = interp1d(times, pwv)
 
     # Probe times...
-    ptimes = np.arange(time_range[0], time_range[1], 60)
+    npts = max(1, int(round((time_range[1] - time_range[0]) / 60.))) + 1
+    ptimes = np.linspace(time_range[0], time_range[1], npts)
     s = (times[0] <= ptimes) * (ptimes <= times[-1])
-    y = pwv_i(ptimes[s])
+    if np.any(s):
+        y = pwv_i(ptimes[s])
+    else:
+        # This likely corresponds to q = 0 case... just average the nearby meas.
+        y = pwv
     return {'mean': y.mean().round(3),
             'std': y.std().round(3),
             'qual': q.round(3)}

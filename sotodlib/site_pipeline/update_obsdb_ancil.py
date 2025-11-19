@@ -64,7 +64,7 @@ def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
         # Find records that need to be updated.
         q = engine.obsdb_query(time_range=time_range, redo=redo)
 
-        logger.debug(f'Query for records to update is: "{q}"')
+        logger.info(f'Query for records to update is: "{q}"')
         recs = obsdb.query(q)
         del obsdb
 
@@ -88,7 +88,7 @@ def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
 
-    parser.add_argument('--verbose', '-v', action='store_true')
+    parser.add_argument('--verbose', '-v', action='count')
     sps = parser.add_subparsers(title='commands', dest='command')
 
     p = sps.add_parser('update-base-data')
@@ -114,16 +114,17 @@ def get_parser(parser=None):
     p.add_argument('--config-file', '-c', default='cli.yaml')
     p.add_argument('--dataset', '-d', action='append')
     p.add_argument('--query', '-q')
+    p.add_argument('--compare', action='store_true')
     p.add_argument('obs_id', nargs='*')
 
     return parser
 
 def main(command=None, verbose=None, lookback_days=None,
          obs_id=None, config_file=None, dataset=None, query=None,
-         full_scan=None, redo=None):
+         full_scan=None, redo=None, compare=None):
     if verbose:
         ancil.logger.setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
+        logger.handlers[0].setLevel(logging.DEBUG)
 
     time_range = None
     if lookback_days is not None:
@@ -139,7 +140,6 @@ def main(command=None, verbose=None, lookback_days=None,
                      time_range=time_range, redo=redo)
 
     elif command == 'check':
-
         # Just trial load the config, processors.
         print(f'Loading config file {config_file} ...')
         cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
@@ -150,7 +150,6 @@ def main(command=None, verbose=None, lookback_days=None,
 
 
     elif command == 'test':
-
         # Run on some obs_ids.
         cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
 
@@ -175,6 +174,10 @@ def main(command=None, verbose=None, lookback_days=None,
                 _r = next(ei)
                 r.update(_r)
                 print(o['obs_id'], _r)
+                if compare:
+                    ex = obsdb.get(o['obs_id'])
+                    for k1, k2 in engine._obsdb_map().items():
+                        print(f'  {k2:<20s}', ex.get(k2), r[k1])
             print()
         print()
 
