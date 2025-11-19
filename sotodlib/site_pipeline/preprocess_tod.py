@@ -2,7 +2,7 @@ import os
 import yaml
 import time
 import logging
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, List
 import numpy as np
 import argparse
 import traceback
@@ -22,39 +22,6 @@ from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 
 logger = sp_util.init_logger("preprocess")
-
-
-def dummy_preproc(obs_id, configs, group, verbosity=0, logger=None,
-                  overwrite=False, run_parallel=False):
-    """
-    Dummy function that can be put in place of preprocess_tod in the
-    main function for testing issues in the processpoolexecutor
-    (multiprocessing).
-    """
-    temp_subdir = "temp"
-    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
-    logger.info(f"Starting preprocess run of {obs_id}: {group}")
-
-    context = core.Context(configs["context_file"])
-
-    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
-
-    error = None
-    pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"],
-                    logger=logger)
-    dets = {gb:gg for gb, gg in zip(group_by, group)}
-    proc_aman = core.AxisManager(core.LabelAxis('dets', ['det%i' % i for i in range(3)]),
-                                 core.OffsetAxis('samps', 1000))
-    proc_aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
-    proc_aman.wrap_new('timestamps', ('samps',))[:] = (np.arange(proc_aman.samps.count) / 200)
-
-    out_dict = pp_util.save_group(obs_id, configs, dets, context,
-                                  subdir=temp_subdir)
-    logger.info(f"Saving data to {out_dict['temp_file']}:{out_dict['db_data']['dataset']}")
-    proc_aman.save(out_dict['temp_file'], out_dict['db_data']['dataset'],
-                   overwrite)
-
-    return out_dict, error
 
 
 def load_preprocess_tod_sim(obs_id,
@@ -92,9 +59,10 @@ def load_preprocess_tod_sim(obs_id,
     configs, context = pp_util.get_preprocess_context(configs, context)
     if dets is not None:
         meta.restrict("dets", dets)
-    meta = pp_util.load_preprocess_det_select(
-        obs_id, configs=configs, context=context, meta=meta, logger=logger
+    det_vals = pp_util.load_preprocess_det_select(
+        obs_id, configs=configs, context=context, logger=logger
     )
+    meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -409,7 +377,7 @@ def main(configs: str,
          min_ctime: Optional[int] = None,
          max_ctime: Optional[int] = None,
          update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
+         tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,

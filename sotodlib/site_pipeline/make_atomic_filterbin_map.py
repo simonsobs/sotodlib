@@ -93,6 +93,9 @@ class Cfg:
     wn_label: str
         Path where to find the white noise per det by the
         preprocessing
+    apply_wobble: bool
+        Correct wobble deflection. This requires
+        aman.wobble_params metadata in the context
     center_at: str
     max_dets: int
     fixed_time: int
@@ -142,7 +145,8 @@ class Cfg:
         dtype_map: str = 'float64',
         unit: str = 'K',
         use_psd: bool = True,
-        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise'
+        wn_label: str = 'preprocess.noiseQ_mapmaking.std',
+        apply_wobble: bool = True
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -180,6 +184,7 @@ class Cfg:
         self.unit = unit
         self.use_psd = use_psd
         self.wn_label = wn_label
+        self.apply_wobble = apply_wobble
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -408,6 +413,12 @@ def main(
         else:
             preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
             preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False)
+
+    # remove datasets from final archive file not found in db
+    preprocess_util.cleanup_archive(preprocess_config[0], L)
+    if len(preprocess_config) > 1:
+        preprocess_util.cleanup_archive(preprocess_config[1], L)
+
     run_list = []
     for oi, ol in enumerate(obslists_arr):
         pid = ol[0][3]
@@ -467,7 +478,8 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,) for r in run_list]
+            wn_label=args.wn_label,apply_wobble=args.apply_wobble)
+            for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:

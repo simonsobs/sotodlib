@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2024 Simons Observatory.
+# Copyright (c) 2020-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Simons Observatory processing modules.
 
@@ -7,6 +7,7 @@
 # Namespace imports
 
 from .act_sign import ActSign
+from .bias_cut import DetBiasCuts
 from .corotator import CoRotator
 from .sim_sso import SimSSO
 from .sim_catalog import SimCatalog
@@ -24,3 +25,5 @@ from .splits import Splits
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 from .load_context import LoadContext
 from .readout_filter import ReadoutFilter
+from .dark_template import DarkTemplate
+from .trend_cut import DetTrendCuts

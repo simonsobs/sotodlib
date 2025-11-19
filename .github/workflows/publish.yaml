@@ -4,19 +4,29 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  # SOTODLIB Monthly Release uses GITHUB_TOKEN. Any repository changes it makes do
+  # not trigger a new workflow run.
+  # This is a "workflow" based trigger. It checks the events and when the monthly
+  # release is run successfully, it gets triggered.
+  workflow_run:
+    workflows: ["SOTODLIB Monthly Release"]
+    types:
+      - completed
 
 jobs:
   pypi-publish:
+    # This if statement checks if the event is not a workflow_run or if the workflow_run was successful
+    if: |
+      github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
       contents: read  # Required to checkout the repository
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Fetch full history for tags
-          ref: ${{ github.ref_name }}
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,8 +36,7 @@ jobs:
       - name: Verify we're on the correct tag
         run: |
           echo "Current tag: $(git describe --tags --exact-match)"
-          echo "Expected tag: ${{ github.ref_name }}"
-          git describe --tags --exact-match | grep -q "${{ github.ref_name }}"
+          git checkout "refs/tags/$(git describe --tags --exact-match)"
 
       - name: Build
         run: |
