@@ -579,7 +579,7 @@ def get_parser():
     parser.add_argument("--sso_name", type=str, default=None,
                         help="Name of solar system object (e.g., 'moon', 'jupiter'). If not specified, get sso_name from observation tags. "\
                        + "Valid only when obs_id is specified")                     
-    parser.add_argument("--restrict_dets_for_debug", type=int, default=False)
+    parser.add_argument("--restrict_dets_for_debug", type=str, default=False)
     return parser
 
 if __name__ == '__main__':
