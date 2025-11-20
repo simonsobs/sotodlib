@@ -2194,13 +2194,6 @@ class EstimateT2P(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("t2p", t2p_aman)
 
-    def process(self, meta, proc_aman=None, sim=False):
-        if proc_aman is None:
-            proc_aman = meta.preprocess
-        if 't2p' not in proc_aman._fields:
-            raise ValueError("No t2p field found in proc_aman. Please run estimate_t2p first.")
-        return meta, proc_aman
-
 class SubtractT2P(_Preprocess):
     """Subtract T to P leakage.
 
@@ -2216,8 +2209,10 @@ class SubtractT2P(_Preprocess):
     name = "subtract_t2p"
 
     def process(self, aman, proc_aman, sim=False):
-        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
-                                        **self.process_cfgs)
+        if 't2p' not in proc_aman._fields:
+            raise ValueError("No t2p field found in proc_aman. Please run estimate_t2p first.")
+            return meta, proc_aman
+        tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'])
         return aman, proc_aman
 
 class SplitFlags(_Preprocess):
@@ -2450,7 +2445,7 @@ class ScanFreqCut(_Preprocess):
     def process(self, aman, proc_aman, sim=False):
         scan_freq = tod_ops.utils.get_scan_freq(aman)
         hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
-        filt = filters.get_hpf(hpf_cfg)
+        filt = tod_ops.get_hpf(hpf_cfg)
         aman[self.signal_name_T] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_T, detrend='linear')
         aman[self.signal_name_Q] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_Q, detrend='linear')
         aman[self.signal_name_U] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_U, detrend='linear')
