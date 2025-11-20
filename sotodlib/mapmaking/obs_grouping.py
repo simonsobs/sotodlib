@@ -29,7 +29,7 @@ class NoTODFound(Exception):
         self.msg = msg
 
 def build_obslists(context, query, mode=None, nset=None, wafer=None,
-        freq=None, ntod=None, tods=None, fixed_time=None, mindur=None, per_tube=False ):
+        freq=None, ntod=None, tods=None, fixed_time=None, mindur=120, per_tube=False ):
     """ 
     Return an obslists dictionary (described in the submodule docstring), 
     along with all ancillary data necessary for the mapmaker
@@ -61,7 +61,7 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     fixed_time : int or None, optional
             Optional, if mode=='fixed_interval', this is the fixed time in
             seconds
-    mindur : int or None, optional
+    mindur : int, optional
             Optional, minimum duration of an observation to be included in 
             the mapping. If not defined it will be 120 seconds
            
@@ -95,7 +95,7 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     
     if mode is None or mode == 'per_obs':
         # We simply need to make and obslists dict with each key being one obs
-        periods = find_scan_periods_perobs(obs_infos)
+        periods = find_scan_periods_perobs(obs_infos, mindur=mindur)
     elif mode=='depth_1':
         periods   = find_scan_periods(obs_infos, ttol=12*3600)
         periods   = split_periods(periods, 24*3600)
@@ -113,7 +113,8 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     # We will make one map per period-detset-band if per_tube=False
     # or per period-band if per_tube=True
     obslists = build_period_obslists(obs_infos, periods, context, nset=nset,
-                                     wafer=wafer, freq=freq, per_tube=per_tube)
+                                     wafer=wafer, freq=freq, per_tube=per_tube,
+                                    mindur=mindur)
     obskeys  = sorted(obslists.keys())
     return obslists, obskeys, periods, obs_infos
 
@@ -208,7 +209,7 @@ def split_periods(periods, maxdur):
     return np.array([t1,t2]).T
 
 def build_period_obslists(obs_info, periods, context, nset=None, 
-                          wafer=None, freq=None, per_tube=False):
+                          wafer=None, freq=None, per_tube=False, mindur=120):
     """
     For each period for each detset-band, make a list of (id,detset,band)
     for the ids that fall inside that period. Returns the obslist dictionary
@@ -223,6 +224,8 @@ def build_period_obslists(obs_info, periods, context, nset=None,
     pids       = np.searchsorted(periods[:,0], ctimes_mid)-1
     # 2. Build our lists. Not sure how to do this without looping
     for i, row in enumerate(obs_info):
+        if row.duration < mindur:
+            continue # we skip obs that are too short
         if wafer is not None and not per_tube:
             wafer_list = [wafer]
         else:

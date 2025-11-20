@@ -137,7 +137,7 @@ class Cfg:
         center_at: Optional[str] = None,
         max_dets: Optional[int] = None,
         fixed_time: Optional[int] = None,
-        min_dur: Optional[int] = None,
+        min_dur: Optional[int] = 300,
         verbose: int = 0,
         quiet: int = 0,
         window: Optional[float] = None,
