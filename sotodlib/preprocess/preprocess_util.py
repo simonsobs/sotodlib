@@ -47,6 +47,76 @@ class PreprocessErrors:
         return errmsg, tb
 
 
+def filter_runlist_by_jobdb(jdb, run_list, group_by, overwrite=False, logger=None):
+    """Given a preprocess_tod or multilayer_preprocess_tod run list, checks
+    whether that entry exists in the preprocess jobdb. If it failed or is done
+    and overwrite is False, add it to the list of skipped obs_ids.  If it
+    doesn't exist, is open, or is done but overwite is True, add an open job
+    to the jobdb.
+
+    Arguments
+    ---------
+
+    jdb : JobDB
+        The preprocessing jobdb class.
+    run_list : list
+        List of (obs_id, group) tuples.
+    group_by : list
+        How grouping is being done for preprocessing.
+    overwrite : bool
+        Whether or not to overwrite entries in the preprocessing db.
+    logger : PythonLogger
+        A python logger.
+
+    Returns
+    -------
+    run_list : list
+        Run list with the subset of skipped entries removed.
+    jobs : Job
+        List of jobs for each entry in the filtered run list.
+
+    """
+    if logger is None:
+        logger = init_logger("preprocess")
+
+    run_list_skipped = []
+    jobs = []
+    for r in run_list:
+        jclass = r[0]['obs_id']
+        for gb, g in zip(group_by, r[1]):
+            if gb == 'detset':
+                jclass += "_" + g
+            else:
+                jclass += "_" + gb + "_" + str(g)
+        failed_jobs = jdb.get_jobs(jclass=jclass, jstate=["failed"])
+        open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"])
+        done_jobs = jdb.get_jobs(jclass=jclass, jstate=["done"])
+        # skip failed jobs
+        if failed_jobs:
+            run_list_skipped.append(r)
+            continue
+        # else use existing open job
+        elif open_jobs:
+            job = open_jobs[0]
+        elif done_jobs:
+            # skip completed jobs if not overwritting
+            if not overwrite:
+                run_list_skipped.append(r)
+                continue
+            else:
+                job = done_jobs[0]
+                with jdb.locked(job) as j:
+                    j.jstate = "open"
+        else:
+            job = jdb.create_job(jclass)
+        jobs.append(job)
+
+    logger.info(f"skipping {len(run_list_skipped)} jobs from jobdb")
+    run_list = [r for r in run_list if r not in run_list_skipped]
+
+    return run_list, jobs
+
+
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
     filename and dataset name for a result.
@@ -275,14 +345,12 @@ def get_preprocess_db(configs, group_by, logger=None):
     """
 
     if logger is None:
-        logger = init_logger("preprocess_db")
+        logger = init_logger("preprocess")
 
     if os.path.exists(configs['archive']['index']):
-        logger.info(f"Mapping {configs['archive']['index']} for the "
-                    "archive index.")
         db = core.metadata.ManifestDb(configs['archive']['index'])
     else:
-        logger.info(f"Creating {configs['archive']['index']} for the "
+        logger.debug(f"Creating {configs['archive']['index']} as the "
                      "archive index.")
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
@@ -678,9 +746,11 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         dbix = {'obs:obs_id':obs_id}
         for gb, g in zip(group_by, cur_groups[0]):
             dbix[f'dets:{gb}'] = g
-        logger.info(f'find_db found: {dbix}')
         if len(db.inspect(dbix)) == 0:
             dbexist = False
+            logger.debug(f"Entry {dbix} not found in {configs['archive']['index']}")
+        else:
+            logger.debug(f"Entry {dbix} found in {configs['archive']['index']}")
     else:
         dbexist = False
 
@@ -1024,7 +1094,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     # Run first layer
     if not db_init_exist or overwrite:
         try:
-            logger.info(f"Generating new init db for {obs_id}: {group}")
+            logger.info(f"Generating new init db entry for {obs_id}: {group}")
             pipe_init = Pipeline(configs_init["process_pipe"],
                                  plot_dir=configs_init["plot_dir"],
                                  logger=logger)
@@ -1046,10 +1116,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             logger.error(f"Init Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
             return None, (obs_id, group), (obs_id, group), PreprocessErrors.PipeLineStepError
 
-        logger.info(f"Saving data to {out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
+        logger.info(f"Saving preprocessing axis manager to "
+                    f"{out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
         proc_aman.save(out_dict_init['temp_file'], out_dict_init['db_data']['dataset'],
                        overwrite)
         if save_archive:
+            logger.info(f"Adding result to init db for {obs_id}: {group}")
             cleanup_mandb(out_dict_init, (obs_id, group), None, configs_init,
                           logger=logger, overwrite=overwrite)
         # Return if not running proc db
@@ -1060,7 +1132,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     # Run second layer
     if (not db_proc_exist or overwrite) and configs_proc is not None:
         try:
-            logger.info(f"Starting proc pipeline on {obs_id}: {group}")
+            logger.info(f"Generating new proc db entry for {obs_id}: {group}")
             init_fields = aman.preprocess._fields.copy()
             init_fields.pop('valid_data', None)
             tags_proc = np.array(context_proc.obsdb.get(aman.obs_info.obs_id,
@@ -1095,6 +1167,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         proc_aman.save(out_dict_proc['temp_file'], out_dict_proc['db_data']['dataset'],
                        overwrite)
         if save_archive:
+            logger.info(f"Adding result to proc db for {obs_id}: {group}")
             cleanup_mandb(out_dict_proc, (obs_id, group), None, configs_proc,
                           logger=logger, overwrite=overwrite)
         if 'valid_data' in aman.preprocess:

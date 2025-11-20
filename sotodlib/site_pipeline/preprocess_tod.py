@@ -219,30 +219,18 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 run_list.append((obs, group))
 
     if jobdb_path is not None:
-        run_list_skipped = []
-        jobs = []
-        for r in run_list:
-            jclass = r[0]['obs_id']
-            for gb, g in zip(group_by, r[1]):
-                if gb == 'detset':
-                    jclass += "_" + g
-                else:
-                    jclass += "_" + gb + "_" + str(g)
-            if jdb.get_jobs(jclass=jclass, jstate=["failed"]):
-                run_list_skipped.append(r)
-            else:
-                open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"])
-                if open_jobs:
-                    job = open_jobs[0]
-                else:
-                    job = jdb.create_job(jclass)
-
-                jobs.append(job)
-
-        logger.info(f"skipping {len(run_list_skipped)} jobs from jobdb")
-        run_list = [r for r in run_list if r not in run_list_skipped]
+        run_list, jobs = pp_util.filter_runlist_by_jobdb(
+            jdb=jdb,
+            run_list=run_list,
+            group_by=group_by,
+            overwrite=overwrite,
+            logger=logger
+        )
     else:
         jobs = [None for r in run_list]
+
+    if len(run_list) == 0:
+        return
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
     futures = []
@@ -278,11 +266,6 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             out_dict = None
             error = PreprocessErrors.ExecutorFutureError
 
-        if jobdb_path is not None:
-            with jdb.locked(job) as j:
-                j.mark_visited()
-                j.jstate = "failed"
-
         futures.remove(future)
 
         if run_parallel:
@@ -292,8 +275,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         if jobdb_path is not None:
             with jdb.locked(job) as j:
-                if j.visit_count == 0:
-                    j.mark_visited()
+                j.mark_visited()
+                if error is not None:
+                    j.jstate = "failed"
+                else:
                     j.jstate = "done"
 
     n_obs_fail = 0
