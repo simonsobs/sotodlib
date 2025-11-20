@@ -92,8 +92,6 @@ def build_obslists(context, query, mode=None, nset=None, wafer=None,
     obs_infos = context.obsdb.query("obs_id in (%s)" % ",".join(["'%s'" % id for id in ids]))
     obs_infos = obs_infos.asarray().view(np.recarray)
     ids       = obs_infos.obs_id # can't rely on ordering, so reget
-    if min_dur is None:
-        min_dur = 120
     
     if mode is None or mode == 'per_obs':
         # We simply need to make and obslists dict with each key being one obs
