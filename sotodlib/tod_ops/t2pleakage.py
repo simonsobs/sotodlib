@@ -6,6 +6,7 @@ from sotodlib.tod_ops import filters, apodize
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from scipy.odr import ODR, Model, RealData
 from lmfit import Model as LmfitModel
+from scipy.fft import rfft, rfftfreq
 
 
 def t2p_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demodU',
