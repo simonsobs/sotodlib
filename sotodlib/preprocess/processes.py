@@ -1733,7 +1733,6 @@ class FourierFilter(_Preprocess):
         field = self.process_cfgs.get("noise_fit_array", None)
         if field:
             noise_fit = proc_aman[field]
-            noise_fit = noise_fit.restrict('dets', aman.dets.vals, in_place=False)
         else:
             noise_fit = None
 
@@ -1939,11 +1938,15 @@ class PCARelCal(_Preprocess):
 
 class PCAFilter(_Preprocess):
     """
-    Applies a pca filter to the data.
+    Applies a pca filter to the data. `model_signal` is used to calculate
+    the PCA modes, which are then subtracted from `signal`. If `model_signal`
+    is not provided, `signal` is used for both. An example use case is to
+    use a low-pass filtered version of the signal to calculate the PCA modes.
 
     example config file entry::
 
       - name: "pca_filter"
+        model_signal: "lpf_signal" # optional, if not provided, use signal
         signal: "signal"
         process:
           n_modes: 10
@@ -1961,7 +1964,7 @@ class PCAFilter(_Preprocess):
     def process(self, aman, proc_aman, sim=False):
         n_modes = self.process_cfgs.get('n_modes')
         signal = aman.get(self.signal)
-        if self.model_signal is not None:
+        if self.model_signal:
             model_signal = aman.get(self.model_signal)
         else:
             model_signal = signal.copy()
@@ -2194,6 +2197,18 @@ class EstimateT2P(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("t2p", t2p_aman)
 
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = tod_ops.t2pleakage.get_t2p_cuts(meta, in_place=False, **self.select_cfgs)
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+
 class SubtractT2P(_Preprocess):
     """Subtract T to P leakage.
 
@@ -2209,9 +2224,6 @@ class SubtractT2P(_Preprocess):
     name = "subtract_t2p"
 
     def process(self, aman, proc_aman, sim=False):
-        if 't2p' not in proc_aman._fields:
-            raise ValueError("No t2p field found in proc_aman. Please run estimate_t2p first.")
-            return meta, proc_aman
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'])
         return aman, proc_aman
 
