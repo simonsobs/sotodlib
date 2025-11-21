@@ -303,6 +303,8 @@ def get_groups(obs_id, configs, context=None):
         The list of keys used to group the detectors.
     groups : list of list of int
         The list of groups of detectors.
+    errors : tuple
+        Tuple of errors or Nones.
     """
     try:
         if type(configs) == str:
@@ -316,16 +318,16 @@ def get_groups(obs_id, configs, context=None):
 
             if (gb == 'detset') and (len(group_by) == 1):
                 groups = context.obsfiledb.get_detsets(obs_id)
-                return group_by, [[g] for g in groups], None
+                return group_by, [[g] for g in groups], (None, None, None)
 
         det_info = context.get_det_info(obs_id)
         rs = det_info.subset(keys=group_by).distinct()
         groups = [[b for a,b in r.items()] for r in rs]
-        return group_by, groups, None
+        return group_by, groups, (None, None, None)
     except Exception as e:
         error = PreprocessErrors.GetGroupsError
         errmsg, tb = PreprocessErrors.get_errors(e)
-        return [], [], [error, errmsg, tb]
+        return [], [], (error, errmsg, tb)
 
 
 def get_preprocess_db(configs, group_by, logger=None):
@@ -535,14 +537,12 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
-    group_by_init, groups_init, error_init = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc, error_proc = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc, context_proc)
 
-    if error_init is not None:
-        raise ValueError(f"{error_init[0]}\n{error_init[1]}\n{error_init[2]}")
-
-    if error_proc is not None:
-        raise ValueError(f"{error_proc[0]}\n{error_proc[1]}\n{error_proc[2]}")
+    for err in (errors_init, errors_proc):
+        if err[0] is not None:
+            raise ValueError(f"{err[0]}\n{err[1]}\n{err[2]}")
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
@@ -640,14 +640,12 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, meta=meta)
 
-    group_by_init, groups_init, error_init = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc, error_proc = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init, context_init)
+    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc, context_proc)
 
-    if error_init is not None:
-        raise ValueError(f"{error_init[0]}\n{error_init[1]}\n{error_init[2]}")
-
-    if error_proc is not None:
-        raise ValueError(f"{error_proc[0]}\n{error_proc[1]}\n{error_proc[2]}")
+    for err in (errors_init, errors_proc):
+        if err[0] is not None:
+            raise ValueError(f"{err[0]}\n{err[1]}\n{err[2]}")
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
@@ -892,6 +890,11 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     remove: bool
         Optional. Default is False. Whether to remove a file if found.
         Used when ``overwrite`` is True in driving functions.
+
+    Returns
+    -------
+    errors : tuple
+        Error from get_groups.
     """
 
     if logger is None:
@@ -903,7 +906,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     if context is None:
         context = core.Context(configs["context_file"])
 
-    group_by, groups, error = get_groups(obs_id, configs, context)
+    group_by, groups, errors = get_groups(obs_id, configs, context)
 
     all_groups = groups.copy()
     for g in all_groups:
@@ -928,7 +931,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             except OSError as e:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
-    return error
+    return errors
 
 
 def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
@@ -964,12 +967,13 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
                 break
 
         if found:
-            error = save_group_and_cleanup(obs_id, configs, context,
+            errors = save_group_and_cleanup(obs_id, configs, context,
                                            subdir=subdir, remove=remove)
-            if error is not None:
-                f = open(errlog, 'a')
-                f.write(f'\n{time.time()}, cleanup error\n{error[0]}\n{error[2]}\n')
-                f.close()
+
+            if errors[0] is not None:
+                with open(errlog, 'a') as f:
+                    f.write(f"{time.time()}, {obs_id}, n/a', {errors[0]}\n")
+                    f.write("\t" + errors[1] + errors[2] + "\n")
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
@@ -1050,13 +1054,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         return None, None, None, (PreprocessErrors.MetaDataError, errmsg, tb)
 
     if configs_proc is not None:
-        group_by, groups, error = get_groups(obs_id, configs_proc)
+        group_by, groups, errors = get_groups(obs_id, configs_proc)
     else:
-        group_by, groups, error = get_groups(obs_id, configs_init)
+        group_by, groups, errors = get_groups(obs_id, configs_init)
 
-    if error is not None:
-        logger.error(f"Get Groups Error for {obs_id}: {group}\n{error[1]}\n{error[2]}")
-        return None, None, None, (error[0], error[1], eror[2])
+    if errors[0] is not None:
+        logger.error(f"Get Groups Error for {obs_id}: {group}\n{errors[1]}\n{errors[2]}")
+        return None, None, None, (errors[0], errors[1], errors[2])
 
     group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
 
@@ -1118,9 +1122,6 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                                  plot_dir=configs_init["plot_dir"],
                                  logger=logger)
             aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
-
-            if 'ws0' in group:
-                raise RuntimeError("ws0 is bad")
 
             out_dict_init = get_preproc_group_out_dict(obs_id, configs_init,
                                                        dets, context_init,
@@ -1235,15 +1236,17 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
     See the ``preproc_or_load_group`` docstring for the varying expected
-    values of ``error`` and the associated ``out_dict``. This function will
+    values of ``errors`` and the associated ``out_dict``. This function will
     either:
 
-    1) Update the mandb sqlite file and move the h5 archive from its temporary
-    location to its permanent path if error is ``None``.
+    1) Update the ManifestDb sqlite file and move the h5 archive from its
+    temporary location to its permanent path if errors[0] is ``None``, out_dict
+    is not``None``. Deletes the temporary h5 file.
 
-    2) Return nothing if error is ``load_success``.
+    2) Return nothing if errors[0] is ``PreprocessErrors.LoadSuccess`` or both it
+    and out_dict are None.
 
-    3) Update the error log if error is anything else.
+    3) Otherwise, update the error log.
 
     Arguments
     ---------
@@ -1256,7 +1259,7 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
         ('temp_file') and the obs_id group metadata and db entry (db_data).
         See save_group for more info.
     configs : dict
-        Preprocessing configuration dictionary
+        Preprocessing configuration dictionary.
     logger : PythonLogger
         Optional.  Python logger.
     overwrite : bool
@@ -1267,7 +1270,7 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     if logger is None:
         logger = init_logger("preprocess")
 
-    if errors[0] is None and out_dict is not None and isinstance(out_dict, dict):
+    if errors[0] is None and out_dict is not None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
