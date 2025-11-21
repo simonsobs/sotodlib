@@ -27,65 +27,43 @@ logger = pp_util.init_logger("preprocess")
 def multilayer_preprocess_tod(obs_id: str,
                               configs_init: Union[str, dict],
                               configs_proc: Union[str, dict],
-                              group: dict,
+                              group: list,
                               verbosity: int = 0,
-                              overwrite: bool = False,
-                              run_parallel: bool = False):
+                              overwrite: bool = False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
     and saves the results in the ManifestDb specified in the configs.
 
     Arguments
     ----------
-    obs_id: string or ResultSet entry
+    obs_id: str or ResultSet entry
         obs_id or obs entry that is passed to context.get_obs
-    configs_init: string or dictionary
+    configs_init: str or dict
         config file or loaded config directory for existing database
-    configs_proc: string or dictionary
+    configs_proc: str or dict
         config file or loaded config directory for processing database
-    group: dict
+    group: list
         Group to run
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
     verbosity: log level
         0 = error, 1 = warn, 2 = info, 3 = debug
-    run_parallel: Bool
-        If true preprocess_tod is called in a parallel process which returns
-        dB info and errors and does no sqlite writing inside the function.
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
-    make_lmsi = any(
-        cfg.get("lmsi_config") is not None
-        for cfg in (configs_init, configs_proc)
-    )
-
     group_by = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     dets = {gb:gg for gb, gg in zip(group_by, group)}
-    aman, out_dict_init, out_dict_proc, error = pp_util.preproc_or_load_group(
+    aman, out_dict_init, out_dict_proc, errors = pp_util.preproc_or_load_group(
         obs_id=obs_id,
         configs_init=configs_init,
         dets=dets,
         configs_proc=configs_proc,
         logger=logger,
         overwrite=overwrite,
-        save_archive=not run_parallel
+        save_archive=False
     )
 
-    if make_lmsi and error is not None:
-        from pathlib import Path
-        import lmsi.core as lmsi
-        for configs in [configs_init, configs_proc]:
-            new_plots = os.path.join(configs["plot_dir"],
-                                     f'{str(aman.timestamps[0])[:5]}',
-                                     aman.obs_info.obs_id)
-
-            if os.path.exists(new_plots):
-                lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
-                          Path(configs["lmsi_config"]),
-                          Path(os.path.join(new_plots, 'index.html')))
-
-    return out_dict_init, out_dict_proc, error
+    return out_dict_init, out_dict_proc, errors
 
 
 def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
@@ -115,9 +93,15 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     os.makedirs(os.path.dirname(configs_proc['archive']['policy']['filename']),
                 exist_ok=True)
 
-    jobdb_path = configs_proc.get("jobdb", None)
-    if jobdb_path is not None:
-        jdb = JobManager(sqlite_file=jobdb_path)
+    # init jobdb
+    jobdb_init_path = configs_init.get("jobdb", None)
+    if jobdb_init_path is not None:
+        jdb_init = JobManager(sqlite_file=jobdb_init_path)
+
+    # proc jobdb
+    jobdb_proc_path = configs_proc.get("jobdb", None)
+    if jobdb_proc_path is not None:
+        jdb_proc = JobManager(sqlite_file=jobdb_proc_path)
 
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog_proc.txt')
@@ -179,11 +163,24 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         for group in groups:
             if 'NC' not in group:
-                run_list.append((obs, group))
+                failed_jobs = None
+                # Did obs_id and group fail in init jobdb
+                failed_jobs = None
+                if jobdb_init_path is not None:
+                    jclass = obs['obs_id']
+                    for gb, g in zip(group_by, group):
+                        if gb == 'detset':
+                            jclass += "_" + g
+                        else:
+                            jclass += "_" + gb + "_" + str(g)
+                    failed_jobs = jdb_init.get_jobs(jclass=jclass, jstate=["failed"])
+                if not failed_jobs or overwrite:
+                    run_list.append((obs, group))
 
-    if jobdb_path is not None:
+    # filter by proc jobdb status
+    if jobdb_proc_path is not None:
         run_list, jobs = pp_util.filter_runlist_by_jobdb(
-            jdb,
+            jdb_proc,
             run_list,
             group_by,
             overwrite=overwrite,
@@ -193,6 +190,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         jobs = [None for r in run_list]
 
     if len(run_list) == 0:
+        logger.info("Nothing to run")
         return
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
@@ -200,17 +198,17 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     futures_dict = {}
     obs_errors = {}
 
-    run_parallel = nproc > 1
-
     for r, j in zip(run_list, jobs):
-        futures.append(executor.submit(multilayer_preprocess_tod,
-                                       obs_id=r[0]['obs_id'],
-                                       configs_init=configs_init,
-                                       configs_proc=configs_proc,
-                                       group=r[1],
-                                       verbosity=verbosity,
-                                       overwrite=overwrite,
-                                       run_parallel=run_parallel))
+        futures.append(
+            executor.submit(multilayer_preprocess_tod,
+                obs_id=r[0]['obs_id'],
+                configs_init=configs_init,
+                configs_proc=configs_proc,
+                group=r[1],
+                verbosity=verbosity,
+                overwrite=overwrite
+            )
+        )
 
         futures_dict[futures[-1]] = (r[0]['obs_id'], r[1], j)
         if r[0]['obs_id'] not in obs_errors:
@@ -221,8 +219,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         obs_id, group, job = futures_dict[future]
         out_meta = (obs_id, group)
         try:
-            out_dict_init, out_dict_proc, error = future.result()
-            obs_errors[obs_id].append({'group': group, 'error': error})
+            out_dict_init, out_dict_proc, errors = future.result()
+            obs_errors[obs_id].append({'group': group, 'error': errors[0]})
             logger.info(f"{obs_id}: {group} extracted successfully")
         except Exception as e:
             errmsg, tb = PreprocessErrors.get_errors(e)
@@ -230,23 +228,25 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
             out_dict_init = None
             out_dict_proc = None
-            error = PreprocessErrors.ExecutorFutureError
+            errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
         futures.remove(future)
 
-        if run_parallel:
+        # only run if first layer was run
+        if out_dict_init is not None:
             logger.info(f"Adding future result to init db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict_init, out_meta, error,
+            pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
                                   configs_init, logger, overwrite)
-            logger.info(f"Adding future result to proc db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict_proc, out_meta, error,
-                                  configs_proc, logger, overwrite)
+        logger.info(f"Adding future result to proc db for {obs_id}: {group}")
+        pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
+                              configs_proc, logger, overwrite)
 
-        if jobdb_path is not None:
-            with jdb.locked(job) as j:
+        if jobdb_proc_path is not None:
+            with jdb_proc.locked(job) as j:
                 j.mark_visited()
-                if error is not None:
+                if errors[0] is not None:
                     j.jstate = "failed"
+                    j.tags["error"] = errors[0]
                 else:
                     j.jstate = "done"
 
