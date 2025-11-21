@@ -1746,7 +1746,7 @@ class FourierFilter(_Preprocess):
         filters = []
         for spec in filt_list:
             fname = spec.get("name")
-            params = tod_ops.fft_ops.build_hpf_params_dict(
+            params = tod_ops.fft_ops.build_filt_params_dict(
                 fname,
                 noise_fit=noise_fit,
                 filter_params=spec.get("filter_params")
@@ -2202,7 +2202,7 @@ class EstimateT2P(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = tod_ops.t2pleakage.get_t2p_cuts(meta, in_place=False, **self.select_cfgs)
+        keep = tod_ops.t2pleakage.get_t2p_cuts(meta, in_place=False, **self.)
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta

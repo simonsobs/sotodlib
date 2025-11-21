@@ -1126,7 +1126,7 @@ def _fit_noise_model_subscan(
     return fitout, covout
 
 
-def build_hpf_params_dict(
+def build_filt_params_dict(
     filter_name,
     noise_fit=None,
     filter_params=None,
