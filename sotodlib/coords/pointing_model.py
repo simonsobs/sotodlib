@@ -335,7 +335,7 @@ param_defaults={
         'harmonic_2az_sin': 0.,
         'harmonic_2az_cos': 0.,
         'acec': 0.,
-        'aces': 0.
+        'aces': 0.,
     }
 }
 
@@ -391,3 +391,4 @@ def get_base_tilt_q_2nd(az, el, dE_C2A, dE_S2A, dA_C2A, dA_S2A):
     q_HE = quat.euler(2, az) * quat.euler(1, delta_el) * quat.euler(2, -az)
 
     return q_HE * q_HA
+
