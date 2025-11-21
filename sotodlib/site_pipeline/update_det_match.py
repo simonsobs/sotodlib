@@ -24,6 +24,12 @@ if len(logger.handlers) == 0:
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
+def get_detset_time(detset: str) -> float:
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
+    return float(detset.split('_')[-2])
 
 @dataclass
 class UpdateDetMatchesConfig:
@@ -101,6 +107,8 @@ class UpdateDetMatchesConfig:
     solution_type: str = 'kaiwen_handmade'
     resonator_set_dir: Optional[str] = None
     time_before_cache_failure: float = float(3600 * 24 * 7)
+    start_time: float = 0
+    stop_time: float = 2**32
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -172,6 +180,8 @@ class Runner:
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
+        remaining_detsets = [r for r in remaining_detsets if get_detset_time(r) > self.cfg.start_time and
+                             get_detset_time(r) <= self.cfg.stop_time]
         return remaining_detsets
 
 def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
@@ -195,13 +205,6 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         rs = det_match.ResSet.from_array(rs_arr)
         rs.name = 'sol'
         return rs
-
-def get_detset_time(detset: str) -> float:
-    """
-    Gets timestamp associated with a detset. Will parse this from the detset
-    name, assuming it is of the form <stream_id>_<time>_tune.
-    """
-    return float(detset.split('_')[-2])
 
 def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
     if time.time() - get_detset_time(detset) < cfg.time_before_cache_failure:
@@ -371,9 +374,11 @@ def update_manifests(runner: Runner, detset):
     assignment = ra[['dets:readout_id', 'dets:det_id']]
 
     def add_to_db(arr, db_path, h5_path, detset, write_relpath=True):
-        write_dataset(core.metadata.ResultSet.from_friend(arr), h5_path, detset, overwrite=True)
+        write_dataset(core.metadata.ResultSet.from_friend(arr), h5_path,
+                      f"{str(runner.cfg.start_time)}/{detset}", overwrite=True)
         if not os.path.exists(db_path):
             scheme = core.metadata.ManifestScheme()
+            scheme.add_range_match("obs:timestamp")
             scheme.add_exact_match('dets:detset')
             scheme.add_data_field('dataset')
             db = core.metadata.ManifestDb(db_path, scheme=scheme)
@@ -384,8 +389,9 @@ def update_manifests(runner: Runner, detset):
         db = core.metadata.ManifestDb(db_path)
         if detset not in db.get_entries(['dataset'])['dataset']:
             db.add_entry({
+                'obs:timestamp': (runner.cfg.start_time, runner.cfg.stop_time),
                 'dets:detset': detset,
-                'dataset': detset
+                'dataset': f"{str(runner.cfg.start_time)}/{detset}"
             }, h5_path)
         else:
             logger.warning(f"Dataset {detset} already exists in db: {db_path}")
