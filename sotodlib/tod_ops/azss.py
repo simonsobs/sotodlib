@@ -86,7 +86,7 @@ def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
                               range=azrange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
 
-def fit_azss(az, azss_stats, max_mode, fit_range=None):
+def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
     """
     Function for fitting Legendre polynomials to signal binned in azimuth.
 
@@ -103,6 +103,10 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
         Azimuth range used to renormalized to the [-1,1] range spanned
         by the Legendre polynomials for fitting. Default is the max-min
         span in the ``binned_az`` array passed in via ``azss_stats``.
+    overwrite: bool
+        If overwrite is true will refit the data even if the fit parameters are
+        already stored in azss_stats. If False will just use the stored
+        parameters in azss_stats to compute and return the model.
 
     Returns
     -------
@@ -123,6 +127,8 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
     x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
     x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
+    if ('coeffs' in azss_stats) and not overwrite:
+        return L.legval(x_legendre, azss_stats.coeffs.T)
 
     coeffs = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m].T, max_mode)
     coeffs = coeffs.T
