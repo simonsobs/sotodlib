@@ -407,7 +407,12 @@ def subtract_azss_template(
     if isinstance(signal, str):
         signal = aman.get(signal)
     if isinstance(azss, str):
-        azss = aman.get(azss)
+        if azss in aman:
+            azss = aman.get(azss)
+        elif azss in aman.preprocess:
+            azss = aman.preprocess.get(azss)
+        else:
+            raise ValueError(f'{azss} field not found in aman or aman.preprocess.')
     if scan_flags is None:
         scan_flags = np.ones(aman.samps.count, dtype=bool)
     elif isinstance(scan_flags, str):
