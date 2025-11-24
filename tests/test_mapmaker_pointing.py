@@ -45,7 +45,7 @@ class MapmakerPointingTest(unittest.TestCase):
             ra_start, ra_stop = 35, 49
             dec_start, dec_stop = -51, -35
             box = np.radians([[dec_start, ra_start], [dec_stop, ra_stop]])
-            reso = np.radians(4.0 / 60)
+            reso = np.radians(1.0 / 60)
             shape, wcs = enmap.geometry(box, res=reso, proj="car")
             wcs.wcs.crpix[1] -= 0.5
             enmap.write_map_geometry(areafile, shape, wcs)
@@ -168,66 +168,73 @@ class MapmakerPointingTest(unittest.TestCase):
             toast_rcond = enmap.read_map(file_rcond_toast, None)[0]
 
             # build a comparison mask
-            mask = toast_rcond > 1e-3
-            # sorted_hits = np.sort(hits[hits != 0])
-            # hit_lim = sorted_hits[int(len(sorted_hits) * 0.1)]
-            # mask = hits > hit_lim
+            mask = toast_rcond > 0
+            bad = np.logical_not(mask)
 
-            # nrow, ncol = 3, 3
             nrow, ncol = 2, 3
             fig = plt.figure(figsize=[6 * ncol, 4 * nrow])
+            axes = [fig.add_subplot(nrow, ncol, iplot + 1) for iplot in range(nrow * ncol)]
 
             amp = 1.0
-            ax = fig.add_subplot(nrow, ncol, 1)
+            args = {
+                "extent" : [ra_start, ra_stop, dec_stop, dec_start],
+                "cmap" : "bwr",
+                "vmin" : -amp,
+                "vmax" : amp,
+                "interpolation" : "none",
+            }
+
+            ax = axes[0]
             ax.set_title("Input")
-            rms0 = np.nanstd(input_map[0, mask])
-            plot = ax.pcolor(input_map[0].T, vmin=-amp, vmax=amp, cmap="bwr")
+            rms0 = np.std(input_map[0, mask])
+            plot = ax.imshow(input_map[0], **args)
             plt.colorbar(plot)
 
-            ax = fig.add_subplot(nrow, ncol, 2)
+            ax = axes[1]
             ax.set_title("TOAST binned")
-            toast_sky[:, toast_hits == 0] = np.nan
-            plot = ax.pcolor(toast_sky[0].T, vmin=-amp, vmax=amp, cmap="bwr")
-            rms1 = np.nanstd(toast_sky[0, mask])
+            toast_sky[:, bad] = np.nan
+            plot = ax.imshow(toast_sky[0], **args)
+            rms1 = np.std(toast_sky[0, mask])
             plt.colorbar(plot)
-            assert np.abs(rms1 / rms0 - 1) < 1e-4
 
-            ax = fig.add_subplot(nrow, ncol, 3)
+            ax = axes[2]
             ax.set_title("MLMapmaker binned")
-            sky[:, hits == 0] = np.nan
-            plot = ax.pcolor(sky[0].T, vmin=-amp, vmax=amp, cmap="bwr")
+            sky[:, bad] = np.nan
+            plot = ax.imshow(sky[0], **args)
             rms2 = np.nanstd(sky[0, mask])
             plt.colorbar(plot)
-            assert np.abs(rms2 / rms0 - 1) < 1e-4
 
-            ax = fig.add_subplot(nrow, ncol, 4)
-            ax.set_title("RMS mask")
-            plot = ax.pcolor(mask.T, vmin=-amp, vmax=amp, cmap="bwr")
+            ax = axes[3]
+            ax.set_title("rcond mask")
+            plot = ax.imshow(mask, **args)
             plt.colorbar(plot)
 
-            amp = 1e-5
-            ax = fig.add_subplot(nrow, ncol, 5)
+            amp = 1e-3
+            args["vmin"] = -amp
+            args["vmax"] = amp
+
+            ax = axes[4]
             ax.set_title("TOAST - input")
             dmap1 = toast_sky[0] - input_map[0]
-            plot = ax.pcolor(dmap1.T, vmin=-amp, vmax=amp, cmap="bwr")
-            rms3 = np.nanstd(dmap1[mask])
+            plot = ax.imshow(dmap1, **args)
+            rms3 = np.std(dmap1[mask])
             plt.colorbar(plot)
-            assert np.abs(rms3 / rms0) < 1e-6
 
-            ax = fig.add_subplot(nrow, ncol, 6)
+            ax = axes[5]
             ax.set_title("MLMapmaker - input")
             dmap2 = sky[0] - input_map[0]
-            plot = ax.pcolor(dmap2.T, vmin=-amp, vmax=amp, cmap="bwr")
-            rms4 = np.nanstd(dmap2[mask])
+            plot = ax.imshow(dmap2, **args)
+            rms4 = np.std(dmap2[mask])
             plt.colorbar(plot)
-              # FIXME : need to understand the remaining differences
-            assert np.abs(rms4 / rms0) < 1e-3
 
-            # ax = fig.add_subplot(nrow, ncol, 9)
-            # ax.set_title("MLMapmaker - input, 1 pix offset in theta")
-            # dmap = sky[0, :-1, :] - input_map[0, 1:, :]
-            # plot = ax.pcolor(dmap.T, vmin=-amp, vmax=amp, cmap="bwr")
-            # plt.colorbar(plot)
+            for ax in axes:
+                ax.set_xlim([39, 43])
+                ax.set_ylim([-44, -40])
+
+            assert np.abs(rms1 / rms0 - 1) < 1e-4
+            assert np.abs(rms2 / rms0 - 1) < 1e-4
+            assert np.abs(rms3 / rms0) < 1e-6
+            assert np.abs(rms4 / rms0) < 1e-6
 
             fname_plot = os.path.join(testdir.name, "wcs_diff.png")
             plt.savefig(fname_plot)
