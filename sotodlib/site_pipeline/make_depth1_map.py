@@ -255,6 +255,7 @@ def maps_to_calculate(obskeys: List[Tuple[int, str, str]], obslists: Dict[Tuple[
     final_obs_infos = []
     obs_infos_dtype = obs_infos.dtype
     for oi in range(len(obskeys)):
+        print(f"Trying {oi}")
         pid, detset, band = obskeys[oi]
         obs_to_use = len(obslists[obskeys[oi]])
         t = np.floor(periods[pid,0]).astype(int)
@@ -263,14 +264,15 @@ def maps_to_calculate(obskeys: List[Tuple[int, str, str]], obslists: Dict[Tuple[
         with Settings(**mapcat_settings).session() as session:
             existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
             map_tods = existing_map.tods if existing_map else []
-
+        
         total_tods = np.sum([map_tod.wafer_count for map_tod in map_tods])
         if total_tods < obs_to_use:
             final_obskeys.append(obskeys[oi])
             final_obslists[obskeys[oi]] = obslists[obskeys[oi]]
-            final_periods.append(periods[pid])
-            final_obs_infos.append(obs_infos[oi])
-
+            obs_id_set = {x[0] for x in obslists[obskeys[oi]]}
+            if not np.isin(periods[pid], final_periods).any():
+                final_periods.append(periods[pid])
+            final_obs_infos += [obs_info for obs_info in obs_infos if obs_info["obs_id"] in obs_id_set]
     return final_obslists, final_obskeys, np.array(final_periods), np.array(final_obs_infos, dtype=obs_infos_dtype)
 
 def commit_depth1_tods(map_name:str, obslist: Dict[Tuple[int, str, str], List[Tuple[str, str, str, int]]], obs_infos: List[Tuple[str, float, float, float, int, str, str, str, str, str, str, int, str, float, float, float, float, float,  float, float, str, str]],
@@ -490,7 +492,7 @@ def main(config_file=None, defaults=defaults, **args):
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'],per_tube=True)
     
-    # obslists, obskeys, periods, obs_infos = maps_to_calculate(obskeys=obskeys, obslists=obslists, periods=periods, obs_infos=obs_infos, mapcat_settings=mapcat_settings)
+    obslists, obskeys, periods, obs_infos = maps_to_calculate(obskeys=obskeys, obslists=obslists, periods=periods, obs_infos=obs_infos, mapcat_settings=mapcat_settings)
    
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
