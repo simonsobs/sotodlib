@@ -24,7 +24,7 @@ jobs:
       contents: read  # Required to checkout the repository
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Fetch full history for tags
       
