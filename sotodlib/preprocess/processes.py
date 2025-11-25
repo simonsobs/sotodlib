@@ -780,7 +780,7 @@ class Calibrate(_Preprocess):
     def select(self, meta, in_place=True):
         if self.select_cfgs is None:
             return meta
-        keep = meta[self.select_cfgs.cut_array] == 0
+        keep = meta[self.select_cfgs['cut_array']] == 0
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
