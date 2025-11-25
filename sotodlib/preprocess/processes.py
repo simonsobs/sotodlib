@@ -743,6 +743,8 @@ class Calibrate(_Preprocess):
         process:
           kind: "array"
           cal_array: "cal.array"
+        select:
+          cut_array: "cal.missing_cal" # should be 0 where cal is good 1 where missing.
 
     """
     name = "calibrate"
@@ -774,6 +776,14 @@ class Calibrate(_Preprocess):
             raise ValueError(f"Entry '{self.process_cfgs['kind']}'"
                               " not understood")
         return aman, proc_aman
+    
+    def select(self, meta, in_place=True):
+        keep = meta[self.select_cfgs.cut_array] == 0
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 class EstimateHWPSS(_Preprocess):
     """
