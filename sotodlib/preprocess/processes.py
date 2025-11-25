@@ -870,7 +870,7 @@ class EstimateHWPSS(_Preprocess):
 
                     # calculate amplitude of each mode
                     mode_labels = list(proc_aman.hwpss_stats.modes.vals)
-                    num_re = re.compile("^[SC](\d+)$")
+                    num_re = re.compile(r"^[SC](\d+)$")
                     nums = sorted(list(set([num_re.match(l).group(1) for l in mode_labels])))
                     coeff_amp = np.zeros((coeff.shape[0], len(nums)), coeff.dtype)
                     amp_labels = []
