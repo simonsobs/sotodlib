@@ -1979,7 +1979,7 @@ class PCAFilter(_Preprocess):
         if self.model_signal:
             model_signal = aman.get(self.model_signal)
         else:
-            model_signal = signal.copy()
+            model_signal = signal
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
