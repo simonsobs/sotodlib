@@ -88,14 +88,6 @@ def setup_mapmaker(operators, templates):
         )
     )
     templates.append(
-        toast.templates.Hwpss(
-            name="hwpss",
-            hwp_angle=defaults.hwp_angle,
-            harmonics=5,
-            enabled=False,
-        )
-    )
-    templates.append(
         toast.templates.Fourier2D(
             name="fourier2d",
             correlation_length=5.0 * u.second,
@@ -137,7 +129,7 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
     if job_ops.mapmaker.enabled:
         job_ops.mapmaker.binning = job_ops.binner
         job_ops.mapmaker.template_matrix = toast.ops.TemplateMatrix(
-            templates=[job_tmpls.baselines, job_tmpls.azss, job_tmpls.hwpss]
+            templates=[job_tmpls.baselines, job_tmpls.azss]
         )
         job_ops.mapmaker.map_binning = job_ops.binner_final
         job_ops.mapmaker.output_dir = otherargs.out_dir

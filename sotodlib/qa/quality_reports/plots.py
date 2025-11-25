@@ -322,9 +322,9 @@ def source_footprints(d: "ReportData") -> go.Figure:
         angs = np.arange(-np.pi / 2, 3 * np.pi / 2, np.pi / 3)
         x0s = [0] + [np.cos(a) * wafer_sep for a in angs]
         y0s = [0] + [np.sin(a) * wafer_sep for a in angs]
-        
+
         wafers = ['ws0', 'ws1', 'ws6', 'ws5', 'ws4', 'ws3', 'ws2']
-        
+
         wafer_centers = {}
         for i, wafer in enumerate(wafers):
             wafer_centers[wafer] = (x0s[i], y0s[i])
@@ -341,14 +341,14 @@ def source_footprints(d: "ReportData") -> go.Figure:
                -0.02117608, -0.01556659, -0.0099571 , -0.02117957,  0.01579872,
                 0.02117957,  0.0099571 ,  0.03112446,  0.03673045,  0.02551671,
                 0.01556834,  0.02117608,  0.01021716]
-        
+
         wafers = ['c1_ws0', 'c1_ws1', 'c1_ws2',
                   'i1_ws0', 'i1_ws1', 'i1_ws2',
                   'i3_ws0', 'i3_ws1', 'i3_ws2',
                   'i4_ws0', 'i4_ws1', 'i4_ws2',
                   'i5_ws0', 'i5_ws1', 'i5_ws2',
                   'i6_ws0', 'i6_ws1', 'i6_ws2']
-        
+
         wafer_centers = {}
         for i, wafer in enumerate(wafers):
             wafer_centers[wafer] = (x0s[i], y0s[i])
@@ -362,7 +362,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
             ]
         )
         return pts
-    
+
     xs = [x for x, y in wafer_centers.values()]
     ys = [y for x, y in wafer_centers.values()]
 
@@ -380,10 +380,10 @@ def source_footprints(d: "ReportData") -> go.Figure:
         x_max = x_mid + y_span / 2
     x_margin = x_span * 0.05
     y_margin = x_span * 0.05
-    
+
     x_range = [x_min - 1.1*wafer_rad, x_max + 1.1*wafer_rad]
     y_range = [y_min - 1.1*wafer_rad, y_max + 1.1*wafer_rad]
-    
+
     def get_normalized_positions(positions, x_range, y_range, fig_width, fig_height):
         x0, x1 = x_range
         y0, y1 = y_range
@@ -413,9 +413,9 @@ def source_footprints(d: "ReportData") -> go.Figure:
                 norm_positions[key] = (x_paper, y_paper)
 
         return norm_positions
-    
+
     norm_positions = get_normalized_positions(wafer_centers, x_range, y_range, 700, 700)
-    
+
     def normalize_values(values, target_total=100):
         total = sum(values)
         if total == 0:
@@ -439,7 +439,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
                 hoverinfo="skip",
             )
         )
-        
+
         fig.add_annotation(
             x=x0,
             y=y0 + 0.9*wafer_rad,
@@ -454,11 +454,11 @@ def source_footprints(d: "ReportData") -> go.Figure:
 
     ntargets = 0
     target_colors = {}
-    if d.source_footprints is not None:        
+    if d.source_footprints is not None:
         wafer_map = defaultdict(list)
         for fp in d.source_footprints:
             wafer_map[fp.wafer].append(fp)
-            
+
         if wafer_map:
             for wafer, group in wafer_map.items():
                 x, y = norm_positions[wafer]
@@ -468,7 +468,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
                     f"Wafer: {fp.wafer}<br>Source: {fp.source}<br>Count: {fp.count}<br>ObsIDs:<br>" + "<br>".join(fp.obsids)
                     for fp in group
                 ]
-                
+
                 x0 = x - pie_width / 2
                 x1 = x + pie_width / 2
                 y0 = y - pie_width / 2
@@ -514,15 +514,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
         height=800,
         margin=dict(t=50, b=50, l=50, r=50)
     )
-    
-    wafers = sorted(set(fp.wafer for fp in d.source_footprints))
-    sources = sorted(set(fp.source for fp in d.source_footprints))
-    
-    lookup = {
-        (fp.wafer, fp.source): fp.obsids
-        for fp in d.source_footprints
-    }
-    
+
     def make_obsid_links(obsids):
         if not obsids:
             return ""
@@ -531,15 +523,28 @@ def source_footprints(d: "ReportData") -> go.Figure:
             for obsid in obsids
         ]
         return "<br>".join(links) + ("<br>" if len(links) == 1 else "")
-    
-    wafer_col = wafers
-    source_cols = []
-    for source in sources:
-        col = []
-        for wafer in wafers:
-            obsids = lookup.get((wafer, source), [])
-            col.append(make_obsid_links(obsids))
-        source_cols.append(col)
+
+    if d.source_footprints is not None:
+        wafers = sorted(set(fp.wafer for fp in d.source_footprints))
+        sources = sorted(set(fp.source for fp in d.source_footprints))
+
+        lookup = {
+            (fp.wafer, fp.source): fp.obsids
+            for fp in d.source_footprints
+        }
+
+        wafer_col = wafers
+        source_cols = []
+        for source in sources:
+            col = []
+            for wafer in wafers:
+                obsids = lookup.get((wafer, source), [])
+                col.append(make_obsid_links(obsids))
+            source_cols.append(col)
+    else:
+        wafer_col = []
+        source_cols = []
+        sources = []
 
     table_columns = [wafer_col] + source_cols
     header_labels = ["Wafers"] + sources
@@ -560,12 +565,12 @@ def source_footprints(d: "ReportData") -> go.Figure:
             height=30
         )
     )])
-    
+
     table.update_layout(
         width=500,
         height=400 + 30 * len(wafers),
         margin=dict(l=20, r=20, t=20, b=20),
         dragmode=False
     )
-    
+
     return SourceFootprintPlots(focalplane=fig, table=table)

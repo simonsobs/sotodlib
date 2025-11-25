@@ -145,7 +145,7 @@ class Cfg:
         dtype_map: str = 'float64',
         unit: str = 'K',
         use_psd: bool = True,
-        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise',
+        wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True
     ) -> None:
         self.context = context

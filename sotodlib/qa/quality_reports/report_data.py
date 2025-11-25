@@ -314,7 +314,7 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
 
     for obs_id, band_totals in totals_dict.items():
         band_totals.pop("NC", None)
-        if not obs_id:
+        if not obs_id or obs_id not in obsids:
             continue
         obs_entry = obs_list[obsids.index(obs_id)]
         obs_entry.num_valid_dets = str(band_totals)

@@ -964,19 +964,13 @@ class BookBinder:
         self.frame_idxs = None
         self.file_idxs = None
         self.meta_files = None
-        
-    def preprocess(self):
-        """
-        Runs preprocessing steps for the book. Preprocesses smurf and ancillary
-        data. Creates full list of book-times, the output frame idx for each
-        sample, and the output file idx for each frame.
-        """
-        if self.times is not None:
-            return
 
+    def set_min_max_ctime(self):
+        """Function to be run after stream.preprocess is finished to set the ctimes.
+        Splitting this out because it is useful for debugging purposes as well
+        """   
         for stream in self.streams.values():
-            stream.preprocess()
-
+            assert stream.times is not None, "All streams must be preprocessed"
         t0 = np.max([s.times[0] for s in self.streams.values()])
         if self.min_ctime is not None:
             assert self.min_ctime >= t0, \
@@ -985,7 +979,6 @@ class BookBinder:
             self.log.warning(
                 f"Over-riding minimum ctime from {t0} to {self.min_ctime}"
             )
-            t0 = self.min_ctime
         else:
             self.min_ctime = t0
 
@@ -997,14 +990,27 @@ class BookBinder:
             self.log.warning(
                 f"Over-riding maximum ctime from {t1} to {self.max_ctime}"
             )
-            t1 = self.max_ctime
         else:
             self.max_ctime = t1
+
+    def preprocess(self):
+        """
+        Runs preprocessing steps for the book. Preprocesses smurf and ancillary
+        data. Creates full list of book-times, the output frame idx for each
+        sample, and the output file idx for each frame.
+        """
+        if self.times is not None:
+            return
+
+        for stream in self.streams.values():
+            stream.preprocess()
+        self.set_min_max_ctime()
+
         # prioritizes the last stream
         # implicitly assumes co-sampled (this is where we could throw errors
         # after looking for co-sampled data)
         ts, _ = fill_time_gaps(stream.times) 
-        m = (t0 <= ts) & (ts <= t1)
+        m = (self.min_ctime <= ts) & (ts <= self.max_ctime)
         ts = ts[m]
 
         self.ancil.preprocess()
@@ -1063,6 +1069,9 @@ class BookBinder:
         if np.all( [x==0 for x in self.dropped.values()] ):
             ## no dropped samples from any slot
             return
+
+        ## do not change the format of these messages without also changing the 
+        ## autofixing behavior that is built off these messages.
         msg = '\n'.join([
             f"\t{self.streams[u].obs_id}: {x}" for u, x in self.dropped.items()
         ])
