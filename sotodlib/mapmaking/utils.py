@@ -1,3 +1,4 @@
+import sys
 from typing import Optional, Any, Union
 from sqlalchemy import create_engine, exc
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
@@ -580,7 +581,7 @@ def rangemat_sum(rangemat):
 def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags", to_null : str = "flags.expected_flags"):
     flag = obs[glitch_flags]
     if to_null != "" and to_null in obs._fields:
-        flag *= ~obs[to_null]
+        flag = flag*~obs[to_null]
     ncut  = rangemat_sum(flag)
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
@@ -814,3 +815,36 @@ def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
             session.commit()
         except exc.IntegrityError:
             session.rollback()
+
+
+def prune_mpi(comm, ranks_to_keep, mapmaker=None):
+    """
+    Prune unneeded MPI procs.
+
+    Arguments:
+
+        comm: The MPI communicator currently in use.
+
+        ranks_to_keep: List of current ranks to keep in the new communicator.
+
+        mapmaker: If mapmaker is provided then all comms will be swapped out
+        for the new communicator. Pass None to if you don't have a mapmaker
+        instance to modify.
+
+    Returns:
+
+        comm: Modified communicator with only the processes we want to keep.
+    """
+    group = comm.Get_group()
+    new_group = group.Incl(ranks_to_keep)
+    new_comm = comm.Create(new_group)
+    if comm.rank not in ranks_to_keep:
+        sys.exit(0)
+    comm = new_comm
+
+    if mapmaker is not None:
+        for signal in mapmaker.signals:
+            if hasattr(signal, "comm"):
+                signal.comm = comm
+
+    return comm

@@ -12,7 +12,7 @@ def get_parser(parser=None):
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
-    parser.add_argument("-O", "--ots",  type=str, default=None, help="Opics tubes to map with. ,-sep")
+    parser.add_argument("-O", "--ots",  type=str, default=None, help="Optics tubes to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
@@ -400,17 +400,9 @@ def main(**args):
             sys.exit(1)
            
         if np.any(nkept_all == 0):
-            group = comm.Get_group()
-            new_group = group.Incl(np.where(nkept_all > 0)[0])
-            new_comm = comm.Create(new_group)
             if nkept == 0:
                 L.info("No tods assigned to this process. Pruning")
-                sys.exit(0)
-            comm = new_comm
-            for signal in mapmaker.signals:
-                if hasattr(signal, "comm"):
-                    signal.comm = comm
-
+            comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
 
         L.info("Done building")
 
