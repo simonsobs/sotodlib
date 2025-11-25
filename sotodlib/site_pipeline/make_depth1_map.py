@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from typing import Tuple, List, Dict
 import numpy as np, sys, time, warnings, os, so3g, logging
 from sotodlib import tod_ops, coords, mapmaking
 from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager, metadata
@@ -7,6 +8,9 @@ from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.coords import pointing_model
 from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory, tilemap
 import yaml
+
+from mapcat.helper import Settings
+from mapcat.database import DepthOneMapTable, TODDepthOneTable
 
 defaults = {"query": "1",
             "odir": "./outputs",
@@ -34,6 +38,9 @@ defaults = {"query": "1",
             "bin": False,
             "srcsamp": None,
             "unit": 'K',
+            "mapcat_database_type": "sqlite",
+            "mapcat_database_name": "mapcat.db",
+            "mapcat_depth_one_parent": "./",
             "min_dets": 50,
            }
 LoaderError = metadata.loader.LoaderError
@@ -60,6 +67,7 @@ def measure_rms(tod, dt=1, bsize=32, nblock=10):
     # to µK√s units
     rms *= dt**0.5
     return rms
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -237,6 +245,94 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
         utils.deslope(obs.signal, w=5, inplace=True)
     return obs
 
+def maps_to_calculate(obskeys: List[Tuple[int, str, str]], obslists: Dict[Tuple[int, str, str], List[Tuple[str, str, str, int]]],
+                      periods: List[List[float]],
+                      obs_infos: List[Tuple[str, float, float, float, int, str, str, str, str, str, str, int, str, float, float, float, float, float,  float, float, str, str]],
+                      mapcat_settings: Dict[str,str]):
+    final_obskeys = []
+    final_obslists = {}
+    final_periods = []
+    final_obs_infos = []
+    obs_infos_dtype = obs_infos.dtype
+    for oi in range(len(obskeys)):
+        print(f"Trying {oi}")
+        pid, detset, band = obskeys[oi]
+        obs_to_use = len(obslists[obskeys[oi]])
+        t = np.floor(periods[pid,0]).astype(int)
+        t5 = ("%05d" % t)[:5]
+        map_name = f"{t5}/depth1_{t:010d}_{detset}_{band}"
+        with Settings(**mapcat_settings).session() as session:
+            existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
+            map_tods = existing_map.tods if existing_map else []
+        
+        total_tods = np.sum([map_tod.wafer_count for map_tod in map_tods])
+        if total_tods < obs_to_use:
+            final_obskeys.append(obskeys[oi])
+            final_obslists[obskeys[oi]] = obslists[obskeys[oi]]
+            obs_id_set = {x[0] for x in obslists[obskeys[oi]]}
+            if not np.isin(periods[pid], final_periods).any():
+                final_periods.append(periods[pid])
+            final_obs_infos += [obs_info for obs_info in obs_infos if obs_info["obs_id"] in obs_id_set]
+    return final_obslists, final_obskeys, np.array(final_periods), np.array(final_obs_infos, dtype=obs_infos_dtype)
+
+def commit_depth1_tods(map_name:str, obslist: Dict[Tuple[int, str, str], List[Tuple[str, str, str, int]]], obs_infos: List[Tuple[str, float, float, float, int, str, str, str, str, str, str, int, str, float, float, float, float, float,  float, float, str, str]],
+                       band: str, inds: List[int], mapcat_settings: Dict[str, str]) -> List[TODDepthOneTable]:
+    with Settings(**mapcat_settings).session() as session:
+        depth1map_obsids = np.unique([obslist[ind][0] for ind in inds])
+        tods = []
+        for obs_id in depth1map_obsids:
+            obs_info = obs_infos[obs_infos["obs_id"] == obs_id][0]
+            tod_depth1_entry = {"obs_id": obs_id,
+                                "ctime": obs_info["timestamp"],
+                                "start_time": obs_info["start_time"],
+                                "stop_time": obs_info["stop_time"],
+                                "nsamples": int(obs_info["n_samples"]),
+                                "telescope": obs_info["telescope"],
+                                "telescope_flavor": obs_info["telescope_flavor"],
+                                "tube_slot": obs_info["tube_slot"],
+                                "tube_flavor": obs_info["tube_flavor"],
+                                "frequency": band,
+                                "scan_type": obs_info["type"],
+                                "subtype": obs_info["subtype"],
+                                "wafer_count": int(obs_info["wafer_count"]),
+                                "duration": obs_info["duration"],
+                                "az_center": obs_info["az_center"],
+                                "az_throw": obs_info["az_throw"],
+                                "el_center": obs_info["el_center"],
+                                "el_throw": obs_info["el_throw"],
+                                "roll_center": obs_info["roll_center"],
+                                "roll_throw": obs_info["roll_throw"],
+                                "wafer_slots_list": obs_info["wafer_slots_list"],
+                                "stream_ids_list": obs_info["stream_ids_list"]}
+            existing_tod = session.query(TODDepthOneTable).filter_by(**tod_depth1_entry).first()
+            tod = TODDepthOneTable(map_name=map_name, **tod_depth1_entry)
+            if existing_tod is None:
+                session.add(tod)
+                tods.append(tod)
+            else:
+                tods.append(existing_tod)
+        session.commit()
+    return tods
+
+def commit_depth1_map(map_name:str, prefix:str, detset:str, band:str, ctime:float, start_time:float, stop_time:float,
+                      tods: List[TODDepthOneTable], mapcat_settings:Dict[str, str])->None:
+    with Settings(**mapcat_settings).session() as session:
+        existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
+        depth1map_meta = DepthOneMapTable(map_id=existing_map.map_id if existing_map else None,
+                                            map_name=map_name,
+                                            map_path=prefix + "_map.fits",
+                                            ivar_path=prefix + "_ivar.fits",
+                                            time_path=prefix + "_time.fits",
+                                            tube_slot=detset,
+                                            frequency=band,
+                                            ctime=ctime,
+                                            start_time=start_time,
+                                            stop_time=stop_time,
+                                            tods=tods
+                                            )
+        session.merge(depth1map_meta)
+        session.commit()
+
 def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None, unit='K', min_dets=50):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
@@ -355,6 +451,10 @@ def main(config_file=None, defaults=defaults, **args):
     SITE    = args['site']
     verbose = args['verbose'] - args['quiet']
     shape, wcs = enmap.read_map_geometry(args['area'])
+    mapcat_settings = {"database_type": args["mapcat_database_type"],
+                       "database_name": args["mapcat_database_name"],
+                       "depth_one_parent": args["mapcat_depth_one_parent"],}
+
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
     # can cause is_compatible failures.
@@ -381,9 +481,7 @@ def main(config_file=None, defaults=defaults, **args):
             L.info(f"{args['preprocess_config']} is not a valid config")
         sys.exit(1)
 
-    recenter = None
-    if args['center_at']:
-        recenter = mapmaking.parse_recentering(args['center_at'])
+    recenter = mapmaking.parse_recentering(args['center_at']) if args['center_at'] else None
 
     with mapmaking.mark('context'):
         context = Context(args['context'])
@@ -394,6 +492,8 @@ def main(config_file=None, defaults=defaults, **args):
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'],per_tube=True)
     
+    obslists, obskeys, periods, obs_infos = maps_to_calculate(obskeys=obskeys, obslists=obslists, periods=periods, obs_infos=obs_infos, mapcat_settings=mapcat_settings)
+   
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
         obslist = obslists[obskeys[oi]]
@@ -401,13 +501,14 @@ def main(config_file=None, defaults=defaults, **args):
         t5      = ("%05d" % t)[:5]
         prefix  = "%s/%s/depth1_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
         tag     = "%5d/%d" % (oi+1, len(obskeys))
+        map_name = f"{t5}/depth1_{t:010d}_{detset}_{band}"
+
         utils.mkdir(os.path.dirname(prefix))
-        meta_done = os.path.isfile(prefix + "_info.hdf")
         maps_done = os.path.isfile(prefix + ".empty") or (
             os.path.isfile(prefix + "_time.fits") and
             os.path.isfile(prefix + "_map.fits") and
             os.path.isfile(prefix + "_ivar.fits"))
-        if args['cont'] and meta_done and (maps_done or meta_only): continue
+        if args['cont'] and (maps_done or meta_only): continue
         if comm_intra.rank == 0:
             L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
         try:
@@ -425,15 +526,11 @@ def main(config_file=None, defaults=defaults, **args):
             # 2. estimate the scan profile and footprint. The scan profile can be done
             #    with a single task, but that task might not be the first one, so just
             #    make it mpi-aware like the footprint stuff
-            my_infos = [obs_infos[obslist[ind][3]] for ind in my_inds]
-            profile  = find_scan_profile(context, my_tods, my_infos, comm=comm_intra)
             subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
             # 3. Write out the depth1 metadata
-            d1info = bunch.Bunch(profile=profile, pid=pid, detset=detset.encode(), band=band.encode(),
-                    period=periods[pid], ids=np.char.encode([obslist[ind][0] for ind in all_inds]),
-                    box=enmap.corners(subshape, subwcs), t=t)
             if comm_intra.rank == 0:
-                write_depth1_info(prefix + "_info.hdf", d1info)
+                tods = commit_depth1_tods(map_name=map_name, obslist=obslist, obs_infos=obs_infos, band=band, inds=my_inds,
+                                          mapcat_settings=mapcat_settings)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
             handle_empty(prefix, tag, comm_intra, e, L)
@@ -452,9 +549,19 @@ def main(config_file=None, defaults=defaults, **args):
                     min_dets=args['min_dets'])
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
+            if comm_intra.rank == 0 :
+                L.info(f"Finished map {map_name}")
+                commit_depth1_map(map_name=map_name, prefix=prefix, detset=detset, band=band,
+                                  ctime=periods[pid][0],
+                                  start_time=periods[pid][0],
+                                  stop_time=periods[pid][1],
+                                  tods=tods,
+                                  mapcat_settings=mapcat_settings)
+
         except DataMissing as e:
             handle_empty(prefix, tag, comm_good, e, L)
     return True
 
 if __name__ == '__main__':
+    from sotodlib.site_pipeline import util
     util.main_launcher(main, get_parser)
