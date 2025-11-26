@@ -402,7 +402,10 @@ def main(**args):
         if np.any(nkept_all == 0):
             if nkept == 0:
                 L.info("No tods assigned to this process. Pruning")
-            comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0], mapmaker)
+            comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
+            for signal in mapmaker.signals:
+                if hasattr(signal, "comm"):
+                    signal.comm = comm
 
         L.info("Done building")
 

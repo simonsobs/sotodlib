@@ -817,7 +817,7 @@ def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
             session.rollback()
 
 
-def prune_mpi(comm, ranks_to_keep, mapmaker=None):
+def prune_mpi(comm, ranks_to_keep):
     """
     Prune unneeded MPI procs.
 
@@ -826,10 +826,6 @@ def prune_mpi(comm, ranks_to_keep, mapmaker=None):
         comm: The MPI communicator currently in use.
 
         ranks_to_keep: List of current ranks to keep in the new communicator.
-
-        mapmaker: If mapmaker is provided then all comms will be swapped out
-        for the new communicator. Pass None to if you don't have a mapmaker
-        instance to modify.
 
     Returns:
 
@@ -841,10 +837,5 @@ def prune_mpi(comm, ranks_to_keep, mapmaker=None):
     if comm.rank not in ranks_to_keep:
         sys.exit(0)
     comm = new_comm
-
-    if mapmaker is not None:
-        for signal in mapmaker.signals:
-            if hasattr(signal, "comm"):
-                signal.comm = comm
 
     return comm
