@@ -438,6 +438,21 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
+    # Count number of stops
+    if stop_for_sims:
+        num_stops = 0
+        for process in configs_init["process_pipe"]:
+            if process.get("use_data_aman", False):
+                num_stops += 1
+        for process in configs_proc["process_pipe"]:
+            if process.get("use_data_aman", False):
+                num_stops += 1
+        logger.warning(
+            "Currently running with `stop_for_sims=True`. "
+            f"It will generate {num_stops} additional copies "
+            "of the data AxisManager with a higher memory usage."
+        )
+
     group_by_init, groups_init, error_init = get_groups(obs_id, configs_init, context_init)
     group_by_proc, groups_proc, error_proc = get_groups(obs_id, configs_proc, context_proc)
 
