@@ -493,34 +493,37 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess, select=False)
-            if init_only:
-                return aman
+            if stop_for_sims:
+                out_amans_init = run_pipeline_stepgroups(
+                    pipe_init,
+                    aman,
+                    run_last_step=not(init_only)
+                )
+                if init_only:
+                    return out_amans_init
+            else:
+                pipe_init.run(aman, aman.preprocess, select=False)
+                if init_only:
+                    return aman
 
             logger.info("Running dependent pipeline")
+            if stop_for_sims:
+                aman = out_amans_init[(len(pipe_init), 'last')]
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
             if stop_for_sims:
-                batch_idx = [
-                    (step, process.name)
-                    for step, process in enumerate(pipe_proc)
-                    if process.use_data_aman
-                ]
-                batch_idx = [(0, pipe_proc[0].name)] + batch_idx
-                pipes = {}
-                for idx in range(len(batch_idx)-1):
-                    start, start_name = batch_idx[idx]
-                    end, end_name = batch_idx[idx+1]
-                    pipes[end, end_name] = pipe_proc[start:end]
-
-                out_amans = {}
-                loc_aman = aman.copy()
-                for (step, name), pipe in pipes.items():
-                    pipe.run(loc_aman, aman.preprocess, select=False)
-                    out_amans[step, name] = loc_aman.copy()
+                out_amans = run_pipeline_stepgroups(
+                    pipe_proc,
+                    out_amans_init[(len(pipe_init), 'last')],
+                )
+                out_amans.update({
+                    (step, name): out_amans_init[(step, name)]
+                    for (step, name) in out_amans_init
+                    if name != 'last'
+                })
                 return out_amans
 
             else:
@@ -528,6 +531,52 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                 return aman
         else:
             raise ValueError('Dependency check between configs failed.')
+
+
+def run_pipeline_stepgroups(pipe, aman, run_last_step=False):
+    """
+    Run a Pipeline object, grouping steps based on
+    the flag `use_data_aman` in the configuration
+    file.
+    Arguments
+    ----------
+    pipe : Pipeline
+        Pipeline object to run.
+    aman : AxisManager
+        AxisManager to process.
+    run_last_step : bool
+        If True, will create a dict item containing the
+        AxisManager after run the full pipeline.
+    """
+    batch_idx = [
+        (step, process.name)
+        for step, process in enumerate(pipe)
+        if process.use_data_aman
+    ]
+    if batch_idx or run_last_step:
+        batch_idx = [(0, pipe[0].name)] + batch_idx
+        if run_last_step:
+            batch_idx += [(len(pipe), 'last')]
+        pipes = {}
+        for idx in range(len(batch_idx)-1):
+            start, start_name = batch_idx[idx]
+            end, end_name = batch_idx[idx+1]
+            # If asked to stop at the first process
+            # one needs to save the current state of
+            # the AxisManager
+            if end == 0:
+                pipes[end, end_name] = None
+            else:
+                pipes[end, end_name] = pipe[start:end]
+        out_amans = {}
+        loc_aman = aman.copy()
+        for (step, name), pipe in pipes.items():
+            if pipe is not None:
+                pipe.run(loc_aman, aman.preprocess, select=False)
+            out_amans[step, name] = loc_aman.copy()
+        return out_amans
+    else:
+        return {}
 
 
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
