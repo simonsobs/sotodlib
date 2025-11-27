@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.optimize import curve_fit
+from lmfit import Model as LmfitModel
 from sotodlib import core, tod_ops
-from sotodlib.tod_ops import filters, apodize
+from sotodlib.tod_ops import filters, apodize, fft_ops
 import logging
 
 logger = logging.getLogger(__name__)
@@ -258,11 +259,11 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
                 weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
                                                                                                              flags=flags, 
                                                                                                              apodize_samps=apodize_flags_samps)
+    else:
+        if (flags is not None) and apodize_flags:
+            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
         else:
-            if (flags is not None) and apodize_flags:
-                weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
-            else:
-                weight_for_signal = None
+            weight_for_signal = None
     
     binning_dict = tod_ops.bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
@@ -348,7 +349,7 @@ def harms_func(x, modes, coeffs):
     -------
     numpy.ndarray: The calculated harmonics function.
     """
-    vects = np.zeros([2*len(modes), x.shape[0]], dtype='float32')
+    vects = np.zeros([2*len(modes), x.shape[0]], dtype=coeffs.dtype if coeffs is not None else 'float32')
     for i, mode in enumerate(modes):
         vects[2*i, :] = np.sin(mode*x)
         vects[2*i+1, :] = np.cos(mode*x)
@@ -356,7 +357,7 @@ def harms_func(x, modes, coeffs):
     if coeffs is None:
         return vects
     else:
-        harmonics = np.matmul(coeffs, vects)
+        harmonics = np.matmul(coeffs, vects, casting='no')
         return harmonics
 
 
@@ -665,20 +666,29 @@ def demod_tod(aman, signal=None, demod_mode=4,
                 lpf_cfg[k] = speed*float(v.split('*')[0])
 
     lpf = filters.get_lpf(lpf_cfg)
-        
-    phasor = np.exp(demod_mode * 1.j * aman.hwp_angle)
+
+    # Create a RFFT object to reuse
+    n = fft_ops.find_superior_integer(aman.samps.count)
+    rfft = fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
+
+    phasor = np.empty_like(aman.hwp_angle, dtype=np.promote_types(signal.dtype, np.complex64))
+    np.exp((demod_mode * 1j * aman.hwp_angle), out=phasor)
     demod = tod_ops.fourier_filter(aman, bpf, detrend=None,
-                                   signal_name=signal_name) * phasor
+                                   signal_name=signal_name, rfft=rfft) * 2. * phasor
 
     # Filter the demodulated signal
     demod_aman = core.AxisManager(aman.dets, aman.samps)
     demod_aman.wrap("timestamps", aman.timestamps, axis_map=[(0, 'samps')])
-    demod_aman.wrap("dsT", aman[signal_name], axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["dsT"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None)
+    demod_aman.wrap("dsT", aman[signal_name].copy(), axis_map=[(0, 'dets'), (1, 'samps')])
+    demod_aman["dsT"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name='dsT', detrend=None, rfft=rfft)
     demod_aman.wrap("demodQ", demod.real, axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["demodQ"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None) * 2.
+    demod_aman["demodQ"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodQ", detrend=None, rfft=rfft)
     demod_aman.wrap("demodU", demod.imag, axis_map=[(0, 'dets'), (1, 'samps')])
-    demod_aman["demodU"] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None) * 2.
+    demod_aman["demodU"][:] = tod_ops.fourier_filter(demod_aman, lpf, signal_name="demodU", detrend=None, rfft=rfft)
+
+    # Destroy the RFFT object
+    del rfft
+
     # Either wrap or return the demodulated signal
     if wrap:
         for fld in ['dsT', 'demodQ', 'demodU']:
@@ -686,3 +696,218 @@ def demod_tod(aman, signal=None, demod_mode=4,
         del demod_aman
     else:
         return demod_aman['dsT'], demod_aman['demodQ'], demod_aman['demodU']
+
+
+def tau_model(fhwp, tau, AQ, AU, mode):
+    return (AQ + 1j*AU) / (1 - 1j* mode * 2 * np.pi * tau * fhwp )
+
+
+def get_tau_hwp(
+    aman,
+    signal='signal',
+    lpf_cfg=None,
+    bpf_cfg=None,
+    width=1000,
+    apodize_samps=2000,
+    trim_samps=2000,
+    min_fhwp=1.,
+    max_fhwp=2.,
+    demod_mode=4,
+    wn=None,
+    flags=None,
+    full_output=False,
+    merge=False,
+    name='tau_hwp'
+):
+    """
+    Analyze observation with hwp spinning up or spinning down and
+    compute the timeconstant of detectors.
+    This demoulate tod and estimate timeconstant from hwp rotation
+    speed depdndence of half-wave plate synchronous signal.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager object containing the TOD data.
+    signal: std optional
+        Name of signal to process. Default is `signal`.
+    lpf_cfg: dict optional
+        Configuration for Low-pass filter applied before demodulation.
+    bpf_cfg: dict optional
+        Configuration for Band-pass filter applied before demodulation.
+    width: int optional
+        width of single section of TOD.
+    apodize_samps: int optional
+        Number of samples on tod ends to apodize.
+    trim_samps: int optional
+        Number of samples on tod ends to trim.
+    min_fhwp: float optional
+        Mininum rotation frequency of hwp to be used for calculation.
+    max_fhwp: float optional
+        Maximum rotation frequency of hwp to be used for calculation.
+    demod_mode: int, optional
+        Demodulation mode. Default is 4.
+    flags: str optional
+        Name of flags in `aman.flags` to use for fitting.
+    wn: str or None
+        Precomputed white noise level of signal to be used for weights of
+        fitting. If none, the fitting weights will be 1.
+    full_output: bool optional
+        Whether to output all the statistics used for fitting.
+    merge: bool optional
+        Whether to merge calculated statistics to `aman`. Default is False.
+    name: str optional
+        Name under which to wrap the calculated statistics.
+        Default is 'tau_hwp'.
+
+    Returns
+    -------
+    result : AxisManager
+        An AxisManager containing time constants, their errors, and reduced
+        chi-squared statistics.
+    """
+
+    if lpf_cfg is None:
+        lpf_cfg = {'type': 'sine2',
+                   'cutoff': min_fhwp * 0.95,
+                   'trans_width': 0.1}
+    if bpf_cfg is None:
+        # no band pass filter
+        bpf_cfg = {'type': 'sine2',
+                   'center': 0,
+                   'width': 200,
+                   'trans_width': 0.1}
+
+    hwp_rate = np.gradient(np.unwrap(aman.hwp_angle) * 200 / 2 / np.pi)
+    if 'hwp_rate' not in aman:
+        aman.wrap('hwp_rate', hwp_rate, [(0, 'samps')])
+
+    if wn is None:
+        # Calculate white noise from section with low hwp speed.
+        idx = np.where(abs(hwp_rate) < .5)[0]
+        s = aman.samps.offset + idx[0]
+        e = aman.samps.offset + idx[-1]
+        aman_short = aman.restrict('samps', (s, e), in_place=False)
+        freqs, Pxx, nseg = fft_ops.calc_psd(aman_short,
+                                            signal=aman_short.get(signal),
+                                            noverlap=0,
+                                            full_output=True)
+        wn = fft_ops.calc_wn(aman_short, pxx=Pxx, freqs=freqs, nseg=nseg)
+
+    tod_ops.detrend_tod(aman, signal_name=signal, method="median")
+    tod_ops.apodize.apodize_cosine(aman, signal_name=signal,
+                                   apodize_samps=apodize_samps)
+    demod_tod(aman, signal=signal, demod_mode=demod_mode,
+              lpf_cfg=lpf_cfg, bpf_cfg=bpf_cfg, wrap=True)
+
+    idx = np.where((min_fhwp < abs(hwp_rate)) & (abs(hwp_rate) < max_fhwp))[0]
+    s = idx[0] if trim_samps < idx[0] else trim_samps
+    e = idx[-1] if trim_samps < aman.samps.count - idx[-1] \
+        else aman.samps.count - trim_samps
+    s += aman.samps.offset
+    e += aman.samps.offset
+
+    aman.restrict('samps', (s, e), in_place=True)
+
+    nsections = int(aman.samps.count / width)
+    timestamps = np.zeros(nsections)
+    hwp_rate = np.zeros(nsections)
+    demodQ = np.zeros((nsections, aman.dets.count))
+    demodU = np.zeros((nsections, aman.dets.count))
+    weights = np.zeros((nsections, aman.dets.count))
+    mask = np.ones((nsections, aman.dets.count), dtype=bool)
+    if isinstance(flags, str) and (flags in aman.flags):
+        flags = ~aman.flags[flags].mask()
+        if flags.ndim == 1:
+            for i in range(nsections):
+                msk = np.zeros(aman.samps.count, dtype=bool)
+                msk[i*width:(i+1)*width] = flags[i*width:(i+1)*width]
+                timestamps[i] = np.median(aman.timestamps[msk])
+                hwp_rate[i] = np.median(aman.hwp_rate[msk])
+                demodQ[i] = np.median(aman.demodQ[:, msk], axis=1)
+                demodU[i] = np.median(aman.demodU[:, msk], axis=1)
+                count = np.sum(msk)
+                weights[i] = np.sqrt(count/200)/wn
+                mask[i, :] = False if count == 0 else True
+        elif flags.ndim == 2:
+            for i in range(nsections):
+                timestamps[i] = np.median(aman.timestamps[i*width:(i+1)*width])
+                hwp_rate[i] = np.median(aman.hwp_rate[i*width:(i+1)*width])
+                for j in range(aman.dets.count):
+                    msk = np.zeros(aman.samps.count, dtype=bool)
+                    msk[i*width:(i+1)*width] = flags[j, i*width:(i+1)*width]
+                    demodQ[i, j] = np.median(aman.demodQ[j, msk])
+                    demodU[i, j] = np.median(aman.demodU[j, msk])
+                    count = np.sum(msk)
+                    weights[i, j] = np.sqrt(count/200)/wn[j]
+                    mask[i, j] = False if count == 0 else True
+    else:
+        for i in range(nsections):
+            timestamps[i] = np.median(aman.timestamps[i*width:(i+1)*width])
+            hwp_rate[i] = np.median(aman.hwp_rate[i*width:(i+1)*width])
+            demodQ[i] = np.median(aman.demodQ[:, i*width:(i+1)*width], axis=1)
+            demodU[i] = np.median(aman.demodU[:, i*width:(i+1)*width], axis=1)
+            weights[i] = np.sqrt(width/200)/wn
+
+    logger.debug('Fit time constant')
+    AQ = np.full(aman.dets.count, np.nan)
+    AQ_error = np.full(aman.dets.count, np.nan)
+    AU = np.full(aman.dets.count, np.nan)
+    AU_error = np.full(aman.dets.count, np.nan)
+    tau = np.full(aman.dets.count, np.nan)
+    tau_error = np.full(aman.dets.count, np.nan)
+    redchi2s = np.full(aman.dets.count, np.nan)
+    for i in range(aman.dets.count):
+        try:
+            model = LmfitModel(tau_model, independent_vars=['fhwp'])
+            model.set_param_hint('mode', vary=False)
+            params = model.make_params(
+                tau=1e-3,
+                AQ=np.median(demodQ[:, i][mask[:, i]]),
+                AU=np.median(demodU[:, i][mask[:, i]]),
+                mode=demod_mode,
+            )
+            fit = model.fit(
+                data=demodQ[:, i][mask[:, i]] + 1j * demodU[:, i][mask[:, i]],
+                params=params,
+                fhwp=hwp_rate[mask[:, i]],
+                weights=weights[:, i][mask[:, i]]
+            )
+            AQ[i] = fit.params['AQ'].value
+            AQ_error[i] = fit.params['AQ'].stderr
+            AU[i] = fit.params['AU'].value
+            AU_error[i] = fit.params['AU'].stderr
+            tau[i] = fit.params['tau'].value
+            tau_error[i] = fit.params['tau'].stderr
+            redchi2s[i] = fit.redchi
+        except Exception:
+            logger.debug(f'Failed to fit {aman.dets.vals[i]}')
+
+    if full_output:
+        sections = core.OffsetAxis('sections', count=nsections,
+                                   offset=0)
+        result = core.AxisManager(aman.dets, sections)
+        result.wrap('timestamps', timestamps, axis_map=[(0, 'sections')])
+        result.wrap('hwp_rate', hwp_rate, axis_map=[(0, 'sections')])
+        result.wrap('demodQ', np.transpose(demodQ),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+        result.wrap('demodU', np.transpose(demodU),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+        result.wrap('weights', np.transpose(weights),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+        result.wrap('mask', np.transpose(mask),
+                    axis_map=[(0, 'dets'), (1, 'sections')])
+    else:
+        result = core.AxisManager(aman.dets)
+    result.wrap('AQ', AQ, axis_map=[(0, 'dets')])
+    result.wrap('AQ_error', AQ_error, axis_map=[(0, 'dets')])
+    result.wrap('AU', AU, axis_map=[(0, 'dets')])
+    result.wrap('AU_error', AU_error, axis_map=[(0, 'dets')])
+    result.wrap('tau_hwp', tau, axis_map=[(0, 'dets')])
+    result.wrap('tau_hwp_error', tau_error, axis_map=[(0, 'dets')])
+    result.wrap('redchi2s', redchi2s, axis_map=[(0, 'dets')])
+
+    if merge:
+        aman.wrap(name, result)
+
+    return result

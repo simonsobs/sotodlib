@@ -24,6 +24,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
+from toast.ops.pipeline import Pipeline
 from toast.utils import Logger
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
@@ -124,7 +125,12 @@ class LoadContext(Operator):
     preprocess_config = Unicode(
         None,
         allow_none=True,
-        help="Apply pre-processing with this configuration",
+        help="Apply site-pipeline pre-processing with this configuration",
+    )
+
+    ignore_preprocess_archive = Bool(
+        False,
+        help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 
     observations = List(list(), help="List of observation IDs to load")
@@ -389,7 +395,7 @@ class LoadContext(Operator):
             # If we are using preprocessing, load the archive DB and cut any
             # observations or wafer slots that do not exist.
             preproc_lookup = None
-            if preproc_conf is not None:
+            if (preproc_conf is not None) and (not self.ignore_preprocess_archive):
                 preproc_lookup = dict()
                 preproc_db = preproc_conf["archive"]["index"]
                 con = sqlite3.connect(preproc_db)
@@ -510,6 +516,7 @@ class LoadContext(Operator):
         # Every group loads its observations
         for obindx in range(group_firstobs, group_firstobs + group_numobs):
             obs_name = obs_props[obindx]["name"]
+            n_samp = obs_props[obindx]["n_samples"]
             otimer = Timer()
             otimer.start()
 
@@ -528,7 +535,7 @@ class LoadContext(Operator):
             # reader needs to do this step, in order to pull in unique metadata
             # that is per-wafer and merge.
             #
-            obs_meta, det_props, n_samp = self._load_metadata(
+            obs_meta, det_props = self._load_metadata(
                 obs_name,
                 obs_props[obindx]["session_name"],
                 comm.comm_group,
@@ -596,7 +603,7 @@ class LoadContext(Operator):
                 to cut detectors when loading.
 
         Returns:
-            (tuple):  The (observation metadata, detector property table, samples)
+            (tuple):  The (observation metadata, detector property table)
                 for the observation.
 
         """
@@ -610,7 +617,6 @@ class LoadContext(Operator):
 
         det_props = None
         obs_meta = None
-        n_samp = None
 
         # FIXME: This only works if there is one wafer per observation (and
         # hence one reader).
@@ -620,7 +626,6 @@ class LoadContext(Operator):
             meta = ctx.get_meta(session_name, dets=dets_select)
             if self.context_file is not None:
                 del ctx
-            n_samp = meta["samps"].count
 
             # Parse the axis manager metadata into observation metadata
             # and detector properties.
@@ -675,14 +680,13 @@ class LoadContext(Operator):
         if gcomm is not None:
             obs_meta = gcomm.bcast(obs_meta, root=0)
             det_props = gcomm.bcast(det_props, root=0)
-            n_samp = gcomm.bcast(n_samp, root=0)
 
         log.debug_rank(
             f"LoadContext {obs_name} metadata bcast took",
             comm=gcomm,
             timer=timer,
         )
-        return (obs_meta, det_props, n_samp)
+        return (obs_meta, det_props)
 
     @function_timer
     def _create_obs_instrument(self, obs_name, gcomm, det_props):
@@ -778,9 +782,45 @@ class LoadContext(Operator):
             sample_rate=1.0 * u.Hz,
         )
 
-        # For now, this should be good enough position for instruments near the
-        # S.O. location.
-        site = SOSite()
+        # Use the default observatory location
+        raw_site = so3g.proj.coords.SITES["_default"]
+        tele_lon_deg = raw_site.lon
+        tele_lat_deg = raw_site.lat
+        tele_alt_m = raw_site.elev
+
+        # Construct a toast weather object.  If we had metadata containing the
+        # current conditions (temperature, PWV, wind, etc) we could use it here.
+        # For now, we use the EarthlySite.typical_weather so that our pointing
+        # corrections are the same as other parts of the code.  For the weather
+        # parameters not in this dictionary, we use the toast-bundled MERRA-2
+        # data for the Atacama.  We add this MERRA-2 data later once we have the
+        # observing session start time.
+
+        site_temp_celsius = raw_site.typical_weather["temperature"]
+        site_humidity = raw_site.typical_weather["humidity"]
+        site_pressure = raw_site.typical_weather["pressure"]
+
+        site_weather = toast.weather.Weather(
+            time=None,
+            ice_water=None,
+            liquid_water=None,
+            pwv=None,
+            humidity=None,
+            surface_pressure=site_pressure * u.mbar,
+            surface_temperature=site_temp_celsius * u.Celsius,
+            air_temperature=site_temp_celsius * u.Celsius,
+            west_wind=None,
+            south_wind=None,
+        )
+        site_weather.relative_humidity = site_humidity
+
+        site = SOSite(
+            name="SO",
+            lat=tele_lat_deg * u.degree,
+            lon=tele_lon_deg * u.degree,
+            alt=tele_alt_m * u.meter,
+            weather=site_weather,
+        )
 
         telescope = toast.instrument.Telescope(
             self.telescope_name, focalplane=focalplane, site=site
@@ -989,6 +1029,7 @@ class LoadContext(Operator):
             wafer_readers,
             wafer_dets,
             preconfig=pconf,
+            ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
         )
@@ -1110,12 +1151,12 @@ class LoadContext(Operator):
                     log.debug(msg)
                     bf = np.zeros(ob.n_local_samples, dtype=np.float64)
                     (rate, dt, _, _, _) = toast.utils.rate_from_times(shrbuf)
-                    bf[ax_shift:ax_shift+restricted_samps] = shrbuf
+                    bf[ax_shift : ax_shift + restricted_samps] = shrbuf
                     bf[0:ax_shift] = shrbuf[0] + dt * np.arange(
                         -ax_shift, 0, 1, dtype=np.float64
                     )
                     end_gap = ob.n_local_samples - restricted_samps - ax_shift
-                    bf[ax_shift + restricted_samps:] = shrbuf[-1] + dt * np.arange(
+                    bf[ax_shift + restricted_samps :] = shrbuf[-1] + dt * np.arange(
                         1, end_gap + 1, 1, dtype=np.float64
                     )
             ob.shared[shr_obs_name].set(bf, fromrank=0)
@@ -1139,6 +1180,28 @@ class LoadContext(Operator):
         ob.session.end = datetime.fromtimestamp(
             ob.shared[self.times].data[-1]
         ).astimezone(timezone.utc)
+
+        # Update site weather, now that we have the observing time.
+        sim_atacama = toast.weather.SimWeather(
+            time=ob.session.start,
+            name="atacama",
+            median_weather=True,
+        )
+        old_weather = ob.telescope.site.weather
+        new_weather = toast.weather.Weather(
+            time=sim_atacama.time,
+            ice_water=sim_atacama.ice_water,
+            liquid_water=sim_atacama.liquid_water,
+            pwv=sim_atacama.pwv,
+            humidity=sim_atacama.humidity,
+            surface_pressure=old_weather.surface_pressure,
+            surface_temperature=old_weather.surface_temperature,
+            air_temperature=old_weather.air_temperature,
+            west_wind=sim_atacama.west_wind,
+            south_wind=sim_atacama.south_wind,
+        )
+        new_weather.relative_humidity = old_weather.relative_humidity
+        ob.telescope.site.weather = new_weather
 
         log.debug_rank(
             f"LoadContext {ob.name} sample rate calculation took",
@@ -1176,6 +1239,7 @@ class LoadContext(Operator):
                 if isinstance(ax[k], AxisManager):
                     _ax_del_children(ax[k])
                 del ax[k]
+
         for wfname in list(axwafers.keys()):
             _ax_del_children(axwafers[wfname])
             del axwafers[wfname]

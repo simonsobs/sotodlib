@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional, List
+import re
 
 from sotodlib import core
 import sotodlib.site_pipeline.util as sp_util
@@ -45,6 +46,19 @@ def preprocess_obs(
         configs = yaml.safe_load(open(configs, "r"))
 
     context = core.Context(configs["context_file"])
+
+    source_list = configs.get('source_list', None)
+    source_names = []
+    for _s in source_list:
+        if isinstance(_s, str):
+            source_names.append(_s)
+        elif len(_s) == 3:
+            source_names.append(_s[0])
+        else:
+            raise ValueError('Invalid style of source')
+
+    for i, source in enumerate(source_names):
+        source_names[i] = re.sub('[^0-9a-zA-Z]+', '', source)
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -56,6 +70,8 @@ def preprocess_obs(
         scheme = core.metadata.ManifestScheme()
         scheme.add_exact_match('obs:obs_id')
         scheme.add_data_field('dataset')
+        scheme.add_data_field('coverage')
+        scheme.add_data_field('source_distance')
         if obs_group:
             scheme.add_data_field('obs_group')
         db = core.metadata.ManifestDb(
@@ -81,6 +97,35 @@ def preprocess_obs(
     db_data = {'obs:obs_id': obs_id,
                 'dataset': dest_dataset}
     
+    sso_footprint_process = False
+    for process in configs['process_pipe']:
+        if 'name' in process and 'sso_footprint' == process['name']:
+            sso_footprint_process = True
+
+    if sso_footprint_process:
+        logger.info(f"Saving per source to database {db_data}")
+        nearby_source_names = []
+        for _source in proc_aman.sso_footprint._assignments.keys():
+            nearby_source_names.append(_source)
+        nearby_source_names_map = {key.casefold(): key for key in nearby_source_names}
+        coverage = []
+        distances = []
+        for source_name in source_names:
+            source_name_l = source_name.casefold()
+            if source_name_l in nearby_source_names_map:
+                source_name = nearby_source_names_map.get(source_name_l)
+                for key in proc_aman.sso_footprint[source_name]._assignments.keys():
+                    if 'ws' in key:
+                        if proc_aman.sso_footprint[source_name][key]:
+                            coverage.append(f"{source_name}:{key}")
+
+                distances.append(f"{source_name}:{proc_aman.sso_footprint[source_name]['mean_distance']}")
+        db_data['coverage'] = ','.join(coverage)
+        db_data['source_distance'] = ','.join(distances)
+    else:
+        db_data['coverage'] = None
+        db_data['source_distance'] = None
+
     if obs_group:
         db_data['obs_group'] = ','.join(obs_group)
     

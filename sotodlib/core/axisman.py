@@ -355,13 +355,34 @@ class AxisManager:
         """Rename or remove a data field.  To delete the field, pass
         new_name=None.
 
+        **Example usage:**
+
+            1. ``aman.move('hwp_angle', None)``
+                Deletes the field ``hwp_angle`` from ``aman``.
+            2. ``aman.move('hwp_angle', 'angle')``
+                Renames the field ``hwp_angle`` to ``angle``.
+            3. ``aman.move('preprocess.t2p.t2p_stats', None)``
+                Deletes the field ``t2p_stats`` from the sub-AxisManager
+                ``aman.preprocess.t2p``.
+
         """
-        if new_name is None:
-            del self._fields[name]
-            del self._assignments[name]
+        if name and '.' in name:
+            tmp, name = name.rsplit('.', 1)
+            aman = self.get(tmp)
         else:
-            self._fields[new_name] = self._fields.pop(name)
-            self._assignments[new_name] = self._assignments.pop(name)
+            aman = self
+        if new_name and '.' in new_name:
+            tmp, new_name = new_name.rsplit('.', 1)
+            new_aman = self.get(tmp)
+        else:
+            new_aman = self
+
+        if new_name is None:
+            del aman._fields[name]
+            del aman._assignments[name]
+        else:
+            new_aman._fields[new_name] = aman._fields.pop(name)
+            new_aman._assignments[new_name] = aman._assignments.pop(name)
         return self
 
     def add_axis(self, a):
@@ -919,7 +940,8 @@ class AxisManager:
             self._assignments.update(aman._assignments)
         return self
 
-    def save(self, dest, group=None, overwrite=False, compression=None):
+    def save(self, dest, group=None, overwrite=False, compression=None,
+             encodings=None):
         """Write this AxisManager data to an HDF5 group.  This is an
         experimental feature primarily intended to assist with
         debugging.  The schema is subject to change, and it's possible
@@ -936,6 +958,8 @@ class AxisManager:
           compression (str or None): Compression filter to apply. E.g.
             'gzip'. This string is passed directly to HDF5 dataset
             routines.
+          encodings (dict or None): Special instructions for encoding
+            / compression. See notes.
 
         Notes:
           If dest is a string, it is taken to be an HDF5 filename and
@@ -967,9 +991,37 @@ class AxisManager:
           context manager... so if you want that protection, open your
           own h5py.File as in the 2nd and 3rd example.
 
+          The encodings dict is used to support flacarray compression
+          of fields.  Suppose member 'quant_field' should be
+          FLAC-compressed, with precision 0.1.  Then pass::
+
+            encodings={
+              'quant_field': {
+                'type': 'flacarray':
+                'args': {
+                  'quanta': 0.1
+                }
+              }
+            }
+
+          For fields in sub-axismanagers, nest the specification; e.g.::
+
+            encodings={
+              'subaman': {
+                 'quant_field': ...
+              }
+            }
+
+          Only multi-dimensional int and float arrays may be so
+          compressed.  Unconsumed encoding information
+          (e.g. specifying compression for a non-existent field or a
+          field that is not an array) will cause an exception to be
+          raised.
+
         """
         from .axisman_io import _save_axisman
-        return _save_axisman(self, dest, group=group, overwrite=overwrite, compression=compression)
+        return _save_axisman(self, dest, group=group, overwrite=overwrite,
+                             compression=compression, encodings=encodings)
 
     @classmethod
     def load(cls, src, group=None, fields=None):

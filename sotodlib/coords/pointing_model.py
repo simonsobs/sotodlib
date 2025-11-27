@@ -136,7 +136,7 @@ def apply_pointing_model_lat(vers, params, ancil):
 
 #
 # LAT model(s)
-#       
+#
 def model_lat_v1(params, az, el, roll):
     """Applies pointing model to (az, el, roll).
 
@@ -145,17 +145,18 @@ def model_lat_v1(params, az, el, roll):
       az, el, roll: naive horizon coordinates, in radians, of the
         boresight.
 
-    The implemented model parameters are:
+    The implemented model parameters are all in radians:
+    - enc_offset_{az, el, cr}: Encoder offsets in radians.
+      Sign convention: True = Encoder + Offset
+    - cr_center_{xi,eta}0: The (xi,eta) coordinate in the LATR-centered 
+      focal plane that remains fixed under corotation. 
+    - el_axis_center_{xi,eta}0: The (xi,eta) coordinate in the CR-centered
+      focal plane that appears fixed when the elevation structure is rotated 
+      about its axis.
+    - mir_center_{xi,eta}0: The (xi,eta) coordinate in the El-structure-centered
+      focal plane that appears fixed when the mirrors are rotated about the ray from
+      sky that hits the center of both mirrors.
 
-    - rx_{xi, eta}_offset: The offset between the LATR center and the axis
-      of the corotator.
-    - cr_offset: The corotator encoder offset.
-    - el_{xi, eta}_offset: The offset between the elevation exis and the
-      corotator axis.
-    - mir_{xi, eta}_offset: The offset between the mirror's axis and the elevation
-      axis (ie: a tilt in the mirrors).
-    - az_offset: The azimuth encoder offset.
-    - el_offset: The elevation encoder offset.
     """
     _p = dict(param_defaults['lat_v1'])
     if isinstance(params, dict):
@@ -169,23 +170,58 @@ def model_lat_v1(params, az, el, roll):
             continue
         if k not in param_defaults['lat_v1'] and v != 0.:
             raise ValueError(f'Handling of model param "{k}" is not implemented.')
-
+    
+    # Here we reconstruct the naive corotator value before applying 
+    # the elevation encoder offset.
     cr = el - roll - np.deg2rad(60)    
-    q_enc = quat.rotation_lonlat(
-        -1 * (az.copy() + params["az_offset"]), el.copy() + params["el_offset"]
-    )
-    q_mir = quat.rotation_xieta(params["mir_xi_offset"], params["mir_eta_offset"])
-    q_el_roll = quat.euler(2, el.copy() + params["el_offset"] - np.deg2rad(60))
-    q_tel = quat.rotation_xieta(params["el_xi_offset"], params["el_eta_offset"])
-    q_cr_roll = quat.euler(2, -1 * cr - params["cr_offset"])
-    q_rx = quat.rotation_xieta(params["rx_xi_offset"], params["rx_eta_offset"])
-    new_az, el, roll = (
-        quat.decompose_lonlat(q_enc * q_mir * q_el_roll * q_tel * q_cr_roll * q_rx)
-        * np.array([-1, 1, 1])[..., None]
+    
+    az_orig = az.copy()
+    az = az + params['enc_offset_az']
+    el = el + params['enc_offset_el'] 
+    cr = cr + params['enc_offset_cr']
+    
+    # Lonlat rotation with az and el encoder offsets included.
+    q_lonlat = quat.rotation_lonlat(-1 * az, el)
+
+    # Rotation that takes a vector in elevation-hub centered 
+    # coordinates to final boresight centered coordinates. 
+    # Accounts for any mirror-related offsets.
+    q_mir_center = ~quat.rotation_xieta(
+        params['mir_center_xi0'],
+        params['mir_center_eta0']
     )
 
-    change = ((new_az - az) + np.pi) % (2 * np.pi) - np.pi
-    az = az.copy() + change
+    # Elevation component of roll motion
+    q_el_roll = quat.euler(2, el - np.deg2rad(60))
+    
+    # Rotation that takes a vector in telescope's corotator-centered
+    # coordinates to el-hub-centered coordinates
+    q_el_axis_center = ~quat.rotation_xieta(
+        params['el_axis_center_xi0'],
+        params['el_axis_center_eta0']
+    )
+
+    # Corotator component of roll motion
+    q_cr_roll = quat.euler(2, -1 * cr)
+    
+    # Rotation that takes a vector in LATR/focal plane-centered coordinates to  
+    # corotator-centered coordinates.
+    q_cr_center = ~quat.rotation_xieta(
+        params['cr_center_xi0'],
+        params['cr_center_eta0']
+    )
+
+    # Horizon Coordinates
+    q_hs = (
+        q_lonlat * q_mir_center
+        * q_el_roll * q_el_axis_center
+        * q_cr_roll * q_cr_center
+    )
+    new_az, el, roll = quat.decompose_lonlat(q_hs)* np.array([-1, 1, 1])[..., None]
+    
+    # Make corrected az as close as possible to the input az.    
+    change = ((new_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
+    az = az_orig + change
 
     return az, el, roll
 
@@ -217,7 +253,9 @@ def model_sat_v1(params, az, el, roll):
         Sign convention: True = Encoder + Offset
       - base_tilt_{cos,sin}: Base tilt coefficients, in radians. 
       - az_rot: Dimensionless parameter describing a linear dependence of Az on El.
-
+      - harmonic_2az_{cos,sin}: 2nd order azimuth correction, Rad  (HACA2, HASA2)
+      - harmonic_2el_{cos,sin}: 2nd order azimuth correction, Rad  (HECA2, HESA2)
+      - acec, aces: Az Centering Error params, TPoint, in Radians
     """
     _p = dict(param_defaults['sat_v1'])
     if isinstance(params, dict):
@@ -234,14 +272,20 @@ def model_sat_v1(params, az, el, roll):
 
     # Construct offsetted encoders.
     az_orig = az.copy()
+    ace = -params['aces'] * np.sin(az) + params['acec'] * np.cos(az)
     az_twist = params['az_rot'] * (el + params['enc_offset_el'])
-    az = az + params['enc_offset_az'] + az_twist
+    az = az + params['enc_offset_az'] + az_twist + ace
     el = el + params['enc_offset_el'] 
     roll = roll - params['enc_offset_boresight'] 
 
     # Rotation that tilts the base (referred to vals after enc correction).
     base_tilt = get_base_tilt_q(params['base_tilt_cos'], params['base_tilt_sin'])
 
+    #Rotations to account for second order basetilts
+    q_2_base_tilt = get_base_tilt_q_2nd(az, el,
+                                        params['harmonic_2el_cos'], params['harmonic_2el_sin'],
+                                        params['harmonic_2az_cos'], params['harmonic_2az_sin'])
+    
     # Rotation that takes a vector in array-centered focal plane coords
     # to a vector in boresight-rotation-centered focal plane coords.
     q_fp_rot = ~quat.rotation_xieta(params['fp_rot_xi0'], params['fp_rot_eta0'])
@@ -250,7 +294,7 @@ def model_sat_v1(params, az, el, roll):
     q_fp_offset = quat.rotation_xieta(params['fp_offset_xi0'], params['fp_offset_eta0'])
 
     # Horizon coordinates.
-    q_hs = (base_tilt * quat.rotation_lonlat(-az, el)
+    q_hs = (q_2_base_tilt * base_tilt * quat.rotation_lonlat(-az, el)
             * q_fp_offset * ~q_fp_rot * quat.euler(2, roll) * q_fp_rot)
 
     neg_az, el, roll = quat.decompose_lonlat(q_hs)
@@ -265,15 +309,15 @@ def model_sat_v1(params, az, el, roll):
 # Support functions
 param_defaults={
     'lat_v1' : {
-        'az_offset': 0,
-        'el_offset': 0,
-        'cr_offset': 0,
-        'el_xi_offset': 0,
-        'el_eta_offset': 0,
-        'rx_xi_offset': 0,
-        'rx_eta_offset': 0,
-        'mir_xi_offset': 0,
-        'mir_eta_offset': 0,
+        'enc_offset_az': 0,
+        'enc_offset_el': 0,
+        'enc_offset_cr': 0,
+        'el_axis_center_xi0': 0,
+        'el_axis_center_eta0': 0,
+        'cr_center_xi0': 0,
+        'cr_center_eta0': 0,
+        'mir_center_xi0': 0,
+        'mir_center_eta0': 0,
     },
     'sat_v1' : {
         'enc_offset_az': 0.,
@@ -285,7 +329,13 @@ param_defaults={
         'fp_rot_eta0': 0.,
         'az_rot': 0.,
         'base_tilt_cos': 0.,
-        'base_tilt_sin': 0.
+        'base_tilt_sin': 0.,
+        'harmonic_2el_sin': 0.,
+        'harmonic_2el_cos': 0.,
+        'harmonic_2az_sin': 0.,
+        'harmonic_2az_cos': 0.,
+        'acec': 0.,
+        'aces': 0.,
     }
 }
 
@@ -327,4 +377,18 @@ def get_base_tilt_q(c, s):
     # (encoder) el, at that position.
     amp = (c**2 + s**2)**.5
     return quat.euler(2, phi) * quat.euler(1, amp) * quat.euler(2, -phi)
+
+def get_base_tilt_q_2nd(az, el, dE_C2A, dE_S2A, dA_C2A, dA_S2A):
+    """ Returns quaternion rotation that applies 2nd order basetilt motion
+    Input Tpoint parameters in radians.
+    """
+    # Azimuth harmonic correction
+    delta_az = dA_C2A * np.cos(2 * az) + dA_S2A * np.sin(2 * az)
+    q_HA = quat.euler(2, delta_az)
+
+    # Elevation harmonic correction (Euler sandwich)
+    delta_el = dE_C2A * np.cos(2*az) + dE_S2A * np.sin(2*az)
+    q_HE = quat.euler(2, az) * quat.euler(1, delta_el) * quat.euler(2, -az)
+
+    return q_HE * q_HA
 

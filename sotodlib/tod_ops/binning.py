@@ -44,9 +44,11 @@ def bin_signal(aman, bin_by, signal=None,
         signal = aman.signal
     if range is None:
         range = (np.nanmin(bin_by), np.nanmax(bin_by))
+
+    signal_dtype = signal.dtype
     
     if weight_for_signal is None:
-        weight_for_signal = np.ones(aman.samps.count)
+        weight_for_signal = np.ones(aman.samps.count, signal_dtype)
         
     # get bin_edges
     bin_edges = np.histogram_bin_edges(bin_by, bins=bins, range=range,)
@@ -54,9 +56,9 @@ def bin_signal(aman, bin_by, signal=None,
     nbins = len(bin_centers)
     
     # prepare binned signal array
-    binned_signal = np.full([aman.dets.count, nbins], np.nan)
-    binned_signal_squared_mean = np.full([aman.dets.count, nbins], np.nan)
-    binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan)
+    binned_signal = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
+    binned_signal_squared_mean = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
+    binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
     
     # get bin indices
     bin_indices = np.digitize(bin_by, bin_edges) - 1

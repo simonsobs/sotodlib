@@ -95,6 +95,18 @@ class MLMapmaker(Operator):
         help="Noise matrix type is either `NmatDetvecs`, `NmatUncorr`, `NmatWhite`, `NmatUnit` or `Nmat`",
     )
 
+    downweight = List(
+        None,
+        allow_none=True,
+        help="Downweight the lowest frequency bins when using NmatDetvecs noise model."
+        "Set to empty list [] or None would disable downweighting."
+        "When using NmatDetvecs noise model, the noise covariance N = D + VV'"
+        "is the sum of uncorrelated part and auto-power in each frequency bin."
+        "ACT uses downweight = [1e-4, 0.25, 0.50], the lowest three frequency bins in D "
+        "will multiply by factor [1e4, 4.0, 2.0]."
+        "This option is ignored when using other noise models.",
+    )
+
     nmat_mode = Unicode(
         "build",
         help="How to initialize the noise matrix.  "
@@ -205,7 +217,12 @@ class MLMapmaker(Operator):
         help="Truncate TOD to an easily factorizable length to ensure efficient FFT.",
     )
 
-    write_div = Bool(True, help="Write out the noise weight map")
+    write_div = Unicode(
+        "all",
+        allow_none=True,
+        help="Components (must be 'T', 'QU', 'TQU', 'all', None, or '')"
+    )
+
     write_hits= Bool(True, help="Write out the hitcount map")
 
     write_rhs = Bool(
@@ -219,7 +236,7 @@ class MLMapmaker(Operator):
     )
 
     @traitlets.validate("comps")
-    def _check_mode(self, proposal):
+    def _check_comps(self, proposal):
         check = proposal["value"]
         if check not in ["T", "QU", "TQU"]:
             raise traitlets.TraitError("Invalid comps (must be 'T', 'QU' or 'TQU')")
@@ -247,7 +264,7 @@ class MLMapmaker(Operator):
         return check
 
     @traitlets.validate("dtype_map")
-    def _check_det_flag_mask(self, proposal):
+    def _check_dtype_map(self, proposal):
         check = proposal["value"]
         if check not in ["float", "float64"]:
             raise traitlets.TraitError(
@@ -292,6 +309,13 @@ class MLMapmaker(Operator):
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)
+        return check
+
+    @traitlets.validate("write_div")
+    def _check_write_div(self, proposal):
+        check = proposal["value"]
+        if check not in ["T", "QU", "TQU", None, 'all', '']:
+            raise traitlets.TraitError("Invalid write_div (must be 'T', 'QU', 'TQU', 'all', None or '')")
         return check
 
     def __init__(self, **kwargs):
@@ -501,20 +525,22 @@ class MLMapmaker(Operator):
                 fname = signal_map.write(prefix, "rhs", signal_map.rhs)
                 log.info_rank(f"Wrote rhs to {fname}", comm=comm)
 
-        if self.write_div:
-            fname = f"{prefix}sky_div.fits"
-            if self.skip_existing and os.path.isfile(fname):
-                log.info_rank(f"Skipping existing div in {fname}", comm=comm)
-            else:
-                # FIXME : only writing the TT variance to avoid integer overflow in communication
-                fname = signal_map.write(prefix, "div", signal_map.div)
-                # fname = signal_map.write(prefix, "div", signal_map.div[0, 0])
-                log.info_rank(f"Wrote div to {fname}", comm=comm)
+        if self.write_div is not None:
+            # Write each covariance element seperately, to reduce peak memory.
+            for i,ci in enumerate(self.comps):
+                for j,cj in enumerate(self.comps):
+                    if ci in self.write_div and cj in self.write_div:
+                        fname = f"{prefix}sky_div{ci}{cj}.fits"
+                        if self.skip_existing and os.path.isfile(fname):
+                            log.info_rank(f"Skipping existing div{ci}{cj} in {fname}", comm=comm)
+                        else:
+                            fname = signal_map.write(prefix, f"div{ci}{cj}", signal_map.div[i, j])
+                            log.info_rank(f"Wrote div{ci}{cj} to {fname}", comm=comm)
 
         if self.write_hits:
             fname = f"{prefix}sky_hits.fits"
             if self.skip_existing and os.path.isfile(fname):
-                log.info_rank(f"Skipping existing div in {fname}", comm=comm)
+                log.info_rank(f"Skipping existing hits in {fname}", comm=comm)
             else:
                 fname = signal_map.write(prefix, "hits", signal_map.hits)
                 log.info_rank(f"Wrote hits to {fname}", comm=comm)
@@ -598,6 +624,36 @@ class MLMapmaker(Operator):
         gcomm = data.comm.comm_group
         timer.start()
 
+        if self.write_div == 'all':
+            self.write_div = self.comps
+        elif self.write_div == '':
+            self.write_div = None
+        elif self.write_div is not None:
+            # Make sure all components in self.write_div is in self.comps
+            for i in self.write_div:
+                if i not in self.comps:
+                    msg = f"Component '{i}' in write_div={self.write_div} not present in comps={self.comps}"
+                    raise RuntimeError(msg)
+
+        if data.comm.group_size != 1:
+            raise RuntimeError(
+                "The ML mapmaker requires the TOAST process group size to be exactly one."
+            )
+
+        if comm is not None:
+            num_obs = np.array(comm.allgather(len(data.obs)))
+        else:
+            num_obs = np.array([len(data.obs)])
+        if np.any(num_obs == 0):
+            # At least one TOAST group have no observation
+            if np.sum(num_obs) < data.comm.ngroups:
+                msg = "There are {} TOAST groups but only {} observations. ".format(data.comm.ngroups, np.sum(num_obs))
+                msg += "Therefore some TOAST groups have no observation in it. "
+                msg += "Please reduce the number of TOAST groups."
+                raise RuntimeError(msg)
+            else:
+                raise RuntimeError("Some TOAST groups have no observation.")
+
         if comm is None and self.tiled:
             log.info("WARNING: Tiled mapmaking not supported without MPI.")
             self.tiled = False
@@ -611,7 +667,7 @@ class MLMapmaker(Operator):
 
         # nmat_type is guaranteed to be a valid Nmat class
         if self.nmat_type == 'NmatDetvecs':
-            noise_model = getattr(mm, self.nmat_type)(downweight=[1e-4, 0.25, 0.50], window=0)
+            noise_model = getattr(mm, self.nmat_type)(downweight=self.downweight)
         else:
             noise_model = getattr(mm, self.nmat_type)()
 

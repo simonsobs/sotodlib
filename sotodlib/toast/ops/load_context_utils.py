@@ -16,6 +16,7 @@ from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
 
+from ...coords import pointing_model
 from ...core import Context, AxisManager
 from ...core.axisman import AxisInterface
 from ...preprocess import Pipeline as PreProcPipe
@@ -40,6 +41,7 @@ def read_and_preprocess_wafers(
     wafer_readers,
     wafer_dets,
     preconfig=None,
+    ignore_preprocess_archive=False,
     context=None,
     context_file=None,
 ):
@@ -58,6 +60,7 @@ def read_and_preprocess_wafers(
             to read this wafer.
         wafer_dets (dict):  For each wafer name, the list of detectors.
         preconfig (dict):  The preprocessing configuration to apply (or None).
+        ignore_preprocess_db (bool): Ignore the 'archive' field in the preprocessing configuration.
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
 
@@ -77,7 +80,7 @@ def read_and_preprocess_wafers(
     for wf, reader in wafer_readers.items():
         if reader == rank:
             ctx = open_context(context=context, context_file=context_file)
-            if preconfig is not None:
+            if (preconfig is not None) and (not ignore_preprocess_archive):
                 # Ensure that the preprocessing archive is defined.  First
                 # check if it already exists in the context.
                 have_ctx_archive = False
@@ -100,7 +103,9 @@ def read_and_preprocess_wafers(
                 if not have_ctx_archive:
                     if not have_pre_archive:
                         msg = "Either the context or the preprocess config must "
-                        msg += "specify the preprocess archive."
+                        msg += "specify the preprocess archive. "
+                        msg += "If you want to ignore preprocessing archive, "
+                        msg += "please set ignore_preprocess_archive=True."
                         raise RuntimeError(msg)
                     else:
                         ctx["metadata"].append(
@@ -117,12 +122,21 @@ def read_and_preprocess_wafers(
                 f"LoadContext {obs_name} loaded wafer {wf} in {elapsed} seconds",
             )
 
+            # Apply pointing model, UNLESS we are applying a preprocess config
+            # on load and that config includes the pointing model
+            if "pointing_model" in axtod:
+                if (
+                    preconfig is None
+                    or "pointing_model" not in [i['name'] for i in preconfig["process_pipe"]]
+                ):
+                    pointing_model.apply_pointing_model(axtod)
+
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
                 # Did we already apply it in the preprocessing?
                 if (
                     preconfig is None
-                    or "hwp_angle_model" not in preconfig["process_pipe"]
+                    or "hwp_angle_model" not in [i['name'] for i in preconfig["process_pipe"]]
                 ):
                     axtod = apply_hwp_angle_model(axtod)
                     timer.stop()
@@ -134,7 +148,10 @@ def read_and_preprocess_wafers(
 
             if preconfig is not None:
                 prepipe = PreProcPipe(preconfig["process_pipe"], logger=log)
-                prepipe.run(axtod, axtod.preprocess)
+                if not ignore_preprocess_archive:
+                    prepipe.run(axtod, axtod.preprocess)
+                else:
+                    prepipe.run(axtod)
                 timer.stop()
                 elapsed = timer.seconds()
                 timer.start()
@@ -553,7 +570,7 @@ def distribute_detector_data(
                     else:
                         for idet in range(n_send_det):
                             obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[idet]
-                        # Update per-detector flags
+                    # Update per-detector flags
                     dflags = {
                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
                         for x in range(n_recv_det)
@@ -619,6 +636,17 @@ def distribute_detector_data(
     # Now safe to delete our dictionary of isend buffer handles, which might include
     # temporary buffers of ranges flags.
     del send_data
+
+    # Every process checks its local data for NaN values.  If any are found, a warning
+    # is printed and the detector is cut.
+    dflags = dict()
+    for det in obs.local_detectors:
+        nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+        if nnan > 0:
+            msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
+            log.warning(msg)
+            dflags[det] = defaults.det_mask_invalid
+    obs.update_local_detector_flags(dflags)
 
 
 @function_timer
@@ -792,7 +820,7 @@ def ax_name_fp_subst(var, fp_array, det=None):
     out = ""
     last = 0
     for match in re.finditer(r"(\{.*\})", var):
-        out += var[last:match.start()]
+        out += var[last : match.start()]
         colname = match.group()
         colname = colname.replace("{", "")
         colname = colname.replace("}", "")

@@ -8,9 +8,12 @@ import numpy as np
 import h5py
 import traceback
 import inspect
+from pathlib import Path
+import re
 from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
+from sotodlib.core.flagman import has_any_cuts
 
 from .. import core
 
@@ -165,7 +168,7 @@ def get_preprocess_context(configs, context=None):
         context["metadata"] = []
 
     for key in context.get("metadata"):
-        if key.get("name") == "preprocess":
+        if key.get("name") == "preprocess" or key.get("label") == "preprocess":
             found=True
             break
     if not found:
@@ -318,15 +321,15 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     configs, context = get_preprocess_context(configs, context)
     pipe = Pipeline(configs["process_pipe"], logger=logger)
 
-    meta = context.get_meta(obs_id, dets=dets, meta=meta)
+    if meta is None:
+        meta = context.get_meta(obs_id, dets=dets)
     logger.info("Restricting detectors on all processes")
     keep_all = np.ones(meta.dets.count,dtype=bool)
     for process in pipe[:]:
         keep = process.select(meta, in_place=False)
         if isinstance(keep, np.ndarray):
             keep_all &= keep
-    meta.restrict("dets", meta.dets.vals[keep_all])
-    return meta
+    return meta.dets.vals[keep_all]
 
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
@@ -363,8 +366,17 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         logger = init_logger("preprocess")
 
     configs, context = get_preprocess_context(configs, context)
-    meta = load_preprocess_det_select(obs_id, configs=configs, context=context,
-                                      dets=dets, meta=meta, logger=logger)
+    meta = context.get_meta(obs_id, dets=dets, meta=meta)
+    if (
+        'valid_data' in meta.preprocess and
+        isinstance(meta.preprocess.valid_data, core.AxisManager)
+       ):
+        keep = has_any_cuts(meta.preprocess.valid_data.valid_data)
+        meta.restrict("dets", keep)
+    else:
+        det_vals = load_preprocess_det_select(obs_id, configs=configs, context=context,
+                                              dets=dets, meta=meta, logger=logger)
+        meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -444,11 +456,17 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all proc pipeline processes")
-            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
-            for process in pipe_proc[:]:
-                keep = process.select(meta_proc, in_place=False)
-                if isinstance(keep, np.ndarray):
-                    keep_all &= keep
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
+            else:
+                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+                for process in pipe_proc[:]:
+                    keep = process.select(meta_proc, in_place=False)
+                    if isinstance(keep, np.ndarray):
+                        keep_all &= keep
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
 
@@ -461,8 +479,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
 
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
-
             pipe_proc.run(aman, aman.preprocess, select=False)
 
             return aman
@@ -579,6 +598,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
             pipe_proc.run(aman, aman.preprocess, sim=True)
 
@@ -633,6 +654,53 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         dbexist = False
 
     return dbexist
+
+
+def cleanup_archive(configs, logger=None):
+    """This function finds the final preprocess archive file and deletes any
+    datasets that are not found in the preprocess database.  This helps avoid
+    cases where the database writing was interrupted in a previous run.
+
+    Arguments
+    ----------
+    configs: fpath or dict
+        Filepath or dictionary containing the preprocess configuration file.
+    logger: PythonLogger
+        Optional. Logger object or None will generate a new one.
+    """
+
+    if type(configs) == str:
+        configs = yaml.safe_load(open(configs, "r"))
+
+    if logger is None:
+        logger = init_logger("preprocess")
+
+    if os.path.exists(configs['archive']['index']):
+        db = core.metadata.ManifestDb(configs['archive']['index'])
+
+        basename = os.path.splitext(os.path.basename(configs["archive"]["policy"]["filename"]))[0]
+
+        # remove datasets from last archive file if they are not in db
+        archive_files = list(
+            Path(os.path.dirname(configs["archive"]["policy"]["filename"])).rglob(f"{basename}*.h5")
+        )
+        pattern = re.compile(r"\d+")
+        archive_files = [p for p in archive_files if pattern.findall(p.stem)]
+
+        if archive_files:
+            latest_file = max([(int(pattern.findall(p.stem)[-1]), p)
+                               for p in archive_files if pattern.findall(p.stem)],
+                              key=lambda t: t[0])[1]
+
+            db_datasets = [d['dataset'] for d in db.inspect()]
+            with h5py.File(latest_file, "r+") as f:
+                keys = list(f.keys())
+                for key in keys:
+                    if key not in db_datasets:
+                        logger.debug(f"{key} not found in db. deleting it from {latest_file}.")
+                        del f[key]
+
+        db.conn.close()
 
 
 def save_group(obs_id, configs, dets, context=None, subdir='temp'):
@@ -812,7 +880,8 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                          logger=None, overwrite=False):
+                          logger=None, overwrite=False, save_proc_aman=True,
+                          save_archive=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -822,12 +891,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     processed tod calling either the ``load_and_preprocess`` or
     ``multilayer_load_and_preprocess`` functions. If the db entry does not exist or
     the overwrite flag is set to True then the full preprocessing steps defined in
-    the configs are run and the outputs are written to a unique h5 file. Any errors,
-    the info to populate the database, the file path of the h5 file, and the process
-    tod are returned from this function. This function is expected to be run in
-    conjunction with the ``cleanup_mandb`` function which consumes all of the outputs
-    (except the processed tod), writes to the database, and moves the multiple h5 files
-    into fewer h5 files (each <= 10 GB).
+    the configs are run and if save_proc_aman is True, the outputs are written to a
+    unique h5 file. Any errors, the info to populate the database, the file path of
+    the h5 file, and the process tod are returned from this function. Processed axis
+    managers can be written to an archive and database by using cleanup_mandb
+    (or setting save_archive to True) which consumes all of the outputs
+    (except the processed tod), writes to the database, and moves the multiple h5
+    files into fewer h5 files (each <= 10 GB).
 
     Arguments
     ---------
@@ -843,6 +913,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Optional. Logger object or None will generate a new one.
     overwrite: bool
         Optional. Whether or not to overwrite existing entries in the preprocess manifest db.
+    save_proc_aman : bool
+        Whether or not to save the preprocessing axis manager.  Required if saving into
+        a preprocessing archive.
+    save_archive : bool
+        Call cleanup_mandb if True to save to the archive and database files
+        in configs_init and configs_proc. Should be False if preproc_or_load_group
+        is being called from within a parallelized script (i.e. python multiprocessing or MPI).
 
     Returns
     -------
@@ -854,7 +931,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     output_init: list
         Varies depending on the value of ``error``.
         If ``error == None`` then output is the info needed to update the manifest db.
-        If ``error == 'load_success'`` then output is just ``[obs_id, dets]``.
+        If ``error == 'load_success'`` or save_proc_aman is ``False``, then output is just ``[obs_id, dets]``.
         If ``error`` is anything else then output stores what to save in the error log.
     output_proc: list:
         See output_init for possible values.
@@ -941,8 +1018,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 return error, [obs_id, dets], [obs_id, dets], aman
             else:
                 try:
-                    outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+                    if save_proc_aman:
+                        outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+                    else:
+                        outputs_proc = [obs_id, dets]
                     init_fields = aman.preprocess._fields.copy()
+                    init_fields.pop('valid_data', None)
                     logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                     # pipeline for init config
                     pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
@@ -976,9 +1057,16 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                     # If a single group fails we don't log anywhere just mis an entry in the db.
                     return success, [obs_id, dets], [obs_id, dets], None
 
-                logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                if save_proc_aman:
+                    logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
+                    proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
+                    if save_archive:
+                        cleanup_mandb(error, outputs_proc, configs_proc,
+                                      logger=logger, overwrite=overwrite)
+
+                if 'valid_data' in aman.preprocess:
+                    aman.preprocess.move('valid_data', None)
                 aman.preprocess.merge(proc_aman)
 
                 return error, [obs_id, dets], outputs_proc, aman
@@ -988,7 +1076,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         try:
             pipe_init = Pipeline(configs_init["process_pipe"], plot_dir=configs_init["plot_dir"], logger=logger)
             aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
-            outputs_init = save_group(obs_id, configs_init, dets, context_init, subdir='temp')
+            if save_proc_aman:
+                outputs_init = save_group(obs_id, configs_init, dets, context_init, subdir='temp')
+            else:
+                outputs_init = [obs_id, dets]
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id, tags=True)['tags'])
             aman.wrap('tags', tags)
@@ -1004,15 +1095,24 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             # If a single group fails we don't log anywhere just mis an entry in the db.
             return success, [obs_id, dets], [obs_id, dets], None
 
-        logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
-        proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
+        if save_proc_aman:
+            logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
+            proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
+
+            if save_archive:
+                cleanup_mandb(error, outputs_init, configs_init,
+                              logger=logger, overwrite=overwrite)
 
         if configs_proc is None:
             return error, outputs_init, [obs_id, dets], aman
         else:
             try:
-                outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+                if save_proc_aman:
+                    outputs_proc = save_group(obs_id, configs_proc, dets, context_proc, subdir='temp_proc')
+                else:
+                    outputs_proc = [obs_id, dets]
                 init_fields = aman.preprocess._fields.copy()
+                init_fields.pop('valid_data', None)
                 logger.info(f"Generating new dependent preproc db entry for {obs_id} {dets}")
                 # pipeline for processing config
                 pipe_proc = Pipeline(configs_proc["process_pipe"], plot_dir=configs_proc["plot_dir"], logger=logger)
@@ -1042,9 +1142,16 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 # If a single group fails we don't log anywhere just mis an entry in the db.
                 return success, [obs_id, dets], [obs_id, dets], None
 
-            logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-            proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+            if save_proc_aman:
+                logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
+                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
 
+                if save_archive:
+                    cleanup_mandb(error, outputs_proc, configs_proc,
+                                  logger=logger, overwrite=overwrite)
+
+            if 'valid_data' in aman.preprocess:
+                aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman)
 
             return error, outputs_init, outputs_proc, aman
@@ -1105,25 +1212,24 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
 
         src_file = outputs['temp_file']
 
-        logger.debug(f"Source file: {src_file}")
-        logger.debug(f"Destination file: {dest_file}")
+        logger.debug(f"Copying from {src_file} to {dest_file}")
 
         with h5py.File(dest_file,'a') as f_dest:
             with h5py.File(src_file,'r') as f_src:
                 for dts in f_src.keys():
-                    logger.debug(f"\t{dts}")
                     # If the dataset or group already exists, delete it to overwrite
                     if overwrite and dts in f_dest:
                         del f_dest[dts]
                     f_src.copy(f_src[f'{dts}'], f_dest, f'{dts}')
                     for member in f_src[dts]:
-                        logger.debug(f"\t{dts}/{member}")
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
         logger.info(f"Saving to database under {outputs['db_data']}")
         db = get_preprocess_db(configs, group_by, logger)
         if len(db.inspect(outputs['db_data'])) == 0:
             db.add_entry(outputs['db_data'], h5_path)
+        # make sure we close the db each time
+        db.conn.close()
         os.remove(src_file)
     elif error == 'load_success':
         return

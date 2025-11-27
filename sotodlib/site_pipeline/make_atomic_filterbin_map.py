@@ -93,6 +93,9 @@ class Cfg:
     wn_label: str
         Path where to find the white noise per det by the
         preprocessing
+    apply_wobble: bool
+        Correct wobble deflection. This requires
+        aman.wobble_params metadata in the context
     center_at: str
     max_dets: int
     fixed_time: int
@@ -134,7 +137,7 @@ class Cfg:
         center_at: Optional[str] = None,
         max_dets: Optional[int] = None,
         fixed_time: Optional[int] = None,
-        min_dur: Optional[int] = None,
+        min_dur: Optional[int] = 300,
         verbose: int = 0,
         quiet: int = 0,
         window: Optional[float] = None,
@@ -142,7 +145,8 @@ class Cfg:
         dtype_map: str = 'float64',
         unit: str = 'K',
         use_psd: bool = True,
-        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise'
+        wn_label: str = 'preprocess.noiseQ_mapmaking.std',
+        apply_wobble: bool = True
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -180,6 +184,7 @@ class Cfg:
         self.unit = unit
         self.use_psd = use_psd
         self.wn_label = wn_label
+        self.apply_wobble = apply_wobble
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -317,7 +322,7 @@ def main(
         errlog.append( os.path.join(os.path.dirname(
             preproc_local['archive']['index']), 'errlog.txt') )
 
-
+    args.query += f" and duration>{args.min_dur}"
     if (args.update_delay is not None):
         min_ctime = int(time.time()) - args.update_delay*86400
         args.query += f" and timestamp>={min_ctime}"
@@ -332,10 +337,10 @@ def main(
         obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
             context_obj, args.query, nset=args.nset, wafer=args.wafer,
             freq=args.freq, ntod=args.ntod, tods=args.tods,
-            fixed_time=args.fixed_time, mindur=args.min_dur)
+            fixed_time=args.fixed_time, min_dur=args.min_dur)
     except mapmaking.NoTODFound as err:
         L.exception(err)
-        exit(1)
+        exit(0)
     L.info(f'Running {len(obslists)} maps after build_obslists')
 
     split_labels = []
@@ -408,6 +413,12 @@ def main(
         else:
             preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
             preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False)
+
+    # remove datasets from final archive file not found in db
+    preprocess_util.cleanup_archive(preprocess_config[0], L)
+    if len(preprocess_config) > 1:
+        preprocess_util.cleanup_archive(preprocess_config[1], L)
+
     run_list = []
     for oi, ol in enumerate(obslists_arr):
         pid = ol[0][3]
@@ -467,7 +478,8 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,) for r in run_list]
+            wn_label=args.wn_label,apply_wobble=args.apply_wobble)
+            for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:

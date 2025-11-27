@@ -311,7 +311,7 @@ def get_wcs_kernel(proj, ra=None, dec=None, res=None):
 
 
 def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
-                  focal_plane=None, sight=None, rot=None, unwrap=False):
+                  focal_plane=None, sight=None, rot=None):
     """Find a geometry (in the sense of enmap) based on wcs_kernel that is
     big enough to contain all data from tod.  Returns (shape, wcs).
 
@@ -356,35 +356,58 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
 
-    if unwrap:
-        # Handle sky wrapping, so a tod straddling the wraparound point
-        # doesn't give a 360 degree wide, mostly empty geometry. This
-        # is appropriate for finding the footprint of a few tods or
-        # a small patch, but for a full-width survey it could introduce
-        # more wrapping problems than it solves
-        planar[...,0] = utils.rewind(planar[...,0], ref=planar[0,0,0])
+    # planar is now [ndet,nsamp,{ira,idec}] in intermediate
+    # coordinates in radians. These will be 0 at the
+    # reference point, and span at most [-pi,pi] in ira
+    # and [-pi/2,pi/2] in idec
 
-    # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
-    delts  = wcs_kernel.wcs.cdelt * DEG
-    ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    # Sometimes a patch will end up straddling the edege of the
+    # map. For example, for a standard CAR projection with a
+    # reference point at ra=dec=0, a patch centered on ra=180
+    # would be half on one side of the map, half on the other,
+    # with a wide stretch of nothing between. For most projections
+    # there's nothing we can do about this, but for the special case
+    # of non-oblique cylindrical projections, we can modify crval
+    # and crpix to construct a compatible pixelization centered on
+    # the patch center.
+    recenter = wcsutils.is_separable(wcs_kernel)
+    if recenter:
+        # First part of recentering:
+        # Unwind each detector in ra to avoid angle jumps, letting
+        # us measure the actual extent of the patch.
+        planar[:,:,0] = utils.unwind(planar[:,:,0])
+        # Harmonize detectors. This assumes that the detectors won't
+        # be more than 180° away from each other at any given time
+        offs = np.round((planar[:,0,0]-planar[0,0,0])/(2*np.pi))*(2*np.pi)
+        planar[:,:,0] -= offs[:,None]
+
+    # Go from intermediate coordinates to pixel coordiantes.
+    # We add crpix because planar is relative to the ref-point.
+    # NB! This makes it 1-based!
+    delts   = wcs_kernel.wcs.cdelt * DEG
+    pixbox  = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    pixbox += wcs_kernel.wcs.crpix
     del planar
-
-    # These planar ranges are in units of pixels away from the
-    # reference point.  The reference point is not necessarily on a
-    # pixel center -- that depends on whether crpix is an integer.  So
-    # transform ranges by +(crpix - 1), making them relative to the
-    # bottom left pixel of wcs_kernel.  Note the -1 here accounts for
-    # FITS numbering of pixels starting at (1, 1).
-    ranges += (wcs_kernel.wcs.crpix - 1)
-
-    # Round ranges, which in pixel offset units, to nearest integer.
-    corners = utils.nint(ranges)
-
-    # Start a new WCS. Adjust crpix to put our footprint in the
-    # bottom-left pixel.
+    # Use these to construct a wcs with lower-left corner
+    # as close to pixbox[0] as possible. We don't want to
+    # change the pixel grid alignment though, so round to
+    # nearest whole pixel
+    p1, p2 = utils.floor(pixbox)
     w = wcs_kernel.deepcopy()
-    w.wcs.crpix -= corners[0]
-    shape = tuple(corners[1] - corners[0] + 1)[::-1]
+    # Adjust crpix so p1 → 1.
+    w.wcs.crpix -= p1-1
+    # If we cover the whole width of the sky, even after unwrapping,
+    # then this might end up being 1 pixel too wide, giving a sky
+    # slightly > 360° which can cause some minor problems.
+    # Can't remove the +1 though, as that would sometimes chop off
+    # a pixel from the exposed area. Either just ignore, since
+    # this is a hypothetical case very unlikely to actually happen,
+    # or add a special case. NB! This case *will* trigger regularly
+    # due to wrapping if recentering is turned off.
+    shape = (p2-p1+1)[::-1]
+    # Make sure wcs crval follows so3g pointing matrix assumptions
+    shape, w = normalize_geometry(shape, w)
+
     return (shape, w)
 
 
@@ -710,3 +733,76 @@ class ScalarLastQuat(np.ndarray):
             temp[..., 1:] = self[..., :3]
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
+
+def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
+    """
+    Constructs a deflected CelestialSightLine using HWP-synchronous
+    pointing correction using combined wobble metadata that contains 
+    both amp and phase fields.
+    
+    This function will raise ValueError unless all detectors belong to a single
+    wafer and frequency band. It extracts the corresponding deflection amplitude
+    and phase from the metadata, computes the wobble correction quaternion, and
+    applies it to the boresight pointing.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager for the observation, must include hwp_angle, timestamps, 
+        and boresight.az/el, as well as det_info with wafer and band info.
+
+    wobble_meta : AxisManager
+        Metadata tree containing both amp and phase fields under
+        wobble_meta.{amp, phase}
+
+    site : str
+        Observatory site identifier for sightline generation (default 'so').
+
+    weather : str
+        Atmospheric condition tag for sightline model (default 'typical').
+
+    Returns
+    -------
+    sight : CelestialSightLine
+        The sightline with the wobble correction quaternion applied.
+    """
+    wafer_slots = np.unique(aman.det_info.wafer_slot)
+    bands = np.unique(aman.det_info.wafer.bandpass)
+
+    if len(wafer_slots) != 1 or len(bands) != 1:
+        raise ValueError("Detectors span multiple wafer_slots or bands.")
+    # the amp and phase are the same for a given wafer, so we can take any of them, in this case for detector index 0
+    # !!!!! this won't work for mixing more than one wafer.
+    # the metadata has amplitudes in arcmin, and phases in radians
+    amp = wobble_meta.amp[0]/60.*np.pi/180.0
+    phase = wobble_meta.phase[0]
+
+    dxi = amp * np.cos(aman.hwp_angle - phase)
+    deta = -amp * np.sin(aman.hwp_angle - phase)
+    deflq = so3g.proj.quat.rotation_xieta(xi=dxi, eta=deta)
+
+    sight = so3g.proj.CelestialSightLine.az_el(
+        aman.timestamps,
+        aman.boresight.az,
+        aman.boresight.el,
+        roll=aman.boresight.roll,
+        weather=weather,
+        site=site,
+    )
+    sight.Q = sight.Q * ~deflq
+    return sight
+
+def normalize_geometry(shape, wcs):
+    # Can't freely change wcs for non-separable geometries
+    # (so non-cylindrical ones), as this would change the geometry
+    # in an incompatible way
+    if not wcsutils.is_separable(wcs): return shape, wcs
+    # The pointing matrix assumes that crval ra is in [-180,180],
+    # and that all points are within 180° of this
+    wcs    = wcs.deepcopy()
+    x_mid  = shape[-1]/2+1
+    ra_mid = wcs.wcs.crval[0] + (x_mid-wcs.wcs.crpix[0])*wcs.wcs.cdelt[0]
+    ra_mid = utils.rewind(ra_mid, ref=0, period=360)
+    wcs.wcs.crpix[0] = x_mid
+    wcs.wcs.crval[0] = ra_mid
+    return shape, wcs

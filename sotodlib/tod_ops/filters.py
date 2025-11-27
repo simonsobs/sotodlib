@@ -91,6 +91,10 @@ def fourier_filter(tod, filt_function,
         signal = tod[signal_name]
     signal = np.atleast_2d(signal)
 
+    if (signal.dtype != "float32"):
+        logger.warn(f'fourier_filter: signal dtype {signal.dtype} is not float32. '
+                    f'fourier_filter will demote to float32.')
+
     if isinstance(filt_function, identity_filter):
         logger.info('fourier_filter: filt_function is identity; skipping FFT.')
         signal = signal.copy()

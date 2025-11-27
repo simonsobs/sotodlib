@@ -355,12 +355,10 @@ class NmatWhite(Nmat):
 
 class NmatUnit(Nmat):
     """
-    
     This is a noise model that does nothing, equivalent to multiply by a 
     unit noise matrix
-    
     """
-    
+
     def __init__(self, ivar=None):
         self.ivar  = ivar
         self.ready = ivar is not None
@@ -378,7 +376,10 @@ class NmatUnit(Nmat):
         return tod
     def write(self, fname):
         self.check_ready()
-        bunch.write(fname, bunch.Bunch(type="NmatUnit"))
+        data = bunch.Bunch(type="NmatUnit")
+        for field in ["ivar"]:
+            data[field] = getattr(self, field)
+        bunch.write(fname, data)
     @staticmethod
     def from_bunch(data): 
         return NmatUnit(ivar=data.ivar)

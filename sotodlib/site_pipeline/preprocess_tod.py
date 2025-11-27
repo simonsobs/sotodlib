@@ -2,7 +2,7 @@ import os
 import yaml
 import time
 import logging
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, List
 import numpy as np
 import argparse
 import traceback
@@ -134,6 +134,8 @@ def preprocess_tod(obs_id,
     else:
         make_lmsi = False
 
+    new_plots = None
+
     n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -180,7 +182,7 @@ def preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        if os.path.exists(new_plots):
+        if new_plots is not None and os.path.exists(new_plots):
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
@@ -228,9 +230,10 @@ def load_preprocess_tod_sim(obs_id, sim_map,
     configs, context = pp_util.get_preprocess_context(configs, context)
     if dets is not None:
         meta.restrict("dets", dets)
-    meta = pp_util.load_preprocess_det_select(
-        obs_id, configs=configs, context=context, meta=meta, logger=logger
+    det_vals = pp_util.load_preprocess_det_select(
+        obs_id, configs=configs, context=context, logger=logger
     )
+    meta.restrict("dets", [d for d in meta.dets.vals if d in det_vals])
 
     if meta.dets.count == 0:
         logger.info(f"No detectors left after cuts in obs {obs_id}")
@@ -322,7 +325,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           min_ctime: Optional[int] = None,
           max_ctime: Optional[int] = None,
           update_delay: Optional[int] = None,
-          tags: Optional[str] = None,
+          tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
@@ -348,6 +351,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
                             subdir='temp', remove=overwrite)
 
+    # remove datasets from final archive file not found in db
+    pp_util.cleanup_archive(configs, logger)
+
     run_list = []
 
     if overwrite or not os.path.exists(configs['archive']['index']):
@@ -356,6 +362,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
+
         for obs in obs_list:
             x = db.inspect({'obs:obs_id': obs["obs_id"]})
             if x is None or len(x) == 0:
@@ -394,11 +401,13 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         if db_datasets:
             if err is None:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
+                logger.info(f'Processing future result')
                 for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                    pp_util.cleanup_mandb(err, db_dataset, configs,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+                pp_util.cleanup_mandb(err, db_datasets, configs,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
@@ -410,7 +419,7 @@ def main(configs: str,
          min_ctime: Optional[int] = None,
          max_ctime: Optional[int] = None,
          update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
+         tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,

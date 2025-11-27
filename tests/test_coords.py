@@ -212,8 +212,15 @@ class CoordsUtilsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             coords.helpers.get_focal_plane_cover(xieta=xy)
 
+    def test_source_pos_ephem(self):
+        """
+        Test getting the position of a Solar System object.
+        """
+        t = 1.7e9
+        pos1 = coords.planets.get_source_pos('jupiter', t)
+        pos1 = coords.planets.get_source_azel('jupiter', t)
 
-    def test_source_pos(self):
+    def test_source_pos_fixed(self):
         """
         Test getting the position of a fixed source.
         """
@@ -229,6 +236,8 @@ class CoordsUtilsTest(unittest.TestCase):
         self.assertEqual(pos1[0], pos2[0])
         self.assertEqual(pos1[1], pos2[1])
 
+        # This doesn't work but it probably should...
+        #coords.planets.get_source_azel("J1000-1000", t)
             
 
 class OpticsTest(unittest.TestCase):
