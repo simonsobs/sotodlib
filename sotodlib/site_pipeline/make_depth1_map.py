@@ -174,6 +174,17 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     union_pixbox = np.array([np.min(pixboxes[:,0],0)-pad,np.max(pixboxes[:,1],0)+pad])
     # Use this to construct the output geometry
     shape = union_pixbox[1]-union_pixbox[0]
+    # Cap xshape to nphi. To see why, consider this example:
+    # Sky width: 100
+    # box 0:   0  30
+    # box 1: -40  10
+    # box 2:  20  70
+    # box 3:  45 110
+    # union: -40 110: Wider than the whole sky!
+    # But since we use union_pixbox[0] as the zero-pixel in
+    # our output geometry, this overflow just results in
+    # unhittable pixels for x >= nphi, which we can just chop off here
+    shape[-1] = min(shape[-1], nphi)
     wcs   = ref_wcs.deepcopy()
     wcs.wcs.crpix -= union_pixbox[0,::-1]
     # Make sure wcs crval follows so3g pointing matrix assumptions
