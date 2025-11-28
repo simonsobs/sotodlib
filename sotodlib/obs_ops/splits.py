@@ -174,8 +174,30 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
         split_aman.wrap('2f_avg', np.nanmean(a2), [(0, 'dets')])
     # Left/right subscans
     if 'turnaround_flags' in proc_aman:
-        fm.wrap('scan_left', proc_aman.turnaround_flags.left_scan)
-        fm.wrap('scan_right', proc_aman.turnaround_flags.right_scan)
+        left  = proc_aman.turnaround_flags.left_scan
+        right = proc_aman.turnaround_flags.right_scan
+
+        ndets, nsamps = aman.dets.count, aman.samps.count
+
+        # If these are so3g RangesMatrix, convert to bool arrays.
+        if hasattr(left,  'mask') and not isinstance(left,  np.ndarray):
+            left  = left.mask()   # -> shape (ndets, nsamps)
+        if hasattr(right, 'mask') and not isinstance(right, np.ndarray):
+            right = right.mask()  # -> shape (ndets, nsamps)
+
+        left  = np.asarray(left,  dtype=bool)
+        right = np.asarray(right, dtype=bool)
+
+        # Sanity checks (objects are already (dets,samps))
+        if left.ndim != 2 or right.ndim != 2:
+            raise ValueError(f"turnaround flags must be 2D (dets,samps); "
+                            f"got left={left.shape} right={right.shape}")
+        if left.shape != (ndets, nsamps) or right.shape != (ndets, nsamps):
+            raise ValueError(f"turnaround flags shape mismatch: "
+                            f"expected {(ndets, nsamps)}, got left={left.shape}, right={right.shape}")
+
+        fm.wrap('scan_left',  left,  [(0, 'dets'), (1, 'samps')])
+        fm.wrap('scan_right', right, [(0, 'dets'), (1, 'samps')])
 
     for k in split_cfg.keys():
         split_aman.wrap(f'{k}_threshold', split_cfg[k])
