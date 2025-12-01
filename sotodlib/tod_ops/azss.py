@@ -8,6 +8,38 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _check_azcoverage(aman, flags, az=None, coverage_threshold=0.95,
+                      exclude_turnarounds=True):
+    """
+    Check if the az coverage is sufficient for fitting.
+    
+    Parameters
+    ----------
+    az: array-like
+        A 1D numpy array representing the azimuth angles.
+    flags: RangesMatrix
+        Flags indicating invalid samples.
+    coverage_threshold: float, optional
+        Threshold for azimuth coverage to consider it sufficient. Default is 0.95.
+    exclude_turnarounds: bool, optional
+        Whether to exclude turnaround regions in the azimuth coverage check. Default is True.
+
+    Returns
+    -------
+    bad_dets: boolean array
+        A boolean array indicating which detectors have insufficient azimuth coverage.
+    coverages: float array
+        An array of azimuth coverage fractions for each detector.
+    """
+    if az is None:
+        az = aman.boresight.az
+    if exclude_turnarounds:
+        tot_range = np.ptp(az[~aman.flags.turnarounds.mask()])
+    else:
+        tot_range = np.ptp(az)
+    coverages = np.array([np.ptp(az[fl])/tot_range if sum(fl) != 0 else 0 for fl in ~flags.mask()])
+    return coverages < coverage_threshold, coverages
+
 
 def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
               apodize_edges=True, apodize_edges_samps=1600,
@@ -153,7 +185,8 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
              method='interpolate', max_mode=None, subtract_in_place=False,
              merge_stats=True, azss_stats_name='azss_stats',
-             merge_model=True, azss_model_name='azss_model'):
+             merge_model=True, azss_model_name='azss_model', coverage_threshold=0.95,
+             exclude_turnarounds=True, return_det_mask=True):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
     **NOTE:** This function does not modify the ``signal`` unless ``subtract_in_place = True``.
@@ -213,6 +246,12 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         Boolean flag indicating whether to merge the azss model with the aman. Defaults to True.
     azss_model_name: string, optional
         The name to assign to the merged azss model. Defaults to 'azss_model'.
+    coverage_threshold: float, optional
+        Minimum azimuth coverage fraction required. Default 0.8
+    exclude_turnarounds: bool, optional
+        Exclude turnarounds when checking coverage. Default True
+    return_det_mask: bool, optional
+        If True, return detector mask along with model. Default False
 
     Returns
     -------
@@ -271,8 +310,16 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
     azss_stats.wrap('binned_signal', binned_signal, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('binned_signal_sigma', binned_signal_sigma, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('uniform_binned_signal_sigma', uniform_binned_signal_sigma, [(0, 'dets')])
-
-    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange)
+    if return_det_mask:
+        bad_dets, coverages = _check_azcoverage(aman, flags=flags, az=az, 
+                                                coverage_threshold=coverage_threshold,
+                                                exclude_turnarounds=exclude_turnarounds)
+        azss_stats.wrap('bad_dets', bad_dets, [(0, 'dets')])
+        azss_stats.wrap('az_coverage', coverages, [(0, 'dets')])
+    else:
+        bad_dets = None
+    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange,
+                                   zero_bad_dets=bad_dets)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -283,9 +330,34 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
     return azss_stats, model_sig_tod
 
 
-def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=None, azrange=None):
+def get_azss_model(aman, azss_stats, az=None, method='interpolate',
+                   max_mode=None, azrange=None, zero_bad_dets=None):
     """
     Function to return the azss template for subtraction given the azss_stats AxisManager
+
+    Parameters
+    ----------
+    aman: AxisManager
+        The axis manager containing the signal
+    azss_stats: AxisManager
+        Contains binned azss statistics  
+    az: array-like, optional
+        Azimuth array. If None, uses aman.boresight.az
+    method: str
+        Method for modeling: 'interpolate' or 'fit'
+    max_mode: int, optional
+        Maximum Legendre mode for 'fit' method
+    azrange: list, optional
+        Azimuth range for fitting
+    zero_bad_dets: bool, optional
+        If True, zero the model for bad detectors with insufficient az coverage.
+        
+    Returns
+    -------
+    model: array-like
+        AZSS model for each detector
+    good_dets_mask: array-like (optional)
+        Boolean mask of detectors with sufficient coverage (if return_det_mask=True)
     """
     if az is None:
         az = aman.boresight.az
@@ -304,6 +376,9 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate', max_mode=Non
     if np.any(~np.isfinite(model)):
         logger.warning('azss model has nan. set zero to nan but this may make glitch')
         model[~np.isfinite(model)] = 0
+    
+    if zero_bad_dets:
+        model[zero_bad_dets, :] = 0
     return model
 
 

@@ -1176,6 +1176,21 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         return aman, proc_aman
+    
+    def select(self, meta, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if 'bad_dets' in meta[self.azss_stats_name]:
+            keep = ~meta[self.azss_stats_name]['bad_dets']
+        else:
+            print('No bad_dets field in azss_stats, skipping det selection.')
+            return meta
+        
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 
 class SubtractAzSSTemplate(_Preprocess):
