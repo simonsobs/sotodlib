@@ -29,10 +29,10 @@ jobs:
           - os: ubuntu-latest
             python: "3.12"
             pyshort: "312"
-          - os: macos-14
+          - os: macos-15
             python: "3.10"
             pyshort: "310"
-          - os: macos-14
+          - os: macos-15
             python: "3.12"
             pyshort: "312"
     steps:
