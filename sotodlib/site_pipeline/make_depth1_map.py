@@ -404,9 +404,9 @@ def write_depth1_info(oname, info):
     bunch.write(oname, info)
 
 def main(config_file=None, defaults=defaults, **args):
-    
+
     cfg = dict(defaults)
-    
+
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
         cfg_from_file = _get_config(config_file)
@@ -416,7 +416,7 @@ def main(config_file=None, defaults=defaults, **args):
 
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
-    
+
     # Certain fields are required. Check if they are all supplied here
     required_fields = ['area','context']
     for req in required_fields:
@@ -443,7 +443,7 @@ def main(config_file=None, defaults=defaults, **args):
     wcs = wcsutils.WCS(wcs.to_header())
     # Set shape to None to allow map to fit these TODs exactly.
     #shape = None
-    
+
     comps = args['comps']
     ncomp = len(comps)
     dtype_tod = np.float32
@@ -520,7 +520,7 @@ def main(config_file=None, defaults=defaults, **args):
         map_calculate = map_to_calculate(map_name=map_name, inds_to_use=my_inds, mapcat_settings=mapcat_settings)
         if not map_calculate:
             continue
-        
+
         # 3. Write out the depth1 metadata
         if comm_intra.rank == 0:
             tods = commit_depth1_tods(map_name=map_name, obslist=obslist, obs_infos=obs_infos, band=band, inds=my_inds,
