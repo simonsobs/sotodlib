@@ -245,35 +245,17 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
         utils.deslope(obs.signal, w=5, inplace=True)
     return obs
 
-def maps_to_calculate(obskeys: List[Tuple[int, str, str]], obslists: Dict[Tuple[int, str, str], List[Tuple[str, str, str, int]]],
-                      periods: List[List[float]],
-                      obs_infos: List[Tuple[str, float, float, float, int, str, str, str, str, str, str, int, str, float, float, float, float, float,  float, float, str, str]],
-                      mapcat_settings: Dict[str,str]):
-    final_obskeys = []
-    final_obslists = {}
-    final_periods = []
-    final_obs_infos = []
-    obs_infos_dtype = obs_infos.dtype
-    for oi in range(len(obskeys)):
-        print(f"Trying {oi}")
-        pid, detset, band = obskeys[oi]
-        obs_to_use = len(obslists[obskeys[oi]])
-        t = np.floor(periods[pid,0]).astype(int)
-        t5 = ("%05d" % t)[:5]
-        map_name = f"{t5}/depth1_{t:010d}_{detset}_{band}"
-        with Settings(**mapcat_settings).session() as session:
-            existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
-            map_tods = existing_map.tods if existing_map else []
+def map_to_calculate(map_name: str, inds_to_use: List[int], mapcat_settings: Dict[str,str])->bool:
+
+    with Settings(**mapcat_settings).session() as session:
+        existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
+        map_tods = existing_map.tods if existing_map else []
         
         total_tods = np.sum([map_tod.wafer_count for map_tod in map_tods])
-        if total_tods < obs_to_use:
-            final_obskeys.append(obskeys[oi])
-            final_obslists[obskeys[oi]] = obslists[obskeys[oi]]
-            obs_id_set = {x[0] for x in obslists[obskeys[oi]]}
-            if not np.isin(periods[pid], final_periods).any():
-                final_periods.append(periods[pid])
-            final_obs_infos += [obs_info for obs_info in obs_infos if obs_info["obs_id"] in obs_id_set]
-    return final_obslists, final_obskeys, np.array(final_periods), np.array(final_obs_infos, dtype=obs_infos_dtype)
+
+        if total_tods < len(inds_to_use):
+            return True
+    return False
 
 def commit_depth1_tods(map_name:str, obslist: Dict[Tuple[int, str, str], List[Tuple[str, str, str, int]]], obs_infos: List[Tuple[str, float, float, float, int, str, str, str, str, str, str, int, str, float, float, float, float, float,  float, float, str, str]],
                        band: str, inds: List[int], mapcat_settings: Dict[str, str]) -> List[TODDepthOneTable]:
@@ -491,8 +473,6 @@ def main(config_file=None, defaults=defaults, **args):
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'],per_tube=True)
-    
-    obslists, obskeys, periods, obs_infos = maps_to_calculate(obskeys=obskeys, obslists=obslists, periods=periods, obs_infos=obs_infos, mapcat_settings=mapcat_settings)
    
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
@@ -519,18 +499,14 @@ def main(config_file=None, defaults=defaults, **args):
             # 2. prune tods that have no valid detectors
             valid     = np.where(my_costs>0)[0]
             my_tods, my_inds, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
-            all_inds  = utils.allgatherv(my_inds,     comm_intra)
-            all_costs = utils.allgatherv(my_costs,    comm_intra)
+            all_inds  = utils.allgatherv(my_inds, comm_intra)
+            all_costs = utils.allgatherv(my_costs, comm_intra)
             if len(all_inds)  == 0: raise DataMissing("No valid tods")
             if sum(all_costs) == 0: raise DataMissing("No valid detectors in any tods")
             # 2. estimate the scan profile and footprint. The scan profile can be done
             #    with a single task, but that task might not be the first one, so just
             #    make it mpi-aware like the footprint stuff
             subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
-            # 3. Write out the depth1 metadata
-            if comm_intra.rank == 0:
-                tods = commit_depth1_tods(map_name=map_name, obslist=obslist, obs_infos=obs_infos, band=band, inds=my_inds,
-                                          mapcat_settings=mapcat_settings)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
             handle_empty(prefix, tag, comm_intra, e, L)
@@ -540,6 +516,15 @@ def main(config_file=None, defaults=defaults, **args):
         my_inds   = all_inds[utils.equal_split(all_costs, comm_intra.size)[comm_intra.rank]]
         comm_good = comm_intra.Split(len(my_inds) > 0)
         if len(my_inds) == 0: continue
+
+        map_calculate = map_to_calculate(map_name=map_name, inds_to_use=my_inds, mapcat_settings=mapcat_settings)
+        if not map_calculate:
+            continue
+        
+        # 3. Write out the depth1 metadata
+        if comm_intra.rank == 0:
+            tods = commit_depth1_tods(map_name=map_name, obslist=obslist, obs_infos=obs_infos, band=band, inds=my_inds,
+                                        mapcat_settings=mapcat_settings)
         try:
             # 5. make the maps
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
