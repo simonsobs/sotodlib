@@ -20,7 +20,7 @@ from ...core.hardware import LAT_COROTATOR_OFFSET
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
 
-def main():
+def main(opts=None):
     parser = argparse.ArgumentParser(
         description="This program measures the median offset of subset of "
         "detectors from boresight.",
@@ -71,7 +71,7 @@ def main():
     )
     parser.set_defaults(corotate_lat=True)
 
-    args = parser.parse_args()
+    args = parser.parse_args(args=opts)
 
     hw = hardware.sim_nominal()
 
