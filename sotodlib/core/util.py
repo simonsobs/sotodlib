@@ -3,6 +3,11 @@ import h5py
 import time
 
 
+class H5LockTimeoutError(Exception):
+    """Raised when an HDF5 file cannot be opened due to lock timeouts."""
+    pass
+
+
 class H5ContextManager:
     """
     Class to open an HDF5 file with retry logic on file locking.  This class
@@ -53,8 +58,10 @@ class H5ContextManager:
                 if attempt + 1 < self.max_attempts:
                     time.sleep(self.delay)
                 else:
-                    raise RuntimeError(f"Failed to open {self.filename} after"
-                                   f" {self.max_attempts} attempts") from e
+                    raise H5LockTimeoutError(
+                        f"Failed to open {self.filename} after "
+                        f"{self.max_attempts} attempts"
+                    ) from e
             except Exception as e:
                 # Other errors should fail immediately
                 raise e
