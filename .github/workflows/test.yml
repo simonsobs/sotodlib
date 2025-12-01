@@ -17,6 +17,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       SOTODLIB_TEST_DISABLE_PLOTS: 1
+      CC: gcc-14
+      CXX: gcc-14
+      FC: gfortran-14
     strategy:
       # Ensure that a test continues even if another fails.  Useful for
       # debugging multiple problems in parallel.
