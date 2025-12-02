@@ -536,6 +536,8 @@ def main(config_file=None, defaults=defaults, **args):
 
         map_calculate = map_to_calculate(map_name=map_name, inds_to_use=my_inds, mapcat_settings=mapcat_settings)
         if not map_calculate:
+            if comm_intra.rank == 0:
+                L.info(f"Map {map_name} already calculated.")
             continue
 
         # 3. Write out the depth1 metadata
