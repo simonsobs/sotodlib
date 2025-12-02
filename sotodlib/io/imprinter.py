@@ -1541,8 +1541,8 @@ class Imprinter:
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             if np.any(checks):
-                self.logger.warning(
-                    f"Found {sum(checks)} channels without readout_id. Were fixed tones running?"
+                self.logger.info(
+                    f"Found {sum(checks)} channels without readout_id. Assume fixed tones are running."
                 )
             # make sure all rchannel ids are sorted
             assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
