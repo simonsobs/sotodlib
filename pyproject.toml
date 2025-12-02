@@ -29,6 +29,7 @@ dependencies = [
   "psycopg2-binary",
   "lmfit",
   "flacarray>=0.3.4",
+  "h5py",
 ]
 dynamic=["version"]
 classifiers = [
@@ -56,6 +57,7 @@ site_pipeline = [
   "alphashape",
   "slack-sdk",
   "mapcat",
+  "requests",
 ]
 tests = [
   "socs",
@@ -74,6 +76,10 @@ toast_so_sim = "sotodlib.toast.scripts.so_sim:cli"
 toast_so_map = "sotodlib.toast.scripts.so_map:cli"
 toast_so_transfer = "sotodlib.toast.scripts.so_transfer:cli"
 toast_so_convert = "sotodlib.toast.scripts.so_convert:cli"
+toast_so_sim_telescope = "sotodlib.toast.scripts.so_sim_telescope:main"
+so-toast-run = "sotodlib.toast.scripts.so_run:cli"
+so-toast-stats = "sotodlib.toast.scripts.so_stats:cli"
+so-toast-coadd = "sotodlib.toast.scripts.so_coadd:cli"
 get_wafer_offset = "sotodlib.toast.scripts.get_wafer_offset:main"
 
 [tool.versioneer]

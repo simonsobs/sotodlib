@@ -175,15 +175,28 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     # Could be done more generally, but would be much more involved, and this should be
     # good enough
     nphi     = utils.nint(np.abs(360/ref_wcs.wcs.cdelt[0]))
-    widths   = pixboxes[:,1,0]-pixboxes[:,0,0]
-    pixboxes[:,0,0] = utils.rewind(pixboxes[:,0,0], ref=pixboxes[0,0,0], period=nphi)
-    pixboxes[:,1,0] = pixboxes[:,0,0] + widths
+    widths   = pixboxes[:,1,1]-pixboxes[:,0,1]
+    pixboxes[:,0,1] = utils.rewind(pixboxes[:,0,1], ref=pixboxes[0,0,1], period=nphi)
+    pixboxes[:,1,1] = pixboxes[:,0,1] + widths
     # It's now safe to find the total pixel bounding box
     union_pixbox = np.array([np.min(pixboxes[:,0],0)-pad,np.max(pixboxes[:,1],0)+pad])
     # Use this to construct the output geometry
     shape = union_pixbox[1]-union_pixbox[0]
+    # Cap xshape to nphi. To see why, consider this example:
+    # Sky width: 100
+    # box 0:   0  30
+    # box 1: -40  10
+    # box 2:  20  70
+    # box 3:  45 110
+    # union: -40 110: Wider than the whole sky!
+    # But since we use union_pixbox[0] as the zero-pixel in
+    # our output geometry, this overflow just results in
+    # unhittable pixels for x >= nphi, which we can just chop off here
+    shape[-1] = min(shape[-1], nphi)
     wcs   = ref_wcs.deepcopy()
     wcs.wcs.crpix -= union_pixbox[0,::-1]
+    # Make sure wcs crval follows so3g pointing matrix assumptions
+    shape, wcs = coords.normalize_geometry(shape, wcs)
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
@@ -230,12 +243,12 @@ def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='
         obs.wrap('flags', FlagManager.for_tod(obs))
     if "glitch_flags" not in obs.flags:
         obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0,'dets'),(1,'samps')])
-    
+
     if obs.signal is not None:
         detrend_tod(obs, method='linear')
         utils.deslope(obs.signal, w=5, inplace=True)
         obs.signal = obs.signal.astype(dtype_tod)
-    
+
     if (not nocal) and (obs.signal is not None):
         rms = measure_rms(obs.signal, dt=1/srate)
         if unit=='K':
@@ -250,7 +263,7 @@ def map_to_calculate(map_name: str, inds_to_use: List[int], mapcat_settings: Dic
     with Settings(**mapcat_settings).session() as session:
         existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
         map_tods = existing_map.tods if existing_map else []
-        
+
         total_tods = np.sum([map_tod.wafer_count for map_tod in map_tods])
 
         if total_tods < len(inds_to_use):
@@ -318,6 +331,7 @@ def commit_depth1_map(map_name:str, prefix:str, detset:str, band:str, ctime:floa
 def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None, unit='K', min_dets=50):
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
+
     # Set up our mapmaking equation
     signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
     signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=tiled>0, interpol=interpol, ofmt="")
@@ -468,12 +482,15 @@ def main(config_file=None, defaults=defaults, **args):
     with mapmaking.mark('context'):
         context = Context(args['context'])
 
+    if args['srcsamp']:
+        srcsamp_mask  = enmap.read_map(args['srcsamp'])
+
     if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
     elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'],per_tube=True)
-   
+
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
         obslist = obslists[obskeys[oi]]
@@ -530,7 +547,7 @@ def main(config_file=None, defaults=defaults, **args):
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
                     subshape, subwcs, noise_model, L, preproc, comps=comps, t0=t, comm=comm_good, tag=tag,
                     niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0,
-                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=args['srcsamp'], unit=args['unit'],
+                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=srcsamp_mask, unit=args['unit'],
                     min_dets=args['min_dets'])
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])

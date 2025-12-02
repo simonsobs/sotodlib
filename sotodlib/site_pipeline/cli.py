@@ -55,7 +55,8 @@ from . import (
     update_g3tsmurf_db,
     update_hkdb,
     update_obsdb,
-    make_cosamp_hk
+    make_cosamp_hk,
+    make_coadd_atomic_map
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -77,6 +78,7 @@ ELEMENTS = {
     'update-hkdb': update_hkdb,
     'update-obsdb': update_obsdb,
     'make-cosamp-hk': make_cosamp_hk,
+    'make-coadd-atomic-map': make_coadd_atomic_map
 }
 
 CLI_NAME = 'so-site-pipeline'

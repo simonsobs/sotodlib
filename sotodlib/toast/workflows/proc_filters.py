@@ -298,3 +298,43 @@ def filter_common_mode(job, otherargs, runargs, data):
 
     if job_ops.common_mode_filter.enabled:
         job_ops.common_mode_filter.apply(data)
+
+
+def setup_median_detrend(operators):
+    """Add commandline args and operators for median detrend.
+
+    Args:
+        operators (list):  The list of operators to extend.
+
+    Returns:
+        None
+
+    """
+    operators.append(
+        toast.ops.Detrend(
+            name="median_detrend",
+            method='median',
+            enabled=False,
+        )
+    )
+
+
+@workflow_timer
+def median_detrend(job, otherargs, runargs, data):
+    """Remove median of data across the detectors.
+
+    Args:
+        job (namespace):  The configured operators and templates for this job.
+        otherargs (namespace):  Other commandline arguments.
+        runargs (namespace):  Job related runtime parameters.
+        data (Data):  The data container.
+
+    Returns:
+        None
+
+    """
+    # Configured operators for this job
+    job_ops = job.operators
+
+    if job_ops.median_detrend.enabled:
+        job_ops.median_detrend.apply(data)

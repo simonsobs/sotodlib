@@ -2,7 +2,7 @@ import os
 import yaml
 import time
 import logging
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, List
 import numpy as np
 import argparse
 import traceback
@@ -325,7 +325,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           min_ctime: Optional[int] = None,
           max_ctime: Optional[int] = None,
           update_delay: Optional[int] = None,
-          tags: Optional[str] = None,
+          tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
@@ -401,11 +401,13 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         if db_datasets:
             if err is None:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
+                logger.info(f'Processing future result')
                 for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                    pp_util.cleanup_mandb(err, db_dataset, configs,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+                pp_util.cleanup_mandb(err, db_datasets, configs,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
@@ -417,7 +419,7 @@ def main(configs: str,
          min_ctime: Optional[int] = None,
          max_ctime: Optional[int] = None,
          update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
+         tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,
