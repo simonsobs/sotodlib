@@ -384,8 +384,7 @@ def swap_archive(config, fpath):
     tc = copy.deepcopy(config)
     tc['archive']['policy']['filename'] = os.path.join(os.path.dirname(tc['archive']['policy']['filename']), fpath)
     dname = os.path.dirname(tc['archive']['policy']['filename'])
-    if not(os.path.exists(dname)):
-        os.makedirs(dname)
+    os.makedirs(dname, exist_ok=True)
     return tc
 
 
