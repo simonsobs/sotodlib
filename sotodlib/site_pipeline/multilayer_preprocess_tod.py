@@ -163,16 +163,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 # Did obs_id and group fail in init pipeline
                 failed_jobs = None
                 if jobdb_path is not None:
-                    obs_id = obs['obs_id']
-                    dataset = ""
+                    tags = {}
+                    tags['obs:obs_id'] = obs['obs_id']
                     for gb, g in zip(group_by, group):
-                        if gb == 'detset':
-                            dataset += "_" + g
-                        else:
-                            dataset += "_" + gb + "_" + str(g)
+                        tags['dets:' + gb] = g
                     failed_jobs = jdb.get_jobs(jclass="init",
-                                               tags={"obs:obs_id": obs_id,
-                                                     "dets:dataset": dataset},
+                                               tags=tags,
                                                jstate=["failed"])
                 if not failed_jobs or overwrite:
                     run_list.append((obs, group))
