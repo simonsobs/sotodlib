@@ -39,15 +39,17 @@ def multilayer_preprocess_tod(obs_id: str,
     obs_id: str or ResultSet entry
         obs_id or obs entry that is passed to context.get_obs
     configs_init: str or dict
-        config file or loaded config directory for existing database
+        Config file or loaded config dictionary for first layer database.
     configs_proc: str or dict
-        config file or loaded config directory for processing database
+        Config file or loaded config dictionary for second layer database.
     group: list
-        Group to run
+        The group to be run.  For example, this might be ['ws0', 'f090']
+        if ``group_by`` (specified by the subobs->use key in the preprocess
+        config) is ['wafer_slot', 'wafer.bandpass'].
     overwrite: bool
-        if True, overwrite existing entries in ManifestDb
-    verbosity: log level
-        0 = error, 1 = warn, 2 = info, 3 = debug
+         If True, overwrite contents of temporary h5 files.
+    verbosity: str
+        The log level to use.  0 = error, 1 = warn, 2 = info, 3 = debug.
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -93,15 +95,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     os.makedirs(os.path.dirname(configs_proc['archive']['policy']['filename']),
                 exist_ok=True)
 
-    # init jobdb
-    jobdb_init_path = configs_init.get("jobdb", None)
-    if jobdb_init_path is not None:
-        jdb_init = JobManager(sqlite_file=jobdb_init_path)
-
-    # proc jobdb
-    jobdb_proc_path = configs_proc.get("jobdb", None)
-    if jobdb_proc_path is not None:
-        jdb_proc = JobManager(sqlite_file=jobdb_proc_path)
+    # jobdb
+    jobdb_path = configs_proc.get("jobdb", None)
+    if jobdb_path is not None:
+        jdb = JobManager(sqlite_file=jobdb_path)
 
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog_proc.txt')
@@ -163,26 +160,30 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         for group in groups:
             if 'NC' not in group:
+                # Did obs_id and group fail in init pipeline
                 failed_jobs = None
-                # Did obs_id and group fail in init jobdb
-                failed_jobs = None
-                if jobdb_init_path is not None:
-                    jclass = obs['obs_id']
+                if jobdb_path is not None:
+                    obs_id = obs['obs_id']
+                    dataset = ""
                     for gb, g in zip(group_by, group):
                         if gb == 'detset':
-                            jclass += "_" + g
+                            dataset += "_" + g
                         else:
-                            jclass += "_" + gb + "_" + str(g)
-                    failed_jobs = jdb_init.get_jobs(jclass=jclass, jstate=["failed"])
+                            dataset += "_" + gb + "_" + str(g)
+                    failed_jobs = jdb.get_jobs(jclass="init",
+                                               tags={"obs:obs_id": obs_id,
+                                                     "dets:dataset": dataset},
+                                               jstate=["failed"])
                 if not failed_jobs or overwrite:
                     run_list.append((obs, group))
 
-    # filter by proc jobdb status
-    if jobdb_proc_path is not None:
-        run_list, jobs = pp_util.filter_runlist_by_jobdb(
-            jdb_proc,
-            run_list,
-            group_by,
+    # filter by jobdb status
+    if jobdb_path is not None:
+        run_list, jobs = pp_util.filter_preproc_runlist_by_jobdb(
+            jdb=jdb,
+            jclass="proc",
+            run_list=run_list,
+            group_by=group_by,
             overwrite=overwrite,
             logger=logger
         )
@@ -241,8 +242,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
                               configs_proc, logger, overwrite)
 
-        if jobdb_proc_path is not None:
-            with jdb_proc.locked(job) as j:
+        if jobdb_path is not None:
+            with jdb.locked(job) as j:
                 j.mark_visited()
                 if errors[0] is not None:
                     j.jstate = "failed"

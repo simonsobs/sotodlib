@@ -14,6 +14,7 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
+from sotodlib.site_pipeline.jobdb import JState
 
 from .. import core
 
@@ -47,7 +48,8 @@ class PreprocessErrors:
         return errmsg, tb
 
 
-def filter_runlist_by_jobdb(jdb, run_list, group_by, overwrite=False, logger=None):
+def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
+                                    overwrite=False, logger=None):
     """Given a preprocess_tod or multilayer_preprocess_tod run list, checks
     whether that entry exists in the preprocess jobdb. If it failed or is done
     and overwrite is False, add it to the list of skipped obs_ids.  If it
@@ -59,10 +61,13 @@ def filter_runlist_by_jobdb(jdb, run_list, group_by, overwrite=False, logger=Non
 
     jdb : JobDB
         The preprocessing jobdb class.
+    jclass : str
+        The job name.
     run_list : list
         List of (obs_id, group) tuples.
     group_by : list
-        How grouping is being done for preprocessing.
+        How grouping is being done for preprocessing.  Specified in the
+        preprocessing config through the subobs.use entry.
     overwrite : bool
         Whether or not to overwrite entries in the preprocessing db.
     logger : PythonLogger
@@ -74,7 +79,6 @@ def filter_runlist_by_jobdb(jdb, run_list, group_by, overwrite=False, logger=Non
         Run list with the subset of skipped entries removed.
     jobs : Job
         List of jobs for each entry in the filtered run list.
-
     """
     if logger is None:
         logger = init_logger("preprocess")
@@ -83,38 +87,32 @@ def filter_runlist_by_jobdb(jdb, run_list, group_by, overwrite=False, logger=Non
     jobs = []
 
     for r in run_list:
-        jclass = r[0]["obs_id"]
+        obs_id = r[0]["obs_id"]
+        dataset = ""
         for gb, g in zip(group_by, r[1]):
             if gb == "detset":
-                jclass += f"_{g}"
+                dataset += f"{g}"
             else:
-                jclass += f"_{gb}_{g}"
+                dataset += f"{gb}_{g}"
 
-        # get jobs
-        open_jobs = jdb.get_jobs(jclass=jclass, jstate=["open"], locked=False)
-        failed_jobs = jdb.get_jobs(jclass=jclass, jstate=["failed"], locked=False)
-        done_jobs = jdb.get_jobs(jclass=jclass, jstate=["done"], locked=False)
+        job = jdb.get_jobs(jclass, tags={"obs:obs_id": obs_id,
+                                        "dets:dataset": dataset})
 
-        if open_jobs:
-            job = open_jobs[0]
-
-        elif failed_jobs or done_jobs:
-            if not overwrite:
-                # skip failed or done jobs
-                run_list_skipped.append(r)
-                continue
-
-            revive = failed_jobs[0] if failed_jobs else done_jobs[0]
-
-            with jdb.locked(revive) as j:
-                j.jstate = "open"
-                j.tags["error"] = None
-
-            job = revive
+        if len(job) > 0:
+            with jdb.locked(job[0]) as j:
+                if j.jstate == JState.open:
+                    jobs.append(job[0])
+                elif j.jstate in [JState.done, JState.failed]:
+                    if overwrite == True:
+                        j.jstate = "open"
+                        j.tags["error"] = None
+                        jobs.append(job[0])
+                    else:
+                        run_list_skipped.append(r)
         else:
-            job = jdb.create_job(jclass, tags={"error": None})
-
-        jobs.append(job)
+            jobs.append(jdb.create_job(jclass, tags={"error": None,
+                                              "obs:obs_id": obs_id,
+                                              "dets:dataset": dataset}))
 
     logger.info(f"skipping {len(run_list_skipped)} jobs from jobdb")
     run_list = [r for r in run_list if r not in run_list_skipped]
@@ -403,19 +401,19 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
     Arguments
     ----------
-    obs_id: multiple
+    obs_id : multiple
         Passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
-    configs: string or dictionary
+    configs : string or dictionary
         Config file or loaded config directory
-    context: core.Context
+    context : core.Context
         The Context file to use.
-    dets: dict
+    dets : dict
         Dets to restrict on from info in det_info. See context.get_meta.
-    meta: AxisManager
+    meta : AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
     """
@@ -446,23 +444,23 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
     Arguments
     ----------
-    obs_id: multiple
+    obs_id : multiple
         Passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
-    configs: string or dictionary
+    configs : string or dictionary
         Config file or loaded config directory
-    context: core.Context
+    context : core.Context
         Optional. The Context file to use.
-    dets: dict
+    dets : dict
         Dets to restrict on from info in det_info. See context.get_meta.
-    meta: AxisManager
+    meta : AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    no_signal: bool
+    no_signal : bool
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
     """
@@ -505,26 +503,26 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
     Arguments
     ----------
-    obs_id: multiple
+    obs_id : multiple
         Passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
-    configs_init: string or dictionary
+    configs_init : string or dictionary
         Config file or loaded config directory
-    configs_proc: string or dictionary
+    configs_proc : string or dictionary
         Second config file or loaded config dictionary to load
         dependent databases generated using multilayer_preprocess_tod.py.
-    dets: dict
+    dets : dict
         Dets to restrict on from info in det_info. See context.get_meta.
-    meta: AxisManager
+    meta : AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    no_signal: bool
+    no_signal : bool
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object or None will generate a new one.
-    init_only: bool
+    init_only : bool
         Optional. If True, do not run the dependent pipeline.
     """
 
@@ -537,8 +535,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
-    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init)
+    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc)
 
     for err in (errors_init, errors_proc):
         if err[0] is not None:
@@ -606,28 +604,28 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
     Arguments
     ----------
-    obs_id: multiple
+    obs_id : multiple
         Passed to `context.get_obs` to load AxisManager, see Notes for
         `context.get_obs`
-    configs_init: string or dictionary
+    configs_init : string or dictionary
         Config file or loaded config directory
-    configs_proc: string or dictionary
+    configs_proc : string or dictionary
         Second config file or loaded config dictionary to load
         dependent databases generated using multilayer_preprocess_tod.py.
-    sim_map: numpy.ndmap or enmap.ndmap
+    sim_map : numpy.ndmap or enmap.ndmap
         Input simulated map to be observed
-    meta: AxisManager
+    meta : AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    no_signal: bool
+    no_signal : bool
         If True, signal will be set to None.
         This is a way to get the axes and pointing info without
         the (large) TOD blob.  Not all loaders may support this.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object or None will generate a new one.
-    init_only: bool
+    init_only : bool
         Optional. Whether or not to run the dependent pipeline.
-    t2ptemplate_aman: AxisManager
+    t2ptemplate_aman : AxisManager
         Optional. AxisManager to use as a template for t2p leakage
         deprojection.
     """
@@ -640,8 +638,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, meta=meta)
 
-    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init, context_init)
-    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc, context_proc)
+    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init)
+    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc)
 
     for err in (errors_init, errors_proc):
         if err[0] is not None:
@@ -716,15 +714,15 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
 
     Arguments
     ----------
-    obs_id: str
+    obs_id : str
         Obs id to process or load
-    configs: fpath or dict
+    configs : str or dict
         Filepath or dictionary containing the preprocess configuration file.
-    dets: dict
+    dets : dict
         Dictionary specifying which detectors/wafers to load see ``Context.obsdb.get_obs``.
-    context: core.Context
+    context : core.Context
         Optional. Context object used for data loading/querying.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object or None will generate a new one.
 
     Returns
@@ -766,9 +764,9 @@ def cleanup_archive(configs, logger=None):
 
     Arguments
     ----------
-    configs: fpath or dict
+    configs : str or dict
         Filepath or dictionary containing the preprocess configuration file.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object or None will generate a new one.
     """
 
@@ -812,16 +810,16 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
 
     Arguments
     ----------
-    obs_id: str
+    obs_id : str
         Obs id to process or load
-    configs: fpath or dict
+    configs : str or dict
         Filepath or dictionary containing the preprocess configuration file.
-    dets: dict
+    dets : dict
         Dictionary specifying which detectors/wafers to load see
         ``Context.obsdb.get_obs``.
-    context: core.Context
+    context : core.Context
         Optional. Context object used for data loading/querying.
-    subdir: str
+    subdir : str
         Optional. Subdirectory to save the output files into.  If it does not
         exist, it is created.
 
@@ -829,7 +827,7 @@ def get_preproc_group_out_dict(obs_id, configs, dets, context=None, subdir='temp
     -------
     outputs : dict
         Dictionary including output filename of data file and information for
-        correspondingdatabase entry.
+        corresponding database entry.
     """
 
     if type(configs) == str:
@@ -876,18 +874,18 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     Arguments
     ----------
-    obs_id: str
+    obs_id : str
         Obs id to process or load
-    configs: fpath or dict
+    configs : str or dict
         Filepath or dictionary containing the preprocess configuration file.
-    context: core.Context
+    context : core.Context
         Optional. Context object used for data loading/querying.
-    subdir: str
+    subdir : str
         Optional. Subdirectory to save the output files into.
         If it does not exist, it is created.
-    logger: PythonLogger
+    logger : PythonLogger
         Optional. Logger object or None will generate a new one.
-    remove: bool
+    remove : bool
         Optional. Default is False. Whether to remove a file if found.
         Used when ``overwrite`` is True in driving functions.
 
@@ -906,7 +904,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     if context is None:
         context = core.Context(configs["context_file"])
 
-    group_by, groups, errors = get_groups(obs_id, configs, context)
+    group_by, groups, errors = get_groups(obs_id, configs)
 
     all_groups = groups.copy()
     for g in all_groups:
@@ -917,8 +915,8 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
 
     for g in groups:
         dets = {gb:gg for gb, gg in zip(group_by, g)}
-        outputs_grp = get_preproc_group_out_dict(obs_id, configs, dets,
-                                                 context, subdir)
+        outputs_grp = get_preproc_group_out_dict(obs_id, configs,
+                                                 dets, subdir)
 
         if os.path.exists(outputs_grp['temp_file']):
             try:
@@ -942,19 +940,19 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
     Arguments
     ---------
-    obs_id: str
+    obs_id : str
         Obs id to check and clean up
-    policy_dir: str
+    policy_dir : str
         Directory to temp per-group output files
-    errlog: fpath
+    errlog : str
         Filepath to error logging file.
-    configs: fpath or dict
+    configs : str or dict
         Filepath or dictionary containing the preprocess configuration file.
-    context: core.Context
+    context : core.Context
         Optional. Context object used for data loading/querying.
-    subdir: str
+    subdir : str
         Optional. Subdirectory to save the output files into.
-    remove: bool
+    remove : bool
         Optional. Default is False. Whether to remove a file if found.
         Used when ``overwrite`` is True in driving functions.
     """
@@ -992,12 +990,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     ---------
     obs_id : str
         Obs id to process or load
-    configs_init : fpath or dict
+    configs_init : str or dict
         Filepath or dictionary containing the preprocess configuration file.
     dets : dict
         Dictionary specifying which detectors/wafers to load see
         ``Context.obsdb.get_obs``.
-    configs_proc : fpath or dict
+    configs_proc : str or dict
         Filepath or dictionary containing a dependent preprocess configuration
         file.
     logger : PythonLogger
@@ -1005,7 +1003,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     overwrite : bool
         Optional. Whether or not to overwrite existing entries in the
         preprocess manifest db.
-    save_archive :
+    save_archive : bool
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc. Should be False if preproc_or_load_group
         is being called from within a parallelized script (i.e. python multiprocessing or MPI).
@@ -1035,7 +1033,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     if logger is None:
         logger = init_logger("preprocess")
 
-    # try exce
+    # Do a try except around config and meta reading to catch metadata failures
     try:
         if type(configs_init) == str:
             configs_init = yaml.safe_load(open(configs_init, "r"))
@@ -1070,11 +1068,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                        f"No analysis to run.")
         return None, None, None, (PreprocessErrors.NoGroupOverlapError, None, None)
 
-    db_init_exist = find_db(obs_id, configs_init, dets, context_init,
-                            logger=logger)
+    db_init_exist = find_db(obs_id, configs_init, dets, logger=logger)
     if configs_proc is not None:
-        db_proc_exist = find_db(obs_id, configs_proc, dets, context_proc,
-                                logger=logger)
+        db_proc_exist = find_db(obs_id, configs_proc, dets, logger=logger)
     else:
         db_proc_exist = False
 
@@ -1090,7 +1086,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             try:
                 logger.info(f"Loading and applying preprocessing for initial layer db on {obs_id}:{group}")
                 aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
-                                           context=context_init, logger=logger)
+                                           logger=logger)
             except Exception as e:
                 errmsg, tb = PreprocessErrors.get_errors(e)
                 logger.error(f"Initial layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
@@ -1123,8 +1119,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                                  logger=logger)
             aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-            out_dict_init = get_preproc_group_out_dict(obs_id, configs_init,
-                                                       dets, context_init,
+            out_dict_init = get_preproc_group_out_dict(obs_id,
+                                                       configs_init,
+                                                       dets,
                                                        subdir=init_temp_subdir)
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id,
@@ -1138,7 +1135,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             return None, None, None, (PreprocessErrors.InitPipeLineRunError, errmsg, tb)
         if success != 'end':
             logger.error(f"Init Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
-            return None, None, None, (PreprocessErrors.PipeLineStepError, None, None)
+            return None, None, None, (PreprocessErrors.PipeLineStepError, success, None)
 
         logger.info(f"Saving preprocessing axis manager to "
                     f"{out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
@@ -1178,8 +1175,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 aman.move("tags", None)
             aman.wrap('tags', tags_proc)
 
-            out_dict_proc = get_preproc_group_out_dict(obs_id, configs_proc,
-                                                       dets, context_proc,
+            out_dict_proc = get_preproc_group_out_dict(obs_id,
+                                                       configs_proc,
+                                                       dets=dets,
                                                        subdir=proc_temp_subdir)
 
             pipe_proc = Pipeline(configs_proc["process_pipe"],
@@ -1199,7 +1197,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             return None, None, None, (PreprocessErrors.ProcPipeLineRunError, errmsg, tb)
         if success != 'end':
             logger.error(f"Proc Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
-            return None, None, None, (PreprocessErrors.PipeLineStepError, None, None)
+            return None, None, None, (PreprocessErrors.PipeLineStepError, success, None)
 
         logger.info(f"Saving proc axis manager to "
                     f"{out_dict_proc['temp_file']}:{out_dict_proc['db_data']['dataset']}")
@@ -1327,7 +1325,7 @@ def get_pcfg_check_aman(pipe):
 
     Arguments
     ---------
-    pipe: _Preprocess class
+    pipe : _Preprocess class
         Preprocess pipeline class from which to build the step argument axis
         manager.
     """
@@ -1353,9 +1351,9 @@ def _check_assignment_length(a, b):
 
     Arguments
     ---------
-    a: AxisManager
+    a : AxisManager
         Primary axis manager to cross check assignments with.
-    b: AxisManager
+    b : AxisManager
         Secondary axis manager to cross check assignments with
     """
 

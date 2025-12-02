@@ -94,15 +94,17 @@ def preprocess_tod(configs: Union[str, dict],
     Arguments
     ----------
     configs: str or dict
-        Configuration file path or loaded configuration dictionary.
+         Config file or loaded config dictionary.
     obs_id: str or ResultSet entry
         obs_id or obs entry that is passed to context.get_obs.
     group: list
-        Group to run.
+        The group to be run.  For example, this might be ['ws0', 'f090']
+        if ``group_by`` (specified by the subobs->use key in the preprocess
+        config) is ['wafer_slot', 'wafer.bandpass'].
     overwrite: bool
-        if True, overwrite contents of temporary h5 files.
+        If True, overwrite contents of temporary h5 files.
     verbosity: str
-        Log level. 0 = error, 1 = warn, 2 = info, 3 = debug
+        Log level. 0 = error, 1 = warn, 2 = info, 3 = debug.
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -202,8 +204,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 run_list.append((obs, group))
 
     if jobdb_path is not None:
-        run_list, jobs = pp_util.filter_runlist_by_jobdb(
+        run_list, jobs = pp_util.filter_preproc_runlist_by_jobdb(
             jdb=jdb,
+            jclass="init",
             run_list=run_list,
             group_by=group_by,
             overwrite=overwrite,
