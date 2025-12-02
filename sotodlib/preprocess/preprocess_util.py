@@ -87,16 +87,12 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
     jobs = []
 
     for r in run_list:
-        obs_id = r[0]["obs_id"]
-        dataset = ""
+        tags = {}
+        tags["obs:obs_id"] = r[0]['obs_id']
         for gb, g in zip(group_by, r[1]):
-            if gb == "detset":
-                dataset += f"{g}"
-            else:
-                dataset += f"{gb}_{g}"
+            tags['dets:' + gb] = g
 
-        job = jdb.get_jobs(jclass, tags={"obs:obs_id": obs_id,
-                                        "dets:dataset": dataset})
+        job = jdb.get_jobs(jclass, tags=tags)
 
         if len(job) > 0:
             with jdb.locked(job[0]) as j:
@@ -110,9 +106,8 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
                     else:
                         run_list_skipped.append(r)
         else:
-            jobs.append(jdb.create_job(jclass, tags={"error": None,
-                                              "obs:obs_id": obs_id,
-                                              "dets:dataset": dataset}))
+            tags["error"] = None
+            jobs.append(jdb.create_job(jclass, tags=tags))
 
     logger.info(f"skipping {len(run_list_skipped)} jobs from jobdb")
     run_list = [r for r in run_list if r not in run_list_skipped]
