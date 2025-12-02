@@ -402,6 +402,9 @@ def main(config_file=None, defaults=defaults, **args):
     with mapmaking.mark('context'):
         context = Context(args['context'])
 
+    if args['srcsamp']:
+        srcsamp_mask  = enmap.read_map(args['srcsamp'])
+
     if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
     elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
@@ -462,7 +465,7 @@ def main(config_file=None, defaults=defaults, **args):
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
                     subshape, subwcs, noise_model, L, preproc, comps=comps, t0=t, comm=comm_good, tag=tag,
                     niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0,
-                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=args['srcsamp'], unit=args['unit'],
+                    verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=srcsamp_mask, unit=args['unit'],
                     min_dets=args['min_dets'])
             # 6. write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
