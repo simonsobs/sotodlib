@@ -1486,6 +1486,70 @@ class DarkDets(_Preprocess):
         else:
             return keep
 
+class LoadPremadeFlags(_Preprocess):
+    """Load premade flags from aman.
+
+    Saves results in proc_aman under the "premade_flags_name" field of aman.
+    In addtion, you can select detectors based on the loaded flags.
+    This is mainly used for simulation for planet mapmaking.
+    When simulated planet is made, we need corresponding flags 
+    to carry out the same preprocessing as the real planet mapmaking.
+    This class is useful whenever you want to premake custum flags and use it.
+    
+    E.g., if aman contains 'sim_jupiter_flag', you can load it to proc_aman as follows:
+
+    Example config block::
+
+        - name : "load_premade_flags"
+            load_premade_flag_name: 'sim_jupiter_flag'
+            calc:
+                inv_flag: True
+            save: True
+            select: # optional
+                kind: "any"
+                invert: True
+    
+    """
+    name = "load_premade_flags"
+    def __init__(self, step_cfgs):
+        self.premade_flags_name = step_cfgs.get('load_premade_flag_name', 'premade_flags')
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        print('flags_name', self.premade_flags_name)
+        premade_flags = aman.flags.get(self.premade_flags_name)
+        source_aman = core.AxisManager(aman.dets, aman.samps)
+        source_aman.wrap(self.premade_flags_name, premade_flags, [(0, 'dets'), (1, 'samps')])
+
+        if self.calc_cfgs.get('inv_flag'):
+            source_aman.wrap(self.premade_flags_name + '_inv',
+                            RangesMatrix.from_mask(~premade_flags.mask()),
+                            [(0, 'dets'), (1, 'samps')])
+                    
+        self.save(proc_aman, source_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, source_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.premade_flags_name, source_aman)            
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = flag_cut_select(proc_aman[self.premade_flags_name][self.premade_flags_name],
+                              kind=self.select_cfgs.get("kind", 'all'),
+                              invert=self.select_cfgs.get('invert', False))
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+    
+
 class SourceFlags(_Preprocess):
     """Calculate the source flags in the data.
     All calculation configs go to `get_source_flags`.
@@ -2685,6 +2749,7 @@ _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
+_Preprocess.register(LoadPremadeFlags)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
