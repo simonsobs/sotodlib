@@ -403,7 +403,9 @@ def main(config_file=None, defaults=defaults, **args):
         context = Context(args['context'])
 
     if args['srcsamp']:
-        srcsamp_mask  = enmap.read_map(args['srcsamp'])
+        srcsamp_mask = enmap.read_map(args['srcsamp'])
+    else:
+        srcsamp_mask = None
 
     if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
     elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
