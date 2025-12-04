@@ -258,10 +258,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if r[0]['obs_id'] not in obs_errors:
             obs_errors[r[0]['obs_id']] = []
 
+    total = len(futures)
+
     with open('progress_bar.txt', 'w') as f:
-        for future in tqdm(as_completed_callable(futures), total=len(futures),
+        for future in tqdm(as_completed_callable(futures), total=total,
                            desc="preprocess_tod", file=f,
-                           miniters=max(1, len(futures) // 100)):
+                           miniters=max(1, total // 100)):
             obs_id, group, job = futures_dict[future]
             out_meta = (obs_id, group)
             try:
