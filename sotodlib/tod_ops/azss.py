@@ -37,6 +37,8 @@ def _check_azcoverage(aman, flags, az=None, coverage_threshold=0.95,
         tot_range = np.ptp(az[~aman.flags.turnarounds.mask()])
     else:
         tot_range = np.ptp(az)
+    if isinstance(flags, str):
+        flags = aman.flags.get(flags)
     coverages = np.array([np.ptp(az[fl])/tot_range if sum(fl) != 0 else 0 for fl in ~flags.mask()])
     return coverages < coverage_threshold, coverages
 
@@ -186,7 +188,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
              method='interpolate', max_mode=None, subtract_in_place=False,
              merge_stats=True, azss_stats_name='azss_stats',
              merge_model=True, azss_model_name='azss_model', coverage_threshold=0.95,
-             exclude_turnarounds=True, return_det_mask=True):
+             exclude_turnarounds=True, return_det_mask=False):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
     **NOTE:** This function does not modify the ``signal`` unless ``subtract_in_place = True``.
@@ -318,8 +320,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         azss_stats.wrap('az_coverage', coverages, [(0, 'dets')])
     else:
         bad_dets = None
-    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange,
-                                   zero_bad_dets=bad_dets)
+    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -331,7 +332,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
 
 
 def get_azss_model(aman, azss_stats, az=None, method='interpolate',
-                   max_mode=None, azrange=None, zero_bad_dets=None):
+                   max_mode=None, azrange=None):
     """
     Function to return the azss template for subtraction given the azss_stats AxisManager
 
@@ -349,8 +350,6 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
         Maximum Legendre mode for 'fit' method
     azrange: list, optional
         Azimuth range for fitting
-    zero_bad_dets: bool, optional
-        If True, zero the model for bad detectors with insufficient az coverage.
         
     Returns
     -------
@@ -377,8 +376,8 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
         logger.warning('azss model has nan. set zero to nan but this may make glitch')
         model[~np.isfinite(model)] = 0
     
-    if zero_bad_dets:
-        model[zero_bad_dets, :] = 0
+    if 'bad_dets' in azss_stats:
+        model[azss_stats['bad_dets'], :] = 0
     return model
 
 
