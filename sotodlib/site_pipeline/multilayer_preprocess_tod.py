@@ -36,20 +36,36 @@ def multilayer_preprocess_tod(obs_id: str,
 
     Arguments
     ----------
-    obs_id: str or ResultSet entry
+    obs_id : str or ResultSet entry
         obs_id or obs entry that is passed to context.get_obs
-    configs_init: str or dict
+    configs_init : str or dict
         Config file or loaded config dictionary for first layer database.
-    configs_proc: str or dict
+    configs_proc : str or dict
         Config file or loaded config dictionary for second layer database.
-    group: list
+    group : list
         The group to be run.  For example, this might be ['ws0', 'f090']
         if ``group_by`` (specified by the subobs->use key in the preprocess
         config) is ['wafer_slot', 'wafer.bandpass'].
-    overwrite: bool
+    overwrite : bool
          If True, overwrite contents of temporary h5 files.
-    verbosity: str
+    verbosity : str
         The log level to use.  0 = error, 1 = warn, 2 = info, 3 = debug.
+
+    Returns
+    -------
+    out_dict_init : dict or None
+        Dictionary output for init config from get_preproc_group_out_dict
+        if preprocessing ran successfully for init layer or ``None`` if
+        preprocessing was loaded or ``preproc_or_load_group`` failed.
+    out_dict_proc : dict or None
+        Dictionary output for proc config from get_preproc_group_out_dict
+        if preprocessing ran successfully for proc layer or ``None`` if
+        preprocessing was loaded, that layer was not run or loaded, or
+        ``preproc_or_load_group`` failed.
+    errors : tuple
+        A tuple containing the error from PreprocessError, an error message,
+        and the traceback. Each will be None if preproc_or_load_group finished
+        successfully.
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -86,6 +102,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
+
+    tqdm.monitor_interval = 0
 
     configs_init, context_init = pp_util.get_preprocess_context(configs_init)
     configs_proc, context_proc = pp_util.get_preprocess_context(configs_proc)
@@ -211,41 +229,43 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if r[0]['obs_id'] not in obs_errors:
             obs_errors[r[0]['obs_id']] = []
 
-    for future in tqdm(as_completed_callable(futures), total=len(futures),
-                           desc="multilayer_preprocess_tod"):
-        obs_id, group, job = futures_dict[future]
-        out_meta = (obs_id, group)
-        try:
-            out_dict_init, out_dict_proc, errors = future.result()
-            obs_errors[obs_id].append({'group': group, 'error': errors[0]})
-            logger.info(f"{obs_id}: {group} extracted successfully")
-        except Exception as e:
-            errmsg, tb = PreprocessErrors.get_errors(e)
-            logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
-            obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-            out_dict_init = None
-            out_dict_proc = None
-            errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
+    with open('progress_bar.txt', 'w') as f:
+        for future in tqdm(as_completed_callable(futures), total=len(futures),
+                               desc="multilayer_preprocess_tod", file=f,
+                               miniters=3):
+            obs_id, group, job = futures_dict[future]
+            out_meta = (obs_id, group)
+            try:
+                out_dict_init, out_dict_proc, errors = future.result()
+                obs_errors[obs_id].append({'group': group, 'error': errors[0]})
+                logger.info(f"{obs_id}: {group} extracted successfully")
+            except Exception as e:
+                errmsg, tb = PreprocessErrors.get_errors(e)
+                logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
+                obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
+                out_dict_init = None
+                out_dict_proc = None
+                errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
-        futures.remove(future)
+            futures.remove(future)
 
-        # only run if first layer was run
-        if out_dict_init is not None:
-            logger.info(f"Adding future result to init db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
-                                  configs_init, logger, overwrite)
-        logger.info(f"Adding future result to proc db for {obs_id}: {group}")
-        pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
-                              configs_proc, logger, overwrite)
+            # only run if first layer was run
+            if out_dict_init is not None:
+                logger.info(f"Adding future result to init db for {obs_id}: {group}")
+                pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
+                                      configs_init, logger, overwrite)
+            logger.info(f"Adding future result to proc db for {obs_id}: {group}")
+            pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
+                                  configs_proc, logger, overwrite)
 
-        if jobdb_path is not None:
-            with jdb.locked(job) as j:
-                j.mark_visited()
-                if errors[0] is not None:
-                    j.jstate = "failed"
-                    j.tags["error"] = errors[0]
-                else:
-                    j.jstate = "done"
+            if jobdb_path is not None:
+                with jdb.locked(job) as j:
+                    j.mark_visited()
+                    if errors[0] is not None:
+                        j.jstate = "failed"
+                        j.tags["error"] = errors[0]
+                    else:
+                        j.jstate = "done"
 
     n_obs_fail = 0
     n_groups_fail = 0

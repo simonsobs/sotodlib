@@ -39,22 +39,28 @@ def load_preprocess_tod_sim(obs_id,
 
     Arguments
     ----------
-    obs_id: multiple
+    obs_id : multiple
         passed to ``context.get_obs`` to load AxisManager, see Notes for
         `context.get_obs`
-    sim_map: pixell.enmap.ndmap
+    sim_map : pixell.enmap.ndmap
         signal map containing (T, Q, U) fields
-    configs: string or dictionary
+    configs : string or dictionary
         config file or loaded config directory
-    dets: dict
+    dets : dict
         dets to restrict on from info in det_info. See context.get_meta.
-    meta: AxisManager
+    meta : AxisManager
         Contains supporting metadata to use for loading.
         Can be pre-restricted in any way. See context.get_meta.
-    modulated: bool
+    modulated : bool
         If True, apply the HWP angle model and scan the simulation
         into a modulated signal.
         If False, scan the simulation into demodulated timestreams.
+
+    Returns
+    -------
+    aman : core.AxisManager
+        Axis manager after running through the preprocessing steps.  Returns
+        ``None`` if all detectors are cut.
     """
     configs, context = pp_util.get_preprocess_context(configs, context)
     if dets is not None:
@@ -93,18 +99,29 @@ def preprocess_tod(configs: Union[str, dict],
 
     Arguments
     ----------
-    configs: str or dict
+    configs : str or dict
          Config file or loaded config dictionary.
-    obs_id: str or ResultSet entry
+    obs_id : str or ResultSet entry
         obs_id or obs entry that is passed to context.get_obs.
-    group: list
+    group : list
         The group to be run.  For example, this might be ['ws0', 'f090']
         if ``group_by`` (specified by the subobs->use key in the preprocess
         config) is ['wafer_slot', 'wafer.bandpass'].
-    overwrite: bool
+    overwrite : bool
         If True, overwrite contents of temporary h5 files.
-    verbosity: str
+    verbosity : str
         Log level. 0 = error, 1 = warn, 2 = info, 3 = debug.
+
+    Returns
+    -------
+    out_dict : dict or None
+        Dictionary output for init config from get_preproc_group_out_dict
+        if preprocessing ran successfully for init layer or ``None`` if
+        preprocessing was loaded or ``preproc_or_load_group`` failed.
+    errors : tuple
+        A tuple containing the error from PreprocessError, an error message,
+        and the traceback. Each will be None if preproc_or_load_group finished
+        successfully.
     """
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -139,6 +156,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           raise_error: bool = False):
 
     temp_subdir = "temp"
+
+    tqdm.monitor_interval = 0
 
     configs, context = pp_util.get_preprocess_context(configs)
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
@@ -239,35 +258,37 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if r[0]['obs_id'] not in obs_errors:
             obs_errors[r[0]['obs_id']] = []
 
-    for future in tqdm(as_completed_callable(futures), total=len(futures),
-                       desc="preprocess_tod"):
-        obs_id, group, job = futures_dict[future]
-        out_meta = (obs_id, group)
-        try:
-            out_dict, errors = future.result()
-            obs_errors[obs_id].append({'group': group, 'error': errors[0]})
-            logger.info(f"{obs_id}: {group} extracted successfully")
-        except Exception as e:
-            errmsg, tb = PreprocessErrors.get_errors(e)
-            logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
-            obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-            out_dict = None
-            errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
+    with open('progress_bar.txt', 'w') as f:
+        for future in tqdm(as_completed_callable(futures), total=len(futures),
+                           desc="preprocess_tod", file=f,
+                           miniters=max(1, len(futures) // 100)):
+            obs_id, group, job = futures_dict[future]
+            out_meta = (obs_id, group)
+            try:
+                out_dict, errors = future.result()
+                obs_errors[obs_id].append({'group': group, 'error': errors[0]})
+                logger.info(f"{obs_id}: {group} extracted successfully")
+            except Exception as e:
+                errmsg, tb = PreprocessErrors.get_errors(e)
+                logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
+                obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
+                out_dict = None
+                errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
-        futures.remove(future)
+            futures.remove(future)
 
-        logger.info(f"Adding future result to db for {obs_id}: {group}")
-        pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
-                              logger, overwrite)
+            logger.info(f"Adding future result to db for {obs_id}: {group}")
+            pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
+                                  logger, overwrite)
 
-        if jobdb_path is not None:
-            with jdb.locked(job) as j:
-                j.mark_visited()
-                if errors[0] is not None:
-                    j.jstate = "failed"
-                    j.tags["error"] = errors[0]
-                else:
-                    j.jstate = "done"
+            if jobdb_path is not None:
+                with jdb.locked(job) as j:
+                    j.mark_visited()
+                    if errors[0] is not None:
+                        j.jstate = "failed"
+                        j.tags["error"] = errors[0]
+                    else:
+                        j.jstate = "done"
 
     n_obs_fail = 0
     n_groups_fail = 0

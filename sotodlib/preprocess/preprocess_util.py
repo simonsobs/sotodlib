@@ -410,6 +410,11 @@ def load_preprocess_det_select(obs_id, configs, context=None,
     logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
+
+    Returns
+    -------
+    list
+        Restricted list of detector vals.
     """
 
     if logger is None:
@@ -457,6 +462,12 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
+
+    Returns
+    -------
+    aman : core.AxisManager or None
+        Loaded and restricted axis manager with preprocessing metadata. Returns
+        ``None`` if all detectors cut.
     """
 
     if logger is None:
@@ -487,7 +498,8 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
-                                   logger=None, init_only=False):
+                                   logger=None, init_only=False,
+                                   ignore_cfg_check=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -518,6 +530,15 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only : bool
         Optional. If True, do not run the dependent pipeline.
+    ignore_cfg_check : bool
+        If True, do not attempt to validate that configs_init is the same as
+        the config used to create the existing init db.
+
+    Returns
+    -------
+    aman : core.AxisManager or None
+        Loaded and restricted axis manager with preprocessing metadata. Returns
+        ``None`` if all detectors cut.
     """
 
     if logger is None:
@@ -546,8 +567,11 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
         aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
-                           logger=logger):
+        if (
+            ignore_cfg_check or
+            check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
+                           logger=logger)
+        ):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all proc pipeline processes")
@@ -622,6 +646,12 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
     t2ptemplate_aman : AxisManager
         Optional. AxisManager to use as a template for t2p leakage
         deprojection.
+
+    Returns
+    -------
+    aman : core.AxisManager or None
+        Loaded and restricted axis manager with preprocessing metadata. Returns
+        ``None`` if all detectors cut.
     """
     if logger is None:
         logger = init_logger("preprocess")
@@ -673,7 +703,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             if init_only:
                 return aman
-            
+
             if t2ptemplate_aman is not None:
                 # Replace Q,U with simulated timestreams
                 t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
@@ -969,7 +999,8 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
-                         logger=None, overwrite=False, save_archive=False):
+                         logger=None, overwrite=False, save_archive=False,
+                         ignore_cfg_check=False):
     """This function takes a single obs_id and dets dictionary and will either
     load from a preprocessing database if it exists or run the preprocessing
     pipeline if it does not or overwrite is True. Both single and multilayer
@@ -1001,21 +1032,24 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc. Should be False if preproc_or_load_group
         is being called from within a parallelized script (i.e. python multiprocessing or MPI).
+    ignore_cfg_check : bool
+        If True, do not attempt to validate that configs_init is the same as the config
+        used to create the existing init db when running ``multilayer_load_and_preprocess``.
 
     Returns
     -------
     aman : AxisManager or None
         Preprocessed axis manager if preproc_or_load_group finished
         successfully or None if it failed.
-    out_dict_init : dict or tuple
+    out_dict_init : dict or None
         Dictionary output for init config from get_preproc_group_out_dict
-        if preprocessing ran successfully for init layer or None if
-        preprocessing was loaded or preproc_or_load_group failed.
-    out_dict_proc : dict or tuple
+        if preprocessing ran successfully for init layer or ``None`` if
+        preprocessing was loaded or ``preproc_or_load_group`` failed.
+    out_dict_proc : dict or None
         Dictionary output for proc config from get_preproc_group_out_dict
-        if preprocessing ran successfully for proc layer or None if
+        if preprocessing ran successfully for proc layer or ``None`` if
         preprocessing was loaded, that layer was not run or loaded, or
-        preproc_or_load_group failed.
+        ``preproc_or_load_group`` failed.
     errors : tuple
         A tuple containing the error from PreprocessError, an error message,
         and the traceback. Each will be None if preproc_or_load_group finished
@@ -1096,7 +1130,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             try:
                 logger.info(f"Loading and applying preprocessing for both dbs on {obs_id}:{group}")
                 aman = multilayer_load_and_preprocess(obs_id=obs_id, dets=dets, configs_init=configs_init,
-                                                      configs_proc=configs_proc, logger=logger)
+                                                      configs_proc=configs_proc, logger=logger,
+                                                      ignore_cfg_check=ignore_cfg_check)
                 logger.info(f"preproc_or_load_group finished successfully for {obs_id}:{group}")
                 return aman, None, None, (PreprocessErrors.LoadSuccess, None, None)
             except Exception as e:
