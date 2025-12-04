@@ -1760,6 +1760,9 @@ class FourierFilter(_Preprocess):
         field = self.process_cfgs.get("noise_fit_array", None)
         if field:
             noise_fit = proc_aman[field]
+            #noise_fit = noise_fit.restrict('dets', aman.dets.vals, in_place=False) # SA
+            #if hasattr(noise_fit, "_axes") and ("dets" in noise_fit._axes): # SA
+            #    noise_fit = noise_fit.restrict('dets', aman.dets.vals, in_place=False) # SA
         else:
             noise_fit = None
 
@@ -2282,7 +2285,6 @@ class SplitFlags(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         split_flg_aman = obs_ops.splits.get_split_flags(aman, proc_aman, split_cfg=self.calc_cfgs)
-
         self.save(proc_aman, split_flg_aman)
         return aman, proc_aman
 
