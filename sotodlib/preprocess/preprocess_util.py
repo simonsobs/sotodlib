@@ -987,7 +987,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
             if errors[0] is not None:
                 with open(errlog, 'a') as f:
                     f.write(f"{time.time()}, {obs_id}, n/a', {errors[0]}\n")
-                    f.write("\t" + errors[1] + errors[2] + "\n")
+                    f.write("\t" + (errors[1] or "") + (errors[2] or "") + "\n")
 
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
@@ -1329,7 +1329,7 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
         errlog = os.path.join(folder, 'errlog.txt')
         with open(errlog, 'a') as f:
             f.write(f"{time.time()}, {out_meta[0]}, {out_meta[1]}, {errors[0]}\n")
-            f.write("\t" + errors[1] + errors[2] + "\n")
+            f.write("\t" + (errors[1] or "") + (errors[2] or "") + "\n")
 
 
 def get_pcfg_check_aman(pipe):
