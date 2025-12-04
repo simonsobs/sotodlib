@@ -550,12 +550,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
-    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init)
-    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc)
-
-    for err in (errors_init, errors_proc):
-        if err[0] is not None:
-            raise ValueError(f"{err[0]}\n{err[1]}\n{err[2]}")
+    group_by_init = np.atleast_1d(configs_init['subobs'].get('use', 'detset'))
+    group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
@@ -662,12 +658,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, meta=meta)
 
-    group_by_init, groups_init, errors_init = get_groups(obs_id, configs_init)
-    group_by_proc, groups_proc, errors_proc = get_groups(obs_id, configs_proc)
-
-    for err in (errors_init, errors_proc):
-        if err[0] is not None:
-            raise ValueError(f"{err[0]}\n{err[1]}\n{err[2]}")
+    group_by_init = np.atleast_1d(configs_init['subobs'].get('use', 'detset'))
+    group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
 
     if (group_by_init != group_by_proc).any():
         raise ValueError('init and proc groups do not match')
@@ -762,7 +754,7 @@ def find_db(obs_id, configs, dets, context=None, logger=None):
         configs = yaml.safe_load(open(configs, "r"))
     if context is None:
         context = core.Context(configs["context_file"])
-    group_by, _, _ = get_groups(obs_id, configs, context)
+    group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     cur_groups = [list(np.fromiter(dets.values(), dtype='<U32'))]
     dbexist = True
     if os.path.exists(configs['archive']['index']):
@@ -1074,27 +1066,20 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                 configs_proc = yaml.safe_load(open(configs_proc, "r"))
             context_proc = core.Context(configs_proc["context_file"])
             make_lmsi_proc = configs_proc.get("lmsi_config") is not None
+
+            # Ensure grouping matches between init and proc configs
+            group_by_init = np.atleast_1d(configs_init['subobs'].get('use', 'detset'))
+            group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
+
+            if (group_by_init != group_by_proc).any():
+                raise ValueError('init and proc groups do not match')
+
     except Exception as e:
         errmsg, tb = PreprocessErrors.get_errors(e)
         logger.error(f"Get configs/context failed for {obs_id}: {group}\n{errmsg}\n{tb}")
         return None, None, None, (PreprocessErrors.MetaDataError, errmsg, tb)
 
-    if configs_proc is not None:
-        group_by, groups, errors = get_groups(obs_id, configs_proc)
-    else:
-        group_by, groups, errors = get_groups(obs_id, configs_init)
-
-    if errors[0] is not None:
-        logger.error(f"Get Groups Error for {obs_id}: {group}\n{errors[1]}\n{errors[2]}")
-        return None, None, None, (errors[0], errors[1], errors[2])
-
     group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
-
-    # Verify if group exists for this obs id
-    if group not in groups:
-        logger.warning(f"Group {group} not found for {obs_id}. "
-                       f"No analysis to run.")
-        return None, None, None, (PreprocessErrors.NoGroupOverlapError, None, None)
 
     db_init_exist = find_db(obs_id, configs_init, dets, logger=logger)
     if configs_proc is not None:
@@ -1118,7 +1103,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             except Exception as e:
                 errmsg, tb = PreprocessErrors.get_errors(e)
                 logger.error(f"Initial layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
-                return None, None, None, (PreprocessErrors.SingleLayerPipelineLoadError, None, None)
+                return None, None, None, (PreprocessErrors.SingleLayerPipelineLoadError, errmsg, tb)
 
             # Return if not running proc db
             if configs_proc is None:
