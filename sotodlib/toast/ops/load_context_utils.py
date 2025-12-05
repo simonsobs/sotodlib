@@ -637,14 +637,14 @@ def distribute_detector_data(
     # temporary buffers of ranges flags.
     del send_data
 
-    # Every process checks its local data for NaN values.  If any are found, a warning
+    # Every process checks its local data for NaN values.  If any are found, a message
     # is printed and the detector is cut.
     dflags = dict()
     for det in obs.local_detectors:
         nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
         if nnan > 0:
             msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
-            log.warning(msg)
+            log.debug(msg)
             dflags[det] = defaults.det_mask_invalid
     obs.update_local_detector_flags(dflags)
 

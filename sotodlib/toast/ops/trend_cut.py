@@ -164,15 +164,21 @@ class DetTrendCuts(Operator):
         slopes = list()
         for slc in slices:
             good = flags[slc] == 0
-            t = reltime[slc][good]
-            s = signal[slc][good]
+            if np.count_nonzero(good) < 0.1 * len(flags[slc]):
+                # Not enough good data
+                slopes.append(0.0)
+            else:
+                t = reltime[slc][good]
+                s = signal[slc][good]
 
-            t_mean = np.mean(t)
-            t_var = np.var(t, mean=t_mean)
-            s_mean = np.mean(s)
-            ts_mean = np.mean(t * s)
-
-            slopes.append((ts_mean - t_mean * s_mean) / t_var)
+                t_mean = np.mean(t)
+                t_var = np.var(t, mean=t_mean)
+                s_mean = np.mean(s)
+                ts_mean = np.mean(t * s)
+                if t_var == 0:
+                    slopes.append(0.0)
+                else:
+                    slopes.append((ts_mean - t_mean * s_mean) / t_var)
         return np.array(slopes)
 
     def _finalize(self, data, **kwargs):
