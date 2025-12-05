@@ -86,6 +86,9 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
     run_list_skipped = []
     jobs = []
 
+    failed = 0
+    done = 0
+
     for r in run_list:
         tags = {}
         tags["obs:obs_id"] = r[0]['obs_id']
@@ -104,12 +107,16 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
                         j.tags["error"] = None
                         jobs.append(job[0])
                     else:
+                        if j.jstate == JState.done:
+                            done += 1
+                        elif j.jstate == JState.failed:
+                            failed += 1
                         run_list_skipped.append(r)
         else:
             tags["error"] = None
             jobs.append(jdb.create_job(jclass, tags=tags))
 
-    logger.info(f"skipping {len(run_list_skipped)} jobs from jobdb")
+    logger.info(f"skipping {done} done jobs and {failed} failed jobs from jobdb")
     run_list = [r for r in run_list if r not in run_list_skipped]
 
     return run_list, jobs
@@ -932,7 +939,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
     for g in groups:
         dets = {gb:gg for gb, gg in zip(group_by, g)}
         outputs_grp = get_preproc_group_out_dict(obs_id, configs,
-                                                 dets, subdir)
+                                                 dets, subdir=subdir)
 
         if os.path.exists(outputs_grp['temp_file']):
             try:
