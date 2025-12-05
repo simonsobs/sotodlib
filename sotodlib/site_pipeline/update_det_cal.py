@@ -488,6 +488,25 @@ def biases_flags(bsa, buffer=200):
     return flags
 
 
+def fill_zeros_biases(am):
+    # fill the zeros in biases by non-zero values before
+    # zeros in the beginning will be filled by non-zero values after
+    for bias in am.biases:
+        last = None
+        for i in range(len(bias)):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+        last = None
+        for i in range(len(bias)-1, -1, -1):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+
 def load_and_reanalyze_bs(bsa, ctx, obs_id):
     """
     Load raw data of biassteps and reanalyze it with hwpss subtraction
@@ -506,6 +525,8 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
     # check consistency of (band, channel) between bsa and L3 book
     # add (band, channel) if missing
     if len(bsa.bands) != len(am.det_info.smurf.band):
+        logger.warn('Number of channels are inconsistent between BiasStepAnalysis object '
+                    f'and L3 oper book {obs_id}')
         band_ch = [(b, c) for b, c in zip(am.det_info.smurf.band, am.det_info.smurf.channel)]
         index = [np.where((bsa.channels == c) & (bsa.bands == b))[0]
                  for b, c in zip(bsa.bands, bsa.channels) if (b, c) in band_ch]
@@ -524,6 +545,9 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
         am = aman
 
     bsa.am = am
+    if np.any([sum(bias==0) for bias in am.biases]):
+        logger.warn(f'Fill zeros in biases {obs_id}')
+        fill_zeros_biases(am)
     bsa._find_bias_edges()
     flags = biases_flags(bsa)
     get_hwpss(am, flags=flags, merge_stats=True)
