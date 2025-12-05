@@ -239,6 +239,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         return
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
+    # ensure db exists up front to prevent race conditions
+    pp_util.get_preprocess_db(configs, group_by, logger)
+
     futures = []
     futures_dict = {}
     obs_errors = {}

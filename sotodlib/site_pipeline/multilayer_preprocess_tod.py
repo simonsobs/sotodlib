@@ -110,6 +110,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
+    os.makedirs(os.path.dirname(configs_init['archive']['policy']['filename']),
+                exist_ok=True)
     os.makedirs(os.path.dirname(configs_proc['archive']['policy']['filename']),
                 exist_ok=True)
 
@@ -208,6 +210,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         logger.info("Nothing to run")
         return
     logger.info(f'Run list created with {len(run_list)} obsid groups')
+
+    # ensure dbs exist up front to prevent race conditions
+    pp_util.get_preprocess_db(configs_init, group_by, logger)
+    pp_util.get_preprocess_db(configs_proc, group_by, logger)
 
     futures = []
     futures_dict = {}
