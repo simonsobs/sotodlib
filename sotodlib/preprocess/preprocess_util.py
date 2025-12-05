@@ -15,6 +15,7 @@ from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
 from sotodlib.site_pipeline.jobdb import JState
+from sotodlib.core.util import H5ContextManager
 
 from .. import core
 
@@ -817,7 +818,7 @@ def cleanup_archive(configs, logger=None):
                               key=lambda t: t[0])[1]
 
             db_datasets = [d['dataset'] for d in db.inspect()]
-            with h5py.File(latest_file, "r+") as f:
+            with H5ContextManager(latest_file, mode="r+") as f:
                 keys = list(f.keys())
                 for key in keys:
                     if key not in db_datasets:
@@ -999,16 +1000,23 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          logger=None, overwrite=False, save_archive=False,
-                         ignore_cfg_check=False):
-    """This function takes a single obs_id and dets dictionary and will either
-    load from a preprocessing database if it exists or run the preprocessing
-    pipeline if it does not or overwrite is True. Both single and multilayer
-    preprocessing are supported. The dets dict must match the grouping
-    specified in the preprocessing config file.  Processed axis managers are
-    written to a temporary h5 file and can be written to an archive and database
-    by using cleanup_mandb (or setting save_archive to True) which consumes
-    all of the outputs (except the processed tod), writes to the database,
-    and moves the multiple h5 files into fewer h5 files (each <= 10 GB).
+                         save_proc_aman=True, ignore_cfg_check=False):
+    """
+    This function is expected to receive a single obs_id, and dets dictionary.
+    The dets dictionary must match the grouping specified in the preprocess
+    config files. It accepts either one or two config strings or dicts representing
+    an initial and a dependent pipeline stage. If the preprocess database entry for
+    this obsid-dets group already exists then this function will just load back the
+    processed tod calling either the ``load_and_preprocess`` or
+    ``multilayer_load_and_preprocess`` functions. If the db entry does not exist or
+    the overwrite flag is set to True then the full preprocessing steps defined in
+    the configs are run and if save_proc_aman is True, the outputs are written to a
+    unique h5 file. Any errors, the info to populate the database, the file path of
+    the h5 file, and the process tod are returned from this function. Processed axis
+    managers can be written to an archive and database by using cleanup_mandb
+    (or setting save_archive to True) which consumes all of the outputs
+    (except the processed tod), writes to the database, and moves the multiple h5
+    files into fewer h5 files (each <= 10 GB).
 
     Arguments
     ---------
@@ -1027,10 +1035,13 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     overwrite : bool
         Optional. Whether or not to overwrite existing entries in the
         preprocess manifest db.
-    save_archive : bool
+     save_archive : bool
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc. Should be False if preproc_or_load_group
         is being called from within a parallelized script (i.e. python multiprocessing or MPI).
+    save_proc_aman : bool
+        Whether or not to save the preprocessing axis manager.  Required if saving into
+        a preprocessing archive.
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as the config
         used to create the existing init db when running ``multilayer_load_and_preprocess``.
@@ -1144,6 +1155,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                                                        configs_init,
                                                        dets,
                                                        subdir=init_temp_subdir)
+
             aman = context_init.get_obs(obs_id, dets=dets)
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id,
                                                    tags=True)['tags'])
@@ -1308,8 +1320,8 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
 
         src_file = out_dict['temp_file']
 
-        with h5py.File(dest_file,'a') as f_dest:
-            with h5py.File(src_file,'r') as f_src:
+        with H5ContextManager(dest_file, mode='a') as f_dest:
+            with H5ContextManager(src_file, mode='r') as f_src:
                 for dts in f_src.keys():
                     # If the dataset or group already exists, delete it to overwrite
                     if overwrite and dts in f_dest:

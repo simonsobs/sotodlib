@@ -2616,7 +2616,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
             j = np.where(msk)[0][0]
             ruids.append(names[j])
         except:
-            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            logger.debug(f"Information retrival error for Detector {ch_map[i]}")
             ruids.append(
                 "sch_NONE_{}_{:03d}".format(ch_map["band"][i], ch_map["channel"][i])
             )
@@ -2687,7 +2687,7 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
             j = np.where(msk)[0][0]
             ruids.append(names[j])
         except:
-            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            logger.debug(f"Information retrival error for Detector {ch_map[i]}")
             ruids.append(
                 "sch_NONE_{}_{:03d}".format(ch_map["band"][i], ch_map["channel"][i])
             )

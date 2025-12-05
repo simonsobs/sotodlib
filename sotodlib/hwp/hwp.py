@@ -15,7 +15,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
               apodize_flags=True, apodize_flags_samps=200,
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
-    """
+    r"""
     Extracts HWP synchronous signal (HWPSS) from a time-ordered data (TOD)
     using linear regression or curve-fitting. The curve-fitting or linear
     regression are either run on the full time ordered data vs hwp angle
