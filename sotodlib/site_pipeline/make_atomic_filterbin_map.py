@@ -137,7 +137,7 @@ class Cfg:
         center_at: Optional[str] = None,
         max_dets: Optional[int] = None,
         fixed_time: Optional[int] = None,
-        min_dur: Optional[int] = None,
+        min_dur: Optional[int] = 300,
         verbose: int = 0,
         quiet: int = 0,
         window: Optional[float] = None,
@@ -145,7 +145,7 @@ class Cfg:
         dtype_map: str = 'float64',
         unit: str = 'K',
         use_psd: bool = True,
-        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise',
+        wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True
     ) -> None:
         self.context = context
@@ -322,7 +322,7 @@ def main(
         errlog.append( os.path.join(os.path.dirname(
             preproc_local['archive']['index']), 'errlog.txt') )
 
-
+    args.query += f" and duration>{args.min_dur}"
     if (args.update_delay is not None):
         min_ctime = int(time.time()) - args.update_delay*86400
         args.query += f" and timestamp>={min_ctime}"
@@ -337,7 +337,7 @@ def main(
         obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
             context_obj, args.query, nset=args.nset, wafer=args.wafer,
             freq=args.freq, ntod=args.ntod, tods=args.tods,
-            fixed_time=args.fixed_time, mindur=args.min_dur)
+            fixed_time=args.fixed_time, min_dur=args.min_dur)
     except mapmaking.NoTODFound as err:
         L.exception(err)
         exit(0)

@@ -139,7 +139,7 @@ class MapmakerPointingTest(unittest.TestCase):
             truncate_tod=False,
             write_hits=True,
             write_rhs=False,
-            write_div=False,
+            write_div="all",
             write_bin=True,
             deslope=False,
         )
