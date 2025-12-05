@@ -534,18 +534,17 @@ def noise_ratio(aman, pxx, freqs, f_sig=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=F
     pxxmean = np.mean(pxx, axis=0)
     rmean = np.mean(pxxmean[fselect], axis=0) / np.mean(pxxmean[fwn], axis=0)
     rdets = np.mean(pxx[:, fselect], axis=1) / np.mean(pxx[:, fwn], axis=1)
+    rmean = np.array([rmean]*aman.dets.count)  # Make a dets axis since scalar wrapping is broken
 
     if not subscan:
         calc_aman = core.AxisManager(aman.dets)
         calc_aman.wrap("rdets", rdets, [(0,"dets")])
-        calc_aman.wrap("rmean", rmean)
+        calc_aman.wrap("rmean", rmean, [(0,"dets")])
     else:
         calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
         calc_aman.wrap("rdets", rdets, [(0,"dets"), (1,"subscans")])
-        calc_aman.wrap("rmean", rmean, [(0, "subscans")])
+        calc_aman.wrap("rmean", rmean, [(0,"dets"), (1,"subscans")])
 
-    calc_aman.wrap("f_sig", np.array(f_sig))
-    calc_aman.wrap("f_wn", np.array(f_wn))
     return calc_aman
 
 def noise_model(f, params, **fixed_param):

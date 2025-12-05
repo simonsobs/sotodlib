@@ -632,7 +632,8 @@ def make_demod_map(context, obslist, noise_model, info,
             info_aman = obs[info_aman_name]
             for info_entry in info_aman.keys():
                 if np.isscalar(info_aman[info_entry]):
-                    subinfo[info_entry] = info_aman[info_entry]
+                    if info_entry not in subinfo:  # Don't overwrite existing entries
+                        subinfo[info_entry] = info_aman[info_entry]
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
         return errors, outputs, None
