@@ -2697,28 +2697,6 @@ class GetTauHWP(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
 
-class AtomicInfo(_Preprocess):
-    """Add a sub-aman containing information to be saved in the atomic info.
-
-    Example config block::
-
-        - name: "atomic_info"
-          process:
-            rmeanQ: noise_ratio_Q.rmean
-
-    """
-    name = "atomic_info"
-    def process(self, aman, proc_aman, sim=False):
-        atomic_info_aman = core.AxisManager()
-        # Format is "name_for_atomic_info": "name_in_proc_aman"
-        for atomic_name in self.process_cfgs:
-            aman_key = self.process_cfgs[atomic_name]
-            val = proc_aman[aman_key]
-            if not (np.issubdtype(type(val), np.number) or np.issubdtype(type(val), np.str_)):
-                raise TypeError(f"Items of type {type(val)} cannot be added to atomic info")
-            atomic_info_aman.wrap(atomic_name, val)
-        aman.wrap("atomic_info", atomic_info_aman)
-        return aman, proc_aman
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
@@ -2769,4 +2747,4 @@ _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
 _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
-_Preprocess.register(AtomicInfo)
+

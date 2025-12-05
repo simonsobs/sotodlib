@@ -503,7 +503,7 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
-def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=False):
+def noise_ratio(aman, pxx, freqs, f_sig=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=False):
     """Compute the ratio of the mean PSD in two frequency regions to evaluate the noise.
 
     Arguments
@@ -514,7 +514,7 @@ def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=F
             Input PSD. Can be [dets, nufreq] or [dets, nufreq, subscans] (NOT just [nufreq]).
         freqs: np.ndarray[float]
             frequency information related to the psd.
-        f_sel: tuple
+        f_sig: tuple
             2-tuple of frequencies giving the range of the numerator ("signal band")
         f_wn: tuple
             2-tuple of frequencies giving the range of the denominator ("white noise")
@@ -528,7 +528,7 @@ def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=F
             "rmean" giving the ratio for the mean (over detectors) PSD.
     """
 
-    fselect = np.logical_and(freqs >= f_sel[0], freqs <= f_sel[1])
+    fselect = np.logical_and(freqs >= f_sig[0], freqs <= f_sig[1])
     fwn = np.logical_and(freqs >= f_wn[0], freqs <= f_wn[1])
 
     pxxmean = np.mean(pxx, axis=0)
@@ -544,7 +544,7 @@ def noise_ratio(aman, pxx, freqs, f_sel=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=F
         calc_aman.wrap("rdets", rdets, [(0,"dets"), (1,"subscans")])
         calc_aman.wrap("rmean", rmean, [(0, "subscans")])
 
-    calc_aman.wrap("f_sel", np.array(f_sel))
+    calc_aman.wrap("f_sig", np.array(f_sig))
     calc_aman.wrap("f_wn", np.array(f_wn))
     return calc_aman
 
