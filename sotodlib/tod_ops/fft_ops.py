@@ -697,7 +697,8 @@ def fit_noise_model(
     base=1.05,
     freq_spacing=None,
     subscan=False,
-    label_axis='dets'
+    label_axis='dets',
+    bounds=None
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -763,6 +764,9 @@ def fit_noise_model(
     label_axis : str
         The name of LabelAxis in the input aman.
         Default is ``dets``.
+    bounds : list of tuple
+        List length 2 with number of non-fixed params each list entry is a tuple
+        first is lower bounds second is upper bounds to constrain fit.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -841,17 +845,25 @@ def fit_noise_model(
         elif len(alpha_est)!=aman[label_axis].count:
             print('Size of alpha_est must be equal to aman.dets.count or a single value.')
             return
+
+        if isinstance(bounds, list):
+            if isinstance(bounds[0], list):
+                bounds = [tuple(b) for b in bounds]
+
         if fixed_param == None:
             initial_params = np.array([wn_est, fknee_est, alpha_est])
-            bounds= ((sys.float_info.min, None), (sys.float_info.min, None), (0, 10))
+            if bounds is None:
+                bounds= ((sys.float_info.min, None), (sys.float_info.min, None), (0, 10))
         if fixed_param == "wn":
             initial_params = np.array([fknee_est, alpha_est])
             fixed = wn_est
-            bounds= ((sys.float_info.min, None), (0, 10))
+            if bounds is None:
+                bounds= ((sys.float_info.min, None), (0, 10))
         if fixed_param == "alpha":
             initial_params = np.array([wn_est, fknee_est])
             fixed = alpha_est
-            bounds= ((sys.float_info.min, None), (sys.float_info.min, None))
+            if counds is None:
+                bounds= ((sys.float_info.min, None), (sys.float_info.min, None))
 
         for i in range(len(pxx)):
             p = pxx[i]
