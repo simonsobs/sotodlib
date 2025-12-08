@@ -546,11 +546,11 @@ class CutBadDistribution(_Preprocess):
         if proc_aman is None:
             proc_aman = meta.preprocess
 
-        statname = self.selec_cfgs.get(param_name, 'wn_signal')
+        stat_name = self.select_cfgs.get('param_name', 'wn_signal')
         if stat_name in meta:
-            keep = get_good_distribution_flags(meta, **self.select_cfgs)
+            keep = tod_ops.flags.get_good_distribution_flags(meta, **self.select_cfgs)
         elif stat_name in proc_aman:
-            keep = get_good_distribution_flags(proc_aman, **self.select_cfgs)
+            keep = tod_ops.flags.get_good_distribution_flags(proc_aman, **self.select_cfgs)
         else:
             warnings.warn(f'{stat_name} not found in aman or proc_aman not applying bad dist cut.')
             return meta
