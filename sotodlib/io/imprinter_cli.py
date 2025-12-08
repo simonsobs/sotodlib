@@ -164,7 +164,7 @@ class MissingReadoutIDs(BookError):
             return
         for oid in remove_oid:
                 self.book = utils.remove_level2_obs_from_book(
-                    self.imprint, self.book, oid
+                    self.imprint, self.book, oid.strip('.')
                 )
     def report_error(self):
         return f"{self.book.bid} does not have readout ids"
