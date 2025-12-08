@@ -1164,3 +1164,59 @@ def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
     if merge:
         aman.flags.wrap('smurfgaps', smurfgaps, [(0, 'dets'), (1, 'samps')])
     return smurfgaps
+
+def get_good_distribution_flags(aman, param_name='wn_signal',
+                                outlier_range=(0.5, 2.), kurtosis_threshold=2.,
+                               blame_max=False, blame_min=False):
+    """
+    Get detector cuts based on the detectors which fit within a gaussian distribution.
+    Outlier and kurtosis thresholds set the cuts and param name determines which
+    statistic's distribution is evaluated to generate the cuts.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    param_name : str
+        Field in aman where to evaluate distribution of.
+    outlier_range : tuple
+        Min and max of distribution allowed
+    kurtosis_threshold : float
+        Maximum allowed kurtosis of final distribution
+    blame_max : bool
+        ADD DESCRIPTION
+    blame_min : bool
+        ADD DESCRIPTION
+
+    Returns
+    -------
+    det_mask : list(bool)
+        Boolean mask for cuts True for keep and False for cut.
+    """
+    det_mask = np.full(aman.dets.count, True, dtype=bool)
+    ratio = aman[param_name]/np.median(aman[param_name])
+    outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
+
+    det_mask[outlier_mask] = False
+    while True:
+        if len(aman.dets.vals[det_mask]) > 0:
+            distributions = aman[param_name][det_mask]
+        else:
+            break
+        kurtosis_wn = stats.kurtosis(distributions)
+        if np.abs(kurtosis_wn) < kurtosis_threshold:
+            break
+        else:
+            assert (blame_max==False) or (blame_min==False)
+            if blame_max:
+                det_mask[aman[param_name] >= np.max(distributions)] = False
+            elif blame_min:
+                det_mask[aman[param_name] <= np.min(distributions)] = False
+            else:
+                max_is_bad_factor = np.max(distributions)/np.median(distributions)
+                min_is_bad_factor = np.median(distributions)/np.min(distributions)
+                if max_is_bad_factor > min_is_bad_factor:
+                    det_mask[aman[param_name] >= np.max(distributions)] = False
+                else:
+                    det_mask[aman[param_name] <= np.min(distributions)] = False
+    return det_mask

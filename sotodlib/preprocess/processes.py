@@ -521,6 +521,47 @@ class GetStats(_Preprocess):
 
             plot_signal(aman, signal_name=self.signal, x_name="timestamps", filename=filename, **self.plot_cfgs)
 
+class CutBadDistribution(_Preprocess):
+    """
+    Detector cuts to keep a statistic within some bounds of a gaussian distribution.
+
+    Example config::
+
+        - name: "cut_bad_dist"
+          select:
+            param_name: wn_signal
+            outlier_range: [0.5, 2.0]
+            kurtosis_threshold: 2.0
+            blame_max: False
+            blame_min: False
+
+    For parameter options see: :func:`sotodlib.tod_ops.flags.get_good_distribution_flags`
+    """
+    name = "cut_bad_dist"
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        statname = self.selec_cfgs.get(param_name, 'wn_signal')
+        if stat_name in meta:
+            keep = get_good_distribution_flags(meta, **self.select_cfgs)
+        elif stat_name in proc_aman:
+            keep = get_good_distribution_flags(proc_aman, **self.select_cfgs)
+        else:
+            warnings.warn(f'{stat_name} not found in aman or proc_aman not applying bad dist cut.')
+            return meta
+
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+
+
 class Noise(_Preprocess):
     """
     Estimate the white noise levels in the data. Assumes the PSD has been
@@ -2804,3 +2845,4 @@ _Preprocess.register(TrimFlagEdge)
 _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
 _Preprocess.register(Move)
+_Preprocess.register(CutBadDistribution)
