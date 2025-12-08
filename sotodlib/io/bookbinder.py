@@ -1502,12 +1502,15 @@ def get_frame_times(frame, allow_bad_timing=False):
     
     # Look for evidence of counters de-syncing. 
     stat = c2-(c0/480000) - np.round(c2-(c0/480000))
-    counters = ((np.ptp(stat)>0.001)+(np.abs(np.mean(stat))>0.0025))
+    counters = ((np.ptp(stat)<0.001)+(np.abs(np.mean(stat))<0.0025))
 
     ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
 
     if not counters and not allow_bad_timing:
-        raise TimingCounterError("Timing counters diverging from normal")
+        raise TimingCounterError(
+            f"Timing counters diverging from normal. ptp: {np.ptp(stat)}, "
+            f"mean: {np.abs(np.mean(stat))}"
+        )
 
     return counters, ts
 
