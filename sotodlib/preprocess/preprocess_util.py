@@ -1170,14 +1170,15 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             logger.error(f"Init Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
             return None, None, None, (PreprocessErrors.PipeLineStepError, success, None)
 
-        logger.info(f"Saving preprocessing axis manager to "
-                    f"{out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
-        proc_aman.save(out_dict_init['temp_file'], out_dict_init['db_data']['dataset'],
-                       overwrite)
-        if save_archive:
-            logger.info(f"Adding result to init db for {obs_id}: {group}")
-            cleanup_mandb(out_dict_init, (obs_id, group), (None, None, None),
-                          configs_init, logger=logger, overwrite=overwrite)
+        if save_proc_aman:
+            logger.info(f"Saving preprocessing axis manager to "
+                        f"{out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
+            proc_aman.save(out_dict_init['temp_file'], out_dict_init['db_data']['dataset'],
+                           overwrite)
+            if save_archive:
+                logger.info(f"Adding result to init db for {obs_id}: {group}")
+                cleanup_mandb(out_dict_init, (obs_id, group), (None, None, None),
+                              configs_init, logger=logger, overwrite=overwrite)
         # Make init plots
         if make_lmsi_init:
             new_plots = os.path.join(configs_init["plot_dir"],
@@ -1232,14 +1233,15 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             logger.error(f"Proc Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
             return None, None, None, (PreprocessErrors.PipeLineStepError, success, None)
 
-        logger.info(f"Saving proc axis manager to "
-                    f"{out_dict_proc['temp_file']}:{out_dict_proc['db_data']['dataset']}")
-        proc_aman.save(out_dict_proc['temp_file'], out_dict_proc['db_data']['dataset'],
-                       overwrite)
-        if save_archive:
-            logger.info(f"Adding result to proc db for {obs_id}: {group}")
-            cleanup_mandb(out_dict_proc, (obs_id, group), (None, None, None),
-                          configs_proc, logger=logger, overwrite=overwrite)
+        if save_proc_aman:
+            logger.info(f"Saving proc axis manager to "
+                        f"{out_dict_proc['temp_file']}:{out_dict_proc['db_data']['dataset']}")
+            proc_aman.save(out_dict_proc['temp_file'], out_dict_proc['db_data']['dataset'],
+                           overwrite)
+            if save_archive:
+                logger.info(f"Adding result to proc db for {obs_id}: {group}")
+                cleanup_mandb(out_dict_proc, (obs_id, group), (None, None, None),
+                              configs_proc, logger=logger, overwrite=overwrite)
         if 'valid_data' in aman.preprocess:
             aman.preprocess.move('valid_data', None)
         aman.preprocess.merge(proc_aman)
