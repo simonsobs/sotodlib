@@ -454,6 +454,77 @@ class PSDCalc(_Preprocess):
             plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
                      xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
 
+class NoiseRatio(_Preprocess):
+    """ Compute ratios of "signal band" to white noise in PSDs.
+
+    Example config block::
+
+    - name: "noise_ratio"
+      psd: "psdQ"
+      wrap: "noise_ratio_Q"
+      subscan: False
+      calc:
+        f_sel: [0.04, 0.14]
+        f_wn: [0.6, 1.0]
+      save: True
+      select:
+        r_max: 1.19
+        select_per_detector: True
+
+    .. autofunction:: sotodlib.tod_ops.fft_ops.noise_ratio
+"""
+    name = "noise_ratio"
+
+    def __init__(self, step_cfgs):
+        self.psd = step_cfgs.get('psd', 'psd')
+        self.wrap = step_cfgs.get('wrap', 'noise_ratio')
+        self.subscan = step_cfgs.get('subscan', False)
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.psd not in proc_aman:
+            raise ValueError("PSD is not saved in Preprocessing AxisManager")
+        psd = proc_aman[self.psd]
+        pxx = psd.Pxx_ss if self.subscan else psd.Pxx
+
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+
+        calc_aman = tod_ops.fft_ops.noise_ratio(proc_aman, pxx, psd.freqs, subscan=self.subscan, **self.calc_cfgs)
+        self.save(proc_aman, calc_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, calc_aman):
+        if self.save_cfgs is None:
+            return
+        else:
+            proc_aman.wrap(self.wrap, calc_aman)
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        per_detector = self.select_cfgs.get("select_per_detector", True)
+        if per_detector:
+            noise_ratio = proc_aman[self.wrap]["rdets"]
+        else:
+            noise_ratio = proc_aman[self.wrap]["rmean"]
+
+        if self.subscan:
+            noise_ratio = np.nanmean(noise_ratio, axis=-1) # Mean over subscans
+        keep = np.ones_like(meta.dets.vals, dtype=bool)
+        keep &= (noise_ratio <= np.float64(self.select_cfgs["r_max"]))
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+
+
 class GetStats(_Preprocess):
     """
     Get basic statistics from a TOD or its power spectrum.
@@ -921,7 +992,7 @@ class EstimateHWPSS(_Preprocess):
 
                     # calculate amplitude of each mode
                     mode_labels = list(proc_aman.hwpss_stats.modes.vals)
-                    num_re = re.compile("^[SC](\d+)$")
+                    num_re = re.compile(r"^[SC](\d+)$")
                     nums = sorted(list(set([num_re.match(l).group(1) for l in mode_labels])))
                     coeff_amp = np.zeros((coeff.shape[0], len(nums)), coeff.dtype)
                     amp_labels = []
@@ -1551,6 +1622,70 @@ class DarkDets(_Preprocess):
             return meta
         else:
             return keep
+
+class LoadPremadeFlags(_Preprocess):
+    """Load premade flags from aman.
+
+    Saves results in proc_aman under the "premade_flags_name" field of aman.
+    In addtion, you can select detectors based on the loaded flags.
+    This is mainly used for simulation for planet mapmaking.
+    When simulated planet is made, we need corresponding flags 
+    to carry out the same preprocessing as the real planet mapmaking.
+    This class is useful whenever you want to premake custum flags and use it.
+    
+    E.g., if aman contains 'sim_jupiter_flag', you can load it to proc_aman as follows:
+
+    Example config block::
+
+        - name : "load_premade_flags"
+            load_premade_flag_name: 'sim_jupiter_flag'
+            calc:
+                inv_flag: True
+            save: True
+            select: # optional
+                kind: "any"
+                invert: True
+    
+    """
+    name = "load_premade_flags"
+    def __init__(self, step_cfgs):
+        self.premade_flags_name = step_cfgs.get('load_premade_flag_name', 'premade_flags')
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        print('flags_name', self.premade_flags_name)
+        premade_flags = aman.flags.get(self.premade_flags_name)
+        source_aman = core.AxisManager(aman.dets, aman.samps)
+        source_aman.wrap(self.premade_flags_name, premade_flags, [(0, 'dets'), (1, 'samps')])
+
+        if self.calc_cfgs.get('inv_flag'):
+            source_aman.wrap(self.premade_flags_name + '_inv',
+                            RangesMatrix.from_mask(~premade_flags.mask()),
+                            [(0, 'dets'), (1, 'samps')])
+                    
+        self.save(proc_aman, source_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, source_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.premade_flags_name, source_aman)            
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = flag_cut_select(proc_aman[self.premade_flags_name][self.premade_flags_name],
+                              kind=self.select_cfgs.get("kind", 'all'),
+                              invert=self.select_cfgs.get('invert', False))
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+    
 
 class SourceFlags(_Preprocess):
     """Calculate the source flags in the data.
@@ -2812,6 +2947,7 @@ _Preprocess.register(GlitchDetection)
 _Preprocess.register(Jumps)
 _Preprocess.register(FixJumps)
 _Preprocess.register(PSDCalc)
+_Preprocess.register(NoiseRatio)
 _Preprocess.register(Noise)
 _Preprocess.register(Calibrate)
 _Preprocess.register(EstimateHWPSS)
@@ -2827,6 +2963,7 @@ _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
+_Preprocess.register(LoadPremadeFlags)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)

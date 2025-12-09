@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Any, Union
 from sqlalchemy import create_engine, exc
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
@@ -5,6 +6,7 @@ import importlib
 import numpy as np
 import so3g
 from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
+from scipy.sparse import issparse, sparray
 
 from .. import coords, core, tod_ops
 
@@ -614,8 +616,12 @@ def get_wrappable(axman, key):
         axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
         return key, val, axdesc
 
-def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
+def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse_handling="naive", logger=None):
     """Downsample AxisManager obs by the integer factor down.
+
+    Note that the handling of flags and associated metadata (ie: jump heights) is
+    naive and can lead to improper handling of these flags,
+    to avoid issues this function should be run after all other preprocessing steps.
 
     This implementation is quite specific and probably needs
     generalization in the future, but it should work correctly
@@ -623,6 +629,14 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
     it uses fourier-resampling when downsampling the detector
     timestreams to avoid both aliasing noise and introducing
     a transfer function."""
+    if logger is None:
+        logger = logging.getLogger("downsample_obs")
+
+    # TODO: At some point we may want something more clever
+    # For now if people downsample after preprocess it doesn't really matter
+    if sparse_handling not in ["naive", "skip"]:
+        raise ValueError("sparse_handling should be 'naive' or 'skip'")
+
     assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
     if down == 1: return obs
     if "samps" not in obs: return obs
@@ -639,8 +653,21 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
             continue
         elif isinstance(obs[key], (core.AxisManager, core.FlagManager)):
             res.wrap(key, downsample_obs(obs[key], down, skip_signal, fft_resample))
+        # TODO: This is a pretty naive way of handling flags, could lead to wierdness
+        # Again not an issue if this is done after preprocess
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
             res.wrap(key, downsample_cut(obs[key], down))
+        elif isinstance(obs[key], so3g.RangesInt32):
+            res.wrap(key, downsample_ranges(obs[key], down))
+        elif issparse(obs[key]) and isinstance(obs[key], sparray):
+            if sparse_handling == "skip":
+                continue
+            elif sparse_handling == "naive":
+                ax_idx = np.where(np.array(axes) == "samps")[0]
+                dat = np.moveaxis(obs[key].toarray(), ax_idx, -1)
+                # Resample and return to original order
+                dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
+                res.wrap(key, obs[key].__class__(dat), [(i, ax) for i, ax in enumerate(axes)])
         elif key in fft_resample:
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
@@ -649,16 +676,18 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"]):
             dat = np.moveaxis(resample.resample_fft_simple(dat, onsamp), -1, ax_idx)
             res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
         # Some naive slicing for everything else
-        else:
+        elif isinstance(obs[key], np.ndarray):
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
             dat = np.moveaxis(obs[key], ax_idx, -1)
             # Resample and return to original order
             dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
             res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+        else:
+            logger.warning("Skipping field %s, unhandled type %s", key, type(obs[key]))
+            continue
 
-    # Not sure how to deal with flags. Some sort of or-binning operation? But it
-    # doesn't matter anyway
+
     return res
 
 def get_flags(obs, flagnames):
@@ -758,6 +787,7 @@ class AtomicInfo(Base):
     moon_distance: Mapped[Optional[float]]
     wind_speed: Mapped[Optional[float]]
     wind_direction: Mapped[Optional[float]]
+    rqu_avg: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id

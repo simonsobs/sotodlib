@@ -216,7 +216,45 @@ class NoMountData(BookError):
         else: 
             raise ValueError(f"What book got me here? {self.book.bid}")
     def report_error(self):
-        return f"{self.book.bid} does not ACU data reading out"
+        return f"{self.book.bid} does not ACU data overlapping detector data"
+
+class DroppedMountData(BookError):
+    """Error thrown when at least 200 samples from one of the mount fields has been 
+    dropped.
+    """
+    max_drop_time_to_fix = 300
+    dropped = None
+
+    @staticmethod
+    def has_error(book):
+        return "DroppedMountData" in book.message
+
+    def fix_book(self):
+        if self.dropped is None:
+            self.report_error()
+
+        if self.book.type == 'obs':
+            if self.dropped > self.max_drop_time_to_fix:
+                print(f"ACU readout dropped for {self.dropped} seconds. Autofixing"
+                      f"only allowed if drop is less than {self.max_drop_time_to_fix}")
+                return
+            utils.set_book_rebind(self.imprint, self.book)
+            self.imprint.bind_book(self.book, require_acu=False,)
+
+        elif self.book.type == 'oper':
+            utils.set_book_rebind(self.imprint, self.book)
+            self.imprint.bind_book(self.book, require_acu=False,)
+        else: 
+            raise ValueError(f"What book got me here? {self.book.bid}")
+
+    def report_error(self):
+        pattern = r"dropped\s*\[(.*?)\]\s*samples over\s*\[(.*?)\]"
+        m = re.search(pattern, self.book.message.split("\n")[-2])
+        self.dropped = sum([float(x) for x in m.group(2).split()])
+        return (
+            f"{self.book.bid} has the ACU dropping out {len(m.group(2).split())} time(s) "
+            f"for a total of {self.dropped} seconds"
+        )
 
 class TimingSystemOff(BookError):
     """Two places this error is thrown. If we get to the timing counter
@@ -320,6 +358,7 @@ AUTOFIX_ERRORS = [
     NoHWPData,
     DuplicateAncillaryData,
     NoMountData,
+    DroppedMountData,
     TimingSystemOff,
     FileTooLargeError,
     BadTimeSamples,

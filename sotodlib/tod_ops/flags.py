@@ -17,7 +17,7 @@ from . import fourier_filter
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_nan=False,
-                       merge=True, overwrite=True,
+                       phase_to_pW=None, merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
@@ -39,6 +39,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         Tuple (lower_bound, upper_bound) for r_n det selection.
     si_nan : bool
         If true, flag dets where s_i is NaN. Default is false.
+    phase_to_pW : Tuple
+        Tuple (lower_bound, upper_bound) for phase_to_pW det selection.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -84,6 +86,9 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         ranges.append(detcal.r_n <= rn_range[1])
     if si_nan:
         ranges.append(np.isnan(detcal.s_i) == False)
+    if phase_to_pW is not None:
+        ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
+        ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
 
     msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
@@ -113,26 +118,27 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                   detcal.r_frac >= rfrac_range[0],
                   detcal.r_frac <= rfrac_range[1]
                  ]
+        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
+
         if psat_range is not None:
+            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
             ranges.append(detcal.p_sat*1e12 >= psat_range[0])
             ranges.append(detcal.p_sat*1e12 <= psat_range[1])
         
         if rn_range is not None:
+            msk_names.extend(['r_n_gt', 'r_n_lt'])
             ranges.append(detcal.r_n >= rn_range[0])
             ranges.append(detcal.r_n <= rn_range[1])
-
+            
+        if phase_to_pW is not None:
+            msk_names.extend(['phase_to_pW_gt', 'phase_to_pW_lt'])
+            ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
+            ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
+        
         for range in ranges:
             msk = ~(np.all([range], axis=0))
             msks.append(RangesMatrix([Ranges.ones_like(x) if Y
                                       else Ranges.zeros_like(x) for Y in msk]))
-
-        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
-        
-        if psat_range is not None:
-            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
-            
-        if rn_range is not None:
-            msk_names.extend(['r_n_gt', 'r_n_lt'])
 
         for i, msk in enumerate(msks):
             if 'samps' in aman:

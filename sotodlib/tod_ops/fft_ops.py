@@ -506,6 +506,53 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
     wn = np.sqrt(wn2)
     return wn
 
+def noise_ratio(aman, pxx, freqs, f_sig=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=False):
+    """Compute the ratio of the mean PSD in two frequency regions to evaluate the noise.
+
+    Arguments
+    ---------
+        aman: AxisManager
+            Only used for matching the dets and subscans dimensions in the output aman.
+        pxx: np.ndarray[float]
+            Input PSD. Can be [dets, nufreq] or [dets, nufreq, subscans] (NOT just [nufreq]).
+        freqs: np.ndarray[float]
+            frequency information related to the psd.
+        f_sig: tuple
+            2-tuple of frequencies giving the range of the numerator ("signal band")
+        f_wn: tuple
+            2-tuple of frequencies giving the range of the denominator ("white noise")
+        subscan: bool
+            True if the PSD is split by subscans
+
+    Returns
+    -------
+        calc_aman: AxisManager
+            Axis manager with fields "rdets" giving the per-detector ratio and
+            "rmean" giving the ratio for the mean (over detectors) PSD.
+    """
+
+    fselect = np.logical_and(freqs >= f_sig[0], freqs <= f_sig[1])
+    fwn = np.logical_and(freqs >= f_wn[0], freqs <= f_wn[1])
+
+    pxxmean = np.mean(pxx, axis=0)
+    rmean = np.mean(pxxmean[fselect], axis=0) / np.mean(pxxmean[fwn], axis=0)
+    rdets = np.mean(pxx[:, fselect], axis=1) / np.mean(pxx[:, fwn], axis=1)
+    rmean = np.array([rmean]*aman.dets.count)  # Make a dets axis since scalar wrapping is broken
+
+    if not subscan:
+        calc_aman = core.AxisManager(aman.dets)
+        calc_aman.wrap("rdets", rdets, [(0,"dets")])
+        calc_aman.wrap("rmean", rmean, [(0,"dets")])
+    else:
+        try:
+            calc_aman = core.AxisManager(aman.dets, aman.turnaround_flags.subscan_info.subscans)
+        except AttributeError:
+            calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
+        calc_aman.wrap("rdets", rdets, [(0,"dets"), (1,"subscans")])
+        calc_aman.wrap("rmean", rmean, [(0,"dets"), (1,"subscans")])
+
+    return calc_aman
+
 def noise_model(f, params, **fixed_param):
     """
     Noise model for power spectrum with white noise, and 1/f noise.

@@ -138,16 +138,6 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
         start_time = start_time.timestamp()
     if isinstance(stop_time, dt.datetime):
         stop_time = stop_time.timestamp()
-        
-    if not overwrite:
-        conn = sqlite3.connect(output_db)
-        cur = conn.cursor()
-        query_stmt = f"SELECT * FROM {interval} WHERE telescope = ? AND freq_channel = ? AND split_label = ? AND start_time = ? AND stop_time = ?"
-        cur.execute(query_stmt, (platform,band,split_label,start_time,stop_time,))
-        rows = cur.fetchall()
-        conn.close()
-        if len(rows) > 0:
-            return False
 
     conn = sqlite3.connect(atomic_db)
     cur = conn.cursor()
@@ -166,6 +156,18 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     for j, row in enumerate(rows):
         for k, item in enumerate(row):
             data[columns[k]].append(item)
+            
+    obslist = ','.join(np.unique(data['obs_id']))
+    
+    if not overwrite:
+        conn = sqlite3.connect(output_db)
+        cur = conn.cursor()
+        query_stmt = f"SELECT * FROM {interval} WHERE telescope = ? AND freq_channel = ? AND split_label = ? AND start_time = ? AND stop_time = ? AND obslist = ?"
+        cur.execute(query_stmt, (platform,band,split_label,start_time,stop_time,obslist,))
+        rows = cur.fetchall()
+        conn.close()
+        if len(rows) > 0:
+            return False
 
     if '+' in band:
         band = band.split('+')[0]
