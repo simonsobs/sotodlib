@@ -367,9 +367,17 @@ def get_obs_with_detsets(ctx, detset_idx):
     """Gets all observations with type 'obs' that have detset data"""
     db = core.metadata.ManifestDb(detset_idx)
     detsets = db.get_entries(['dataset'])['dataset']
-    obs_ids = set()
-    for dset in detsets:
-        obs_ids = obs_ids.union(ctx.obsfiledb.get_obs_with_detset(dset))
+
+    values = ",".join("?" for _ in detsets)
+    query = f"""
+        SELECT DISTINCT obs_id
+        FROM files
+        WHERE detset IN ({values})
+    """
+
+    c = ctx.obsfiledb.conn.execute(query, detsets)
+    obs_ids = set([r[0] for r in c])
+
     return obs_ids
 
 
