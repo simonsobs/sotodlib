@@ -89,7 +89,7 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
     # Set default set of splits
     default_cfg = {'high_gain': 0.115, 'high_tau': 1.5e-3,
                    'det_A': 'A', 'pol_angle': 35, 'crossover': 'BL', 'right_focal_plane': 0,
-                   'top_focal_plane': 0, 'central_pixels': 0.071, 'high_rq': 1.1, 'high_ru': 1.2}
+                   'top_focal_plane': 0, 'central_pixels': 0.071, 'high_rq': 1.1, 'high_ru': 1.12}
     if split_cfg is None:
         split_cfg = default_cfg
 
@@ -171,13 +171,25 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
 
     if 'noise_ratio_Q' in proc_aman:
         # 1/f noise split
-        fm.wrap_dets('high_rq', proc_aman.noise_ratio_Q.rdets > split_cfg['high_rq'])
-        fm.wrap_dets('low_rq', proc_aman.noise_ratio_Q.rdets <= split_cfg['high_rq'])
+        rq = proc_aman.noise_ratio_Q.rdets
+        if rq.ndim > 1:  # Mean over subscans
+            rq = np.nanmean(rq, axis=-1)
+        fm.wrap_dets('high_rq', rq > split_cfg['high_rq'])
+        fm.wrap_dets('low_rq',  rq <= split_cfg['high_rq'])
         split_aman.wrap('rq_avg', np.nanmean(proc_aman.noise_ratio_Q.rmean))
     if 'noise_ratio_U' in proc_aman:
-        fm.wrap_dets('high_ru', proc_aman.noise_ratio_U.rdets > split_cfg['high_ru'])
-        fm.wrap_dets('low_ru', proc_aman.noise_ratio_U.rdets <= split_cfg['high_ru'])
+        ru = proc_aman.noise_ratio_U.rdets
+        if ru.ndim > 1:  # Mean over subscans
+            ru = np.nanmean(ru, axis=-1)
+        fm.wrap_dets('high_ru', ru > split_cfg['high_ru'])
+        fm.wrap_dets('low_ru', ru <= split_cfg['high_ru'])
         split_aman.wrap('ru_avg', np.nanmean(proc_aman.noise_ratio_U.rmean))
+    if 'noise_ratio_Q' in proc_aman and 'noise_ratio_U' in proc_aman:
+        rqu = np.mean([rq, ru], axis=0)
+        high_rqu = np.mean([split_cfg['high_rq'], split_cfg['high_ru']])
+        fm.wrap_dets('high_rqu', rqu > high_rqu)
+        fm.wrap_dets('low_rqu', rqu <= high_rqu)
+        split_aman.wrap('rqu_avg', np.nanmean([proc_aman.noise_ratio_Q.rmean, proc_aman.noise_ratio_U.rmean]))
 
 
     for k in split_cfg.keys():

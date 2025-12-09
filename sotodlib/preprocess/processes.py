@@ -463,6 +463,7 @@ class NoiseRatio(_Preprocess):
     - name: "noise_ratio"
       psd: "psdQ"
       wrap: "noise_ratio_Q"
+      subscan: False
       calc:
         f_sel: [0.04, 0.14]
         f_wn: [0.6, 1.0]
@@ -478,7 +479,6 @@ class NoiseRatio(_Preprocess):
     def __init__(self, step_cfgs):
         self.psd = step_cfgs.get('psd', 'psd')
         self.wrap = step_cfgs.get('wrap', 'noise_ratio')
-        self.per_detector = step_cfgs.get('per_detector', True)
         self.subscan = step_cfgs.get('subscan', False)
 
         super().__init__(step_cfgs)

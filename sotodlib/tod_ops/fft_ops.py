@@ -541,7 +541,10 @@ def noise_ratio(aman, pxx, freqs, f_sig=(0.04, 0.14), f_wn=(0.6, 1.0), subscan=F
         calc_aman.wrap("rdets", rdets, [(0,"dets")])
         calc_aman.wrap("rmean", rmean, [(0,"dets")])
     else:
-        calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
+        try:
+            calc_aman = core.AxisManager(aman.dets, aman.turnaround_flags.subscan_info.subscans)
+        except AttributeError:
+            calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
         calc_aman.wrap("rdets", rdets, [(0,"dets"), (1,"subscans")])
         calc_aman.wrap("rmean", rmean, [(0,"dets"), (1,"subscans")])
 
