@@ -156,7 +156,7 @@ def t2p_joint_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demod
         return AQ + lamQ * dT + 1.j * (AU + lamU * dT)
 
     if sigma_demod is None:
-        sigma_demod = np.ones_like(aman.dets.count)
+        sigma_demod = np.ones(aman.dets.count)
 
     if flag_name is None:
         mask = np.ones_like(aman[T_sig_name], dtype='bool')

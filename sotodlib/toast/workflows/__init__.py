@@ -39,6 +39,8 @@ from .proc_filters import (
     filter_poly2d,
     setup_filter_common_mode,
     filter_common_mode,
+    setup_median_detrend,
+    median_detrend,
 )
 from .proc_flagging import (
     setup_simple_jumpcorrect,
