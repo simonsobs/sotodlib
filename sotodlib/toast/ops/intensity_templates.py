@@ -320,6 +320,17 @@ class IntensityTemplates(Operator):
                         pickle.dump(intensity_templates, f)
                 log.info_rank(f"Cached templates in {fname_cache}", comm=gcomm)
 
+            # Loading from cache causes there to be unused templates.
+            # Discard all that are not relevant for local detectors
+            unused_keys = set(intensity_templates.keys())
+            for det in ob.local_detectors:
+                if det in det_to_key:
+                    key = det_to_key[det]
+                    if key in unused_keys:
+                        unused_keys.remove(key)
+            for key in unused_keys:
+                del intensity_templates[key]
+
             # Optionally, lowpass/bandpass filter all computed templates
             # This happens after caching so cached templates are never
             # filtered.
