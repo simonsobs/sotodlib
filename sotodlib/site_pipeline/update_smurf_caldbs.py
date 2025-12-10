@@ -59,9 +59,12 @@ if not logger.hasHandlers():
 
 
 
-def main(config: Union[str, dict], 
-        overwrite:Optional[bool]=False,
-        skip_detset=False, skip_detcal=False):
+def main(
+    config: Union[str, dict],
+    overwrite: Optional[bool] = False,
+    skip_detset: Optional[bool] = False,
+    skip_detcal: Optional[bool] = False,
+):
     if not skip_detset:
         smurf_detset_info(config, overwrite)
     if not skip_detcal:
