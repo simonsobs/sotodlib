@@ -1,0 +1,13 @@
+# TENTATIVE WG YAML FILE
+hk_root: '/global/cfs/cdirs/sobs/data/satp1/hk'
+db_file: '/global/cfs/cdirs/sobs/users/mhasse/work/250404/hkdb-satp1.db'
+aliases:
+  enc_rad_raw: 'wg-encoder.wgencoder_full.reference_count'
+  LSL1: 'wg-actuator.wgactuator.limitswitch_LSL1'
+  LSL2: 'wg-actuator.wgactuator.limitswitch_LSL2'
+  LSR1: 'wg-actuator.wgactuator.limitswitch_LSR1'
+  LSR2: 'wg-actuator.wgactuator.limitswitch_LSR2'
+  angleX: 'wg-tilt-sensor.wgtiltsensor.angleX'
+  angleY: 'wg-tilt-sensor.wgtiltsensor.angleY'
+  tempX: 'wg-tilt-sensor.wgtiltsensor.tempX'
+  tempY: 'wg-tilt-sensor.wgtiltsensor.tempY'

@@ -27,7 +27,7 @@ dtype = [
 def run(
     logger,
     context_path,
-    process_pipe,
+    # process_pipe,
     metadata_list,
     obs_id,
     n_split,
@@ -42,6 +42,7 @@ def run(
 
     try:
         ctx = core.Context(context_path, metadata_list=metadata_list)
+        
         meta = ctx.get_meta(obs_id)
         nper = int(np.ceil(meta.dets.count/n_split))
         logger.info(f'process {obs_id}, dets {meta.dets.count}')
@@ -49,17 +50,7 @@ def run(
             dets = meta.dets.vals[i*nper:(i+1)*nper]
             meta_short = meta.restrict('dets', dets, in_place=False)
 
-            ## ---- restrict invalid detectors start ---- ##
-            isvalid = np.sum(np.isnan([meta_short.focal_plane.xi, meta_short.focal_plane.eta, meta_short.focal_plane.gamma]).astype(int), axis=0) == 0
-            meta_short = meta_short.restrict('dets', meta_short.dets.vals[isvalid], in_place=False)
-
-            meta_short = meta_short.restrict('dets', meta_short.dets.vals[(0.05 < meta_short.det_cal.r_frac) & (meta_short.det_cal.r_frac < 0.95)], in_place=False)
-            meta_short = meta_short.restrict('dets', meta_short.dets.vals[meta_short.det_cal.phase_to_pW > 0], in_place=False)
-            ## ---- restrict invalid detectors end ---- ##
-
             tod = ctx.get_obs(meta_short)
-            # pipe = preprocess.Pipeline(process_pipe)
-            # proc = core.AxisManager(tod.dets, tod.samps)
 
             ## ---- Preprocess start ---- ##
             apply_hwp_angle_model(tod)
@@ -69,6 +60,16 @@ def run(
             ## ---- Preprocess end ---- ##
 
             ## ---- Wire grid calibration start ---- ##
+
+            config = L3Config(
+                path = f'./calibration/tentative_wg.yaml',
+                start_time = tod.timestamps[0] - 60,
+                stop_time = tod.timestamps[-1] + 60 ,
+            )
+
+            raw_data_dict_wg = load_data(config)
+
+            wrap_wg_hk(tod, raw_data_dict = raw_data_dict_wg)
             correct_wg_angle(tod)
             idx_steps_starts, idx_steps_ends = find_operation_range(tod)
             calc_calibration_data_set(tod, idx_steps_starts, idx_steps_ends)
@@ -95,7 +96,7 @@ def _main(
     executor,
     as_completed_callable: Callable,
     context_path: str,
-    process_pipe: dict,
+    # process_pipe: dict,
     output_dir: str,
     metadata_list: Optional[List[str]] = 'all',
     verbosity: Optional[int] = 2,
@@ -190,7 +191,7 @@ def _main(
                 run,
                 logger,
                 context_path,
-                process_pipe,
+                # process_pipe,
                 metadata_list,
                 obs_id=job.tags['obs_id'],
                 n_split=n_split,
