@@ -20,6 +20,7 @@ from toast.timing import function_timer
 from toast.traits import Int, Unicode, trait_docs
 from toast.utils import Environment, Logger
 from toast.ops import Operator
+from toast.ops.demodulation import Lowpass
 
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
@@ -238,6 +239,7 @@ class IntensityTemplates(Operator):
             # See if we already have cached templates
 
             intensity_templates = {}
+            hkfields = {}
             if self.cache_dir is not None:
                 fname_cache = os.path.join(self.cache_dir, f"{ob.name}.pck")
                 if os.path.isfile(fname_cache):
@@ -247,16 +249,19 @@ class IntensityTemplates(Operator):
                         comm=gcomm,
                     )
                     with open(fname_cache, "rb") as f:
-                        intensity_templates = pickle.load(f)
+                        intensity_templates, hkfields = pickle.load(f)
             else:
                 fname_cache = None
 
             # See if we have a housekeeping template
 
-            hkfields = {}
             if self.hkkey is not None:
                 for key in self.hkkey.split(","):
-                    hkfields[key] = ob.hk.interp(key)
+                    if key in hkfields:
+                        # This key is already loaded, possibly from cache.
+                        pass
+                    else:
+                        hkfields[key] = ob.hk.interp(key)
 
             # Every process builds all intensity templates that it needs
 
@@ -317,7 +322,7 @@ class IntensityTemplates(Operator):
                             intensity_templates.update(templates)
                 if gcomm is None or gcomm.rank == 0:
                     with open(fname_cache, "wb") as f:
-                        pickle.dump(intensity_templates, f)
+                        pickle.dump([intensity_templates, hkfields], f)
                 log.info_rank(f"Cached templates in {fname_cache}", comm=gcomm)
 
             # Loading from cache causes there to be unused templates.
@@ -336,8 +341,53 @@ class IntensityTemplates(Operator):
             # filtered.
 
             if self.submode != "raw":
-                msg = "Filtering intensity templates not implemented yet"
-                raise NotImplementedError(msg)
+                fsample = ob.telescope.focalplane.sample_rate
+                single_lowpass = None
+                lowpasses = None
+                if self.submode.startswith("lowpass:"):
+                    fmax = u.Quantity(self.submode.replace("lowpass:", ""))
+                    single_lowpass = Lowpass(fmax, fsample)
+                elif self.submode.startswith("split:"):
+                    lowpasses = []
+                    for freq in self.submode.replace("split:", "").split(","):
+                        fmax = u.Quantity(freq)
+                        lowpasses.append(Lowpass(fmax, fsample))
+                else:
+                    msg = f"Unknown submode: {self.submode}"
+                    raise RuntimeError(msg)
+
+                # Apply the filters to all templates
+
+                for key, templates in intensity_templates.items():
+                    for name, template in templates.items():
+                        if single_lowpass is not None:
+                            # Lowpass mode, replace original template
+                            template[:] = single_lowpass(template)
+                        else:
+                            # Split mode, derive multiple templates and
+                            # conserve total power
+                            for i, lowpass in enumerate(lowpasses):
+                                lowpassed = lowpass(template)
+                                template -= lowpassed
+                                templates[f"{name}-lowpass{i}"] = lowpassed
+
+                for hkkey, hkfield in hkfields.items():
+                    if single_lowpass is not None:
+                        # Lowpass mode, replace original template
+                        hkfield[:] = single_lowpass(hkfield)
+                    else:
+                        # Split mode, derive multiple templates and
+                        # conserve total power
+                        for i, lowpass in enumerate(lowpasses):
+                            lowpassed = lowpass(hkfield)
+                            hkfield -= lowpassed
+                            hkfields[f"{hkkey}-lowpass{i}"] = lowpassed
+
+            # Add housekeeping fields to the templates
+
+            for key, templates in intensity_templates.items():
+                for hkkey, hkfield in hkfields.items():
+                    templates[hkkey] = hkfield
 
             # Store the intensity templates in the observation
 

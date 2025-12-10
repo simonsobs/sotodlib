@@ -72,33 +72,13 @@ class IntensityTemplateTest(unittest.TestCase):
 
         # Generate and cache templates
 
-        cache_dir = os.path.join(outdir, "template_cache")
         so_ops.IntensityTemplates(
             name="intensity_templates",
             fpkeys="wafer_slot,bandcenter",
             template_name="intensity_templates",
-            cache_dir=cache_dir,
+            mode="radius:1deg",
+            submode="lowpass:1Hz",
         ).apply(data)
-
-        # Try loading the templates from cache and compare to the ones
-        # in memory
-
-        so_ops.IntensityTemplates(
-            name="intensity_templates_copy",
-            fpkeys="wafer_slot,bandcenter",
-            template_name="intensity_templates_copy",
-            cache_dir=cache_dir,
-        ).apply(data)
-
-        for ob in data.obs:
-            orig = ob["intensity_templates"]
-            cached = ob["intensity_templates_copy"]
-            for key1, value1 in orig.items():
-                for key2, value2 in value1.items():
-                    if isinstance(value2, str):
-                        assert value2 == cached[key1][key2]
-                    else:
-                        assert np.allclose(value2, cached[key1][key2])
 
         # Replace polarization signal with scaled intensity templates
 
@@ -163,6 +143,86 @@ class IntensityTemplateTest(unittest.TestCase):
         assert (
             np.abs(np.std(filtered[2, good]) / np.std(binned[2, good])) < 1e-10
         )
+
+        close_data_and_comm(data)
+
+    def test_intensity_template_caching(self):
+        if not toast_available:
+            print("toast cannot be imported- skipping unit tests", flush=True)
+            return
+
+        comm, procs, rank = toast.get_world()
+
+        outdir = create_outdir(
+            subdir=os.path.splitext(os.path.basename(__file__))[0],
+            mpicomm=comm,
+        )
+
+        data = simulation_test_data(
+            comm,
+            telescope_name="SAT4",
+            wafer_slot="w42",
+            bands="SAT_f030,SAT_f040",
+            sample_rate=37.0 * u.Hz,
+            thin_fp=64,
+            cal_schedule=False,
+        )
+
+        # Simulate noise to fill the TOD
+
+        toast.ops.DefaultNoiseModel().apply(data)
+        toast.ops.SimNoise().apply(data)
+
+        # Demodulate
+
+        detpointing = toast.ops.PointingDetectorSimple(
+            quats="quats_radec",
+            boresight=defaults.boresight_radec,
+            shared_flag_mask=0,
+        )
+
+        weights = toast.ops.StokesWeights(
+            mode="IQU",
+            hwp_angle=defaults.hwp_angle,
+            detector_pointing=detpointing,
+            weights="weights_radec",
+        )
+
+        toast.ops.Demodulate(stokes_weights=weights, in_place=True).apply(data)
+
+        # Generate and cache templates
+
+        cache_dir = os.path.join(outdir, "template_cache")
+        so_ops.IntensityTemplates(
+            name="intensity_templates",
+            fpkeys="wafer_slot,bandcenter",
+            template_name="intensity_templates",
+            cache_dir=cache_dir,
+            mode="radius:1deg",
+            submode="lowpass:1Hz",
+        ).apply(data)
+
+        # Try loading the templates from cache and compare to the ones
+        # in memory
+
+        so_ops.IntensityTemplates(
+            name="intensity_templates_copy",
+            fpkeys="wafer_slot,bandcenter",
+            template_name="intensity_templates_copy",
+            cache_dir=cache_dir,
+            mode="radius:1deg",
+            submode="lowpass:1Hz",
+        ).apply(data)
+
+        for ob in data.obs:
+            orig = ob["intensity_templates"]
+            cached = ob["intensity_templates_copy"]
+            for key1, value1 in orig.items():
+                for key2, value2 in value1.items():
+                    if isinstance(value2, str):
+                        assert value2 == cached[key1][key2]
+                    else:
+                        assert np.allclose(value2, cached[key1][key2])
 
         close_data_and_comm(data)
 
