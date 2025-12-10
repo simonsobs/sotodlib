@@ -3,6 +3,7 @@
 # a BSD-style license that can be found in the LICENSE file.
 
 import os
+import pickle
 import re
 import warnings
 from time import time
@@ -267,6 +268,7 @@ class IntensityTemplates(Operator):
                 if self.mode.startswith("radius:"):
                     radius = u.Quantity(self.mode.split(":")[1])
 
+            det_to_key = {}
             for det in local_dets:
                 # See if this detector needs a template
                 if det.startswith("demod4r") or det.startswith("demod4i"):
@@ -275,6 +277,7 @@ class IntensityTemplates(Operator):
                     key = template_key.format(pixel=pixel)
                     if key not in intensity_templates:
                         intensity_templates[key] = {}
+                    det_to_key[det] = key
                     # Get a shorthand for templates for this detector
                     templates = intensity_templates[key]
                     # See if we need to add housekeeping templates
@@ -327,6 +330,7 @@ class IntensityTemplates(Operator):
 
             # Store the intensity templates in the observation
 
+            intensity_templates["det_to_key"] = det_to_key
             ob[self.template_name] = intensity_templates
 
         return
