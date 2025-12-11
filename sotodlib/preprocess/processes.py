@@ -1929,6 +1929,8 @@ class FourierFilter(_Preprocess):
         self.signal_name = step_cfgs.get('signal_name', 'signal')
         # By default signal is overwritted by the filtered signal
         self.wrap_name = step_cfgs.get('wrap_name', 'signal')
+        # TEMPORARY
+        self.load_file = step_cfgs.get('load_file', False)
 
         super().__init__(step_cfgs)
 
@@ -1936,6 +1938,24 @@ class FourierFilter(_Preprocess):
         field = self.process_cfgs.get("noise_fit_array", None)
         if field:
             noise_fit = proc_aman[field]
+            # TEMPORARY
+            print(proc_aman[field].fit[0])
+            if self.load_file:
+                if np.all(aman.det_info.wafer.bandpass == 'f090'):
+                    dinfo = core.AxisManager.load(f'/scratch/gpfs/SIMONSOBS/users/js7893/202511_200_obs_test/detector_database/detdb_aman_f090.hdf')
+                if np.all(aman.det_info.wafer.bandpass == 'f150'):
+                    dinfo = core.AxisManager.load(f'/scratch/gpfs/SIMONSOBS/users/js7893/202511_200_obs_test/detector_database/detdb_aman_f150.hdf')
+                _, m1, m2 = np.intersect1d(dinfo.dets.vals, noise_fit.dets.vals, return_indices=True)
+                mo = np.where(dinfo.obss.vals == aman.obs_info.obs_id)[0][0]
+                if ('Q' in field) or ('q' in field):
+                    noise_fit.fit[m2,1] = dinfo['fk_demodQ'][m1,mo]
+                    noise_fit.fit[m2,2] = -dinfo['alpha_demodQ'][m1,mo]
+                if ('U' in field) or ('u' in field):
+                    noise_fit.fit[m2,1] = dinfo['fk_demodU'][m1,mo]
+                    noise_fit.fit[m2,2] = -dinfo['alpha_demodU'][m1,mo]
+                #noise_fit.fit[,:] = np.nan
+                noise_fit.fit[np.any(~np.isfinite(noise_fit.fit), axis=1)] = [1, 0.01, 2]
+                print(proc_aman[field].fit[0])
         else:
             noise_fit = None
 
@@ -2928,7 +2948,6 @@ class Move(_Preprocess):
     def process(self, aman, proc_aman, sim=False):
         aman.move(**self.process_cfgs)
         return aman, proc_aman
-
 
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
