@@ -22,19 +22,20 @@ WG_OFFSET_SATP1 = np.deg2rad(180-(47.37+33.5+87)) # SAT1, MF1, which is 12.13 de
 WG_OFFSET_SATP2 = np.deg2rad(180-(50.127+33.5+87)) # SAT2, UHF, which is 9.473 deg
 WG_OFFSET_SATP3 = np.deg2rad(180-(48.29+33.5+87)) # TSAT, MF2, which is 11.21 deg
 
+
 @dataclass
-class L2Config:
-    path: str
+class wg_config:
+    hk_root: str
+    db_file: str
+    site: bool
+    aliases: dict
+    wg_count: int
+    wg_offset: float
     telescope: str
     timestamp_margin: float = 1.0
 
-@dataclass
-class L3Config:
-    path: str
 
-DataSourceConfig = Union[L2Config, L3Config]
-
-def load_data(config: DataSourceConfig, start_time: float, stop_time: float) -> dict:
+def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
     Load wire grid house-keeping data based on the provided configuration.
     start_time and stop_time are used to load the data within the specified range.
@@ -59,35 +60,23 @@ def load_data(config: DataSourceConfig, start_time: float, stop_time: float) -> 
             - tempX : ``'wg-tilt-sensor.wgtiltsensor.tempX'``
             - tempY : ``'wg-tilt-sensor.wgtiltsensor.tempY'``
     """
-    if isinstance(config, L2Config):
+    if config.site:
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
         return load_l2_data(config, start_time, stop_time)
-    elif isinstance(config, L3Config):
+    else:
         logger.info("Loading the wire grid house-keeping data with hkdb.")
         return load_l3_data(config, start_time, stop_time)
-    else:
-        raise ValueError("Unsupported config type")
 
-def load_l2_data(config: L2Config, start_time: float, stop_time: float) -> dict:
+def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
     Load wire grid house-keeping data with so3g.hk.load_range method.
     """
-    aliases = [
-        'enc_rad_raw',
-        'LSL1', 'LSL2', 'LSR1', 'LSR2',
-        'angleX', 'angleY', 'tempX', 'tempY'
-    ]
-    fields = [
-        f'{config.telescope}.wg-encoder.feeds.wgencoder_full.reference_count',
-        f'{config.telescope}.wg-actuator.feeds.wgactuator.limitswitch_LSL1',
-        f'{config.telescope}.wg-actuator.feeds.wgactuator.limitswitch_LSL2',
-        f'{config.telescope}.wg-actuator.feeds.wgactuator.limitswitch_LSR1',
-        f'{config.telescope}.wg-actuator.feeds.wgactuator.limitswitch_LSR2',
-        f'{config.telescope}.wg-tilt-sensor.feeds.wgtiltsensor.angleX',
-        f'{config.telescope}.wg-tilt-sensor.feeds.wgtiltsensor.angleY',
-        f'{config.telescope}.wg-tilt-sensor.feeds.wgtiltsensor.temperatureX',
-        f'{config.telescope}.wg-tilt-sensor.feeds.wgtiltsensor.temperatureY',
-    ]
+    aliases = config.aliases.keys()
+    fields = []
+    for field in config.aliases.values():
+        first_field, second_field = field.split('.', 1)
+        fields.append(config.telescope + '.' + first_field + '.feeds.' + second_field)
+    
     _start = start_time - config.timestamp_margin  # margin of 1 second
     _stop = stop_time + config.timestamp_margin
     _data = load_range(
@@ -123,20 +112,22 @@ def load_l2_data(config: L2Config, start_time: float, stop_time: float) -> dict:
         )
     return raw_data_dict
 
-def load_l3_data(config: L3Config, start_time: float, stop_time: float) -> dict:
-    cfg = hkdb.HkConfig.from_yaml(config.path)
+def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict:
+    hkdb_config = {k: getattr(config, k) for k in ['hk_root', 'db_file','aliases']}
+
+    cfg = hkdb.HkConfig.from_dict(hkdb_config)
     lspec = hkdb.LoadSpec(
         cfg=cfg, start=start_time, end=stop_time,
         fields=list(cfg.aliases.keys())
     )
     raw_data = hkdb.load_hk(lspec)
     _fields = list(raw_data.data.keys())
-    _swapped_aliases = {v: k for k, v in cfg.aliases.items()}
+    _swapped_aliases = {v: k for k, v in config.aliases.items()}
     _aliases = [_swapped_aliases[f] for f in _fields]
     raw_data_dict = {
         alias: raw_data.data[field] for alias, field in zip(_aliases, _fields)
     }
-    _in_radians = raw_data_dict['enc_rad_raw'][1] * WG_COUNTS2RAD
+    _in_radians = raw_data_dict['enc_rad_raw'][1] * 2 * np.pi / config.wg_count
     raw_data_dict['enc_rad_raw'] = (
     raw_data_dict['enc_rad_raw'][0], _in_radians
         )
