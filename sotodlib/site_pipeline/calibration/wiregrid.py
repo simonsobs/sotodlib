@@ -707,7 +707,7 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=
     if remove_cal_data:
         tod.move('wg', None)
     if merge:
-        tod.wrap('gamma_cal', ax)
+        tod.wg.wrap('gamma_cal', ax)
     return ax
 
 def get_ecal_gamma(tod):
@@ -751,5 +751,5 @@ def get_ecal_gamma(tod):
     ax.wrap('theta_det_instr',  0.5*np.pi - gamma, [(0, 'dets')])
     ax.wrap('gamma',            gamma,             [(0, 'dets')])
     ax.wrap('gamma_err',        gamma_err,        [(0, 'dets')])
-    tod.wrap('gamma_ecal', ax)
+    tod.wg.wrap('gamma_ecal', ax)
     return ax
