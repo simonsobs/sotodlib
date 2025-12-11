@@ -16,7 +16,7 @@ from sotodlib.tod_ops import apodize, detrend, filters, fourier_filter
 from sotodlib.site_pipeline.calibration.wiregrid import *
 
 
-## Tentative data type for result
+## Data for result
 dtype = [
     ('dets:readout_id', '<U40'),
     ('gamma', 'f4'),
@@ -61,7 +61,7 @@ def run(
 
             ## ---- Wire grid calibration start ---- ##
 
-            config = L3Config(
+            config = wg_config(
                 path = f'./calibration/tentative_wg.yaml',
                 start_time = tod.timestamps[0] - 60,
                 stop_time = tod.timestamps[-1] + 60 ,
@@ -79,7 +79,7 @@ def run(
 
             for i in range(tod.dets.count):
                 dic = {'dets:readout_id': tod.dets.vals[i]}
-                dic.update({v[0] : tod.gamma_cal[v[0]][i] for v in dtype[1:]})
+                dic.update({v[0] : tod.wg.gamma_cal[v[0]][i] for v in dtype[1:]})
                 rset.append(dic)
 
         assert len(rset) == meta.dets.count

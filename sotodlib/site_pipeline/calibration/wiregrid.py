@@ -50,7 +50,7 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
         - hk_root. path to house-keeping data directory, e.g. ``'../data/satp1/hk/'``
         - db_file.  path to sqlite database file, e.g. ``'./hkdb-satp1.db'``
         - aliases:
-            - enc_rad_raw : ``'wg-encoder.wgencoder_full.reference_count'``
+            - enc_count : ``'wg-encoder.wgencoder_full.reference_count'``
             - LSL1 : ``'wg-actuator.wgactuator.limitswitch_LSL1'``
             - LSL2 : ``'wg-actuator.wgactuator.limitswitch_LSL2'``
             - LSR1 : ``'wg-actuator.wgactuator.limitswitch_LSR1'``
@@ -89,7 +89,7 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
         logger.error("No available wire grid data with this tod.")
         raise ValueError("No available wire grid data with this tod.")
 
-    if 'enc_rad_raw' not in _data:
+    if 'enc_count' not in _data:
         logger.error("No available ENCODER data with this tod.")
         raise ValueError("No available ENCODER data with this tod.")
 
@@ -106,10 +106,15 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
         logger.warning("The actuator data is not correctly stored in house-keeping. \
                         \n inside/outside status is not certificated so far.")
     raw_data_dict = _data
-    _in_radians = raw_data_dict['enc_rad_raw'][1] * WG_COUNTS2RAD
+    print(raw_data_dict)
+
     raw_data_dict['enc_rad_raw'] = (
-    raw_data_dict['enc_rad_raw'][0], _in_radians
+    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[0]
         )
+    raw_data_dict['enc_rad'] = (
+    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[1]
+        )
+    
     return raw_data_dict
 
 def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict:
@@ -127,10 +132,17 @@ def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict
     raw_data_dict = {
         alias: raw_data.data[field] for alias, field in zip(_aliases, _fields)
     }
-    _in_radians = raw_data_dict['enc_rad_raw'][1] * 2 * np.pi / config.wg_count
+    print(raw_data_dict)
+    print(raw_data_dict.keys())
+
     raw_data_dict['enc_rad_raw'] = (
-    raw_data_dict['enc_rad_raw'][0], _in_radians
+    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[0]
         )
+    
+    raw_data_dict['enc_rad'] = (
+    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[1]
+        )
+    
     return raw_data_dict
 
 # Wrap house-keeping data
@@ -147,7 +159,9 @@ def wrap_wg_hk(tod, raw_data_dict, merge=True):
         tod : AxisManager
             This includes fields, which are related with the wire grid hardware.
 
-                - enc_rad_raw : wires' direction read by encoder in radian (raw data from the encoder)
+                - enc_count : wires' direction read by encoder in radian (raw data from the encoder)
+                - enc_rad_raw : wires' direction read by encoder in radian (corrected with encoder count)
+                - enc_rad : wires' direction read by encoder in radian (corrected with encoder count and hardware offset)
                 - LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
                 - LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
                 - LSR1 : ON/OFF status of the limit switch RIGHT 1 (outside) of the actuator
@@ -183,30 +197,29 @@ def wrap_wg_hk(tod, raw_data_dict, merge=True):
         return tod
     return hk_aman
 
-# Correct wires' direction for each telescope
-def correct_wg_angle(tod):
-    """
+def correct_wg_angle(enc_count, config: wg_config):
+    '''
     Correct offset of wires' direction with value confirmed in the hardware testing.
 
     Parameters
     ----------
-        tod : AxisManager
-
-    """
-    _tel = tod.obs_info.telescope
-    if _tel == 'satp1':
-        wg_offset = WG_OFFSET_SATP1
-    elif _tel == 'satp2':
-        wg_offset = WG_OFFSET_SATP2
-    elif _tel == 'satp3':
-        wg_offset = WG_OFFSET_SATP3
+        enc_count : np.ndarray
+            encoder actual counts
+        config : wg_config
+    Returns
+    -------
+        _in_radians : np.ndarray
+            wires' direction in radian (corrected with encoder count)
+        _in_radians_w_offset : np.ndarray
+            wires' direction in radian (corrected with encoder count and hardware offset) 
+    '''
+    if isinstance(config, wg_config)==False:
+        raise TypeError("config should be an instance of wg_config dataclass.")
     else:
-        logger.warning(f"No matched telescope name of {_tel} for wire grid offset value, wg_offset.\n \
-                        the encoder offset is specified to zero. The hardware offset must remain.")
-        wg_offset = 0
-    enc_rad = (-tod.wg.instrument.enc_rad_raw + wg_offset)%(2*np.pi)
-    tod.wg.instrument.wrap('enc_rad', enc_rad, [(0, 'samps')])
-    return True
+        _in_radians = enc_count * 2 * np.pi / config.wg_count
+        _in_radians_w_offset = (- _in_radians + np.deg2rad(config.wg_offset))%(2*np.pi) 
+
+    return _in_radians, _in_radians_w_offset
 
 # Detect the motion of the wire grid
 def _detect_motion(count, flag=0):
