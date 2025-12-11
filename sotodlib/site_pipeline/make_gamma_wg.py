@@ -17,16 +17,6 @@ import sotodlib.hwp.hwp as hwp
 from sotodlib.tod_ops import apodize, detrend, filters, fourier_filter
 from sotodlib.site_pipeline.calibration.wiregrid import *
 
-# TENTATIVE SOLUTION TO IMPORT SOTODLIB
-sys.path = ['/pscratch/sd/y/ykasai/sotodlib'] + sys.path
-
-
-## Data for result
-dtype = [
-    ('dets:readout_id', '<U40'),
-    ('gamma', 'f4'),
-    ('gamma_err', 'f4'),
-]
 
 
 def run(
@@ -42,8 +32,7 @@ def run(
     This split detectors into `n_split` chunks and process serially.
     Returns obs_id and ResultSet.
     """
-    res_arr = np.array([], dtype=dtype)
-    rset = core.metadata.ResultSet.from_friend(res_arr)
+    wg_cfg = wg_config(**wiregrid_config)
 
     try:
         ctx = core.Context(context_path, metadata_list=metadata_list)
@@ -65,7 +54,6 @@ def run(
             ## ---- Preprocess end ---- ##
 
             ## ---- Wire grid calibration start ---- ##
-            wg_cfg = wg_config(**wiregrid_config)
             raw_data_dict_wg = load_data(wg_cfg, tod.timestamps[0]-60, tod.timestamps[-1]+60)
 
             wrap_wg_hk(tod, raw_data_dict = raw_data_dict_wg)
@@ -75,13 +63,14 @@ def run(
             get_cal_gamma(tod)
             ## ---- Wire grid calibration end ---- ##
 
-            for i in range(tod.dets.count):
-                dic = {'dets:readout_id': tod.dets.vals[i]}
-                dic.update({v[0] : tod.wg.gamma_cal[v[0]][i] for v in dtype[1:]})
-                rset.append(dic)
+            if i == 0:
+                result = tod.wg.copy()
+            else:
+                result = core.AxisManager.concatenate(
+                [result, tod.wg], axis='dets', other_fields='first')
 
-        assert len(rset) == meta.dets.count
-        return obs_id, rset
+        assert result.dets.count == meta.dets.count
+        return obs_id, result
     except (LoaderError, OSError) as e:
         logger.error(f'Failed to load data {obs_id} {e}')
         return obs_id, None
@@ -195,22 +184,17 @@ def _main(
                 n_split=n_split,
             ))
         for future in futures:
-            obs_id, rset = future.result()
+            obs_id, result = future.result()
             for job in jobs:
                 if job.tags['obs_id'] == obs_id:
                     break
-            if rset is not None:
+            if result is not None:
                 try:
                     logger.info(f'saving {obs_id}...')
                     unix = obs_id.split('_')[1][:4]  # first 4 digits
                     h5_fn = f'gamma_wg_{unix}.h5'
                     h5_path = os.path.join(output_dir, h5_fn)
-                    write_dataset(
-                        data=rset,
-                        filename=h5_path,
-                        address=obs_id,
-                        overwrite=True
-                    )
+                    result.save(h5_path, overwrite=overwrite, compression='gzip', group=obs_id)
                     db.add_entry(
                         {'obs:obs_id': obs_id, 'dataset': obs_id},
                         filename=h5_fn, replace=overwrite,

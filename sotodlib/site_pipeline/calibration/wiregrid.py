@@ -261,7 +261,7 @@ def _detect_steps(tod, steps_thresholds=(10, 300)):
         idx_steps_start, idx_steps_stop : sample index of the start/stop for each step
 
     """
-    cdiff0 = np.where(_detect_motion(tod.wg.instrument.count) < steps_thresholds[0], 1, 0)
+    cdiff0 = np.where(_detect_motion(tod.wg.instrument.enc_count) < steps_thresholds[0], 1, 0)
     cdiff1 = np.where(_detect_motion(cdiff0, flag=1) > steps_thresholds[1], 0, 1)
     cdiff2 = cdiff1[1:] - cdiff1[:-1]
     idx_step_stop = np.where(cdiff2 == 1)[0]
