@@ -5,6 +5,8 @@ import yaml
 import argparse
 from typing import Optional, List, Callable
 
+import sys
+
 from sotodlib import core, preprocess
 from sotodlib.io.metadata import write_dataset
 from sotodlib.site_pipeline import util, jobdb
@@ -14,6 +16,9 @@ from sotodlib.hwp.hwp_angle_model import apply_hwp_angle_model
 import sotodlib.hwp.hwp as hwp
 from sotodlib.tod_ops import apodize, detrend, filters, fourier_filter
 from sotodlib.site_pipeline.calibration.wiregrid import *
+
+# TENTATIVE SOLUTION TO IMPORT SOTODLIB
+sys.path = ['/pscratch/sd/y/ykasai/sotodlib'] + sys.path
 
 
 ## Data for result
@@ -27,7 +32,7 @@ dtype = [
 def run(
     logger,
     context_path,
-    # process_pipe,
+    wiregrid_config,
     metadata_list,
     obs_id,
     n_split,
@@ -60,17 +65,10 @@ def run(
             ## ---- Preprocess end ---- ##
 
             ## ---- Wire grid calibration start ---- ##
-
-            config = wg_config(
-                path = f'./calibration/tentative_wg.yaml',
-                start_time = tod.timestamps[0] - 60,
-                stop_time = tod.timestamps[-1] + 60 ,
-            )
-
-            raw_data_dict_wg = load_data(config)
+            wg_cfg = wg_config(**wiregrid_config)
+            raw_data_dict_wg = load_data(wg_cfg, tod.timestamps[0]-60, tod.timestamps[-1]+60)
 
             wrap_wg_hk(tod, raw_data_dict = raw_data_dict_wg)
-            correct_wg_angle(tod)
             idx_steps_starts, idx_steps_ends = find_operation_range(tod)
             calc_calibration_data_set(tod, idx_steps_starts, idx_steps_ends)
             fit_with_circle(tod)
@@ -96,7 +94,7 @@ def _main(
     executor,
     as_completed_callable: Callable,
     context_path: str,
-    # process_pipe: dict,
+    wiregrid_config: str,
     output_dir: str,
     metadata_list: Optional[List[str]] = 'all',
     verbosity: Optional[int] = 2,
@@ -191,7 +189,7 @@ def _main(
                 run,
                 logger,
                 context_path,
-                # process_pipe,
+                wiregrid_config,
                 metadata_list,
                 obs_id=job.tags['obs_id'],
                 n_split=n_split,
@@ -228,21 +226,26 @@ def _main(
                 logger.error(f'Failed {obs_id}, try again later')
 
 
-def main(config):
-    with open(config, "r") as f:
-        cfg = yaml.safe_load(f)
-    rank, executor, as_completed_callable = get_exec_env(nprocs=cfg['nprocs'])
+def main(pipeline_config, wiregrid_config):
+    with open(pipeline_config, "r") as f:
+        pp_cfg = yaml.safe_load(f)
+    with open(wiregrid_config, "r") as f:
+        wg_cfg = yaml.safe_load(f)
+    
+    rank, executor, as_completed_callable = get_exec_env(nprocs=pp_cfg['nprocs'])
     if rank == 0:
         _main(
             executor=executor,
             as_completed_callable=as_completed_callable,
-            **cfg
+            wiregrid_config=wg_cfg,
+            **pp_cfg
         )
 
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('config', help="Path to configuration yaml file.")
+    parser.add_argument('pipeline_config', help="Path to configuration yaml file.")
+    parser.add_argument('wiregrid_config', help="Path to wire grid configuration yaml file.")
     return parser
 
 

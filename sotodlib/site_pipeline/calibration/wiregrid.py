@@ -106,7 +106,6 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
         logger.warning("The actuator data is not correctly stored in house-keeping. \
                         \n inside/outside status is not certificated so far.")
     raw_data_dict = _data
-    print(raw_data_dict)
 
     raw_data_dict['enc_rad_raw'] = (
     raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[0]
@@ -132,8 +131,6 @@ def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict
     raw_data_dict = {
         alias: raw_data.data[field] for alias, field in zip(_aliases, _fields)
     }
-    print(raw_data_dict)
-    print(raw_data_dict.keys())
 
     raw_data_dict['enc_rad_raw'] = (
     raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[0]
