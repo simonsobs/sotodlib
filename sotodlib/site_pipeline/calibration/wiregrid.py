@@ -107,11 +107,8 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
                         \n inside/outside status is not certificated so far.")
     raw_data_dict = _data
 
-    raw_data_dict['enc_rad_raw'] = (
-    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[0]
-        )
     raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[1]
+    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)
         )
     
     return raw_data_dict
@@ -132,12 +129,8 @@ def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict
         alias: raw_data.data[field] for alias, field in zip(_aliases, _fields)
     }
 
-    raw_data_dict['enc_rad_raw'] = (
-    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[0]
-        )
-    
     raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)[1]
+    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)
         )
     
     return raw_data_dict
@@ -216,7 +209,7 @@ def correct_wg_angle(enc_count, config: wg_config):
         _in_radians = enc_count * 2 * np.pi / config.wg_count
         _in_radians_w_offset = (- _in_radians + np.deg2rad(config.wg_offset))%(2*np.pi) 
 
-    return _in_radians, _in_radians_w_offset
+    return _in_radians_w_offset
 
 # Detect the motion of the wire grid
 def _detect_motion(count, flag=0):
@@ -268,7 +261,7 @@ def _detect_steps(tod, steps_thresholds=(10, 300)):
         idx_steps_start, idx_steps_stop : sample index of the start/stop for each step
 
     """
-    cdiff0 = np.where(_detect_motion(tod.wg.instrument.enc_rad/WG_COUNTS2RAD) < steps_thresholds[0], 1, 0)
+    cdiff0 = np.where(_detect_motion(tod.wg.instrument.count) < steps_thresholds[0], 1, 0)
     cdiff1 = np.where(_detect_motion(cdiff0, flag=1) > steps_thresholds[1], 0, 1)
     cdiff2 = cdiff1[1:] - cdiff1[:-1]
     idx_step_stop = np.where(cdiff2 == 1)[0]
