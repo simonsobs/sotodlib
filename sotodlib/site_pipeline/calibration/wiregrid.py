@@ -26,19 +26,15 @@ WG_OFFSET_SATP3 = np.deg2rad(180-(48.29+33.5+87)) # TSAT, MF2, which is 11.21 de
 class L2Config:
     path: str
     telescope: str
-    start_time: float
-    stop_time: float
     timestamp_margin: float = 1.0
 
 @dataclass
 class L3Config:
     path: str
-    start_time: float
-    stop_time: float
 
 DataSourceConfig = Union[L2Config, L3Config]
 
-def load_data(config: DataSourceConfig) -> dict:
+def load_data(config: DataSourceConfig, start_time: float, stop_time: float) -> dict:
     """
     Load wire grid house-keeping data based on the provided configuration.
     start_time and stop_time are used to load the data within the specified range.
@@ -65,14 +61,14 @@ def load_data(config: DataSourceConfig) -> dict:
     """
     if isinstance(config, L2Config):
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
-        return load_l2_data(config)
+        return load_l2_data(config, start_time, stop_time)
     elif isinstance(config, L3Config):
         logger.info("Loading the wire grid house-keeping data with hkdb.")
-        return load_l3_data(config)
+        return load_l3_data(config, start_time, stop_time)
     else:
         raise ValueError("Unsupported config type")
 
-def load_l2_data(config: L2Config) -> dict:
+def load_l2_data(config: L2Config, start_time: float, stop_time: float) -> dict:
     """
     Load wire grid house-keeping data with so3g.hk.load_range method.
     """
@@ -92,8 +88,8 @@ def load_l2_data(config: L2Config) -> dict:
         f'{config.telescope}.wg-tilt-sensor.feeds.wgtiltsensor.temperatureX',
         f'{config.telescope}.wg-tilt-sensor.feeds.wgtiltsensor.temperatureY',
     ]
-    _start = config.start_time - config.timestamp_margin  # margin of 1 second
-    _stop = config.stop_time + config.timestamp_margin
+    _start = start_time - config.timestamp_margin  # margin of 1 second
+    _stop = stop_time + config.timestamp_margin
     _data = load_range(
         _start, _stop, data_dir=config.path,
         fields=fields,
@@ -127,10 +123,10 @@ def load_l2_data(config: L2Config) -> dict:
         )
     return raw_data_dict
 
-def load_l3_data(config: L3Config) -> dict:
+def load_l3_data(config: L3Config, start_time: float, stop_time: float) -> dict:
     cfg = hkdb.HkConfig.from_yaml(config.path)
     lspec = hkdb.LoadSpec(
-        cfg=cfg, start=config.start_time, end=config.stop_time,
+        cfg=cfg, start=start_time, end=stop_time,
         fields=list(cfg.aliases.keys())
     )
     raw_data = hkdb.load_hk(lspec)
