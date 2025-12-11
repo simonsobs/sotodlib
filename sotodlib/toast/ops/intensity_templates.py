@@ -380,7 +380,8 @@ class IntensityTemplates(Operator):
                 # Apply the filters to all templates
 
                 for key, templates in intensity_templates.items():
-                    for name, template in templates.items():
+                    for name in list(templates.keys()):
+                        template = templates[name]
                         if single_lowpass is not None:
                             # Lowpass mode, replace original template
                             template[:] = single_lowpass(template)
@@ -392,7 +393,8 @@ class IntensityTemplates(Operator):
                                 template -= lowpassed
                                 templates[f"{name}-lowpass{i}"] = lowpassed
 
-                for hkkey, hkfield in hkfields.items():
+                for hkkey in list(hkfields.keys()):
+                    hkfield = hkfields[hkkey]
                     if single_lowpass is not None:
                         # Lowpass mode, replace original template
                         hkfield[:] = single_lowpass(hkfield)
