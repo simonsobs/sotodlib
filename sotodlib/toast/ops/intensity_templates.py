@@ -103,6 +103,12 @@ class IntensityTemplates(Operator):
         "complementary templates at given frequencies\n",
     )
 
+    order = Int(
+        1,
+        help="Expansion order of the templates.  Zeroth order is never added "
+        "to avoid degeneracies",
+    )
+
     fpkeys = Unicode(
         "det_info:wafer:type,det_info:wafer:bandpass",
         allow_none=True,
@@ -185,8 +191,9 @@ class IntensityTemplates(Operator):
                     det for det in local_dets if pat.match(det) is not None
                 ]
                 if len(local_intensity_dets) == 0:
-                    msg = f"No detectors in {ob.name} match '{self.pattern}'"
-                    raise RuntimeError(msg)
+                    msg = f"No detectors in {ob.name} match '{self.pattern}'. "
+                    msg += f"Local detectors: {local_dets}"
+                    log.warning(msg)
             if gcomm.size == 1:
                 intensity_dets = local_intensity_dets
             else:
@@ -261,7 +268,9 @@ class IntensityTemplates(Operator):
                         # This key is already loaded, possibly from cache.
                         pass
                     else:
-                        hkfields[key] = ob.hk.interp(key)
+                        hkfield = ob.hk.interp(key)
+                        hkfield -= np.mean(hkfield)
+                        hkfields[key] = hkfield
 
             # Every process builds all intensity templates that it needs
 
@@ -285,14 +294,13 @@ class IntensityTemplates(Operator):
                     det_to_key[det] = key
                     # Get a shorthand for templates for this detector
                     templates = intensity_templates[key]
-                    # See if we need to add housekeeping templates
-                    for hkkey, hkfield in hkfields.items():
-                        if hkkey not in templates:
-                            templates[hkkey] = hkfield
                     # Compute the intensity-based template(s) for this key
                     quat = fp[det]["quat"]
                     vec = qa.rotate(quat, ZAXIS)
                     for fpkey in unique_fpkeys:
+                        if fpkey in templates:
+                            # Already cached
+                            continue
                         use_det = np.zeros(ndet_intensity, dtype=bool)
                         for idet, intensity_det in enumerate(intensity_dets):
                             if fpkeys[idet] != fpkey:
@@ -302,7 +310,14 @@ class IntensityTemplates(Operator):
                                 # Check for distance
                                 iquat = fp[intensity_det]["quat"]
                                 ivec = qa.rotate(iquat, ZAXIS)
-                                dist = np.arccos(np.dot(vec, ivec))
+                                dp = np.dot(vec, ivec)
+                                # arccos() will throw warnings if dp is not
+                                # strictly in [-1, 1]
+                                if dp < -1:
+                                    dp = -1
+                                elif dp > 1:
+                                    dp = 1
+                                dist = np.arccos(dp)
                                 if dist > radius.to_value(u.rad):
                                     # too far, do not include
                                     continue
@@ -310,13 +325,19 @@ class IntensityTemplates(Operator):
                         if not np.any(use_det):
                             continue
                         mean_intensity = np.mean(all_tod[use_det], 0)
+                        mean_intensity -= np.mean(mean_intensity)
                         templates[fpkey] = mean_intensity
 
             # Optionally, cache all available templates
 
             if fname_cache is not None:
                 if gcomm is not None:
-                    all_intensity_templates = gcomm.gather(intensity_templates)
+                    templates_send = {}
+                    if gcomm.rank != 0:
+                        # Only send the templates that may have been updated
+                        for key in det_to_key.values():
+                            templates_send[key] = intensity_templates[key]
+                    all_intensity_templates = gcomm.gather(templates_send)
                     if gcomm.rank == 0:
                         for templates in all_intensity_templates:
                             intensity_templates.update(templates)
@@ -388,6 +409,14 @@ class IntensityTemplates(Operator):
             for key, templates in intensity_templates.items():
                 for hkkey, hkfield in hkfields.items():
                     templates[hkkey] = hkfield
+
+            # Optionally add higher order templates
+
+            if self.order > 1:
+                for key, templates in intensity_templates.items():
+                    for name, template in templates.items:
+                        for p in range(2, self.order + 1):
+                            templates[f"{name}-order{p}"] = template**p
 
             # Store the intensity templates in the observation
 
