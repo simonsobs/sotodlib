@@ -16,12 +16,6 @@ from sotodlib.io import hk_utils
 from sotodlib.site_pipeline import util
 logger = util.init_logger('wiregrid', 'wiregrid: ')
 
-# hardware specific constants, which may have to be sperated as a config file
-WG_COUNTS2RAD = 2*np.pi/52000 # SATP1~SATP3, JSAT(SATP4?) will be 104000
-WG_OFFSET_SATP1 = np.deg2rad(180-(47.37+33.5+87)) # SAT1, MF1, which is 12.13 deg
-WG_OFFSET_SATP2 = np.deg2rad(180-(50.127+33.5+87)) # SAT2, UHF, which is 9.473 deg
-WG_OFFSET_SATP3 = np.deg2rad(180-(48.29+33.5+87)) # TSAT, MF2, which is 11.21 deg
-
 
 @dataclass
 class wg_config:
@@ -80,7 +74,7 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
     _start = start_time - config.timestamp_margin  # margin of 1 second
     _stop = stop_time + config.timestamp_margin
     _data = load_range(
-        _start, _stop, data_dir=config.path,
+        _start, _stop, data_dir=config.hk_root,
         fields=fields,
         alias=aliases,
     )
