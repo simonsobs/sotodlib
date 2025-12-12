@@ -150,11 +150,19 @@ def get_split_flags(aman, proc_aman=None, split_cfg=None):
 
     if 't2p' in proc_aman:
         # T2P Leakage split
-        if not 'high_leakage' in split_cfg:
+        if 'high_leakage' not in split_cfg:
             split_cfg['high_leakage'] = 1e-3
-        fm.wrap_dets('high_leakage', np.sqrt(proc_aman.t2p.lamQ**2 + proc_aman.t2p.lamU**2) > split_cfg['high_leakage'])
-        fm.wrap_dets('low_leakage', np.sqrt(proc_aman.t2p.lamQ**2 + proc_aman.t2p.lamU**2) <= split_cfg['high_leakage'])
-        split_aman.wrap('leakage_avg', np.nanmean(np.sqrt(proc_aman.t2p.lamQ**2 + proc_aman.t2p.lamU**2)),
+        if 'AQ' in proc_aman.t2p:
+            leak_fldQ = 'lamQ'
+            leak_fldU = 'lamU'
+        elif 'coeffsQ' in proc_aman.t2p:
+            leak_fldQ = 'coeffsQ'
+            leak_fldU = 'coeffsU'
+        else:
+            raise ValueError('no leakage coefficients found in axis manager') 
+        fm.wrap_dets('high_leakage', np.sqrt(proc_aman.t2p[leak_fldQ]**2 + proc_aman.t2p[leak_fldU]**2) > split_cfg['high_leakage'])
+        fm.wrap_dets('low_leakage', np.sqrt(proc_aman.t2p[leak_fldQ]**2 + proc_aman.t2p[leak_fldU]**2) <= split_cfg['high_leakage'])
+        split_aman.wrap('leakage_avg', np.nanmean(np.sqrt(proc_aman.t2p[leak_fldQ]**2 + proc_aman.t2p[leak_fldU]**2)),
                     [(0, 'dets')])
     if 'hwpss_stats' in proc_aman:
         # High 2f amplitude split

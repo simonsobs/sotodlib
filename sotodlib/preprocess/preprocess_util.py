@@ -562,11 +562,19 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all proc pipeline processes")
-            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
-            for process in pipe_proc[:]:
-                keep = process.select(meta_proc, in_place=False)
-                if isinstance(keep, np.ndarray):
-                    keep_all &= keep
+
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
+            else:
+                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+                for process in pipe_proc[:]:
+                    keep = process.select(meta_proc, in_place=False)
+                    if isinstance(keep, np.ndarray):
+                        keep_all &= keep
+
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
             aman = context_init.get_obs(meta_proc, no_signal=True)
