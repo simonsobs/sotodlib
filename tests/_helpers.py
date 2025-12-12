@@ -305,6 +305,7 @@ def simulation_test_data(
         scan_accel_az=3 * u.degree / u.second ** 2,
         use_ephem=False,
         use_qpoint=True,
+        so3g_compat_mode=True,
     )
     sim_ground.apply(data)
 
