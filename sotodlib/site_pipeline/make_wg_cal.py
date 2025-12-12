@@ -5,17 +5,15 @@ import yaml
 import argparse
 from typing import Optional, List, Callable
 
-import sys
 
-from sotodlib import core, preprocess
-from sotodlib.io.metadata import write_dataset
+from sotodlib import core
 from sotodlib.site_pipeline import util, jobdb
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.core.metadata.loader import LoaderError
 from sotodlib.hwp.hwp_angle_model import apply_hwp_angle_model
 import sotodlib.hwp.hwp as hwp
-from sotodlib.tod_ops import apodize, detrend, filters, fourier_filter
-from sotodlib.site_pipeline.calibration.wiregrid import *
+from sotodlib.tod_ops import filters, fourier_filter
+from sotodlib.site_pipeline.calibration.wiregrid import wrap_wg_hk, find_operation_range, calc_calibration_data_set, fit_with_circle, get_cal_gamma, load_data, wg_config
 
 
 
@@ -46,15 +44,17 @@ def run(
 
             tod = ctx.get_obs(meta_short)
 
+            if i == 0:
+                raw_data_dict_wg = load_data(wg_cfg, tod.timestamps[0], tod.timestamps[-1])
+
             ## ---- Preprocess start ---- ##
             apply_hwp_angle_model(tod)
-            iir_filt = filters.iir_filter(iir_params = tod.iir_params[f'{dir(tod.iir_params)[-1]}'], invert=True)
+            iir_filt = filters.iir_filter(tod, invert=True)
             tod.signal = fourier_filter(tod, iir_filt)
             hwp.demod_tod(tod, signal='signal')
             ## ---- Preprocess end ---- ##
 
             ## ---- Wire grid calibration start ---- ##
-            raw_data_dict_wg = load_data(wg_cfg, tod.timestamps[0]-60, tod.timestamps[-1]+60)
 
             wrap_wg_hk(tod, raw_data_dict = raw_data_dict_wg)
             idx_steps_starts, idx_steps_ends = find_operation_range(tod)
@@ -96,7 +96,7 @@ def _main(
     stale: Optional[float] = 60.
 ):
     """
-    Main function for making gamma_wg metadata
+    Main function for making wg_cal metadata
 
     Arguments
     ---------
@@ -128,7 +128,7 @@ def _main(
     """
 
     logger = util.init_logger(
-        __name__, 'make_gamma_wg: ', verbosity=verbosity)
+        __name__, 'make_wg_cal: ', verbosity=verbosity)
 
     ctx = core.Context(context_path, metadata_list=metadata_list)
     obs_ids = []
@@ -137,7 +137,7 @@ def _main(
         for obs in obslist:
             obs_ids.append(obs['obs_id'])
 
-    db_path = os.path.join(output_dir, 'gamma_wg.sqlite')
+    db_path = os.path.join(output_dir, 'wg_cal.sqlite')
     if os.path.exists(db_path):
         logger.info(f"Mapping {db_path} for the "
                     "archive index.")
@@ -153,7 +153,7 @@ def _main(
             scheme=scheme
         )
 
-    jclass = 'gamma_wg'
+    jclass = 'wg_cal'
     jdb_path = os.path.join(output_dir, 'jobdb.sqlite')
     jdb = jobdb.JobManager(sqlite_file=jdb_path)
 
@@ -192,7 +192,7 @@ def _main(
                 try:
                     logger.info(f'saving {obs_id}...')
                     unix = obs_id.split('_')[1][:4]  # first 4 digits
-                    h5_fn = f'gamma_wg_{unix}.h5'
+                    h5_fn = f'wg_cal_{unix}.h5'
                     h5_path = os.path.join(output_dir, h5_fn)
                     result.save(h5_path, overwrite=overwrite, compression='gzip', group=obs_id)
                     db.add_entry(
