@@ -46,7 +46,7 @@ from sotodlib.io.metadata import write_dataset
 from sotodlib.io.load_smurf import G3tSmurf, TuneSets
 from sotodlib.io.load_book import load_smurf_npy_data, get_cal_obsids
 from sotodlib.io.imprinter import Imprinter
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
 
 # stolen  from pysmurf, max bias volt / num_bits
 DEFAULT_RTM_BIT_TO_VOLT = 10 / 2**19
@@ -55,7 +55,7 @@ TES_BIAS_COUNT = 12  # per detset / primary file group
 
 logger = logging.getLogger('smurf_caldbs')
 if not logger.hasHandlers():
-    sp_util.init_logger('smurf_caldbs')
+    sp_init_logger('smurf_caldbs')
 
 
 

@@ -15,7 +15,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 import numpy as np
-import sotodlib.site_pipeline.util as util
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils

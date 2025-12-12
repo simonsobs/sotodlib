@@ -41,11 +41,11 @@ import numpy as np
 import time
 import argparse
 import logging
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
 from typing import Optional
 from itertools import product
 
-logger = util.init_logger('update_obsdb', 'update-obsdb: ')
+logger = init_logger('update_obsdb', 'update-obsdb: ')
 
 def check_meta_type(bookpath: str):
     metapath = os.path.join(bookpath, "M_index.yaml")

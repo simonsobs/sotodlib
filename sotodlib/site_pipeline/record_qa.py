@@ -2,12 +2,13 @@ import yaml
 import argparse
 
 from sotodlib import core
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.qa import metrics as qa_metrics
 from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.site_pipeline.jobdb import JobManager
 
-logger = sp_util.init_logger("qa_metrics")
+logger = init_logger("qa_metrics")
 
 
 def main(config):
@@ -131,4 +132,4 @@ def get_parser(parser=None):
 
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

@@ -8,8 +8,9 @@ from typing import Optional
 
 from sotodlib import core
 from sotodlib.io import hk_utils
-from sotodlib.site_pipeline import util
-logger = util.init_logger('make_cosamp_hk', 'make_cosamp_hk: ')
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+logger = init_logger('make_cosamp_hk', 'make_cosamp_hk: ')
 
 def get_parser(parser=None):
     if parser is None:
@@ -285,5 +286,5 @@ def main(config: str,
 
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
     

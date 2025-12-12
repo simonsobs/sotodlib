@@ -17,7 +17,7 @@ import yaml
 import datetime as dt
 from zipfile import ZipFile, ZIP_DEFLATED
 import sotodlib
-from sotodlib.site_pipeline.util import init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 from .datapkg_utils import walk_files
 
 

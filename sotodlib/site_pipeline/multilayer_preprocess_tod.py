@@ -15,7 +15,8 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
 
 logger = pp_util.init_logger("preprocess")
 
@@ -318,7 +319,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog.txt')
 
-    obs_list = sp_util.get_obslist(context_proc, query=query, obs_id=obs_id, min_ctime=min_ctime,
+    obs_list = get_obslist(context_proc, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
                                    planet_obs=planet_obs)
     if len(obs_list)==0:
@@ -444,4 +445,4 @@ def main(configs_init: str,
 
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

@@ -6,7 +6,7 @@ Command line / prefect tool for working with an hkdb.
 import argparse
 
 from sotodlib.io import hkdb
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
 
 def get_parser(parser=None):
     if parser is None:
@@ -49,7 +49,7 @@ def cli_main(**kw):
     cfg = hkdb.HkConfig.from_yaml(kw['cfg_file'])
 
     if kw.get('verbose'):
-        util.init_logger('', logger=hkdb.log, verbosity=3)
+        init_logger('', logger=hkdb.log, verbosity=3)
 
     if cmd is None:
         print('Pass -h to get usage.')
@@ -98,7 +98,7 @@ def cli_main(**kw):
 
 def simple_update(cfg_file: str, retry_failed: bool=False):
     """Updates hkdb index databases"""
-    util.init_logger('', logger=hkdb.log, verbosity=3)
+    init_logger('', logger=hkdb.log, verbosity=3)
     stats = hkdb.update_index_all(cfg_file, retry_failed=retry_failed)
     hkdb.log.info(f'hkdb update summary: {stats}')
     if stats['new_files_failed']:
