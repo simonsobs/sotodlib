@@ -71,8 +71,9 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
         first_field, second_field = field.split('.', 1)
         fields.append(config.telescope + '.' + first_field + '.feeds.' + second_field)
     
-    _start = start_time - config.timestamp_margin  # margin of 1 second
-    _stop = stop_time + config.timestamp_margin
+    _start = float(start_time - config.timestamp_margin)  # margin of 1 second
+    _stop = float(stop_time + config.timestamp_margin)
+    
     _data = load_range(
         _start, _stop, data_dir=config.hk_root,
         fields=fields,

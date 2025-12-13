@@ -34,7 +34,7 @@ def run(
 
     try:
         ctx = core.Context(context_path, metadata_list=metadata_list)
-        
+
         meta = ctx.get_meta(obs_id)
         nper = int(np.ceil(meta.dets.count/n_split))
         logger.info(f'process {obs_id}, dets {meta.dets.count}')
@@ -136,7 +136,7 @@ def _main(
         obslist = ctx.obsdb.query("subtype = 'cal'", tags=[tag])
         for obs in obslist:
             obs_ids.append(obs['obs_id'])
-
+    
     db_path = os.path.join(output_dir, 'wg_cal.sqlite')
     if os.path.exists(db_path):
         logger.info(f"Mapping {db_path} for the "
