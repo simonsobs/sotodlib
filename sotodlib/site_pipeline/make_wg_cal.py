@@ -138,7 +138,7 @@ def _main(
         obslist = ctx.obsdb.query("subtype = 'cal'", tags=[tag])
         for obs in obslist:
             obs_ids.append(obs['obs_id'])
-    
+
     db_path = os.path.join(output_dir, 'wg_cal.sqlite')
     if os.path.exists(db_path):
         logger.info(f"Mapping {db_path} for the "
