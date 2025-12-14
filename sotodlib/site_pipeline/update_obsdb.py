@@ -19,8 +19,7 @@ The config file could be of the form:
     obsfiledb: dummyobsfiledb.sqlite
     lat_tube_list_file: path to yaml dict matching tubes and bands
     tolerate_stray_files: True
-    skip_bad_books: True
-    known_bad_books_file: path to \n-separated file listing bad books 
+    known_bad_books_file: path to file listing bad books (one obs_id per line)
     extra_extra_files:
     - Z_bookbinder_log.txt
     extra_files:
@@ -85,13 +84,14 @@ def telescope_lookup(telescope: str):
         return {}
 
 
-def main(config: str, 
-        recency: float = None, 
-        booktype: Optional[str] = "both",
-        verbosity: Optional[int] = 2,
-        overwrite: Optional[bool] = False,
-        fastwalk: Optional[bool] = False):
-
+def main(config: str,
+         recency: float = None,
+         booktype: Optional[str] = "both",
+         verbosity: Optional[int] = 2,
+         overwrite: Optional[bool] = False,
+         fastwalk: Optional[bool] = False,
+         limit: Optional[int] = None,
+         ):
     """
     Create or update an obsdb for observation or operations data.
 
@@ -112,6 +112,10 @@ def main(config: str,
         if True, assume the directories have a structure /base_dir/obs|oper/\\d{5}/...
         Then replace base_dir with only the directories where \\d{5} is greater or 
         equal to recency.
+    limit : int
+        Limit the number of books to process; helpful for debugging.
+        If None or 0, there is no limit.
+
     """
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
@@ -150,16 +154,17 @@ def main(config: str,
         for col, typ in config_dict["obsdb_cols"].items():
             col_list.append(col+" "+typ)
         bookcartobsdb.add_obs_columns(col_list)
-    if "skip_bad_books" not in config_dict:
-        config_dict["skip_bad_books"] = False
     
     config_dict["known_bad_books"] = []
-    if "known_bad_books_file" in config_dict:
+    if config_dict.get("known_bad_books_file"):
         try:
             with open(config_dict["known_bad_books_file"], "r") as bbf:
-                config_dict["known_bad_books"] = bbf.read().split("\n")
+                # Read the file, dropping empty lines and lines led by #.
+                config_dict["known_bad_books"] = [
+                    x.strip() for x in bbf.readlines() if x.strip()[:1] not in ["", "#"]]
         except:
-            raise IOError("Bad books file couldn't be read in")
+            raise IOError("Failed to read bad books file: " +
+                          str(config_dict["known_bad_books_file"]))
         
     #How far back we should look
     tnow = time.time()
@@ -182,7 +187,7 @@ def main(config: str,
 
     for bd in base_dir:
         #Find folders that are book-like and recent
-        for dirpath, _, _ in os.walk(bd):
+        for dirpath in glob.glob(bd + '/*'):
             if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
                 _, book_id = os.path.split(dirpath)
                 if book_id in existing and not overwrite:
@@ -197,10 +202,15 @@ def main(config: str,
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
     #Check the books for the observations we want
+    op_counter = 0
     bad_book_counter = 0
+
     for bookpath in sorted(bookcart):
+        if limit and op_counter >= limit:
+            break
         if check_meta_type(bookpath) in accept_type:
             t1 = time.time()
+            op_counter += 1
             logger.info(f"Examining book at {bookpath}")
             try:
                 #obsfiledb creation
@@ -212,17 +222,9 @@ def main(config: str,
                     obsfiledb_info, logger, config_dict, overwrite=True)
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
-                if config_dict["skip_bad_books"]:
-                    _, book_id = os.path.split(bookpath)
-                    config_dict["known_bad_books"].append(book_id)
-                    logger.error(f"failed to add {bookpath}. There are now {len(config_dict['known_bad_books'])} known bad books.")
-                    bad_book_counter +=1
-                    if "known_bad_books_file" in config_dict:
-                        with open(config_dict["known_bad_books_file"], "w") as bbf:
-                            bbf.write("\n".join(config_dict["known_bad_books"]))
-                    continue
-                else:
-                    raise e
+                logger.error(f"Failed to add {bookpath}.")
+                bad_book_counter += 1
+                continue
 
             index = yaml.safe_load(open(os.path.join(bookpath, "M_index.yaml"), "rb"))
             obs_id = index.pop("book_id")
@@ -338,8 +340,9 @@ def main(config: str,
         else:
             bookcart.remove(bookpath)
     if bad_book_counter != 0:
-        logger.error(f"Found {bad_book_counter} new bad books, There are now {len(config_dict['known_bad_books'])} known bad books.")
+        logger.error(f"Failed to add {bad_book_counter} books.")
         raise(Exception)
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -356,6 +359,8 @@ def get_parser(parser=None):
         help="If true, writes over existing entries")
     parser.add_argument("--fastwalk", action="store_true",
         help="Assume known directory tree shape and speed up walkthrough")
+    parser.add_argument("--limit", type=int,
+        help="Limit processing to only this number of book candidates.")
     return parser
 
 
