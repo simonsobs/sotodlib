@@ -4,7 +4,6 @@
 # import python standard libraries
 import numpy as np
 from dataclasses import dataclass
-from typing import Union
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
 
@@ -12,7 +11,6 @@ from scipy.interpolate import interp1d
 from so3g.hk import load_range
 from sotodlib import core
 from sotodlib.io import hkdb
-from sotodlib.io import hk_utils
 from sotodlib.site_pipeline import util
 logger = util.init_logger('wiregrid', 'wiregrid: ')
 
@@ -31,11 +29,8 @@ class wg_config:
 
 def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
-    Load wire grid house-keeping data based on the provided configuration.
+    Load wire grid house-keeping data based on the provided configuration in site-pipeline-configs.
     start_time and stop_time are used to load the data within the specified range.
-
-    The L3Config file path should point the sqlite database file.
-    The L2Config file path should point the directory where the house-keeping data is stored.
 
     Notes
     -----
@@ -53,6 +48,14 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
             - angleY : ``'wg-tilt-sensor.wgtiltsensor.angleY'``
             - tempX : ``'wg-tilt-sensor.wgtiltsensor.tempX'``
             - tempY : ``'wg-tilt-sensor.wgtiltsensor.tempY'``
+            - tempAIN0C: ``'wg-temp-sensor.wgtempsensor.tempAIN0C'``
+            - tempAIN1C: ``'wg-temp-sensor.wgtempsensor.tempAIN1C'``
+            - tempAIN2C: ``'wg-temp-sensor.wgtempsensor.tempAIN2C'``
+        - wg_count: magnetic scale counts per one lap (52,000 for SATp1~SATp3)
+        - wg_offset: correction for the encoder offset, in degrees 
+            (12.13 deg for SATp1, 9.473 deg for SATp2, 11.21 deg for SATp3)
+        - telescope: telescope name in lowercase letters, e.g. 'satp1'
+
     """
     if config.site:
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
@@ -103,7 +106,7 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
     raw_data_dict = _data
 
     raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)
+    raw_data_dict['enc_count'][0], _correct_wg_angle(raw_data_dict['enc_count'][1], config)
         )
     
     return raw_data_dict
@@ -125,7 +128,7 @@ def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict
     }
 
     raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], correct_wg_angle(raw_data_dict['enc_count'][1], config)
+    raw_data_dict['enc_count'][0], _correct_wg_angle(raw_data_dict['enc_count'][1], config)
         )
     
     return raw_data_dict
@@ -155,6 +158,9 @@ def wrap_wg_hk(tod, raw_data_dict, merge=True):
                 - angleY : tilt angle Y of the tilt sensor in degree
                 - tempX : temperature sensor X of the tilt sensor in Celsius
                 - tempY : temperature sensor Y of the tilt sensor in Celsius
+                - temp_rotator: temperature sensor of the rotator in Celsius
+                - temp_rotation_motor: temperature sensor of the rotation motor in Celsius
+                - temp_elec_plate: temperature sensor of the electric plate in Celsius
 
     """
     if not hasattr(tod, 'timestamps'):
@@ -182,7 +188,7 @@ def wrap_wg_hk(tod, raw_data_dict, merge=True):
         return tod
     return hk_aman
 
-def correct_wg_angle(enc_count, config: wg_config):
+def _correct_wg_angle(enc_count, config: wg_config):
     '''
     Correct offset of wires' direction with value confirmed in the hardware testing.
 
@@ -193,10 +199,8 @@ def correct_wg_angle(enc_count, config: wg_config):
         config : wg_config
     Returns
     -------
-        _in_radians : np.ndarray
-            wires' direction in radian (corrected with encoder count)
         _in_radians_w_offset : np.ndarray
-            wires' direction in radian (corrected with encoder count and hardware offset) 
+            wires' direction in radian (corrected with both encoder count and hardware offset) 
     '''
     if isinstance(config, wg_config)==False:
         raise TypeError("config should be an instance of wg_config dataclass.")
@@ -677,7 +681,7 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=
     gamma_err = np.nanmean(_det_angle_err, axis=1)/np.sqrt(np.shape(_det_angle_err)[1])
 
     # back ground polarization
-    _bg_theta = (0.5*np.arctan2(_cfr.cy0, _cfr.cx0)  - gamma)%np.pi
+    _bg_theta = (0.5*np.arctan2(_cfr.cy0, _cfr.cx0) - gamma)%np.pi
     _bg_amp = np.sqrt(_cfr.cx0**2 + _cfr.cy0**2)
 
     ax = core.AxisManager(tod.dets, tod.wg.wg_steps)

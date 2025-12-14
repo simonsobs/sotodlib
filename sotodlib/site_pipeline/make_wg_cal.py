@@ -13,8 +13,9 @@ from sotodlib.core.metadata.loader import LoaderError
 from sotodlib.hwp.hwp_angle_model import apply_hwp_angle_model
 import sotodlib.hwp.hwp as hwp
 from sotodlib.tod_ops import filters, fourier_filter
-from sotodlib.site_pipeline.calibration.wiregrid import wrap_wg_hk, find_operation_range, calc_calibration_data_set, fit_with_circle, get_cal_gamma, load_data, wg_config
-
+from sotodlib.site_pipeline.calibration.wiregrid import wrap_wg_hk, \
+    find_operation_range, calc_calibration_data_set, fit_with_circle, \
+    get_cal_gamma, load_data, wg_config
 
 
 def run(
@@ -45,29 +46,30 @@ def run(
             tod = ctx.get_obs(meta_short)
 
             if i == 0:
-                raw_data_dict_wg = load_data(wg_cfg, tod.timestamps[0], tod.timestamps[-1])
+                raw_data_dict_wg = load_data(wg_cfg, tod.timestamps[0],
+                                             tod.timestamps[-1])
 
-            ## ---- Preprocess start ---- ##
+            # ---- Preprocess start ---- #
             apply_hwp_angle_model(tod)
             iir_filt = filters.iir_filter(tod, invert=True)
             tod.signal = fourier_filter(tod, iir_filt)
             hwp.demod_tod(tod, signal='signal')
-            ## ---- Preprocess end ---- ##
+            # ---- Preprocess end ---- #
 
-            ## ---- Wire grid calibration start ---- ##
+            # ---- Wire grid calibration start ---- #
 
-            wrap_wg_hk(tod, raw_data_dict = raw_data_dict_wg)
+            wrap_wg_hk(tod, raw_data_dict=raw_data_dict_wg)
             idx_steps_starts, idx_steps_ends = find_operation_range(tod)
             calc_calibration_data_set(tod, idx_steps_starts, idx_steps_ends)
             fit_with_circle(tod)
             get_cal_gamma(tod)
-            ## ---- Wire grid calibration end ---- ##
+            # ---- Wire grid calibration end ---- #
 
             if i == 0:
                 result = tod.wg.copy()
             else:
                 result = core.AxisManager.concatenate(
-                [result, tod.wg], axis='dets', other_fields='first')
+                    [result, tod.wg], axis='dets', other_fields='first')
 
         assert result.dets.count == meta.dets.count
         return obs_id, result
@@ -194,7 +196,8 @@ def _main(
                     unix = obs_id.split('_')[1][:4]  # first 4 digits
                     h5_fn = f'wg_cal_{unix}.h5'
                     h5_path = os.path.join(output_dir, h5_fn)
-                    result.save(h5_path, overwrite=overwrite, compression='gzip', group=obs_id)
+                    result.save(h5_path, overwrite=overwrite,
+                                compression='gzip', group=obs_id)
                     db.add_entry(
                         {'obs:obs_id': obs_id, 'dataset': obs_id},
                         filename=h5_fn, replace=overwrite,
@@ -215,8 +218,9 @@ def main(pipeline_config, wiregrid_config):
         pp_cfg = yaml.safe_load(f)
     with open(wiregrid_config, "r") as f:
         wg_cfg = yaml.safe_load(f)
-    
-    rank, executor, as_completed_callable = get_exec_env(nprocs=pp_cfg['nprocs'])
+
+    rank, executor, as_completed_callable = \
+        get_exec_env(nprocs=pp_cfg['nprocs'])
     if rank == 0:
         _main(
             executor=executor,
@@ -228,8 +232,10 @@ def main(pipeline_config, wiregrid_config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('pipeline_config', help="Path to configuration yaml file.")
-    parser.add_argument('wiregrid_config', help="Path to wire grid configuration yaml file.")
+    parser.add_argument('pipeline_config',
+                        help="Path to configuration yaml file.")
+    parser.add_argument('wiregrid_config',
+                        help="Path to wire grid configuration yaml file.")
     return parser
 
 
