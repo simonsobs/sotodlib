@@ -30,7 +30,7 @@ from .load_smurf import (
 from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
-from ..site_pipeline.util import init_logger
+from ..site_pipeline.utils.logging import init_logger
 
 
 ####################
