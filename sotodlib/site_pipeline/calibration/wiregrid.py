@@ -32,6 +32,20 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     Load wire grid house-keeping data based on the provided configuration in site-pipeline-configs.
     start_time and stop_time are used to load the data within the specified range.
 
+    Parameters
+    ----------
+        config : wg_config
+            configuration for loading the wire grid house-keeping data
+        start_time : float
+            start time in unixtime
+        stop_time : float
+            stop time in unixtime
+
+    Returns
+    -------
+        raw_data_dict : dict
+            dictionary including the raw house-keeping data and corrected encoder angle about the wire grid operation.
+
     Notes
     -----
         We assume wg_cfg is a yaml file, which has the following structure.
@@ -48,9 +62,9 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
             - angleY : ``'wg-tilt-sensor.wgtiltsensor.angleY'``
             - tempX : ``'wg-tilt-sensor.wgtiltsensor.tempX'``
             - tempY : ``'wg-tilt-sensor.wgtiltsensor.tempY'``
-            - tempAIN0C: ``'wg-temp-sensor.wgtempsensor.tempAIN0C'``
-            - tempAIN1C: ``'wg-temp-sensor.wgtempsensor.tempAIN1C'``
-            - tempAIN2C: ``'wg-temp-sensor.wgtempsensor.tempAIN2C'``
+            - temp_rotation: ``'wg-temp-sensor.wgtempsensor.tempAIN0C'``
+            - temp_rotation_motor: ``'wg-temp-sensor.wgtempsensor.tempAIN1C'``
+            - temp_elec_plate: ``'wg-temp-sensor.wgtempsensor.tempAIN2C'``
         - wg_count: magnetic scale counts per one lap (52,000 for SATp1~SATp3)
         - wg_offset: correction for the encoder offset, in degrees 
             (12.13 deg for SATp1, 9.473 deg for SATp2, 11.21 deg for SATp3)
@@ -59,15 +73,30 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
     if config.site:
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
-        return load_l2_data(config, start_time, stop_time)
+        return _load_l2_data(config, start_time, stop_time)
     else:
         logger.info("Loading the wire grid house-keeping data with hkdb.")
-        return load_l3_data(config, start_time, stop_time)
+        return _load_l3_data(config, start_time, stop_time)
 
-def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict:
+def _load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
     Load wire grid house-keeping data with so3g.hk.load_range method.
+
+    Parameters
+    ----------
+        config : wg_config
+            configuration for loading the wire grid house-keeping data
+        start_time : float
+            start time in unixtime
+        stop_time : float
+            stop time in unixtime
+
+    Returns
+    -------
+        raw_data_dict : dict
+            dictionary including the raw house-keeping data and corrected encoder angle about the wire grid operation.
     """
+
     aliases = config.aliases.keys()
     fields = []
     for field in config.aliases.values():
@@ -111,7 +140,24 @@ def load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict
     
     return raw_data_dict
 
-def load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict:
+def _load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dict:
+    '''
+    Load wire grid house-keeping data with sotodlib.io.load_hk method.
+
+    Parameters
+    ----------
+        config : wg_config
+            configuration for loading the wire grid house-keeping data
+        start_time : float
+            start time in unixtime
+        stop_time : float
+            stop time in unixtime
+
+    Returns
+    -------
+        raw_data_dict : dict
+            dictionary including the raw house-keeping data and corrected encoder angle about the wire grid operation.
+    '''
     hkdb_config = {k: getattr(config, k) for k in ['hk_root', 'db_file','aliases']}
 
     cfg = hkdb.HkConfig.from_dict(hkdb_config)
@@ -564,6 +610,30 @@ def _ellipse_model(params, x, y, xerr, yerr):
     return chi
 
 def fit_with_ellipse(tod):
+    """
+    Get the results by the ellipse fitting about the responce against the wires in Q+iU plane
+
+    Parameters
+    ----------
+        tod : AxisManager
+
+    Returns
+    -------
+        efit_results : list
+            the result of the ellipse fitting of the wires' signal in the Q/U plane.
+    Notes
+    -----
+        With this process, tod will include the several parameters of the fittings as tod.wg.cfit_result:
+
+            - ex0(_err) : the estimated x-offset value(, and its fit err).
+            - ey0(_err) : the estimated y-offset value(, and its fit err).
+            - ea(_err) : Estimated major axis vaule(, and its fit err).
+            - eb(_err) : Estimated minor axis vaule(, and its fit err).
+            - etheta(_err) : Estimated rotation angle vaule(, and its fit err).
+            - covariance : covariance matrix of the estimated parameters.
+            - residual_var : Residual variance.
+            - is_success : the status of how fits end. 
+    """
 
     _cal = tod.wg.cal_data
     fit_results = []
@@ -623,7 +693,7 @@ def fit_with_ellipse(tod):
 ### Elliptical fitting functions to here ###
 
 # Get and wrap the calibration angle by the wire grid
-def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=np.deg2rad(5.)):
+def get_cal_gamma(tod, merge=True, remove_cal_data=False):
     """
     Calibrate detector polarization angle with a circle model
 
@@ -632,10 +702,6 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=
         tod : AxisManager
         merge : bool (default, True)
         remove_cal_data : bool (defalut) False
-        num_bins : int
-            see _ignore_outlier_angle
-        gap_size : float
-            see _ignore_outlier_angle
 
     Returns
     -------
@@ -644,11 +710,11 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=
 
     Notes
     -----
-        gamma_raw(_err) is the raw output of the calibration for each wire grid step.
-        wires_relative_power is the signal intensity of the wires, which will relatively change depending on the ambient temperature.
-        gamma(_err) is the main result of the calibration using Sparse Wire Grid.
-        background_pol_rad or background_pol_relative_power is the Q/U-plane offsets of the detectors signal respect to the wires' reflection.
-        theta_det_instr is gamma translated to the instrumental angle printed on the silicon wafer.
+        - gamma_raw(_err) is the raw output of the calibration for each wire grid step.
+        - wires_relative_power is the signal intensity of the wires, which will relatively change depending on the ambient temperature.
+        - gamma(_err) is the main result of the calibration using Sparse Wire Grid.
+        - background_pol_rad or background_pol_relative_power is the Q/U-plane offsets of the detectors signal respect to the wires' reflection.
+        - theta_det_instr is gamma translated to the instrumental angle printed on the silicon wafer.
 
     """
     _cd = tod.wg.cal_data
@@ -694,7 +760,7 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False, num_bins=18, gap_size=
     ax.wrap('background_pol_relative_power', _bg_amp,           [(0, 'dets')])
     ax.wrap('theta_det_instr',               0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
     if remove_cal_data:
-        tod.move('wg', None)
+        tod.wg.move('wg', None)
     if merge:
         tod.wg.wrap('gamma_cal', ax)
     return ax
@@ -703,6 +769,14 @@ def get_ecal_gamma(tod):
     """
     Calibrate dtector polarization angle with an ellipse model.
     See also get_cal_gamma.
+
+    Parameters
+    ----------
+        tod : AxisManager
+    Returns
+    -------
+        ax : AxisManager
+            which includes the calibrated angle of gamma by ellipse model in the sky coordinate, etc.
     """
     _cal = tod.wg.cal_data
     _efr = tod.wg.efit_result
