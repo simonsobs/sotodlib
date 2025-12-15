@@ -545,8 +545,9 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
         am = aman
 
     bsa.am = am
-    if np.any([sum(bias==0) for bias in am.biases]):
-        logger.warn(f'Fill zeros in biases {obs_id}')
+    zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
+    if zero_bias_count > 0:
+        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
         fill_zeros_biases(am)
     bsa._find_bias_edges()
     flags = biases_flags(bsa)
