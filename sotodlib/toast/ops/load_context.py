@@ -637,6 +637,8 @@ class LoadContext(Operator):
 
             # Optionally load housekeeping data
             if self.hk_site_root is not None or self.hk_platform_root is not None:
+                hktimer = Timer()
+                hktimer.start()
                 ob.hk = HKManager(
                     ob.comm.comm_group,
                     ob.shared[self.times].data,
@@ -649,6 +651,12 @@ class LoadContext(Operator):
                     plat_fields=self.hk_platform_fields,
                     plat_aliases=self.hk_platform_aliases,
                 )
+                log.debug_rank(
+                    f"LoadContext {obs_name} housekeeping data loaded in",
+                    comm=ob.comm.comm_group,
+                    timer=hktimer,
+                )
+
 
             # Compute the boresight pointing and observatory position
             if have_pointing:
