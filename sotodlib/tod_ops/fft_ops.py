@@ -11,7 +11,7 @@ import pyfftw
 import so3g
 import sys
 from so3g.proj import Ranges
-from scipy.optimize import minimize
+from scipy.optimize import curve_fit, minimize
 from scipy.signal import welch
 from scipy.stats import chi2
 from sotodlib import core, hwp
@@ -588,6 +588,15 @@ def neglnlike(params, x, y, bin_size=1, **fixed_param):
         return 1.0e30
     return output
 
+
+def _curve_fit_bounds_array(bounds):
+    lower = []
+    upper = []
+    for low, high in bounds:
+        lower.append(-np.inf if low is None else low)
+        upper.append(np.inf if high is None else high)
+    return np.array(lower, dtype=float), np.array(upper, dtype=float)
+
 def get_psd_mask(aman, psd_mask=None, f=None,
                 mask_hwpss=True, hwp_freq=None, max_hwpss_mode=10, hwpss_width=((-0.4, 0.6), (-0.2, 0.2)),
                 mask_peak=False, peak_freq=None, peak_width=(-0.002, +0.002),
@@ -745,7 +754,9 @@ def fit_noise_model(
     freq_spacing=None,
     subscan=False,
     label_axis='dets',
-    bounds=None
+    bounds=None,
+    fit_method="likelihood",
+    curve_fit_kwargs=None,
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -814,6 +825,13 @@ def fit_noise_model(
     bounds : list of tuple
         List length 2 with number of non-fixed params each list entry is a tuple
         first is lower bounds second is upper bounds to constrain fit.
+    fit_method : str
+        Selects optimizer. "likelihood" (default) uses the Nelder-Mead
+        negative log-likelihood fit. "log_curve_fit" performs a
+        log-space non-linear least square fit via scipy.optimize.curve_fit.
+    curve_fit_kwargs : dict
+        Extra options forwarded to curve_fit when fit_method is
+        "log_curve_fit". Ignored otherwise.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -854,10 +872,21 @@ def fit_noise_model(
         pxx = pxx[:, mask]
 
     if subscan:
-        fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
-                                  "lowf": lowf, "f_max": f_max, "fixed_param": fixed_param,
-                                  "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
-                                  "freq_spacing": freq_spacing}
+        fit_noise_model_kwargs = {
+            "fknee_est": fknee_est,
+            "wn_est": wn_est,
+            "alpha_est": alpha_est,
+            "lowf": lowf,
+            "f_max": f_max,
+            "fixed_param": fixed_param,
+            "binning": binning,
+            "unbinned_mode": unbinned_mode,
+            "base": base,
+            "freq_spacing": freq_spacing,
+            "bounds": bounds,
+            "fit_method": fit_method,
+            "curve_fit_kwargs": curve_fit_kwargs,
+        }
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
         axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs"), (2, aman.subscans)]
         axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
@@ -875,7 +904,6 @@ def fit_noise_model(
             f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                               base=base, merge=False)
         fitout = np.zeros((aman[label_axis].count, 3))
-        # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
         covout = np.zeros((aman[label_axis].count, 3, 3))
         if isinstance(wn_est, (int, float)):
             wn_est = np.full(aman[label_axis].count, wn_est)
@@ -893,55 +921,119 @@ def fit_noise_model(
             print('Size of alpha_est must be equal to aman.dets.count or a single value.')
             return
 
+        wn_est = np.asarray(wn_est, dtype=float)
+        fknee_est = np.asarray(fknee_est, dtype=float)
+        alpha_est = np.asarray(alpha_est, dtype=float)
+
+        fixed_vals = None
+        if fixed_param is None:
+            initial_params = np.vstack((wn_est, fknee_est, alpha_est))
+            if bounds is None:
+                bounds = (
+                    (sys.float_info.min, None),
+                    (sys.float_info.min, None),
+                    (0, 10),
+                )
+        elif fixed_param == "wn":
+            initial_params = np.vstack((fknee_est, alpha_est))
+            fixed_vals = np.asarray(wn_est, dtype=float)
+            if bounds is None:
+                bounds = (
+                    (sys.float_info.min, None),
+                    (0, 10),
+                )
+        elif fixed_param == "alpha":
+            initial_params = np.vstack((wn_est, fknee_est))
+            fixed_vals = np.asarray(alpha_est, dtype=float)
+            if bounds is None:
+                bounds = (
+                    (sys.float_info.min, None),
+                    (sys.float_info.min, None),
+                )
+        else:
+            raise ValueError("fixed_param must be 'wn', 'alpha', or None.")
+
+        n_free_params = initial_params.shape[0]
         if isinstance(bounds, list):
-            if isinstance(bounds[0], list):
-                bounds = [tuple(b) for b in bounds]
+            bounds = [tuple(b) for b in bounds]
+        if isinstance(bounds, tuple):
+            pass
+        else:
+            bounds = tuple(bounds)
 
-        if fixed_param == None:
-            initial_params = np.array([wn_est, fknee_est, alpha_est])
-            if bounds is None:
-                bounds= ((sys.float_info.min, None), (sys.float_info.min, None), (0, 10))
-        if fixed_param == "wn":
-            initial_params = np.array([fknee_est, alpha_est])
-            fixed = wn_est
-            if bounds is None:
-                bounds= ((sys.float_info.min, None), (0, 10))
-        if fixed_param == "alpha":
-            initial_params = np.array([wn_est, fknee_est])
-            fixed = alpha_est
-            if counds is None:
-                bounds= ((sys.float_info.min, None), (sys.float_info.min, None))
+        if len(bounds) != n_free_params:
+            raise ValueError("Number of bounds entries must match free parameters.")
 
-        for i in range(len(pxx)):
-            p = pxx[i]
-            p0 = initial_params.T[i]
+        curve_bounds = None
+        if fit_method == "log_curve_fit":
+            curve_bounds = _curve_fit_bounds_array(bounds)
+
+        for i, p in enumerate(pxx):
+            p0 = initial_params[:, i]
             _fixed = {}
-            if fixed_param != None:
-                _fixed = {fixed_param: fixed[i]}
-            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
-                           p0, bounds=bounds, method="Nelder-Mead")
-            with warnings.catch_warnings():
-                warnings.filterwarnings("error")
-                try:
-                    Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
-                    hessian_ndt, _ = Hfun(res["x"])
-                    # Inverse of the hessian is an estimator of the covariance matrix
-                    # sqrt of the diagonals gives you the standard errors.
-                    covout_i = np.linalg.inv(hessian_ndt)            
-                except np.linalg.LinAlgError:
+            if fixed_param is not None:
+                _fixed = {fixed_param: fixed_vals[i]}
+
+            if fit_method == "likelihood":
+                res = minimize(
+                    lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                    p0,
+                    bounds=bounds,
+                    method="Nelder-Mead",
+                )
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error")
+                    try:
+                        Hfun = ndt.Hessian(
+                            lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                            full_output=True,
+                        )
+                        hessian_ndt, _ = Hfun(res["x"])
+                        covout_i = np.linalg.inv(hessian_ndt)
+                    except np.linalg.LinAlgError:
+                        print(
+                            f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (LinAlgError)"
+                        )
+                        covout_i = np.full((len(p0), len(p0)), np.nan)
+                    except IndexError:
+                        print(
+                            f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (IndexError)"
+                        )
+                        covout_i = np.full((len(p0), len(p0)), np.nan)
+                    except RuntimeWarning as e:
+                        covout_i = np.full((len(p0), len(p0)), np.nan)
+                        print(
+                            f"RuntimeWarning: {e}\n Hessian failed because results are: {res['x']}, for det: {aman[label_axis].vals[i]}"
+                        )
+                fitout_i = res.x
+            else:
+                valid = np.isfinite(p) & (p > 0) & np.isfinite(f)
+                if np.count_nonzero(valid) < n_free_params:
                     print(
-                        f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (LinAlgError)"
+                        f"Insufficient valid samples for detector {aman[label_axis].vals[i]} in log_curve_fit."
                     )
-                    covout_i = np.full((len(p0), len(p0)), np.nan)
-                except IndexError:
-                    print(
-                        f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (IndexError)"
-                    )
-                    covout_i = np.full((len(p0), len(p0)), np.nan)
-                except RuntimeWarning as e:
-                    covout_i = np.full((len(p0), len(p0)), np.nan)
-                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman[label_axis].vals[i]}')
-            fitout_i = res.x
+                    fitout_i = np.full(n_free_params, np.nan)
+                    covout_i = np.full((n_free_params, n_free_params), np.nan)
+                else:
+                    try:
+                        popt, pcov = curve_fit(
+                            lambda freq, *params: np.log(noise_model(freq, params, **_fixed)),
+                            f[valid],
+                            np.log(p[valid]),
+                            p0=p0,
+                            bounds=curve_bounds,
+                            **curve_fit_kwargs,
+                        )
+                    except (RuntimeError, ValueError) as err:
+                        print(
+                            f"curve_fit failed for detector {aman[label_axis].vals[i]}: {err}"
+                        )
+                        fitout_i = np.full(n_free_params, np.nan)
+                        covout_i = np.full((n_free_params, n_free_params), np.nan)
+                    else:
+                        fitout_i = popt
+                        covout_i = pcov
+
             if fixed_param == "wn":
                 covout_i = np.insert(covout_i, 0, 0, axis=0)
                 covout_i = np.insert(covout_i, 0, 0, axis=1)
@@ -952,6 +1044,7 @@ def fit_noise_model(
                 covout_i = np.insert(covout_i, 2, 0, axis=1)
                 covout_i[2][2] = np.nan
                 fitout_i = np.insert(fitout_i, 2, alpha_est[i])
+
             covout[i] = covout_i
             fitout[i] = fitout_i
         axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs")]

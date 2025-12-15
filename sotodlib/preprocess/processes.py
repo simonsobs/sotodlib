@@ -661,9 +661,16 @@ class Noise(_Preprocess):
             wn_est: noise
             fixed_param: 'wn'
             binning: True
+            fit_method: log_curve_fit #or likelihood 
+            curve_fit_kwargs:
+                maxfev: 20000
           save: True
           select:
             max_noise: 2000
+            require_finite_fit: True
+
+    Set ``select.require_finite_fit`` to ``True`` to drop detectors whose fit
+    parameters contain NaNs (indicating a failed noise fit).
 
     Example config block for calculating white noise only::
 
@@ -681,7 +688,7 @@ class Noise(_Preprocess):
     If ``fit: True`` this operation will run
     :func:`sotodlib.tod_ops.fft_ops.fit_noise_model`, else it will run
     :func:`sotodlib.tod_ops.fft_ops.calc_wn`.
-
+    
     """
     name = "noise"
     _influx_field = "median_white_noise"
@@ -823,6 +830,10 @@ class Noise(_Preprocess):
             keep &= (wn >= np.float64(self.select_cfgs["min_noise"]))
         if fk is not None and "max_fknee" in self.select_cfgs.keys():
             keep &= (fk <= np.float64(self.select_cfgs["max_fknee"]))
+        if self.fit and self.select_cfgs.get("require_finite_fit", False):
+            fit_vals = np.asarray(noise_aman.fit)
+            fit_flat = fit_vals.reshape(fit_vals.shape[0], -1)
+            keep &= np.all(np.isfinite(fit_flat), axis=1)
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
