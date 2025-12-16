@@ -140,6 +140,7 @@ def preprocess_tod(configs: Union[str, dict],
     return out_dict, errors
 
 
+
 def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs: str,
@@ -153,8 +154,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: int = 4,
-          raise_error: bool = False):
+          raise_error: bool = False,
+          run_from_jobdb: bool = False,
+         ):
 
+    assert run_from_jobdb, "breaking things if this is False"
     temp_subdir = "temp"
 
     tqdm.monitor_interval = 0
@@ -166,27 +170,34 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 exist_ok=True)
 
     jobdb_path = configs.get("jobdb", None)
+    if jobdb_path is None and run_from_jobdb:
+        raise ValueError(f"Cannot run without jobdb attached")
+        
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
 
-    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id,
-                                   min_ctime=min_ctime, max_ctime=max_ctime,
-                                   update_delay=update_delay, tags=tags,
-                                   planet_obs=planet_obs)
-    if len(obs_list) == 0:
-        logger.warning(f"No observations returned from query: {query}")
-        return
+    if run_from_jobdb:
+        job_list = jdb.get_jobs("init", jstate=JState.open)
+        obs_list = list(set([j.tags['obs:obs_id'] for j in job_list]))
+    else:
+        obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id,
+                                       min_ctime=min_ctime, max_ctime=max_ctime,
+                                       update_delay=update_delay, tags=tags,
+                                       planet_obs=planet_obs)
+        obs_list = [obs['obs_id'] for obs in obs_list]
+        if len(obs_list) == 0:
+            logger.warning(f"No observations returned from query: {query}")
+            return
 
     # clean up lingering files from previous incomplete runs
     policy_dir = os.path.join(os.path.dirname(
             configs['archive']['policy']['filename']),
             temp_subdir
     )
-    for obs in obs_list:
-        obs_id = obs['obs_id']
+    for obs_id in obs_list:
         pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
                             subdir=temp_subdir, remove=overwrite)
 
@@ -202,43 +213,45 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     else:
         db = core.metadata.ManifestDb(configs['archive']['index'])
 
-    futures = []
-    futures_dict = {}
-    for obs in obs_list:
-        futures.append(executor.submit(pp_util.get_groups, obs["obs_id"], configs))
-        futures_dict[futures[-1]] = obs
+    if not run_from_jobdb:
+        futures = []
+        futures_dict = {}
+        for obs_id in obs_list:
+            futures.append(executor.submit(pp_util.get_groups, obs_id, configs))
+            futures_dict[futures[-1]] = obs
+    
+        for future in tqdm(as_completed_callable(futures), total=len(futures),
+                           desc="building run list from obs list"):
+            obs = futures_dict[future]
+            _, groups, _ = future.result()
+    
+            if db is not None and not overwrite:
+                x = db.inspect({'obs:obs_id': obs['obs_id']})
+                if x is not None and len(x) != 0 and len(x) != len(groups):
+                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+    
+            for group in groups:
+                if 'NC' not in group:
+                    run_list.append((obs, group))
 
-    for future in tqdm(as_completed_callable(futures), total=len(futures),
-                       desc="building run list from obs list"):
-        obs = futures_dict[future]
-        _, groups, _ = future.result()
+        if jobdb_path is not None:
+            run_list, jobs = pp_util.filter_preproc_runlist_by_jobdb(
+                jdb=jdb,
+                jclass="init",
+                run_list=run_list,
+                group_by=group_by,
+                overwrite=overwrite,
+                logger=logger
+            )
+        else:
+            jobs = [None for r in run_list]
 
-        if db is not None and not overwrite:
-            x = db.inspect({'obs:obs_id': obs['obs_id']})
-            if x is not None and len(x) != 0 and len(x) != len(groups):
-                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
-
-        for group in groups:
-            if 'NC' not in group:
-                run_list.append((obs, group))
-
-    if jobdb_path is not None:
-        run_list, jobs = pp_util.filter_preproc_runlist_by_jobdb(
-            jdb=jdb,
-            jclass="init",
-            run_list=run_list,
-            group_by=group_by,
-            overwrite=overwrite,
-            logger=logger
-        )
-    else:
-        jobs = [None for r in run_list]
-
-    if len(run_list) == 0:
-        logger.info("Nothing to run")
-        return
-    logger.info(f'Run list created with {len(run_list)} obsid groups')
-
+        if len(run_list) == 0:
+            logger.info("Nothing to run")
+            return
+        logger.info(f'Run list created with {len(run_list)} obsid groups')
+        raise NotImplementedError("I have broken this")
+        
     # ensure db exists up front to prevent race conditions
     pp_util.get_preprocess_db(configs, group_by, logger)
 
@@ -246,20 +259,22 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     futures_dict = {}
     obs_errors = {}
 
-    for r, j in zip(run_list, jobs):
+    for job in job_list:
+        obs_id = job.tags['obs:obs_id']
+        group = [job.tags['dets:'+g] for g in group_by]
         futures.append(
             executor.submit(
                 preprocess_tod,
-                obs_id=r[0]["obs_id"],
+                obs_id=obs_id,
                 configs=configs,
-                group=r[1],
+                group=group,
                 verbosity=verbosity,
                 overwrite=overwrite,
             )
         )
-        futures_dict[futures[-1]] = (r[0]['obs_id'], r[1], j)
-        if r[0]['obs_id'] not in obs_errors:
-            obs_errors[r[0]['obs_id']] = []
+        futures_dict[futures[-1]] = (obs_id, group, job)
+        if obs_id not in obs_errors:
+            obs_errors[obs_id] = []
 
     total = len(futures)
 
@@ -374,6 +389,12 @@ def get_parser(parser=None):
         type=bool,
         default=False
     )
+    parser.add_argument(
+        '--run-from-jobdb',
+        help="If true, assumes jobdb is populated/readout to go with a run list.",
+        type=bool,
+        default=False, action='store_true',
+    )
     return parser
 
 
@@ -388,7 +409,9 @@ def main(configs: str,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: int = 4,
-         raise_error: bool = False):
+         raise_error: bool = False,
+         run_from_jobdb: bool = False,
+        ):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -405,7 +428,9 @@ def main(configs: str,
               planet_obs=planet_obs,
               verbosity=verbosity,
               nproc=nproc,
-              raise_error=raise_error)
+              raise_error=raise_error,
+              run_from_jobdb=run_from_jobdb,
+             )
 
 if __name__ == '__main__':
     sp_util.main_launcher(main, get_parser)

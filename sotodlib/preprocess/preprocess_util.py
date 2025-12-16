@@ -88,8 +88,8 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
     jobs = []
 
     failed = 0
-    done = 0
-
+    done = 0 
+    
     for r in run_list:
         tags = {}
         tags["obs:obs_id"] = r[0]['obs_id']
