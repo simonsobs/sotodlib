@@ -14,7 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
-from sotodlib.site_pipeline.jobdb import JobManager
+from sotodlib.site_pipeline.jobdb import JobManager, JState
 import sotodlib.site_pipeline.util as sp_util
 from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess.preprocess_util import PreprocessErrors
@@ -392,8 +392,7 @@ def get_parser(parser=None):
     parser.add_argument(
         '--run-from-jobdb',
         help="If true, assumes jobdb is populated/readout to go with a run list.",
-        type=bool,
-        default=False, action='store_true',
+        action='store_true',
     )
     return parser
 
