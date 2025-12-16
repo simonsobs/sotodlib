@@ -493,7 +493,7 @@ def write_demod_maps(prefix, data, info, unit='K', split_labels=['full']):
             data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                               data.wmap[n_split], unit=unit+'^-1')
             data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                              data.weights[n_split], unit=unit+'^2')
+                              data.weights[n_split], unit=unit+'^-2')
             data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                               data.signal.hits[n_split], unit='hits')
 
