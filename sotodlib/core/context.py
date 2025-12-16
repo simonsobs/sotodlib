@@ -219,7 +219,9 @@ class Context(odict):
           special_channels (bool): If True, load "special" readout
             channels that are normally skipped (e.g. fixed tones).
           merge_special_channels (bool): If True, merge "special" readout
-            channels into normal readout channels.
+            channels into normal readout channels. the order of combined
+            channels are sorted by smurf band/channel so that it alignes
+            with raw files.
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
@@ -530,50 +532,6 @@ class Context(odict):
                 axm = AxisManager(OffsetAxis('samps', stop - start, start, obs_id))
                 meta = meta.merge(axm)
         return meta
-
-    def get_obs_all_channels(self, *args, **kwargs):
-        """ Load TOD and supporting metadata for some observation.
-
-        If the special channels, i.e. fixed tones, exist, this will combine the special channels into
-        normal `dets` axis. The order of combined `dets` are sorted by band/channel
-        so that it alignes with raw files.
-        The returned axismanager will not have data fields which has "normal" `dets` axis.
-
-        """
-
-        am = self.get_obs(*args, **kwargs)
-        if 'tones' not in am:
-            return am
-
-        logger.info('Merge special channels to normal channels')
-        special_band_ch = [(b, c) for b, c in zip(am.tones.band, am.tones.channel)]
-        normal_band_ch = [(b, c) for b, c in zip(am.det_info.smurf.band, am.det_info.smurf.channel)]
-        band_ch = np.array(sorted(normal_band_ch + special_band_ch))
-
-        normal_idx = [np.where((band_ch.T[0] == b) & (band_ch.T[1] == c))[0] for b, c in normal_band_ch]
-        special_idx = [np.where((band_ch.T[0] == b) & (band_ch.T[1] == c))[0] for b, c in special_band_ch]
-
-        new_dets = np.zeros(am.dets.count + am.tdets.count, dtype=am.dets.vals.dtype)
-        new_signal = np.zeros((am.dets.count + am.tdets.count, am.samps.count), dtype=am.signal.dtype)
-        for j, i in enumerate(normal_idx):
-            new_dets[i] = am.dets.vals[j]
-            new_signal[i] = am.signal[j]
-        for j, i in enumerate(special_idx):
-            new_dets[i] = am.tdets.vals[j]
-            new_signal[i] = am.tones.signal[j]
-        new_aman = AxisManager(LabelAxis('dets', new_dets), \
-                               *(am.get(k) for k in am._axes.keys() if k not in ('dets', 'tdets')))
-        new_aman.wrap('signal', new_signal, axis_map = [(0, 'dets'), (1, 'samps')])
-        for k, v in am._assignments.items():
-            if ('dets' not in v) and ('tdets' not in v):
-                field = am.get(k)
-                if isinstance(field, AxisManager):
-                    new_aman.wrap(k, field)
-                else:
-                    axis_map = [(i, ax) for i, ax in enumerate(v)]
-                    new_aman.wrap(k, field, axis_map = axis_map)
-        del am
-        return new_aman
 
     def get_det_info(self,
                      obs_id=None,
