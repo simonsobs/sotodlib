@@ -728,6 +728,12 @@ class Noise(_Preprocess):
 
         if self.fit:
             fcfgs = copy.deepcopy(self.calc_cfgs)
+            fit_method = fcfgs.pop('fit_method', None)
+            curve_fit_kwargs = fcfgs.pop('curve_fit_kwargs', None)
+            if curve_fit_kwargs is None and fit_method == 'log_curve_fit':
+                curve_fit_kwargs = {}
+            if curve_fit_kwargs is not None and not isinstance(curve_fit_kwargs, dict):
+                raise TypeError("calc.curve_fit_kwargs must be a mapping when provided")
             fixed_param = fcfgs.get('fixed_param', [])
             wn_est = fcfgs.get('wn_est', None)
 
@@ -750,11 +756,16 @@ class Noise(_Preprocess):
                 fcfgs['subscan'] = self.subscan
             fcfgs.pop('fwhite', None)
             f_max = check_frequency_cutoff(fcfgs.get("lowf", None), fcfgs.pop("f_max", 100))
+            fit_kwargs = dict(fcfgs)
+            if fit_method is not None:
+                fit_kwargs['fit_method'] = fit_method
+            if curve_fit_kwargs is not None:
+                fit_kwargs['curve_fit_kwargs'] = curve_fit_kwargs
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
                                                         f_max=f_max,
-                                                        **fcfgs)
+                                                        **fit_kwargs)
             if calc_wn or wn_est is None:
                 if not self.subscan:
                     calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets")])
