@@ -174,6 +174,7 @@ class Context(odict):
                 no_signal=None,
                 no_headers=None,
                 special_channels=None,
+                merge_special_channels=None,
                 loader_type=None,
     ):
         """Load TOD and supporting metadata for some observation.
@@ -217,6 +218,8 @@ class Context(odict):
             information that tags along with the signal.
           special_channels (bool): If True, load "special" readout
             channels that are normally skipped (e.g. fixed tones).
+          merge_special_channels (bool): If True, merge "special" readout
+            channels into normal readout channels.
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
@@ -305,6 +308,7 @@ class Context(odict):
 
         if aman is None:
             return meta
+
         if meta is not None:
             if 'det_info' in aman and 'det_info' in meta:
                 # If the loader added det_info, then perform a special
@@ -329,6 +333,38 @@ class Context(odict):
                         _det_info.move(k, None)
                 meta.det_info.merge(_det_info)
             aman.merge(meta)
+
+        if merge_special_channels and 'tones' in aman and 'det_info.smurf' in aman:
+            logger.info('Merge special channels to normal channels')
+            special_band_ch = [(b, c) for b, c in zip(aman.tones.band, aman.tones.channel)]
+            normal_band_ch = [(b, c) for b, c in zip(aman.det_info.smurf.band, aman.det_info.smurf.channel)]
+            band_ch = np.array(sorted(normal_band_ch + special_band_ch))
+
+            normal_idx = [np.where((band_ch.T[0] == b) & (band_ch.T[1] == c))[0] for b, c in normal_band_ch]
+            special_idx = [np.where((band_ch.T[0] == b) & (band_ch.T[1] == c))[0] for b, c in special_band_ch]
+
+            new_dets = np.zeros(aman.dets.count + aman.tdets.count, dtype=aman.dets.vals.dtype)
+            new_signal = np.zeros((aman.dets.count + aman.tdets.count, aman.samps.count), dtype=aman.signal.dtype)
+            for j, i in enumerate(normal_idx):
+                new_dets[i] = aman.dets.vals[j]
+                new_signal[i] = aman.signal[j]
+            for j, i in enumerate(special_idx):
+                new_dets[i] = aman.tdets.vals[j]
+                new_signal[i] = aman.tones.signal[j]
+            new_aman = AxisManager(
+                LabelAxis('dets', new_dets), *(aman.get(k) for k in aman._axes.keys() if k not in ('dets', 'tdets')))
+            new_aman.wrap('signal', new_signal, axis_map = [(0, 'dets'), (1, 'samps')])
+            # drop fields with normal 'dets' axis or 'tdets' axis
+            for k, v in aman._assignments.items():
+                if ('dets' not in v) and ('tdets' not in v):
+                    field = aman.get(k)
+                    if isinstance(field, AxisManager):
+                        new_aman.wrap(k, field)
+                    else:
+                        axis_map = [(i, ax) for i, ax in enumerate(v)]
+                        new_aman.wrap(k, field, axis_map = axis_map)
+            aman = new_aman
+
         return aman
 
     def get_meta(self,
