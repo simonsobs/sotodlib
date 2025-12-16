@@ -109,8 +109,8 @@ def main(config: str,
     overwrite : bool
         if False, do not re-check existing entries
     fastwalk : bool
-        if True, assume the directories have a structure /base_dir/obs|oper/\d{5}/...
-        Then replace base_dir with only the directories where \d{5} is greater or 
+        if True, assume the directories have a structure /base_dir/obs|oper/\\d{5}/...
+        Then replace base_dir with only the directories where \\d{5} is greater or 
         equal to recency.
     """
     if verbosity == 0:

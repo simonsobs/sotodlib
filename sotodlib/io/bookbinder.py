@@ -26,7 +26,13 @@ if not log.hasHandlers():
     init_logger('bookbinder')
 
 class TimingSystemOff(Exception):
-    """Exception raised when we try to bind books where the timing system is found to be off and the books have imprecise timing counters"""
+    """Exception raised when we try to bind books when the SMuRF slot says it has low
+    precision timing or downsample is not set to external"""
+    pass
+
+class TimingCounterError(Exception):
+    """Exception raised when timing counters are not behaving correctly but the system
+    believes it has high-precision timing."""
     pass
 
 class NoScanFrames(Exception):
@@ -44,7 +50,13 @@ class NoHKFiles(Exception):
     pass
 
 class NoMountData(Exception):
-    """Exception raised when we cannot find mount data"""
+    """Exception raised when we cannot find mount data overlapping detector data"""
+    pass
+
+MAX_DROPPED_HK = 200
+class DroppedMountData(Exception):
+    """Exception raised when at least MAX_DROPPED_HK samples have been dropped from a 
+    mount field"""
     pass
 
 class NoHWPData(Exception):
@@ -195,7 +207,7 @@ class HkDataField:
                 raise NonMonotonicAncillaryTimes(msg)
             else:
                 log.warning(msg)
-        
+                        
 @dataclass
 class HkData:
     """
@@ -212,7 +224,7 @@ class HkData:
     def from_dict(cls, d: Dict[str, str]):
         """
         Creates HkData object from a dict of field addresses. Addresses must be formatted like ``<instance_id>.<feed>.<field>``.
-        Keys of dict must be valide fields of HkData class, such as ``az`` or ``el``.
+        Keys of dict must be valid fields of HkData class, such as ``az`` or ``el``.
         """
         kw = {}
         for k, v in d.items():
@@ -240,6 +252,25 @@ class HkData:
                     drop_duplicates=drop_duplicates,
                     require_monotonic_times=require_monotonic_times,
                 )
+
+def validate_mount_field(hk_field: HkDataField, times):
+        diff_times = hk_field.times[:-1] + 0.5*np.diff(hk_field.times)
+        m = (times[0] <= diff_times) & (diff_times <= times[-1])
+        err = None
+        if m.sum() < 2:
+            err= NoMountData(
+                f"No mount data overlapping with detector data: {hk_field.addr}"
+            )
+        arr = np.diff(hk_field.times)/np.median(np.diff(hk_field.times))            
+        if np.any(arr[m] > MAX_DROPPED_HK):
+            ## don't change error message without changing imprinter CLI
+            err= DroppedMountData(
+                f"{hk_field.addr} dropped "
+                f"{arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
+                f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
+                "seconds. Interpolation may be questionable."
+            )
+        return arr > 2, err
 
 class AncilProcessor:
     """
@@ -383,38 +414,33 @@ class AncilProcessor:
         cur_file_idx = None
         out_files = []
 
-        def validate_mount_field(hk_field: HkDataField, max_dt=None):
-            m = (times[0] <= hk_field.times) & (hk_field.times <= times[-1])
-            if m.sum() < 2:
-                raise NoMountData(
-                    f"No mount data overlapping with detector data: {hk_field.addr}"
-                )
-            if max_dt is not None:
-                _max_dt = np.max(np.diff(hk_field.times[m]))
-                if _max_dt > max_dt:
-                    raise NoMountData(
-                        f"Max data spacing {_max_dt}s is higher than {max_dt}s for {hk_field.addr}. "
-                        "Interpolation may be questionable."
-                    )
-
         # go through and interpolate ACU times to detector times
         acu_interp_data = {}
+        acu_invalid_data = {}
         for fld in ['az', 'el', 'boresight', 'corotator_enc']:
             f = getattr(self.hkdata, fld)
             if f is not None:
-                try:
-                    validate_mount_field(f, max_dt=10)
-                    acu_interp_data[fld] = np.interp(
-                        times, f.times, f.data
-                    )
-                except NoMountData as e:
+                invalid, err = validate_mount_field(f, times)
+                acu_interp_data[fld] = np.interp(
+                    times, f.times, f.data
+                )
+                acu_invalid_data[fld] = np.interp( 
+                    times, f.times[:-1]+0.5*np.diff(f.times), 
+                    invalid
+                )>0
+                if err is not None:
                     if self.require_acu:
-                        raise e
+                        raise err
                     else:
-                        self.log.warning(e)
-                        acu_interp_data[fld] = None
+                        self.log.warning(err)
+                        ## remove field entirely if there's no data
+                        if isinstance(err, NoMountData):
+                            acu_interp_data[fld]=None
+                            acu_invalid_data[fld]=None
+                
             else: 
                 acu_interp_data[fld] = None
+                acu_invalid_data[fld]=None
 
         az = acu_interp_data['az']
         el = acu_interp_data['el']
@@ -445,10 +471,18 @@ class AncilProcessor:
             if az is not None:
                 anc_data['az_enc'] = core.G3VectorDouble(az[m])
                 anc_data['el_enc'] = core.G3VectorDouble(el[m])
+                anc_data['flag_az_enc'] = core.G3VectorBool(acu_invalid_data['az'][m])
+                anc_data['flag_el_enc'] = core.G3VectorBool(acu_invalid_data['el'][m])
             if boresight is not None:
                 anc_data['boresight_enc'] = core.G3VectorDouble(boresight[m])
+                anc_data['flag_boresight_enc'] = core.G3VectorBool(
+                    acu_invalid_data['boresight'][m]
+                )
             if corotator_enc is not None:
                 anc_data['corotator_enc'] = core.G3VectorDouble(corotator_enc[m])
+                anc_data['flag_corotator_enc'] = core.G3VectorBool(
+                    acu_invalid_data['corotator_enc'][m]
+                )
             oframe['ancil'] = anc_data
             writer(oframe)
             anc_frame_data.append(anc_data)
@@ -1454,13 +1488,31 @@ def get_frame_times(frame, allow_bad_timing=False):
 
     counters = np.all( np.diff(c0)!=0 ) and np.all( np.diff( c2 )!=0)
 
-    if counters:
-        return True, counters_to_timestamps(c0, c2)
-    elif allow_bad_timing:
-        return False, np.array(frame['data'].times) / core.G3Units.s
-    else:
-        ## don't change this error message. used in Imprinter CLI
-        raise TimingSystemOff("Timing counters not incrementing")
+    if not counters:
+        if allow_bad_timing:
+            return False, np.array(frame['data'].times) / core.G3Units.s
+        else:
+            raise TimingCounterError("Timing counters not incrementing")
+             
+    s, ns = split_ts_bits(c2)
+
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    
+    # Look for evidence of counters de-syncing. 
+    stat = c2-(c0/480000) - np.round(c2-(c0/480000))
+    counters = ((np.ptp(stat)<0.001)+(np.abs(np.mean(stat))<0.0025))
+
+    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+
+    if not counters and not allow_bad_timing:
+        raise TimingCounterError(
+            f"Timing counters diverging from normal. ptp: {np.ptp(stat)}, "
+            f"mean: {np.abs(np.mean(stat))}"
+        )
+
+    return counters, ts
 
 def split_ts_bits(c):
     """
@@ -1472,14 +1524,6 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
-def counters_to_timestamps(c0, c2):
-    s, ns = split_ts_bits(c2)
-
-    # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPICS time referenced to 1990 relative to UNIX time.
-    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
-    return ts
 
 def find_ref_idxs(refs, vs):
     """
