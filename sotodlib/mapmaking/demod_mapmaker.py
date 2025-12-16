@@ -624,6 +624,16 @@ def make_demod_map(context, obslist, noise_model, info,
     n_dets = comm.allreduce(n_dets)
     for subinfo in info:
         subinfo['number_dets'] = n_dets
+
+        # Blindly add *all* scalars in this aman to sub_info.
+        # The ones in the AtomicInfo class will be automatically added to the AtomicInfo, the others ignored.
+        info_aman_name = 'preprocess.split_flags'
+        if obs is not None and info_aman_name in obs:
+            info_aman = obs[info_aman_name]
+            for info_entry in info_aman.keys():
+                if np.isscalar(info_aman[info_entry]):
+                    if info_entry not in subinfo:  # Don't overwrite existing entries
+                        subinfo[info_entry] = info_aman[info_entry]
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
         return errors, outputs, None
