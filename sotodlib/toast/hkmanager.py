@@ -7,6 +7,7 @@ import numpy as np
 from scipy.interpolate import CubicSpline, PchipInterpolator
 
 from toast.utils import Logger
+from toast.io.hdf_utils import load_meta_object, save_meta_object
 
 from ..io import hkdb
 
@@ -204,3 +205,48 @@ class HKManager(MutableMapping):
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def save_hdf5(self, handle, obs, **kwargs):
+        """Save the HKManager object to an HDF5 file.
+
+        Args:
+            handle (h5py.Group):  The group to populate.
+            obs (Observation):  The parent observation.
+
+        Returns:
+            None
+
+        """
+        gcomm = obs.comm.comm_group
+        if (gcomm is None) or (gcomm.rank == 0):
+            # The rank zero process should always be writing
+            if handle is None:
+                raise RuntimeError("HDF5 group is not open on the root process")
+        if handle is not None:
+            save_meta_object(handle, "data", self._internal)
+            save_meta_object(handle, "aliases", self._aliases)
+
+    def load_hdf5(self, handle, obs, **kwargs):
+        """Load the HKManager object from an HDF5 file.
+
+        Args:
+            handle (h5py.Group):  The group containing noise model.
+            obs (Observation):  The parent observation.
+
+        Returns:
+            None
+
+        """
+        gcomm = obs.comm.comm_group
+        if (gcomm is None) or (gcomm.rank == 0):
+            # The rank zero process should always be reading
+            if handle is None:
+                raise RuntimeError("HDF5 group is not open on the root process")
+        if handle is not None:
+            data = load_meta_object(handle["data"])
+            aliases = load_meta_object(handle["aliases"])
+        if gcomm is not None:
+            data = gcomm.bcast(data, root=0)
+            aliases = gcomm.bcast(aliases, root=0)
+        self._internal = data
+        self._aliases = aliases
