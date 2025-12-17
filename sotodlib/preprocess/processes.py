@@ -2447,7 +2447,7 @@ class EstimateT2P(_Preprocess):
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        keep = tod_ops.t2pleakage.get_t2p_cuts(meta, in_place=False, **self.select_cfgs)
+        keep = tod_ops.t2pleakage.get_t2p_cuts(meta, t2p_aman=proc_aman.t2p, in_place=False, **self.select_cfgs)
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
