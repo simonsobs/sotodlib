@@ -833,16 +833,16 @@ class AxisManager:
                 data = [1,3,5], indexes = [0, -1, 2, 1]
                 would result in new_data = [1, nan, 5, 3]
         """
+        # Check if axis even exists first
+        if axis not in self._axes.keys():
+            raise ValueError(f"Axis doesn't exist in aman! \
+                             Can't re-index along {axis}")
+
         if in_place:
             aman = self
         else:
             aman = self.copy(axes_only=True)
             aman._assignments.update(self._assignments)
-
-        # Check if axis even exists first
-        if axis not in self._axes.keys():
-            raise ValueError(f"Axis doesn't exist in aman! \
-                             Can't re-index along {axis}")
 
         # Loop through ever assignment and reindex along
         # each that is tied to the axis in question
