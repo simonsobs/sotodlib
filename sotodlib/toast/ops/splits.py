@@ -590,6 +590,17 @@ class Splits(Operator):
             if hasattr(self.mapmaker, trt):
                 setattr(self.mapmaker, trt, True)
 
+        # Optionally make copies of the shared flags
+        if self.splits_as_flags:
+            save_shared_flags = {}
+            for ob in data.obs:
+                if ob.comm_col_rank == 0:
+                    save_shared_flags[ob.name] = ob.shared[self.shared_flags].data
+                else:
+                    save_shared_flags[ob.name] = None
+        else:
+            save_shared_flags = None
+
         # Loop over splits
         for split_name, spl in self._split_obj.items():
             # Set mapmaker name based on split and the name of this
@@ -653,6 +664,15 @@ class Splits(Operator):
             setattr(self.mapmaker, k, v)
         map_binner.pixel_pointing.view = pointing_view_save
         map_binner.pixel_pointing.shared_flag_mask = shared_flag_mask_save
+
+        # Optionally restore shared flags
+        if save_shared_flags is not None:
+            for ob in data.obs:
+                ob.shared[self.shared_flags].set(
+                    save_shared_flags[ob.name], offset=(0,), fromrank=0
+                )
+
+        return
 
     def splits_exist(self, data, split_name=None):
         """Write out all split products."""
