@@ -221,6 +221,7 @@ class Context(odict):
             function to use (this will override whatever is specified
             in context.yaml).
 
+
         Notes:
           It is acceptable to pass the ``obs_id`` argument by position
           (first), but all other arguments should be passed by
@@ -329,6 +330,62 @@ class Context(odict):
                         _det_info.move(k, None)
                 meta.det_info.merge(_det_info)
             aman.merge(meta)
+
+        # Deal with special channels, if they exist.
+        # We will merge the dets and tdets axes
+        # And merge the tdets signal into the dets signal, band, and channels.
+        # nans will be inserted into every other dataset assigned to the dets axis.
+        if special_channels is not None and special_channels:
+            # Grab all band and channel info for dets + tdets
+            det_bands = aman.det_info.smurf.band
+            det_channels = aman.det_info.smurf.channel
+            tdet_bands = aman.tones.band
+            tdet_channels = aman.tones.channel
+
+            # Create a sorted array of dets + tdets
+            special_band_ch = [(b, c) for b, c in zip(tdet_bands, tdet_channels)]
+            normal_band_ch = [(b, c) for b, c in zip(det_bands, det_channels)]
+            band_ch = np.array(sorted(normal_band_ch + special_band_ch))
+
+            # Grab the det idxs from the det band + channels
+            det_indexes = np.zeros(len(band_ch)) * np.nan
+            for i, (b, c) in enumerate(band_ch):
+                w = np.where((det_bands == b) & (det_channels == c))[0]
+                if len(w) == 0:
+                    continue
+
+                det_indexes[i] = w[0]
+
+            # Grab the tdet idxs from the tdet band + channels
+            tdet_indexes = np.zeros(len(band_ch)) * np.nan
+            for i, (b, c) in enumerate(band_ch):
+                w = np.where((tdet_bands == b) & (tdet_channels == c))[0]
+                if len(w) == 0:
+                    continue
+
+                tdet_indexes[i] = w[0]
+
+            # Use the det idxs to reindex all datasets assigned to the dets axis
+            # This will set the len to dets + tdets
+            # And will insert nans where the tdet channels exist
+            # in the sorted band_ch array
+            aman.reindex_axis(axis='dets', indexes=det_indexes)
+
+            # Finally use the tdet idxs to fill in the tdet data
+            # For the signal, band, and channels
+            for i, tidx in enumerate(tdet_indexes):
+                if np.isnan(tidx):
+                    continue
+
+                aman.signal[i] = aman.tones.signal[int(tidx)]
+                aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
+                aman.det_info.smurf.band[i] = aman.tones.band[int(tidx)]
+                aman.dets.vals[i] = aman.tdets.vals[int(tidx)]
+
+            aman.move('tones', new_name=None)  # Destroy the tones data
+            del aman._axes['tdets']  # Destroy the tdets axis
+            # obs_aman tdet info is merged!
+
         return aman
 
     def get_meta(self,
