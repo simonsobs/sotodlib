@@ -1200,7 +1200,7 @@ def get_good_distribution_flags(aman, param_name='wn_signal',
         Boolean mask for cuts True for keep and False for cut.
     """
     det_mask = np.full(aman.dets.count, True, dtype=bool)
-    ratio = aman[param_name]/np.median(aman[param_name])
+    ratio = aman[param_name]/np.nanmedian(aman[param_name])
     outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
 
     det_mask[outlier_mask] = False
@@ -1215,14 +1215,14 @@ def get_good_distribution_flags(aman, param_name='wn_signal',
         else:
             assert (blame_max==False) or (blame_min==False)
             if blame_max:
-                det_mask[aman[param_name] >= np.max(distributions)] = False
+                det_mask[aman[param_name] >= np.nanmax(distributions)] = False
             elif blame_min:
-                det_mask[aman[param_name] <= np.min(distributions)] = False
+                det_mask[aman[param_name] <= np.nanmin(distributions)] = False
             else:
-                max_is_bad_factor = np.max(distributions)/np.median(distributions)
-                min_is_bad_factor = np.median(distributions)/np.min(distributions)
+                max_is_bad_factor = np.nanmax(distributions)/np.nanmedian(distributions)
+                min_is_bad_factor = np.nanmedian(distributions)/np.nanmin(distributions)
                 if max_is_bad_factor > min_is_bad_factor:
-                    det_mask[aman[param_name] >= np.max(distributions)] = False
+                    det_mask[aman[param_name] >= np.nanmax(distributions)] = False
                 else:
-                    det_mask[aman[param_name] <= np.min(distributions)] = False
+                    det_mask[aman[param_name] <= np.nanmin(distributions)] = False
     return det_mask
