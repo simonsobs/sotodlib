@@ -855,7 +855,7 @@ class AxisManager:
             # we can skip it.
             if axis not in axes:
                 continue
-            print(assignment)
+
             v = aman[assignment]
 
             if isinstance(v, AxisManager):
@@ -911,7 +911,7 @@ class AxisManager:
                 if np.isnan(index) or not (0 <= int(index) < len(old_axis.vals)):
                     continue
                 vals[i] = old_axis.vals[int(index)]
-                
+
             new_axis = LabelAxis(name=axis, vals=vals)
 
         if isinstance(old_axis, OffsetAxis):

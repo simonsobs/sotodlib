@@ -380,7 +380,34 @@ class Context(odict):
                 aman.signal[i] = aman.tones.signal[int(tidx)]
                 aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
                 aman.det_info.smurf.band[i] = aman.tones.band[int(tidx)]
-                aman.dets.vals[i] = aman.tdets.vals[int(tidx)]
+
+            def add_tdet_ids(aman, tdet_indexes, tdet_ids):
+                """
+                    Small Function for recursively delving through
+                    all amans in the arg aman to add tdet ids into
+                    the dets axes.
+                """
+                # Check all assignments for any AxisManagers
+                for assignment, axes in aman._assignments.items():
+                    if isinstance(aman[assignment], AxisManager) and "dets" in axes:
+                        # If they have a Dets axis, go fix it first.
+                        add_tdet_ids(aman[assignment], tdet_indexes, tdet_ids)
+
+                # Skip current aman if it doesn't have a dets axis.
+                # This is the recursion base case
+                # Assuming someone didn't make an infinitely deep aman
+                # Or circular amans....
+                if "dets" not in aman._axes.keys():
+                    return
+
+                # If this aman has a dets axis, add in tdet ids.
+                for i, tidx in enumerate(tdet_indexes):
+                    if np.isnan(tidx):
+                        continue
+                    aman.dets.vals[i] = tdet_ids[int(tidx)]
+
+            # Add in tdet ids to all amans.
+            add_tdet_ids(aman, tdet_indexes, aman.tdets.vals)
 
             aman.move('tones', new_name=None)  # Destroy the tones data
             del aman._axes['tdets']  # Destroy the tdets axis
