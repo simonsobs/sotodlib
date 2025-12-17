@@ -441,7 +441,7 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, *
     else:
         return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
+def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, method='median'):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
@@ -470,6 +470,9 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
 
         high_f (float):
             high frequency cutoff to calculate median psd value. Defaults to 10Hz
+        
+        method (str):
+            median or mean to compute white noise. Default is median.
 
     Returns
     -------
@@ -491,13 +494,23 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
                       '`noverlap=0, full_output=True`')
         debias = None
     else:
-        debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)
+        if method == 'median':
+            debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)
+        else: 
+            debias = 1
+
+    if method == 'median':
+        _f = np.median
+    elif method == 'mean':
+        _f = np.mean
+    else:
+        raise ValueError('Only median and mean allowed')
 
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0)
     if pxx.ndim == 1:
-        wn2 = np.median(pxx[fmsk])
+        wn2 = _f(pxx[fmsk])
     else:
-        wn2 = np.median(pxx[:, fmsk], axis=1)
+        wn2 = _f(pxx[:, fmsk], axis=1)
     if debias is not None:
         if pxx.ndim == 3:
             wn2 *= debias[None, :]
@@ -896,6 +909,8 @@ def fit_noise_model(
             six = 1
         else:
             six = np.argmin(np.abs(f - lowf))
+            if six == 0:
+                six = 1
         f = f[six:eix]
         pxx = pxx[:, six:eix]
         bin_size = 1
