@@ -197,25 +197,40 @@ class JobManager:
     def _lockstr(self):
         return 'me%i' % os.getpid()
 
+    def commit_jobs(self, jobs):
+        """Commit jobs to the jobs table"""
+
+        with self.session_scope() as session:
+            for job in jobs:
+                existing = self.get_jobs(
+                    job.jclass, tags=job.tags,
+                    jstate=JState.all(), locked=None)
+                if len(existing):
+                    raise JobNotUniqueError(
+                        'Found other records with same tags: '
+                        f'{[x.id for x in existing]}')
+                session.add(job)
+            session.commit()
+            # Force a retrieval of job.id, before expunging --
+            # otherwise some fields will dangle and sqlalchemy can
+            # complain later about the detached object.
+            for job in jobs:
+                job.id
+                session.expunge(job)
+
     def create_job(self,
                    jclass=None,
                    tags={},
                    jstate=None,
                    creation_time=None,
                    visit_count=None,
-                   visit_time=None):
+                   visit_time=None,
+                   commit=False):
         """Create a new job in the jobs table.
 
         Return the job.
 
         """
-        existing = self.get_jobs(
-            jclass, tags=tags,
-            jstate=JState.all(), locked=None)
-        if len(existing):
-            raise JobNotUniqueError(
-                'Found other records with same tags: '
-                f'{[x.id for x in existing]}')
 
         if creation_time is None:
             creation_time = time.time()
@@ -228,14 +243,8 @@ class JobManager:
                   visit_count=visit_count,
                   visit_time=visit_time,
                   _tags=tags)
-        with self.session_scope() as session:
-            session.add(job)
-            session.commit()
-            # Force a retrieval of job.id, before expunging --
-            # otherwise some fields will dangle and sqlalchemy can
-            # complain later about the detached object.
-            job.id
-            session.expunge(job)
+        if commit:
+            self.commit_jobs([job,])
         return job
 
     def get_jobs(self,

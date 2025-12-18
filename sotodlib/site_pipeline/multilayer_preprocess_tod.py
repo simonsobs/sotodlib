@@ -14,7 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
-from sotodlib.site_pipeline.jobdb import JobManager
+from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
 from sotodlib.preprocess.preprocess_util import PreprocessErrors
@@ -84,6 +84,89 @@ def multilayer_preprocess_tod(obs_id: str,
     return out_dict_init, out_dict_proc, errors
 
 
+def check_init_jobdb(
+    jdb,
+    init_db,
+    init_jobs_map,
+    obs_id,
+    group,
+    group_by,
+    overwrite=False,
+):
+    """
+    Check if a job exists in the init jobdb.  Create it if it doesn't or open
+    it if overwritting or it is not in the init db.
+
+    Arguments
+    ----------
+    jdb : JobDB
+        JobDB instance.
+    init_db : ManifestDb or None
+        Init preproc database.
+    init_jobs_map : dict
+        Mapping from jobdb tags to existing init jobs.
+    obs_id : str
+        The obs_id for jobdb entry.
+    group : list
+        The group for the jobdb entry.
+    group_by : list
+        Keys defining detector grouping (e.g. ["wafer", "band"]).
+    overwrite : bool, optional
+        Whether to reopen jobs even if they already exist in init_db.
+
+    Returns
+    -------
+    failed_job : bool
+        True if a failed job should be recorded as failed.
+    job : jobdb.Job or None
+        New job to add to init db. None if none are to be added.
+    """
+    # build tags
+    tags = {'obs:obs_id': obs_id}
+    for gb, g in zip(group_by, group):
+        tags[f'dets:{gb}'] = g
+
+    init_job = init_jobs_map.get(frozenset(tags.items()))
+
+    # make job if it doesn't exist
+    if init_job is None:
+        tags["error"] = None
+        init_job = jdb.create_job(
+            jclass="init",
+            tags=tags,
+            commit=False
+        )
+        return False, init_job
+
+    # if job is open, don't need to do anything
+    if init_job.jstate not in (JState.done, JState.failed):
+        return False, None
+
+    # check whether this job exists in init_db
+    found = True
+    if init_job.jstate == JState.done and init_db is not None:
+        x = init_db.inspect({'obs:obs_id': obs_id})
+        found = any(
+            [a[f'dets:{gb}'] for gb in group_by] == group
+            for a in x
+        )
+
+    # reopen job if overwriting or missing from init_db
+    if overwrite or not found:
+        with jdb.locked(init_job) as j:
+            j.jstate = "open"
+            for _t in j._tags:
+                if _t.key == "error":
+                    _t.value = None
+        return False, None
+
+    # otherwise mark job as failed so we don't rerun it
+    if init_job.jstate == JState.failed:
+        return True, None
+
+    return False, None
+
+
 def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           as_completed_callable: Callable,
           configs_init: str,
@@ -97,8 +180,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           tags: Optional[str] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
-          nproc: Optional[int] = 4,
-          raise_error: Optional[bool] = False):
+          nproc: int = 4,
+          run_from_jobdb: bool = False,
+          raise_error: bool = False):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
@@ -110,27 +194,49 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     logger = sp_util.init_logger("preprocess", verbosity=verbosity)
 
-    os.makedirs(os.path.dirname(configs_init['archive']['policy']['filename']),
-                exist_ok=True)
-    os.makedirs(os.path.dirname(configs_proc['archive']['policy']['filename']),
-                exist_ok=True)
+    for fname in (configs_init['archive']['policy']['filename'],
+                  configs_proc['archive']['policy']['filename']
+                 ):
+        os.makedirs(os.path.dirname(fname),
+                    exist_ok=True)
 
     # jobdb
     jobdb_path = configs_proc.get("jobdb", None)
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
+         # get init jobs
+        new_init_jobs = []
+        init_jobs = jdb.get_jobs(jclass="init")
+        init_jobs_map = {
+            frozenset({k: v for k, v in j.tags.items() if k != 'error'}.items()): j
+            for j in init_jobs
+        }
+    elif run_from_jobdb:
+        raise ValueError(f"Need a jobdb if using it to make a run_list.")
 
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog_proc.txt')
 
-    obs_list = sp_util.get_obslist(context_proc, query=query, obs_id=obs_id,
-                                   min_ctime=min_ctime, max_ctime=max_ctime,
-                                   update_delay=update_delay, tags=tags,
-                                   planet_obs=planet_obs)
+    if jobdb_path is not None and run_from_jobdb:
+        if not overwrite:
+            job_list = jdb.get_jobs("proc", jstate=JState.open)
+        else:
+            job_list = jdb.get_jobs("proc")
+        obs_list = list(set([j.tags['obs:obs_id'] for j in job_list]))
+        if len(obs_list) == 0:
+            logger.warning(f"No open jobs in jobdb.")
+            return
+    else:
+        obs_list = sp_util.get_obslist(context_proc, query=query, obs_id=obs_id,
+                                       min_ctime=min_ctime, max_ctime=max_ctime,
+                                       update_delay=update_delay, tags=tags,
+                                       planet_obs=planet_obs)
 
-    if len(obs_list) == 0:
-        logger.warning(f"No observations returned from query: {query}")
-        return
+        obs_list = [obs['obs_id'] for obs in obs_list]
+
+        if len(obs_list) == 0:
+            logger.warning(f"No observations returned from query: {query}")
+            return
 
     # clean up lingering files from previous incomplete runs
     init_policy_dir = os.path.join(os.path.dirname(
@@ -142,69 +248,114 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         proc_temp_subdir
     )
 
-    for obs in obs_list:
-        obs_id = obs['obs_id']
+    for obs_id in obs_list:
         pp_util.cleanup_obs(obs_id, init_policy_dir, errlog, configs_init,
                             context_init, subdir=init_temp_subdir, remove=overwrite)
         pp_util.cleanup_obs(obs_id, proc_policy_dir, errlog, configs_proc,
                             context_proc, subdir=proc_temp_subdir, remove=overwrite)
 
     # remove datasets from final archive file not found in init db
-    pp_util.cleanup_archive(configs_init, logger)
-    pp_util.cleanup_archive(configs_proc, logger)
+    for config in (configs_init, configs_proc):
+        pp_util.cleanup_archive(config, logger)
 
     run_list = []
 
     group_by = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
 
+    if overwrite or not os.path.exists(configs_init['archive']['index']):
+        init_db = None
+    else:
+        init_db = core.metadata.ManifestDb(configs_init['archive']['index'])
     if overwrite or not os.path.exists(configs_proc['archive']['index']):
-        db = None
+        proc_db = None
     else:
-        db = core.metadata.ManifestDb(configs_proc['archive']['index'])
+         proc_db = core.metadata.ManifestDb(configs_proc['archive']['index'])
 
-    futures = []
-    futures_dict = {}
-    for obs in obs_list:
-        futures.append(executor.submit(pp_util.get_groups, obs["obs_id"], configs_proc))
-        futures_dict[futures[-1]] = obs
+    if not run_from_jobdb:
+        futures = []
+        futures_dict = {}
+        for obs_id in obs_list:
+            futures.append(executor.submit(pp_util.get_groups, obs_id, configs_proc))
+            futures_dict[futures[-1]] = obs_id
 
-    for future in tqdm(as_completed_callable(futures), total=len(futures),
-                       desc="building run list from obs list"):
-        obs = futures_dict[future]
-        _, groups, _ = future.result()
+        for future in tqdm(as_completed_callable(futures), total=len(futures),
+                           desc="building run list from obs list"):
+            obs_id = futures_dict[future]
+            _, groups, _ = future.result()
 
-        if db is not None and not overwrite:
-            x = db.inspect({'obs:obs_id': obs['obs_id']})
-            if x is not None and len(x) != 0 and len(x) != len(groups):
-                [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+            if proc_db is not None and not overwrite:
+                x = proc_db.inspect({'obs:obs_id': obs_id})
+                if x is not None and len(x) != 0 and len(x) != len(groups):
+                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+            for group in groups:
+                if 'NC' not in group:
+                    failed_job = False
+                    if jobdb_path is not None:
+                        failed_job, new_init_job = check_init_jobdb(
+                                                        jdb,
+                                                        init_db,
+                                                        init_jobs_map,
+                                                        obs_id,
+                                                        group,
+                                                        group_by,
+                                                        overwrite=False,
+                                                    )
+                        if new_init_job:
+                            new_init_jobs.append(new_init_job)
 
-        for group in groups:
-            if 'NC' not in group:
-                # Did obs_id and group fail in init pipeline
-                failed_jobs = None
+                    if not failed_job or overwrite:
+                        run_list.append((obs_id, group))
+
+
+        # filter by jobdb status
+        if jobdb_path is not None:
+            jdb.commit_jobs(new_init_jobs)
+
+            run_list = pp_util.filter_preproc_runlist_by_jobdb(
+                jdb=jdb,
+                jclass="proc",
+                db=proc_db,
+                run_list=run_list,
+                group_by=group_by,
+                overwrite=overwrite,
+                logger=logger
+            )
+    else:
+        for job in job_list:
+            obs_id = job.tags["obs:obs_id"]
+            groups = [[job.tags['dets:'+g] for g in group_by]]
+            if overwrite:
+                with jdb.locked(job) as j:
+                    j.jstate = "open"
+                    for _t in j._tags:
+                        if _t.key == "error":
+                            _t.value = None
+            elif proc_db is not None:
+                x = proc_db.inspect({'obs:obs_id': obs_id})
+                if x is not None and len(x) != 0 and len(x) != len(groups):
+                    for a in x:
+                        entry = [a[f'dets:{gb}'] for gb in group_by]
+                        if entry in groups:
+                            groups.remove(entry)
+            for group in groups:
+                failed_job = False
                 if jobdb_path is not None:
-                    tags = {}
-                    tags['obs:obs_id'] = obs['obs_id']
-                    for gb, g in zip(group_by, group):
-                        tags['dets:' + gb] = g
-                    failed_jobs = jdb.get_jobs(jclass="init",
-                                               tags=tags,
-                                               jstate=["failed"])
-                if not failed_jobs or overwrite:
-                    run_list.append((obs, group))
+                    failed_job, new_init_job = check_init_jobdb(
+                                                    jdb,
+                                                    init_db,
+                                                    init_jobs_map,
+                                                    obs_id,
+                                                    group,
+                                                    group_by,
+                                                    overwrite=False,
+                                                )
+                    if new_init_job:
+                        new_init_jobs.append(new_init_job)
 
-    # filter by jobdb status
-    if jobdb_path is not None:
-        run_list, jobs = pp_util.filter_preproc_runlist_by_jobdb(
-            jdb=jdb,
-            jclass="proc",
-            run_list=run_list,
-            group_by=group_by,
-            overwrite=overwrite,
-            logger=logger
-        )
-    else:
-        jobs = [None for r in run_list]
+                if not failed_job or overwrite:
+                    run_list.append((obs_id, group))
+
+        jdb.commit_jobs(new_init_jobs)
 
     if len(run_list) == 0:
         logger.info("Nothing to run")
@@ -219,10 +370,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     futures_dict = {}
     obs_errors = {}
 
-    for r, j in zip(run_list, jobs):
+    for r in run_list:
         futures.append(
             executor.submit(multilayer_preprocess_tod,
-                obs_id=r[0]['obs_id'],
+                obs_id=r[0],
                 configs_init=configs_init,
                 configs_proc=configs_proc,
                 group=r[1],
@@ -231,9 +382,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             )
         )
 
-        futures_dict[futures[-1]] = (r[0]['obs_id'], r[1], j)
-        if r[0]['obs_id'] not in obs_errors:
-            obs_errors[r[0]['obs_id']] = []
+        futures_dict[futures[-1]] = (r[0], r[1])
+        if r[0] not in obs_errors:
+            obs_errors[r[0]] = []
 
     total = len(futures)
 
@@ -241,7 +392,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         for future in tqdm(as_completed_callable(futures), total=total,
                                desc="multilayer_preprocess_tod", file=f,
                                miniters=max(1, total // 100)):
-            obs_id, group, job = futures_dict[future]
+            obs_id, group = futures_dict[future]
             out_meta = (obs_id, group)
             try:
                 out_dict_init, out_dict_proc, errors = future.result()
@@ -266,31 +417,42 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
                                   configs_proc, logger, overwrite)
 
+            # update jobdb
             if jobdb_path is not None:
-                with jdb.locked(job) as j:
-                    j.mark_visited()
-                    if errors[0] is not None:
-                        j.jstate = "failed"
-                        j.tags["error"] = errors[0]
-                    else:
-                        j.jstate = "done"
+                tags = {}
+                tags["obs:obs_id"] = obs_id
+                for gb, g in zip(group_by, group):
+                    tags['dets:' + gb] = g
+                jobs = jdb.get_jobs(jstate=JState.open, tags=tags)
 
-    n_obs_fail = 0
-    n_groups_fail = 0
-    for obs_id, out_meta in obs_errors.items():
-        if all(entry['error'] is not None for entry in out_meta):
-            n_obs_fail += 1
-            n_groups_fail += len(out_meta)
-        else:
-            for entry in out_meta:
-                if entry['error'] is not None:
-                    n_groups_fail += 1
+                for job in jobs:
+                    # init layer state will be JState.done if already run
+                    if job.jstate == JState.open:
+                        with jdb.locked(job) as j:
+                            j.mark_visited()
+                            if errors[0] is not None:
+                                j.jstate = JState.failed
+                                for _t in j._tags:
+                                    if _t.key == "error":
+                                        _t.value = errors[0]
+                            else:
+                                j.jstate = JState.done
+    if raise_error:
+        n_obs_fail = 0
+        n_groups_fail = 0
+        for obs_id, out_meta in obs_errors.items():
+            if all(entry['error'] is not None for entry in out_meta):
+                n_obs_fail += 1
+                n_groups_fail += len(out_meta)
+            else:
+                for entry in out_meta:
+                    if entry['error'] is not None:
+                        n_groups_fail += 1
 
-    if raise_error and (n_groups_fail > 0):
-        raise RuntimeError(f"multilayer_preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
-                           f"failed obsids and {n_groups_fail}/{len(run_list)} failed groups")
-    else:
-        logger.info("multilayer_preprocess_tod is done")
+        if n_groups_fail > 0:
+            raise RuntimeError(f"preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
+                               f"failed obsids and {n_groups_fail}/{len(run_list)} failed groups")
+    logger.info("multilayer_preprocess_tod is done")
 
 
 def get_parser(parser=None):
@@ -350,6 +512,12 @@ def get_parser(parser=None):
         default=4
     )
     parser.add_argument(
+        '--run-from-jobdb',
+        help="If True, use open jobs in jobdb as the run_list.",
+        type=bool,
+        default=False, action='store_true',
+    )
+    parser.add_argument(
         '--raise-error',
         help="Raise an error upon completion if any obsids or groups fail.",
         type=bool,
@@ -369,8 +537,9 @@ def main(configs_init: str,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
-         nproc: Optional[int] = 4,
-         raise_error: Optional[bool] = False):
+         nproc: int = 4,
+         run_from_jobdb: bool = False,
+         raise_error: bool = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -388,6 +557,7 @@ def main(configs_init: str,
               planet_obs=planet_obs,
               verbosity=verbosity,
               nproc=nproc,
+              run_from_jobdb=run_from_jobdb,
               raise_error=raise_error)
 
 

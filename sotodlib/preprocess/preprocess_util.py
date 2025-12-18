@@ -10,6 +10,7 @@ import traceback
 import inspect
 from pathlib import Path
 import re
+from tqdm import tqdm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
@@ -49,7 +50,7 @@ class PreprocessErrors:
         return errmsg, tb
 
 
-def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
+def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                                     overwrite=False, logger=None):
     """Given a preprocess_tod or multilayer_preprocess_tod run list, checks
     whether that entry exists in the preprocess jobdb. If it failed or is done
@@ -64,6 +65,8 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
         The preprocessing jobdb class.
     jclass : str
         The job name.
+    db : ManifestDb or None
+        Preprocessing database.
     run_list : list
         List of (obs_id, group) tuples.
     group_by : list
@@ -78,49 +81,59 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, run_list, group_by,
     -------
     run_list : list
         Run list with the subset of skipped entries removed.
-    jobs : Job
-        List of jobs for each entry in the filtered run list.
     """
     if logger is None:
         logger = init_logger("preprocess")
 
     run_list_skipped = []
-    jobs = []
 
     failed = 0
     done = 0
 
-    for r in run_list:
+    existing_jobs = jdb.get_jobs(jclass)
+    tags_to_job = {
+        frozenset({k: v for k, v in j.tags.items() if k != 'error'}.items()): j
+        for j in existing_jobs
+    }
+
+    new_jobs = []
+    for r in tqdm(run_list, total=len(run_list),
+                 desc="filtering by jobdb"):
         tags = {}
-        tags["obs:obs_id"] = r[0]['obs_id']
+        tags["obs:obs_id"] = r[0]
         for gb, g in zip(group_by, r[1]):
             tags['dets:' + gb] = g
 
-        job = jdb.get_jobs(jclass, tags=tags)
-
-        if len(job) > 0:
-            with jdb.locked(job[0]) as j:
-                if j.jstate == JState.open:
-                    jobs.append(job[0])
-                elif j.jstate in [JState.done, JState.failed]:
+        job = tags_to_job.get(frozenset(tags.items()), None)
+        if not job:
+            tags["error"] = None
+            new_jobs.append(jdb.create_job(jclass, tags=tags, commit=False))
+        elif job.jstate in [JState.done, JState.failed]:
+            found = True
+            if job.jstate == JState.done and db is not None:
+                x = db.inspect({'obs:obs_id': r[0]})
+                found = any(
+                    [a[f'dets:{gb}'] for gb in group_by] == r[1]
+                    for a in x
+                )
+            if overwrite or not found:
+                with jdb.locked(job) as j:
                     if overwrite == True:
                         j.jstate = "open"
                         j.tags["error"] = None
-                        jobs.append(job[0])
-                    else:
-                        if j.jstate == JState.done:
-                            done += 1
-                        elif j.jstate == JState.failed:
-                            failed += 1
-                        run_list_skipped.append(r)
-        else:
-            tags["error"] = None
-            jobs.append(jdb.create_job(jclass, tags=tags))
+            else:
+                if job.jstate == JState.done:
+                    done += 1
+                elif job.jstate == JState.failed:
+                    failed += 1
+                run_list_skipped.append(r)
+
+    jdb.commit_jobs(new_jobs)
 
     logger.info(f"skipping {done} done jobs and {failed} failed jobs from jobdb")
     run_list = [r for r in run_list if r not in run_list_skipped]
 
-    return run_list, jobs
+    return run_list
 
 
 class ArchivePolicy:
@@ -1071,6 +1084,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     if logger is None:
         logger = init_logger("preprocess")
 
+    group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
+
     # Do a try except around config and meta reading to catch metadata failures
     try:
         if type(configs_init) == str:
@@ -1096,8 +1111,6 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         errmsg, tb = PreprocessErrors.get_errors(e)
         logger.error(f"Get configs/context failed for {obs_id}: {group}\n{errmsg}\n{tb}")
         return None, None, None, (PreprocessErrors.MetaDataError, errmsg, tb)
-
-    group = [list(np.fromiter(dets.values(), dtype='<U32'))][0]
 
     db_init_exist = find_db(obs_id, configs_init, dets, logger=logger)
     if configs_proc is not None:
