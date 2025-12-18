@@ -463,11 +463,14 @@ def _apply_pointing_model(config, aman):
             config["pointing_model"]["function"][1],
         )
     if "az" not in aman.pointing:
-        raise ValueError("Need to have az in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have az in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("az", np.deg2rad(aman.obs_info.az_center)*np.ones(aman.dets.count), [(0, aman.dets)])
     if "el" not in aman.pointing:
-        raise ValueError("Need to have el in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have el in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("el", np.deg2rad(aman.obs_info.el_center)*np.ones(aman.dets.count), [(0, aman.dets)])
     if "roll" not in aman.pointing:
-        raise ValueError("Need to have roll in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have roll in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("roll", np.deg2rad(aman.obs_info.roll_center)*np.ones(aman.dets.count), [(0, aman.dets)])
 
     params = config["pointing_model"].get("params", {})
     if "pointing_model" in aman:
@@ -481,6 +484,7 @@ def _apply_pointing_model(config, aman):
     ancil.wrap("az_enc", np.rad2deg(aman.pointing.az))
     ancil.wrap("el_enc", np.rad2deg(aman.pointing.el))
     ancil.wrap("roll_enc", np.rad2deg(aman.pointing.roll))
+    ancil.wrap("boresight_enc", -1*np.rad2deg(aman.pointing.roll)) # for SATs
     bs = func(aman, params, ancil, False)
     q_fp = quat.rotation_xieta(aman.pointing.xi, aman.pointing.eta)
     have_gamma = False
@@ -499,7 +503,7 @@ def _apply_pointing_model(config, aman):
         ~quat.euler(2, bs.roll)
         * ~quat.rotation_lonlat(-bs.az, bs.el)
         * quat.rotation_lonlat(-1 * aman.pointing.az, aman.pointing.el)
-        * quat.euler(2, aman.pointing.roll)
+        * quat.euler(2, (not config["pointing_model"].get("force_zero_roll", False)) * aman.pointing.roll)
         * q_fp
     )
 
