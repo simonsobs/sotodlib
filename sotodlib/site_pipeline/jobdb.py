@@ -225,7 +225,7 @@ class JobManager:
                    creation_time=None,
                    visit_count=None,
                    visit_time=None,
-                   commit=False):
+                   commit=True):
         """Create a new job in the jobs table.
 
         Return the job.
