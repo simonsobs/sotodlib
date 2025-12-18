@@ -84,7 +84,7 @@ def multilayer_preprocess_tod(obs_id: str,
     return out_dict_init, out_dict_proc, errors
 
 
-def check_init_jobdb(
+def _check_init_jobdb(
     jdb,
     init_db,
     init_jobs_map,
@@ -291,7 +291,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 if 'NC' not in group:
                     failed_job = False
                     if jobdb_path is not None:
-                        failed_job, new_init_job = check_init_jobdb(
+                        failed_job, new_init_job = _check_init_jobdb(
                                                         jdb,
                                                         init_db,
                                                         init_jobs_map,
@@ -340,7 +340,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             for group in groups:
                 failed_job = False
                 if jobdb_path is not None:
-                    failed_job, new_init_job = check_init_jobdb(
+                    failed_job, new_init_job = _check_init_jobdb(
                                                     jdb,
                                                     init_db,
                                                     init_jobs_map,
