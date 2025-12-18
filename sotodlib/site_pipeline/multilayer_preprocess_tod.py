@@ -514,8 +514,8 @@ def get_parser(parser=None):
     parser.add_argument(
         '--run-from-jobdb',
         help="If True, use open jobs in jobdb as the run_list.",
-        type=bool,
-        default=False, action='store_true',
+        default=False,
+        action='store_true',
     )
     parser.add_argument(
         '--raise-error',
