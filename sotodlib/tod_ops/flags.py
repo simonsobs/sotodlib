@@ -16,7 +16,7 @@ from . import filters
 from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                       psat_range=None, rn_range=None, si_nan=False,
+                       psat_range=None, rn_range=None, si_range=None,
                        phase_to_pW=None, merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
@@ -37,8 +37,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         If None, no flags are not applied from P_SAT. 
     rn_range : Tuple
         Tuple (lower_bound, upper_bound) for r_n det selection.
-    si_nan : bool
-        If true, flag dets where s_i is NaN. Default is false.
+    si_range : Tuple
+        Tuple (lower_bound, upper_bound) for s_i det selection.
     phase_to_pW : Tuple
         Tuple (lower_bound, upper_bound) for phase_to_pW det selection.
     merge : bool
@@ -84,8 +84,9 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     if rn_range is not None:
         ranges.append(detcal.r_n >= rn_range[0])
         ranges.append(detcal.r_n <= rn_range[1])
-    if si_nan:
-        ranges.append(np.isnan(detcal.s_i) == False)
+    if si_range is not None:
+        ranges.append(detcal.s_i >= si_range[0])
+        ranges.append(detcal.s_i <= si_range[1])
     if phase_to_pW is not None:
         ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
         ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
@@ -129,6 +130,11 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
             msk_names.extend(['r_n_gt', 'r_n_lt'])
             ranges.append(detcal.r_n >= rn_range[0])
             ranges.append(detcal.r_n <= rn_range[1])
+
+        if si_range is not None:
+            msk_names.extend(['s_i_gt', 's_i_lt'])
+            ranges.append(detcal.s_i >= si_range[0])
+            ranges.append(detcal.s_i <= si_range[1])
             
         if phase_to_pW is not None:
             msk_names.extend(['phase_to_pW_gt', 'phase_to_pW_lt'])
