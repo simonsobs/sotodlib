@@ -50,8 +50,8 @@ class HKManager(MutableMapping):
 
     def __init__(
         self,
-        comm,
-        timestamps,
+        comm=None,
+        timestamps=None,
         site_root=None,
         site_db=None,
         site_fields=None,
@@ -64,8 +64,12 @@ class HKManager(MutableMapping):
         self._internal = dict()
         self._aliases = dict()
         self._stamps = timestamps
-        self._start_time = timestamps[0]
-        self._stop_time = timestamps[-1]
+        if timestamps is not None:
+            self._start_time = timestamps[0]
+            self._stop_time = timestamps[-1]
+        elif site_root is not None or plat_root is not None:
+            msg = "If loading site or platform data, timestamps are required"
+            raise RuntimeError(msg)
         rank = 0
         if comm is not None:
             rank = comm.rank
@@ -195,9 +199,18 @@ class HKManager(MutableMapping):
 
     def __eq__(self, other):
         log = Logger.get()
-        if self._internal != other._internal:
-            log.verbose(f"  data {self._internal} != {other._internal}")
+        if set(self._internal.keys()) != set(other._internal.keys()):
+            log.verbose(f"  keys {self._internal} != {other._internal}")
             return False
+        for k, v in self._internal.items():
+            try:
+                if not np.allclose(v, other._internal[k]):
+                    log.verbose(f"  data array {v} != {other._internal[k]}")
+                    return False
+            except Exception:
+                if self._internal[k] != other._internal[k]:
+                    log.verbose(f"  data value {v} != {other._internal[k]}")
+                    return False
         if self._aliases != other._aliases:
             log.verbose(f"  aliases {self._aliases} != {other._aliases}")
             return False
@@ -223,6 +236,13 @@ class HKManager(MutableMapping):
             if handle is None:
                 raise RuntimeError("HDF5 group is not open on the root process")
         if handle is not None:
+            tdata = handle.create_dataset(
+                "timestamps", self._stamps.shape, dtype=self._stamps.dtype
+            )
+            hslices = [slice(0, x) for x in self._stamps.shape]
+            hslices = tuple(hslices)
+            tdata.write_direct(self._stamps, hslices, hslices)
+            del tdata
             save_meta_object(handle, "data", self._internal)
             save_meta_object(handle, "aliases", self._aliases)
 
@@ -242,11 +262,22 @@ class HKManager(MutableMapping):
             # The rank zero process should always be reading
             if handle is None:
                 raise RuntimeError("HDF5 group is not open on the root process")
+        stamps = None
+        data = None
+        aliases = None
         if handle is not None:
+            tdata = handle["timestamps"]
+            stamps = np.copy(tdata[:])
             data = load_meta_object(handle["data"])
             aliases = load_meta_object(handle["aliases"])
+            del tdata
         if gcomm is not None:
+            stamps = gcomm.bcast(stamps, root=0)
             data = gcomm.bcast(data, root=0)
             aliases = gcomm.bcast(aliases, root=0)
+
+        self._stamps = stamps
+        self._start_time = stamps[0]
+        self._stop_time = stamps[-1]
         self._internal = data
         self._aliases = aliases
