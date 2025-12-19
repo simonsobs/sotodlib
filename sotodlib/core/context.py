@@ -174,6 +174,7 @@ class Context(odict):
                 no_signal=None,
                 no_headers=None,
                 special_channels=None,
+                reindex_dets=None,
                 loader_type=None,
     ):
         """Load TOD and supporting metadata for some observation.
@@ -217,6 +218,15 @@ class Context(odict):
             information that tags along with the signal.
           special_channels (bool): If True, load "special" readout
             channels that are normally skipped (e.g. fixed tones).
+          reindex_dets (bool) If True, reindexes the axismanager
+            "dets" axis to include any special dets that may have
+            been loaded. All special det signals, bands, channels, 
+            and readout_ids will be inserted along the dets axis
+            and respective data arrays. Does not destroy special 
+            dets axes like the "tdets" axis. WARNING: ~Doubles
+            run time and instantaenous memory usage as the signal
+            dataset has to effectively be copied! Memory returned
+            after reindexing is complete.
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
@@ -335,7 +345,7 @@ class Context(odict):
         # We will merge the dets and tdets axes
         # And merge the tdets signal into the dets signal, band, and channels.
         # nans will be inserted into every other dataset assigned to the dets axis.
-        if special_channels is not None and special_channels:
+        if special_channels and reindex_dets:
             # Grab all band and channel info for dets + tdets
             det_bands = aman.det_info.smurf.band
             det_channels = aman.det_info.smurf.channel
@@ -357,7 +367,7 @@ class Context(odict):
                 det_indexes[i] = w[0]
 
             # Grab the tdet idxs from the tdet band + channels
-            tdet_indexes = np.zeros(len(band_ch)) * np.nan
+            tdet_indexes = np.full(np.nan, len(band_ch))
             for i, (b, c) in enumerate(band_ch):
                 w = np.where((tdet_bands == b) & (tdet_channels == c))[0]
                 if len(w) == 0:
@@ -409,8 +419,6 @@ class Context(odict):
             # Add in tdet ids to all amans.
             add_tdet_ids(aman, tdet_indexes, aman.tdets.vals)
 
-            aman.move('tones', new_name=None)  # Destroy the tones data
-            del aman._axes['tdets']  # Destroy the tdets axis
             # obs_aman tdet info is merged!
 
         return aman

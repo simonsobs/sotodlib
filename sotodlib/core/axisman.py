@@ -832,6 +832,10 @@ class AxisManager:
             For example:
                 data = [1,3,5], indexes = [0, -1, 2, 1]
                 would result in new_data = [1, nan, 5, 3]
+            
+            in_place (bool): If in_place == True, the intersection is
+            applied to self.  Otherwise, a new object is returned,
+            with data copied out.
         """
         # Check if axis even exists first
         if axis not in self._axes.keys():
