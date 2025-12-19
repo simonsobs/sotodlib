@@ -284,8 +284,10 @@ def load_obs_boresight_per_detector(config, filelist, obs_ind):
 
 def _init_fit_params(config, epochs):
     pm_version = config.get("pm_version")
-    init_params = config.get("initial_params", pm.param_defaults[pm_version])
+    initial_params = config.get("initial_params", {})
     fixed_params = config.get("fixed_params",[])
+    init_params = pm.param_defaults[pm_version]
+    init_params.update(initial_params)
 
     # Add independant params
     orig_pars = np.array(list(init_params.keys()))
@@ -293,7 +295,7 @@ def _init_fit_params(config, epochs):
     for epoch in epochs: 
         indep_list = epoch["indep_list"]
         if np.sum(np.isin(indep_list, par_list)) != len(indep_list):
-            raise ValueError(f"Invalid independant parameters in time range starting with {t0}")
+            raise ValueError(f"Invalid independant parameters in epoch {epoch['name']}")
         indep_list = [f"{n}_{epoch['name']}" for n in indep_list]
         par_list = np.hstack((par_list, indep_list))
         for ipar, par in zip(indep_list, epoch["indep_list"]):
@@ -573,6 +575,7 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
             obs_cr.append(np.nanmedian(full_aman.ancil.corotator_enc[inds]))
             ufm_cr = []
             for ufm in ufm_list:
+                ufm_inds = np.where(full_aman.det_ufm[inds] == ufm)[0]    
                 ufm_cr.append(np.nanmedian(full_aman.ancil.corotator_enc[inds][ufm_inds]))
             all_ufm_cr.append(ufm_cr)
         per_obs_stats.wrap("cr", np.array(obs_cr))
@@ -596,7 +599,8 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
         
     #Calculate RMSs
     per_obs_stats.wrap("rms",
-                       np.sqrt(np.nanmean(per_obs_stats["dxi"]**2 +                                                 per_obs_stats["deta"]**2))
+                       np.sqrt(np.nanmean(per_obs_stats["dxi"]**2 +                                                 
+                                          per_obs_stats["deta"]**2))
                       )
     per_ufm_stats.wrap("rms",
                        np.sqrt(np.nanmean(per_ufm_stats["dxi"]**2 + 
@@ -980,8 +984,8 @@ def main(config_path: str):
                                                         use_inds=good_fit_inds)
                 
                 logger.info("RMS on initial fit without outliers: %f arcmin", masked_rms)
-                epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
                 epoch["solver_aman"].weights[bad_fit_inds] = 0.0
+            epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
 
         model_solved_params = minimize(
             objective_model_func_lmfit_joint,
