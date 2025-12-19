@@ -347,11 +347,11 @@ class Context(odict):
         # nans will be inserted into every other dataset assigned to the dets axis.
         if special_channels and reindex_dets:
             # Check for special channels (tones).
-            if 'tones' not in aman.keys():
-                logger.error('"tones" not found in aman, no special channels to reindex!')
+            if 'tones' not in aman:
+                logger.info('"tones" not found in aman, no special channels to reindex!')
 
             # Check there is det_info to reindex.
-            elif 'det_info' not in aman.keys():
+            elif 'det_info' not in aman:
                 logger.error('"det_info" not found in aman, no dets to reindex!')
 
             # Both tones and det_info exist.
