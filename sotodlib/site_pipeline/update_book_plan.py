@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy import not_
 
 from sotodlib.site_pipeline.monitor import Monitor
-from sotodlib.site_pipeline.util import init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 
 from sotodlib.io.imprinter import (
     Imprinter,

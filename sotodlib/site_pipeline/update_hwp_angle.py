@@ -13,8 +13,8 @@ import yaml
 import datetime as dt
 from sotodlib.hwp.g3thwp import G3tHWP
 
-from sotodlib.site_pipeline import util
-logger = util.init_logger(__name__, 'update-hwp-angle: ')
+from sotodlib.site_pipeline.utils.logging import init_logger
+logger = init_logger(__name__, 'update-hwp-angle: ')
 
 
 def get_parser():

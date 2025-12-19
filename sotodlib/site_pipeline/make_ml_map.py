@@ -327,5 +327,5 @@ def main(**args):
         eval_prev     = mapmaker.evaluator(step.x_zip)
 
 if __name__ == '__main__':
-    from sotodlib.site_pipeline import util
-    util.main_launcher(main, get_parser)
+    from sotodlib.site_pipeline.utils.pipeline import main_launcher
+    main_launcher(main, get_parser)
