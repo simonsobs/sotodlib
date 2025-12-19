@@ -56,7 +56,7 @@ class ToastContextTest(TestCase):
         """Add fake housekeeping data"""
         for ob in data.obs:
             timestamps = ob.shared[defaults.times].data
-            slow_times = timestamps[::10]
+            slow_times = timestamps[::12]
             ivals = np.random.randint(-100, high=100, size=len(slow_times), dtype=np.int32)
             fvals = np.random.random(size=len(slow_times))
             ob.hk = sotodlib.toast.hkmanager.HKManager(
@@ -75,7 +75,7 @@ class ToastContextTest(TestCase):
             telescope_name="SAT1",
             wafer_slot=None,
             bands="SAT_f090",
-            sample_rate=10.0 * u.Hz,
+            sample_rate=40.0 * u.Hz,
             thin_fp=16,
             cal_schedule=False,
         )
@@ -85,6 +85,30 @@ class ToastContextTest(TestCase):
         for ob in data.obs:
             orig[ob.name] = copy.deepcopy(ob.hk)
 
+        toast.ops.DefaultNoiseModel().apply(data)
+
+        toast.ops.SimNoise().apply(data)
+
+        detpointing_azel = toast.ops.PointingDetectorSimple(
+            boresight=defaults.boresight_radec,
+            quats="quats_azel",
+        )
+
+        demod_weights_in = toast.ops.StokesWeights(
+            weights="demod_weights_in",
+            mode="IQU",
+            hwp_angle=defaults.hwp_angle,
+            detector_pointing=detpointing_azel,
+        )
+
+        demod = toast.ops.Demodulate(
+            stokes_weights=demod_weights_in,
+            nskip=10,
+            purge=False,
+            mode="IQU",
+        )
+        demod_data = demod.apply(data)
+
         vol_path = os.path.join(self.outdir, "test_hk")
         toast.ops.SaveHDF5(
             volume=vol_path,
@@ -92,18 +116,19 @@ class ToastContextTest(TestCase):
                 (defaults.det_data, {"quanta": 1.0e-10}),
                 (defaults.det_flags, {"level": 6}),
             ]
-        ).apply(data)
+        ).apply(demod_data)
 
         new_data = toast.Data(comm=data.comm)
         toast.ops.LoadHDF5(volume=vol_path).apply(new_data)
 
-        for old_ob, new_ob in zip(data.obs, new_data.obs):
+        for old_ob, new_ob in zip(demod_data.obs, new_data.obs):
             if old_ob != new_ob:
                 print(f"OLD: {old_ob} not equal to")
                 print(f"NEW: {new_ob}", flush=True)
                 #self.assertTrue(False)
 
         close_data_and_comm(new_data)
+        close_data_and_comm(demod_data)
         close_data_and_comm(data)
 
 
