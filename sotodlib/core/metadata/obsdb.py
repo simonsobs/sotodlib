@@ -289,8 +289,8 @@ class ObsDb(object):
                 placeholders = ', '.join(['?'] * (len(obs_key) + 1))
                 c.execute(f'INSERT OR REPLACE INTO tags ({columns}) VALUES ({placeholders})',
                             tuple(obs_key.values()) + (t,))
-            if commit:
-                self.conn.commit()
+        if commit:
+            self.conn.commit()
         return self
 
     def copy(self, map_file=None, overwrite=False):

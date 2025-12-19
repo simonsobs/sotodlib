@@ -305,7 +305,7 @@ class MLMapmaker(Operator):
     @traitlets.validate("nmat_type")
     def _check_nmat_type(self, proposal):
         check = proposal["value"]
-        allowed = ["NmatUncorr", "NmatDetvecs", "NmatWhite", "NmatUnit", "Nmat"]
+        allowed = ["NmatUncorr", "NmatDetvecs", "NmatDetvecsDCT", "NmatWhite", "NmatUnit", "Nmat"]
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)
@@ -489,6 +489,21 @@ class MLMapmaker(Operator):
         return axobs
 
     @function_timer
+    def _add_obs(self, mapmaker, name, axobs, nmat, signal_estimate):
+        """ Add data to the mapmaker
+
+        Singled out for more granular timing
+        """
+        mapmaker.add_obs(
+            name,
+            axobs,
+            deslope=self.deslope,
+            noise_model=nmat,
+            signal_estimate=signal_estimate,
+        )
+        return
+
+    @function_timer
     def _init_mapmaker(
             self, mapmaker, signal_map, mapmaker_prev, eval_prev, comm, gcomm, prefix,
     ):
@@ -669,7 +684,7 @@ class MLMapmaker(Operator):
                 )
 
         # nmat_type is guaranteed to be a valid Nmat class
-        if self.nmat_type == 'NmatDetvecs':
+        if self.nmat_type in ['NmatDetvecs', 'NmatDetvecsDCT']:
             noise_model = getattr(mm, self.nmat_type)(downweight=self.downweight)
         else:
             noise_model = getattr(mm, self.nmat_type)()
@@ -749,13 +764,8 @@ class MLMapmaker(Operator):
                 else:
                     signal_estimate = None
 
-                mapmaker.add_obs(
-                    ob.name,
-                    axobs,
-                    deslope=self.deslope,
-                    noise_model=nmat,
-                    signal_estimate=signal_estimate,
-                )
+                self._add_obs(mapmaker, ob.name, axobs, nmat, signal_estimate)
+
                 del axobs
                 del signal_estimate
 
