@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import copy
 from collections.abc import MutableMapping
 
 import numpy as np
@@ -281,3 +282,36 @@ class HKManager(MutableMapping):
         self._stop_time = stamps[-1]
         self._internal = data
         self._aliases = aliases
+
+    def duplicate(self):
+        """Create a copy of the HKManager"""
+        new_hk = HKManager()
+        new_hk._stamps = np.copy(self._stamps)
+        new_hk._start_time = new_hk._stamps[0]
+        new_hk._stop_time = new_hk._stamps[-1]
+        new_hk._internal = copy.deepcopy(self._internal)
+        new_hk._aliases = copy.deepcopy(self._aliases)
+        return new_hk
+
+    def downsample(self, demod_times):
+        """Downsample the HKManager
+
+        The demodulation operator with downsample any observation
+        attributes with a `downsample()` method.  For this class
+        that operation is trivial, since it just involves replacing
+        the timestamps.
+
+        Args:
+            demod_times (array):  The new downsampled timestamps.
+
+        Returns:
+            (HKManager):  The downsampled HKManager.
+
+        """
+        new_hk = HKManager()
+        new_hk._stamps = demod_times
+        new_hk._start_time = new_hk._stamps[0]
+        new_hk._stop_time = new_hk._stamps[-1]
+        new_hk._internal = copy.deepcopy(self._internal)
+        new_hk._aliases = copy.deepcopy(self._aliases)
+        return new_hk
