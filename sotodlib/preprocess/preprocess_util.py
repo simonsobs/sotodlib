@@ -51,21 +51,27 @@ class PreprocessErrors:
 
 
 def _get_aman_encodings(encodings, field):
-    """Encodings for flacarray compression"""
+    """Encodings for flacarray compression."""
     if (
         isinstance(field, np.ndarray)
         and np.issubdtype(field.dtype, np.number)
         and not np.isnan(field).any()
-       ):
+    ):
         encodings["type"] = "flacarray"
+
         if np.issubdtype(field.dtype, np.floating):
+            if field.dtype == np.float32:
+                quanta = 1e-7
+            else:
+                quanta = 1e-10
+
             encodings["args"] = {
                 "level": 5,
-                "quanta": 1e-8,
+                "quanta": quanta,
             }
         return
 
-    if isinstance(field, core.AxisManager):
+    elif isinstance(field, core.AxisManager):
         for name in field._assignments:
             subfield = field[name]
             encodings[name] = {}
@@ -1106,7 +1112,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
 
-    if compress:
+    if compress == True:
         compress = "gzip"
     else:
         compress = None
