@@ -50,6 +50,28 @@ class PreprocessErrors:
         return errmsg, tb
 
 
+def _get_aman_encodings(encodings, field):
+    """Encodings for flacarray compression"""
+    if (
+        isinstance(field, np.ndarray)
+        and np.issubdtype(field.dtype, np.number)
+        and not np.isnan(field).any()
+       ):
+        encodings["type"] = "flacarray"
+        if np.issubdtype(field.dtype, np.floating):
+            encodings["args"] = {
+                "level": 5,
+                "quanta": 1e-8,
+            }
+        return
+
+    if isinstance(field, core.AxisManager):
+        for name in field._assignments:
+            subfield = field[name]
+            encodings[name] = {}
+            _get_aman_encodings(encodings[name], subfield)
+
+
 def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                                     overwrite=False, logger=None):
     """Given a preprocess_tod or multilayer_preprocess_tod run list, checks
@@ -1013,7 +1035,8 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          logger=None, overwrite=False, save_archive=False,
-                         save_proc_aman=True, ignore_cfg_check=False):
+                         save_proc_aman=True, compress=False,
+                         ignore_cfg_check=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -1055,6 +1078,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     save_proc_aman : bool
         Whether or not to save the preprocessing axis manager.  Required if saving into
         a preprocessing archive.
+    compress : bool
+        Whether or not to compress the preprocessing data.  Uses flacarray compression.
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as the config
         used to create the existing init db when running ``multilayer_load_and_preprocess``.
@@ -1080,6 +1105,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     """
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
+
+    if compress:
+        compress = "gzip"
+    else:
+        compress = None
 
     if logger is None:
         logger = init_logger("preprocess")
@@ -1186,8 +1216,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         if save_proc_aman:
             logger.info(f"Saving preprocessing axis manager to "
                         f"{out_dict_init['temp_file']}:{out_dict_init['db_data']['dataset']}")
-            proc_aman.save(out_dict_init['temp_file'], out_dict_init['db_data']['dataset'],
-                           overwrite)
+            encodings = {}
+            if compress is not None:
+                _get_aman_encodings(encodings, proc_aman)
+            proc_aman.save(out_dict_init['temp_file'],
+                           out_dict_init['db_data']['dataset'],
+                           compression=compress,
+                           encodings=encodings,
+                           overwrite=overwrite)
             if save_archive:
                 logger.info(f"Adding result to init db for {obs_id}: {group}")
                 cleanup_mandb(out_dict_init, (obs_id, group), (None, None, None),
@@ -1249,8 +1285,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         if save_proc_aman:
             logger.info(f"Saving proc axis manager to "
                         f"{out_dict_proc['temp_file']}:{out_dict_proc['db_data']['dataset']}")
-            proc_aman.save(out_dict_proc['temp_file'], out_dict_proc['db_data']['dataset'],
-                           overwrite)
+            encodings = {}
+            if compress is not None:
+                _get_aman_encodings(encodings, proc_aman)
+            proc_aman.save(out_dict_proc['temp_file'],
+                           out_dict_proc['db_data']['dataset'],
+                           compression=compress,
+                           encodings=encodings,
+                           overwrite=overwrite)
             if save_archive:
                 logger.info(f"Adding result to proc db for {obs_id}: {group}")
                 cleanup_mandb(out_dict_proc, (obs_id, group), (None, None, None),

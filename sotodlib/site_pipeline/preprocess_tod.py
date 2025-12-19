@@ -91,6 +91,7 @@ def preprocess_tod(configs: Union[str, dict],
                    obs_id: str,
                    group: dict,
                    verbosity: int = 0,
+                   compress: bool = False,
                    overwrite: bool = False,
                   ):
     """Meant to be run as part of a batched script, this function calls the
@@ -107,10 +108,12 @@ def preprocess_tod(configs: Union[str, dict],
         The group to be run.  For example, this might be ['ws0', 'f090']
         if ``group_by`` (specified by the subobs->use key in the preprocess
         config) is ['wafer_slot', 'wafer.bandpass'].
-    overwrite : bool
-        If True, overwrite contents of temporary h5 files.
     verbosity : str
         Log level. 0 = error, 1 = warn, 2 = info, 3 = debug.
+    compress : bool
+        Whether or not to compress the preprocessing h5 files.
+    overwrite : bool
+        If True, overwrite contents of temporary h5 files.
 
     Returns
     -------
@@ -135,6 +138,7 @@ def preprocess_tod(configs: Union[str, dict],
         logger=logger,
         overwrite=overwrite,
         save_archive=False,
+        compress=compress,
     )
 
     return out_dict, errors
@@ -153,6 +157,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: int = 4,
+          compress: bool = False,
           run_from_jobdb: bool = False,
           raise_error: bool = False):
 
@@ -286,6 +291,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 configs=configs,
                 group=r[1],
                 verbosity=verbosity,
+                compress=compress,
                 overwrite=overwrite,
             )
         )
@@ -409,6 +415,12 @@ def get_parser(parser=None):
         default=4
     )
     parser.add_argument(
+        '--compress',
+        help="Compress preprocessing database.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
         '--run-from-jobdb',
         help="If True, use open jobs in jobdb as the run_list.",
         default=False,
@@ -434,6 +446,7 @@ def main(configs: str,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: int = 4,
+         compress: bool = False,
          run_from_jobdb: bool = False,
          raise_error: bool = False):
 
@@ -452,6 +465,7 @@ def main(configs: str,
               planet_obs=planet_obs,
               verbosity=verbosity,
               nproc=nproc,
+              compress=compress,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error)
 

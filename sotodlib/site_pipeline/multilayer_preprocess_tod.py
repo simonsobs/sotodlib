@@ -29,6 +29,7 @@ def multilayer_preprocess_tod(obs_id: str,
                               configs_proc: Union[str, dict],
                               group: list,
                               verbosity: int = 0,
+                              compress: bool = False,
                               overwrite: bool = False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
@@ -46,10 +47,12 @@ def multilayer_preprocess_tod(obs_id: str,
         The group to be run.  For example, this might be ['ws0', 'f090']
         if ``group_by`` (specified by the subobs->use key in the preprocess
         config) is ['wafer_slot', 'wafer.bandpass'].
-    overwrite : bool
-         If True, overwrite contents of temporary h5 files.
     verbosity : str
         The log level to use.  0 = error, 1 = warn, 2 = info, 3 = debug.
+    compress : bool
+        Whether or not to compress the preprocessing h5 files.
+    overwrite : bool
+         If True, overwrite contents of temporary h5 files.
 
     Returns
     -------
@@ -78,7 +81,8 @@ def multilayer_preprocess_tod(obs_id: str,
         configs_proc=configs_proc,
         logger=logger,
         overwrite=overwrite,
-        save_archive=False
+        save_archive=False,
+        compress=compress,
     )
 
     return out_dict_init, out_dict_proc, errors
@@ -181,6 +185,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: int = 4,
+          compress: bool = False,
           run_from_jobdb: bool = False,
           raise_error: bool = False):
 
@@ -378,7 +383,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 configs_proc=configs_proc,
                 group=r[1],
                 verbosity=verbosity,
-                overwrite=overwrite
+                compress=compress,
+                overwrite=overwrite,
             )
         )
 
@@ -512,6 +518,12 @@ def get_parser(parser=None):
         default=4
     )
     parser.add_argument(
+        '--compress',
+        help="Compress preprocessing database.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
         '--run-from-jobdb',
         help="If True, use open jobs in jobdb as the run_list.",
         default=False,
@@ -537,6 +549,7 @@ def main(configs_init: str,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
+         compress: bool = False,
          nproc: int = 4,
          run_from_jobdb: bool = False,
          raise_error: bool = False):
@@ -557,6 +570,7 @@ def main(configs_init: str,
               planet_obs=planet_obs,
               verbosity=verbosity,
               nproc=nproc,
+              compress=compress,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error)
 
