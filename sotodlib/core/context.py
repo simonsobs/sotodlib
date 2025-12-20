@@ -368,7 +368,7 @@ class Context(odict):
                 band_ch = np.array(sorted(normal_band_ch + special_band_ch))
     
                 # Grab the det idxs from the det band + channels
-                det_indexes = np.zeros(len(band_ch)) * np.nan
+                det_indexes = np.full(len(band_ch), np.nan)
                 for i, (b, c) in enumerate(band_ch):
                     w = np.where((det_bands == b) & (det_channels == c))[0]
                     if len(w) == 0:
@@ -377,7 +377,7 @@ class Context(odict):
                     det_indexes[i] = w[0]
     
                 # Grab the tdet idxs from the tdet band + channels
-                tdet_indexes = np.full(np.nan, len(band_ch))
+                tdet_indexes = np.full(len(band_ch), np.nan)
                 for i, (b, c) in enumerate(band_ch):
                     w = np.where((tdet_bands == b) & (tdet_channels == c))[0]
                     if len(w) == 0:
