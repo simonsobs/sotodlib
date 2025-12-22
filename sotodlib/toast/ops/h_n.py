@@ -71,7 +71,7 @@ class Hn(Operator):
 
     noise_model = Unicode(
         "noise_model",
-        allow_None=True,
+        allow_none=True,
         help="Observation key containing the noise model",
     )
 

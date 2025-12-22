@@ -202,7 +202,7 @@ class MLMapmaker(Operator):
         help="Set verbosity in MLMapmaker.  If None, use toast loglevel",
     )
 
-    weather = Unicode("vacuum", help="Weather to assume when making maps")
+    weather = Unicode("toco", help="Weather to assume when making maps")
     site    = Unicode("so",     help="Site to use when making maps")
 
     maxiter = List(
