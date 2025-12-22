@@ -518,33 +518,11 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
         ctx: Context object
         obs_id: observation id of bias steps
     """
-    am = ctx.get_obs(obs_id)
+    am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
     am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
             [(0, 'samps')])
     if np.all(am.hwp_angle == 0):
         return
-
-    # check consistency of (band, channel) between bsa and L3 book
-    # add (band, channel) if missing
-    if len(bsa.bands) != len(am.det_info.smurf.band):
-        logger.warn('Number of channels are inconsistent between BiasStepAnalysis object '
-                    f'and L3 oper book {obs_id}')
-        band_ch = [(b, c) for b, c in zip(am.det_info.smurf.band, am.det_info.smurf.channel)]
-        index = [np.where((bsa.channels == c) & (bsa.bands == b))[0]
-                 for b, c in zip(bsa.bands, bsa.channels) if (b, c) in band_ch]
-
-        dets = np.array([str(i) for i in range(len(bsa.bands))], dtype=am.dets.vals.dtype)
-        signal = np.zeros((len(bsa.bands), am.samps.count), dtype=am.signal.dtype)
-        for i, s in zip(index, am.signal):
-            signal[i] = s
-
-        ldets = core.LabelAxis('dets', vals=dets)
-        aman = core.AxisManager(ldets, am.samps, am.bias_lines)
-        aman.wrap('signal', signal, axis_map=[(0, 'dets'), (1, 'samps')])
-        aman.wrap('biases', am.biases, axis_map=[(0, 'bias_lines'), (1, 'samps')])
-        aman.wrap('timestamps', am.timestamps, axis_map=[(0, 'samps')])
-        aman.wrap('hwp_angle', am.hwp_angle, axis_map=[(0, 'samps')])
-        am = aman
 
     bsa.am = am
     zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
