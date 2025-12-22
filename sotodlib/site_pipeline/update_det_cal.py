@@ -24,7 +24,7 @@ from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
@@ -43,9 +43,11 @@ BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
             'uhf': {'lb': 'f220', 'hb': 'f280'},
             'lf': {'lb': 'f030', 'hb': 'f040'}}
 
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
-    sp_util.init_logger("det_cal")
+    sp_init_logger("det_cal")
 
 
 def get_data_root(ctx: core.Context, obs_id:str) -> str:
@@ -1017,4 +1019,4 @@ def main(config_file: str):
         _main(cfg, executor, as_completed_callable)
 
 if __name__ == "__main__":
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

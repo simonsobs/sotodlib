@@ -546,7 +546,7 @@ class HWPSolMeanRate(HWPSolQA):
     def _gen_value(self, meta):
         good_samp = ~meta.hwp_solution[f"filled_flag_{self._encoder}"]
         nsamp = good_samp.sum()
-        rate = np.nan if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
+        rate = 0.0 if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
         return rate
 
 

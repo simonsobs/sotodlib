@@ -15,6 +15,7 @@ import flacarray
 
 from .axisman import *
 from .flagman import FlagManager
+from .util import H5ContextManager
 
 # Backwards compatibility for before skip_shape_check was added
 _rm_fast_kwargs = {}
@@ -223,7 +224,7 @@ def _save_axisman(axisman, dest, group=None, overwrite=False, compression=None,
     # Resolve the destination group.
     file_to_close = None
     if isinstance(dest, str):
-        file_to_close = h5py.File(dest, 'a')
+        file_to_close = H5ContextManager(dest, mode='a').open()
         dest = file_to_close['/']
     assert isinstance(dest, h5py.Group)  # filename or Group expected
     if group is not None:
