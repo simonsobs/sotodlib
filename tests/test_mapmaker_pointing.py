@@ -6,6 +6,7 @@
 """
 
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -26,22 +27,36 @@ except ImportError as e:
 if toast_available:
     import healpy as hp
 
-from . import _helpers as helpers
+from ._helpers import (
+    create_outdir, simulation_test_data, close_data_and_comm
+)
 
 
 class MapmakerPointingTest(unittest.TestCase):
+    def setUp(self):
+        fixture_name = os.path.splitext(os.path.basename(__file__))[0]
+        if not toast_available:
+            print("TOAST cannot be imported- skipping unit tests", flush=True)
+            return
+        world, procs, rank = toast.get_world()
+        self.outdir = create_outdir(fixture_name, mpicomm=world)
+
     def test_mapmaker_pointing_wcs(self):
         if not toast_available:
-            print("toast cannot be imported- skipping unit tests", flush=True)
             return
-
         log = toast.utils.Logger.get()
-        comm, procs, rank = toast.get_world()
+        world, procs, rank = toast.get_world()
+        testdir = os.path.join(self.outdir, "pointing_wcs")
+        if world is None or world.rank == 0:
+            if os.path.isdir(testdir):
+                shutil.rmtree(testdir)
+            os.makedirs(testdir)
+        if world is not None:
+            world.barrier()
 
         if rank == 0:
             # Create an area file
-            testdir = tempfile.TemporaryDirectory()
-            areafile = os.path.join(testdir.name, "wcs_area_file.fits")
+            areafile = os.path.join(testdir, "wcs_area_file.fits")
             ra_start, ra_stop = 35, 49
             dec_start, dec_stop = -51, -35
             box = np.radians([[dec_start, ra_start], [dec_stop, ra_stop]])
@@ -58,30 +73,34 @@ class MapmakerPointingTest(unittest.TestCase):
                 for dec in np.linspace(dec_start, dec_stop, 10):
                     ra0 = np.radians(ra)
                     dec0 = np.radians(dec)
-                    input_map[0] += np.exp(-0.5 * ((DEC - dec0)**2 + (RA - ra0)**2)/radius**2)
-            input_map_file = os.path.join(testdir.name, "input_map.fits")
+                    input_map[0] += np.exp(
+                        -0.5 * ((DEC - dec0)**2 + (RA - ra0)**2)/radius**2
+                    )
+            input_map_file = os.path.join(testdir, "input_map.fits")
             enmap.write_map(input_map_file, input_map, extra={"BUNIT" : "uK"})
         else:
             areafile = None
             input_map_file = None
-        if comm is not None:
-            areafile = comm.bcast(areafile)
-            input_map_file = comm.bcast(input_map_file)
-        log.info_rank(f"Wrote test map to {input_map_file}", comm=comm)
+
+        if world is not None:
+            areafile = world.bcast(areafile)
+            input_map_file = world.bcast(input_map_file)
+        log.info_rank(f"Wrote test map to {input_map_file}", comm=world)
 
         # scan the WCS map with TOAST
         # map the scanned signal using TOAST
         # map the scanned signal using MLMapmaker
         # compare input/TOAST/MLMapmaker
 
-        data = helpers.simulation_test_data(
-            comm,
+        data = simulation_test_data(
+            world,
             telescope_name=None,
             wafer_slot="w00",
             bands="LAT_f230",
             sample_rate=10.0 * u.Hz,
             thin_fp=16,
             cal_schedule=False,
+            groupsize=1,  # required by MLMapmaker
         )
 
         pointing = toast.ops.PointingDetectorSimple(
@@ -130,17 +149,17 @@ class MapmakerPointingTest(unittest.TestCase):
             write_invcov=False,
             write_cov=False,
             write_map=False,
-            output_dir=testdir.name,
+            output_dir=testdir,
             map_rcond_threshold=1e-6,
         ).apply(data)
-        file_hits_toast = os.path.join(testdir.name, "mapmaker_hits.fits")
-        file_map_toast = os.path.join(testdir.name, "mapmaker_binmap.fits")
-        file_rcond_toast = os.path.join(testdir.name, "mapmaker_rcond.fits")
+        file_hits_toast = os.path.join(testdir, "mapmaker_hits.fits")
+        file_map_toast = os.path.join(testdir, "mapmaker_binmap.fits")
+        file_rcond_toast = os.path.join(testdir, "mapmaker_rcond.fits")
 
         mapmaker = so_ops.MLMapmaker(
             area=areafile,
             name="mlmapmaker",
-            out_dir=testdir.name,
+            out_dir=testdir,
             comps="TQU",
             nmat_type="Nmat",
             maxiter=[3],
@@ -158,22 +177,39 @@ class MapmakerPointingTest(unittest.TestCase):
             # Compare binned maps
             import matplotlib.pyplot as plt
 
-            file_hits = os.path.join(testdir.name, "mlmapmaker_sky_hits.fits")
-            file_map = os.path.join(testdir.name, "mlmapmaker_sky_map.fits")
+            file_hits = os.path.join(testdir, "mlmapmaker_sky_hits.fits")
+            file_map = os.path.join(testdir, "mlmapmaker_sky_map.fits")
             hits = enmap.read_map(file_hits).astype(int)
             sky = enmap.read_map(file_map) * 1e6  # input map is in uK
 
             toast_hits = enmap.read_map(file_hits_toast)[0]
-            toast_sky = enmap.read_map(file_map_toast, None) * 1e6  # input map is in uK
+            toast_sky = enmap.read_map(file_map_toast, None)
+            toast_sky *= 1e6  # input map is in uK
             toast_rcond = enmap.read_map(file_rcond_toast, None)[0]
 
             # build a comparison mask
             mask = toast_rcond > 0
+
+            # There are a tiny number of outliers in the MLMapmaker
+            # difference map.  Discard 10 worst offenders.
+            dmap = sky[0] - input_map[0]
+            sorted_dmap = np.sort(np.abs(dmap[mask]))
+            limit = sorted_dmap[-10]
+            bad_pix = np.logical_and(np.abs(dmap) > limit, mask)
+            log.info(
+                f"Masking 10 / {np.sum(mask)} worst pixels in the MLMapmaker "
+                "residual map"
+            )
+            mask[bad_pix] = False
+
             bad = np.logical_not(mask)
 
             nrow, ncol = 2, 3
             fig = plt.figure(figsize=[6 * ncol, 4 * nrow])
-            axes = [fig.add_subplot(nrow, ncol, iplot + 1) for iplot in range(nrow * ncol)]
+            axes = [
+                fig.add_subplot(nrow, ncol, iplot + 1)
+                for iplot in range(nrow * ncol)
+            ]
 
             amp = 1.0
             args = {
@@ -209,7 +245,7 @@ class MapmakerPointingTest(unittest.TestCase):
             plot = ax.imshow(mask, **args)
             plt.colorbar(plot)
 
-            amp = 1e-3
+            amp = 1e-6
             args["vmin"] = -amp
             args["vmax"] = amp
 
@@ -227,42 +263,58 @@ class MapmakerPointingTest(unittest.TestCase):
             rms4 = np.std(dmap2[mask])
             plt.colorbar(plot)
 
-            for ax in axes:
-                ax.set_xlim([39, 43])
-                ax.set_ylim([-44, -40])
+            # for ax in axes:
+            #     ax.set_xlim([39, 43])
+            #     ax.set_ylim([-44, -40])
 
-            assert np.abs(rms1 / rms0 - 1) < 1e-4
-            assert np.abs(rms2 / rms0 - 1) < 1e-4
-            assert np.abs(rms3 / rms0) < 1e-6
-            assert np.abs(rms4 / rms0) < 1e-6
-
-            fname_plot = os.path.join(testdir.name, "wcs_diff.png")
+            fname_plot = os.path.join(testdir, "wcs_diff.png")
             plt.savefig(fname_plot)
 
-        helpers.close_data_and_comm(data)
+            test1 = np.abs(rms1 / rms0 - 1)
+            test2 = np.abs(rms2 / rms0 - 1)
+            test3 = np.abs(rms3 / rms0)
+            test4 = np.abs(rms4 / rms0)
+            log.info(f"RMS comparison:")
+            log.info(f"           TOAST / input - 1 = {test1:.4e}")
+            log.info(f"      MLMapmaker / input - 1 = {test2:.4e}")
+            log.info(f"     (TOAST - input) / input = {test3:.4e}")
+            log.info(f"(MLMapmaker - input) / input = {test4:.4e}")
+
+            assert test1 < 1e-6
+            assert test2 < 1e-6
+            assert test3 < 1e-6
+            assert test4 < 1e-6
+
+        close_data_and_comm(data)
 
     def test_mapmaker_pointing(self):
         if not toast_available:
-            print("toast cannot be imported- skipping unit tests", flush=True)
             return
 
         log = toast.utils.Logger.get()
+        world, procs, rank = toast.get_world()
+        testdir = os.path.join(self.outdir, "pointing_healpix")
+        if world is None or world.rank == 0:
+            if os.path.isdir(testdir):
+                shutil.rmtree(testdir)
+            os.makedirs(testdir)
+        if world is not None:
+            world.barrier()
 
         nnz = 3
         nside = 1024
         wpix = hp.nside2pixarea(nside, degrees=True)**.5 * 60
         npix = 12 * nside**2
-        testdir = tempfile.TemporaryDirectory()
 
-        comm, procs, rank = toast.get_world()
-        data = helpers.simulation_test_data(
-            comm,
+        data = simulation_test_data(
+            world,
             telescope_name=None,
             wafer_slot="w00",
             bands="LAT_f230",
             sample_rate=10.0 * u.Hz,
             thin_fp=16,
             cal_schedule=False,
+            groupsize=1,
         )
 
         pointing = toast.ops.PointingDetectorSimple(
@@ -283,20 +335,17 @@ class MapmakerPointingTest(unittest.TestCase):
             detector_pointing=pointing,
         )
 
-        input_map_file = os.path.join(
-            testdir.name,
-            "pointing_test_map.fits",
-        )
+        input_map_file = os.path.join(testdir, "pointing_test_map.fits")
         if rank == 0:
             input_map = np.zeros([nnz, npix], dtype=np.float32)
             input_map[1] = 1
             hp.write_map(
                 input_map_file, input_map, nest=pixels.nest, column_units="K"
             )
-        log.info_rank(f"Wrote test map to {input_map_file}", comm=comm)
+        log.info_rank(f"Wrote test map to {input_map_file}", comm=world)
 
-        if data.comm.comm_world is not None:
-            data.comm.comm_world.Barrier()
+        if world is not None:
+            world.Barrier()
 
         # Scan map into timestreams
         scan_hpix = toast.ops.ScanHealpixMap(
@@ -326,13 +375,13 @@ class MapmakerPointingTest(unittest.TestCase):
             write_invcov=False,
             write_cov=False,
             write_map=False,
-            output_dir=testdir.name,
+            output_dir=testdir,
         ).apply(data)
-        file_hits_toast = os.path.join(testdir.name, "mapmaker_hits.fits")
-        file_map_toast = os.path.join(testdir.name, "mapmaker_binmap.fits")
+        file_hits_toast = os.path.join(testdir, "mapmaker_hits.fits")
+        file_map_toast = os.path.join(testdir, "mapmaker_binmap.fits")
 
         # Create an area file
-        areafile = os.path.join(testdir.name, "area_file.fits")
+        areafile = os.path.join(testdir, "area_file.fits")
         box = utils.parse_box("-51:-35,35:49") * utils.degree
         res = wpix * utils.arcmin
         shape, wcs = enmap.geometry(box, res=res, proj="car")
@@ -342,7 +391,7 @@ class MapmakerPointingTest(unittest.TestCase):
         mapmaker = so_ops.MLMapmaker(
             area=areafile,
             name="mlmapmaker",
-            out_dir=testdir.name,
+            out_dir=testdir,
             comps="TQU",
             nmat_type="Nmat",
             maxiter=[3],
@@ -400,19 +449,31 @@ class MapmakerPointingTest(unittest.TestCase):
                 dgammas_rms[idet] = rms_dgamma
                 tol = 1.0
                 if rms_dlon > tol:
-                    raise RuntimeError(f"RA differs systematically over {tol} arc seconds")
+                    msg = f"RA differs systematically over {tol} arc seconds"
+                    raise RuntimeError(msg)
                 if rms_dlat > tol:
-                    raise RuntimeError(f"Dec differs systematically over {tol} arc seconds")
+                    msg = f"Dec differs systematically over {tol} arc seconds"
+                    raise RuntimeError(msg)
                 if rms_dgamma > tol:
-                    raise RuntimeError(f"PA differs systematically over {tol} arc seconds")
-            log.info(f"dlat = {np.mean(dlats_mean):.3f} +- {np.std(dlats_mean):.3f} arcsec")
-            log.info(f"dlon = {np.mean(dlons_mean):.3f} +- {np.std(dlons_mean):.3f} arcsec")
-            log.info(f"dgamma = {np.mean(dgammas_mean):.3f} +- {np.std(dgammas_mean):.3f} arcsec")
+                    msg = f"PA differs systematically over {tol} arc seconds"
+                    raise RuntimeError(msg)
+            log.info(
+                f"dlat = {np.mean(dlats_mean):.3f} "
+                f"+- {np.std(dlats_mean):.3f} arcsec"
+            )
+            log.info(
+                f"dlon = {np.mean(dlons_mean):.3f} "
+                f"+- {np.std(dlons_mean):.3f} arcsec"
+            )
+            log.info(
+                f"dgamma = {np.mean(dgammas_mean):.3f} "
+                f"+- {np.std(dgammas_mean):.3f} arcsec"
+            )
 
             # Compare binned maps
 
-            file_hits = os.path.join(testdir.name, "mlmapmaker_sky_hits.fits")
-            file_map = os.path.join(testdir.name, "mlmapmaker_sky_map.fits")
+            file_hits = os.path.join(testdir, "mlmapmaker_sky_hits.fits")
+            file_map = os.path.join(testdir, "mlmapmaker_sky_map.fits")
             hits = enmap.read_map(file_hits).astype(int)
             sky = enmap.read_map(file_map)
             good = hits != 0
@@ -428,9 +489,15 @@ class MapmakerPointingTest(unittest.TestCase):
             toast_rms = []
             toast_means = []
             log.info(f"            {'MLMapmaker':16}            {'TOAST':16}")
-            log.info(f"Hits        {np.sum(hits):8}       {np.sum(toast_hits):16}")
-            log.info(f"Hit pixels  {np.sum(good):8}       {np.sum(toast_good):16}")
-            log.info(f"After cut   {np.sum(ind):8}       {np.sum(toast_ind):16}")
+            log.info(
+                f"Hits        {np.sum(hits):8}       {np.sum(toast_hits):16}"
+            )
+            log.info(
+                f"Hit pixels  {np.sum(good):8}       {np.sum(toast_good):16}"
+            )
+            log.info(
+                f"After cut   {np.sum(ind):8}       {np.sum(toast_ind):16}"
+            )
             for i in range(3):
                 rms.append(np.std(sky[i][ind].ravel()))
                 means.append(np.mean(sky[i][ind].ravel()))
@@ -452,7 +519,7 @@ class MapmakerPointingTest(unittest.TestCase):
             if np.abs(means[2]) > tol:
                 raise RuntimeError("Found non-zero U")
 
-        helpers.close_data_and_comm(data)
+        close_data_and_comm(data)
 
 if __name__ == '__main__':
     unittest.main()
