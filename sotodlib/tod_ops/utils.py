@@ -71,3 +71,51 @@ def get_block_moment(
         block_moment64(tod, output, block_size, moment, central, shift)
 
     return output.reshape(orig_shape)
+
+def get_scan_speed(aman, in_deg=False, wrap=False, wrap_name='scanspeed'):
+    """
+    Compute the azimuth scan speed of the telescope in [rad/s].
+
+    Arguments:
+
+        aman (axismanager): Observation TOD with boresight data.
+
+        in_deg (bool): If True, this returns scan speed in [deg/s].
+
+        wrap (bool): If True, scan speed is wrapped in TOD.
+
+        wrap_name (str): The name to wrap the scan speed.
+    Returns:
+
+        scanspeed (float): The azimuth scan speed.
+    """
+    scanspeed = np.median(np.abs(np.diff(aman.boresight.az))/np.diff(aman.timestamps))
+    if in_deg:
+        scanspeed = 180/np.pi * scanspeed
+    if wrap:
+        aman.wrap(wrap_name, scanspeed)
+    return scanspeed
+
+def get_scan_freq(aman, wrap=False, wrap_name='scanfreq'):
+    """
+    Compute the azimuth scan frequency of the telescope in [1/s].
+    Here the scan frequency is defined as the inverse of the period
+    of one set of left-going and right-going scan.
+
+    Arguments:
+
+        aman (axismanager): Observation TOD with boresight data.
+
+        wrap (bool): If True, scan frequency is wrapped in TOD.
+
+        wrap_name (str): The name to wrap the scan frequency.
+    Returns:
+
+        scanfreq (float): The azimuth scan frequency.
+    """
+    scanspeed = get_scan_speed(aman, in_deg=True)
+    scanfreq = 1/(aman.obs_info.az_throw*4/scanspeed)
+    if wrap:
+        aman.wrap(wrap_name, scanfreq)
+    return scanfreq
+
