@@ -127,7 +127,7 @@ def preprocess_tod(configs: Union[str, dict],
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
     """
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
     group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
     dets = {gb:gg for gb, gg in zip(group_by, group)}
@@ -167,7 +167,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     tqdm.monitor_interval = 0
 
     configs, context = pp_util.get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
     os.makedirs(os.path.dirname(configs['archive']['policy']['filename']),
                 exist_ok=True)

@@ -13,8 +13,8 @@ from so3g.hk import load_range
 from sotodlib import core
 from sotodlib.io import hkdb
 from sotodlib.io import hk_utils
-from sotodlib.site_pipeline import util
-logger = util.init_logger('wiregrid', 'wiregrid: ')
+from sotodlib.site_pipeline.utils.logging import init_logger
+logger = init_logger('wiregrid', 'wiregrid: ')
 
 # hardware specific constants, which may have to be sperated as a config file
 WG_COUNTS2RAD = 2*np.pi/52000 # SATP1~SATP3, JSAT(SATP4?) will be 104000

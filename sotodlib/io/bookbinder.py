@@ -17,7 +17,7 @@ import yaml
 import datetime as dt
 from zipfile import ZipFile, ZIP_DEFLATED
 import sotodlib
-from sotodlib.site_pipeline.util import init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 from .datapkg_utils import walk_files
 
 
@@ -26,7 +26,13 @@ if not log.hasHandlers():
     init_logger('bookbinder')
 
 class TimingSystemOff(Exception):
-    """Exception raised when we try to bind books where the timing system is found to be off and the books have imprecise timing counters"""
+    """Exception raised when we try to bind books when the SMuRF slot says it has low
+    precision timing or downsample is not set to external"""
+    pass
+
+class TimingCounterError(Exception):
+    """Exception raised when timing counters are not behaving correctly but the system
+    believes it has high-precision timing."""
     pass
 
 class NoScanFrames(Exception):
@@ -42,7 +48,6 @@ class BadTimeSamples(Exception):
 class NoHKFiles(Exception):
     """Exception raised when we cannot find any HK data around the book time"""
     pass
-
 
 class NoMountData(Exception):
     """Exception raised when we cannot find mount data overlapping detector data"""
@@ -1483,13 +1488,31 @@ def get_frame_times(frame, allow_bad_timing=False):
 
     counters = np.all( np.diff(c0)!=0 ) and np.all( np.diff( c2 )!=0)
 
-    if counters:
-        return True, counters_to_timestamps(c0, c2)
-    elif allow_bad_timing:
-        return False, np.array(frame['data'].times) / core.G3Units.s
-    else:
-        ## don't change this error message. used in Imprinter CLI
-        raise TimingSystemOff("Timing counters not incrementing")
+    if not counters:
+        if allow_bad_timing:
+            return False, np.array(frame['data'].times) / core.G3Units.s
+        else:
+            raise TimingCounterError("Timing counters not incrementing")
+             
+    s, ns = split_ts_bits(c2)
+
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    
+    # Look for evidence of counters de-syncing. 
+    stat = c2-(c0/480000) - np.round(c2-(c0/480000))
+    counters = ((np.ptp(stat)<0.001)+(np.abs(np.mean(stat))<0.0025))
+
+    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+
+    if not counters and not allow_bad_timing:
+        raise TimingCounterError(
+            f"Timing counters diverging from normal. ptp: {np.ptp(stat)}, "
+            f"mean: {np.abs(np.mean(stat))}"
+        )
+
+    return counters, ts
 
 def split_ts_bits(c):
     """
@@ -1501,14 +1524,6 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
-def counters_to_timestamps(c0, c2):
-    s, ns = split_ts_bits(c2)
-
-    # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPICS time referenced to 1990 relative to UNIX time.
-    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
-    return ts
 
 def find_ref_idxs(refs, vs):
     """

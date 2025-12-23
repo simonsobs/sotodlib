@@ -71,7 +71,7 @@ def multilayer_preprocess_tod(obs_id: str,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
     """
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
     group_by = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     dets = {gb:gg for gb, gg in zip(group_by, group)}
@@ -198,7 +198,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     configs_init, context_init = pp_util.get_preprocess_context(configs_init)
     configs_proc, context_proc = pp_util.get_preprocess_context(configs_proc)
 
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
     for fname in (configs_init['archive']['policy']['filename'],
                   configs_proc['archive']['policy']['filename']
