@@ -258,7 +258,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             groups = [[job.tags['dets:'+g] for g in group_by]]
             if overwrite:
                 with jdb.locked(job) as j:
-                    j.jstate = "open"
+                    j.jstate = JState.open
                     for _t in j._tags:
                         if _t.key == "error":
                             _t.value = None
@@ -269,6 +269,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         entry = [a[f'dets:{gb}'] for gb in group_by]
                         if entry in groups:
                             groups.remove(entry)
+                            # if it was found in the db but is still in open
+                            # jobs, then it was added by cleanup_obs and
+                            # should be set to done.
+                            with jdb.locked(job) as j:
+                                j.jstate = JState.done
+
             for group in groups:
                 run_list.append((obs_id, group))
 

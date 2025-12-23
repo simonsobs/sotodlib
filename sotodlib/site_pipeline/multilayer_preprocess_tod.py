@@ -139,7 +139,8 @@ def _check_init_jobdb(
         init_job = jdb.create_job(
             jclass="init",
             tags=tags,
-            commit=False
+            commit=False,
+            check_existing=False,
         )
         return False, init_job
 
@@ -332,7 +333,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             groups = [[job.tags['dets:'+g] for g in group_by]]
             if overwrite:
                 with jdb.locked(job) as j:
-                    j.jstate = "open"
+                    j.jstate = JState.open
                     for _t in j._tags:
                         if _t.key == "error":
                             _t.value = None
@@ -343,6 +344,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         entry = [a[f'dets:{gb}'] for gb in group_by]
                         if entry in groups:
                             groups.remove(entry)
+                            # if it was found in the db but is still in open
+                            # jobs, then it was added by cleanup_obs and
+                            # should be set to done.
+                            with jdb.locked(job) as j:
+                                j.jstate = JState.done
             for group in groups:
                 failed_job = False
                 if jobdb_path is not None:

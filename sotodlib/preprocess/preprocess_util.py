@@ -135,7 +135,8 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
         job = tags_to_job.get(frozenset(tags.items()), None)
         if not job:
             tags["error"] = None
-            new_jobs.append(jdb.create_job(jclass, tags=tags, commit=False))
+            new_jobs.append(jdb.create_job(jclass, tags=tags, commit=False,
+                                           check_existing=False))
         elif job.jstate in [JState.done, JState.failed]:
             found = True
             if job.jstate == JState.done and db is not None:
