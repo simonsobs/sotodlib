@@ -15,13 +15,14 @@ from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 from sotodlib.site_pipeline.jobdb import JobManager, JState
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
 from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess.preprocess_util import PreprocessErrors
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
 
-logger = sp_util.init_logger("preprocess")
+logger = pp_util.init_logger("preprocess")
 
 
 def load_preprocess_tod_sim(obs_id,
@@ -190,10 +191,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             logger.warning(f"No jobs found in jobdb.")
             return
     else:
-        obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id,
-                                       min_ctime=min_ctime, max_ctime=max_ctime,
-                                       update_delay=update_delay, tags=tags,
-                                       planet_obs=planet_obs)
+        obs_list = get_obslist(context, query=query, obs_id=obs_id,
+                            min_ctime=min_ctime, max_ctime=max_ctime,
+                            update_delay=update_delay, tags=tags,
+                            planet_obs=planet_obs)
         obs_list = [obs['obs_id'] for obs in obs_list]
         if len(obs_list) == 0:
             logger.warning(f"No observations returned from query: {query}")
@@ -470,4 +471,4 @@ def main(configs: str,
               raise_error=raise_error)
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
