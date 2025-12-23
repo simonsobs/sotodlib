@@ -197,15 +197,29 @@ class JobManager:
     def _lockstr(self):
         return 'me%i' % os.getpid()
 
-    def make_job(self,
+    def commit_jobs(self, jobs):
+        """Commit jobs to the jobs table"""
+        with self.session_scope() as session:
+            session.add_all(jobs)
+            session.flush()
+            # Force a retrieval of job.id, before expunging --
+            # otherwise some fields will dangle and sqlalchemy can
+            # complain later about the detached object.
+            for job in jobs:
+                job.id
+                session.expunge(job)
+            session.commit()
+
+    def create_job(self,
                    jclass=None,
                    tags={},
                    jstate=None,
                    creation_time=None,
                    visit_count=None,
                    visit_time=None,
-                   check_existing=True):
-        """Create a new job in without adding to the jobs table.
+                   check_existing=True,
+                   commit=True):
+        """Create a new job and opitionally commit to the jobs table.
 
         Return the job.
 
@@ -230,35 +244,8 @@ class JobManager:
                   visit_count=visit_count,
                   visit_time=visit_time,
                   _tags=tags)
-        return job
-
-    def commit_jobs(self, jobs):
-        """Commit jobs to the jobs table"""
-        with self.session_scope() as session:
-            for job in jobs:
-                session.add(job)
-            session.commit()
-            # Force a retrieval of job.id, before expunging --
-            # otherwise some fields will dangle and sqlalchemy can
-            # complain later about the detached object.
-            for job in jobs:
-                job.id
-                session.expunge(job)
-
-    def create_job(self,
-                   jclass=None,
-                   tags={},
-                   jstate=None,
-                   creation_time=None,
-                   visit_count=None,
-                   visit_time=None):
-        """Create a new job in the jobs table.
-
-        Return the job.
-
-        """
-        job = self.make_job(jclass, tags, jstate, creation_time, visit_count, visit_time)
-        self.commit_jobs([job,])
+        if commit:
+            self.commit_jobs([job,])
         return job
 
     def get_jobs(self,
