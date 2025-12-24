@@ -1,72 +1,18 @@
+import os
+import time
+import warnings
 from argparse import ArgumentParser
-from typing import Tuple, List, Dict
-import numpy as np, sys, time, warnings, os, so3g, logging
-from sotodlib import tod_ops, coords, mapmaking
-from sotodlib.core import Context, AxisManager, IndexAxis, FlagManager, metadata
-from sotodlib.tod_ops import filters, detrend_tod
+
+import numpy as np
+from pixell import bunch, enmap, mpi, tilemap, utils, wcsutils
+
+from sotodlib import mapmaking
+from sotodlib.core import Context
 from sotodlib.preprocess import preprocess_util as pp_util
-from sotodlib.coords import pointing_model
-from pixell import enmap, utils, fft, bunch, wcsutils, mpi, colors, memory, tilemap
-import yaml
-
-from mapcat.helper import Settings
-from mapcat.database import DepthOneMapTable, TODDepthOneTable
-
-defaults = {"query": "1",
-            "odir": "./outputs",
-            "comps": "T",
-            "ntod": None,
-            "tods": None,
-            "nset": None,
-            "site": 'so_lat',
-            "nmat": "corr",
-            "max_dets": None,
-            "verbose": 0,
-            "quiet": 0,
-            "center_at": None,
-            "window": 0.0,
-            "nmat_dir": "/nmats",
-            "nmat_mode": "build",
-            "downsample": 1,
-            "maxiter": 100,
-            "tiled": 1,
-            "wafer": None,
-            "freq": None,
-            "tasks_per_group":1,
-            "cont":False,
-            "rhs": False,
-            "bin": False,
-            "srcsamp": None,
-            "unit": 'K',
-            "mapcat_database_type": "sqlite",
-            "mapcat_database_name": "mapcat.db",
-            "mapcat_depth_one_parent": "./",
-            "min_dets": 50,
-           }
-LoaderError = metadata.loader.LoaderError
-sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
-
-def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
-    # First reject detectors with unreasonably low noise
-    good     = rms_uKrts >= sens_lim
-    # Also reject far too noisy detectors
-    good    &= rms_uKrts <  sens_lim*max_lim
-    # Then reject outliers
-    if np.sum(good) == 0: return good
-    ref      = np.median(rms_uKrts[good])
-    good    &= rms_uKrts > ref*med_tol
-    good    &= rms_uKrts < ref/med_tol
-    return good
-
-def measure_rms(tod, dt=1, bsize=32, nblock=10):
-    tod = tod[:,:tod.shape[1]//bsize*bsize]
-    tod = tod.reshape(tod.shape[0],-1,bsize)
-    bstep = max(1,tod.shape[1]//nblock)
-    tod = tod[:,::bstep,:][:,:nblock,:]
-    rms = np.median(np.std(tod,-1),-1)
-    # to µK√s units
-    rms *= dt**0.5
-    return rms
+from sotodlib.site_pipeline.utils.depth1_maps_utils import (
+    DEFAULTS, DataMissing, LoaderError, _get_config, calibrate_obs,
+    commit_depth1_map, commit_depth1_tods, create_mapmaker_config,
+    find_footprint, map_to_calculate, read_tods, write_depth1_map)
 
 
 def get_parser(parser=None):
@@ -107,246 +53,27 @@ def get_parser(parser=None):
     parser.add_argument("--min-dets", type=int, help="Minimum number of detectors for an obs (per wafer per freq)")
     return parser
 
-def _get_config(config_file):
-    return yaml.safe_load(open(config_file,'r'))
-
-def handle_empty(prefix, tag, comm, e, L):
-    # This happens if we ended up with no valid tods for some reason
-    if comm.rank == 0:
-        L.info("%s Skipped: %s" % (tag, str(e)))
-        utils.mkdir(os.path.dirname(prefix))
-        with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
-
-def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
-    # Broadcast and flatten input arrays
-    coords, ctime = utils.broadcast_arrays(coords, ctime, npre=(1,0))
-    cflat = utils.to_Nd(coords, 2, axis=-1)
-    tflat = utils.to_Nd(ctime,  1, axis=-1)
-    dflat, dshape = utils.to_Nd(detoffs, 2, axis=-1, return_inverse=True)
-    nsamp, ndet = cflat.shape[1], dflat.shape[1]
-    assert cflat.shape[1:] == tflat.shape, "tele2equ coords and ctime have incompatible shapes %s vs %s" % (str(coords.shape), str(ctime.shape))
-    # Set up the transform itself
-    sight  = so3g.proj.CelestialSightLine.az_el(tflat, cflat[0], cflat[1],
-            roll=cflat[2] if len(cflat) > 2 else 0, site=site, weather="toco")
-    # To support other coordiante systems I would add
-    # if rot is not None: sight.Q = rot * sight.Q
-    dummy  = np.arange(ndet)
-    fp     = so3g.proj.FocalPlane.from_xieta(dummy, dflat[0], dflat[1],
-            dflat[2] if len(dflat) > 2 else 0)
-    asm    = so3g.proj.Assembly.attach(sight, fp)
-    proj   = so3g.proj.Projectionist()
-    res    = np.zeros((ndet,nsamp,4))
-    # And actually perform it
-    proj.get_coords(asm, output=res)
-    # Finally unflatten
-    res    = res.reshape(dshape[1:]+coords.shape[1:]+(4,))
-    return res
-
-def find_scan_profile(context, my_tods, my_infos, comm=mpi.COMM_WORLD, npoint=100):
-    # Pre-allocate empty profile since other tasks need a receive buffer
-    profile = np.zeros([2,npoint])
-    # Who has the first valid tod?
-    first   = np.where(comm.allgather([len(my_tods)]))[0][0]
-    if comm.rank == first:
-        tod, info = my_tods[0], my_infos[0]
-        # Find our array's central pointing offset. 
-        fp   = tod.focal_plane
-        xi0  = np.mean(utils.minmax(fp.xi))
-        eta0 = np.mean(utils.minmax(fp.eta))
-        # Build a boresight corresponding to a single az sweep at constant time
-        azs  = info.az_center + np.linspace(-info.az_throw/2, info.az_throw/2, npoint)
-        els  = np.full(npoint, info.el_center)
-        profile[:] = tele2equ(np.array([azs, els])*utils.degree, info.timestamp, detoffs=[xi0, eta0]).T[1::-1] # dec,ra
-    comm.Bcast(profile, root=first)
-    return profile
-
-def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=False, pad=1):
-    # Measure the pixel bounds of each observation relative to our
-    # reference wcs
-    pixboxes = []
-    for tod in tods:
-        my_shape, my_wcs = coords.get_footprint(tod, ref_wcs)
-        my_pixbox = enmap.pixbox_of(ref_wcs, my_shape, my_wcs)
-        pixboxes.append(my_pixbox)
-    pixboxes = utils.allgatherv(pixboxes, comm)
-    if len(pixboxes) == 0: raise DataMissing("No usable obs to estimate footprint from")
-    # Handle sky wrapping. This assumes cylindrical coordinates with sky-wrapping
-    # in the x-direction, and that there's an integer number of pixels around the sky.
-    # Could be done more generally, but would be much more involved, and this should be
-    # good enough
-    nphi     = utils.nint(np.abs(360/ref_wcs.wcs.cdelt[0]))
-    widths   = pixboxes[:,1,1]-pixboxes[:,0,1]
-    pixboxes[:,0,1] = utils.rewind(pixboxes[:,0,1], ref=pixboxes[0,0,1], period=nphi)
-    pixboxes[:,1,1] = pixboxes[:,0,1] + widths
-    # It's now safe to find the total pixel bounding box
-    union_pixbox = np.array([np.min(pixboxes[:,0],0)-pad,np.max(pixboxes[:,1],0)+pad])
-    # Use this to construct the output geometry
-    shape = union_pixbox[1]-union_pixbox[0]
-    # Cap xshape to nphi. To see why, consider this example:
-    # Sky width: 100
-    # box 0:   0  30
-    # box 1: -40  10
-    # box 2:  20  70
-    # box 3:  45 110
-    # union: -40 110: Wider than the whole sky!
-    # But since we use union_pixbox[0] as the zero-pixel in
-    # our output geometry, this overflow just results in
-    # unhittable pixels for x >= nphi, which we can just chop off here
-    shape[-1] = min(shape[-1], nphi)
-    wcs   = ref_wcs.deepcopy()
-    wcs.wcs.crpix -= union_pixbox[0,::-1]
-    # Make sure wcs crval follows so3g pointing matrix assumptions
-    shape, wcs = coords.normalize_geometry(shape, wcs)
-    if return_pixboxes: return shape, wcs, pixboxes
-    else: return shape, wcs
-
-class DataMissing(Exception): pass
-
-def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, site='so', L=None, min_dets=50):
-    my_tods = []
-    my_inds = []
-    if inds is None: inds = list(range(comm.rank, len(obslist), comm.size))
-    for ind in inds:
-        obs_id, detset, band, obs_ind = obslist[ind]
-        try:
-            tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            tod = calibrate_obs(tod, band, site=site, L=L, min_dets=min_dets)
-            my_tods.append(tod)
-            my_inds.append(ind)
-        except RuntimeError: continue
-    return my_tods, my_inds
-
-def calibrate_obs(obs, band, site='so', dtype_tod=np.float32, nocal=True, unit='K', L=None, min_dets=50):
-    if obs.signal is not None and obs.dets.count < min_dets:
-        return None
-    if (not nocal) and (obs.signal is not None):
-        # Check nans
-        mask = np.logical_not(np.isfinite(obs.signal))
-        if mask.sum() > 0:
-            return None
-        # Check all 0s
-        zero_dets = np.sum(obs.signal, axis=1)
-        mask = zero_dets == 0.0
-        if mask.any():
-            obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
-    # Cut non-optical dets
-    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
-    mapmaking.fix_boresight_glitches(obs, )
-    srate = (obs.samps.count-1)/(obs.timestamps[-1]-obs.timestamps[0])
-    # Add site and weather, since they're not in obs yet
-    obs.wrap("weather", np.full(1, "toco"))
-    if "site" not in obs:
-        obs.wrap("site",    np.full(1, site))
-
-    # add dummy glitch flags if not present
-    if 'flags' not in obs._fields:
-        obs.wrap('flags', FlagManager.for_tod(obs))
-    if "glitch_flags" not in obs.flags:
-        obs.flags.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0,'dets'),(1,'samps')])
-
-    if obs.signal is not None:
-        detrend_tod(obs, method='linear')
-        utils.deslope(obs.signal, w=5, inplace=True)
-        obs.signal = obs.signal.astype(dtype_tod)
-
-    if (not nocal) and (obs.signal is not None):
-        rms = measure_rms(obs.signal, dt=1/srate)
-        if unit=='K':
-            good    = sensitivity_cut(rms*1e6, sens_limits[band])
-        elif unit == 'uK':
-            good    = sensitivity_cut(rms, sens_limits[band])
-        utils.deslope(obs.signal, w=5, inplace=True)
-    return obs
-
-def map_to_calculate(map_name: str, inds_to_use: List[int], mapcat_settings: Dict[str,str])->bool:
-
-    with Settings(**mapcat_settings).session() as session:
-        existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
-        map_tods = existing_map.tods if existing_map else []
-
-        total_tods = np.sum([map_tod.wafer_count for map_tod in map_tods])
-
-        if total_tods < len(inds_to_use):
-            return True
-    return False
-
-def commit_depth1_tods(map_name:str, obslist: Dict[Tuple[int, str, str], List[Tuple[str, str, str, int]]], obs_infos: List[Tuple[str, float, float, float, int, str, str, str, str, str, str, int, str, float, float, float, float, float,  float, float, str, str]],
-                       band: str, inds: List[int], mapcat_settings: Dict[str, str]) -> List[TODDepthOneTable]:
-    with Settings(**mapcat_settings).session() as session:
-        depth1map_obsids = np.unique([obslist[ind][0] for ind in inds])
-        tods = []
-        for obs_id in depth1map_obsids:
-            obs_info = obs_infos[obs_infos["obs_id"] == obs_id][0]
-            tod_depth1_entry = {"obs_id": obs_id,
-                                "ctime": obs_info["timestamp"],
-                                "start_time": obs_info["start_time"],
-                                "stop_time": obs_info["stop_time"],
-                                "nsamples": int(obs_info["n_samples"]),
-                                "telescope": obs_info["telescope"],
-                                "telescope_flavor": obs_info["telescope_flavor"],
-                                "tube_slot": obs_info["tube_slot"],
-                                "tube_flavor": obs_info["tube_flavor"],
-                                "frequency": band,
-                                "scan_type": obs_info["type"],
-                                "subtype": obs_info["subtype"],
-                                "wafer_count": int(obs_info["wafer_count"]),
-                                "duration": obs_info["duration"],
-                                "az_center": obs_info["az_center"],
-                                "az_throw": obs_info["az_throw"],
-                                "el_center": obs_info["el_center"],
-                                "el_throw": obs_info["el_throw"],
-                                "roll_center": obs_info["roll_center"],
-                                "roll_throw": obs_info["roll_throw"],
-                                "wafer_slots_list": obs_info["wafer_slots_list"],
-                                "stream_ids_list": obs_info["stream_ids_list"]}
-            existing_tod = session.query(TODDepthOneTable).filter_by(**tod_depth1_entry).first()
-            tod = TODDepthOneTable(map_name=map_name, **tod_depth1_entry)
-            if existing_tod is None:
-                session.add(tod)
-                tods.append(tod)
-            else:
-                tods.append(existing_tod)
-        session.commit()
-    return tods
-
-def commit_depth1_map(map_name:str, prefix:str, detset:str, band:str, ctime:float, start_time:float, stop_time:float,
-                      tods: List[TODDepthOneTable], mapcat_settings:Dict[str, str])->None:
-    with Settings(**mapcat_settings).session() as session:
-        existing_map = session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
-        depth1map_meta = DepthOneMapTable(map_id=existing_map.map_id if existing_map else None,
-                                            map_name=map_name,
-                                            map_path=prefix + "_map.fits",
-                                            ivar_path=prefix + "_ivar.fits",
-                                            time_path=prefix + "_time.fits",
-                                            tube_slot=detset,
-                                            frequency=band,
-                                            ctime=ctime,
-                                            start_time=start_time,
-                                            stop_time=stop_time,
-                                            tods=tods
-                                            )
-        session.merge(depth1map_meta)
-        session.commit()
-
 def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", niter=100, site='so', tiled=0, verbose=0, downsample=1, interpol='nearest', srcsamp_mask=None, unit='K', min_dets=50):
     pre = "" if tag is None else tag + " "
-    if comm.rank == 0: L.info(pre + "Initializing equation system")
+    if comm.rank == 0:
+        L.info(f"{pre} Initializing equation system")
 
     # Set up our mapmaking equation
     signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
     signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=tiled>0, interpol=interpol, ofmt="")
-    signals    = [signal_cut, signal_map]
+    signals = [signal_cut, signal_map]
     if srcsamp_mask is not None:
         signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
         signals.append(signal_srcsamp)
     mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
-    if comm.rank == 0: L.info(pre + "Building RHS")
+    if comm.rank == 0:
+        L.info(f"{pre} Building RHS")
     time_rhs   = signal_map.rhs*0
     # And feed it with our observations
     nobs_kept  = 0
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
-        name = "%s:%s:%s" % (obs_id, detset, band)
+        name = f"{obs_id}:{detset}:{band}"
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time
         #obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
@@ -362,16 +89,16 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
         if downsample != 1:
             obs = mapmaking.downsample_obs(obs, downsample)
         if obs.dets.count == 0:
-            print('Skipping ', (obs_id, detset, band))
+            print(f'Skipping {obs_id}, {detset}, {band}')
             continue
         # And add it to the mapmaker
         try:
             mapmaker.add_obs(name, obs)
         except KeyError:
-            print('rank = %i' % comm.rank, (obs_id, detset, band) )
+            print(f'rank = {comm.rank} {obs_id}, {detset}, {band}')
         # Also build the RHS for the per-pixel timestamp. First
         # make a white noise weighted timestamp per sample timestream
-        Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
+        Nt = np.zeros_like(obs.signal, dtype=dtype_tod)
         Nt += obs.timestamps - t0
         Nt *= mapmaker.data[-1].nmat.ivar[:,None]
         signal_cut.data[name].pcut.clear(Nt)
@@ -385,68 +112,49 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, L, preproc, comps
         nobs_kept += 1
 
     nobs_kept = comm.allreduce(nobs_kept)
-    if nobs_kept == 0: raise DataMissing("All data cut")
+    if nobs_kept == 0:
+        raise DataMissing("All data cut")
     mapmaker.prepare()
     # mapmaker doesn't know about time_rhs, so handle it manually
-    if signal_map.tiled: time_rhs = tilemap.redistribute(time_rhs, comm)
-    else:                time_rhs = utils.allreduce     (time_rhs, comm)    
-    if signal_map.tiled: bin_ = tilemap.map_mul(signal_map.idiv,signal_map.rhs)
-    else: bin_ = enmap.map_mul(signal_map.idiv,signal_map.rhs)
-    if comm.rank == 0: L.info(pre + "Solving")
+    if signal_map.tiled:
+        time_rhs = tilemap.redistribute(time_rhs, comm)
+    else:
+        time_rhs = utils.allreduce(time_rhs, comm)
+    if signal_map.tiled:
+        bin_ = tilemap.map_mul(signal_map.idiv,signal_map.rhs)
+    else:
+        bin_ = enmap.map_mul(signal_map.idiv,signal_map.rhs)
+    if comm.rank == 0:
+        L.info(f"{pre} Solving")
     t1 = time.time()
     for step in mapmaker.solve(maxiter=niter):
         t2 = time.time()
         if comm.rank == 0:
-            L.info("%s CG step %5d %15.7e %6.1f %6.3f" % (tag, step.i, step.err, (t2-t1), (t2-t1)/nobs_kept))
+            L.info(f"{tag} CG step {step.i:5d} {step.err:15.7e} {t2-t1:6.1f} {(t2-t1)/nobs_kept:6.3f}")
         t1 = time.time()
     map_  = step.x[1]
     ivar = signal_map.div[0,0]
-    with utils.nowarn(): tmap = utils.remove_nan(time_rhs / ivar)
+    with utils.nowarn():
+        tmap = utils.remove_nan(time_rhs / ivar)
     return bunch.Bunch(map=map_, ivar=ivar, tmap=tmap, signal=signal_map, t0=t0, bin=bin_)
 
-def write_depth1_map(prefix, data, dtype = np.float32, binned=False, rhs=False, unit='K'):
-    data.signal.write(prefix, "map",  data.map.astype(dtype), unit=unit)
-    data.signal.write(prefix, "ivar", data.ivar.astype(dtype), unit=unit+'^-2')
-    data.signal.write(prefix, "time", data.tmap.astype(dtype))
-    if binned:
-        data.signal.write(prefix, "bin", data.bin.astype(dtype), unit=unit)
-    if rhs:
-        data.signal.write(prefix, "rhs", data.signal.rhs.astype(dtype), unit=unit+'^-1')
 
-def write_depth1_info(oname, info):
-    utils.mkdir(os.path.dirname(oname))
-    bunch.write(oname, info)
+def main(config_file, defaults=DEFAULTS, **args):
 
-def main(config_file=None, defaults=defaults, **args):
+    dtype_tod = np.float32
+    dtype_map = np.float64
 
-    cfg = dict(defaults)
-
-    # Update the default dict with values provided from a config.yaml file
-    if config_file is not None:
-        cfg_from_file = _get_config(config_file)
-        cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
-    else:
-        print("No config file provided, assuming default values") 
-
-    # Merge flags from config file and defaults with any passed through CLI
-    cfg.update({k: v for k, v in args.items() if v is not None})
-
-    # Certain fields are required. Check if they are all supplied here
-    required_fields = ['area','context']
-    for req in required_fields:
-        if req not in cfg.keys():
-            raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
-    args = cfg
+    args = create_mapmaker_config(defaults=defaults, config_file=config_file, args=args)
 
     warnings.simplefilter('ignore')
     # Set up our communicators
-    comm       = mpi.COMM_WORLD
+    comm = mpi.COMM_WORLD
     comm_intra = comm.Split(comm.rank // args['tasks_per_group'])
     comm_inter = comm.Split(comm.rank  % args['tasks_per_group'])
 
-    SITE    = args['site']
+    SITE = args['site']
     verbose = args['verbose'] - args['quiet']
-    shape, wcs = enmap.read_map_geometry(args['area'])
+    _, wcs = enmap.read_map_geometry(args['area'])
     mapcat_settings = {"database_type": args["mapcat_database_type"],
                        "database_name": args["mapcat_database_name"],
                        "depth_one_parent": args["mapcat_depth_one_parent"],}
@@ -455,86 +163,83 @@ def main(config_file=None, defaults=defaults, **args):
     # we risk adding information in MPI due to reconstruction, and that
     # can cause is_compatible failures.
     wcs = wcsutils.WCS(wcs.to_header())
-    # Set shape to None to allow map to fit these TODs exactly.
-    #shape = None
 
     comps = args['comps']
-    ncomp = len(comps)
-    dtype_tod = np.float32
-    dtype_map = np.float64
-    meta_only  = False
-    nmat_dir = os.path.join(args['odir'],args['nmat_dir'])
     utils.mkdir(args['odir'])
 
     # Set up logging.
     L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
 
     # set up the preprocessing
-    try:
-        preproc = yaml.safe_load(open(args['preprocess_config'], 'r'))
-    except:
-        if comm.rank==0:
-            L.info(f"{args['preprocess_config']} is not a valid config")
-        sys.exit(1)
-
-    recenter = mapmaking.parse_recentering(args['center_at']) if args['center_at'] else None
+    preproc = _get_config(args['preprocess_config'])
 
     with mapmaking.mark('context'):
         context = Context(args['context'])
 
-    if args['srcsamp']:
-        srcsamp_mask = enmap.read_map(args['srcsamp'])
+    srcsamp_mask = enmap.read_map(args['srcsamp']) if args['srcsamp'] else None
+
+    if args['nmat'] == "uncorr":
+        noise_model = mapmaking.NmatUncorr()
+    elif args['nmat'] == "corr":
+        noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
     else:
-        srcsamp_mask = None
+        raise ValueError(f"Unrecognized noise model '{args['nmat']}'")
 
-    if   args['nmat'] == "uncorr": noise_model = mapmaking.NmatUncorr()
-    elif args['nmat'] == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args['window'])
-    else: raise ValueError("Unrecognized noise model '%s'" % args['nmat'])
-
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode='depth_1', nset=args['nset'], ntod=args['ntod'], tods=args['tods'], freq=args['freq'],per_tube=True)
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context,
+                                                                     args['query'],
+                                                                     mode='depth_1',
+                                                                     nset=args['nset'],
+                                                                     ntod=args['ntod'],
+                                                                     tods=args['tods'],
+                                                                     freq=args['freq'],
+                                                                     per_tube=True)
 
     for oi in range(comm_inter.rank, len(obskeys), comm_inter.size):
         pid, detset, band = obskeys[oi]
         obslist = obslists[obskeys[oi]]
-        t       = utils.floor(periods[pid,0])
-        t5      = ("%05d" % t)[:5]
-        prefix  = "%s/%s/depth1_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
-        tag     = "%5d/%d" % (oi+1, len(obskeys))
+        t = utils.floor(periods[pid,0])
+        t5 = f"{t:05d}"[:5]
+        prefix  = f"{args['odir']}/{t5}/depth1_{t:010d}_{detset}_{band}"
+        tag = f"{oi+1:5d}/{len(obskeys)}"
         map_name = f"{t5}/depth1_{t:010d}_{detset}_{band}"
 
         utils.mkdir(os.path.dirname(prefix))
-        maps_done = os.path.isfile(prefix + ".empty") or (
-            os.path.isfile(prefix + "_time.fits") and
-            os.path.isfile(prefix + "_map.fits") and
-            os.path.isfile(prefix + "_ivar.fits"))
-        if args['cont'] and (maps_done or meta_only): continue
+
         if comm_intra.rank == 0:
-            L.info("%s Proc period %4d dset %s:%s @%.0f dur %5.2f h with %2d obs" % (tag, pid, detset, band, t, (periods[pid,1]-periods[pid,0])/3600, len(obslist)))
+            L.info(f"{tag} Proc period {pid:4d} dset {detset}:{band} @{t:.0f} dur {(periods[pid,1]-periods[pid,0])/3600:5.2f} h with {len(obslist):2d} obs")
         try:
-            # 1. read in the metadata and use it to determine which tods are
+            # Read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
             my_tods, my_inds = read_tods(context, obslist, comm=comm_intra, no_signal=True, site=SITE, L=L, min_dets=args['min_dets'])
-            my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod, maxcut=0.3)) for tod in my_tods])
-            # 2. prune tods that have no valid detectors
-            valid     = np.where(my_costs>0)[0]
+            my_costs = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod, maxcut=0.3)) for tod in my_tods])
+
+            # Prune tods that have no valid detectors
+            valid = np.where(my_costs>0)[0]
             my_tods, my_inds, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
-            all_inds  = utils.allgatherv(my_inds, comm_intra)
+            all_inds = utils.allgatherv(my_inds, comm_intra)
             all_costs = utils.allgatherv(my_costs, comm_intra)
-            if len(all_inds)  == 0: raise DataMissing("No valid tods")
-            if sum(all_costs) == 0: raise DataMissing("No valid detectors in any tods")
-            # 2. estimate the scan profile and footprint. The scan profile can be done
-            #    with a single task, but that task might not be the first one, so just
-            #    make it mpi-aware like the footprint stuff
+            if len(all_inds)  == 0:
+                raise DataMissing("No valid tods")
+            if sum(all_costs) == 0:
+                raise DataMissing("No valid detectors in any tods")
+
+            # Estimate the scan profile and footprint. The scan profile can be done
+            # with a single task, but that task might not be the first one, so just
+            # make it mpi-aware like the footprint stuff
             subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
-            handle_empty(prefix, tag, comm_intra, e, L)
+            L.info(f"Skipping {map_name} with {e}")
             continue
-        # 4. redistribute the valid tasks. Tasks with nothing to do don't continue
+
+        # Redistribute the valid tasks. Tasks with nothing to do don't continue
         # past here.
-        my_inds   = all_inds[utils.equal_split(all_costs, comm_intra.size)[comm_intra.rank]]
+        my_inds = all_inds[utils.equal_split(all_costs, comm_intra.size)[comm_intra.rank]]
         comm_good = comm_intra.Split(len(my_inds) > 0)
-        if len(my_inds) == 0: continue
+        if len(my_inds) == 0:
+            if comm_intra.rank == 0:
+                L.info(f"Map {map_name} has not data.")
+            continue
 
         map_calculate = map_to_calculate(map_name=map_name, inds_to_use=my_inds, mapcat_settings=mapcat_settings)
         if not map_calculate:
@@ -542,18 +247,19 @@ def main(config_file=None, defaults=defaults, **args):
                 L.info(f"Map {map_name} already calculated.")
             continue
 
-        # 3. Write out the depth1 metadata
+        # Write out the depth1 metadata
         if comm_intra.rank == 0:
             tods = commit_depth1_tods(map_name=map_name, obslist=obslist, obs_infos=obs_infos, band=band, inds=my_inds,
                                         mapcat_settings=mapcat_settings)
         try:
-            # 5. make the maps
+            # Make the maps
             mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds],
                     subshape, subwcs, noise_model, L, preproc, comps=comps, t0=t, comm=comm_good, tag=tag,
                     niter=args['maxiter'], dtype_map=dtype_map, dtype_tod=dtype_tod, site=SITE, tiled=args['tiled']>0,
                     verbose=verbose>0, downsample=args['downsample'], srcsamp_mask=srcsamp_mask, unit=args['unit'],
                     min_dets=args['min_dets'])
-            # 6. write them
+
+            # Write them
             write_depth1_map(prefix, mapdata, dtype=dtype_tod, binned=args['bin'], rhs=args['rhs'], unit=args['unit'])
             if comm_intra.rank == 0 :
                 L.info(f"Finished map {map_name}")
@@ -565,7 +271,7 @@ def main(config_file=None, defaults=defaults, **args):
                                   mapcat_settings=mapcat_settings)
 
         except DataMissing as e:
-            handle_empty(prefix, tag, comm_good, e, L)
+            L.info(f"Skipping {map_name} with {e}")
     return True
 
 if __name__ == '__main__':
