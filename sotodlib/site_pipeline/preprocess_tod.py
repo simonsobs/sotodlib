@@ -180,7 +180,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                           'errlog.txt')
 
     if run_from_jobdb:
-        job_list = jdb.get_jobs("init", jstate=JState.open)
+        job_list = jdb.get_jobs("init", jstate=JState.open, locked=False)
+        print(f"found {len(job_list)} open jobs to run")
         obs_list = list(set([j.tags['obs:obs_id'] for j in job_list]))
     else:
         obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id,
@@ -198,6 +199,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             temp_subdir
     )
     for obs_id in obs_list:
+        print("Cleaning up observations")
         pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
                             subdir=temp_subdir, remove=overwrite)
 
