@@ -17,6 +17,19 @@ from typing import List, Tuple, TYPE_CHECKING, Dict, Any, Optional
 from .report_data import ReportData, Footprint
 
 
+def get_wafers(platform: str):
+    if platform  == "lat":
+        tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
+        wafer_slots = ["ws0", "ws1", "ws2"]
+        wafers = [f"{x}_{y}" for x in tube_slots for y in wafer_slots]
+    elif platform in ["satp1", "satp2", "satp3"]:
+        wafers = [f"ws{i} " for i in range(7)]
+    else:
+        raise ValueError(f"Uknown platform {platform}")
+
+    return wafers
+
+
 def get_discrete_distinct_colors(n, reverse=False):
     base_colors = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377', '#BBBBBB']
     n_base = len(base_colors)
@@ -66,16 +79,122 @@ class ObsEfficiencyPlots:
     heatmap: go.Figure
 
 
-def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
-    if d.cfg.platform  == "lat":
-        tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
-        wafer_slots = ["ws0", "ws1", "ws2"]
-        wafers = [f"{x}_{y}" for x in tube_slots for y in wafer_slots]
-    elif d.cfg.platform in ["satp1", "satp2", "satp3"]:
-        wafers = [f"ws{i} " for i in range(7)]
-    else:
-        raise ValueError(f"Uknown platform {d.cfg.platform}")
+def obsdb_line_plot(x, y, xlabel, ylabel, title):
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode='lines',
+            name=ylabel,
+            line=dict(color="#0072B2", width=2),
+            marker=dict(size=8)
+        ))
 
+    # layout
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=140, b=40),
+        height=550,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+            y=0.92,
+            yanchor="top",
+            font=dict(size=18),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text=xlabel,
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text=ylabel,
+        showgrid=True,
+        gridcolor="lightgray",
+    )
+
+    return fig
+
+
+def boresight_vs_time(d: ReportData) -> go.Figure:
+    """Boresight angle and corotator in degrees vs time"""
+    tstamps = [o.start_time for o in d.obs_list]
+    boresight = [o.boresight if o.boresight is not None else np.nan for o in d.obs_list]
+    boresight = np.round(boresight, 1)
+
+    if d.cfg.platform == "lat":
+        el_center = [o.el_center if o.el_center is not None else np.nan for o in d.obs_list]
+        tstamps, boresight, el_center = zip(*sorted(zip(tstamps, boresight, el_center)))
+        el_center = list(el_center)
+    else:
+        tstamps, boresight = zip(*sorted(zip(tstamps, boresight)))
+    tstamps = list(tstamps)
+    boresight = list(boresight)
+    tstamps = [
+        dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
+        for t in tstamps
+    ]
+
+    fig = obsdb_line_plot(tstamps, boresight, "Time (UTC)", "Boresight [deg]", "Boresight")
+
+    if d.cfg.platform == "lat":
+        corot = np.array(boresight) + np.array(el_center) - 60
+
+        fig.add_trace(
+        go.Scatter(
+            x=tstamps,
+            y=corot,
+            mode="lines",
+            name="Corotator [deg]",
+            line=dict(color="#E69F00", width=2),
+            marker=dict(size=8),
+            yaxis="y2",
+        ))
+
+        fig.update_layout(
+        yaxis2=dict(
+            title="Corotator [deg]",
+            overlaying="y",
+            side="right"
+        ))
+
+    return fig
+
+
+def hwp_freq_vs_time(d: ReportData) -> go.Figure:
+    """Mean HWP frequency vs time"""
+    if d.cfg.platform in ["satp1", "satp2", "satp3"]:
+        tstamps = [o.start_time for o in d.obs_list]
+        hwp_freq_mean = [o.hwp_freq_mean if o.hwp_freq_mean is not None else np.nan for o in d.obs_list]
+        hwp_freq_mean = np.round(hwp_freq_mean, 2)
+
+        tstamps, hwp_freq_mean = zip(*sorted(zip(tstamps, hwp_freq_mean)))
+        tstamps = [dt.datetime.fromtimestamp(ts).strftime("%b %d") for ts in tstamps]
+
+        return obsdb_line_plot(tstamps, hwp_freq_mean, "Time (UTC)", "Mean HWP Freq [Hz]", "Mean HWP Freq")
+    else:
+        return go.Figure()
+
+
+def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
+    """Plot heatmap of wafer vs time and pie chart showing observation efficiency"""
+
+    wafers = get_wafers(d.cfg.platform)
     nwafers = len(wafers)
 
     times = pd.date_range(d.cfg.start_time, d.cfg.stop_time, nsegs).to_pydatetime()
@@ -177,6 +296,7 @@ markers = ["circle", "square", "diamond", "cross", "x", "triangle-up"]
 
 
 def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
+    """PWV and yield as a function of time"""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     yields = defaultdict(list)
@@ -269,13 +389,16 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
     fig.update_yaxes(
         title_text="PWV [mm]",
         secondary_y=True,
-        showgrid=False,
+        showgrid=True,
     )
 
     return fig
 
 
 def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) -> go.Figure:
+    """Number of valid detectors as a function of PWV. Current interval is plotted over
+    longterm contours.
+    """
     fig = go.Figure()
 
     if longterm_data is not None:
@@ -373,6 +496,7 @@ def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) 
 
 
 def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
+    """PWV and NEPs as a function of time"""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     neps = defaultdict(lambda: defaultdict(list))
@@ -454,7 +578,7 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
             text=f"{field_name.capitalize()} NEP and PWV",
             x=0.5,
             xanchor="center",
-            y=0.92,   # slightly lower
+            y=0.92,
             yanchor="top",
             font=dict(size=18),
         ),
@@ -475,7 +599,7 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
     fig.update_yaxes(
         title_text="PWV [mm]",
         secondary_y=True,
-        showgrid=False,
+        showgrid=True,
     )
 
     return fig
@@ -483,6 +607,8 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
 
 def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
                field_name: str = None) -> go.Figure:
+    """NEP as a function of PWV. Current interval is plotted over longterm contours.
+    """
     fig = go.Figure()
 
     if longterm_data is not None:
@@ -825,27 +951,14 @@ def source_footprints(d: "ReportData") -> go.Figure:
         ]
         return "<br>".join(links) + ("<br>" if len(links) == 1 else "")
 
-    if d.source_footprints is not None:
-        wafers = sorted(set(fp.wafer for fp in d.source_footprints))
-        sources = sorted(set(fp.source for fp in d.source_footprints))
-
-        lookup = {
-            (fp.wafer, fp.source): fp.obsids
-            for fp in d.source_footprints
-        }
-
-        wafer_col = wafers
-        source_cols = []
-        for source in sources:
-            col = []
-            for wafer in wafers:
-                obsids = lookup.get((wafer, source), [])
-                col.append(make_obsid_links(obsids))
-            source_cols.append(col)
-    else:
-        wafer_col = []
-        source_cols = []
-        sources = []
+    wafer_col = wafers
+    source_cols = []
+    for source in sources:
+        col = []
+        for wafer in wafers:
+            obsids = lookup.get((wafer, source), [])
+            col.append(make_obsid_links(obsids))
+        source_cols.append(col)
 
     table_columns = [wafer_col] + source_cols
     header_labels = ["Wafers"] + sources

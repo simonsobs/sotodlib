@@ -111,7 +111,7 @@ def main(cfg: str) -> None:
     cfg = GenerateReportConfig.from_yaml(cfg)
     base_path = os.path.join(cfg.output_root, cfg.report_interval)
 
-    for start_time, stop_time in tqdm(cfg.time_intervals):
+    for start_time, stop_time in tqdm(cfg.time_intervals, total=len(cfg.time_intervals)):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         subdir = os.path.join(base_path, time_str)
         report_file = os.path.join(subdir, "report.html")
@@ -149,6 +149,9 @@ def main(cfg: str) -> None:
                     template_dir=cfg.template_dir,
                     longterm_data=longterm_data
                 )
+                # update longterm obs file
+                if longterm_path is not None:
+                    data.save(longterm_path, overwrite=False, update_footprints=False)
         except Exception as e:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
@@ -174,6 +177,8 @@ def render_report(
     figures: Dict[str, go.Figure] = {
         "obs_efficiency_heatmap": obs_efficiency_plots.heatmap,
         "obs_efficiency_pie": obs_efficiency_plots.pie,
+        "boresight_vs_time": plots.boresight_vs_time(data),
+        "hwp_freq_vs_time": plots.hwp_freq_vs_time(data),
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
         "pwv_and_array_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="array"),

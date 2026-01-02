@@ -95,6 +95,9 @@ class ObsInfo:
     obs_tube_slot: str
     obs_tags: str = ""
     pwv: float = np.nan
+    el_center: float = np.nan
+    boresight: float = np.nan
+    hwp_freq_mean: float = np.nan
     num_valid_dets: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     array_nep: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     det_nep: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
@@ -110,6 +113,9 @@ class ObsInfo:
             obs_type=data["type"],
             obs_subtype=data["subtype"],
             obs_tube_slot=data["tube_slot"],
+            boresight=-data["roll_center"] if data["roll_center"] is not None else None,
+            el_center=data["el_center"],
+            hwp_freq_mean=data["hwp_freq_mean"] if "hwp_freq_mean" in data else None
         )
         return obs_info
 
@@ -167,11 +173,6 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
     Load PWV data from the range specified in the ReportDataConfig.
     Uses hk_cfg file or dict specified in the config.
     """
-
-    # don't try and load pwv earlier than 90 days ago
-    if cfg.start_time < dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=90):
-        return None
-
     if isinstance(cfg.hk_cfg, str):
         hk_cfg: HkConfig = HkConfig.from_yaml(cfg.hk_cfg)
     elif isinstance(cfg.hk_cfg, dict):
@@ -197,7 +198,11 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
     Load the pwv from either the CLASS or APEX radiometer.
     Merge both datasets when available.
     """
-    result = load_pwv(cfg)
+    try:
+        result = load_pwv(cfg)
+    except Exception as e:
+        logger.error(f"load_pwv failed with {e}")
+        result = None
     result_apex = get_apex_data(cfg)
     if result_apex is not None:
         result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
@@ -292,7 +297,8 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
 
     for obs_id, band_totals in totals_dict.items():
         band_totals.pop("NC", None)
-        if not obs_id or obs_id not in obsids:
+
+        if not obs_id:
             continue
 
         obs_entry = obs_list[obsids.index(obs_id)]
@@ -419,7 +425,6 @@ class ReportData:
             )
         ]
 
-        #for i, o in tqdm(enumerate(obs_list), total=len(obs_list)):
         for i, o in enumerate(obs_list):
             o.obs_tags = ",".join(ctx.obsdb.get(o.obs_id, tags=True)['tags'])
 
@@ -463,11 +468,11 @@ class ReportData:
         return data
 
 
-    def save(self, path: str) -> None:
+    def save(self, path: str, overwrite: bool=True, update_footprints: bool=True) -> None:
         """
         Save compiled data to an H5 file.
         """
-        with h5py.File(path, "w") as hdf:
+        with h5py.File(path, "w" if overwrite else "a") as hdf:
             d = self.cfg.__dict__
             for k, v in d.items():
                 if isinstance(v, dt.datetime):
@@ -478,25 +483,34 @@ class ReportData:
                     except:
                         raise Exception(f"Key: {k} cannot be converted to h5.")
 
-            hdf.attrs["cfg"] = json.dumps(d)
-            hdf.create_dataset("pwv", data=self.pwv)
+            if "cfg" not in hdf.attrs:
+                hdf.attrs["cfg"] = json.dumps(d)
+            if "pwv" not in hdf:
+                hdf.create_dataset("pwv", data=self.pwv)
 
             for obs in self.obs_list:
-                g = hdf.create_group(obs.obs_id)
+                if obs.obs_id not in hdf:
+                    g = hdf.create_group(obs.obs_id)
+                else:
+                    g = hdf[obs.obs_id]
                 for k, v in asdict(obs).items():
                     if v is None:
                         v = ""
 
                     if isinstance(v, np.ndarray) and v.dtype.names is not None:
+                        if k in g:
+                            del g[k]
                         g.create_dataset(k, data=v)
                     elif isinstance(v, (list, np.ndarray)) and np.issubdtype(np.array(v).dtype, np.number):
+                        if k in g:
+                            del g[k]
                         g.create_dataset(k, data=np.array(v))
                     elif isinstance(v, (int, float, np.floating)):
                         g.attrs[k] = v
                     else:
                         g.attrs[k] = str(v)
 
-            if self.source_footprints is not None:
+            if update_footprints and self.source_footprints is not None:
                 fp_grp = hdf.create_group("source_footprints")
                 wafers = np.array([fp.wafer for fp in self.source_footprints], dtype='S')
                 sources = np.array([fp.source for fp in self.source_footprints], dtype='S')
