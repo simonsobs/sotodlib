@@ -199,24 +199,16 @@ class JobManager:
 
     def commit_jobs(self, jobs):
         """Commit jobs to the jobs table"""
-
         with self.session_scope() as session:
-            for job in jobs:
-                existing = self.get_jobs(
-                    job.jclass, tags=job.tags,
-                    jstate=JState.all(), locked=None)
-                if len(existing):
-                    raise JobNotUniqueError(
-                        'Found other records with same tags: '
-                        f'{[x.id for x in existing]}')
-                session.add(job)
-            session.commit()
+            session.add_all(jobs)
+            session.flush()
             # Force a retrieval of job.id, before expunging --
             # otherwise some fields will dangle and sqlalchemy can
             # complain later about the detached object.
             for job in jobs:
                 job.id
                 session.expunge(job)
+            session.commit()
 
     def create_job(self,
                    jclass=None,
@@ -225,12 +217,21 @@ class JobManager:
                    creation_time=None,
                    visit_count=None,
                    visit_time=None,
+                   check_existing=True,
                    commit=True):
-        """Create a new job in the jobs table.
+        """Create a new job and opitionally commit to the jobs table.
 
         Return the job.
 
         """
+        if check_existing:
+            existing = self.get_jobs(
+                jclass, tags=tags,
+                jstate=JState.all(), locked=None)
+            if len(existing):
+                raise JobNotUniqueError(
+                    'Found other records with same tags: '
+                    f'{[x.id for x in existing]}')
 
         if creation_time is None:
             creation_time = time.time()
