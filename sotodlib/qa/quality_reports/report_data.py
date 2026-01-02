@@ -1,4 +1,4 @@
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, asdict, field
 from typing import Literal, Any, Dict, Union, Optional, List, Tuple
 import datetime as dt
 import yaml
@@ -95,7 +95,9 @@ class ObsInfo:
     obs_tube_slot: str
     obs_tags: str = ""
     pwv: float = np.nan
-    num_valid_dets: str = ""
+    num_valid_dets: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    array_nep: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    det_nep: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
 
     @classmethod
     def from_obsdb_entry(cls, data) -> "ObsInfo":
@@ -114,40 +116,6 @@ class ObsInfo:
     def __repr__(self):
         inner = ", ".join(f"{k}={repr(v)}" for k, v in self.__dict__.items())
         return f"ObsInfo({inner})"
-
-
-def arr_to_obs_list(obs_arr: np.ndarray) -> List[ObsInfo]:
-    """
-    Convert a npy structured array back to a list of ObsInfo objects.
-    """
-    obs_list: List[ObsInfo] = []
-    for entry in obs_arr:
-        kw = {}
-        for k, v in obs_arr.dtype.fields.items():
-            if v[0].type == np.bytes_:  # Convert back to string
-                kw[k] = entry[k].decode()
-            else:  # Is a numeric type
-                kw[k] = entry[k]
-        obs_list.append(ObsInfo(**kw))
-    return obs_list
-
-
-def obs_list_to_arr(obs_list: List[ObsInfo]) -> np.ndarray:
-    """
-    Convert a list of ObsInfo objects to a numpy structured array for processing
-    and storage.
-    """
-    dtype = []
-    data = []
-    for field in fields(ObsInfo):
-        if field.type is str:
-            typ: Any = "|S100"
-        else:
-            typ = field.type
-        dtype.append((field.name, typ))
-    for obs in obs_list:
-        data.append(tuple(getattr(obs, name) for name, _ in dtype))
-    return np.array(data, dtype=dtype)
 
 
 def get_apex_data(cfg: ReportDataConfig):
@@ -262,7 +230,11 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets', 'wafer.bandpass']#, '"wafer_slot"::tag', '"wafer.bandpass"::tag']
+    keys = ['time', 'num_valid_dets', 'bandpass']
+    if cfg.platform == "lat":
+        keys += ['array_net_T', 'det_net_T']
+    elif cfg.platform in ['satp1', 'satp2', 'satp3']:
+        keys += [f"{prefix}_{suffix}" for prefix in ["array_net", "det_net"] for suffix in ["T", "Q", "U"]]
 
     query = f"""
         SELECT """ + ", ".join(keys) +  f""" from "autogen"."preprocesstod" WHERE (
@@ -299,25 +271,68 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
 
     df["obs_id"] = df["timestamp"].apply(find_obsid)
 
+    nep_cols = [c for c in df.columns if "_net_" in c]
+    agg_dict = {"num_valid_dets": "sum", **{c: "sum" for c in nep_cols}}
+
     totals = (
-        df[["num_valid_dets", "obs_id", "wafer.bandpass"]]
-        .groupby(["obs_id", "wafer.bandpass"])["num_valid_dets"]
-        .sum()
-        .reset_index()
+        df.groupby(["obs_id", "bandpass"], as_index=False)
+          .agg(agg_dict)
     )
 
     totals_dict = (
-        totals.groupby("obs_id")
-              .apply(lambda g: dict(zip(g["wafer.bandpass"], g["num_valid_dets"])))
-              .to_dict()
+    totals.groupby("obs_id")
+          .apply(
+              lambda g: {
+                  row["bandpass"]: {c: row[c] for c in agg_dict.keys()}
+                  for _, row in g.iterrows()
+              }
+          )
+          .to_dict()
     )
 
     for obs_id, band_totals in totals_dict.items():
         band_totals.pop("NC", None)
+
         if not obs_id:
             continue
+
         obs_entry = obs_list[obsids.index(obs_id)]
-        obs_entry.num_valid_dets = str(band_totals)
+
+        det_dtype = [(band, "i4") for band in band_totals.keys()]
+        row = tuple(vals["num_valid_dets"] for _, vals in band_totals.items())
+        obs_entry.num_valid_dets = np.array([row], dtype=det_dtype)
+
+        for key, attr_name in zip(["array_net_", "det_net_"], ["array_nep", "det_nep"]):
+            all_keys = sorted({
+                k
+                for vals in band_totals.values() if isinstance(vals, dict)
+                for k in vals if k.startswith(key)
+            })
+
+            nep_dtype = [(band, [(k, "f8") for k in all_keys]) for band in band_totals.keys()]
+
+            nep_row = tuple(
+                tuple(vals.get(k, np.nan) for k in all_keys)
+                for _, vals in band_totals.items()
+            )
+
+            setattr(obs_entry, attr_name, np.array([nep_row], dtype=nep_dtype))
+
+
+#     for obs_id, band_totals in totals_dict.items():
+#         band_totals.pop("NC", None)
+#         if not obs_id:
+#             continue
+#         obs_entry = obs_list[obsids.index(obs_id)]
+#         obs_entry.num_valid_dets = str({band: vals["num_valid_dets"] for band, vals in band_totals.items()})
+#         obs_entry.array_nep = str({
+#                             band: {k: v for k, v in vals.items() if k.startswith("array_net_")}
+#                             for band, vals in band_totals.items()
+#         })
+#         obs_entry.det_nep = str({
+#                             band: {k: v for k, v in vals.items() if k.startswith("det_net_")}
+#                             for band, vals in band_totals.items()
+#         })
 
 
 @dataclass
@@ -448,6 +463,7 @@ class ReportData:
             data.source_footprints = source_footprints
         return data
 
+
     def save(self, path: str) -> None:
         """
         Save compiled data to an H5 file.
@@ -462,9 +478,24 @@ class ReportData:
                         d[k] = v
                     except:
                         raise Exception(f"Key: {k} cannot be converted to h5.")
+
             hdf.attrs["cfg"] = json.dumps(d)
             hdf.create_dataset("pwv", data=self.pwv)
-            hdf.create_dataset("obs_list", data=obs_list_to_arr(self.obs_list))
+
+            for obs in self.obs_list:
+                g = hdf.create_group(obs.obs_id)
+                for k, v in asdict(obs).items():
+                    if v is None:
+                        v = ""
+
+                    if isinstance(v, np.ndarray) and v.dtype.names is not None:
+                        g.create_dataset(k, data=v)
+                    elif isinstance(v, (list, np.ndarray)) and np.issubdtype(np.array(v).dtype, np.number):
+                        g.create_dataset(k, data=np.array(v))
+                    elif isinstance(v, (int, float, np.floating)):
+                        g.attrs[k] = v
+                    else:
+                        g.attrs[k] = str(v)
 
             if self.source_footprints is not None:
                 fp_grp = hdf.create_group("source_footprints")
@@ -476,20 +507,38 @@ class ReportData:
                 fp_grp.create_dataset('source', data=sources)
                 fp_grp.create_dataset('count', data=counts)
                 fp_grp.create_dataset('obsids', data=obsids)
-                # for i, fp in enumerate(self.source_footprints):
-                #     grp = fp_grp.create_group(f"fp_{i}")
-                #     grp.attrs["target"] = fp.target
-                #     grp.attrs["obs_id"] = fp.obs_id
-                #     grp.create_dataset("wafers", data=','.join(wafers.astype(str)))
 
     @classmethod
     def load(cls, path: str) -> "ReportData":
+        obs_list = []
         with h5py.File(path, "r") as hdf:
             # Load config
             cfg = ReportDataConfig(**json.loads(hdf.attrs["cfg"]))
-
-            obs_list = arr_to_obs_list(hdf["obs_list"])
             pwv = np.array(hdf["pwv"])
+
+            for obs_id, g in hdf.items():
+                if obs_id in ["pwv", "cfg", "source_footprints"]:
+                    continue
+
+                kwargs = {"obs_id": obs_id}
+
+                for k, v in g.attrs.items():
+                    if isinstance(v, bytes):
+                        kwargs[k] = v.decode()
+                    else:
+                        kwargs[k] = v
+
+                for k, dset in g.items():
+                    data = dset[()]
+
+                    if isinstance(data, np.ndarray) and data.dtype.names is not None:
+                        kwargs[k] = data
+                    elif data.shape == ():
+                        kwargs[k] = float(data)
+                    else:
+                        kwargs[k] = data
+
+                obs_list.append(ObsInfo(**kwargs))
 
             if "source_footprints" in hdf:
                 fps = []
@@ -524,9 +573,9 @@ def get_source_footprints(d: ReportData) -> List[Footprint]:
         if (float(entry['obs:obs_id'].split('_')[1]) >= d.cfg.start_time.timestamp()) & \
         (float(entry['obs:obs_id'].split('_')[1]) <= d.cfg.stop_time.timestamp()):
             source_obs_list.append(entry['obs:obs_id'])
-            
+
     coverage_data = defaultdict(lambda: defaultdict(lambda: {'count': 0, 'obsids': set()}))
-    
+
     for obs in source_obs_list:
         entry = db.inspect({'obs:obs_id': obs})
         if entry[0]['coverage'] == '':
@@ -537,7 +586,7 @@ def get_source_footprints(d: ReportData) -> List[Footprint]:
             if source in d.cfg.cal_targets:
                 coverage_data[wafer][source]['count'] += 1
                 coverage_data[wafer][source]['obsids'].add(obs)
-                
+
     for wafer, sources in coverage_data.items():
         for source, info in sources.items():
             fps.append(Footprint(wafer=wafer,

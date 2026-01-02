@@ -84,7 +84,7 @@ class GenerateReportConfig:
         self.template_dir = template_dir
         self.data_config = data_config
         self.skip_html = skip_html
-        
+
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
         if self.report_interval == "weekly":
             delta = dt.timedelta(weeks=1)
@@ -143,6 +143,7 @@ def main(cfg: str) -> None:
                     longterm_data = ReportData.load(data.cfg.longterm_obs_file)
                     longterm_path = data.cfg.longterm_obs_file
                 render_report(
+                    cfg,
                     data,
                     report_file,
                     template_dir=cfg.template_dir,
@@ -156,6 +157,7 @@ def main(cfg: str) -> None:
 
 
 def render_report(
+    cfg: GenerateReportConfig,
     data: ReportData,
     output_path: str,
     template_dir=None,
@@ -174,6 +176,10 @@ def render_report(
         "obs_efficiency_pie": obs_efficiency_plots.pie,
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
+        "pwv_and_array_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="array"),
+        "array_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="array"),
+        "pwv_and_det_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="det"),
+        "det_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="det"),
         "source_focalplane": source_footprint_plots.focalplane,
         "source_table": source_footprint_plots.table
     }
@@ -189,6 +195,7 @@ def render_report(
         stop_time_str = data.cfg.stop_time.isoformat()
     jinja_data = {
         "data": data,
+        "report_interval": cfg.report_interval.capitalize(),
         "plots": {k: v.to_html(**html_kw) for k, v in figures.items()},
         "general_stats": {
             "Start time": dt.datetime.fromisoformat(start_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
