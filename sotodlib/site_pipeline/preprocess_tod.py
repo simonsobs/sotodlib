@@ -341,7 +341,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 with jdb.locked(job) as j:
                     j.mark_visited()
                     if errors[0] is not None:
-                        j.jstate = JState.error
+                        j.jstate = JState.failed
                         for _t in j._tags:
                             if _t.key == "error":
                                 _t.value = errors[0]
