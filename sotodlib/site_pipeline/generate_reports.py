@@ -17,7 +17,7 @@ from dateutil.relativedelta import relativedelta
 from importlib import reload
 reload(plots)
 
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
 
 def create_manifest(base_dir: str, output_file: str):
@@ -222,4 +222,4 @@ def get_parser(
 
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

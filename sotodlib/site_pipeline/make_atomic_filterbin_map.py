@@ -15,7 +15,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 import numpy as np
-import sotodlib.site_pipeline.util as util
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
@@ -137,7 +136,7 @@ class Cfg:
         center_at: Optional[str] = None,
         max_dets: Optional[int] = None,
         fixed_time: Optional[int] = None,
-        min_dur: Optional[int] = None,
+        min_dur: Optional[int] = 300,
         verbose: int = 0,
         quiet: int = 0,
         window: Optional[float] = None,
@@ -145,7 +144,7 @@ class Cfg:
         dtype_map: str = 'float64',
         unit: str = 'K',
         use_psd: bool = True,
-        wn_label: str = 'preprocess.noiseQ_mapmaking.white_noise',
+        wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True
     ) -> None:
         self.context = context
@@ -193,18 +192,6 @@ class Cfg:
 
 class DataMissing(Exception):
     pass
-
-def get_pwv(start_time, stop_time, data_dir):
-    try:
-        pwv_info = hk_utils.get_hkaman(
-            float(start_time), float(stop_time), alias=['pwv'],
-            fields=['site.env-radiometer-class.feeds.pwvs.pwv'],
-            data_dir=data_dir)
-        pwv_all = pwv_info['env-radiometer-class']['env-radiometer-class'][0]
-        pwv = np.nanmedian(pwv_all)
-    except (KeyError, ValueError):
-        pwv = 0.0
-    return pwv
 
 def get_sun_distance(site, ctime, az, el):
     site_ = so3g_coords.SITES[site].ephem_observer()
@@ -322,8 +309,9 @@ def main(
         errlog.append( os.path.join(os.path.dirname(
             preproc_local['archive']['index']), 'errlog.txt') )
 
-
     if (args.update_delay is not None):
+        # this is only to be used for running automatic maps on prefect
+        args.query += f" and duration>{args.min_dur}"
         min_ctime = int(time.time()) - args.update_delay*86400
         args.query += f" and timestamp>={min_ctime}"
 
@@ -337,7 +325,7 @@ def main(
         obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
             context_obj, args.query, nset=args.nset, wafer=args.wafer,
             freq=args.freq, ntod=args.ntod, tods=args.tods,
-            fixed_time=args.fixed_time, mindur=args.min_dur)
+            fixed_time=args.fixed_time, min_dur=args.min_dur)
     except mapmaking.NoTODFound as err:
         L.exception(err)
         exit(0)
@@ -432,12 +420,7 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        #pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
 
-        # Save file for data base of atomic maps.
-        # We will write an individual file,
-        # another script will loop over those files
-        # and write into sqlite data base
         if not args.only_hits:
             info_list = []
             for split_label in split_labels:
@@ -454,9 +437,16 @@ def main(
                 info['prefix_path'] = str(prefix + '_%s' % split_label)
                 info['elevation'] = obs_infos[obslist[0][3]].el_center
                 info['azimuth'] = obs_infos[obslist[0][3]].az_center
-                #info['pwv'] = float(pwv_atomic)
-                info['roll_angle'] = obs_infos[obslist[0][3]].roll_center
                 info['sun_distance'] = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
+                try:
+                    info['pwv'] = obs_infos[obslist[0][3]].pwv_mean
+                    info['dpwv'] = obs_infos[obslist[0][3]].pwv_std
+                    info['roll_angle'] = obs_infos[obslist[0][3]].roll_center
+                    info['scan_speed'] = obs_infos[obslist[0][3]].scan_vel
+                    info['scan_acc'] = obs_infos[obslist[0][3]].scan_accel
+                except (AttributeError, KeyError):
+                    # if these are not in the obsdb then we get here and we skip
+                    continue
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:

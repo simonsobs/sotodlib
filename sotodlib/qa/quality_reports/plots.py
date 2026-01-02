@@ -825,14 +825,27 @@ def source_footprints(d: "ReportData") -> go.Figure:
         ]
         return "<br>".join(links) + ("<br>" if len(links) == 1 else "")
 
-    wafer_col = wafers
-    source_cols = []
-    for source in sources:
-        col = []
-        for wafer in wafers:
-            obsids = lookup.get((wafer, source), [])
-            col.append(make_obsid_links(obsids))
-        source_cols.append(col)
+    if d.source_footprints is not None:
+        wafers = sorted(set(fp.wafer for fp in d.source_footprints))
+        sources = sorted(set(fp.source for fp in d.source_footprints))
+
+        lookup = {
+            (fp.wafer, fp.source): fp.obsids
+            for fp in d.source_footprints
+        }
+
+        wafer_col = wafers
+        source_cols = []
+        for source in sources:
+            col = []
+            for wafer in wafers:
+                obsids = lookup.get((wafer, source), [])
+                col.append(make_obsid_links(obsids))
+            source_cols.append(col)
+    else:
+        wafer_col = []
+        source_cols = []
+        sources = []
 
     table_columns = [wafer_col] + source_cols
     header_labels = ["Wafers"] + sources

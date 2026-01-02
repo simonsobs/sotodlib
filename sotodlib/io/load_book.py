@@ -455,6 +455,8 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                         origin_tag=obs_id))
 
     aman.wrap('timestamps', timestamps, axis_map=[(0, 'samps')])
+    # flags place
+    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
 
     if ancil is not None:
         # Handle ancillary fields, a.k.a. boresight pointing /
@@ -464,7 +466,10 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         # Put all fields into 'ancil'.
         _a = aman['ancil']
         for k, v in ancil.finalize().items():
-            _a.wrap(k, v, [(0, 'samps')])
+            if "flag" in k:
+                _a.wrap(k, so3g.RangesInt32.from_mask(v), [(0, 'samps')])
+            else:
+                _a.wrap(k, v, [(0, 'samps')])
 
         # Transform some fields into 'boresight'.
         if 'az_enc' in _a and 'el_enc' in _a:
@@ -482,6 +487,13 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 _b.wrap('roll', None)
             else:
                 _b.wrap('roll', roll * DEG, [(0, 'samps')])
+            
+            # if we don't have flag fields, assume it's good
+            bs_flag = so3g.RangesInt32(aman.samps.count)
+            for k, flg in _a._fields.items():
+                if "flag" in k:
+                    bs_flag += flg 
+            aman.flags.wrap("acu_drops", bs_flag, [(0, 'samps')])
 
     if len(results) == 0:
         return aman
@@ -513,19 +525,20 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 # Should look like this: sch_NONE_2_326
                 b, c = map(int, k.split('_')[2:])
                 tone_info.append((v['stream_id'], v['stream_id'] + f'_{b}_{c}', b, c))
-        ts, tk, tb, tc = map(np.array, zip(*tone_info))
-        tman = core.AxisManager(core.LabelAxis('tdets', tk),
-                                aman.samps)
-        aman.wrap('tones', tman)
-        aman.tones.wrap('stream_id', ts, axis_map=[(0, 'tdets')])
-        aman.tones.wrap('band', tb, axis_map=[(0, 'tdets')])
-        aman.tones.wrap('channel', tc, axis_map=[(0, 'tdets')])
-        aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype='float32')
-        dets_ofs = 0
-        for v in results.values():
-            d = v['tones'].data
-            aman.tones['signal'][dets_ofs:dets_ofs + len(d)] = d
-            dets_ofs += len(d)
+        if tone_info:
+            ts, tk, tb, tc = map(np.array, zip(*tone_info))
+            tman = core.AxisManager(core.LabelAxis('tdets', tk),
+                                    aman.samps)
+            aman.wrap('tones', tman)
+            aman.tones.wrap('stream_id', ts, axis_map=[(0, 'tdets')])
+            aman.tones.wrap('band', tb, axis_map=[(0, 'tdets')])
+            aman.tones.wrap('channel', tc, axis_map=[(0, 'tdets')])
+            aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype='float32')
+            dets_ofs = 0
+            for v in results.values():
+                d = v['tones'].data
+                aman.tones['signal'][dets_ofs:dets_ofs + len(d)] = d
+                dets_ofs += len(d)
 
     # In sims, or if no_headers, the primary block may be unpopulated.
     if any([(v['primary'] is not None and v['primary'].data is not None)
@@ -562,9 +575,6 @@ def _concat_filesets(results, ancil=None, timestamps=None,
                 for k, v in r['iir_params'].items():
                     _iir.wrap(k, v)
             aman['iir_params'].wrap(r['stream_id'], _iir)
-
-    # flags place
-    aman.wrap("flags", core.FlagManager.for_tod(aman, "dets", "samps"))
 
     # Assemble per-wafer flags by suffixing the stream_id.
     for flag_key in one_result['flags'].keys():

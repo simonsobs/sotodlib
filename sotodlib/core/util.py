@@ -1,4 +1,81 @@
 import numpy as np
+import h5py
+import time
+
+
+class H5LockTimeoutError(Exception):
+    """Raised when an HDF5 file cannot be opened due to lock timeouts."""
+    pass
+
+
+class H5ContextManager:
+    """
+    Class to open an HDF5 file with retry logic on file locking.  This class
+    can be used either as a context manager or as a regular function.
+
+    Examples
+    --------
+    As a context manager
+        with H5ContextManager("data.h5", "r") as f:
+            print(list(f.keys()))
+
+    Direct function call:
+        f = H5ContextManager("data.h5", "r").open()
+        print(list(f.keys()))
+        f.close()
+
+    Parameters
+    ----------
+    filename : str
+        Path to the HDF5 file.
+    *args :
+        Additional positional arguments passed to `h5py.File`.
+    max_attempts : int, optional
+        Number of times to retry opening the file if it is locked.
+    delay : int or float, optional
+        Delay in seconds between retries.
+    **kwargs :
+        Additional keyword arguments passed to `h5py.File`.
+    """
+    def __init__(self, filename, *args, max_attempts=3, delay=5, **kwargs):
+        self.filename = filename
+        self.args = args
+        self.kwargs = kwargs
+        self.max_attempts = max_attempts
+        self.delay = delay
+        self.f = None
+
+        assert self.max_attempts > 0
+        assert self.delay >= 0
+
+    def open(self):
+        for attempt in range(self.max_attempts):
+            try:
+                self.f = h5py.File(self.filename, *self.args, **self.kwargs)
+                return self.f
+            except BlockingIOError as e:
+                # If the file is locked, retry opening it after a delay
+                if attempt + 1 < self.max_attempts:
+                    time.sleep(self.delay)
+                else:
+                    raise H5LockTimeoutError(
+                        f"Failed to open {self.filename} after "
+                        f"{self.max_attempts} attempts"
+                    ) from e
+            except Exception as e:
+                # Other errors should fail immediately
+                raise e
+
+    def __enter__(self):
+        if self.f is None:
+            self.open()
+        return self.f
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.f:
+            self.f.close()
+            self.f = None
+
 
 def tag_substr(dest, tags, max_recursion=20):
     """ Do string substitution of all our tags into dest (in-place

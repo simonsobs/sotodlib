@@ -18,7 +18,7 @@ class Context(odict):
     hook_sets = {}
 
     def __init__(self, filename=None, site_file=None, user_file=None,
-                 data=None, load_list='all'):
+                 data=None, load_list='all', metadata_list='all'):
         """Construct a Context object.  Note this is an ordereddict with a few
         attributes added on.
 
@@ -41,6 +41,9 @@ class Context(odict):
           load_list (str or list): A list of databases to load; some
             combination of 'obsdb', 'detdb', 'obsfiledb', or the
             string 'all' to load all of them (default).
+          metadata_list (str or list): A list of metadata labels to load;
+            some combinations of metadata labels, or the string 'all' to
+            load all of them (default).
 
         """
         super().__init__()
@@ -55,18 +58,18 @@ class Context(odict):
         logger.info(f'Using user_file={user_file}.')
 
         self.update(site_cfg)
-        self.update_context(user_cfg)
+        self.update_context(user_cfg, metadata_list)
 
         ok, full_filename, context_cfg = _read_cfg(filename)
         if filename is not None and not ok:
             raise RuntimeError(
                 'Could not load requested context file %s' % filename)
         logger.info(f'Using context_file={full_filename}.')
-        self.update_context(context_cfg)
+        self.update_context(context_cfg, metadata_list)
 
         # Update with anything the user passed in.
         if data is not None:
-            self.update_context(data)
+            self.update_context(data, metadata_list)
 
         self.site_file = site_file
         self.user_file = user_file
@@ -111,11 +114,15 @@ class Context(odict):
             return default
         return self[k]
 
-    def update_context(self, new_stuff):
+    def update_context(self, new_stuff, metadata_list='all'):
         appendable = ['metadata']
         mergeable = ['tags']
 
         for k, v in new_stuff.items():
+            if k == 'metadata':
+                if metadata_list != 'all':
+                    v = [m for m in v if 'label'
+                         in m and m['label'] in metadata_list]
             if k in appendable and k in self:
                 self[k].extend(v)
             elif k in mergeable and k in self:
@@ -167,6 +174,7 @@ class Context(odict):
                 no_signal=None,
                 no_headers=None,
                 special_channels=None,
+                reindex_dets=None,
                 loader_type=None,
     ):
         """Load TOD and supporting metadata for some observation.
@@ -210,9 +218,19 @@ class Context(odict):
             information that tags along with the signal.
           special_channels (bool): If True, load "special" readout
             channels that are normally skipped (e.g. fixed tones).
+          reindex_dets (bool) If True, reindexes the axismanager
+            "dets" axis to include any special dets that may have
+            been loaded. All special det signals, bands, channels, 
+            and readout_ids will be inserted along the dets axis
+            and respective data arrays. Does not destroy special 
+            dets axes like the "tdets" axis. WARNING: ~Doubles
+            run time and instantaenous memory usage as the signal
+            dataset has to effectively be copied! Memory returned
+            after reindexing is complete.
           loader_type (str): Name of the registered TOD loader
             function to use (this will override whatever is specified
             in context.yaml).
+
 
         Notes:
           It is acceptable to pass the ``obs_id`` argument by position
@@ -322,6 +340,97 @@ class Context(odict):
                         _det_info.move(k, None)
                 meta.det_info.merge(_det_info)
             aman.merge(meta)
+
+        # Deal with special channels, if they exist.
+        # We will merge the dets and tdets axes
+        # And merge the tdets signal into the dets signal, band, and channels.
+        # nans will be inserted into every other dataset assigned to the dets axis.
+        if special_channels and reindex_dets:
+            # Check for special channels (tones).
+            if 'tones' not in aman:
+                logger.info('"tones" not found in aman, no special channels to reindex!')
+
+            # Check there is det_info to reindex.
+            elif 'det_info' not in aman:
+                logger.error('"det_info" not found in aman, no dets to reindex!')
+
+            # Both tones and det_info exist.
+            else:
+                # Grab all band and channel info for dets + tdets
+                det_bands = aman.det_info.smurf.band
+                det_channels = aman.det_info.smurf.channel
+                tdet_bands = aman.tones.band
+                tdet_channels = aman.tones.channel
+    
+                # Create a sorted array of dets + tdets
+                special_band_ch = [(b, c) for b, c in zip(tdet_bands, tdet_channels)]
+                normal_band_ch = [(b, c) for b, c in zip(det_bands, det_channels)]
+                band_ch = np.array(sorted(normal_band_ch + special_band_ch))
+    
+                # Grab the det idxs from the det band + channels
+                det_indexes = np.full(len(band_ch), np.nan)
+                for i, (b, c) in enumerate(band_ch):
+                    w = np.where((det_bands == b) & (det_channels == c))[0]
+                    if len(w) == 0:
+                        continue
+    
+                    det_indexes[i] = w[0]
+    
+                # Grab the tdet idxs from the tdet band + channels
+                tdet_indexes = np.full(len(band_ch), np.nan)
+                for i, (b, c) in enumerate(band_ch):
+                    w = np.where((tdet_bands == b) & (tdet_channels == c))[0]
+                    if len(w) == 0:
+                        continue
+    
+                    tdet_indexes[i] = w[0]
+    
+                # Use the det idxs to reindex all datasets assigned to the dets axis
+                # This will set the len to dets + tdets
+                # And will insert nans where the tdet channels exist
+                # in the sorted band_ch array
+                aman.reindex_axis(axis='dets', indexes=det_indexes)
+    
+                # Finally use the tdet idxs to fill in the tdet data
+                # For the signal, band, and channels
+                for i, tidx in enumerate(tdet_indexes):
+                    if np.isnan(tidx):
+                        continue
+    
+                    aman.signal[i] = aman.tones.signal[int(tidx)]
+                    aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
+                    aman.det_info.smurf.band[i] = aman.tones.band[int(tidx)]
+    
+                def add_tdet_ids(aman, tdet_indexes, tdet_ids):
+                    """
+                        Small Function for recursively delving through
+                        all amans in the arg aman to add tdet ids into
+                        the dets axes.
+                    """
+                    # Check all assignments for any AxisManagers
+                    for assignment, axes in aman._assignments.items():
+                        if isinstance(aman[assignment], AxisManager) and "dets" in axes:
+                            # If they have a Dets axis, go fix it first.
+                            add_tdet_ids(aman[assignment], tdet_indexes, tdet_ids)
+    
+                    # Skip current aman if it doesn't have a dets axis.
+                    # This is the recursion base case
+                    # Assuming someone didn't make an infinitely deep aman
+                    # Or circular amans....
+                    if "dets" not in aman._axes.keys():
+                        return
+    
+                    # If this aman has a dets axis, add in tdet ids.
+                    for i, tidx in enumerate(tdet_indexes):
+                        if np.isnan(tidx):
+                            continue
+                        aman.dets.vals[i] = tdet_ids[int(tidx)]
+    
+                # Add in tdet ids to all amans.
+                add_tdet_ids(aman, tdet_indexes, aman.tdets.vals)
+    
+                # obs_aman tdet info is merged!
+
         return aman
 
     def get_meta(self,
