@@ -116,18 +116,17 @@ class IntensityTemplates(Operator):
         "detectors with",
     )
 
-    hkkey = Unicode(
-        None,
-        allow_none=True,
-        help="An additional housekeeping data key to extract and process into "
-        "a template.  It will be lowpassed or split according to `submode` "
-        "just like the intensity templates.  Multiple keys can be separated by "
-        "commas."
-    )
-
     template_name = Unicode(
         "intensity_templates",
         help="Observation key for recording the calculated templates",
+    )
+
+    focalplane_pixel_width = Quantity(
+        0.01 * u.deg
+        help="Focalplane pixel width is used to assign detector positions into "
+        "rows and columns.  Should be smaller than typical separation of "
+        "nearest neighbor centers but not so small that detector in the same "
+        "focalplane pixel can get separated.",
     )
 
     @traitlets.validate("det_mask")
@@ -160,6 +159,33 @@ class IntensityTemplates(Operator):
         return
 
     @function_timer
+    def _det_to_pixel(self, det, focalplane):
+        """Translate detector name into pixel name
+
+        For now, this is done by translating the detector quaternion
+        into a row and column on the focalplane.  If a suitable
+        detector property is reliably available in the focalplane
+        database, it should be used instead.
+        """
+
+        # Get a detector position on the focal plane by rotating the
+        # boresight on the X-axis and taking the detector pointing
+        # in lon/lat
+
+        quat = focalplane[det]["quat"]
+        yrot = qa.rotation(YAXIS, np.pi / 2)
+        theta, phi, _ = qa.to_iso_angles(qa.mult(yrot, quat))
+        lon = np.degrees(phi)
+        lat = 90 - np.degrees(theta)
+
+        wpix = self.focalplane_pixel_width.to_value(u.degree)
+        col = int(lon / wpix - 0.5)
+        row = int(lat / wpix - 0.5)
+        pixel = f"({col},{row})"
+
+        return pixel
+
+    @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         """Derive the templates
 
@@ -168,9 +194,10 @@ class IntensityTemplates(Operator):
 
         """
         log = Logger.get()
+        wcomm = data.comm.comm_world
         gcomm = data.comm.comm_group
 
-        if self.cache_dir is not None:
+        if (wcomm is None or wcomm.rank == 0) and self.cache_dir is not None:
             os.makedirs(self.cache_dir, exist_ok=True)
 
         for ob in data.obs:
@@ -246,7 +273,6 @@ class IntensityTemplates(Operator):
             # See if we already have cached templates
 
             intensity_templates = {}
-            hkfields = {}
             if self.cache_dir is not None:
                 fname_cache = os.path.join(self.cache_dir, f"{ob.name}.pck")
                 if os.path.isfile(fname_cache):
@@ -256,25 +282,13 @@ class IntensityTemplates(Operator):
                         comm=gcomm,
                     )
                     with open(fname_cache, "rb") as f:
-                        intensity_templates, hkfields = pickle.load(f)
+                        intensity_templates = pickle.load(f)
             else:
                 fname_cache = None
 
-            # See if we have a housekeeping template
-
-            if self.hkkey is not None:
-                for key in self.hkkey.split(","):
-                    if key in hkfields:
-                        # This key is already loaded, possibly from cache.
-                        pass
-                    else:
-                        hkfield = ob.hk.interp(key)
-                        hkfield -= np.mean(hkfield)
-                        hkfields[key] = hkfield
-
             # Every process builds all intensity templates that it needs
 
-            if self.mode.lower == "all":
+            if self.mode.lower() == "all":
                 template_key = "all"
                 radius = None
             else:
@@ -287,7 +301,7 @@ class IntensityTemplates(Operator):
                 # See if this detector needs a template
                 if det.startswith("demod4r") or det.startswith("demod4i"):
                     # Yes, derive the template key
-                    pixel = det.replace("demod4r_", "").replace("demod4i_", "")
+                    pixel = self._det_to_pixel(det, fp)
                     key = template_key.format(pixel=pixel)
                     if key not in intensity_templates:
                         intensity_templates[key] = {}
@@ -343,7 +357,7 @@ class IntensityTemplates(Operator):
                             intensity_templates.update(templates)
                 if gcomm is None or gcomm.rank == 0:
                     with open(fname_cache, "wb") as f:
-                        pickle.dump([intensity_templates, hkfields], f)
+                        pickle.dump(intensity_templates, f)
                 log.info_rank(f"Cached templates in {fname_cache}", comm=gcomm)
 
             # Loading from cache causes there to be unused templates.
@@ -392,25 +406,6 @@ class IntensityTemplates(Operator):
                                 lowpassed = lowpass(template)
                                 template -= lowpassed
                                 templates[f"{name}-lowpass{i}"] = lowpassed
-
-                for hkkey in list(hkfields.keys()):
-                    hkfield = hkfields[hkkey]
-                    if single_lowpass is not None:
-                        # Lowpass mode, replace original template
-                        hkfield[:] = single_lowpass(hkfield)
-                    else:
-                        # Split mode, derive multiple templates and
-                        # conserve total power
-                        for i, lowpass in enumerate(lowpasses):
-                            lowpassed = lowpass(hkfield)
-                            hkfield -= lowpassed
-                            hkfields[f"{hkkey}-lowpass{i}"] = lowpassed
-
-            # Add housekeeping fields to the templates
-
-            for key, templates in intensity_templates.items():
-                for hkkey, hkfield in hkfields.items():
-                    templates[hkkey] = hkfield
 
             # Optionally add higher order templates
 
