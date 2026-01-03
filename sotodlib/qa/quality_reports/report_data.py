@@ -324,22 +324,6 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
             setattr(obs_entry, attr_name, np.array([nep_row], dtype=nep_dtype))
 
 
-#     for obs_id, band_totals in totals_dict.items():
-#         band_totals.pop("NC", None)
-#         if not obs_id:
-#             continue
-#         obs_entry = obs_list[obsids.index(obs_id)]
-#         obs_entry.num_valid_dets = str({band: vals["num_valid_dets"] for band, vals in band_totals.items()})
-#         obs_entry.array_nep = str({
-#                             band: {k: v for k, v in vals.items() if k.startswith("array_net_")}
-#                             for band, vals in band_totals.items()
-#         })
-#         obs_entry.det_nep = str({
-#                             band: {k: v for k, v in vals.items() if k.startswith("det_net_")}
-#                             for band, vals in band_totals.items()
-#         })
-
-
 @dataclass
 class Footprint:
     """
