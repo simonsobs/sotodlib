@@ -28,3 +28,5 @@ from .readout_filter import ReadoutFilter
 from .dark_template import DarkTemplate
 from .trend_cut import DetTrendCuts
 from .intensity_templates import IntensityTemplates
+from .dark_templates import DarkTemplates
+from .housekeeping_templates import HouseKeepingTemplates
