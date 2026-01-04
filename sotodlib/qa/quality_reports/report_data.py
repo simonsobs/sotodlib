@@ -10,7 +10,6 @@ import json
 import h5py
 import logging
 import numpy as np
-# import alphashape
 from influxdb import InfluxDBClient
 from collections import defaultdict
 
@@ -18,8 +17,11 @@ from sotodlib.io import hkdb
 from sotodlib.io.hkdb import HkConfig
 from sotodlib.core import Context
 from sotodlib.core.metadata import ManifestDb
+from pixell import enmap, enplot
+
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 class ReportDataConfig:
     def __init__(
@@ -35,6 +37,7 @@ class ReportDataConfig:
         longterm_obs_file: Optional[str] = None,
         preprocess_sourcedb_path: Optional[str] = None,
         load_source_footprints: bool = True,
+        make_cov_map: bool = True,
         cal_targets: Optional[List[str]] = None,
         show_hk_pb: bool = False,
     ) -> None:
@@ -46,6 +49,7 @@ class ReportDataConfig:
         self.preprocess_sourcedb_path: Optional[str] = preprocess_sourcedb_path
         self.load_source_footprints: bool = load_source_footprints
         self.show_hk_pb: bool = show_hk_pb
+        self.make_cov_map = make_cov_map
 
         if cal_targets is None:
             self.cal_targets = ["jupiter", "saturn", "tau_A", "tauA", "cenA", "mars"]
@@ -113,9 +117,9 @@ class ObsInfo:
             obs_type=data["type"],
             obs_subtype=data["subtype"],
             obs_tube_slot=data["tube_slot"],
-            boresight=-data["roll_center"] if data["roll_center"] is not None else None,
-            el_center=data["el_center"],
-            hwp_freq_mean=data["hwp_freq_mean"] if "hwp_freq_mean" in data else None
+            boresight=-data["roll_center"] if data["roll_center"] is not None else np.nan,
+            el_center=data["el_center"] if data["el_center"] is not None else np.nan,
+            hwp_freq_mean=data["hwp_freq_mean"] if ("hwp_freq_mean" in data and data["hwp_freq_mean"] is not None) else np.nan
         )
         return obs_info
 
@@ -190,7 +194,10 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
         show_pb=cfg.show_hk_pb,
     )
 
-    return result
+    if "env-radiometer-class.pwvs.pwv" in result.data.keys():
+        return result.data["env-radiometer-class.pwvs.pwv"]
+    else:
+        return None
 
 
 def get_hk_and_pwv_data(cfg: ReportDataConfig):
@@ -203,14 +210,17 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
     except Exception as e:
         logger.error(f"load_pwv failed with {e}")
         result = None
-    result_apex = get_apex_data(cfg)
+    try:
+        result_apex = get_apex_data(cfg)
+    except:
+        result_apex = None
     if result_apex is not None:
         result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
 
-    if hasattr(result, 'pwv'):
+    if result is not None:
         if result_apex is not None:
-            combined_times = np.concatenate((result.pwv[0], result_apex[0]))
-            combined_data = np.concatenate((result.pwv[1], result_apex[1]))
+            combined_times = np.concatenate((result[0], result_apex[0]))
+            combined_data = np.concatenate((result[1], result_apex[1]))
 
             sorted_indices = np.argsort(combined_times)
             sorted_times = combined_times[sorted_indices]
@@ -324,6 +334,27 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
             setattr(obs_entry, attr_name, np.array([nep_row], dtype=nep_dtype))
 
 
+def generate_coverage_map(ctx_path: str, obs_list: List[ObsInfo]):
+    from sotodlib.mapmaking.utils import downsample_obs
+    from sotodlib import coords
+
+    ctx = Context(ctx_path)
+    res = 10./60 * coords.DEG
+
+    cmb_obs_list = [o for o in obs_list if o.obs_subtype == "cmb"]
+
+    geom = enmap.fullsky_geometry(res=res, proj='car')
+    w = None
+    for o in tqdm(cmb_obs_list, total=len(cmb_obs_list)):
+        aman = ctx.get_obs(o.obs_id, no_signal=True)
+        aman.restrict("dets", np.isfinite(aman.focal_plane.gamma))
+        aman = downsample_obs(aman, 100, skip_signal=True)
+        aman.restrict("dets", aman.dets.vals[::10])
+        p = coords.P.for_tod(aman, geom=geom, comps='T')
+        w = p.to_weights(aman, dest=w)
+
+    return w
+
 @dataclass
 class Footprint:
     """
@@ -393,14 +424,17 @@ class ReportData:
 
     cfg: ReportDataConfig
     obs_list: List[ObsInfo]
-    pwv: np.ndarray
+    pwv: Optional[np.ndarray] = None
     source_footprints: Optional[List[Footprint]] = None
+    w: Optional[enmap.ndmap] = None
     longterm_obs_df: Optional[pd.DataFrame] = None
+
 
     @classmethod
     def build(cls, cfg: ReportDataConfig) -> "ReportData":
         ctx = Context(cfg.ctx_path)
 
+        logger.info("Building Obs List")
         obs_list = [
             ObsInfo.from_obsdb_entry(o)
             for o in ctx.obsdb.query(
@@ -413,7 +447,8 @@ class ReportData:
             o.obs_tags = ",".join(ctx.obsdb.get(o.obs_id, tags=True)['tags'])
 
         if cfg.longterm_obs_file is not None:
-            longterm_obs_df = cls.load(cfg.longterm_obs_file)
+            logger.info("Getting longterm data")
+            longterm_obs_df = cls.load(cfg.longterm_obs_file, cov_map_path=None)
         else:
             longterm_obs_df = None
 
@@ -442,21 +477,29 @@ class ReportData:
                 o.pwv = -9999.
 
         data: "ReportData" = cls(
-            cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
+            cfg=cfg, obs_list=obs_list, pwv=None, longterm_obs_df=longterm_obs_df
         )
 
         if cfg.load_source_footprints:
             logger.info("Loading Source Footprints")
             source_footprints = get_source_footprints(data)
             data.source_footprints = source_footprints
+
+        if cfg.make_cov_map:
+            logger.info("Making Coverage Map")
+            try:
+                data.w = generate_coverage_map(cfg.ctx_path, obs_list)
+            except Exception as e:
+                logger.error(f"Coverage map failed with {e}")
+
         return data
 
 
-    def save(self, path: str, overwrite: bool=True, update_footprints: bool=True) -> None:
+    def save(self, data_path: str, cov_map_path: str, overwrite: bool=True, update_footprints: bool=True) -> None:
         """
         Save compiled data to an H5 file.
         """
-        with h5py.File(path, "w" if overwrite else "a") as hdf:
+        with h5py.File(data_path, "w" if overwrite else "a") as hdf:
             d = self.cfg.__dict__
             for k, v in d.items():
                 if isinstance(v, dt.datetime):
@@ -469,7 +512,7 @@ class ReportData:
 
             if "cfg" not in hdf.attrs:
                 hdf.attrs["cfg"] = json.dumps(d)
-            if "pwv" not in hdf:
+            if self.pwv is not None and "pwv" not in hdf:
                 hdf.create_dataset("pwv", data=self.pwv)
 
             for obs in self.obs_list:
@@ -505,13 +548,23 @@ class ReportData:
                 fp_grp.create_dataset('count', data=counts)
                 fp_grp.create_dataset('obsids', data=obsids)
 
+            if cov_map_path is not None and self.w is not None:
+                enmap.write_map(cov_map_path + ".fits", self.w)
+                f = enplot.plot(self.w, grid=True, downgrade=1, mask=0, ticks=10)
+                enplot.write(cov_map_path + ".png", f[0])
+
+
     @classmethod
-    def load(cls, path: str) -> "ReportData":
+    def load(cls, data_path: str, cov_map_path: str) -> "ReportData":
         obs_list = []
-        with h5py.File(path, "r") as hdf:
+        with h5py.File(data_path, "r") as hdf:
             # Load config
             cfg = ReportDataConfig(**json.loads(hdf.attrs["cfg"]))
-            pwv = np.array(hdf["pwv"])
+
+            if "pwv" in hdf:
+                pwv = np.array(hdf["pwv"])
+            else:
+                pwv = None
 
             for obs_id, g in hdf.items():
                 if obs_id in ["pwv", "cfg", "source_footprints"]:
@@ -549,15 +602,20 @@ class ReportData:
                     fps.append(Footprint(
                         wafer=wafer, source=source, count=count, obsids=obsids
                     ))
-                # fps = [Footprint.from_h5(fp) for fp in hdf["source_footprints"].values()]
             else:
                 fps = None
+
+        if cov_map_path is not None:
+            w = enmap.read_map(cov_map_path + ".fits")
+        else:
+            w = None
 
         return cls(
             cfg=cfg,
             obs_list=obs_list,
             pwv=pwv,
             source_footprints=fps,
+            w=w,
         )
 
 

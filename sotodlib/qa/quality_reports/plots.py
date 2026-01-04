@@ -1,12 +1,13 @@
 import plotly
 from plotly.subplots import make_subplots
-import matplotlib.colors as mcolors
 from plotly.colors import DEFAULT_PLOTLY_COLORS
+import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import matplotlib.colors as mcolors
+import os
 import pandas as pd
 from dataclasses import dataclass, field
-import plotly.express as px
 import datetime as dt
 from copy import deepcopy
 import ast
@@ -79,13 +80,13 @@ class ObsEfficiencyPlots:
     heatmap: go.Figure
 
 
-def obsdb_line_plot(x, y, xlabel, ylabel, title):
+def obsdb_line_plot(x, y, xlabel, ylabel, title, xlim):
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
             x=x,
             y=y,
-            mode='lines',
+            mode='markers',
             name=ylabel,
             line=dict(color="#0072B2", width=2),
             marker=dict(size=8)
@@ -121,6 +122,7 @@ def obsdb_line_plot(x, y, xlabel, ylabel, title):
         showgrid=True,
         gridcolor="lightgray",
         zeroline=False,
+        range=[xlim[0], xlim[1]]
     )
     fig.update_yaxes(
         title_text=ylabel,
@@ -150,7 +152,8 @@ def boresight_vs_time(d: ReportData) -> go.Figure:
         for t in tstamps
     ]
 
-    fig = obsdb_line_plot(tstamps, boresight, "Time (UTC)", "Boresight [deg]", "Boresight")
+    fig = obsdb_line_plot(tstamps, boresight, "Time (UTC)", "Boresight [deg]", "Boresight",
+                         xlim=[d.cfg.start_time, d.cfg.stop_time])
 
     if d.cfg.platform == "lat":
         corot = np.array(boresight) + np.array(el_center) - 60
@@ -159,7 +162,7 @@ def boresight_vs_time(d: ReportData) -> go.Figure:
         go.Scatter(
             x=tstamps,
             y=corot,
-            mode="lines",
+            mode='markers',
             name="Corotator [deg]",
             line=dict(color="#E69F00", width=2),
             marker=dict(size=8),
@@ -184,9 +187,13 @@ def hwp_freq_vs_time(d: ReportData) -> go.Figure:
         hwp_freq_mean = np.round(hwp_freq_mean, 2)
 
         tstamps, hwp_freq_mean = zip(*sorted(zip(tstamps, hwp_freq_mean)))
-        tstamps = [dt.datetime.fromtimestamp(ts).strftime("%b %d") for ts in tstamps]
+        tstamps = [
+            dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
+            for t in tstamps
+        ]
 
-        return obsdb_line_plot(tstamps, hwp_freq_mean, "Time (UTC)", "Mean HWP Freq [Hz]", "Mean HWP Freq")
+        return obsdb_line_plot(tstamps, hwp_freq_mean, "Time (UTC)", "Mean HWP Freq [Hz]", "Mean HWP Freq",
+                              xlim=[d.cfg.start_time, d.cfg.stop_time])
     else:
         return go.Figure()
 
@@ -333,15 +340,21 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
 
     # PWV trace
     ds_factor = 10
-    pwvs = deepcopy(d.pwv[1][::ds_factor])
-    pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-    ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+    #pwvs = deepcopy(d.pwv[1][::ds_factor])
+    #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
+    #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+
+    ts, pwvs = zip(*sorted(
+        ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
+    ))
+    ts = list(ts)
+    pwvs = list(pwvs)
 
     fig.add_trace(
         go.Scatter(
             x=ts,
             y=pwvs,
-            mode="lines",
+            mode="markers",
             name="PWV [mm]",
             line=dict(color="#CC79A7", width=2, dash="solid"),
             opacity=0.6,
@@ -543,15 +556,21 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
 
     # PWV trace
     ds_factor = 10
-    pwvs = deepcopy(d.pwv[1][::ds_factor])
-    pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-    ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+    #pwvs = deepcopy(d.pwv[1][::ds_factor])
+    #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
+    #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+
+    ts, pwvs = zip(*sorted(
+        ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
+    ))
+    ts = list(ts)
+    pwvs = list(pwvs)
 
     fig.add_trace(
         go.Scatter(
             x=ts,
             y=pwvs,
-            mode="lines",
+            mode="markers",
             name="PWV [mm]",
             line=dict(color="#CC79A7", width=2, dash="solid"),
             opacity=0.6,
@@ -723,6 +742,37 @@ def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
     )
 
     return fig
+
+def cov_map_plot(map_path: str, embed:bool=True) -> str:
+    import base64
+    png_path = map_path + ".png"
+
+    if not os.path.isfile(png_path):
+        return "<p>Coverage map not found</p>"
+
+    # Embed image as base64 (guaranteed to work)
+    if embed:
+        with open(png_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+
+        return (
+            f'<img src="data:image/png;base64,{b64}" '
+            f'style="max-width:100%; height:auto;" '
+            f'alt="Coverage Map">'
+        )
+
+    # Otherwise use relative path
+    return (
+        f'<img src="./{os.path.basename(png_path)}" '
+        f'style="max-width:100%; height:auto;" '
+        f'alt="Coverage Map">'
+    )
+#     if os.path.isfile(map_path + ".png"):
+#         map_png = f'<img src="./{os.path.basename(map_path) + ".png"}" style="max-width:100%; height:auto;" alt="Coverage Map">'
+#     else:
+#         map_png = "<p>Coverage map not found</p>"
+
+#     return map_png
 
 
 @dataclass
