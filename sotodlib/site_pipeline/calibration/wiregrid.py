@@ -61,11 +61,11 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
             - LSR2 : ``'wg-actuator.wgactuator.limitswitch_LSR2'``
             - angleX : ``'wg-tilt-sensor.wgtiltsensor.angleX'``
             - angleY : ``'wg-tilt-sensor.wgtiltsensor.angleY'``
-            - tempX : ``'wg-tilt-sensor.wgtiltsensor.tempX'``
-            - tempY : ``'wg-tilt-sensor.wgtiltsensor.tempY'``
-            - temp_rotation: ``'wg-temp-sensor.wgtempsensor.tempAIN0C'``
-            - temp_rotation_motor: ``'wg-temp-sensor.wgtempsensor.tempAIN1C'``
-            - temp_elec_plate: ``'wg-temp-sensor.wgtempsensor.tempAIN2C'``
+            - tempX : ``'wg-tilt-sensor.wgtiltsensor.temperatureX'``
+            - tempY : ``'wg-tilt-sensor.wgtiltsensor.temperatureY'``
+            - temp_rotator: ``'wg-labjack.sensors_downsampled.AIN0C'``
+            - temp_rotation_motor: ``'wg-labjack.sensors_downsampled.AIN1C'``
+            - temp_elec_plate: ``'wg-labjack.sensors_downsampled.AIN2C'``
         - wg_count: magnetic scale counts per one lap (52,000 for SATp1~SATp3)
         - wg_offset: correction for the encoder offset, in degrees 
             (12.13 deg for SATp1, 9.473 deg for SATp2, 11.21 deg for SATp3)
