@@ -112,7 +112,7 @@ class HouseKeepingTemplates(Operator):
 
     hkkey = Unicode(
         None,
-        allow_none=False,
+        allow_none=True,
         help="Housekeeping data key to extract and process into a template. "
         "It will be lowpassed or split according to `submode`. Multiple keys "
         "can be separated by commas."
@@ -162,6 +162,11 @@ class HouseKeepingTemplates(Operator):
         """
         log = Logger.get()
         gcomm = data.comm.comm_group
+
+        if self.hkkey is None:
+            msg = f"You must set the `hkkey` trait before applying "
+            msg += "HouseKeepingTemplates"
+            raise RuntimeError(msg)
 
         if self.cache_dir is not None:
             os.makedirs(self.cache_dir, exist_ok=True)
@@ -222,6 +227,12 @@ class HouseKeepingTemplates(Operator):
             for key in self.hkkey.split(","):
                 keep[key] = hkfields[key]
             hkfields = keep
+
+            nhk = len(hkfields)
+            log.info_rank(
+                f"Building housekeeping templates from {nhk} streams.",
+                comm=gcomm,
+            )
 
             # Optionally, combine the fields
 
@@ -296,10 +307,10 @@ class HouseKeepingTemplates(Operator):
             key = "detector"
             hktemplates = {key : hktemplates}
 
-            if self.optical_pattern is None:
+            if self.pattern is None:
                 pattern = None
             else:
-                pattern = re.compile(self.optical_pattern)
+                pattern = re.compile(self.pattern)
 
             det_to_key = {}
             for det in local_dets:

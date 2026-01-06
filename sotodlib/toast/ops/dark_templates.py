@@ -190,7 +190,7 @@ class DarkTemplates(Operator):
             dark_tod = {}
             for dark_det in local_dark_dets:
                 dark_tod[dark_det] = ob.detdata[self.det_data][dark_det]
-            all_dark_tod = gcomm.allgather(all_dark_tod)
+            all_dark_tod = gcomm.allgather(dark_tod)
             for dark_dict in all_dark_tod:
                 dark_tod.update(dark_dict)
 
@@ -239,8 +239,8 @@ class DarkTemplates(Operator):
             ndark = len(dark_tod)
             if ndark == 0:
                 msg = f"No dark detectors in {ob.name} match "
-                msg += "det_mask={self.det_mask}, "
-                msg += "pattern='{self.dark_pattern}'. "
+                msg += f"det_mask={self.det_mask}, "
+                msg += f"pattern='{self.dark_pattern}'. "
                 log.warning(msg)
                 continue
 
@@ -252,6 +252,7 @@ class DarkTemplates(Operator):
             # Every process builds all dark templates.  This should be a negligible
             # amount of work
 
+            nsample = ob.n_local_samples
             arr = np.zeros([ndark, nsample], dtype=float)
             for idet, det in enumerate(dark_tod):
                 arr[idet] = dark_tod[det]
