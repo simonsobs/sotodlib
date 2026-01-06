@@ -52,6 +52,7 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
 
         - hk_root. path to house-keeping data directory, e.g. ``'../data/satp1/hk/'``
         - db_file.  path to sqlite database file, e.g. ``'./hkdb-satp1.db'``
+        - site: bool. If True, load housekeeping data from L2 hk data at site, if False load it from L3 hkdb. 
         - aliases:
             - enc_count : ``'wg-encoder.wgencoder_full.reference_count'``
             - LSL1 : ``'wg-actuator.wgactuator.limitswitch_LSL1'``
@@ -69,14 +70,21 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
         - wg_offset: correction for the encoder offset, in degrees 
             (12.13 deg for SATp1, 9.473 deg for SATp2, 11.21 deg for SATp3)
         - telescope: telescope name in lowercase letters, e.g. 'satp1'
+        - timestamp_margin: Time buffer added before and after the time range of observation, in seconds. Defaults to 1. This margin compensates for imperfect timestamp synchronization between detectors' data and housekeeping data.
 
     """
     if config.site:
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
-        return _load_l2_data(config, start_time, stop_time)
+        raw_data_dict = _load_l2_data(config, start_time, stop_time)
     else:
         logger.info("Loading the wire grid house-keeping data with hkdb.")
-        return _load_l3_data(config, start_time, stop_time)
+        raw_data_dict = _load_l3_data(config, start_time, stop_time)
+
+    raw_data_dict['enc_rad'] = (
+    raw_data_dict['enc_count'][0], _correct_wg_angle(raw_data_dict['enc_count'][1], config)
+        )
+
+    return raw_data_dict
 
 def _load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
@@ -133,10 +141,6 @@ def _load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dic
         logger.warning("The actuator data is not correctly stored in house-keeping. \
                         \n inside/outside status is not certificated so far.")
     raw_data_dict = _data
-
-    raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], _correct_wg_angle(raw_data_dict['enc_count'][1], config)
-        )
     
     return raw_data_dict
 
@@ -172,10 +176,6 @@ def _load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dic
     raw_data_dict = {
         alias: raw_data.data[field] for alias, field in zip(_aliases, _fields)
     }
-
-    raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], _correct_wg_angle(raw_data_dict['enc_count'][1], config)
-        )
     
     return raw_data_dict
 
@@ -193,8 +193,7 @@ def wrap_wg_hk(tod, raw_data_dict, merge=True):
         tod : AxisManager
             This includes fields, which are related with the wire grid hardware.
 
-                - enc_count : wires' direction read by encoder in radian (raw data from the encoder)
-                - enc_rad_raw : wires' direction read by encoder in radian (corrected with encoder count)
+                - enc_count : wires' direction read in raw encoder count (raw data from the encoder)
                 - enc_rad : wires' direction read by encoder in radian (corrected with encoder count and hardware offset)
                 - LSL1 : ON/OFF status of the limit switch LEFT 1 (outside) of the actuator
                 - LSL2 : ON/OFF status of the limit switch LEFT 2 (inside) of the actuator
@@ -248,7 +247,7 @@ def _correct_wg_angle(enc_count, config: wg_config):
         _in_radians_w_offset : np.ndarray
             wires' direction in radian (corrected with both encoder count and hardware offset) 
     '''
-    if isinstance(config, wg_config)==False:
+    if not isinstance(config, wg_config):
         raise TypeError("config should be an instance of wg_config dataclass.")
     else:
         _in_radians = enc_count * 2 * np.pi / config.wg_count
@@ -760,7 +759,7 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
     ax.wrap('background_pol_relative_power', _bg_amp,           [(0, 'dets')])
     ax.wrap('theta_det_instr',               0.5*np.pi - gamma, [(0, 'dets')]) # instumental angle of dets
     if remove_cal_data:
-        tod.wg.move('wg', None)
+        tod.move('wg', None)
     if merge:
         tod.wg.wrap('gamma_cal', ax)
     return ax

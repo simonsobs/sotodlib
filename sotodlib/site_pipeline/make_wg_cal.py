@@ -27,7 +27,7 @@ def run(
     n_split,
 ):
     """
-    Function to run process pipeline for tau_hwp.
+    Function to run process pipeline for wire grid calibration.
     This split detectors into `n_split` chunks and process serially.
     Returns obs_id and ResultSet.
     """

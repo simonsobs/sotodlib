@@ -58,8 +58,8 @@ One can get calibration results by calling these functions.
 Here, we load the wire grid data using the ``wiregrid_config``.
 The example for SATp1 at NERSC is as follows::
 
-  hk_root: '/global/cfs/cdirs/sobs/data/satp1/hk'
-  db_file: '/global/cfs/cdirs/sobs/users/mhasse/work/250404/hkdb-satp1.db'
+  hk_root: '/data/satp1/hk/'
+  db_file: '/hkdb-satp1.db'
   site: False  
 
   aliases:
