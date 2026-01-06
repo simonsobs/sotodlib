@@ -9,10 +9,13 @@ from typing import Optional
 import copy
 
 from sotodlib import core
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
 import sotodlib.preprocess.preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
-logger = sp_util.init_logger("preprocess")
+logger = init_logger("preprocess")
 
 def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
     """ Loads the saved information from the preprocessing pipeline and runs the
@@ -28,8 +31,8 @@ def plot_preprocess_tod(obs_id, configs, context, group_list=None, verbosity=2):
     configs: string or dictionary
         config file or loaded config directory
     """
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    
+    logger = init_logger("preprocess", verbosity=verbosity)
+
     group_by, groups = pp_util.get_groups(obs_id, configs, context)
     all_groups = groups.copy()
     for g in all_groups:
@@ -87,8 +90,8 @@ def plot_preprocess_tod_from_db(obs_id, group_by, group, configs, context, verbo
     configs: string or dictionary
         config file or loaded config directory
     """
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    
+    logger = init_logger("preprocess", verbosity=verbosity)
+
     pipe = Pipeline(configs["process_pipe"], plot_dir=configs["plot_dir"], logger=logger)
     
     logger.info(f"Beginning run for {obs_id}:{group}")
@@ -183,7 +186,7 @@ def main(
 
     """
     configs, context = pp_util.get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = init_logger("preprocess", verbosity=verbosity)
 
     if not os.path.exists(configs['archive']['index']):
         # don't run if database doesn't exist
@@ -204,9 +207,9 @@ def main(
                     group = v
             run_list.append( ({'obs_id': obsid, 'group_by': group_by}, group) )
     else:
-        obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
-                                       max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
-                                       planet_obs=planet_obs)
+        obs_list = get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
+                               max_ctime=max_ctime, update_delay=update_delay, tags=tags,
+                               planet_obs=planet_obs)
         if len(obs_list)==0:
             logger.warning(f"No observations returned from query: {query}")
 
@@ -238,4 +241,4 @@ def main(
             continue
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
