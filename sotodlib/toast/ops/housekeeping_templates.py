@@ -185,7 +185,9 @@ class HouseKeepingTemplates(Operator):
 
             hkfields = {}
             if self.cache_dir is not None:
-                fname_cache = os.path.join(self.cache_dir, f"{ob.name}.pck")
+                fname_cache = os.path.join(
+                    self.cache_dir, f"{ob.session.name}.pck"
+                )
                 if os.path.isfile(fname_cache):
                     log.info_rank(
                         f"Loading housekeeping fields from "
