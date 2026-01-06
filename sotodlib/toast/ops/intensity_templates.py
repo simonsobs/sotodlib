@@ -17,7 +17,7 @@ from toast import qarray as qa
 from toast.mpi import MPI, Comm, MPI_Comm
 from toast.observation import default_values as defaults
 from toast.timing import function_timer
-from toast.traits import Int, Unicode, trait_docs
+from toast.traits import Int, Unicode, Quantity, trait_docs
 from toast.utils import Environment, Logger
 from toast.ops import Operator
 from toast.ops.demodulation import Lowpass
@@ -122,7 +122,7 @@ class IntensityTemplates(Operator):
     )
 
     focalplane_pixel_width = Quantity(
-        0.01 * u.deg
+        0.01 * u.deg,
         help="Focalplane pixel width is used to assign detector positions into "
         "rows and columns.  Should be smaller than typical separation of "
         "nearest neighbor centers but not so small that detector in the same "
