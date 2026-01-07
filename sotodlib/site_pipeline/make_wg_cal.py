@@ -108,23 +108,23 @@ def _main(
         Dictionary of process pipeline config
     output_dir: str
         Path to the output directory
-    metadata_list: str or list of str
+    metadata_list: str or list of str (default 'all')
         List of metadata labels to load
-    verbosity: int
+    verbosity: int (default 2)
         0: Error, 1: Warning, 2: Info, 3: Debug
-    overwrite: bool
+    overwrite: bool (default False)
         If true, overwrites existing entries in the database
-    tags: List of str
+    tags: List of str (default None)
         List of tag to use for quering observations
-    obs_id: List of str
+    obs_id: List of str (default None)
         List of obs-ids of particular observations that you want to run.
-    n_split:
+    n_split: int (default 10)
         Number of splits for the serial processing of a single observation.
-    nprocs: int
+    nprocs: int (default 1)
         Number of processes to use. 1 at site computing.
-    max_retry: int
+    max_retry: int (default 3)
         Maximum number to retry job.
-    stale: float
+    stale: float (default 60.)
         Jobs locked for longer than this time will be treated as stale
         and unlocked.
     """
