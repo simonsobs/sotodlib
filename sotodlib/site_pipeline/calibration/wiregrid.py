@@ -43,7 +43,7 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
 
     Returns
     -------
-        raw_data_dict : dict
+        wg_data_dict : dict
             dictionary including the raw house-keeping data and corrected encoder angle about the wire grid operation.
 
     Notes
@@ -75,16 +75,16 @@ def load_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
     if config.site:
         logger.info("Loading the wire grid house-keeping data with hk_dir.")
-        raw_data_dict = _load_l2_data(config, start_time, stop_time)
+        wg_data_dict = _load_l2_data(config, start_time, stop_time)
     else:
         logger.info("Loading the wire grid house-keeping data with hkdb.")
-        raw_data_dict = _load_l3_data(config, start_time, stop_time)
+        wg_data_dict = _load_l3_data(config, start_time, stop_time)
 
-    raw_data_dict['enc_rad'] = (
-    raw_data_dict['enc_count'][0], _correct_wg_angle(raw_data_dict['enc_count'][1], config)
+    wg_data_dict['enc_rad'] = (
+    wg_data_dict['enc_count'][0], _correct_wg_angle(wg_data_dict['enc_count'][1], config)
         )
 
-    return raw_data_dict
+    return wg_data_dict
 
 def _load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dict:
     """
@@ -102,7 +102,7 @@ def _load_l2_data(config: wg_config, start_time: float, stop_time: float) -> dic
     Returns
     -------
         raw_data_dict : dict
-            dictionary including the raw house-keeping data and corrected encoder angle about the wire grid operation.
+            dictionary including the raw house-keeping data about the wire grid operation.
     """
 
     aliases = config.aliases.keys()
@@ -160,7 +160,7 @@ def _load_l3_data(config: wg_config, start_time: float, stop_time: float) -> dic
     Returns
     -------
         raw_data_dict : dict
-            dictionary including the raw house-keeping data and corrected encoder angle about the wire grid operation.
+            dictionary including the raw house-keeping data about the wire grid operation.
     '''
     hkdb_config = {k: getattr(config, k) for k in ['hk_root', 'db_file','aliases']}
 
