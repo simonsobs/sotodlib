@@ -1670,10 +1670,10 @@ class GlitchClassification(_Preprocess):
     """
     name = "classify_glitches"
 
-    def calc_and_save(self, aman, proc_aman):
-        n_thres = self.calc_cfgs.get("n_thres", 2)
-        n_buffer = self.calc_cfgs.get("n_buffer", 5)
-        trained_forest_name = self.calc_cfgs.get("trained_forest_name", "trained_forest")
+    def process(self, aman, proc_aman):
+        n_thres = self.process_cfgs.get("n_thres", 2)
+        n_buffer = self.process_cfgs.get("n_buffer", 5)
+        trained_forest_name = self.process_cfgs.get("trained_forest_name", "trained_forest")
 
         # get the number of detectors flagged as glitch (at each sample)
         glitch_flags = proc_aman.glitches.glitch_flags  # size: (ndets, nsamps)
@@ -1703,12 +1703,12 @@ class GlitchClassification(_Preprocess):
         snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
     #     self.save(proc_aman, snippet_aman)
 
-    def save(self, proc_aman, snippet_aman):
-        if self.save_cfgs is None:
-            return
-        if self.save_cfgs:
-            proc_aman.wrap("glitch_snippets", snippet_aman)
-        # aman.wrap("glitch_snippets", snippet_aman)
+    # def save(self, proc_aman, snippet_aman):
+    #     if self.save_cfgs is None:
+    #         return
+    #     if self.save_cfgs:
+    #         proc_aman.wrap("glitch_snippets", snippet_aman)
+        aman.wrap("glitch_snippets", snippet_aman)
 
 
 _Preprocess.register(SplitFlags)
