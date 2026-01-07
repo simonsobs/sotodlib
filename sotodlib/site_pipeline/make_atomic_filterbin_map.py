@@ -19,6 +19,7 @@ from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
 from so3g.proj import coords as so3g_coords
 from pixell import enmap, wcsutils, colors, memory
@@ -30,7 +31,7 @@ from pixell.mpiutils import FakeCommunicator
 class Cfg:
     """
     Class to configure make-atomic-filterbin-map
-    
+
     Args
     --------
     context: str
@@ -246,7 +247,7 @@ def future_write_to_log(e, errlog):
     f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
     f.close()
 
-def main(
+def main_func(
     config_file: str,
     executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     as_completed_callable: Callable) -> None:
@@ -491,6 +492,12 @@ def main(
     return True
 
 
+def main(config_file: str, nprocs: int):
+    rank, executor, as_completed_callable = get_exec_env(nprocs)
+    if rank == 0:
+        main_func(config_file, executor, as_completed_callable)
+
+
 def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     if parser is None:
         p = ArgumentParser()
@@ -505,7 +512,4 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     return p
 
 if __name__ == '__main__':
-    args = get_parser().parse_args()
-    rank, executor, as_completed_callable = get_exec_env(args.nprocs)
-    if rank == 0:
-        main(args.config_file, executor, as_completed_callable)
+    main_launcher(main, get_parser)
