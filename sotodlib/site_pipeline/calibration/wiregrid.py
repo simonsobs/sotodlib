@@ -187,6 +187,10 @@ def wrap_wg_hk(tod, raw_data_dict, merge=True):
     Parameters
     ----------
         tod : AxisManager
+        raw_data_dict : dict
+            dictionary including the raw house-keeping data about the wire grid operation.
+        merge : bool (default, True)
+            whether merge the house-keeping data into tod or not
 
     Returns
     -------
@@ -264,7 +268,7 @@ def _detect_motion(count, flag=0):
     ----------
         count : int
             encoder actual counts
-        flag : int
+        flag : int (default, 0)
             flag to choose moving or static
 
     Returns
@@ -295,7 +299,7 @@ def _detect_steps(tod, steps_thresholds=(10, 300)):
     Parameters
     ----------
         tod : AxisManager
-        steps_thresholds : Tuple
+        steps_thresholds : Tuple (default, (10, 300))
             the thresholds on the encoder counts.
             the first element is the upper bound for the static state,
             and the second element is the lower bound for the difference of the first
@@ -700,7 +704,9 @@ def get_cal_gamma(tod, merge=True, remove_cal_data=False):
     ----------
         tod : AxisManager
         merge : bool (default, True)
-        remove_cal_data : bool (defalut) False
+            whether merge the calibration results into tod or not
+        remove_cal_data : bool (default, False)
+            whether remove the intermediate product for the wire grid calibration in tod or not
 
     Returns
     -------
