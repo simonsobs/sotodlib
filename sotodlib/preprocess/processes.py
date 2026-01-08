@@ -2702,6 +2702,41 @@ class TrimFlagEdge(_Preprocess):
 
         return aman, proc_aman
 
+class AcuDropFlags(_Preprocess):
+    """Expands ACU drop flag fields in aman to all detectors.  ACU drop flags
+    indicate where samples are missing from the ACU data due to aggregator
+    failures.
+
+    Example config block::
+
+        - name: "acu_drop_flags"
+          calc:
+            buffer: 200
+            name: "acu_drops"
+            merge: True
+          save: True
+    """
+
+    name = "acu_drop_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        acu_drops = RangesMatrix([aman.flags.get("acu_drops")  for _ in aman.det_info.stream_id])
+        buffer = self.calc_cfgs.get("buffer", 200)
+        if buffer:
+            acu_drops = acu_drops.buffer(buffer)
+
+        flag_aman = core.AxisManager(aman.dets, aman.samps)
+        flag_aman.wrap(self.calc_cfgs['name'], acu_drops, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, flag_aman)
+
+        return aman, proc_aman
+
+    def save(self, proc_aman, flag_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("acu_drops", flag_aman)
+
 class SmurfGapsFlags(_Preprocess):
     """Expand smurfgaps flag of each stream_id to all detectors
     smurfgaps flags indicates the samples of each stream_id where the
@@ -2835,6 +2870,7 @@ _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
+_Preprocess.register(AcuDropFlags)
 _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
 _Preprocess.register(Move)
