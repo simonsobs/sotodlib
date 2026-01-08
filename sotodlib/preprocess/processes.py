@@ -2713,7 +2713,6 @@ class AcuDropFlags(_Preprocess):
           calc:
             buffer: 200
             name: "acu_drops"
-            merge: True
           save: True
     """
 
@@ -2721,7 +2720,7 @@ class AcuDropFlags(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         if "acu_drops" in aman.flags:
-            acu_drops = RangesMatrix([aman.flags.get("acu_drops")  for _ in aman.det_info.stream_id])
+            acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in aman.det_info.stream_id])
             buffer = self.calc_cfgs.get("buffer", 200)
             if buffer:
                 acu_drops = acu_drops.buffer(buffer)
