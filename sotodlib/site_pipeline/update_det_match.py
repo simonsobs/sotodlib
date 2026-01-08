@@ -80,7 +80,7 @@ class UpdateDetMatchesConfig:
         Time in seconds before a failed detset will be added to the cache. This
         is to prevent new detsets still acquiring data from being added right
         away.
-    
+
     Attributes
     -------------
     freq_offsets : Optional[np.ndarray]
@@ -109,7 +109,7 @@ class UpdateDetMatchesConfig:
         if self.wafer_map_path is None:
             self.wafer_map_path = os.path.join(
                 self.site_pipeline_root, 'shared/detmapping/wafer_map.yaml')
-        
+
         if self.freq_offset_range_args is not None:
             self.freq_offsets = np.arange(*self.freq_offset_range_args)
         else:
@@ -120,12 +120,12 @@ class UpdateDetMatchesConfig:
 
         if not os.path.exists(self.results_path):
             raise FileNotFoundError(f"Results dir does not exist: {self.results_path}")
-        
+
         allowed_solution_types = ['kaiwen_handmade', 'resonator_set']
         if self.solution_type not in allowed_solution_types:
             raise ValueError(
                 f"Solution type ({self.solution_type}) must be a member of: {allowed_solution_types}")
-        
+
         if self.solution_type == 'resonator_set':
             if self.resonator_set_dir is None:
                 raise ValueError("Must specify resonator_set_dir for solution_type='resonator_set'")
@@ -139,7 +139,7 @@ class Runner:
         self.detcal_db = None
         with open(self.cfg.wafer_map_path, 'r') as f:
             self.wafer_map = yaml.safe_load(f)
-        
+
         self.ufm_to_fp_file = os.path.join(
             cfg.site_pipeline_root, 'shared/focalplane/ufm_to_fp.yaml')
 
@@ -161,7 +161,7 @@ class Runner:
         if self.detcal_db is None:
             raise Exception(
                 f"Could not find detcal metadata entry with name: {cfg.detcal_meta_name}")
-        
+
         self.failed_detset_cache_path = os.path.join(cfg.results_path, 'failed_detsets.yaml')
         self.match_dir = os.path.join(cfg.results_path, 'matches')
         if not os.path.exists(self.match_dir):
@@ -212,7 +212,7 @@ def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
         with open(cache_file, 'r') as f:
             x = yaml.safe_load(f)
     else:
-        x = {}  
+        x = {}
 
     x[str(detset)] = str(msg)
     with open(cache_file, 'w') as f:
@@ -244,7 +244,7 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
             match_pars=match_pars,
         )
         match_pars.freq_offset_mhz = opt_freq
-    match = det_match.Match(rs0, rs1, match_pars=match_pars, 
+    match = det_match.Match(rs0, rs1, match_pars=match_pars,
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
     return match
 
@@ -267,7 +267,7 @@ def run_match(runner: Runner, detset: str) -> bool:
     obsids_with_cal = set(runner.detcal_db.get_entries(['dataset'])['dataset'])
     obs_dset = {r[0] for r in cur}
     obs_ids = sorted(list(
-        obs_all.intersection(obs_dset).intersection(obsids_with_cal)), 
+        obs_all.intersection(obs_dset).intersection(obsids_with_cal)),
         key=lambda s:s.split('_')[1])[::-1]
     if len(obs_ids) == 0:
         add_to_failed_cache(
@@ -280,8 +280,11 @@ def run_match(runner: Runner, detset: str) -> bool:
 
     book_dir = os.path.dirname(runner.ctx.obsfiledb.get_files(obs_id)[detset][0][0])
     book_idx_file = os.path.join(book_dir, 'M_index.yaml')
-    with open(book_idx_file, 'r') as f:
-        book_idx = yaml.safe_load(f)
+    try:
+        with open(book_idx_file, 'r') as f:
+            book_idx = yaml.safe_load(f)
+    except Exception as e:
+        return False
 
     aman = runner.ctx.get_meta(obs_id, ignore_missing=True)
     finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
@@ -299,7 +302,7 @@ def run_match(runner: Runner, detset: str) -> bool:
         stream_id = aman.det_info.stream_id[aman.det_info.detset == ds][0]
         # Try to get wafer slot info from book idx
         if 'wafer_slots' in book_idx:
-            for ws in book_idx['wafer_slots']:  
+            for ws in book_idx['wafer_slots']:
                 if ws['stream_id'] == stream_id:
                     wafer_slot = ws['wafer_slot']
                     break
@@ -311,11 +314,14 @@ def run_match(runner: Runner, detset: str) -> bool:
                 raise Exception("Could not find wafer-slot")
         else:
             wafer_slot = None
-
-        match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
-        fpath = os.path.join(runner.match_dir, f"{ds}.h5")
-        match.save(fpath)
-        logger.info(f"Saved match to file: {fpath}")
+        try:
+            match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
+            fpath = os.path.join(runner.match_dir, f"{ds}.h5")
+            match.save(fpath)
+            logger.info(f"Saved match to file: {fpath}")
+        except Exception as e:
+            logger.error(f"{ds} failed with {e}")
+            continue
 
     return True
 
@@ -338,8 +344,7 @@ def scan_for_freq_offset(rs0, rs1, freq_offsets, match_pars=None, show_pb=True):
     else:
         match_pars = deepcopy(match_pars)
     freq_offsets = np.array(freq_offsets)
-    
-    rs0 = deepcopy(rs0) 
+    rs0 = deepcopy(rs0)
     rs1 = deepcopy(rs1)
 
     costs = np.full_like(freq_offsets, np.nan)
@@ -389,7 +394,7 @@ def update_manifests(runner: Runner, detset):
             }, h5_path)
         else:
             logger.warning(f"Dataset {detset} already exists in db: {db_path}")
-    
+
     write_relpath = runner.cfg.write_relpath
     add_to_db(ra, det_match_idx, det_match_h5, detset,
               write_relpath=write_relpath)

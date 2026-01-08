@@ -613,14 +613,14 @@ class MatchParams:
     unassigned_slots: int = 1000
     freq_offset_mhz: float = 0.0
     freq_width: float = 2.
-    dist_width: float =0.01
+    dist_width: float = 0.01
     unmatched_good_res_pen: float = 10.
     good_res_qi_thresh: float = 100e3
     enforce_pointing_reqs: bool = False
 
     assigned_bg_unmatched_pen: float = 100000
     unassigned_bg_unmatched_pen: float = 10000
-    assigned_bg_mismatch_pen: float = 100000
+    assigned_bg_mismatch_pen: float = np.inf #100000
     unassigned_bg_mismatch_pen: float = 1
 
 
@@ -696,9 +696,11 @@ class Match:
         self.matching, self.merged = self._match()
         self.stats = self.get_stats()
 
+    # We're matching dst onto src so design onto pointing or
+    # pointing onto tune
     def _get_biadjacency_matrix(self) -> np.ndarray:
-        src_arr = self.src.as_array()
-        dst_arr = self.dst.as_array()
+        src_arr = self.src.as_array() # pointing or tuneset
+        dst_arr = self.dst.as_array() # design or pointing
 
         mat = np.zeros((len(self.src), len(self.dst)), dtype=float)
 
@@ -711,14 +713,17 @@ class Match:
             # pointing data. For these types of detectors, the cost is left
             # untouched.
 
+            # Has pointing (design and pointing)
             src_has_pointing = np.isfinite(src_arr['xi']) & np.isfinite(src_arr['eta'])
             dst_has_pointing = np.isfinite(dst_arr['xi']) & np.isfinite(dst_arr['eta'])
 
+            # Do not match NC
             src_no_match = np.isin(src_arr['det_type'], ['NC'])
             dst_no_match = np.isin(dst_arr['det_type'], ['NC'])
             mat[src_no_match, :] = np.inf
             mat[:, dst_no_match] = np.inf
 
+            # Don't want pointing matches for these detector types
             src_pointing_forbidden = np.isin(src_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
             dst_pointing_forbidden = np.isin(dst_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
             m = src_pointing_forbidden[:, None] & dst_has_pointing[None, :]
@@ -726,12 +731,23 @@ class Match:
             m = src_has_pointing[:, None] & dst_pointing_forbidden[None, :]
             mat[m] = np.inf
 
+            # OPTC detectors should have pointing
             src_pointing_required = np.isin(src_arr['det_type'], ['OPTC'])
             dst_pointing_required = np.isin(dst_arr['det_type'], ['OPTC'])
             m = src_pointing_required[:, None] & (~dst_has_pointing[None, :])
             mat[m] = np.inf
             m = (~src_has_pointing[:, None]) & dst_pointing_required[None, :]
             mat[m] = np.inf
+
+        # These should always have BG = -1
+        src_unassigned_type = np.isin(src_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+        dst_unassigned_type = np.isin(dst_arr['det_type'], ['UNRT', 'SQID', 'BARE'])
+        # pointing or tuneset have unassigned type (shouldn't ever happen)
+        m = src_unassigned_type[:, None] & (dst_arr['bg'][None, :] !=-1)
+        mat[m] = np.inf
+        # Design or pointing have unassigned type (should happen)
+        m = dst_unassigned_type[None, :] & (src_arr['bg'][:, None] !=-1)
+        mat[m] = np.inf
 
         # Frequency offset
         df = src_arr['res_freq'][:, None] - dst_arr['res_freq'][None, :]
@@ -740,10 +756,12 @@ class Match:
 
         # BG mismatch
         bgs_mismatch = src_arr['bg'][:, None] != dst_arr['bg'][None, :]
-        bgs_unassigned = (src_arr['bg'][:, None] == 1) | (dst_arr['bg'][None, :] == -1)
-
+        # If either BG is unassigned
+        bgs_unassigned = (src_arr['bg'][:, None] == -1) | (dst_arr['bg'][None, :] == -1)
+        # If the BG is mismatched and one of them is unassigned
         m = bgs_mismatch & bgs_unassigned
         mat[m] += self.match_pars.unassigned_bg_mismatch_pen
+        # If the BG is mismatched and none of them are unassigned (shouldn't happen)
         m = bgs_mismatch & (~bgs_unassigned)
         mat[m] += self.match_pars.assigned_bg_mismatch_pen
 
@@ -758,6 +776,7 @@ class Match:
         mat[np.isnan(mat)] = np.inf
 
         return mat
+
 
     def _get_unassigned_costs(self, rs):
         ra = rs.as_array()
@@ -779,6 +798,7 @@ class Match:
     def _match(self):
         nside = max(len(self.src), len(self.dst)) + self.match_pars.unassigned_slots
 
+
         # Keep this square so all resonators are included in final matching
         mat_full = np.zeros((nside, nside), dtype=float)
         with warnings.catch_warnings():
@@ -798,6 +818,21 @@ class Match:
         self.matching = np.array(linear_sum_assignment(mat_full))
         self.matching_cost = mat_full[self.matching[0], self.matching[1]].sum()
 
+        # ensure matching and match_idx are reset
+        for r1, r2 in self.get_match_iter(include_unmatched=True):
+            if r1 is None:
+                r2.matched = 0
+                r2.match_idx = -1
+                continue
+            if r2 is None:
+                r1.matched = 0
+                r1.match_idx = -1
+                continue
+            r1.matched = 0
+            r1.match_idx = -1
+            r2.matched = 0
+            r2.match_idx = -1
+
         for r1, r2 in self.get_match_iter(include_unmatched=True):
             if r1 is None:
                 r2.matched = 0
@@ -805,7 +840,6 @@ class Match:
             if r2 is None:
                 r1.matched = 0
                 continue
-
             r1.matched = 1
             r1.match_idx = r2.idx
             r2.matched = 1
