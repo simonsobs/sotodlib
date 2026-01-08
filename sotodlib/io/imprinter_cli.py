@@ -140,6 +140,16 @@ class SecondFail(BookError):
         msg += _last_line(self.book)
         return msg
 
+class ObsBookTooShort(BookError):
+    @staticmethod
+    def has_error(book):
+        return 'ObsBookTooShort' in book.message
+    def fix_book(self):
+        assert self.book.type == 'obs'
+        utils.set_book_wont_bind(self.imprint, self.book)
+    def report_error(self):
+        return f"{self.book.bid} too short (<60s)"
+
 class MissingReadoutIDs(BookError):
     @staticmethod
     def has_error(book):
@@ -154,7 +164,7 @@ class MissingReadoutIDs(BookError):
             return
         for oid in remove_oid:
                 self.book = utils.remove_level2_obs_from_book(
-                    self.imprint, self.book, oid
+                    self.imprint, self.book, oid.strip('.')
                 )
     def report_error(self):
         return f"{self.book.bid} does not have readout ids"
@@ -354,6 +364,7 @@ AUTOFIX_ERRORS = [
     SecondFail,
     BookDirHasFiles,
     MissingReadoutIDs,
+    ObsBookTooShort,
     NoScanFrames,
     NoHWPData,
     DuplicateAncillaryData,

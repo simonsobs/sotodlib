@@ -809,6 +809,144 @@ class AxisManager:
                 dest._fields[k] = v[sslice]
         return dest
 
+    def reindex_axis(self, axis, indexes, in_place=True):
+        """
+        Reindexes all data that is assigned to a specified axis
+        with a new list/array of indexes.
+        This is particularly useful if the number of detectors
+        between the meta and obs data don't match.
+        This function will recursively delve through all
+        AxisManagers in aman and will reindex every
+        data array that is found assigned to an axis
+        matching the specified axis.
+
+        Args:
+            axis (str): The name of the axis in the aman to reindex.
+            indexes (int array): an array of ints with length
+                equal to the length of the new array
+                and values equal to the idxs of the
+                values in the data to be reindexed.
+                Indexes that should be left as nan in
+                the new array should be set to -1 or nan.
+
+            For example:
+                data = [1,3,5], indexes = [0, -1, 2, 1]
+                would result in new_data = [1, nan, 5, 3]
+            
+            in_place (bool): If in_place == True, the intersection is
+            applied to self.  Otherwise, a new object is returned,
+            with data copied out.
+        """
+        # Check if axis even exists first
+        if axis not in self._axes.keys():
+            raise ValueError(f"Axis doesn't exist in aman! \
+                             Can't re-index along {axis}")
+
+        if in_place:
+            aman = self
+        else:
+            aman = self.copy(axes_only=True)
+            aman._assignments.update(self._assignments)
+
+        # Loop through ever assignment and reindex along
+        # each that is tied to the axis in question
+        new_axes = {}
+        reindexed_vs = {}
+        assignments = list(aman._assignments.keys())
+        for assignment in assignments:
+            axes = aman._assignments[assignment]
+            # If this assignment isn't connected to our axis
+            # we can skip it.
+            if axis not in axes:
+                continue
+
+            v = aman[assignment]
+
+            if isinstance(v, AxisManager):
+                # If we hit an axis manager,
+                # recursively reindex it as well. Scary!
+                new_v = v.reindex_axis(axis, indexes)
+
+            else:
+                # By this point we have a non AxisManager
+                # assignment assigned to only our axis.
+                # Build new array with the correct indexes.
+                shape = [len(indexes)]
+                if isinstance(v, np.ndarray):
+                    for s in np.shape(v)[1:]:
+                        shape.append(s)
+
+                new_v = np.empty(shape, dtype=v.dtype)
+                if isinstance(v.dtype, float):
+                    # Fill any float arrays with nans
+                    # Non float arrays may have weird
+                    # behavior for newly added indexes. 
+                    # Oh well.
+                    new_v *= np.nan  
+
+                for i, index in enumerate(indexes):
+                    if np.isnan(index) or not (0 <= index < len(v)):
+                        continue
+
+                    new_v[i] = v[int(index)]
+
+            reindexed_vs[assignment] = new_v
+            new_axes[assignment] = np.array(axes)
+
+            # Destroy the old assignment
+            aman.move(name=assignment, new_name=None)
+
+        old_axis = aman._axes[axis]
+
+        # Recreate the axis
+        if isinstance(old_axis, IndexAxis):
+            # Build a new axis that has a length equal to the indexes arg.
+            new_axis = IndexAxis(name=axis, count=len(indexes))
+
+        if isinstance(old_axis, LabelAxis):
+            # A LabelAxis dtype may vary by length,
+            # we'll insert empty values for the newly added idxs.
+            # This will produce empty strings
+            # ('') for det_ids, readout_ids, etc.
+            # It may produce strange behavior
+            # for non string like objects. Be careful!
+            vals = np.empty(len(indexes), dtype=old_axis.vals.dtype)
+            for i, index in enumerate(indexes):
+                if np.isnan(index) or not (0 <= int(index) < len(old_axis.vals)):
+                    continue
+                vals[i] = old_axis.vals[int(index)]
+
+            new_axis = LabelAxis(name=axis, vals=vals)
+
+        if isinstance(old_axis, OffsetAxis):
+            new_axis = OffsetAxis(count=len(indexes),
+                                  offset=old_axis.offset,
+                                  origin_tag=old_axis.origin_tag)
+
+        # We're done with this old axis now, destroy it.
+        del aman._axes[axis]
+        # Add in the reindexed axis.
+        aman.add_axis(new_axis)
+
+        # Now we'll go through all the reindexed data and wrap it back in.
+        for assignment, axes in new_axes.items():
+            # Build the axis map for wrapping the data.
+            ax_map = []
+            for i, ax in enumerate(axes):
+                # Axis map looks like a list of numbered tuples.
+                ax_map.append((i, ax))
+
+            vs = reindexed_vs[assignment]
+            # Need to wrap aman's with no axismap
+            if isinstance(vs, AxisManager):
+                aman.wrap(name=assignment, data=vs)
+
+            else:  # Everything else needs an axismap
+                aman.wrap(name=assignment, data=vs, axis_map=ax_map)
+
+        # Everything is now reindexed and rewrapped. Done!
+        return aman  # Return for rewrapping if recursively called.
+
     @staticmethod
     def _broadcast_selector(sslice):
         """sslice is a list of selectors, which will typically be slice(), or
