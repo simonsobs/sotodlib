@@ -5,9 +5,7 @@ import yaml
 import argparse
 from typing import Optional, List, Callable
 
-
 from sotodlib import core
-# from sotodlib.site_pipeline import util, jobdb
 from sotodlib.site_pipeline import jobdb
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
