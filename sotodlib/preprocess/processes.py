@@ -2712,7 +2712,8 @@ class AcuDropFlags(_Preprocess):
         - name: "acu_drop_flags"
           calc:
             buffer: 200
-            name: "acu_drops"
+            name: "acu_drop_flags"
+            merge: True
           save: True
     """
 
@@ -2727,6 +2728,9 @@ class AcuDropFlags(_Preprocess):
         else:
             acu_drops = RangesMatrix.zeros(
                 shape=(aman.dets.count, aman.samps.count))
+
+        if self.calc_cfgs.get("merge", True):
+            aman.flags.wrap('acu_drop_flags', acu_drops, [(0, 'dets'), (1, 'samps')])
 
         flag_aman = core.AxisManager(aman.dets, aman.samps)
         flag_aman.wrap(self.calc_cfgs['name'], acu_drops, [(0, 'dets'), (1, 'samps')])
