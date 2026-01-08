@@ -15,7 +15,8 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
 
 logger = pp_util.init_logger("preprocess")
 
@@ -153,6 +154,9 @@ def multilayer_preprocess_tod(obs_id,
                     new_plots_init = os.path.join(configs_init["plot_dir"],
                             f'{str(aman.timestamps[0])[:5]}',
                             aman.obs_info.obs_id)
+
+            elif error not in ["load_success", "end"]:
+                raise RuntimeError(f"Initial layer failed with {error}")
 
             init_fields = aman.preprocess._fields.copy()
             init_fields.pop('valid_data', None)
@@ -315,7 +319,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     errlog = os.path.join(os.path.dirname(configs_proc['archive']['index']),
                           'errlog.txt')
 
-    obs_list = sp_util.get_obslist(context_proc, query=query, obs_id=obs_id, min_ctime=min_ctime,
+    obs_list = get_obslist(context_proc, query=query, obs_id=obs_id, min_ctime=min_ctime,
                                    max_ctime=max_ctime, update_delay=update_delay, tags=tags,
                                    planet_obs=planet_obs)
     if len(obs_list)==0:
@@ -386,18 +390,22 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         if db_datasets_init:
             if err is None:
                 for db_dataset in db_datasets_init:
-                    logger.info(f'Processing future result db_dataset: {db_datasets_init}')
-                    pp_util.cleanup_mandb(err, db_dataset, configs_init, logger, overwrite)
+                    logger.info(f'Processing init future result')
+                    pp_util.cleanup_mandb(err, db_dataset, configs_init,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets_init, configs_init, logger, overwrite)
+                pp_util.cleanup_mandb(err, db_datasets_init, configs_init,
+                                      logger, overwrite)
 
         if db_datasets_proc:
             if err is None:
-                logger.info(f'Processing future dependent result db_dataset: {db_datasets_proc}')
+                logger.info(f'Processing future proc result')
                 for db_dataset in db_datasets_proc:
-                    pp_util.cleanup_mandb(err, db_dataset, configs_proc, logger, overwrite)
+                    pp_util.cleanup_mandb(err, db_dataset, configs_proc,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc, logger, overwrite)
+                pp_util.cleanup_mandb(err, db_datasets_proc, configs_proc,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"multilayer_preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
@@ -437,4 +445,4 @@ def main(configs_init: str,
 
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

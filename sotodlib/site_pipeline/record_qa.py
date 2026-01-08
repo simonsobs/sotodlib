@@ -2,12 +2,13 @@ import yaml
 import argparse
 
 from sotodlib import core
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.qa import metrics as qa_metrics
 from sotodlib.site_pipeline.monitor import Monitor
 from sotodlib.site_pipeline.jobdb import JobManager
 
-logger = sp_util.init_logger("qa_metrics")
+logger = init_logger("qa_metrics")
 
 
 def main(config):
@@ -19,6 +20,7 @@ def main(config):
 
     monitor = Monitor.from_configs(config["monitor"])
     context = core.Context(config["context_file"])
+    influx_log = config.get("influx_log", "qa_metrics_log")
 
     # get JobDB configuration
     jdb_max_retry = 5  # mark a job as failed after this number of tries
@@ -38,7 +40,7 @@ def main(config):
         except AttributeError:
             raise Exception(f"No metric named {name} was found.")
         # Instantiate class with remaining elements as kwargs
-        metrics.append(metric_class(context=context, monitor=monitor, **m))
+        metrics.append(metric_class(context=context, monitor=monitor, log=influx_log, **m))
 
     # get a list of obs_id to process and add to the JobDB
     jobs = []
@@ -130,4 +132,4 @@ def get_parser(parser=None):
 
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

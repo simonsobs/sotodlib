@@ -80,7 +80,8 @@ import argparse
 import sys
 import yaml
 
-from . import util
+from .utils.logging import init_logger
+from .utils.pipeline import main_launcher
 
 
 def get_parser(parser=None):
@@ -172,7 +173,7 @@ def add_to_obsfiledb(info, logger, config, overwrite=False):
 
 
 def main(book_dir, config=None, add=None, overwrite=None, verbose=None):
-    logger = util.init_logger(__name__, 'check_book: ',
+    logger = init_logger(__name__, 'check_book: ',
                               verbosity=(3 if verbose else 2))
 
     if config is not None:
@@ -191,4 +192,4 @@ def main(book_dir, config=None, add=None, overwrite=None, verbose=None):
 
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

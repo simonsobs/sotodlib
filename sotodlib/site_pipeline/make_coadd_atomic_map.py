@@ -8,7 +8,8 @@ from dateutil.relativedelta import relativedelta
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List
 
 from sotodlib import mapmaking
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from pixell import utils as putils
 
 
@@ -129,7 +130,7 @@ class CoaddAtomicConfig:
 
 
 def main(config_file: str, verbosity: int) -> None:
-    logger = sp_util.init_logger("make_coadd_atomic_map", verbosity=verbosity)
+    logger = init_logger("make_coadd_atomic_map", verbosity=verbosity)
     cfg = CoaddAtomicConfig.from_yaml(config_file)
     logger.info(f"Setup {cfg.interval} intervals")
     logger.debug(cfg.time_intervals)
@@ -197,4 +198,4 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     return p
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

@@ -30,6 +30,7 @@ dependencies = [
   "lmfit",
   "flacarray>=0.3.4",
   "numpy-quaternion",
+  "h5py",
 ]
 dynamic=["version"]
 classifiers = [
@@ -56,6 +57,7 @@ site_pipeline = [
   "pandas",
   "alphashape",
   "slack-sdk",
+  "requests",
 ]
 tests = [
   "socs",
