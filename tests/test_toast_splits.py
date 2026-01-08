@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Simons Observatory.
+# Copyright (c) 2024-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Check functionality of Splits.
 
@@ -7,6 +7,7 @@ import os
 import unittest
 
 import astropy.units as u
+import healpy as hp
 import numpy as np
 
 try:
@@ -105,22 +106,49 @@ class SplitTest(unittest.TestCase):
         )
 
         # Test that we can instantiate all the splits
+        split_names = [
+            "all",
+            "left_going",
+            "right_going",
+            "outer_detectors",
+            "inner_detectors",
+            "polA",
+            "polB",
+        ]
         splits = so_ops.Splits(
             name="splits",
-            splits=[
-                "all",
-                "left_going",
-                "right_going",
-                "outer_detectors",
-                "inner_detectors",
-                "polA",
-                "polB",
-            ],
+            splits=split_names,
             mapmaker=mapmaker,
             output_dir=self.outdir,
         )
 
         splits.apply(data)
+
+        # Test that we get the same result using flags instead of intervals
+        splits2 = so_ops.Splits(
+            name="splits_w_flags",
+            splits=split_names,
+            mapmaker=mapmaker,
+            output_dir=self.outdir,
+            splits_as_flags=True,
+        )
+
+        splits2.apply(data)
+
+        for split_name in split_names:
+            fname1 = os.path.join(
+                self.outdir,
+                f"{splits.name}_{split_name}_map.fits",
+            )
+            fname2 = os.path.join(
+                self.outdir,
+                f"{splits2.name}_{split_name}_map.fits",
+            )
+            m1 = hp.read_map(fname1, None)
+            m2 = hp.read_map(fname2, None)
+            assert np.all((m1 == 0) == (m2 == 0))
+            mask = m1 != 0
+            assert np.allclose(m1[mask], m2[mask])
 
         close_data_and_comm(data)
 

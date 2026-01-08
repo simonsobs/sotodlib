@@ -3,7 +3,7 @@ import datetime as dt
 from typing import Optional
 
 from sotodlib.io.imprinter import Imprinter, BOUND, UPLOADED
-from sotodlib.site_pipeline.util import init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 
 logger = init_logger(__name__, "update_librarian: ")
 

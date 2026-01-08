@@ -11,8 +11,9 @@ from scipy.interpolate import interp1d
 from so3g.hk import load_range
 from sotodlib import core
 from sotodlib.io import hkdb
-from sotodlib.site_pipeline import util
-logger = util.init_logger('wiregrid', 'wiregrid: ')
+from sotodlib.io import hk_utils
+from sotodlib.site_pipeline.utils.logging import init_logger
+logger = init_logger('wiregrid', 'wiregrid: ')
 
 
 @dataclass

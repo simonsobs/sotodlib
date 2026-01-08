@@ -24,7 +24,7 @@ from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
@@ -43,9 +43,11 @@ BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
             'uhf': {'lb': 'f220', 'hb': 'f280'},
             'lf': {'lb': 'f030', 'hb': 'f040'}}
 
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
-    sp_util.init_logger("det_cal")
+    sp_init_logger("det_cal")
 
 
 def get_data_root(ctx: core.Context, obs_id:str) -> str:
@@ -488,6 +490,25 @@ def biases_flags(bsa, buffer=200):
     return flags
 
 
+def fill_zeros_biases(am):
+    # fill the zeros in biases by non-zero values before
+    # zeros in the beginning will be filled by non-zero values after
+    for bias in am.biases:
+        last = None
+        for i in range(len(bias)):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+        last = None
+        for i in range(len(bias)-1, -1, -1):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+
 def load_and_reanalyze_bs(bsa, ctx, obs_id):
     """
     Load raw data of biassteps and reanalyze it with hwpss subtraction
@@ -497,12 +518,17 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
         ctx: Context object
         obs_id: observation id of bias steps
     """
-    am = ctx.get_obs(obs_id)
+    am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
     am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
             [(0, 'samps')])
     if np.all(am.hwp_angle == 0):
         return
+
     bsa.am = am
+    zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
+    if zero_bias_count > 0:
+        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
+        fill_zeros_biases(am)
     bsa._find_bias_edges()
     flags = biases_flags(bsa)
     get_hwpss(am, flags=flags, merge_stats=True)
@@ -971,4 +997,4 @@ def main(config_file: str):
         _main(cfg, executor, as_completed_callable)
 
 if __name__ == "__main__":
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

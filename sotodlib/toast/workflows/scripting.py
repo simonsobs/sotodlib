@@ -42,6 +42,12 @@ def load_or_simulate_observing(job, otherargs, runargs, comm):
     else:
         group_size = wrk.reduction_group_size(job, runargs, comm)
         toast_comm = toast.Comm(world=comm, groupsize=group_size)
+        log.info_rank(
+            f"  Created a TOAST communicator with {toast_comm.world_size} ranks"
+            f" and {toast_comm.ngroups} process groups of "
+            f"{toast_comm.group_size} ranks each",
+            comm,
+        )
         data = toast.Data(comm=toast_comm)
         # Load data from all formats
         wrk.load_data_hdf5(job, otherargs, runargs, data)
