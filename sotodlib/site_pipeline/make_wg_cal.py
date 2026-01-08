@@ -7,7 +7,10 @@ from typing import Optional, List, Callable
 
 
 from sotodlib import core
-from sotodlib.site_pipeline import util, jobdb
+# from sotodlib.site_pipeline import util, jobdb
+from sotodlib.site_pipeline import jobdb
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.core.metadata.loader import LoaderError
 from sotodlib.hwp.hwp_angle_model import apply_hwp_angle_model
@@ -129,7 +132,7 @@ def _main(
         and unlocked.
     """
 
-    logger = util.init_logger(
+    logger = init_logger(
         __name__, 'make_wg_cal: ', verbosity=verbosity)
 
     ctx = core.Context(context_path, metadata_list=metadata_list)
@@ -240,4 +243,4 @@ def get_parser():
 
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
