@@ -247,7 +247,7 @@ def future_write_to_log(e, errlog):
     f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
     f.close()
 
-def main_func(
+def main(
     config_file: str,
     executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     as_completed_callable: Callable) -> None:
@@ -492,10 +492,10 @@ def main_func(
     return True
 
 
-def main(config_file: str, nprocs: int):
+def cli_main(config_file: str, nprocs: int):
     rank, executor, as_completed_callable = get_exec_env(nprocs)
     if rank == 0:
-        main_func(config_file, executor, as_completed_callable)
+        main(config_file, executor, as_completed_callable)
 
 
 def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
@@ -512,4 +512,4 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     return p
 
 if __name__ == '__main__':
-    main_launcher(main, get_parser)
+    main_launcher(cli_main, get_parser)
