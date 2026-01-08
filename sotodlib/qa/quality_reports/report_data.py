@@ -212,7 +212,8 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
         result = None
     try:
         result_apex = get_apex_data(cfg)
-    except:
+    except Exception as e:
+        logger.error(f"get_apex_data failed with {e}")
         result_apex = None
     if result_apex is not None:
         result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
