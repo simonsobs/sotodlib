@@ -821,7 +821,7 @@ def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
     if timeout_env not in (None, ''):
         connect_args['timeout'] = float(timeout_env)
 
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=False, **connect_args)
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False, connect_args=connect_args)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
