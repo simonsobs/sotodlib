@@ -2711,7 +2711,7 @@ class AcuDropFlags(_Preprocess):
 
         - name: "acu_drop_flags"
           calc:
-            buffer: 200
+            buffer: 200 # disable buffering by setting to False or None.
             name: "acu_drop_flags"
             merge: True
           save: True
@@ -2721,7 +2721,7 @@ class AcuDropFlags(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         if "acu_drops" in aman.flags:
-            acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in aman.det_info.stream_id])
+            acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in range(aman.dets.count)])
             buffer = self.calc_cfgs.get("buffer", 200)
             if buffer:
                 acu_drops = acu_drops.buffer(buffer)
