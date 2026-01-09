@@ -198,7 +198,10 @@ class JobManager:
         return 'me%i' % os.getpid()
 
     def commit_jobs(self, jobs):
-        """Commit jobs to the jobs table"""
+        """Commit jobs (such as those created using create_job(...,
+        commit=False)) to the jobs table.
+
+        """
         with self.session_scope() as session:
             session.add_all(jobs)
             session.flush()
@@ -219,7 +222,7 @@ class JobManager:
                    visit_time=None,
                    check_existing=True,
                    commit=True):
-        """Create a new job and opitionally commit to the jobs table.
+        """Create a new job and optionally commit to the jobs table.
 
         Return the job.
 
