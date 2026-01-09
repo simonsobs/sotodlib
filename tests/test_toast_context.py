@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Test toast context loading."""
 
@@ -115,8 +115,13 @@ class ToastContextTest(TestCase):
             detdata=[
                 (defaults.det_data, {"quanta": 1.0e-10}),
                 (defaults.det_flags, {"level": 6}),
-            ]
+            ],
         ).apply(demod_data)
+
+        if world is not None:
+            # This test will intermittently fail if the files are still
+            # being written while the loading starts
+            world.Barrier()
 
         new_data = toast.Data(comm=data.comm)
         toast.ops.LoadHDF5(volume=vol_path).apply(new_data)
