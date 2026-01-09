@@ -1,4 +1,4 @@
-# Copyright (c) 2025 by the parties listed in the AUTHORS file.
+# Copyright (c) 2025-2026 by the parties listed in the AUTHORS file.
 # All rights reserved.  Use of this source code is governed by
 # a BSD-style license that can be found in the LICENSE file.
 
@@ -6,7 +6,7 @@ import os
 import pickle
 import re
 import warnings
-from time import time
+from time import time, sleep
 
 import h5py
 import numpy as np
@@ -16,7 +16,7 @@ from astropy import units as u
 from toast import qarray as qa
 from toast.mpi import MPI, Comm, MPI_Comm
 from toast.observation import default_values as defaults
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.traits import Int, Unicode, trait_docs
 from toast.utils import Environment, Logger
 from toast.ops import Operator
@@ -161,6 +161,13 @@ class DarkTemplates(Operator):
         log = Logger.get()
         wcomm = data.comm.comm_world
         gcomm = data.comm.comm_group
+        timer0 = Timer()
+        timer0.start()
+
+        if detectors is None:
+            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         if (wcomm is None or wcomm.rank == 0) and self.cache_dir is not None:
             os.makedirs(self.cache_dir, exist_ok=True)
@@ -206,8 +213,27 @@ class DarkTemplates(Operator):
                         f"{fname_cache}",
                         comm=gcomm,
                     )
-                    with open(fname_cache, "rb") as f:
-                        cached_dark_tod = pickle.load(f)
+                    # Loading the file will fail if another process is
+                    # writing it. We will try up to 6 times and wait
+                    # 10 seconds between each try
+                    n_try_max = 3
+                    for n_try in range(n_try_max):
+                        try:
+                            with open(fname_cache, "rb") as f:
+                                cached_dark_tod = pickle.load(f)
+                        except EOFError:
+                            if n_try == n_try_max - 1:
+                                log.warning(
+                                    f"EOF at {fname_cache}, will overwrite"
+                                )
+                                break
+                            else:
+                                log.warning(
+                                    f"EOF at {fname_cache}, waiting for 10 seconds"
+                                )
+                                sleep(10)
+                                continue
+                        break  # success
             else:
                 fname_cache = None
 
@@ -337,6 +363,11 @@ class DarkTemplates(Operator):
 
             dark_templates["det_to_key"] = det_to_key
             ob[self.template_name] = dark_templates
+
+        if detectors is None:
+            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
         return
 
