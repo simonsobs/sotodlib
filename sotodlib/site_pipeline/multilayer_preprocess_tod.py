@@ -390,7 +390,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 group_list=r[1], verbosity=verbosity,
                 configs_init=configs_init,
                 configs_proc=configs_proc,
-                overwrite=overwrite, run_parallel=True) for r in run_list]
+                overwrite=overwrite,
+                compress=compress, run_parallel=True) for r in run_list]
     for future in as_completed_callable(futures):
         logger.info('New future as_completed result')
         try:
