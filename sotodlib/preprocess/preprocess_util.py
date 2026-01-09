@@ -132,6 +132,28 @@ def init_logger(name, announce='', verbosity=2):
     return logger
 
 
+def _get_aman_encodings(encodings, field):
+    """Encodings for flacarray compression."""
+    if (
+        isinstance(field, np.ndarray)
+        and np.issubdtype(field.dtype, np.number)
+        and not np.isnan(field).any()
+    ):
+        encodings["type"] = "flacarray"
+
+        if np.issubdtype(field.dtype, np.floating):
+            if field.dtype == np.float32:
+                quanta = 1e-7
+            else:
+                quanta = 1e-10
+
+            encodings["args"] = {
+                "level": 5,
+                "quanta": quanta,
+            }
+        return
+
+
 def get_preprocess_context(configs, context=None):
     """Load the provided config file and context file. To be used in
     ``preprocess_*.py`` site pipeline scripts. If the provided context
@@ -581,7 +603,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             if init_only:
                 return aman
-            
+
             if t2ptemplate_aman is not None:
                 # Replace Q,U with simulated timestreams
                 t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
@@ -882,6 +904,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                           logger=None, overwrite=False, save_proc_aman=True,
+                          compress=False,
                           save_archive=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
@@ -917,6 +940,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     save_proc_aman : bool
         Whether or not to save the preprocessing axis manager.  Required if saving into
         a preprocessing archive.
+    compress : bool
+        Whether or not to compress the preprocessing data.  Uses flacarray compression.
     save_archive : bool
         Call cleanup_mandb if True to save to the archive and database files
         in configs_init and configs_proc. Should be False if preproc_or_load_group
@@ -942,6 +967,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
     if logger is None:
         logger = init_logger("preprocess")
+
+    if compress == True:
+        compress = "gzip"
+    else:
+        compress = None
 
     error = None
 
@@ -1060,7 +1090,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
                 if save_proc_aman:
                     logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                    proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                    encodings = {}
+                    if compress is not None:
+                        _get_aman_encodings(encodings, proc_aman)
+                    proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'],
+                                   compression=compress, encodings=encodings, overwrite=overwrite)
 
                     if save_archive:
                         cleanup_mandb(error, outputs_proc, configs_proc,
@@ -1098,7 +1132,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
         if save_proc_aman:
             logger.info(f"Saving data to {outputs_init['temp_file']}:{outputs_init['db_data']['dataset']}")
-            proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'], overwrite)
+            encodings = {}
+            if compress is not None:
+                _get_aman_encodings(encodings, proc_aman)
+            proc_aman.save(outputs_init['temp_file'], outputs_init['db_data']['dataset'],
+                           compression=compress, encodings=encodings, overwrite=overwrite)
 
             if save_archive:
                 cleanup_mandb(error, outputs_init, configs_init,
@@ -1145,7 +1183,11 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
             if save_proc_aman:
                 logger.info(f"Saving data to {outputs_proc['temp_file']}:{outputs_proc['db_data']['dataset']}")
-                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'], overwrite)
+                encodings = {}
+                if compress is not None:
+                    _get_aman_encodings(encodings, proc_aman)
+                proc_aman.save(outputs_proc['temp_file'], outputs_proc['db_data']['dataset'],
+                               compression=compress, encodings=encodings, overwrite=overwrite)
 
                 if save_archive:
                     cleanup_mandb(error, outputs_proc, configs_proc,
@@ -1196,7 +1238,7 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
 
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
+        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
         nfile = 0
         folder = os.path.dirname(configs['archive']['policy']['filename'])

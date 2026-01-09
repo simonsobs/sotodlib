@@ -26,6 +26,7 @@ def multilayer_preprocess_tod(obs_id,
                               verbosity=0,
                               group_list=None,
                               overwrite=False,
+                              compress=False,
                               run_parallel=False):
     """Meant to be run as part of a batched script. Given a single
     Observation ID, this function uses an existing ManifestDb generated
@@ -46,6 +47,8 @@ def multilayer_preprocess_tod(obs_id,
         list of groups to run if you only want to run a partial update
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
+    compress : bool
+        Whether or not to compress the preprocessing h5 files.
     verbosity: log level
         0 = error, 1 = warn, 2 = info, 3 = debug
     run_parallel: Bool
@@ -54,6 +57,11 @@ def multilayer_preprocess_tod(obs_id,
     """
 
     logger = pp_util.init_logger("preprocess", verbosity=verbosity)
+
+    if compress == True:
+        compress = "gzip"
+    else:
+        compress = None
 
     # list to hold error, destination file, and db data
     outputs_init = []
@@ -147,7 +155,9 @@ def multilayer_preprocess_tod(obs_id,
         dets = {gb:gg for gb, gg in zip(group_by_proc, group)}
         try:
             error, outputs_grp_init, _, aman = pp_util.preproc_or_load_group(obs_id, configs_init,
-                                                                             dets=dets, logger=logger)
+                                                                             dets=dets,
+                                                                             compress=compress,
+                                                                             logger=logger)
             if error is None:
                 outputs_init.append(outputs_grp_init)
                 if make_lmsi:
@@ -198,7 +208,11 @@ def multilayer_preprocess_tod(obs_id,
             continue
 
         logger.info(f"Saving data to {outputs_grp_proc['temp_file']}:{outputs_grp_proc['db_data']['dataset']}")
-        proc_aman.save(outputs_grp_proc['temp_file'], outputs_grp_proc['db_data']['dataset'], overwrite)
+        encodings = {}
+        if compress is not None:
+            _get_aman_encodings(encodings, proc_aman)
+        proc_aman.save(outputs_grp_proc['temp_file'], outputs_grp_proc['db_data']['dataset'],
+                       compression=compress, encodings=encodings, overwrite=overwrite)
 
         if run_parallel:
             outputs_proc.append(outputs_grp_proc)
@@ -276,6 +290,12 @@ def get_parser(parser=None):
         action='store_true',
     )
     parser.add_argument(
+        '--compress',
+        help="Compress preprocessing database.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
         '--verbosity',
         help="increase output verbosity. 0:Error, 1:Warning, 2:Info(default), 3:Debug",
         default=2,
@@ -308,6 +328,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
+          compress: bool = False,
           nproc: Optional[int] = 4,
           raise_error: Optional[bool] = False):
 
@@ -422,6 +443,7 @@ def main(configs_init: str,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
+         compress: bool = False,
          nproc: Optional[int] = 4,
          raise_error: Optional[bool] = False):
 
@@ -440,6 +462,7 @@ def main(configs_init: str,
               tags=tags,
               planet_obs=planet_obs,
               verbosity=verbosity,
+              compress=compress,
               nproc=nproc,
               raise_error=raise_error)
 

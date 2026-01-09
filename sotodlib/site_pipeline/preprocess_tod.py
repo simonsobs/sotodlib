@@ -57,6 +57,7 @@ def preprocess_tod(obs_id,
                    verbosity=0,
                    group_list=None,
                    overwrite=False,
+                   compress=False,
                    run_parallel=False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and saves the results in
@@ -72,6 +73,8 @@ def preprocess_tod(obs_id,
         list of groups to run if you only want to run a partial update
     overwrite: bool
         if True, overwrite existing entries in ManifestDb
+    compress : bool
+        Whether or not to compress the preprocessing h5 files.
     verbosity: log level
         0 = error, 1 = warn, 2 = info, 3 = debug
     run_parallel: Bool
@@ -81,6 +84,11 @@ def preprocess_tod(obs_id,
 
     outputs = []
     logger = init_logger("preprocess", verbosity=verbosity)
+
+    if compress == True:
+        compress = "gzip"
+    else:
+        compress = None
 
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
@@ -169,7 +177,11 @@ def preprocess_tod(obs_id,
 
         outputs_grp = pp_util.save_group(obs_id, configs, dets, context, subdir='temp')
         logger.info(f"Saving data to {outputs_grp['temp_file']}:{outputs_grp['db_data']['dataset']}")
-        proc_aman.save(outputs_grp['temp_file'], outputs_grp['db_data']['dataset'], overwrite)
+        encodings = {}
+        if compress is not None:
+            _get_aman_encodings(encodings, proc_aman)
+        proc_aman.save(outputs_grp['temp_file'], outputs_grp['db_data']['dataset'],
+                       compression=compress, encodings=encodings, overwrite=overwrite)
 
         if run_parallel:
             outputs.append(outputs_grp)
@@ -304,6 +316,12 @@ def get_parser(parser=None):
         type=int
     )
     parser.add_argument(
+        '--compress',
+        help="Compress preprocessing database.",
+        type=bool,
+        default=False
+    )
+    parser.add_argument(
         '--nproc',
         help="Number of parallel processes to run on.",
         type=int,
@@ -330,6 +348,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
+          compress: bool = False,
           nproc: Optional[int] = 4,
           raise_error: Optional[bool] = False):
 
@@ -383,7 +402,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
                     group_list=r[1], verbosity=verbosity,
                     configs=configs,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
+                    overwrite=overwrite, compress=compress, run_parallel=True) for r in run_list]
     for future in as_completed_callable(futures):
         logger.info('New future as_completed result')
         try:
@@ -424,6 +443,7 @@ def main(configs: str,
          tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
+         compress: bool = False,
          nproc: Optional[int] = 4,
          raise_error: Optional[bool] = False):
 
@@ -441,6 +461,7 @@ def main(configs: str,
               tags=tags,
               planet_obs=planet_obs,
               verbosity=verbosity,
+              compress=compress,
               nproc=nproc,
               raise_error=raise_error)
 
