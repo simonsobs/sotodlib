@@ -611,7 +611,7 @@ def make_demod_map(context, obslist, noise_model, info,
                                                 logger=L,
                                                 overwrite=False)
         errors.append(error[0]) ; outputs.append((output_init, output_proc)) ;
-        if error not in [None,'load_success']:
+        if error[0] not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the preproc database'%(obs_id,detset,band))
             continue
         obs.wrap("weather", np.full(1, "toco"))
