@@ -98,6 +98,14 @@ class DetBiasCuts(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
+        wcomm = data.comm.comm_world
+        timer0 = Timer()
+        timer0.start()
+
+        if detectors is None:
+            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         bg_key = f"{self.detcal_prefix}bg"
         r_tes_key = f"{self.detcal_prefix}r_tes"
@@ -200,6 +208,11 @@ class DetBiasCuts(Operator):
                         bias_flags[det] = self.bias_mask
                         continue
             ob.update_local_detector_flags(bias_flags)
+
+        if detectors is None:
+            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
     def _finalize(self, data, **kwargs):
         return

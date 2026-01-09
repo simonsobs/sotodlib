@@ -105,6 +105,9 @@ class DetTrendCuts(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
+        wcomm = data.comm.comm_world
+        timer0 = Timer()
+        timer0.start()
 
         for ob in data.obs:
             # Relative timestamps within the observation
@@ -132,6 +135,11 @@ class DetTrendCuts(Operator):
 
             # Update per-detector flags
             ob.update_local_detector_flags(trend_flags)
+
+        if detectors is None:
+            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
     def _compute_chunk_slices(self, obs, reltime):
         # Sample rate

@@ -6,7 +6,7 @@ import os
 import pickle
 import re
 import warnings
-from time import time
+from time import time, sleep
 
 import h5py
 import numpy as np
@@ -16,7 +16,7 @@ from astropy import units as u
 from toast import qarray as qa
 from toast.mpi import MPI, Comm, MPI_Comm
 from toast.observation import default_values as defaults
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.traits import Int, Unicode, Quantity, trait_docs
 from toast.utils import Environment, Logger
 from toast.ops import Operator
@@ -79,11 +79,18 @@ class IntensityTemplates(Operator):
         help="If specified, cache templates in this directory.",
     )
 
-    pattern = Unicode(
+    source_pattern = Unicode(
         f"^demod0.*",
         allow_none=True,
         help="Regex pattern to match against detector names. Only detectors "
-        "that match the pattern are used to derive intensity templates."
+        "that match the pattern are used to derive intensity templates.",
+    )
+
+    target_pattern = Unicode(
+        f"^demod4.*",
+        allow_none=True,
+        help="Regex pattern to match against detector names. Only detectors "
+        "that match the pattern are assigned an intensity template.",
     )
 
     mode = Unicode(
@@ -196,6 +203,13 @@ class IntensityTemplates(Operator):
         log = Logger.get()
         wcomm = data.comm.comm_world
         gcomm = data.comm.comm_group
+        timer0 = Timer()
+        timer0.start()
+
+        if detectors is None:
+            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         if (wcomm is None or wcomm.rank == 0) and self.cache_dir is not None:
             os.makedirs(self.cache_dir, exist_ok=True)
@@ -205,22 +219,22 @@ class IntensityTemplates(Operator):
                 msg = "ERROR: IntensityTemplates assumes data are distributed "
                 msg += "by detector"
                 raise RuntimeError(msg)
+            fp = ob.telescope.focalplane
 
             # Get the list of all detectors that are not cut
             local_dets = ob.select_local_detectors(
                 detectors, flagmask=self.det_mask
             )
-            if self.pattern is None:
-                local_intensity_dets = local_dets
-            else:
-                pat = re.compile(self.pattern)
+            local_intensity_dets = []
+            for det in local_dets:
+                if fp[det]["det_info:wafer:type"] != "DARK":
+                    local_intensity_dets.append(det)
+            if self.source_pattern is not None:
+                pat = re.compile(self.source_pattern)
                 local_intensity_dets = [
-                    det for det in local_dets if pat.match(det) is not None
+                    det for det in local_intensity_dets
+                    if pat.match(det) is not None
                 ]
-                if len(local_intensity_dets) == 0:
-                    msg = f"No detectors in {ob.name} match '{self.pattern}'. "
-                    msg += f"Local detectors: {local_dets}"
-                    log.warning(msg)
             if gcomm.size == 1:
                 intensity_dets = local_intensity_dets
             else:
@@ -235,6 +249,13 @@ class IntensityTemplates(Operator):
                 else:
                     intensity_dets = None
                 intensity_dets = gcomm.bcast(intensity_dets)
+
+            if len(intensity_dets) == 0:
+                msg = f"No detectors in {ob.name} match "
+                msg += f"det_mask = {self.det_mask}, "
+                msg += f"source_pattern = '{self.source_pattern}'. "
+                log.warning(msg)
+                continue
 
             # Assemble and reduce the TOD for all qualifying detectors
 
@@ -281,8 +302,27 @@ class IntensityTemplates(Operator):
                         f"{fname_cache}",
                         comm=gcomm,
                     )
-                    with open(fname_cache, "rb") as f:
-                        intensity_templates = pickle.load(f)
+                    # Loading the file will fail if another process is
+                    # writing it. We will try up to 6 times and wait
+                    # 10 seconds between each try
+                    n_try_max = 6
+                    for n_try in range(n_try_max):
+                        try:
+                            with open(fname_cache, "rb") as f:
+                                intensity_templates = pickle.load(f)
+                        except EOFError:
+                            if n_try == n_try_max - 1:
+                                log.warning(
+                                    f"EOF at {fname_cache}, will overwrite"
+                                )
+                                break
+                            else:
+                                log.warning(
+                                    f"EOF at {fname_cache}, waiting for 10 seconds"
+                                )
+                                sleep(10)
+                                continue
+                        break  # success
             else:
                 fname_cache = None
 
@@ -296,51 +336,58 @@ class IntensityTemplates(Operator):
                 if self.mode.startswith("radius:"):
                     radius = u.Quantity(self.mode.split(":")[1])
 
+            if self.target_pattern is None:
+                pattern = None
+            else:
+                pattern = re.compile(self.target_pattern)
+
             det_to_key = {}
             for det in local_dets:
                 # See if this detector needs a template
-                if det.startswith("demod4r") or det.startswith("demod4i"):
-                    # Yes, derive the template key
-                    pixel = self._det_to_pixel(det, fp)
-                    key = template_key.format(pixel=pixel)
-                    if key not in intensity_templates:
-                        intensity_templates[key] = {}
-                    det_to_key[det] = key
-                    # Get a shorthand for templates for this detector
-                    templates = intensity_templates[key]
-                    # Compute the intensity-based template(s) for this key
-                    quat = fp[det]["quat"]
-                    vec = qa.rotate(quat, ZAXIS)
-                    for fpkey in unique_fpkeys:
-                        if fpkey in templates:
-                            # Already cached
+                if pattern is not None and pattern.match(det) is None:
+                    # No need for a template
+                    continue
+                # Yes, derive the template key
+                pixel = self._det_to_pixel(det, fp)
+                key = template_key.format(pixel=pixel)
+                if key not in intensity_templates:
+                    intensity_templates[key] = {}
+                det_to_key[det] = key
+                # Get a shorthand for templates for this detector
+                templates = intensity_templates[key]
+                # Compute the intensity-based template(s) for this key
+                quat = fp[det]["quat"]
+                vec = qa.rotate(quat, ZAXIS)
+                for fpkey in unique_fpkeys:
+                    if fpkey in templates:
+                        # Already cached
+                        continue
+                    use_det = np.zeros(ndet_intensity, dtype=bool)
+                    for idet, intensity_det in enumerate(intensity_dets):
+                        if fpkeys[idet] != fpkey:
+                            # mismatched key, do not include
                             continue
-                        use_det = np.zeros(ndet_intensity, dtype=bool)
-                        for idet, intensity_det in enumerate(intensity_dets):
-                            if fpkeys[idet] != fpkey:
-                                # mismatched key, do not include
+                        if radius is not None:
+                            # Check for distance
+                            iquat = fp[intensity_det]["quat"]
+                            ivec = qa.rotate(iquat, ZAXIS)
+                            dp = np.dot(vec, ivec)
+                            # arccos() will throw warnings if dp is not
+                            # strictly in [-1, 1]
+                            if dp < -1:
+                                dp = -1
+                            elif dp > 1:
+                                dp = 1
+                            dist = np.arccos(dp)
+                            if dist > radius.to_value(u.rad):
+                                # too far, do not include
                                 continue
-                            if radius is not None:
-                                # Check for distance
-                                iquat = fp[intensity_det]["quat"]
-                                ivec = qa.rotate(iquat, ZAXIS)
-                                dp = np.dot(vec, ivec)
-                                # arccos() will throw warnings if dp is not
-                                # strictly in [-1, 1]
-                                if dp < -1:
-                                    dp = -1
-                                elif dp > 1:
-                                    dp = 1
-                                dist = np.arccos(dp)
-                                if dist > radius.to_value(u.rad):
-                                    # too far, do not include
-                                    continue
-                            use_det[idet] = True
-                        if not np.any(use_det):
-                            continue
-                        mean_intensity = np.mean(all_tod[use_det], 0)
-                        mean_intensity -= np.mean(mean_intensity)
-                        templates[fpkey] = mean_intensity
+                        use_det[idet] = True
+                    if not np.any(use_det):
+                        continue
+                    mean_intensity = np.mean(all_tod[use_det], 0)
+                    mean_intensity -= np.mean(mean_intensity)
+                    templates[fpkey] = mean_intensity
 
             # Optionally, cache all available templates
 
@@ -419,6 +466,11 @@ class IntensityTemplates(Operator):
 
             intensity_templates["det_to_key"] = det_to_key
             ob[self.template_name] = intensity_templates
+
+        if detectors is None:
+            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
         return
 

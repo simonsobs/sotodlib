@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2024 Simons Observatory.
+# Copyright (c) 2024-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
@@ -6,7 +6,7 @@ import numpy as np
 from toast.fft import convolve
 from toast.utils import Logger, rate_from_times
 from toast.traits import trait_docs, Int, Unicode
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.observation import default_values as defaults
 from toast.ops import Operator
 
@@ -46,6 +46,14 @@ class ReadoutFilter(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
+        wcomm = data.comm.comm_world
+        timer0 = Timer()
+        timer0.start()
+
+        if detectors is None:
+            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         for ob in data.obs:
             if self.iir_params not in ob:
@@ -96,6 +104,12 @@ class ReadoutFilter(Operator):
                 signal = ob.detdata[self.det_data][local_dets, :]
                 self._filter_detectors(rate, freq, signal, ob[self.iir_params])
 
+        if detectors is None:
+            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
+        else:
+            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
+
+    @function_timer
     def _filter_detectors(self, rate, freq, det_array, iir_props):
         # Get the common filter kernel for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
