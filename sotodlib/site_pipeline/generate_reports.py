@@ -111,11 +111,15 @@ def main(cfg: str) -> None:
     cfg = GenerateReportConfig.from_yaml(cfg)
     base_path = os.path.join(cfg.output_root, cfg.report_interval)
 
-    for start_time, stop_time in tqdm(cfg.time_intervals):
+    for start_time, stop_time in tqdm(cfg.time_intervals, total=len(cfg.time_intervals)):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         subdir = os.path.join(base_path, time_str)
         report_file = os.path.join(subdir, "report.html")
         data_file = os.path.join(subdir, "data.h5")
+        if cfg.data_config.get("make_cov_map", True):
+            map_file = os.path.join(subdir, "cov")
+        else:
+            map_file = None
 
         data_cfg = ReportDataConfig(
             start_time=start_time,
@@ -134,21 +138,25 @@ def main(cfg: str) -> None:
         try:
             if not os.path.exists(data_file) or cfg.overwrite_data:
                 data: ReportData = ReportData.build(data_cfg)
-                data.save(data_file)
+                data.save(data_file, map_file)
             else:
-                data = ReportData.load(data_file)
+                data = ReportData.load(data_file, map_file)
 
             if not os.path.exists(report_file) or cfg.overwrite_html and not cfg.skip_html:
                 if data.cfg.longterm_obs_file != longterm_path:
-                    longterm_data = ReportData.load(data.cfg.longterm_obs_file)
+                    longterm_data = ReportData.load(data.cfg.longterm_obs_file, None)
                     longterm_path = data.cfg.longterm_obs_file
                 render_report(
                     cfg,
                     data,
                     report_file,
                     template_dir=cfg.template_dir,
-                    longterm_data=longterm_data
+                    longterm_data=longterm_data,
+                    map_file=map_file,
                 )
+                # update longterm obs file
+                if longterm_path is not None and cfg.report_interval == "monthly":
+                    data.save(longterm_path, map_path=None, overwrite=False, update_footprints=False)
         except Exception as e:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
@@ -162,6 +170,7 @@ def render_report(
     output_path: str,
     template_dir=None,
     longterm_data: Optional[ReportData] = None,
+    map_file: Optional[str] = None,
 ):
     if template_dir is None:
         template_dir = os.path.join(os.path.dirname(__file__), "templates")
@@ -174,10 +183,17 @@ def render_report(
     figures: Dict[str, go.Figure] = {
         "obs_efficiency_heatmap": obs_efficiency_plots.heatmap,
         "obs_efficiency_pie": obs_efficiency_plots.pie,
+        "boresight_vs_time": plots.boresight_vs_time(data),
+        "hwp_freq_vs_time": plots.hwp_freq_vs_time(data),
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
+        "pwv_and_array_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="array"),
+        "array_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="array"),
+        "pwv_and_det_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="det"),
+        "det_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="det"),
         "source_focalplane": source_footprint_plots.focalplane,
-        "source_table": source_footprint_plots.table
+        "source_table": source_footprint_plots.table,
+        "map_png": plots.cov_map_plot(map_file),
     }
 
     html_kw = dict(full_html=False, include_plotlyjs=False)
@@ -192,7 +208,10 @@ def render_report(
     jinja_data = {
         "data": data,
         "report_interval": cfg.report_interval.capitalize(),
-        "plots": {k: v.to_html(**html_kw) for k, v in figures.items()},
+        "plots": {
+            k: v if isinstance(v, str) else v.to_html(**html_kw)
+            for k, v in figures.items()
+        },
         "general_stats": {
             "Start time": dt.datetime.fromisoformat(start_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
             "Stop time": dt.datetime.fromisoformat(stop_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
