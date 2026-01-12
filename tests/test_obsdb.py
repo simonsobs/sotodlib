@@ -106,6 +106,27 @@ class TestObsDb(unittest.TestCase):
             self.assertTrue(k in r0.keys)
             self.assertTrue(k in r1.keys)
 
+    def test_escaped_characters_tags(self):
+        db = get_example()
+        existing_obs = db.query()
+        obs_id = existing_obs[0]['obs_id']
+        tag = 'a8-{}-😭'
+        db.update_obs(obs_id, tags=[tag])
+        
+        # Three things we need to check: =0, =1, and a separate query
+        def assert_obs(result):
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]['obs_id'], obs_id)
+
+        def assert_not_obs(result):
+            self.assertEqual(len(result), len(existing_obs) - 1)
+            self.assertTrue(all([x['obs_id'] != obs_id for x in result]))
+
+        assert_obs(db.query(tags=[f'{tag}=1']))
+        assert_obs(db.query(f'`{tag}`=1', tags=[tag]))
+        assert_not_obs(db.query(tags=[f'{tag}=0']))
+
+
     def test_owb_tags(self):
         """Test tags with wafer_info keys."""
         db = get_owb_example()
