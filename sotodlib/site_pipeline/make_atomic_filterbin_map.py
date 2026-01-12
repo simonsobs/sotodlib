@@ -391,10 +391,18 @@ def main(
 
     # clean up lingering files from previous incomplete runs
     if len(preprocess_config)==1:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
     else:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
+
         policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[1]['archive']['policy']['filename']), 'temp_proc')
+        preprocess_util.get_preprocess_db(preprocess_config[1], group_by, L)
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
