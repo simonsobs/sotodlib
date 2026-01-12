@@ -81,6 +81,8 @@ P_SAT = {
 R_BOLO = 0.008
 # Readout noise fraction
 R_FRAC = 0.5
+# Shunt Resistance [Ohm]
+R_SHUNT = 400e-6
 
 
 @trait_docs
@@ -152,7 +154,7 @@ class SimMuMUXCrosstalk(Operator):
         output_signal = input_signal / dPhi0dT
         return output_signal
 
-    def _draw_Phi0(self, obs, focalplane, detectors, vmin=0.3, vmax=1.3):
+    def _draw_Phi0(self, obs, focalplane, detectors, vmin=0.0, vmax=1.0):
         """ Draw initial SQUID phases from a flat distribution
         """
         Phi0 = {}
@@ -173,6 +175,8 @@ class SimMuMUXCrosstalk(Operator):
                 counter=(counter1, counter2),
             )[0]
             v = vmin + x * (vmax - vmin)
+            # Convert from Phi0 to Phi
+            v *= 2 * np.pi
             Phi0[det] = v
 
         return Phi0
@@ -209,9 +213,12 @@ class SimMuMUXCrosstalk(Operator):
             P_atm = efficiency * bandpass.optical_loading(det, median_signal)  # W
             P_opt += P_atm - P_atm_ref
             dPdT = bandpass.kcmb2w(det)  # K_CMB -> W
-            dIdP = 1 / np.sqrt((P_sat - P_opt) * R_FRAC * R_BOLO)  # W -> A
+            R_TES = R_FRAC * R_BOLO
+            I_TES = np.sqrt((P_sat - P_opt) / R_TES)
+            dIdP = -1 / (I_TES * (R_TES - R_SHUNT))  # W -> A
             dPhi0dI = 1 / 9e-6  # A -> [rad]
-            dPhi0dT[det] = dPdT * dIdP * dPhi0dI  # K_CMB -> [rad]
+            dPhidPhi0 = 2 * np.pi
+            dPhi0dT[det] = dPdT * dIdP * dPhi0dI * dPhidPhi0  # K_CMB -> [rad]
 
         return dPhi0dT
 
@@ -285,9 +292,16 @@ class SimMuMUXCrosstalk(Operator):
                         Phi0[det_source],
                         dPhi0dT[det_source],
                     )
-                    crosstalk += chi * np.sin(
-                        source_squid_phase - target_squid_phase
-                    )
+                    # Add crosstalk if not collided resonator
+                    if not np.isnan(chi):
+                        crosstalk += chi * np.sin(
+                            source_squid_phase - target_squid_phase
+                        )
+                    #else:
+                    #    # Otherwise flag
+                    #    print('Flagging!')
+                    #    temp_obs.detdata[self.det_flags][det_source] |= self.det_flag_mask
+                    #    temp_obs.detdata[self.det_flags][det_target] |= self.det_flag_mask
 
                 # Translate crosstalk into temperature units and scale to
                 # match input data
@@ -308,9 +322,12 @@ class SimMuMUXCrosstalk(Operator):
                 # explicitly here
                 offset_old = np.median(obs.detdata[self.det_data][det])
                 offset_new = np.median(temp_obs.detdata[self.det_data][det])
+                # Propagate data
                 obs.detdata[self.det_data][det] = (
                     temp_obs.detdata[self.det_data][det] - offset_new + offset_old
                 )
+                # Propagate flags
+                obs.detdata[self.det_flags][det] |= temp_obs.detdata[self.det_flags][det]
 
             # Free data copy
             temp_obs.clear()
