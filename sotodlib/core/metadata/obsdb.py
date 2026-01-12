@@ -431,10 +431,10 @@ class ObsDb(object):
                     val = None
                 if val is None:
                     join_type = 'left join'
-                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as {t}")
+                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
                 elif val == '0':
                     join_type = 'left join'
-                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as {t}")
+                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
                     query_text += f' and {t}==0'
                 else:
                     join_type = 'join'
