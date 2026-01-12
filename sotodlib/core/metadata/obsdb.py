@@ -435,10 +435,10 @@ class ObsDb(object):
                 elif val == '0':
                     join_type = 'left join'
                     extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
-                    query_text += f' and {t}==0'
+                    query_text += f' and "{t}"=0'
                 else:
                     join_type = 'join'
-                    extra_fields.append(f'1 as {t}')
+                    extra_fields.append(f'1 as "{t}"')
                 joins += (f" {join_type} (select distinct obs_id from tags where tag='{t}') as tt{tagi} on "
                           f"obs.obs_id = tt{tagi}.obs_id")
         extra_fields = ''.join([','+f for f in extra_fields])
