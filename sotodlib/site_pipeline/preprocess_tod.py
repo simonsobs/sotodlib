@@ -2,6 +2,7 @@ import argparse
 import os
 import time
 import traceback
+from pathlib import Path
 from typing import Callable, List, Optional, Union
 
 import numpy as np
@@ -335,6 +336,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     configs, context = pp_util.get_preprocess_context(configs)
     logger = init_logger("preprocess", verbosity=verbosity)
 
+    # create archive directory if needed
+    Path(configs['archive']['index']).parent.mkdir(parents=True, exist_ok=True)
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
 
@@ -391,6 +394,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
 
     # Get the database instance
+
     db = pp_util.get_preprocess_db(configs, group_by, logger)
 
     # Use batch manager to optimize operations
