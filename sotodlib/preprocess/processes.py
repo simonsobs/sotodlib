@@ -849,6 +849,21 @@ class Noise(_Preprocess):
         else:
             return keep
 
+    def calc_stats(self, aman, proc_aman):
+        if self.stats_cfgs is None or self.save_cfgs is None:
+            return
+
+        if (
+            (isinstance(self.save_cfgs, bool) and self.save_cfgs)
+            or self.save_cfgs['wrap_name'] is None
+        ):
+            noise_aman = proc_aman["noise"]
+        else:
+            noise_aman = proc_aman[self.save_cfgs['wrap_name']]
+
+        field = self.stats_cfgs.get("name", "mean_white_noise")
+        aman.stats.wrap(field, np.nanmean(noise_aman.white_noise))
+
 
 class Calibrate(_Preprocess):
     """Calibrate the timestreams based on some provided information.

@@ -126,6 +126,8 @@ def preprocess_tod(configs: Union[str, dict],
         A tuple containing the error from PreprocessError, an error message,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
+    stats : dict
+        A dictionary storing calculated preprocessing stats
     """
     logger = pp_util.init_logger("preprocess", verbosity=verbosity)
 
@@ -142,7 +144,12 @@ def preprocess_tod(configs: Union[str, dict],
         compress=compress,
     )
 
-    return out_dict, errors
+    if "stats" in aman:
+        stats = {k: aman.stats[k] for k in aman.stats._assignments.keys()}
+    else:
+        stats = None
+
+    return out_dict, errors, stats
 
 
 def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
@@ -286,6 +293,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     # ensure db exists up front to prevent race conditions
     pp_util.get_preprocess_db(configs, group_by, logger)
 
+    # get stats db
+    statsdb_path = configs.get("statsdb", None)
+    if statsdb_path is not None:
+        statsdb = pp_util.get_preprocess_stats_db(statsdb_path, group_by)
+
     futures = []
     futures_dict = {}
     obs_errors = {}
@@ -316,7 +328,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             obs_id, group = futures_dict[future]
             out_meta = (obs_id, group)
             try:
-                out_dict, errors = future.result()
+                out_dict, errors, stats = future.result()
                 obs_errors[obs_id].append({'group': group, 'error': errors[0]})
                 logger.info(f"{obs_id}: {group} extracted successfully")
             except Exception as e:
@@ -348,6 +360,18 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                                 _t.value = errors[0]
                     else:
                         j.jstate = JState.done
+
+            if (
+                errors[0] is None
+                and statsdb_path is not None
+                and stats is not None
+            ):
+                stats_keys = [
+                    f"{k} {'float' if isinstance(stats[k], float) else 'string'}"
+                    for k in stats.keys()
+                ]
+                statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
+                statsdb.update_obs((obs_id, *group), stats)
 
     if raise_error:
         n_obs_fail = 0
