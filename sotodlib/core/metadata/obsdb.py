@@ -417,7 +417,7 @@ class ObsDb(object):
             obsdb.query('`bad-tag`=1', tags=['bad-tag'])
 
           For this reason, we generally advise against the use of 
-          non-alphanumeric chacaters in tags.
+          non-alphanumeric characters in tags.
 
         """
         sort_text = ''
