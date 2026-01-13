@@ -1,23 +1,22 @@
-import os
-import yaml
-import time
-import logging
-from typing import Optional, Union, Callable, List
-import numpy as np
 import argparse
+import os
+import time
 import traceback
-from typing import Optional
-from sotodlib.utils.procs_pool import get_exec_env
-import h5py
-import copy
+from pathlib import Path
+from typing import Callable, List, Optional, Union
+
+import numpy as np
+import yaml
+
+from sotodlib import core
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
-from sotodlib import core
-from sotodlib.site_pipeline.utils.logging import init_logger
-from sotodlib.site_pipeline.utils.pipeline import main_launcher
-from sotodlib.site_pipeline.utils.obsdb import get_obslist
+from sotodlib.preprocess import Pipeline
 from sotodlib.preprocess import preprocess_util as pp_util
-from sotodlib.preprocess import _Preprocess, Pipeline, processes
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.utils.procs_pool import get_exec_env
 
 logger = init_logger("preprocess")
 
@@ -182,6 +181,7 @@ def preprocess_tod(obs_id,
 
     if make_lmsi:
         from pathlib import Path
+
         import lmsi.core as lmsi
 
         if new_plots is not None and os.path.exists(new_plots):
@@ -336,6 +336,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     configs, context = pp_util.get_preprocess_context(configs)
     logger = init_logger("preprocess", verbosity=verbosity)
 
+    # create archive directory if needed
+    Path(configs['archive']['index']).parent.mkdir(parents=True, exist_ok=True)
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
 
@@ -379,37 +381,55 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     n_fail = 0
 
-    # Run write_block obs-ids in parallel at once then write all to the sqlite db.
-    futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
-                    group_list=r[1], verbosity=verbosity,
-                    configs=configs,
-                    overwrite=overwrite, run_parallel=True) for r in run_list]
-    for future in as_completed_callable(futures):
-        logger.info('New future as_completed result')
-        try:
-            err, db_datasets = future.result()
-            if err is not None:
-                n_fail += 1
-        except Exception as e:
-            errmsg = f'{type(e)}: {e}'
-            tb = ''.join(traceback.format_tb(e.__traceback__))
-            logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
-            f = open(errlog, 'a')
-            f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
-            f.close()
-            n_fail+=1
-            continue
-        futures.remove(future)
+    # Create batch database manager with default batch size of 100
+    batch_size = configs['archive'].get('batch_size', 100)
 
-        if db_datasets:
-            if err is None:
-                logger.info(f'Processing future result')
-                for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs,
-                                          logger, overwrite)
-            else:
-                pp_util.cleanup_mandb(err, db_datasets, configs,
-                                      logger, overwrite)
+    # Create or get the ManifestDb instance
+    if run_list:
+        # Use the first observation to determine group_by
+        sample_obs = run_list[0][0]
+        group_by, _, _ = pp_util.get_groups(sample_obs['obs_id'], configs, context)
+    else:
+        # Fallback if no observations
+        group_by = np.atleast_1d(configs['subobs'].get('use', 'detset'))
+
+    # Get the database instance
+
+    db = pp_util.get_preprocess_db(configs, group_by, logger)
+
+    # Use batch manager to optimize operations
+    with core.metadata.ManifestDbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
+        # Run write_block obs-ids in parallel at once then write all to the sqlite db.
+        futures = [executor.submit(preprocess_tod, obs_id=r[0]['obs_id'],
+                        group_list=r[1], verbosity=verbosity,
+                        configs=configs,
+                        overwrite=overwrite, run_parallel=True) for r in run_list]
+        for future in as_completed_callable(futures):
+            logger.info('New future as_completed result')
+            try:
+                err, db_datasets = future.result()
+                if err is not None:
+                    n_fail += 1
+            except Exception as e:
+                errmsg = f'{type(e)}: {e}'
+                tb = ''.join(traceback.format_tb(e.__traceback__))
+                logger.info(f"ERROR: future.result()\n{errmsg}\n{tb}")
+                f = open(errlog, 'a')
+                f.write(f'\n{time.time()}, future.result() error\n{errmsg}\n{tb}\n')
+                f.close()
+                n_fail+=1
+                continue
+            futures.remove(future)
+
+            if db_datasets:
+                if err is None:
+                    logger.info('Processing future result')
+                    for db_dataset in db_datasets:
+                        pp_util.cleanup_mandb(err, db_dataset, configs,
+                                              logger, overwrite, db_manager=db_manager)
+                else:
+                    pp_util.cleanup_mandb(err, db_datasets, configs,
+                                          logger, overwrite, db_manager=db_manager)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")

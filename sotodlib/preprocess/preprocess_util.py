@@ -1,24 +1,30 @@
-import os
-import logging
-import time
-import sys
+from __future__ import annotations
+
 import copy
-import yaml
-import numpy as np
-import h5py
-import traceback
 import inspect
-from pathlib import Path
+import logging
+import os
 import re
-from sotodlib.hwp import hwp_angle_model
+import sys
+import time
+import traceback
+from pathlib import Path
+from typing import Any
+
+import h5py
+import numpy as np
+import yaml
+
+from sotodlib import core
 from sotodlib.coords import demod as demod_mm
-from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
+from sotodlib.core.metadata import ManifestDbBatchManager
 from sotodlib.core.util import H5ContextManager
+from sotodlib.hwp import hwp_angle_model
+from sotodlib.tod_ops import t2pleakage
 
-from .. import core
+from . import Pipeline
 
-from . import _Preprocess, Pipeline, processes
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -581,7 +587,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             if init_only:
                 return aman
-            
+
             if t2ptemplate_aman is not None:
                 # Replace Q,U with simulated timestreams
                 t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
@@ -832,7 +838,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
                     elif g in db_groups:
                         logger.info(f"{outputs_grp['temp_file']} found in db, removing")
                     os.remove(outputs_grp['temp_file'])
-            except OSError as e:
+            except OSError:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
     return error
@@ -1158,7 +1164,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
             return error, outputs_init, outputs_proc, aman
 
 
-def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
+def cleanup_mandb(
+    error: str | None,
+    outputs: dict[str, Any],
+    configs: dict[str, Any],
+    logger: logging.Logger | None = None,
+    overwrite: bool = False,
+    db_manager: ManifestDbBatchManager | None = None,
+) -> None:
     """
     Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
@@ -1189,6 +1202,9 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
     overwrite : bool
         Optional. Delete the entry in the archive file if it exists and
         replace it with the new entry.
+    db_manager : ManifestDbBatchManager
+        Optional. External database batch manager for optimized operations.
+        If provided, uses the manager instead of creating individual connections.
     """
 
     if logger is None:
@@ -1196,7 +1212,7 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
 
     if error is None:
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
-        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0 
+        # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
         nfile = 0
         folder = os.path.dirname(configs['archive']['policy']['filename'])
@@ -1226,11 +1242,18 @@ def cleanup_mandb(error, outputs, configs, logger=None, overwrite=False):
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
         logger.info(f"Saving to database under {outputs['db_data']}")
-        db = get_preprocess_db(configs, group_by, logger)
-        if len(db.inspect(outputs['db_data'])) == 0:
-            db.add_entry(outputs['db_data'], h5_path)
-        # make sure we close the db each time
-        db.conn.close()
+
+        if db_manager is not None:
+            # Use the batch manager
+            db_manager.add_entry(outputs['db_data'], h5_path)
+        else:
+            # Use the original approach for backward compatibility
+            db = get_preprocess_db(configs, group_by, logger)
+            if len(db.inspect(outputs['db_data'])) == 0:
+                db.add_entry(outputs['db_data'], h5_path)
+            # make sure we close the db each time
+            db.conn.close()
+
         os.remove(src_file)
     elif error == 'load_success':
         return
