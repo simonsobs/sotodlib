@@ -1648,8 +1648,10 @@ class PointingModel(_Preprocess):
 
 
 class GlitchClassification(_Preprocess):
-    """Classify glitches using a random forest. Will return the probability of being each
-    type of glitch: 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other
+    """Classify glitches using a random forest.
+
+    Returns the probability of being each type of glitch: 0: Point Sources,
+    1: Point Sources + Other 2: Cosmic Rays, 3: Electronic Glitches.
 
     Saves results in proc_aman under the "glitch_snippets" field.
 
@@ -1695,11 +1697,13 @@ class GlitchClassification(_Preprocess):
         predictions = gc.classify_glitch_stats(stats, trained_forest_name)
 
         # wrap the ranges and dets in an axis manager
-        snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets, core.LabelAxis("stat_names", list(stats.columns)))
+        snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
+                                        core.LabelAxis("stat_names", list(stats.columns)),
+                                        core.LabelAxis("pred_cols", list(predictions.columns)))
         snippet_aman.wrap("snippet_ranges", snippet_ranges, [(0, 'samps')])
         snippet_aman.wrap("det_mask", np.array(det_mask), [(0, 'snippets'), (1, 'dets')])
         snippet_aman.wrap("stats", stats.to_numpy(), [(0, 'snippets'), (1, 'stat_names')])
-        snippet_aman.wrap("predictions", predictions, [(0, 'snippets')])
+        snippet_aman.wrap("predictions", predictions.to_numpy(), [(0, 'snippets'), (1, 'pred_cols')])
         snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
         self.save(proc_aman, snippet_aman)
 

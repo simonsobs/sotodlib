@@ -132,17 +132,28 @@ def training_forest(df_train, cols, n_trees = 50, max_depth = 15):
 
 def classify_data_forest(df_classify, trained_forest):
 
-    '''
-    Classify glitches using a random forest.
+    """Classify glitches using a random forest.
 
-    Input: df_classify: pandas data frame of data to classify,
-    trained_forest: trained random forest
-    Output: df_w_labs_and_stats: returns the dataframe with a column for the predicted labels - int from
-    0 - 3 corresponding to 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other also columns
-    with the probability that the glitch is each of the categories
-    '''
+    Parameters:
+        df_classify (pandas.DataFrame):
+            DataFrame of data to classify
+        trained_forest (RandomForestClassifier):
+            Trained random forest
 
-    col_predictions = ['Glitch Prediction', 'Probability of being a Point Source', 'Probability of being a Point Source + Other', 'Probability of being a Cosmic Ray', 'Probability of being an Other']
+    Returns:
+        pandas.DataFrame:
+            DataFrame with columns for the predicted labels for the glitches
+            and the probabilities of them belonging to each category.
+            Labels: int from 0-3 corresponding to
+            0: Point Sources
+            1: Point Sources + Other
+            2: Cosmic Rays
+            3: Electronic Glitches
+    """
+
+    col_preds = ['Glitch Prediction', 'Probability of being a Point Source',
+                'Probability of being a Point Source + Other', 'Probability of being a Cosmic Ray',
+                'Probability of being an Electronic Glitch']
 
     X_classify = df_classify[trained_forest.feature_names_in_]
 
@@ -150,17 +161,10 @@ def classify_data_forest(df_classify, trained_forest):
 
     y_pred_forest_probs = trained_forest.predict_proba(X_classify)
 
-    predictions = np.zeros((X_classify.shape[0], 5))
+    preds = pd.DataFrame(np.column_stack((y_pred_forest, y_pred_forest_probs)),
+                    columns = col_preds, index = df_classify.index)
 
-    predictions[:, 0] = y_pred_forest
-    predictions[:, 1] = y_pred_forest_probs[:, 0]
-    predictions[:, 2] = y_pred_forest_probs[:, 1]
-    predictions[:, 3] = y_pred_forest_probs[:, 2]
-    predictions[:, 4] = y_pred_forest_probs[:, 3]
-
-    lab_df = pd.DataFrame(predictions, columns = col_predictions, index=df_classify.index)
-
-    return lab_df
+    return preds
 
 def classify_glitch_stats(stats, trained_forest):
     """
@@ -178,7 +182,7 @@ def classify_glitch_stats(stats, trained_forest):
 
     Returns
     -------
-    numpy.ndarray
+    pandas.DataFrame
         The predictions for the glitches and the probabilities for each category.
     """
     if isinstance(trained_forest, str):
@@ -197,7 +201,7 @@ def classify_glitch_stats(stats, trained_forest):
         df_predictions.loc[i] = np.full(df_predictions.shape[1], np.nan)
     df_predictions.sort_index(inplace=True)
 
-    return df_predictions.to_numpy()
+    return df_predictions
 
 def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0', '#FFE660'], \
  save = False, save_file_name = 'forest_confusion_matrix', outdir = os.getcwd(), show = True):
