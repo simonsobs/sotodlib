@@ -366,10 +366,16 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 and statsdb_path is not None
                 and stats is not None
             ):
-                stats_keys = [
-                    f"{k} {'float' if isinstance(stats[k], float) else 'string'}"
-                    for k in stats.keys()
-                ]
+                stats_keys = []
+                for k, v in stats.items():
+                    if isinstance(v, int):
+                        t = "int"
+                    elif isinstance(v, float):
+                        t = "float"
+                    elif isinstance(v, str):
+                        t = "string"
+                    stats_keys.append(f"{k} {t}")
+
                 statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
                 statsdb.update_obs((obs_id, *group), stats)
 

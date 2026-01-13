@@ -100,6 +100,16 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
                                 psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
+    def calc_stats(self, aman, proc_aman):
+        if self.stats_cfgs is None or self.save_cfgs is None or not self.save_cfgs:
+            return
+
+        dbc_aman = proc_aman["det_bias_flags"]
+        base_name = self.stats_cfgs.get("base_name", "det_bias_flags")
+        m = has_all_cut(dbc_aman.valid)
+        field = f"{base_name}_cuts"
+        aman.stats.wrap(field, np.sum(has_all_cut(dbc_aman.det_bias_flags)[m]))
+
 
 class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
@@ -173,6 +183,17 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
             plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
+
+    def calc_stats(self, aman, proc_aman):
+        if self.stats_cfgs is None or self.save_cfgs is None:
+            return
+
+        trend_aman = proc_aman["trends"]
+
+        base_name = self.stats_cfgs.get("base_name", "trends")
+        m = has_all_cut(trend_aman.valid)
+        field = f"{base_name}_cuts"
+        aman.stats.wrap(field, np.sum(has_all_cut(trend_aman.trend_flags)[m]))
 
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
@@ -375,6 +396,23 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
             plot_signal_diff(aman, proc_aman[name], flag_type='jumps', flag_threshold=self.select_cfgs.get("max_n_jumps", 5), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
             plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
+
+    def calc_stats(self, aman, proc_aman):
+        if self.stats_cfgs is None or self.save_cfgs:
+            return
+
+        jumps_aman = proc_aman[self.save_cfgs.get('jumps_name', 'jumps')]
+
+        base_name = self.stats_cfgs.get("base_name", "jumps")
+
+        m = has_all_cut(jumps_aman.valid)
+        field = f"{base_name}_cuts"
+        aman.stats.wrap(field, np.sum(has_all_cut(jumps_aman.jump_flag)[m]))
+
+        m = has_any_cuts(x.jumps.valid)
+        field = f"{base_name}_counts"
+        aman.stats.wrap(field, count_cuts(jum_aman.jump_flag)[m])
+
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
@@ -861,8 +899,10 @@ class Noise(_Preprocess):
         else:
             noise_aman = proc_aman[self.save_cfgs['wrap_name']]
 
-        field = self.stats_cfgs.get("name", "mean_white_noise")
-        aman.stats.wrap(field, np.nanmean(noise_aman.white_noise))
+        base_name = self.stats_cfgs.get("base_name", "white_noise")
+        m = has_all_cut(noise_aman.valid)
+        field = f"mean_{base_name}"
+        aman.stats.wrap(field, np.nanmean(noise_aman.white_noise[m]))
 
 
 class Calibrate(_Preprocess):

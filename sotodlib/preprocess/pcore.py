@@ -537,8 +537,6 @@ class Pipeline(list):
 
             proc_aman['frequency_cutoffs'].wrap('signal', freq_cutoff)
 
-        aman.wrap("stats", core.AxisManager(aman.dets, aman.samps))
-
         success = 'end'
         for step, process in enumerate(self):
             if sim and process.skip_on_sim:
@@ -557,8 +555,6 @@ class Pipeline(list):
                 proc_aman.restrict('dets', aman.dets.vals)
             self.logger.debug(f"{proc_aman.dets.count} detectors remaining")
 
-            process.calc_stats(aman, proc_aman)
-            
             if aman.dets.count == 0:
                 success = process.name
                 break
@@ -571,6 +567,13 @@ class Pipeline(list):
         if "frequency_cutoffs" in full:
             full.move("frequency_cutoffs", None)
         full.wrap("frequency_cutoffs", proc_aman["frequency_cutoffs"])
+
+        # calc stats
+        aman.wrap("stats", core.AxisManager())
+        aman.stats.wrap("ndets", proc_aman.dets.count)
+        aman.stats.wrap("nsamps", proc_aman.samps.count)
+        for step, process in enumerate(self):
+            process.calc_stats(aman, full)
 
         return full, success
         
