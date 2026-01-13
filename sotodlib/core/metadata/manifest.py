@@ -40,6 +40,8 @@ The ManifestScheme includes:
 * a description of Endpoint Data to associate with valid Index Data.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -839,7 +841,7 @@ class ManifestDbBatchManager:
         else:
             self.logger = logger
 
-    def __enter__(self) -> 'ManifestDbBatchManager':
+    def __enter__(self) -> ManifestDbBatchManager:
         """Context manager entry."""
         return self
 
