@@ -411,7 +411,7 @@ class ObsDb(object):
           When filtering is activated in this way, the returned
           results must satisfy all the criteria (i.e. the individual
           constraints are AND-ed). If your tag name contains special 
-          characters (e.g. '-'), you will ened to enclose it in 
+          characters (e.g. '-'), you will need to enclose it in 
           backticks when using it in a query string, e.g.:
  
             obsdb.query('`bad-tag`=1`', tags=['bad-tag'])
