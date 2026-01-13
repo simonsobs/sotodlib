@@ -414,7 +414,7 @@ class ObsDb(object):
           characters (e.g. '-'), you will need to enclose it in 
           backticks when using it in a query string, e.g.:
  
-            obsdb.query('`bad-tag`=1`', tags=['bad-tag'])
+            obsdb.query('`bad-tag`=1', tags=['bad-tag'])
 
           For this reason, we generally advise against the use of 
           non-alphanumeric chacaters in tags.
