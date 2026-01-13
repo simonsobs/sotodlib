@@ -41,6 +41,7 @@ class PreprocessErrors:
     NoInitDbError = "no_init_db_error"
     GroupOutputError = "group_output_error"
     ExecutorFutureError = "executor_future_error"
+    SkipMissingError = "skip_missing_error"
 
     @classmethod
     def get_errors(cls, e):
@@ -1043,7 +1044,7 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          logger=None, overwrite=False, save_archive=False,
                          save_proc_aman=True, compress=False,
-                         ignore_cfg_check=False):
+                         skip_missing=False, ignore_cfg_check=False):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -1087,6 +1088,9 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         a preprocessing archive.
     compress : bool
         Whether or not to compress the preprocessing data.  Uses flacarray compression.
+    skip_missing : bool
+        Do not attempt to run preprocessing pipeline if either of the preproc dbs
+        don't exist or the obs_id and group combination is not found.
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as the config
         used to create the existing init db when running ``multilayer_load_and_preprocess``.
@@ -1154,6 +1158,25 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         db_proc_exist = find_db(obs_id, configs_proc, dets, logger=logger)
     else:
         db_proc_exist = False
+
+    # Skip entries not in either db if the db exists but entry is not found.
+    # Setting overwrite to True will bypass this and re-run.
+    if not overwrite and skip_missing:
+        # init db exists but entry not in init db
+        if (
+            os.path.exists(configs_init['archive']['index'])
+            and not db_init_exist
+        ):
+            logger.warn(f"{obs_id}: {group} not found in init db and skip missing={skip_missing}")
+            return None, None, None, (PreprocessErrors.SkipMissingError, None, None)
+        # proc db exists but entry not in proc db
+        if (
+            configs_proc is not None
+            and os.path.exists(configs_proc['archive']['index'])
+            and not db_proc_exist
+        ):
+            logger.warn(f"{obs_id}: {group} not found in proc db and skip missing={skip_missing}")
+            return None, None, None, (PreprocessErrors.SkipMissingError, None, None)
 
     # Cannot run if proc db exists but init db does not
     if db_proc_exist and not db_init_exist and not overwrite:
