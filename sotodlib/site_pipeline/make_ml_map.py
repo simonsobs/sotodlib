@@ -36,7 +36,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
-    parser.add_argument("-h", "--hits", action="store_true", help="Write hits maps")
+    parser.add_argument("--hits", action="store_true", help="Write hits maps")
     return parser
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
