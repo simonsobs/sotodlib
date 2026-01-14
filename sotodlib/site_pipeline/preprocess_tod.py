@@ -320,6 +320,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
+    add_obs_cols = True
     pb_name = f"pb_{str(int(time.time()))}.txt"
     with open(pb_name, 'w') as f:
         for future in tqdm(as_completed_callable(futures), total=total,
@@ -361,22 +362,26 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     else:
                         j.jstate = JState.done
 
+            # update statsdb
             if (
                 errors[0] is None
                 and statsdb_path is not None
                 and stats is not None
             ):
-                stats_keys = []
-                for k, v in stats.items():
-                    if isinstance(v, int):
-                        t = "int"
-                    elif isinstance(v, float):
-                        t = "float"
-                    elif isinstance(v, str):
-                        t = "string"
-                    stats_keys.append(f"{k} {t}")
+                if add_obs_cols == True:
+                    stats_keys = []
+                    for k, v in stats.items():
+                        if isinstance(v, int):
+                            t = "int"
+                        elif isinstance(v, float):
+                            t = "float"
+                        elif isinstance(v, str):
+                            t = "string"
 
-                statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
+                        stats_keys.append(f"{k} {t}")
+
+                    statsdb.add_obs_columns(stats_keys, ignore_duplicates=True)
+                    add_obs_cols = False
                 statsdb.update_obs((obs_id, *group), stats)
 
     if raise_error:
