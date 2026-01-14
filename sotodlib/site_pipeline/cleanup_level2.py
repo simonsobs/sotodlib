@@ -5,7 +5,7 @@ import argparse
 
 from sotodlib.io.imprinter import Imprinter
 from sotodlib.io.datapkg_completion import DataPackaging
-from sotodlib.site_pipeline.util import init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 
 logger = init_logger(__name__, "cleanup_level2: ")
 

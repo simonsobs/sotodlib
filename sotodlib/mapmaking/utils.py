@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional, Any, Union
 from sqlalchemy import create_engine, exc
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
@@ -815,7 +816,12 @@ class AtomicInfo(Base):
         return core
 
 def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
+    connect_args = {}
+    timeout_env = os.getenv('SOTODLIB_SQLITE_TIMEOUT')
+    if timeout_env not in (None, ''):
+        connect_args['timeout'] = float(timeout_env)
+
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False, connect_args=connect_args)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:

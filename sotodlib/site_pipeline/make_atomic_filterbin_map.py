@@ -15,11 +15,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 import numpy as np
-import sotodlib.site_pipeline.util as util
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
 from so3g.proj import coords as so3g_coords
 from pixell import enmap, wcsutils, colors, memory
@@ -31,7 +31,7 @@ from pixell.mpiutils import FakeCommunicator
 class Cfg:
     """
     Class to configure make-atomic-filterbin-map
-    
+
     Args
     --------
     context: str
@@ -391,10 +391,18 @@ def main(
 
     # clean up lingering files from previous incomplete runs
     if len(preprocess_config)==1:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
     else:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
+
         policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[1]['archive']['policy']['filename']), 'temp_proc')
+        preprocess_util.get_preprocess_db(preprocess_config[1], group_by, L)
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
@@ -486,10 +494,19 @@ def main(
         futures.remove(future)
         for ii in range(len(errors)):
             for idx_prepoc in range(len(preprocess_config)):
-                if isinstance(outputs[ii][idx_prepoc], dict):
-                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
+                if outputs[ii][idx_prepoc] is not None:
+                    oid = outputs[ii][idx_prepoc]['db_data']['obs:obs_id']
+                    group = [v for k, v in outputs[ii][idx_prepoc]['db_data'].items() if 'dets' in k]
+                    preprocess_util.cleanup_mandb(outputs[ii][idx_prepoc], (oid, group), (errors[ii], None, None),
+                          preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
+
+
+def cli_main(config_file: str, nprocs: int):
+    rank, executor, as_completed_callable = get_exec_env(nprocs)
+    if rank == 0:
+        main(config_file, executor, as_completed_callable)
 
 
 def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
@@ -506,7 +523,4 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     return p
 
 if __name__ == '__main__':
-    args = get_parser().parse_args()
-    rank, executor, as_completed_callable = get_exec_env(args.nprocs)
-    if rank == 0:
-        main(args.config_file, executor, as_completed_callable)
+    main_launcher(cli_main, get_parser)

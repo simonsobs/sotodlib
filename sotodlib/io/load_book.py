@@ -519,25 +519,27 @@ def _concat_filesets(results, ancil=None, timestamps=None,
         n_tones = 0
         tone_info = []
         for v in results.values():
-            d = v['tones'].finalize()
-            n_tones += d.shape[0]
-            for k in v['tones'].keys:
-                # Should look like this: sch_NONE_2_326
-                b, c = map(int, k.split('_')[2:])
-                tone_info.append((v['stream_id'], v['stream_id'] + f'_{b}_{c}', b, c))
-        ts, tk, tb, tc = map(np.array, zip(*tone_info))
-        tman = core.AxisManager(core.LabelAxis('tdets', tk),
-                                aman.samps)
-        aman.wrap('tones', tman)
-        aman.tones.wrap('stream_id', ts, axis_map=[(0, 'tdets')])
-        aman.tones.wrap('band', tb, axis_map=[(0, 'tdets')])
-        aman.tones.wrap('channel', tc, axis_map=[(0, 'tdets')])
-        aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype='float32')
-        dets_ofs = 0
-        for v in results.values():
-            d = v['tones'].data
-            aman.tones['signal'][dets_ofs:dets_ofs + len(d)] = d
-            dets_ofs += len(d)
+            if v['tones'].data is not None:
+                d = v['tones'].finalize()
+                n_tones += d.shape[0]
+                for k in v['tones'].keys:
+                    # Should look like this: sch_NONE_2_326
+                    b, c = map(int, k.split('_')[2:])
+                    tone_info.append((v['stream_id'], v['stream_id'] + f'_{b}_{c}', b, c))
+        if tone_info:
+            ts, tk, tb, tc = map(np.array, zip(*tone_info))
+            tman = core.AxisManager(core.LabelAxis('tdets', tk),
+                                    aman.samps)
+            aman.wrap('tones', tman)
+            aman.tones.wrap('stream_id', ts, axis_map=[(0, 'tdets')])
+            aman.tones.wrap('band', tb, axis_map=[(0, 'tdets')])
+            aman.tones.wrap('channel', tc, axis_map=[(0, 'tdets')])
+            aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype='float32')
+            dets_ofs = 0
+            for v in results.values():
+                d = v['tones'].data
+                aman.tones['signal'][dets_ofs:dets_ofs + len(d)] = d
+                dets_ofs += len(d)
 
     # In sims, or if no_headers, the primary block may be unpopulated.
     if any([(v['primary'] is not None and v['primary'].data is not None)
