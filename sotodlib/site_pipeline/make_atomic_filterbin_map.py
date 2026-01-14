@@ -391,10 +391,18 @@ def main(
 
     # clean up lingering files from previous incomplete runs
     if len(preprocess_config)==1:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
     else:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
+
         policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[1]['archive']['policy']['filename']), 'temp_proc')
+        preprocess_util.get_preprocess_db(preprocess_config[1], group_by, L)
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
@@ -486,8 +494,11 @@ def main(
         futures.remove(future)
         for ii in range(len(errors)):
             for idx_prepoc in range(len(preprocess_config)):
-                if isinstance(outputs[ii][idx_prepoc], dict):
-                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
+                if outputs[ii][idx_prepoc] is not None:
+                    oid = outputs[ii][idx_prepoc]['db_data']['obs:obs_id']
+                    group = [v for k, v in outputs[ii][idx_prepoc]['db_data'].items() if 'dets' in k]
+                    preprocess_util.cleanup_mandb(outputs[ii][idx_prepoc], (oid, group), (errors[ii], None, None),
+                          preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
 
