@@ -1307,10 +1307,10 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         except Exception as e:
             errmsg, tb = PreprocessErrors.get_errors(e)
             logger.error(f"Pipeline Run Error for {obs_id}: {group}\n{errmsg}\n{tb}")
-            return None, None, None, (PreprocessErrors.ProcPipeLineRunError, errmsg, tb)
+            return None, out_dict_init, None, (PreprocessErrors.ProcPipeLineRunError, errmsg, tb)
         if success != 'end':
             logger.error(f"Proc Pipeline Step Error for {obs_id}: {group}\nFailed at step {success}")
-            return None, None, None, (PreprocessErrors.PipeLineStepError, success, None)
+            return None, out_dict_init, None, (PreprocessErrors.PipeLineStepError, success, None)
 
         if save_proc_aman:
             logger.info(f"Saving proc axis manager to "
@@ -1388,7 +1388,7 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     if logger is None:
         logger = init_logger("preprocess")
 
-    if errors[0] is None and out_dict is not None:
+    if out_dict is not None and os.path.isfile(out_dict['temp_file']):
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
