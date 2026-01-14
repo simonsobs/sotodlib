@@ -36,6 +36,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
+    parser.add_argument("-h", "--hits", action="store_true", help="Write hits maps")
     return parser
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
@@ -408,6 +409,9 @@ def main(**args):
         signal_map.write(prefix, "div", signal_map.div, unit=args.unit+'^-2')
         signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args.unit)
         L.info("Wrote rhs, div, bin")
+        if args.hits:
+            signal_map.write(prefix, "hits", signal_map.hits, unit='hits')
+            L.info("Wrote hits")
 
         # Set up initial condition
         x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
