@@ -9,6 +9,7 @@ import so3g
 import yaml
 from pixell import bunch, enmap, mpi
 from pixell import utils as putils
+
 from sotodlib import coords, mapmaking
 from sotodlib.core import FlagManager, metadata
 from sotodlib.tod_ops import detrend_tod
@@ -107,7 +108,7 @@ def _get_config(config_file: str) -> Dict[Any, Any]:
 
 
 def tele2equ(
-    coords: List[None, np.ndarray],
+    coords: List[np.ndarray],
     ctime: float,
     detoffs: List[int] = [0, 0],
     site: str = "so_sat1",
@@ -267,7 +268,7 @@ def read_tods(
                 dets={"wafer_slot": detset, "wafer.bandpass": band},
                 no_signal=no_signal,
             )
-            tod = calibrate_obs(tod, band, site=site, L=L, min_dets=min_dets)
+            tod, _ = calibrate_obs(tod, band, site=site, L=L, min_dets=min_dets)
             my_tods.append(tod)
             my_inds.append(ind)
         except RuntimeError:

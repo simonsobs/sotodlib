@@ -1,7 +1,6 @@
 from typing import Dict, List, Tuple
 
 import numpy as np
-
 from mapcat.database import DepthOneMapTable, TODDepthOneTable
 from mapcat.helper import Settings
 

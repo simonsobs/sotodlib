@@ -5,13 +5,21 @@ from argparse import ArgumentParser
 
 import numpy as np
 from pixell import bunch, enmap, mpi, tilemap, utils, wcsutils
+
 from sotodlib import mapmaking
 from sotodlib.core import Context
 from sotodlib.preprocess import preprocess_util as pp_util
-from sotodlib.site_pipeline.utils.depth1_maps_utils import (
-    DEFAULTS, DataMissing, LoaderError, _get_config, calibrate_obs,
-    commit_depth1_map, commit_depth1_tods, create_mapmaker_config,
-    find_footprint, map_to_calculate, read_tods, write_depth1_map)
+from sotodlib.site_pipeline.utils.depth1_utils import (DEFAULTS, DataMissing,
+                                                       LoaderError,
+                                                       _get_config,
+                                                       calibrate_obs,
+                                                       create_mapmaker_config,
+                                                       find_footprint,
+                                                       read_tods,
+                                                       write_depth1_map)
+from sotodlib.site_pipeline.utils.mapcat import (commit_depth1_map,
+                                                 commit_depth1_tods,
+                                                 map_to_calculate)
 
 
 def get_parser(parser=None):
@@ -316,6 +324,7 @@ def main(config_file, defaults=DEFAULTS, **args):
                 L=L,
                 min_dets=args["min_dets"],
             )
+
             my_costs = np.array(
                 [
                     tod.samps.count
