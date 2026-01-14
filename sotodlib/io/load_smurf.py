@@ -648,7 +648,7 @@ class G3tSmurf:
             The active session
         """
 
-        band = int(re.findall("b\d.txt", cha)[0][1])
+        band = int(re.findall(r"b\d.txt", cha)[0][1])
 
         ch_assign = session.query(ChanAssignments).filter(
             ChanAssignments.ctime == ctime,
@@ -1580,7 +1580,7 @@ class G3tSmurf:
                     # same folder
                     root = os.path.join("/", *path.split("/")[:-1])
                     fname = path.split("/")[-1]
-                    fband = int(re.findall("b\d.txt", fname)[0][1])
+                    fband = int(re.findall(r"b\d.txt", fname)[0][1])
                     cha_times = [
                         int(f.split("_")[0])
                         for f in os.listdir(root)

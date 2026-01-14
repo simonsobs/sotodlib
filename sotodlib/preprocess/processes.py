@@ -378,7 +378,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
 
 class PSDCalc(_Preprocess):
-    """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
+    """ Calculate the PSD of the data and add it to the AxisManager under the
     "psd" field.
 
     Note: noverlap = 0 amd full_output = True are recommended to get unbiased
@@ -389,13 +389,12 @@ class PSDCalc(_Preprocess):
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
-        "calc":
+        "process":
           "nperseg": 1024 # optional
           "noverlap": 0 # optional
           "wrap_name": "psd" # optional
           "subscan": False # optional
           "full_output": True # optional
-        "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
@@ -407,19 +406,19 @@ class PSDCalc(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def calc_and_save(self, aman, proc_aman):
-        full_output = self.calc_cfgs.get('full_output')
+    def process(self, aman, proc_aman, sim=False):
+        full_output = self.process_cfgs.get('full_output')
         if full_output:
             freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                                        **self.calc_cfgs)
+                                                        **self.process_cfgs)
         else:
             freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                                  **self.calc_cfgs)
+                                                  **self.process_cfgs)
 
         fft_aman = core.AxisManager(aman.dets,
                                     core.OffsetAxis("nusamps", len(freqs)))
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
-        if self.calc_cfgs.get('subscan', False):
+        if self.process_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
             if full_output:
@@ -431,15 +430,16 @@ class PSDCalc(_Preprocess):
         if full_output:
             fft_aman.wrap("nseg", nseg)
 
+        aman.wrap(self.wrap, fft_aman)
+
+        return aman, proc_aman
+
+    def calc_and_save(self, aman, proc_aman):
         if "frequency_cutoffs" in proc_aman:
             proc_aman["frequency_cutoffs"].wrap(self.wrap, proc_aman["frequency_cutoffs"][self.signal])
 
-        self.save(proc_aman, fft_aman)
         return aman, proc_aman
 
-    def save(self, proc_aman, fft_aman):
-        if not(self.save_cfgs is None):
-            proc_aman.wrap(self.wrap, fft_aman)
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
@@ -453,7 +453,7 @@ class PSDCalc(_Preprocess):
             filename = filename.replace('{name}', f'{ufm}_{self.wrap}')
 
             plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
-                     xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
+                     xx=attrgetter(f"{self.wrap}.freqs")(aman), filename=filename, **self.plot_cfgs)
 
 class NoiseRatio(_Preprocess):
     """ Compute ratios of "signal band" to white noise in PSDs.
@@ -484,9 +484,9 @@ class NoiseRatio(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.psd not in proc_aman:
-            raise ValueError("PSD is not saved in Preprocessing AxisManager")
-        psd = proc_aman[self.psd]
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
         pxx = psd.Pxx_ss if self.subscan else psd.Pxx
 
         if self.calc_cfgs is None:
@@ -654,9 +654,9 @@ class Noise(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.psd not in proc_aman:
-            raise ValueError("PSD is not saved in Preprocessing AxisManager")
-        psd = proc_aman[self.psd]
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
         pxx = psd.Pxx_ss if self.subscan else psd.Pxx
 
         if "frequency_cutoffs" in proc_aman:
@@ -2702,6 +2702,48 @@ class TrimFlagEdge(_Preprocess):
 
         return aman, proc_aman
 
+class AcuDropFlags(_Preprocess):
+    """Expands ACU drop flag fields in aman to all detectors.  ACU drop flags
+    indicate where samples are missing from the ACU data due to aggregator
+    failures.
+
+    Example config block::
+
+        - name: "acu_drop_flags"
+          calc:
+            buffer: 200 # disable buffering by setting to False or None.
+            name: "acu_drop_flags"
+            merge: True
+          save: True
+    """
+
+    name = "acu_drop_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        if "acu_drops" in aman.flags:
+            acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in range(aman.dets.count)])
+            buffer = self.calc_cfgs.get("buffer", 200)
+            if buffer:
+                acu_drops = acu_drops.buffer(buffer)
+        else:
+            acu_drops = RangesMatrix.zeros(
+                shape=(aman.dets.count, aman.samps.count))
+
+        if self.calc_cfgs.get("merge", True):
+            aman.flags.wrap('acu_drop_flags', acu_drops, [(0, 'dets'), (1, 'samps')])
+
+        flag_aman = core.AxisManager(aman.dets, aman.samps)
+        flag_aman.wrap(self.calc_cfgs['name'], acu_drops, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, flag_aman)
+
+        return aman, proc_aman
+
+    def save(self, proc_aman, flag_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("acu_drops", flag_aman)
+
 class SmurfGapsFlags(_Preprocess):
     """Expand smurfgaps flag of each stream_id to all detectors
     smurfgaps flags indicates the samples of each stream_id where the
@@ -2835,6 +2877,7 @@ _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
+_Preprocess.register(AcuDropFlags)
 _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
 _Preprocess.register(Move)
