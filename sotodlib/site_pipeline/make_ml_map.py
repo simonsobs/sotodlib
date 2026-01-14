@@ -34,6 +34,8 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
+    parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
     return parser
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
@@ -65,7 +67,7 @@ def main(**args):
     from sotodlib.core import Context, AxisManager, IndexAxis
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
-    from sotodlib.coords import pointing_model
+    from sotodlib.coords import pointing_model, sidelobes
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
     from sotodlib.core import metadata
@@ -197,6 +199,7 @@ def main(**args):
             # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+        sidelobe_cutters = {}
 
         nkept = 0
         # TODO: Fix the task distribution. The current one doesn't care which mpi
@@ -350,6 +353,11 @@ def main(**args):
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
                 mmask = obs.flags.glitch_flags.mask()
                 L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
+
+                # sidelobes cuts
+                cutss = sidelobes.sidelobe_cut(obs, args, sidelobe_cutters)
+                for cut in cutss:
+                    obs.flags.glitch_flags += cut
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
