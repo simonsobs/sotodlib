@@ -22,8 +22,20 @@ from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.obsdb import get_obslist
 
 
+
 logger = pp_util.init_logger("preprocess")
 
+
+def multilayer_preprocess_tod(obs_id: str,
+                              configs_init: Union[str, dict],
+                              configs_proc: Union[str, dict],
+                              group: list,
+                              verbosity: int = 0,
+                              compress: bool = False,
+                              overwrite: bool = False):
+    """Meant to be run as part of a batched script, this function calls the
+    preprocessing pipeline a specific Observation ID and group combination
+    and saves the results in the ManifestDb specified in the configs.
 
 def multilayer_preprocess_tod(obs_id: str,
                               configs_init: Union[str, dict],
@@ -401,7 +413,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
-    with open('progress_bar.txt', 'w') as f:
+    pb_name = f"pb_{str(int(time.time()))}.txt"
+    with open(pb_name, 'w') as f:
         for future in tqdm(as_completed_callable(futures), total=total,
                                desc="multilayer_preprocess_tod", file=f,
                                miniters=max(1, total // 100)):
@@ -527,7 +540,7 @@ def get_parser(parser=None):
     parser.add_argument(
         '--compress',
         help="Compress preprocessing database.",
-        type=bool,
+        action='store_true',
         default=False
     )
     parser.add_argument(

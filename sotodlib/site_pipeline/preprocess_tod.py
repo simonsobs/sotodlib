@@ -308,7 +308,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
-    with open('progress_bar.txt', 'w') as f:
+    pb_name = f"pb_{str(int(time.time()))}.txt"
+    with open(pb_name, 'w') as f:
         for future in tqdm(as_completed_callable(futures), total=total,
                            desc="preprocess_tod", file=f,
                            miniters=max(1, total // 100)):
@@ -424,7 +425,7 @@ def get_parser(parser=None):
     parser.add_argument(
         '--compress',
         help="Compress preprocessing database.",
-        type=bool,
+        action='store_true',
         default=False
     )
     parser.add_argument(
