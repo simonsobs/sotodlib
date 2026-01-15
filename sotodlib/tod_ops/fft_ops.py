@@ -817,7 +817,6 @@ def fit_noise_model(
         If True, (nusamps,) mask is taken from aman.psd_mask, or calculated on the fly.
         Can also be a 1d (nusamps,) bool array True for good samples to keep.
         Can also be a Ranges in which case it will be inverted before application.
-
     fixed_param : str
         This accepts 'wn' or 'alpha' or None. If 'wn' ('alpha') is given, 
         white noise level (alpha) is fixed to the wn_est (alpha_est).
@@ -840,8 +839,9 @@ def fit_noise_model(
         first is lower bounds second is upper bounds to constrain fit.
     fit_method : str
         Selects optimizer. "likelihood" (default) uses the Nelder-Mead
-        negative log-likelihood fit. "log_curve_fit" performs a
-        log-space non-linear least square fit via scipy.optimize.curve_fit.
+        negative log-likelihood fit through ``scipy.optimize.minimize``.
+        "log_curve_fit" performs a log-space non-linear least square fit via 
+        ``scipy.optimize.curve_fit``.
     curve_fit_kwargs : dict
         Extra options forwarded to curve_fit when fit_method is
         "log_curve_fit". Ignored otherwise.
@@ -918,23 +918,18 @@ def fit_noise_model(
         if binning == True:
             f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                               base=base, merge=False)
+        errsout = np.full(aman[label_axis].count, 'no_error', dtype='<U16')
         fitout = np.zeros((aman[label_axis].count, 3))
         covout = np.zeros((aman[label_axis].count, 3, 3))
         if isinstance(wn_est, (int, float)):
             wn_est = np.full(aman[label_axis].count, wn_est)
-        elif len(wn_est)!=aman[label_axis].count:
-            print('Size of wn_est must be equal to aman.dets.count or a single value.')
-            return
+        assert len(wn_est)==aman[label_axis].count, 'Size of wn_est must be equal to aman.dets.count or a single value.'
         if isinstance(fknee_est, (int, float)):
             fknee_est = np.full(aman[label_axis].count, fknee_est)
-        elif len(fknee_est)!=aman[label_axis].count:
-            print('Size of fknee_est must be equal to aman.dets.count or a single value.')
-            return
+        assert len(fknee_est)==aman[label_axis].count, 'Size of fknee_est must be equal to aman.dets.count or a single value'
         if isinstance(alpha_est, (int, float)):
             alpha_est = np.full(aman[label_axis].count, alpha_est)
-        elif len(alpha_est)!=aman[label_axis].count:
-            print('Size of alpha_est must be equal to aman.dets.count or a single value.')
-            return
+        assert len(alpha_est)==aman[label_axis].count, 'Size of alpha_est must be equal to aman.dets.count or a single value.'
 
         wn_est = np.asarray(wn_est, dtype=float)
         fknee_est = np.asarray(fknee_est, dtype=float)
@@ -976,8 +971,7 @@ def fit_noise_model(
         else:
             bounds = tuple(bounds)
 
-        if len(bounds) != n_free_params:
-            raise ValueError("Number of bounds entries must match free parameters.")
+        assert len(bounds) == n_free_params, "Number of bounds entries must match free parameters."
 
         curve_bounds = None
         if fit_method == "log_curve_fit":
@@ -1006,20 +1000,14 @@ def fit_noise_model(
                         hessian_ndt, _ = Hfun(res["x"])
                         covout_i = np.linalg.inv(hessian_ndt)
                     except np.linalg.LinAlgError:
-                        print(
-                            f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (LinAlgError)"
-                        )
+                        errout[i] = 'LinalgError'
                         covout_i = np.full((len(p0), len(p0)), np.nan)
                     except IndexError:
-                        print(
-                            f"Cannot calculate Hessian for detector {aman[label_axis].vals[i]} skipping. (IndexError)"
-                        )
+                        errout[i] = 'IndexError'
                         covout_i = np.full((len(p0), len(p0)), np.nan)
                     except RuntimeWarning as e:
                         covout_i = np.full((len(p0), len(p0)), np.nan)
-                        print(
-                            f"RuntimeWarning: {e}\n Hessian failed because results are: {res['x']}, for det: {aman[label_axis].vals[i]}"
-                        )
+                        errout[i] = 'RuntimeWarning'
                 fitout_i = res.x
             else:
                 valid = np.isfinite(p) & (p > 0) & np.isfinite(f)
@@ -1039,10 +1027,8 @@ def fit_noise_model(
                             bounds=curve_bounds,
                             **curve_fit_kwargs,
                         )
-                    except (RuntimeError, ValueError) as err:
-                        print(
-                            f"curve_fit failed for detector {aman[label_axis].vals[i]}: {err}"
-                        )
+                    except Exception as err:
+                        errout[i] = f"{err}"
                         fitout_i = np.full(n_free_params, np.nan)
                         covout_i = np.full((n_free_params, n_free_params), np.nan)
                     else:
@@ -1075,6 +1061,7 @@ def fit_noise_model(
     )
     noise_fit_stats.wrap("fit", fitout, axis_map_fit)
     noise_fit_stats.wrap("cov", covout, axis_map_cov)
+    noise_fit_stats.wrap("err", errout, [(0, label_axis)])
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)

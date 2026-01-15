@@ -623,8 +623,7 @@ class CutBadDistribution(_Preprocess):
         elif stat_name in proc_aman:
             keep = tod_ops.flags.get_good_distribution_flags(proc_aman, **self.select_cfgs)
         else:
-            warnings.warn(f'{stat_name} not found in aman or proc_aman not applying bad dist cut.')
-            return meta
+            raise ValueError(f'{stat_name} not found in aman or proc_aman not applying bad dist cut.')
 
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
@@ -756,16 +755,15 @@ class Noise(_Preprocess):
                 fcfgs['subscan'] = self.subscan
             fcfgs.pop('fwhite', None)
             f_max = check_frequency_cutoff(fcfgs.get("lowf", None), fcfgs.pop("f_max", 100))
-            fit_kwargs = dict(fcfgs)
             if fit_method is not None:
-                fit_kwargs['fit_method'] = fit_method
+                fcfgs['fit_method'] = fit_method
             if curve_fit_kwargs is not None:
-                fit_kwargs['curve_fit_kwargs'] = curve_fit_kwargs
+                fcfgs['curve_fit_kwargs'] = curve_fit_kwargs
             calc_aman = tod_ops.fft_ops.fit_noise_model(aman, pxx=pxx,
                                                         f=psd.freqs,
                                                         merge_fit=True,
                                                         f_max=f_max,
-                                                        **fit_kwargs)
+                                                        **fcfgs)
             if calc_wn or wn_est is None:
                 if not self.subscan:
                     calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets")])
@@ -911,7 +909,7 @@ class Calibrate(_Preprocess):
                               " not understood")
         return aman, proc_aman
     
-    def select(self, meta, in_place=True):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         keep = meta[self.select_cfgs['cut_array']] == 0
@@ -1222,9 +1220,9 @@ class Demodulate(_Preprocess):
 
 class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight and subtract.
-    All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied
-    and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
-    fitting will be applied and used as AzSS model. If `subtract` is True in process, subtract AzSS model
+    All process configs go to ``get_azss``. If ``method`` is 'interpolate', no fitting applied
+    and binned signal is directly used as AzSS model. If ``method`` is 'fit', Legendre polynominal
+    fitting will be applied and used as AzSS model. If ``subtract`` is True in process, subtract AzSS model
     from signal in place.
 
     Example configuration block::
@@ -1311,14 +1309,13 @@ class AzSS(_Preprocess):
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         return aman, proc_aman
     
-    def select(self, meta, in_place=True):
+    def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
         if 'bad_dets' in meta[self.azss_stats_name]:
             keep = ~meta[self.azss_stats_name]['bad_dets']
         else:
-            print('No bad_dets field in azss_stats, skipping det selection.')
-            return meta
+            keep = np.ones(aman.dets.count, dtype=bool)
         
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
@@ -2207,13 +2204,12 @@ class GetCommonMode(_Preprocess):
     example config file entry::
 
       - name: "get_common_mode"
-        noise_fit: True
-        f_max: 2.0
         wrap_name: "common_demodQ"
         calc:
+            noise_fit: True
+            f_max: 2.0
             signal: "signal"
             method: "median"
-        
         save: True
 
     If ``noise_fit`` is True, the 1/f noise fit parameters of the common mode
@@ -2222,17 +2218,19 @@ class GetCommonMode(_Preprocess):
     """
     name = 'get_common_mode'
     def __init__(self, step_cfgs):
-        self.noise_fit = step_cfgs.get('noise_fit', False)
-        self.f_max = step_cfgs.get('f_max', None)
         self.wrap_name = step_cfgs.get('wrap_name', 'common_mode')
 
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        common_mode = tod_ops.pca.get_common_mode(aman, **self.calc_cfgs)
-        if self.noise_fit:
+        cmcfgs = copy.deepcopy(self.calc_cfgs)
+        for k in cmcfgs.keys()
+            if k not in ['signal', 'method']:
+                cmcfgs.pop(k)
+        common_mode = tod_ops.pca.get_common_mode(aman, **cmcfgs)
+        if self.calc_cfgs['noise_fit']:
             common_aman = tod_ops.fft_ops.get_common_noise_params(aman, signal=common_mode,
-                                                                  f_max=self.f_max)
+                                                                  f_max=self.calc_cfgs['f_max'])
             samps = core.OffsetAxis('samps', aman.samps.count)
             common_aman.wrap(self.wrap_name, common_mode, [(0, samps)])
         else:
@@ -2440,9 +2438,7 @@ class SubtractT2P(_Preprocess):
      Example config block::
 
         - name : "subtract_t2p"
-          process:
-            Q_sig_name: 'demodQ'
-            U_sig_name: 'demodU'
+          process: {}
     
     .. autofunction:: sotodlib.tod_ops.t2pleakage.subtract_t2p
     """
@@ -2665,27 +2661,27 @@ class ScanFreqCut(_Preprocess):
     Example config block::
 
         - name : 'scan_freq_cut'
-          signal_name_T: 'dsT'
-          signal_name_Q: 'demodQ'
-          signal_name_U: 'demodU'
-          process: True
+          process:
+            signal_name_T: 'dsT'
+            signal_name_Q: 'demodQ'
+            signal_name_U: 'demodU'
 
     """
     name = "scan_freq_cut"
 
     def __init__(self, step_cfgs):
-        self.signal_name_T = step_cfgs.get('signal_name_T', 'dsT')
-        self.signal_name_Q = step_cfgs.get('signal_name_Q', 'demodQ')
-        self.signal_name_U = step_cfgs.get('signal_name_U', 'demodU')
+        
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False):
         scan_freq = tod_ops.utils.get_scan_freq(aman)
         hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
         filt = tod_ops.get_hpf(hpf_cfg)
-        aman[self.signal_name_T] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_T, detrend='linear')
-        aman[self.signal_name_Q] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_Q, detrend='linear')
-        aman[self.signal_name_U] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_U, detrend='linear')
+        n = fft_ops.find_superior_integer(aman.samps.count)
+        rfft = fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
+        aman[self.process_cfgs.get('signal_name_T', 'dsT')] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_T, detrend='linear', rfft=rfft)
+        aman[self.process_cfgs.get('signal_name_Q', 'demodQ')]] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_Q, detrend='linear', rfft=rfft)
+        aman[self.process_cfgs.get('signal_name_U', 'demodU')]] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_U, detrend='linear', rfft=rfft)
         return aman, proc_aman
 
 class FocalplaneNanFlags(_Preprocess):
