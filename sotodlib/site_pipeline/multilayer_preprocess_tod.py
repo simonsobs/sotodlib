@@ -22,20 +22,8 @@ from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.obsdb import get_obslist
 
 
-
 logger = pp_util.init_logger("preprocess")
 
-
-def multilayer_preprocess_tod(obs_id: str,
-                              configs_init: Union[str, dict],
-                              configs_proc: Union[str, dict],
-                              group: list,
-                              verbosity: int = 0,
-                              compress: bool = False,
-                              overwrite: bool = False):
-    """Meant to be run as part of a batched script, this function calls the
-    preprocessing pipeline a specific Observation ID and group combination
-    and saves the results in the ManifestDb specified in the configs.
 
 def multilayer_preprocess_tod(obs_id: str,
                               configs_init: Union[str, dict],
