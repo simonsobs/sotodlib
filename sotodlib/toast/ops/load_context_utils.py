@@ -15,6 +15,7 @@ from toast.timing import function_timer, Timer
 from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
+from toast.io.hdf_utils import unicode_array_to_fixed, replace_unicode_arrays
 
 from ...coords import pointing_model
 from ...core import Context, AxisManager
@@ -125,19 +126,17 @@ def read_and_preprocess_wafers(
             # Apply pointing model, UNLESS we are applying a preprocess config
             # on load and that config includes the pointing model
             if "pointing_model" in axtod:
-                if (
-                    preconfig is None
-                    or "pointing_model" not in [i['name'] for i in preconfig["process_pipe"]]
-                ):
+                if preconfig is None or "pointing_model" not in [
+                    i["name"] for i in preconfig["process_pipe"]
+                ]:
                     pointing_model.apply_pointing_model(axtod)
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
                 # Did we already apply it in the preprocessing?
-                if (
-                    preconfig is None
-                    or "hwp_angle_model" not in [i['name'] for i in preconfig["process_pipe"]]
-                ):
+                if preconfig is None or "hwp_angle_model" not in [
+                    i["name"] for i in preconfig["process_pipe"]
+                ]:
                     axtod = apply_hwp_angle_model(axtod)
                     timer.stop()
                     elapsed = timer.seconds()
@@ -219,14 +218,16 @@ def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_ba
             field_axes = axman._assignments[key]
             if len(field_axes) == 0:
                 # This data is not associated with an axis.
-                om[key] = axman[key]
+                om[key] = replace_unicode_arrays(axman[key])
             elif len(field_axes) == 1 and field_axes[0] == det_axis:
                 # This is a detector property
                 if fp_key in fp_cols:
                     msg = f"Context meta key '{fp_key}' is duplicated in nested"
                     msg += " AxisManagers"
                     raise RuntimeError(msg)
-                fp_cols[fp_key] = Column(name=fp_key, data=np.array(axman[key]))
+                fp_cols[fp_key] = Column(
+                    name=fp_key, data=np.array(unicode_array_to_fixed(axman[key]))
+                )
     if obs_base is not None and len(om) == 0:
         # There were no meta data keys- delete this dict
         del obs_meta[obs_base]
