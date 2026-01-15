@@ -8,7 +8,11 @@ import numpy as np
 from scipy.interpolate import CubicSpline, PchipInterpolator
 
 from toast.utils import Logger
-from toast.io.hdf_utils import load_meta_object, save_meta_object
+from toast.io.hdf_utils import (
+    load_meta_object,
+    save_meta_object,
+    replace_unicode_arrays,
+)
 
 from ..io import hkdb
 
@@ -133,7 +137,14 @@ class HKManager(MutableMapping):
             hkdb=None,
         )
         result = hkdb.load_hk(lspec, show_pb=False)
-        self._internal.update(result.data)
+
+        # If any data contains a numpy array of UTF strings (e.g. '<U9' or similar),
+        # we convert those to an array of fixed-length ASCII strings.  This allows
+        # automatic serialization to HDF5 and causes fewer downstream problems.
+
+        converted = replace_unicode_arrays(result.data)
+
+        self._internal.update(converted)
         if aliases is not None:
             for k, v in aliases.items():
                 if v not in self._internal:
