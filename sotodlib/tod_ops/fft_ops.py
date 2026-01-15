@@ -918,7 +918,7 @@ def fit_noise_model(
         if binning == True:
             f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                               base=base, merge=False)
-        errsout = np.full(aman[label_axis].count, 'no_error', dtype='<U16')
+        errout = np.full(aman[label_axis].count, 'no_error', dtype='<U16')
         fitout = np.zeros((aman[label_axis].count, 3))
         covout = np.zeros((aman[label_axis].count, 3, 3))
         if isinstance(wn_est, (int, float)):

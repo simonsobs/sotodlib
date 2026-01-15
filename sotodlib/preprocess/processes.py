@@ -2224,7 +2224,7 @@ class GetCommonMode(_Preprocess):
 
     def calc_and_save(self, aman, proc_aman):
         cmcfgs = copy.deepcopy(self.calc_cfgs)
-        for k in cmcfgs.keys()
+        for k in cmcfgs.keys():
             if k not in ['signal', 'method']:
                 cmcfgs.pop(k)
         common_mode = tod_ops.pca.get_common_mode(aman, **cmcfgs)
@@ -2677,11 +2677,11 @@ class ScanFreqCut(_Preprocess):
         scan_freq = tod_ops.utils.get_scan_freq(aman)
         hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
         filt = tod_ops.get_hpf(hpf_cfg)
-        n = fft_ops.find_superior_integer(aman.samps.count)
-        rfft = fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
-        aman[self.process_cfgs.get('signal_name_T', 'dsT')] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_T, detrend='linear', rfft=rfft)
-        aman[self.process_cfgs.get('signal_name_Q', 'demodQ')]] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_Q, detrend='linear', rfft=rfft)
-        aman[self.process_cfgs.get('signal_name_U', 'demodU')]] = tod_ops.fourier_filter(aman, filt, signal_name=self.signal_name_U, detrend='linear', rfft=rfft)
+        n = tod_ops.fft_ops.find_superior_integer(aman.samps.count)
+        rfft = tod_ops.fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
+        aman[self.process_cfgs['signal_name_T']] = tod_ops.fourier_filter(aman, filt, signal_name=self.process_cfgs['signal_name_T'], detrend='linear', rfft=rfft)
+        aman[self.process_cfgs['signal_name_Q']] = tod_ops.fourier_filter(aman, filt, signal_name=self.process_cfgs['signal_name_Q'], detrend='linear', rfft=rfft)
+        aman[self.process_cfgs['signal_name_U']] = tod_ops.fourier_filter(aman, filt, signal_name=self.process_cfgs['signal_name_U'], detrend='linear', rfft=rfft)
         return aman, proc_aman
 
 class FocalplaneNanFlags(_Preprocess):
