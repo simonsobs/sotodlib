@@ -318,8 +318,6 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
                                                 exclude_turnarounds=exclude_turnarounds)
         azss_stats.wrap('bad_dets', bad_dets, [(0, 'dets')])
         azss_stats.wrap('az_coverage', coverages, [(0, 'dets')])
-    else:
-        bad_dets = None
     model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange)
 
     if merge_stats:

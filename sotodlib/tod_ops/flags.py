@@ -1183,7 +1183,10 @@ def get_good_distribution_flags(aman, param_name='wn_signal',
     """
     Get detector cuts based on the detectors which fit within a gaussian distribution.
     Outlier and kurtosis thresholds set the cuts and param name determines which
-    statistic's distribution is evaluated to generate the cuts.
+    statistic's distribution is evaluated to generate the cuts. This either cuts 
+    one detector at a time at the max or min of the distribution (blame max/min) or it 
+    determines if the distribution is screwed high or low and cuts max if high and min if low
+    this is the default behavior.
 
     Parameters
     ----------
@@ -1196,9 +1199,12 @@ def get_good_distribution_flags(aman, param_name='wn_signal',
     kurtosis_threshold : float
         Maximum allowed kurtosis of final distribution
     blame_max : bool
-        ADD DESCRIPTION
+        If true, iteratively removes the maximum value from the
+        distribution until the kurtosis threshold is met.
+        ``blame_min`` cannot be True when ``blame_max`` is True.
+        Default is False.
     blame_min : bool
-        ADD DESCRIPTION
+        Same as ``blame_max`` but removes the minimum value.
 
     Returns
     -------
