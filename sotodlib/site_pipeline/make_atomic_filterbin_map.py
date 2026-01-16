@@ -96,6 +96,9 @@ class Cfg:
     apply_wobble: bool
         Correct wobble deflection. This requires
         aman.wobble_params metadata in the context
+    compress: bool
+        When running preprocess from scratch, whether to
+        compress the files
     center_at: str
     max_dets: int
     fixed_time: int
@@ -146,7 +149,8 @@ class Cfg:
         unit: str = 'K',
         use_psd: bool = True,
         wn_label: str = 'preprocess.noiseQ_mapmaking.std',
-        apply_wobble: bool = True
+        apply_wobble: bool = True,
+        compress: bool = True,
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -185,6 +189,7 @@ class Cfg:
         self.use_psd = use_psd
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
+        self.compress = compress
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -477,7 +482,8 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,apply_wobble=args.apply_wobble)
+            wn_label=args.wn_label,apply_wobble=args.apply_wobble,
+            compress=args.compress)
             for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
