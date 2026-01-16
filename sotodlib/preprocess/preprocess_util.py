@@ -414,6 +414,28 @@ def get_preprocess_db(configs, group_by, logger=None):
     return db
 
 
+def get_preprocess_stats_db(statsdb_path, group_by):
+    """Make or load a preprocessing stats ObsDb using preprocessing grouping
+    as indexes.
+
+    Arguments
+    ----------
+    statsdb_path : str
+        The path to the stats db file.
+    group_by : list of str
+        The list of keys used to group the detectors.
+
+    Returns
+    -------
+    statsdb : ObsDb
+        ObsDb object
+    """
+    group_by = [g.split('.')[-1] for g in group_by]
+    statsdb = core.metadata.ObsDb(map_file=statsdb_path,
+                                  wafer_info=group_by)
+    return statsdb
+
+
 def swap_archive(config, fpath):
     """Update the configuration archive policy filename,
     create an output archive directory if it doesn't exist,

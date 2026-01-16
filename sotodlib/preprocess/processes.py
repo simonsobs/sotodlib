@@ -100,6 +100,22 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
                                 psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
+    def calc_stats(self, aman, proc_aman):
+        if (
+            self.stats_cfgs is None
+            or (isinstance(self.stats_cfgs, bool) and not self.stats_cfgs)
+            or self.save_cfgs is None
+            or (isinstance(self.save_cfgs, bool) and not self.save_cfgs)
+        ):
+            return
+
+        dbc_aman = proc_aman["det_bias_flags"]
+        m = has_any_cuts(dbc_aman.valid)
+        for k in dbc_aman._assignments.keys():
+            if "flags" in k:
+                field = f"{k}_cuts"
+                aman.stats.wrap(field, np.sum(has_any_cuts(dbc_aman[k])[m]))
+
 
 class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
@@ -173,6 +189,17 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
             plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
+
+    def calc_stats(self, aman, proc_aman):
+        if self.stats_cfgs is None or self.save_cfgs is None:
+            return
+
+        trend_aman = proc_aman["trends"]
+
+        base_name = self.stats_cfgs.get("base_name", "trends")
+        m = has_any_cuts(trend_aman.valid)
+        field = f"{base_name}_cuts"
+        aman.stats.wrap(field, np.sum(has_any_cuts(trend_aman.trend_flags)[m]))
 
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
@@ -255,6 +282,26 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
             plot_signal_diff(aman, proc_aman[self.glitch_name], flag_type='glitches', flag_threshold=self.select_cfgs.get("max_n_glitch", 10), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
             plot_flag_stats(aman, proc_aman[self.glitch_name], flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
+
+    def calc_stats(self, aman, proc_aman):
+        if (
+            self.stats_cfgs is None
+            or (isinstance(self.stats_cfgs, bool) and not self.stats_cfgs)
+            or self.save_cfgs is None
+            or (isinstance(self.save_cfgs, bool) and not self.save_cfgs)
+        ):
+            return
+
+        glitch_aman = proc_aman[self.glitch_name]
+
+        m = has_all_cut(glitch_aman.valid)
+        field = f"{self.glitch_name}_cuts"
+        aman.stats.wrap(field, np.sum(has_all_cut(glitch_aman.glitch_flags)[m]))
+
+        m = has_any_cuts(glitch_aman.valid)
+        field = f"{self.glitch_name}_counts"
+        aman.stats.wrap(field, np.sum(count_cuts(glitch_aman.glitch_flags)[m]))
+
 
 class FixJumps(_Preprocess):
     """
@@ -375,6 +422,31 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
             plot_signal_diff(aman, proc_aman[name], flag_type='jumps', flag_threshold=self.select_cfgs.get("max_n_jumps", 5), 
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_jump_signal_diff'))
             plot_flag_stats(aman, proc_aman[name], flag_type='jumps', filename=filename.replace('{name}', f'{ufm}_jumps_stats'))
+
+    def calc_stats(self, aman, proc_aman):
+        if (
+            self.stats_cfgs is None
+            or (isinstance(self.stats_cfgs, bool) and not self.stats_cfgs)
+            or self.save_cfgs is None
+            or (isinstance(self.save_cfgs, bool) and not self.save_cfgs)
+        ):
+            return
+
+        jumps_aman = proc_aman[self.save_cfgs.get('jumps_name', 'jumps')]
+
+        if isinstance(self.stats_cfgs, bool):
+            base_name = "jumps"
+        else:
+            base_name = self.stats_cfgs.get("base_name", "jumps")
+
+        m = has_all_cut(jumps_aman.valid)
+        field = f"{base_name}_cuts"
+        aman.stats.wrap(field, np.sum(has_all_cut(jumps_aman.jump_flag)[m]))
+
+        m = has_any_cuts(jumps_aman.valid)
+        field = f"{base_name}_counts"
+        aman.stats.wrap(field, np.sum(count_cuts(jumps_aman.jump_flag)[m]))
+
 
 class PSDCalc(_Preprocess):
     """ Calculate the PSD of the data and add it to the AxisManager under the
@@ -848,6 +920,47 @@ class Noise(_Preprocess):
             return meta
         else:
             return keep
+
+    def calc_stats(self, aman, proc_aman):
+        if (
+            self.stats_cfgs is None
+            or (isinstance(self.stats_cfgs, bool) and not self.stats_cfgs)
+            or self.save_cfgs is None
+            or (isinstance(self.save_cfgs, bool) and not self.save_cfgs)
+        ):
+            return
+
+        if (
+            isinstance(self.save_cfgs, bool)
+            or not self.save_cfgs.get("wrap_name", None)
+        ):
+            noise_aman = proc_aman["noise"]
+        else:
+            noise_aman = proc_aman[self.save_cfgs['wrap_name']]
+
+        m = has_all_cut(noise_aman.valid)
+
+        if isinstance(self.stats_cfgs, bool):
+            base_name = "noise"
+        else:
+            base_name = self.stats_cfgs.get("base_name", "noise")
+
+        if "white_noise" in noise_aman:
+            field = f"mean_{base_name}_white_noise"
+            aman.stats.wrap(field, np.nanmean(noise_aman.white_noise[m]))
+            field = f"std_{base_name}_white_noise"
+            aman.stats.wrap(field, np.nanstd(noise_aman.white_noise[m]))
+
+        if self.fit:
+            for i, coeff in enumerate(noise_aman.noise_model_coeffs.vals):
+                # skip if white noise was calculated separately
+                if coeff == "white_noise" and "white_noise" in noise_aman:
+                    continue
+                field = f"mean_{base_name}_{coeff}"
+                aman.stats.wrap(field, np.nanmean(noise_aman.fit[:,i][m]))
+                field = f"std_{base_name}_{coeff}"
+                aman.stats.wrap(field, np.nanstd(noise_aman.fit[:, i][m]))
+
 
 
 class Calibrate(_Preprocess):
