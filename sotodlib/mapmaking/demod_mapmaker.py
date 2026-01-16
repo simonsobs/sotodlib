@@ -504,7 +504,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
                     unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
-                    apply_wobble=True):
+                    apply_wobble=True, compress=True):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -566,6 +566,8 @@ def make_demod_map(context, obslist, noise_model, info,
     apply_wobble : bool, optional
         Correct wobble deflection. This requires aman.wobble_params metadata in the
         context
+    compress : bool, optional
+        If running preprocessing from scratch, whether to compress the files
 
     Returns
     -------
@@ -609,7 +611,8 @@ def make_demod_map(context, obslist, noise_model, info,
                                                 configs_proc=preproc_proc,
                                                 dets={'wafer_slot':detset, 'wafer.bandpass':band},
                                                 logger=L,
-                                                overwrite=False)
+                                                overwrite=False,
+                                                compress=compress)
         errors.append(error[0]) ; outputs.append((output_init, output_proc)) ;
         if error[0] not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the preproc database'%(obs_id,detset,band))
