@@ -44,7 +44,7 @@ class WeatherStation(utils.AncilEngine):
                 'ambient_temp': np.nan,
             }
 
-            lspec.start, lspec.end = time_range
+            lspec.start, lspec.end = map(float, time_range)  # de-numpy
             result = hkdb.load_hk(lspec, show_pb=False)
 
             if hasattr(result, 'temp_outside'):
@@ -101,7 +101,7 @@ class TocoPwv(utils.LowResTable):
             hkdb=db,
         )
 
-        lspec.start, lspec.end = time_range
+        lspec.start, lspec.end = map(float, time_range)
         result = hkdb.load_hk(lspec, show_pb=False)
         if not hasattr(result, 'pwv'):
             result.pwv = [[], []]
