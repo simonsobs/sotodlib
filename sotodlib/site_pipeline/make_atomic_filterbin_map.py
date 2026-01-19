@@ -395,6 +395,10 @@ def main(
     L.info(f'Running {len(obslists_arr)} maps after removing duplicate maps')
 
     # clean up lingering files from previous incomplete runs
+    for p_config in preprocess_config:
+        fname = p_config['archive']['policy']['filename']
+        os.makedirs(os.path.dirname(fname), exist_ok=True)
+
     if len(preprocess_config)==1:
         group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
 
