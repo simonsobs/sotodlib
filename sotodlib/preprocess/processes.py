@@ -2678,13 +2678,14 @@ class ScanFreqCut(_Preprocess):
         hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
         filt = tod_ops.get_hpf(hpf_cfg)
         n = tod_ops.fft_ops.find_superior_integer(aman.samps.count)
-        #rfft = tod_ops.fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
-        rfftT = tod_ops.fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
-        rfftQ = tod_ops.fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
-        rfftU = tod_ops.fft_ops.RFFTObj.for_shape(aman.dets.count, n, 'BOTH')
-        aman[self.process_cfgs['signal_name_T']] = tod_ops.fourier_filter(aman, filt, signal_name=self.process_cfgs['signal_name_T'], detrend='linear', rfft=rfftT)
-        aman[self.process_cfgs['signal_name_Q']] = tod_ops.fourier_filter(aman, filt, signal_name=self.process_cfgs['signal_name_Q'], detrend='linear', rfft=rfftQ)
-        aman[self.process_cfgs['signal_name_U']] = tod_ops.fourier_filter(aman, filt, signal_name=self.process_cfgs['signal_name_U'], detrend='linear', rfft=rfftU)
+        rfft = tod_ops.fft_ops.RFFTObj.for_shape(aman.dets.count, n, "BOTH")
+        tname = self.process_cfgs["signal_name_T"]
+        qname = self.process_cfgs["signal_name_Q"]
+        uname = self.process_cfgs["signal_name_U"]
+        # Copy results into the existing arrays to avoid aliasing the shared rfft workspace
+        aman[tname][:] = tod_ops.fourier_filter(aman, filt, signal_name=tname, detrend="linear", rfft=rfft)
+        aman[qname][:] = tod_ops.fourier_filter(aman, filt, signal_name=qname, detrend="linear", rfft=rfft)
+        aman[uname][:] = tod_ops.fourier_filter(aman, filt, signal_name=uname, detrend="linear", rfft=rfft)
         return aman, proc_aman
 
 class FocalplaneNanFlags(_Preprocess):
