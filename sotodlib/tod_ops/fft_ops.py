@@ -11,7 +11,7 @@ import pyfftw
 import so3g
 import sys
 from so3g.proj import Ranges
-from scipy.optimize import minimize
+from scipy.optimize import curve_fit, minimize
 from scipy.signal import welch
 from scipy.stats import chi2
 from sotodlib import core, hwp
@@ -276,6 +276,7 @@ def calc_psd(
     overwrite=True,
     subscan=False,
     full_output=False,
+    label_axis='dets',
     **kwargs
 ):
     """Calculates the power spectrum density of an input signal using signal.welch().
@@ -300,6 +301,8 @@ def calc_psd(
         subscan (bool): if True, compute psd on subscans.
         full_output: if True this also outputs nseg, the number of segments used for
             welch, for correcting bias of median white noise estimation by calc_wn.
+        label_axis (str): The name of LabelAxis in the input aman.
+            Default is ``dets``.
         **kwargs: keyword args to be passed to signal.welch().
 
     Returns:
@@ -328,7 +331,7 @@ def calc_psd(
             freqs, Pxx = _calc_psd_subscan(aman, signal=signal,
                                            freq_spacing=freq_spacing,
                                            **kwargs)
-        axis_map_pxx = [(0, "dets"), (1, "nusamps"), (2, "subscans")]
+        axis_map_pxx = [(0, label_axis), (1, "nusamps"), (2, "subscans")]
         axis_map_nseg = [(0, "subscans")]
     else:
         if timestamps is None:
@@ -364,7 +367,7 @@ def calc_psd(
             nseg = int(max_samples / kwargs["nperseg"])
 
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
-        axis_map_pxx = [(0, aman.dets), (1, "nusamps")]
+        axis_map_pxx = [(0, aman[label_axis]), (1, "nusamps")]
         axis_map_nseg = None
 
     if merge:
@@ -438,7 +441,7 @@ def _calc_psd_subscan(aman, signal=None, freq_spacing=None, full_output=False, *
     else:
         return freqs, Pxx
 
-def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
+def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, method='median'):
     """
     Function that calculates the white noise level as a median PSD value between
     two frequencies. Defaults to calculation of white noise between 5 and 10Hz.
@@ -467,6 +470,9 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
 
         high_f (float):
             high frequency cutoff to calculate median psd value. Defaults to 10Hz
+        
+        method (str):
+            median or mean to compute white noise. Default is median.
 
     Returns
     -------
@@ -488,13 +494,23 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10):
                       '`noverlap=0, full_output=True`')
         debias = None
     else:
-        debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)
+        if method == 'median':
+            debias = 2 * nseg / chi2.ppf(0.5, 2 * nseg)
+        else: 
+            debias = 1
+
+    if method == 'median':
+        _f = np.median
+    elif method == 'mean':
+        _f = np.mean
+    else:
+        raise ValueError('Only median and mean allowed')
 
     fmsk = np.all([freqs >= low_f, freqs <= high_f], axis=0)
     if pxx.ndim == 1:
-        wn2 = np.median(pxx[fmsk])
+        wn2 = _f(pxx[fmsk])
     else:
-        wn2 = np.median(pxx[:, fmsk], axis=1)
+        wn2 = _f(pxx[:, fmsk], axis=1)
     if debias is not None:
         if pxx.ndim == 3:
             wn2 *= debias[None, :]
@@ -584,6 +600,15 @@ def neglnlike(params, x, y, bin_size=1, **fixed_param):
     if not np.isfinite(output):
         return 1.0e30
     return output
+
+
+def _curve_fit_bounds_array(bounds):
+    lower = []
+    upper = []
+    for low, high in bounds:
+        lower.append(-np.inf if low is None else low)
+        upper.append(np.inf if high is None else high)
+    return np.array(lower, dtype=float), np.array(upper, dtype=float)
 
 def get_psd_mask(aman, psd_mask=None, f=None,
                 mask_hwpss=True, hwp_freq=None, max_hwpss_mode=10, hwpss_width=((-0.4, 0.6), (-0.2, 0.2)),
@@ -740,7 +765,11 @@ def fit_noise_model(
     unbinned_mode=3,
     base=1.05,
     freq_spacing=None,
-    subscan=False
+    subscan=False,
+    label_axis='dets',
+    bounds=None,
+    fit_method="likelihood",
+    curve_fit_kwargs=None,
 ):
     """
     Fits noise model with white and 1/f noise to the PSD of binned signal.
@@ -788,7 +817,6 @@ def fit_noise_model(
         If True, (nusamps,) mask is taken from aman.psd_mask, or calculated on the fly.
         Can also be a 1d (nusamps,) bool array True for good samples to keep.
         Can also be a Ranges in which case it will be inverted before application.
-
     fixed_param : str
         This accepts 'wn' or 'alpha' or None. If 'wn' ('alpha') is given, 
         white noise level (alpha) is fixed to the wn_est (alpha_est).
@@ -803,6 +831,20 @@ def fit_noise_model(
         The approximate desired frequency spacing of the PSD. Passed to calc_psd.
     subscan : bool
         If True, fit noise on subscans.
+    label_axis : str
+        The name of LabelAxis in the input aman.
+        Default is ``dets``.
+    bounds : list of tuple
+        List length 2 with number of non-fixed params each list entry is a tuple
+        first is lower bounds second is upper bounds to constrain fit.
+    fit_method : str
+        Selects optimizer. "likelihood" (default) uses the Nelder-Mead
+        negative log-likelihood fit through ``scipy.optimize.minimize``.
+        "log_curve_fit" performs a log-space non-linear least square fit via 
+        ``scipy.optimize.curve_fit``.
+    curve_fit_kwargs : dict
+        Extra options forwarded to curve_fit when fit_method is
+        "log_curve_fit". Ignored otherwise.
     Returns
     -------
     noise_fit_stats : AxisManager
@@ -824,6 +866,7 @@ def fit_noise_model(
             merge=merge_psd,
             subscan=subscan,
             full_output=True,
+            label_axis=label_axis,
             **psdargs,
         )
     if np.any(mask):
@@ -842,19 +885,32 @@ def fit_noise_model(
         pxx = pxx[:, mask]
 
     if subscan:
-        fit_noise_model_kwargs = {"fknee_est": fknee_est, "wn_est": wn_est, "alpha_est": alpha_est,
-                                  "lowf": lowf, "f_max": f_max, "fixed_param": fixed_param,
-                                  "binning": binning, "unbinned_mode": unbinned_mode, "base": base,
-                                  "freq_spacing": freq_spacing}
+        fit_noise_model_kwargs = {
+            "fknee_est": fknee_est,
+            "wn_est": wn_est,
+            "alpha_est": alpha_est,
+            "lowf": lowf,
+            "f_max": f_max,
+            "fixed_param": fixed_param,
+            "binning": binning,
+            "unbinned_mode": unbinned_mode,
+            "base": base,
+            "freq_spacing": freq_spacing,
+            "bounds": bounds,
+            "fit_method": fit_method,
+            "curve_fit_kwargs": curve_fit_kwargs,
+        }
         fitout, covout = _fit_noise_model_subscan(aman, signal,  f, pxx, fit_noise_model_kwargs)
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs"), (2, aman.subscans)]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs"), (2, aman.subscans)]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs"), (3, aman.subscans)]
     else:
         eix = np.argmin(np.abs(f - f_max))
         if lowf is None:
             six = 1
         else:
             six = np.argmin(np.abs(f - lowf))
+            if six == 0:
+                six = 1
         f = f[six:eix]
         pxx = pxx[:, six:eix]
         bin_size = 1
@@ -862,66 +918,123 @@ def fit_noise_model(
         if binning == True:
             f, pxx, bin_size = get_binned_psd(aman, f=f, pxx=pxx, unbinned_mode=unbinned_mode,
                                               base=base, merge=False)
-        fitout = np.zeros((aman.dets.count, 3))
-        # This is equal to np.sqrt(np.diag(cov)) when doing curve_fit
-        covout = np.zeros((aman.dets.count, 3, 3))
+        errout = np.full(aman[label_axis].count, 'no_error', dtype='<U16')
+        fitout = np.zeros((aman[label_axis].count, 3))
+        covout = np.zeros((aman[label_axis].count, 3, 3))
         if isinstance(wn_est, (int, float)):
-            wn_est = np.full(aman.dets.count, wn_est)
-        elif len(wn_est)!=aman.dets.count:
-            print('Size of wn_est must be equal to aman.dets.count or a single value.')
-            return
+            wn_est = np.full(aman[label_axis].count, wn_est)
+        assert len(wn_est)==aman[label_axis].count, 'Size of wn_est must be equal to aman.dets.count or a single value.'
         if isinstance(fknee_est, (int, float)):
-            fknee_est = np.full(aman.dets.count, fknee_est)
-        elif len(fknee_est)!=aman.dets.count:
-            print('Size of fknee_est must be equal to aman.dets.count or a single value.')
-            return
+            fknee_est = np.full(aman[label_axis].count, fknee_est)
+        assert len(fknee_est)==aman[label_axis].count, 'Size of fknee_est must be equal to aman.dets.count or a single value'
         if isinstance(alpha_est, (int, float)):
-            alpha_est = np.full(aman.dets.count, alpha_est)
-        elif len(alpha_est)!=aman.dets.count:
-            print('Size of alpha_est must be equal to aman.dets.count or a single value.')
-            return
-        if fixed_param == None:
-            initial_params = np.array([wn_est, fknee_est, alpha_est])
-            bounds= ((sys.float_info.min, None), (sys.float_info.min, None), (0, 10))
-        if fixed_param == "wn":
-            initial_params = np.array([fknee_est, alpha_est])
-            fixed = wn_est
-            bounds= ((sys.float_info.min, None), (0, 10))
-        if fixed_param == "alpha":
-            initial_params = np.array([wn_est, fknee_est])
-            fixed = alpha_est
-            bounds= ((sys.float_info.min, None), (sys.float_info.min, None))
+            alpha_est = np.full(aman[label_axis].count, alpha_est)
+        assert len(alpha_est)==aman[label_axis].count, 'Size of alpha_est must be equal to aman.dets.count or a single value.'
 
-        for i in range(len(pxx)):
-            p = pxx[i]
-            p0 = initial_params.T[i]
+        wn_est = np.asarray(wn_est, dtype=float)
+        fknee_est = np.asarray(fknee_est, dtype=float)
+        alpha_est = np.asarray(alpha_est, dtype=float)
+
+        fixed_vals = None
+        if fixed_param is None:
+            initial_params = np.vstack((wn_est, fknee_est, alpha_est))
+            if bounds is None:
+                bounds = (
+                    (sys.float_info.min, None),
+                    (sys.float_info.min, None),
+                    (0, 10),
+                )
+        elif fixed_param == "wn":
+            initial_params = np.vstack((fknee_est, alpha_est))
+            fixed_vals = np.asarray(wn_est, dtype=float)
+            if bounds is None:
+                bounds = (
+                    (sys.float_info.min, None),
+                    (0, 10),
+                )
+        elif fixed_param == "alpha":
+            initial_params = np.vstack((wn_est, fknee_est))
+            fixed_vals = np.asarray(alpha_est, dtype=float)
+            if bounds is None:
+                bounds = (
+                    (sys.float_info.min, None),
+                    (sys.float_info.min, None),
+                )
+        else:
+            raise ValueError("fixed_param must be 'wn', 'alpha', or None.")
+
+        n_free_params = initial_params.shape[0]
+        if isinstance(bounds, list):
+            bounds = [tuple(b) for b in bounds]
+        if isinstance(bounds, tuple):
+            pass
+        else:
+            bounds = tuple(bounds)
+
+        assert len(bounds) == n_free_params, "Number of bounds entries must match free parameters."
+
+        curve_bounds = None
+        if fit_method == "log_curve_fit":
+            curve_bounds = _curve_fit_bounds_array(bounds)
+
+        for i, p in enumerate(pxx):
+            p0 = initial_params[:, i]
             _fixed = {}
-            if fixed_param != None:
-                _fixed = {fixed_param: fixed[i]}
-            res = minimize(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
-                           p0, bounds=bounds, method="Nelder-Mead")
-            with warnings.catch_warnings():
-                warnings.filterwarnings("error")
-                try:
-                    Hfun = ndt.Hessian(lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed), full_output=True)
-                    hessian_ndt, _ = Hfun(res["x"])
-                    # Inverse of the hessian is an estimator of the covariance matrix
-                    # sqrt of the diagonals gives you the standard errors.
-                    covout_i = np.linalg.inv(hessian_ndt)            
-                except np.linalg.LinAlgError:
+            if fixed_param is not None:
+                _fixed = {fixed_param: fixed_vals[i]}
+
+            if fit_method == "likelihood":
+                res = minimize(
+                    lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                    p0,
+                    bounds=bounds,
+                    method="Nelder-Mead",
+                )
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error")
+                    try:
+                        Hfun = ndt.Hessian(
+                            lambda params: neglnlike(params, f, p, bin_size=bin_size, **_fixed),
+                            full_output=True,
+                        )
+                        hessian_ndt, _ = Hfun(res["x"])
+                        covout_i = np.linalg.inv(hessian_ndt)
+                    except np.linalg.LinAlgError:
+                        errout[i] = 'LinalgError'
+                        covout_i = np.full((len(p0), len(p0)), np.nan)
+                    except IndexError:
+                        errout[i] = 'IndexError'
+                        covout_i = np.full((len(p0), len(p0)), np.nan)
+                    except RuntimeWarning as e:
+                        covout_i = np.full((len(p0), len(p0)), np.nan)
+                        errout[i] = 'RuntimeWarning'
+                fitout_i = res.x
+            else:
+                valid = np.isfinite(p) & (p > 0) & np.isfinite(f)
+                if np.count_nonzero(valid) < n_free_params:
                     print(
-                        f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (LinAlgError)"
+                        f"Insufficient valid samples for detector {aman[label_axis].vals[i]} in log_curve_fit."
                     )
-                    covout_i = np.full((len(p0), len(p0)), np.nan)
-                except IndexError:
-                    print(
-                        f"Cannot calculate Hessian for detector {aman.dets.vals[i]} skipping. (IndexError)"
-                    )
-                    covout_i = np.full((len(p0), len(p0)), np.nan)
-                except RuntimeWarning as e:
-                    covout_i = np.full((len(p0), len(p0)), np.nan)
-                    print(f'RuntimeWarning: {e}\n Hessian failed because results are: {res["x"]}, for det: {aman.dets.vals[i]}')
-            fitout_i = res.x
+                    fitout_i = np.full(n_free_params, np.nan)
+                    covout_i = np.full((n_free_params, n_free_params), np.nan)
+                else:
+                    try:
+                        popt, pcov = curve_fit(
+                            lambda freq, *params: np.log(noise_model(freq, params, **_fixed)),
+                            f[valid],
+                            np.log(p[valid]),
+                            p0=p0,
+                            bounds=curve_bounds,
+                            **curve_fit_kwargs,
+                        )
+                    except Exception as err:
+                        errout[i] = f"{err}"
+                        fitout_i = np.full(n_free_params, np.nan)
+                        covout_i = np.full((n_free_params, n_free_params), np.nan)
+                    else:
+                        fitout_i = popt
+                        covout_i = pcov
+
             if fixed_param == "wn":
                 covout_i = np.insert(covout_i, 0, 0, axis=0)
                 covout_i = np.insert(covout_i, 0, 0, axis=1)
@@ -932,21 +1045,23 @@ def fit_noise_model(
                 covout_i = np.insert(covout_i, 2, 0, axis=1)
                 covout_i[2][2] = np.nan
                 fitout_i = np.insert(fitout_i, 2, alpha_est[i])
+
             covout[i] = covout_i
             fitout[i] = fitout_i
-        axis_map_fit = [(0, "dets"), (1, "noise_model_coeffs")]
-        axis_map_cov = [(0, "dets"), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
+        axis_map_fit = [(0, label_axis), (1, "noise_model_coeffs")]
+        axis_map_cov = [(0, label_axis), (1, "noise_model_coeffs"), (2, "noise_model_coeffs")]
 
     noise_model_coeffs = ["white_noise", "fknee", "alpha"]
 
     noise_fit_stats = core.AxisManager(
-        aman.dets,
+        aman[label_axis],
         core.LabelAxis(
             name="noise_model_coeffs", vals=np.array(noise_model_coeffs, dtype="<U11")
         ),
     )
     noise_fit_stats.wrap("fit", fitout, axis_map_fit)
     noise_fit_stats.wrap("cov", covout, axis_map_cov)
+    noise_fit_stats.wrap("err", errout, [(0, label_axis)])
 
     if merge_fit:
         aman.wrap(merge_name, noise_fit_stats)
@@ -1165,10 +1280,10 @@ def _fit_noise_model_subscan(
     return fitout, covout
 
 
-def build_hpf_params_dict(
+def build_filt_params_dict(
     filter_name,
     noise_fit=None,
-    filter_params=None
+    filter_params=None,
 ):
     """
     Build the filter parameter dictionary from a provided
@@ -1192,17 +1307,24 @@ def build_hpf_params_dict(
     if noise_fit is not None:
 
         pars_mapping = {
-            "high_pass_butter4": {
-                "fc": "fknee",
-            },
             "counter_1_over_f": {
                 "fk": "fknee", 
                 "n": "alpha"
             },
+            "high_pass_butter4": {
+                "fc": "fknee",
+            },
             "high_pass_sine2": {
                 "cutoff": "fknee",
                 "width": None
-            }
+            },
+            "low_pass_butter4": {
+                "fc": "fknee",
+            },
+            "low_pass_sine2": {
+                "cutoff": "fknee",
+                "width": None
+            },
         }
 
         if filter_name not in pars_mapping.keys():
@@ -1212,12 +1334,21 @@ def build_hpf_params_dict(
         
         noise_fit_array = noise_fit.fit
         noise_fit_params = noise_fit.noise_model_coeffs.vals
-        
-        median_params = np.median(noise_fit_array, axis=0)
-        median_dict = {
-            k: median_params[i]
-            for i, k in enumerate(noise_fit_params)
-        }
+
+        each_detector = False
+        if filter_params is not None:
+            each_detector = filter_params.get('each_detector', False)
+        if each_detector:
+            noise_fit_dict = {
+                k: noise_fit_array[:, i]
+                for i, k in enumerate(noise_fit_params)
+            }
+        else:
+            median_params = np.median(noise_fit_array, axis=0)
+            noise_fit_dict = {
+                k: median_params[i]
+                for i, k in enumerate(noise_fit_params)
+            }
 
         params_dict = {}
         for k, v in pars_mapping[filter_name].items():
@@ -1230,8 +1361,58 @@ def build_hpf_params_dict(
                 else:
                     params_dict.update({k: filter_params[k]})
             else:
-                params_dict[k] = median_dict[v]
+                params_dict[k] = noise_fit_dict[v]
 
         filter_params = params_dict
     
     return filter_params
+
+def get_common_noise_params(
+    aman,
+    signal=None,
+    merge=False,
+    merge_name='common_mode',
+    **fit_args
+):
+    """
+    Fits noise model with white and 1/f noise to the PSD of common noise.
+    This can be applied to any 1D data with same size as aman.samps.
+
+    Args
+    ----
+    aman : AxisManager
+        Axis manager which has samps axis aligned with signal.
+    signal : nparray
+        The pre-computed common mode sized 1 x nsamps, or
+        the signal sized ndets x nsamps.
+        When signal is given in 2D shape, the common mode across detectors
+        is calculated with median method.
+        
+    merge : bool
+        If True, ``aman_common`` is added into axis manager with merge_name.
+    merge_name : str
+        ``aman_common`` is added with this name.
+    
+    Returns
+    -------
+    noise_fit_stats : AxisManager
+        The fit parameters of given common mode.
+
+    """
+
+    if signal is None:
+        signal = np.nanmedian(aman.signal, axis=0)
+    elif signal.shape == (aman.dets.count, aman.samps.count):
+        signal = np.nanmedian(signal, axis=0)
+    elif len(signal) != aman.samps.count:
+        raise ValueError(
+                        "The input signal is required to have same length as aman.samps."
+                    )
+    aman_common = core.AxisManager(core.LabelAxis('common', ['common']), aman.samps)
+    aman_common.wrap('signal', np.array([signal]), [(0, 'common'), (1, 'samps')])
+    aman_common.wrap('timestamps', aman.timestamps, [(0, 'samps')])
+    noise_fit_stats = fit_noise_model(aman_common, signal=None, merge_fit=True, 
+                                      label_axis='common', **fit_args)
+    if merge:
+        aman.wrap(merge_name, aman_common)
+    return noise_fit_stats
