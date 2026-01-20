@@ -403,9 +403,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
 
     Args:
 
-      timeconst: Array of time constant values (one per detector).
-        Alternately, a string indicating what member of tod to use for
-        the time constants array.  Defaults to 'timeconst'.
+      timeconst: Array of time constant values (one per detector),
+        or a scalar value, or a string indicating what field of tod
+        to use for the time constants array. Defaults to 'timeconst'.
       invert (bool): If true, returns the inverse transfer function,
         to deconvolve the time constants.
 
@@ -419,9 +419,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        # attrgetter used to retrieve a field multiple layers deep.
-        _f = attrgetter(timeconst)
-        timeconst = _f(tod)
+        timeconst = tod.get(timeconst)
+    if np.isscalar(timeconst):
+        timeconst = np.full(tod.dets.count, timeconst)
 
     if target is None:
         filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]

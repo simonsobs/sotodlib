@@ -241,11 +241,18 @@ class FilterTest(unittest.TestCase):
         iir_params_multi.wrap('wafer1', wrap_iir(4, fc))
         iir_params_multi.wrap('wafer2', wrap_iir(4, fc))
 
+        # timeconst
+        timeconst = np.full(tod.dets.count, 1e-3)
+        tod.wrap('timeconst', timeconst)
+
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
                 tod_ops.filters.high_pass_sine2(fc),
                 tod_ops.filters.low_pass_butter4(fc),
                 tod_ops.filters.low_pass_sine2(fc),
+                tod_ops.filters.band_pass_butter4(fc-10, fc+10),
+                tod_ops.filters.band_stop_butter4(fc-10, fc+10),
+                tod_ops.filters.band_stop_sine2(fc-10, fc+10),
                 tod_ops.filters.gaussian_filter(fc, f_sigma=f0 / 10),
                 tod_ops.filters.gaussian_filter(0, f_sigma=f0 / 10),
                 tod_ops.filters.iir_filter(iir_params=iir_params),
@@ -254,6 +261,9 @@ class FilterTest(unittest.TestCase):
                     a=iir_params.a, b=iir_params.b, fscale=iir_params.fscale),
                 tod_ops.filters.iir_filter(
                     iir_params=dict(iir_params._fields.items())),
+                tod_ops.filters.timeconst_filter(timeconst=timeconst),
+                tod_ops.filters.timeconst_filter(timeconst='timeconst'),
+                tod_ops.filters.timeconst_filter(timeconst=1e-3),
                 tod_ops.filters.identity_filter(),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
