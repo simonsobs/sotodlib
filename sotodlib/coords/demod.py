@@ -182,26 +182,57 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         return signal_sim
 
 
-def rotate_demodQU(tod, sign=1, offset=0, update_focal_plane=True):
+def rotate_focal_plane(tod, hwp=True):
+    """ Interpret the boresight rotation effect as a focal plane rotation and update them accordingly.
+    This applies constant rotation to focal plane. If hwp=True, rotations of gamma are reflected.
+    This updates tod.boresight.roll and tod.focal_plane, in place.
+    """
+    sign = -1. if hwp else 1.
+    avg_roll = np.average(tod.boresight.roll)
+    tod.boresight.roll -= avg_roll
+    fp = so3g.proj.quat.rotation_xieta(tod.focal_plane.xi, tod.focal_plane.eta, sign * tod.focal_plane.gamma)
+    fp = so3g.proj.quat.euler(2, avg_roll) * fp
+    xi, eta, gamma = so3g.proj.quat.decompose_xieta(fp)
+    # boresight is float64 but signal and focal_plane are float32
+    tod.focal_plane.xi = np.float32(xi)
+    tod.focal_plane.eta = np.float32(eta)
+    tod.focal_plane.gamma = sign * np.float32(gamma)
+
+
+def rotate_demodQU(tod, sign=1, offset=0, radial=False, update_focal_plane=True):
     """
     Apply detectors' polarization angle calibration to the HWP demodulated Q and U timestreams to
     place all detectors' Q and U timestreams in a common telescope frame. This updates tod.demodQ
     and tod.demodU, in place.
+    To get Qr Ur timestreams, run `rotate_demodQU(tod)` and then `rotate_demodQU(tod, radial=True)`.
+    To restore the Q U timestreams, run `rotate_demodQU(tod, sign=-1, radial=True)`.
+    
 
     Args:
         tod : an axisManager object
-        update_focal_plane (bool, optional): Whether to set focal_plane.gamma angles to zero,
-            consistent with new coordinate reference. Make this true for polarization mapmaking
-            using make_map.
+        update_focal_plane (bool, optional): Whether to update focal_plane.gamma angles consistent with new coordinate reference. 
+            Make this True for polarization mapmaking using make_map.
         offset : float, optional
             The rotation angle in degrees to apply (default is 0).
         sign : int, optional
             A sign factor to control the direction of the rotation (default is +1).
+        radial : bool, optional
+            If True and the Q U timestreams in tod are in a common telescope flame, this function turns Q U
+            into Qr Ur. 
+            
 
     """
-    demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*tod.focal_plane.gamma + 1j*np.deg2rad(offset)) )).T
+    if radial:
+        theta_fp = np.arctan2(tod.focal_plane.xi, tod.focal_plane.eta)
+        demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*theta_fp) )).T
+        if update_focal_plane:
+            tod.focal_plane.gamma -= sign * theta_fp
+
+    else:
+        demodC = ((tod.demodQ + 1j*tod.demodU).T * np.exp( sign*(-2j*tod.focal_plane.gamma + 1j*np.deg2rad(offset)) )).T
+        if update_focal_plane:
+            tod.focal_plane.gamma *= 0
     tod.demodQ = demodC.real
     tod.demodU = demodC.imag
     del demodC
-    if update_focal_plane:
-        tod.focal_plane.gamma *= 0
+

@@ -67,11 +67,12 @@ class P:
 
     - sight: A CelestialSightLine, representing the boresight pointing
       in celestial coordinates. [samps]
-    - fp: G3VectorQuat representing the focal plane offsets of each
-      detector. When constructing with a tod argument, fp can be
-      automatically populated from tod.focal_plane; note that if hwp
-      is passed as True then the gamma (polarization) angles will be
-      reflected (gamma' = -gamma). [dets]
+    - fp: FocalPlane object representing the focal plane offsets
+      and T,P responses of each detector. When constructing with a
+      tod argument, fp can be automatically populated from
+      tod.focal_plane; note that if hwp is passed as True then the
+      gamma (polarization) angles will be reflected (gamma' = -gamma).
+      [dets]
     - geom: The target map geometry. This is a pixell.enmap.Geometry
       object, with attributes .shape and .wcs (for non-tiled rectpix);
       a pixell.tilemap.TileGeometry (if tiled); or a Healpix geometry as
@@ -197,16 +198,7 @@ class P:
             sight.Q = rot * sight.Q
 
         # Set up the detectors in the focalplane
-        fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
-        xi, eta, gamma  = fp.xi, fp.eta, fp.get('gamma')
-        if np.any(np.isnan(np.array([xi, eta]))):
-            raise ValueError('np.nan is included in xi or eta')
-        if gamma is not None and np.any(np.isnan(gamma)):
-            raise ValueError('np.nan is included in gamma')
-        assert (gamma is not None or not hwp)
-        if hwp:
-            gamma = -gamma
-        fp = so3g.proj.quat.rotation_xieta(xi, eta, gamma)
+        fp = helpers.get_fplane(tod, focal_plane=focal_plane, hwp=hwp)
 
         if geom is None and wcs_kernel is not None:
             geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
@@ -427,7 +419,7 @@ class P:
 
         if comps is None:
             comps = self.comps
-        tod_shape = (len(self.fp), len(self.sight.Q))
+        tod_shape = (self.fp.ndet, len(self.sight.Q))
         if dest is None:
             dest = np.zeros(tod_shape, np.float32)
         assert(dest.shape == tod_shape)  # P.fp/P.sight and dest argument disagree
@@ -558,10 +550,7 @@ class P:
     def _get_asm(self):
         """Bundles self.fp and self.sight into an "Assembly" for calling
         so3g.proj routines."""
-        so3g_fp = so3g.proj.FocalPlane()
-        for i, q in enumerate(self.fp):
-            so3g_fp[f'a{i}'] = q
-        return so3g.proj.Assembly.attach(self.sight, so3g_fp)
+        return so3g.proj.Assembly.attach(self.sight, self.fp)
 
     def _prepare_map(self, map):
         """Gently reformat a map in order to send it to so3g."""

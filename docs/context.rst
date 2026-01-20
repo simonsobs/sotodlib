@@ -1545,7 +1545,7 @@ few queries::
   >>> obsdb.query('hwp_speed >= 2.')
   ResultSet<[obs_id,timestamp,hwp_speed], 1 rows>
 
-  >>> obsdb.query('hwp_speed > 1. and drift=="rising"')
+  >>> obsdb.query("hwp_speed > 1. and drift=='rising'")
   ResultSet<[obs_id,timestamp,hwp_speed], 1 rows>
 
 The object returned by obsdb.query is a :py:obj:`ResultSet`, from
@@ -1579,7 +1579,7 @@ end of some of the tag strings::
 
 Alternately, the values of tags can be used in query strings::
 
-  >>> obsdb.query('(hwp_fast==1 and drift=="rising") or (hwp_fast==0 and drift="setting")',
+  >>> obsdb.query("(hwp_fast==1 and drift=='rising') or (hwp_fast==0 and drift='setting')",
     tags=['hwp_fast'])
   ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 2 rows>
     

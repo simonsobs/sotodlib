@@ -82,9 +82,9 @@ class QAMetric(object):
         """
         # query influx log measurement for observations of this field
         res = self.monitor.client.query(
-            f"select {self._influx_field}, observation from {self._influx_log}"
+            f"SELECT observation FROM {self._influx_log} WHERE \"metric_type\" = '{self._influx_field}'"
         ).get_points()
-        return [r["observation"] for r in res]
+        return [r["observation"] for r in list(res)]
 
     def process_and_record(self, obs_id, meta=None):
         """ Generate a metric for this obs_id and record it to InfluxDB.
@@ -101,8 +101,8 @@ class QAMetric(object):
         if meta.obs_info.obs_id != obs_id:
             raise Exception(f"Metadata does not correspond to obs_id {obs_id}.")
         line = self._process(meta)
-        log_tags = {"observation": obs_id}  # used to identify this entry
-        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags)
+        log_tags = {"metric_type": self._influx_field}  # used to identify this entry
+        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags, qa_metrics=True, obs_id=obs_id)
         self.monitor.write()
 
     def get_new_obs(self):
@@ -169,9 +169,11 @@ class PreprocessValidDets(PreprocessQA):
     The config entry supports a `process_args` block where the following options can be
     specified:
 
-    tags : list
-        Keys into `metadata.det_info` to record as tags with the Influx line.
-        Added to the default list ["wafer_slot", "tel_tube", "wafer.bandpass"].
+    tags : dict
+        The values are keys into `metadata.det_info` to record as tags with
+        the Influx line. The keys are addded to the default list
+        ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+        from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
     thresh : float
         The threshold for the fraction of valid samples above which a detector is
         deemed good (default 0.75)
@@ -192,48 +194,222 @@ class PreprocessValidDets(PreprocessQA):
         # bypass the PreprocessQA __init__
         super(PreprocessQA, self).__init__(*args, **kwargs)
         # extract parameters
-        self._tags = process_args.get("tags", [])
+        self._tags = process_args.get("tags", {})
         self._thresh = process_args.get("thresh", 0.75)
         self._key = process_args.get("process_name", "glitches")
 
     def _process(self, meta):
 
         # add specified tags
-        tag_keys = ["wafer_slot", "tel_tube", "wafer.bandpass"]
-        tag_keys += [t for t in self._tags if t not in tag_keys]
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys["bandpass"] = "wafer.bandpass"
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
+
+        tag_keys.update(self._tags)
 
         # record one metric per wafer slot, per bandpass
         # extract these tags for the metric
         tags = []
         vals = []
-        for bp in np.unique(meta.det_info.wafer.bandpass):
+        for bp in np.unique(bandpasses):
             for ws in np.unique(meta.det_info.wafer_slot):
                 subset = np.where(
-                    (meta.det_info.wafer_slot == ws) & (meta.det_info.wafer.bandpass == bp)
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
                 )[0]
 
-                # Compute the number of samples that are valid
-                frac_valid = np.array([
-                    np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
-                    for r in meta.preprocess[self._key].valid[subset]
-                ])
+                if len(subset) > 0:
+                    # Compute the number of samples that are valid
+                    frac_valid = np.array([
+                        np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
+                        for r in meta.preprocess[self._key].valid[subset]
+                    ])
 
-                # Count detectors with fraction valid above threshold
-                n_good = (frac_valid > self._thresh).sum()
+                    # Count detectors with fraction valid above threshold
+                    n_good = (frac_valid > self._thresh).sum()
 
-                # get the tags for this wafer (all detectors in this subset share these)
-                tags_i = {
-                    k: _get_tag(meta.det_info, k, subset[0]) for k in tag_keys if _has_tag(meta.det_info, k)
-                }
-                tags_i["telescope"] = meta.obs_info.telescope
+                    # get the tags for this wafer (all detectors in this subset share these)
+                    tags_i = {
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
+                    }
+                    tags_i["telescope"] = meta.obs_info.telescope
 
-                # add tags and values to respective lists in order
-                vals.append(n_good)
-                tags.append(tags_i)
+                    # add tags and values to respective lists in order
+                    vals.append(n_good)
+                    tags.append(tags_i)
 
         obs_time = [meta.obs_info.timestamp] * len(vals)
         return {
             "field": self._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
+
+# inherit from PreprocessQA to reuse available_obs method
+class PreprocessArrayNET(PreprocessQA):
+    """Generate a QA metric for array NET values for each wafer slot and bandpass.
+
+    The config entry supports a `process_args` block where the following
+    options can be specified:
+
+    tags : dict
+        The values are keys into `metadata.det_info` to record as tags with
+        the Influx line. The keys are addded to the default list
+        ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+        from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
+    noise_aman : str
+        The name of the axis manager that holds the white noise array.
+        (default 'noise')
+
+    """
+
+    _influx_meas = "preprocesstod"
+    _influx_field = "array_net"
+
+    def __init__(
+        self,
+        *args,
+        process_args={},
+        **kwargs
+    ):
+        # bypass the PreprocessQA __init__
+        super(PreprocessQA, self).__init__(*args, **kwargs)
+        # extract parameters
+        self._tags = process_args.get("tags", {})
+        self._noise_aman = process_args.get("noise_aman", "noise")
+        self._field_name = process_args.get("field_name", "")
+        self._unit_factor = process_args.get("unit_factor", 1)
+
+    def _process(self, meta):
+
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys["bandpass"] = "wafer.bandpass"
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
+
+        tag_keys.update(self._tags)
+        tags = []
+        vals = []
+        for bp in np.unique(bandpasses):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
+                )[0]
+
+                white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
+                mask = (white_noise != 0) & (~np.isnan(white_noise))
+                good_indices = np.nonzero(mask)[0]
+                if good_indices.size > 0:
+                    vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)))
+
+                    tags_base = {
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
+                    tags.append(tags_base)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": f"{self._influx_field}{'_' + self._field_name if self._field_name else ''}",
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
+
+# inherit from PreprocessQA to reuse available_obs method
+class PreprocessDetNET(PreprocessQA):
+    """Generate a QA metric for per detector NET values for each wafer slot
+    and bandpass.
+
+    The config entry supports a `process_args` block where the following
+    options can be specified:
+
+    tags : dict
+        The values are keys into `metadata.det_info` to record as tags with
+        the Influx line. The keys are addded to the default list
+        ["wafer_slot", "tel_tube", "bandpass"] with "bandpass" being taken
+        from "wafer.bandpass" or "det_cal.bandpass" if the former isn't found.
+    noise_aman : str
+        The name of the axis manager that holds the white noise array.
+        (default 'noise')
+
+    """
+
+    _influx_meas = "preprocesstod"
+    _influx_field = "det_net"
+
+    def __init__(
+        self,
+        *args,
+        process_args={},
+        **kwargs
+    ):
+        # bypass the PreprocessQA __init__
+        super(PreprocessQA, self).__init__(*args, **kwargs)
+        # extract parameters
+        self._tags = process_args.get("tags", {})
+        self._noise_aman = process_args.get("noise_aman", "noise")
+        self._field_name = process_args.get("field_name", "")
+        self._unit_factor = process_args.get("unit_factor", 1)
+
+    def _process(self, meta):
+
+        # record one metric per wafer_slot per bandpass
+        # extract these tags for the metric
+        tag_keys = {
+            "wafer_slot": "wafer_slot",
+            "tel_tube": "tel_tube",
+        }
+
+        if _has_tag(meta.det_info, 'wafer.bandpass'):
+            bandpasses = meta.det_info.wafer.bandpass
+            tag_keys["bandpass"] = "wafer.bandpass"
+        else:
+            bandpasses = meta.det_info.det_cal.bandpass
+            tag_keys["bandpass"] = "det_cal.bandpass"
+
+        tag_keys.update(self._tags)
+        tags = []
+        vals = []
+        for bp in np.unique(bandpasses):
+            for ws in np.unique(meta.det_info.wafer_slot):
+                subset = np.where(
+                    (meta.det_info.wafer_slot == ws) & (bandpasses == bp)
+                )[0]
+
+                white_noise = meta.preprocess[self._noise_aman].white_noise[subset] * self._unit_factor
+                mask = (white_noise != 0) & (~np.isnan(white_noise))
+                good_indices = np.nonzero(mask)[0]
+                if good_indices.size > 0:
+                    vals.append(np.sqrt(1.0 / np.nansum(1.0 / (white_noise[good_indices])**2)) * np.sqrt(len(good_indices)))
+
+                    tags_base = {
+                        k: _get_tag(meta.det_info, i, subset[0]) for k, i in tag_keys.items() if _has_tag(meta.det_info, i)
+                    }
+                    tags_base["telescope"] = meta.obs_info.telescope
+                    tags.append(tags_base)
+
+        obs_time = [meta.obs_info.timestamp] * len(tags)
+        return {
+            "field": f"{self._influx_field}{'_' + self._field_name if self._field_name else ''}",
             "values": vals,
             "timestamps": obs_time,
             "tags": tags,
@@ -287,13 +463,20 @@ class HWPSolQA(QAMetric):
 
 
 class HWPSolSuccess(HWPSolQA):
-    """ Records success of the HWP angle solution calculation, for each encode."""
+    """ Records success of the HWP angle solution calculation, for each encoder.
+    0: No data, 1: Success, 2: Fail
+    """
 
-    _influx_field = "logger"
+    _influx_field = "sol_success"
     _needs_encoder = True
 
     def _gen_value(self, meta):
-        return meta.hwp_solution[f"logger_{self._encoder}"] == "Angle calculation succeeded"
+        if meta.hwp_solution[f"logger_{self._encoder}"] == 'No HWP data':
+            return 0
+        elif meta.hwp_solution[f"logger_{self._encoder}"] == "Angle calculation succeeded":
+            return 1
+        else:
+            return 2
 
 
 class HWPSolPrimaryEncoder(HWPSolQA):
@@ -363,7 +546,7 @@ class HWPSolMeanRate(HWPSolQA):
     def _gen_value(self, meta):
         good_samp = ~meta.hwp_solution[f"filled_flag_{self._encoder}"]
         nsamp = good_samp.sum()
-        rate = np.nan if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
+        rate = 0.0 if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
         return rate
 
 
@@ -374,5 +557,84 @@ class HWPSolMeanTemplate(HWPSolQA):
     _needs_encoder = True
 
     def _gen_value(self, meta):
-        obs_time = [meta.obs_info.timestamp]
         return np.mean(np.abs(meta.hwp_solution[f"template_{self._encoder}"]))
+
+
+class HWPSolNumDroppedPacketsEncoder(HWPSolQA):
+    """ The number of dropped encoder packets."""
+
+    _influx_field = "num_dropped_packets_encoder"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dropped_packets_{self._encoder}"]
+
+
+class HWPSolNumDroppedPacketsIrig(HWPSolQA):
+    """ The number of dropped IRIG packets."""
+
+    _influx_field = "num_dropped_packets_irig"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dropped_packets_irig_{self._encoder}"]
+
+
+class HWPSolNumDataPointGlitchesEncoder(HWPSolQA):
+    """ The number of data point glitches in encoder data."""
+
+    _influx_field = "num_data_point_glitches_encoder"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_glitches_{self._encoder}"]
+
+
+class HWPSolNumDataPointGlitchesIrig(HWPSolQA):
+    """ The number of data point glitches in IRIG data."""
+
+    _influx_field = "num_data_point_glitches_irig"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_glitches_irig_{self._encoder}"]
+
+
+class HWPSolNumValueGlitchesEncoder(HWPSolQA):
+    """ The number of value glitches in encoder data."""
+
+    _influx_field = "num_value_glitches_encoder"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_value_glitches_{self._encoder}"]
+
+
+class HWPSolNumValueGlitchesIrig(HWPSolQA):
+    """ The number of value glitches in IRIG data."""
+
+    _influx_field = "num_value_glitches_irig"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_value_glitches_irig_{self._encoder}"]
+
+
+class HWPSolDeadRotations(HWPSolQA):
+    """ The number of dead rotations that failed to correct glitches."""
+
+    _influx_field = "num_dead_rots"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dead_rots_{self._encoder}"]
+
+
+class HWPSolDroppedSlits(HWPSolQA):
+    """ The number of dropped slits."""
+
+    _influx_field = "num_dropped_slits"
+    _needs_encoder = True
+
+    def _gen_value(self, meta):
+        return meta.hwp_solution[f"num_dropped_slits_{self._encoder}"]
