@@ -283,7 +283,7 @@ class DataPackaging:
                     if len(status.tags)==0:
                         no_tags += 1
                     else:
-                        msg += f"\Trying to add {fpath} to database"
+                        msg += f"\nTrying to add {fpath} to database"
                         self.SMURF.add_file( 
                             fpath, self.g3session, overwrite=True
                         )

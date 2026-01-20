@@ -5,13 +5,16 @@ import numpy as np
 import argparse
 import traceback
 from typing import Optional, List
+import re
 
 from sotodlib import core
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
 from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
-logger = sp_util.init_logger("preprocess")
+logger = init_logger("preprocess")
 
 def preprocess_obs(
     obs_id, 
@@ -38,8 +41,8 @@ def preprocess_obs(
         List of obs_ids within group
     """
 
-    if logger is None: 
-        logger = sp_util.init_logger("preprocess")
+    if logger is None:
+        logger = init_logger("preprocess")
     
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
@@ -55,6 +58,9 @@ def preprocess_obs(
             source_names.append(_s[0])
         else:
             raise ValueError('Invalid style of source')
+
+    for i, source in enumerate(source_names):
+        source_names[i] = re.sub('[^0-9a-zA-Z]+', '', source)
  
     if os.path.exists(configs['archive']['index']):
         logger.info(f"Mapping {configs['archive']['index']} for the "
@@ -103,10 +109,13 @@ def preprocess_obs(
         nearby_source_names = []
         for _source in proc_aman.sso_footprint._assignments.keys():
             nearby_source_names.append(_source)
+        nearby_source_names_map = {key.casefold(): key for key in nearby_source_names}
         coverage = []
         distances = []
         for source_name in source_names:
-            if source_name in nearby_source_names:
+            source_name_l = source_name.casefold()
+            if source_name_l in nearby_source_names_map:
+                source_name = nearby_source_names_map.get(source_name_l)
                 for key in proc_aman.sso_footprint[source_name]._assignments.keys():
                     if 'ws' in key:
                         if proc_aman.sso_footprint[source_name][key]:
@@ -212,11 +221,11 @@ def main(
     lat: bool = False,
  ):
     configs, context = pp_util.get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
-    
-    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime, 
-                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags, 
-                                   planet_obs=planet_obs)
+    logger = init_logger("preprocess", verbosity=verbosity)
+
+    obs_list = get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
+                           max_ctime=max_ctime, update_delay=update_delay, tags=tags,
+                           planet_obs=planet_obs)
     
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
@@ -286,4 +295,4 @@ def main(
             
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

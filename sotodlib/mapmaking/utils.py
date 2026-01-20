@@ -1,3 +1,5 @@
+import logging
+import os
 from typing import Optional, Any, Union
 from sqlalchemy import create_engine, exc
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
@@ -5,6 +7,7 @@ import importlib
 import numpy as np
 import so3g
 from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
+from scipy.sparse import issparse, sparray
 
 from .. import coords, core, tod_ops
 
@@ -605,59 +608,6 @@ def downsample_cut(cut, down):
     factor down."""
     return so3g.proj.ranges.RangesMatrix([downsample_ranges(r,down) for r in cut.ranges])
 
-def downsample_obs(obs, down, skip_signal=False):
-    """Downsample AxisManager obs by the integer factor down.
-
-    This implementation is quite specific and probably needs
-    generalization in the future, but it should work correctly
-    and efficiently for ACT-like data at least. In particular
-    it uses fourier-resampling when downsampling the detector
-    timestreams to avoid both aliasing noise and introducing
-    a transfer function."""
-    assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
-    if down == 1: return obs
-    # Compute how many samples we will end up with
-    onsamp = (obs.samps.count+down-1)//down
-    # Set up our output axis manager
-    axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
-    res    = core.AxisManager(core.IndexAxis("samps", onsamp), *axes)
-    # Stuff without sample axes
-    for key, axes in obs._assignments.items():
-        if "samps" not in axes:
-            res.wrap(*get_wrappable(obs, key))
-    # The normal sample stuff
-    res.wrap("timestamps", obs.timestamps[::down], [(0, "samps")])
-    bore = core.AxisManager(core.IndexAxis("samps", onsamp))
-    for key in ["az", "el", "roll"]:
-        bore.wrap(key, getattr(obs.boresight, key)[::down], [(0, "samps")])
-    res.wrap("boresight", bore)
-    if not skip_signal:
-        res.wrap("signal", resample.resample_fft_simple(obs.signal, onsamp), [(0,"dets"),(1,"samps")])
-
-    # TODO: Once it's finalized whether cuts are in obs.flags.X or obs.X, remove these
-    # if tests
-    cut_keys = []
-    if "glitch_flags"  in obs:
-        cut_keys.append("glitch_flags")
-    elif "flags.glitch_flags" in obs:
-        cut_keys.append("flags.glitch_flags")
-
-    if "source_flags" in obs:
-        cut_keys.append("source_flags")
-    elif "flags.source_flags" in obs:
-        cut_keys.append("flags.source_flags")
-
-    # We need to add a res.flags FlagManager to res
-    res = res.wrap('flags', core.FlagManager.for_tod(res))
-    for key in cut_keys:
-        new_key = key.split(".")[-1]
-        res.flags.wrap(new_key, downsample_cut(obs[key], down),
-                       [(0,"dets"),(1,"samps")])
-
-    # Not sure how to deal with flags. Some sort of or-binning operation? But it
-    # doesn't matter anyway
-    return res
-
 def get_wrappable(axman, key):
     val = getattr(axman, key)
     if isinstance(val, core.AxisManager):
@@ -666,6 +616,80 @@ def get_wrappable(axman, key):
         axes   = axman._assignments[key]
         axdesc = [(k,v) for k,v in enumerate(axes) if v is not None]
         return key, val, axdesc
+
+def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse_handling="naive", logger=None):
+    """Downsample AxisManager obs by the integer factor down.
+
+    Note that the handling of flags and associated metadata (ie: jump heights) is
+    naive and can lead to improper handling of these flags,
+    to avoid issues this function should be run after all other preprocessing steps.
+
+    This implementation is quite specific and probably needs
+    generalization in the future, but it should work correctly
+    and efficiently for ACT-like data at least. In particular
+    it uses fourier-resampling when downsampling the detector
+    timestreams to avoid both aliasing noise and introducing
+    a transfer function."""
+    if logger is None:
+        logger = logging.getLogger("downsample_obs")
+
+    # TODO: At some point we may want something more clever
+    # For now if people downsample after preprocess it doesn't really matter
+    if sparse_handling not in ["naive", "skip"]:
+        raise ValueError("sparse_handling should be 'naive' or 'skip'")
+
+    assert down == putils.nint(down), "Only integer downsampling supported, but got '%.8g'" % down
+    if down == 1: return obs
+    if "samps" not in obs: return obs
+    # Compute how many samples we will end up with
+    onsamp = (obs.samps.count+down-1)//down
+    # Set up our output axis manager
+    axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
+    res    = core.AxisManager(core.OffsetAxis("samps", onsamp), *axes)
+    for key, axes in obs._assignments.items():
+        # Stuff without sample axes
+        if "samps" not in axes:
+            res.wrap(*get_wrappable(obs, key))
+        elif key == "signal" and skip_signal:
+            continue
+        elif isinstance(obs[key], (core.AxisManager, core.FlagManager)):
+            res.wrap(key, downsample_obs(obs[key], down, skip_signal, fft_resample))
+        # TODO: This is a pretty naive way of handling flags, could lead to wierdness
+        # Again not an issue if this is done after preprocess
+        elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
+            res.wrap(key, downsample_cut(obs[key], down))
+        elif isinstance(obs[key], so3g.RangesInt32):
+            res.wrap(key, downsample_ranges(obs[key], down))
+        elif issparse(obs[key]) and isinstance(obs[key], sparray):
+            if sparse_handling == "skip":
+                continue
+            elif sparse_handling == "naive":
+                ax_idx = np.where(np.array(axes) == "samps")[0]
+                dat = np.moveaxis(obs[key].toarray(), ax_idx, -1)
+                # Resample and return to original order
+                dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
+                res.wrap(key, obs[key].__class__(dat), [(i, ax) for i, ax in enumerate(axes)])
+        elif key in fft_resample:
+            # Make the axis that is samps the last one
+            ax_idx = np.where(np.array(axes) == "samps")[0]
+            dat = np.moveaxis(obs[key], ax_idx, -1)
+            # Resample and return to original order
+            dat = np.moveaxis(resample.resample_fft_simple(dat, onsamp), -1, ax_idx)
+            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+        # Some naive slicing for everything else
+        elif isinstance(obs[key], np.ndarray):
+            # Make the axis that is samps the last one
+            ax_idx = np.where(np.array(axes) == "samps")[0]
+            dat = np.moveaxis(obs[key], ax_idx, -1)
+            # Resample and return to original order
+            dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
+            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+        else:
+            logger.warning("Skipping field %s, unhandled type %s", key, type(obs[key]))
+            continue
+
+
+    return res
 
 def get_flags(obs, flagnames):
     """Parse detector-set splits"""
@@ -762,6 +786,9 @@ class AtomicInfo(Base):
     dec_center: Mapped[Optional[float]]
     number_dets: Mapped[Optional[int]]
     moon_distance: Mapped[Optional[float]]
+    wind_speed: Mapped[Optional[float]]
+    wind_direction: Mapped[Optional[float]]
+    rqu_avg: Mapped[Optional[float]]
 
     def __init__(self, obs_id, telescope, freq_channel, wafer, ctime, split_label):
         self.obs_id = obs_id
@@ -789,7 +816,12 @@ class AtomicInfo(Base):
         return core
 
 def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
-    engine = create_engine("sqlite:///%s" % atomic_db, echo=False)
+    connect_args = {}
+    timeout_env = os.getenv('SOTODLIB_SQLITE_TIMEOUT')
+    if timeout_env not in (None, ''):
+        connect_args['timeout'] = float(timeout_env)
+
+    engine = create_engine("sqlite:///%s" % atomic_db, echo=False, connect_args=connect_args)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     with Session() as session:
