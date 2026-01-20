@@ -3055,6 +3055,8 @@ class GlitchClassification(_Preprocess):
         snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
         self.save(proc_aman, snippet_aman)
 
+        return aman, proc_aman
+
     def save(self, proc_aman, snippet_aman):
         if self.save_cfgs is None:
             return
