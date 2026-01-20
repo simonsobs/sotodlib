@@ -686,7 +686,8 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
-                                       t2ptemplate_aman=None):
+                                       t2ptemplate_aman=None,
+                                       ignore_cfg_check=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -721,6 +722,9 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
     t2ptemplate_aman : AxisManager
         Optional. AxisManager to use as a template for t2p leakage
         deprojection.
+    ignore_cfg_check : bool
+        If True, do not attempt to validate that configs_init is the same as
+        the config used to create the existing init db.
 
     Returns
     -------
@@ -750,18 +754,44 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
         aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
-                           logger=logger):
+        if (
+            ignore_cfg_check or
+            check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
+                            logger=logger)
+        ):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
+            logger.info("Restricting detectors on all init pipeline processes")
+            if (
+                'valid_data' in meta_init.preprocess and
+                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
+            else:
+              keep_all = np.ones(meta_init.dets.count,dtype=bool)
+              for process in pipe_init[:]:
+                  keep = process.select(meta_init, in_place=False)
+                  if isinstance(keep, np.ndarray):
+                      keep_all &= keep
+            meta_init.restrict("dets", meta_init.dets.vals[keep_all])
+            meta_proc.restrict("dets", meta_init.dets.vals)
+
             logger.info("Restricting detectors on all proc pipeline processes")
-            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
-            for process in pipe_proc[:]:
-                keep = process.select(meta_proc, in_place=False)
-                if isinstance(keep, np.ndarray):
-                    keep_all &= keep
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
+            else:
+                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+                for process in pipe_proc[:]:
+                    keep = process.select(meta_proc, in_place=False)
+                    if isinstance(keep, np.ndarray):
+                        keep_all &= keep
+
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
+
             aman = context_init.get_obs(meta_proc, no_signal=True)
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
             aman.move("signal", None)
