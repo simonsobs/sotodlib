@@ -513,7 +513,7 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
-    return_full_aman: bool
+    return_full_aman : bool
         Optional. Return unrestricted axis manager alongside restricted aman
         if True, otherwise return None.
 
