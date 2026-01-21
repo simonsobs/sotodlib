@@ -40,6 +40,7 @@ class ReportDataConfig:
         make_cov_map: bool = True,
         cal_targets: Optional[List[str]] = None,
         show_hk_pb: bool = False,
+        noise_scale_factor: float = 1000000
     ) -> None:
         self.ctx_path: str = ctx_path
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
@@ -50,6 +51,7 @@ class ReportDataConfig:
         self.load_source_footprints: bool = load_source_footprints
         self.show_hk_pb: bool = show_hk_pb
         self.make_cov_map = make_cov_map
+        self.noise_scale_factor = noise_scale_factor
 
         if cal_targets is None:
             self.cal_targets = ["jupiter", "saturn", "tau_A", "tauA", "cenA", "mars"]
@@ -92,6 +94,7 @@ class ObsInfo:
     obs_id: str
     start_time: float
     stop_time: float
+    duration: float
     wafer_slots_list: str
     stream_ids_list: str
     obs_type: str
@@ -112,6 +115,7 @@ class ObsInfo:
             obs_id=data["obs_id"],
             start_time=data["start_time"],
             stop_time=data["stop_time"],
+            duration=data["duration"],
             wafer_slots_list=data["wafer_slots_list"],
             stream_ids_list=data["stream_ids_list"],
             obs_type=data["type"],
@@ -273,7 +277,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     return df
 
 
-def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
+def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scale_factor: float) -> None:
     timestamps = np.array([o.start_time for o in obs_list])
     obsids = [o.obs_id for o in obs_list]
 
@@ -327,33 +331,12 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
             nep_dtype = [(band, [(k, "f8") for k in all_keys]) for band in band_totals.keys()]
 
             nep_row = tuple(
-                tuple(vals.get(k, np.nan) for k in all_keys)
+                tuple((noise_scale_factor * vals.get(k, np.nan)) for k in all_keys)
                 for _, vals in band_totals.items()
             )
 
             setattr(obs_entry, attr_name, np.array([nep_row], dtype=nep_dtype))
 
-
-def generate_coverage_map(ctx_path: str, obs_list: List[ObsInfo]):
-    from sotodlib.mapmaking.utils import downsample_obs
-    from sotodlib import coords
-
-    ctx = Context(ctx_path)
-    res = 10./60 * coords.DEG
-
-    cmb_obs_list = [o for o in obs_list if o.obs_subtype == "cmb"]
-
-    geom = enmap.fullsky_geometry(res=res, proj='car')
-    w = None
-    for o in tqdm(cmb_obs_list, total=len(cmb_obs_list)):
-        aman = ctx.get_obs(o.obs_id, no_signal=True)
-        aman.restrict("dets", np.isfinite(aman.focal_plane.gamma))
-        aman = downsample_obs(aman, 100, skip_signal=True)
-        aman.restrict("dets", aman.dets.vals[::10])
-        p = coords.P.for_tod(aman, geom=geom, comps='T')
-        w = p.to_weights(aman, dest=w)
-
-    return w
 
 @dataclass
 class Footprint:
@@ -448,7 +431,7 @@ class ReportData:
 
         if cfg.longterm_obs_file is not None:
             logger.info("Getting longterm data")
-            longterm_obs_df = cls.load(cfg.longterm_obs_file, cov_map_path=None)
+            longterm_obs_df = cls.load(cfg.longterm_obs_file)
         else:
             longterm_obs_df = None
 
@@ -460,7 +443,7 @@ class ReportData:
 
         if qds_df is not None:
             logger.info("Merging PWV and QDS data with obs list")
-            merge_qds_and_obs_list(qds_df, obs_list)
+            merge_qds_and_obs_list(qds_df, obs_list, cfg.noise_scale_factor)
         else:
             logger.warn("QDS data not found")
 
@@ -485,17 +468,10 @@ class ReportData:
             source_footprints = get_source_footprints(data)
             data.source_footprints = source_footprints
 
-        if cfg.make_cov_map:
-            logger.info("Making Coverage Map")
-            try:
-                data.w = generate_coverage_map(cfg.ctx_path, obs_list)
-            except Exception as e:
-                logger.error(f"Coverage map failed with {e}")
-
         return data
 
 
-    def save(self, data_path: str, cov_map_path: str, overwrite: bool=True, update_footprints: bool=True) -> None:
+    def save(self, data_path: str, overwrite: bool=True, update_footprints: bool=True) -> None:
         """
         Save compiled data to an H5 file.
         """
@@ -548,14 +524,9 @@ class ReportData:
                 fp_grp.create_dataset('count', data=counts)
                 fp_grp.create_dataset('obsids', data=obsids)
 
-            if cov_map_path is not None and self.w is not None:
-                enmap.write_map(cov_map_path + ".fits", self.w)
-                f = enplot.plot(self.w, grid=True, downgrade=1, mask=0, ticks=10)
-                enplot.write(cov_map_path + ".png", f[0])
-
 
     @classmethod
-    def load(cls, data_path: str, cov_map_path: str) -> "ReportData":
+    def load(cls, data_path: str) -> "ReportData":
         obs_list = []
         with h5py.File(data_path, "r") as hdf:
             # Load config
@@ -605,17 +576,11 @@ class ReportData:
             else:
                 fps = None
 
-        if cov_map_path is not None:
-            w = enmap.read_map(cov_map_path + ".fits")
-        else:
-            w = None
-
         return cls(
             cfg=cfg,
             obs_list=obs_list,
             pwv=pwv,
             source_footprints=fps,
-            w=w,
         )
 
 

@@ -1,5 +1,10 @@
+from sotodlib.core import Context
+from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.mapmaking.utils import downsample_obs
+from sotodlib import coords
+from pixell import enmap, enplot
 from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig
-from typing import Literal, Union, Dict, Any, Optional, Tuple, List
+from typing import Literal, Union, Dict, Any, Optional, Tuple, List, Callable
 import numpy as np
 import datetime as dt
 import os
@@ -20,7 +25,26 @@ reload(plots)
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
 
+def generate_coverage_map(ctx_path: str, obs_id: str):
+    """
+    Load an obs_id and generate a hits map with pixell.
+    """
+    ctx = Context(ctx_path)
+    res = 10./60 * coords.DEG
+
+    geom = enmap.fullsky_geometry(res=res, proj='car')
+    aman = ctx.get_obs(obs_id, no_signal=True)
+    aman.restrict("dets", np.isfinite(aman.focal_plane.gamma))
+    aman = downsample_obs(aman, 100, skip_signal=True)
+    aman.restrict("dets", aman.dets.vals[::10])
+    p = coords.P.for_tod(aman, geom=geom, comps='T')
+    w = p.to_weights(aman)
+
+    return w
+
+
 def create_manifest(base_dir: str, output_file: str):
+    """Create a javascript manifest for navigating between pages"""
     manifest = []
     for parent in [os.path.join(base_dir, "weekly"), os.path.join(base_dir, "monthly")]:
         if not os.path.exists(parent):
@@ -107,7 +131,11 @@ class GenerateReportConfig:
             return GenerateReportConfig(**yaml.safe_load(f))
 
 
-def main(cfg: str) -> None:
+def _main(cfg: str,
+          executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
+          as_completed_callable: Callable,
+         ) -> None:
+
     cfg = GenerateReportConfig.from_yaml(cfg)
     base_path = os.path.join(cfg.output_root, cfg.report_interval)
 
@@ -116,10 +144,8 @@ def main(cfg: str) -> None:
         subdir = os.path.join(base_path, time_str)
         report_file = os.path.join(subdir, "report.html")
         data_file = os.path.join(subdir, "data.h5")
-        if cfg.data_config.get("make_cov_map", True):
-            map_file = os.path.join(subdir, "cov")
-        else:
-            map_file = None
+        map_fits_file = os.path.join(subdir, "cov.fits")
+        map_png_file = os.path.join(subdir, "cov.png")
 
         data_cfg = ReportDataConfig(
             start_time=start_time,
@@ -138,13 +164,41 @@ def main(cfg: str) -> None:
         try:
             if not os.path.exists(data_file) or cfg.overwrite_data:
                 data: ReportData = ReportData.build(data_cfg)
-                data.save(data_file, map_file)
+                data.save(data_file)
             else:
-                data = ReportData.load(data_file, map_file)
+                data = ReportData.load(data_file)
+
+            if data_cfg.make_cov_map:
+                if not os.path.exists(map_fits_file) or cfg.overwrite_data:
+                    cmb_obs_list = [o for o in data.obs_list if o.obs_subtype == "cmb"]
+
+                    futures = []
+                    for o in cmb_obs_list:
+                        futures.append(executor.submit(
+                                generate_coverage_map,
+                                data.cfg.ctx_path,
+                                o.obs_id))
+
+                    total = len(futures)
+                    for future in tqdm(as_completed_callable(futures), total=total, desc="generate_cov_map"):
+                        if data.w is None:
+                            data.w = future.result()
+                        else:
+                            data.w += future.result()
+                        futures.remove(future)
+
+                    enmap.write_map(map_fits_file, data.w)
+                    f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10)
+                    enplot.write(map_png_file, f[0])
+                else:
+                    data.w = enmap.read_map(map_fits_file)
+                    if not os.path.exists(map_png_file):
+                        f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10)
+                        enplot.write(map_png_file, f[0])
 
             if not os.path.exists(report_file) or cfg.overwrite_html and not cfg.skip_html:
                 if data.cfg.longterm_obs_file != longterm_path:
-                    longterm_data = ReportData.load(data.cfg.longterm_obs_file, None)
+                    longterm_data = ReportData.load(data.cfg.longterm_obs_file)
                     longterm_path = data.cfg.longterm_obs_file
                 render_report(
                     cfg,
@@ -152,7 +206,7 @@ def main(cfg: str) -> None:
                     report_file,
                     template_dir=cfg.template_dir,
                     longterm_data=longterm_data,
-                    map_file=map_file,
+                    map_png_file=map_png_file,
                 )
                 # update longterm obs file
                 if longterm_path is not None and cfg.report_interval == "monthly":
@@ -170,7 +224,7 @@ def render_report(
     output_path: str,
     template_dir=None,
     longterm_data: Optional[ReportData] = None,
-    map_file: Optional[str] = None,
+    map_png_file: Optional[str] = None,
 ):
     if template_dir is None:
         template_dir = os.path.join(os.path.dirname(__file__), "templates")
@@ -193,7 +247,7 @@ def render_report(
         "det_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="det"),
         "source_focalplane": source_footprint_plots.focalplane,
         "source_table": source_footprint_plots.table,
-        "map_png": plots.cov_map_plot(map_file),
+        "map_png": plots.cov_map_plot(map_png_file),
     }
 
     html_kw = dict(full_html=False, include_plotlyjs=False)
@@ -213,9 +267,14 @@ def render_report(
             for k, v in figures.items()
         },
         "general_stats": {
+            "Platform": cfg.platform,
             "Start time": dt.datetime.fromisoformat(start_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
             "Stop time": dt.datetime.fromisoformat(stop_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
             "Number of Observations": len([o for o in data.obs_list if o.obs_type == "obs"]),
+            "Number of CMB Observations": len([o for o in data.obs_list if o.obs_subtype == "cmb"]),
+            "Number of Cal Observations": len([o for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"]),
+            "Duration of CMB Observations (hrs)": np.round(np.sum(o.duration for o in data.obs_list if o.obs_subtype == "cmb") / 3600, 1),
+            "Duration of Cal Observations (hrs)": np.round(np.sum(o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs") / 3600, 1),
         }
     }
 
@@ -235,6 +294,20 @@ def get_parser(
     )
     return p
 
+
+def main(
+    cfg: str,
+    nproc: int = 1
+) -> None:
+
+    rank, executor, as_completed_callable = get_exec_env(nproc)
+
+    if rank == 0:
+        _main(
+            cfg=cfg,
+            executor=executor,
+            as_completed_callable=as_completed_callable
+        )
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)

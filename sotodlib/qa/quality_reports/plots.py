@@ -610,7 +610,7 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
         zeroline=False,
     )
     fig.update_yaxes(
-        title_text=r"$\rm{NEP\ [pW/\sqrt{Hz}]}$",
+        title_text=r"$\rm{NEP\ [aW/\sqrt{Hz}]}$",
         secondary_y=False,
         showgrid=True,
         gridcolor="lightgray",
@@ -736,23 +736,22 @@ def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
         zeroline=False,
     )
     fig.update_yaxes(
-        title_text=r"$\rm{NEP\ [pW/\sqrt{Hz}]}$",
+        title_text=r"$\rm{NEP\ [aW/\sqrt{Hz}]}$",
         showgrid=True,
         gridcolor="lightgray",
     )
 
     return fig
 
-def cov_map_plot(map_path: str, embed:bool=True) -> str:
+def cov_map_plot(map_png_file: str, embed:bool=True) -> str:
     import base64
-    png_path = map_path + ".png"
 
-    if not os.path.isfile(png_path):
+    if map_png_file is None or not os.path.isfile(map_png_file):
         return "<p>Coverage map not found</p>"
 
     # Embed image as base64 (guaranteed to work)
     if embed:
-        with open(png_path, "rb") as f:
+        with open(map_png_file, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("ascii")
 
         return (
@@ -763,18 +762,10 @@ def cov_map_plot(map_path: str, embed:bool=True) -> str:
 
     # Otherwise use relative path
     return (
-        f'<img src="./{os.path.basename(png_path)}" '
+        f'<img src="./{os.path.basename(map_png_file)}" '
         f'style="max-width:100%; height:auto;" '
         f'alt="Coverage Map">'
     )
-#     if os.path.isfile(map_path + ".png"):
-#         map_png = f'<img src="./{os.path.basename(map_path) + ".png"}" style="max-width:100%; height:auto;" alt="Coverage Map">'
-#     else:
-#         map_png = "<p>Coverage map not found</p>"
-
-#     return map_png
-
-
 @dataclass
 class SourceFootprintPlots:
     focalplane: go.Figure
@@ -984,14 +975,6 @@ def source_footprints(d: "ReportData") -> go.Figure:
         margin=dict(t=50, b=50, l=50, r=50)
     )
 
-    wafers = sorted(set(fp.wafer for fp in d.source_footprints))
-    sources = sorted(set(fp.source for fp in d.source_footprints))
-
-    lookup = {
-        (fp.wafer, fp.source): fp.obsids
-        for fp in d.source_footprints
-    }
-
     def make_obsid_links(obsids):
         if not obsids:
             return ""
@@ -1001,14 +984,27 @@ def source_footprints(d: "ReportData") -> go.Figure:
         ]
         return "<br>".join(links) + ("<br>" if len(links) == 1 else "")
 
-    wafer_col = wafers
-    source_cols = []
-    for source in sources:
-        col = []
-        for wafer in wafers:
-            obsids = lookup.get((wafer, source), [])
-            col.append(make_obsid_links(obsids))
-        source_cols.append(col)
+    if d.source_footprints is not None:
+        wafers = sorted(set(fp.wafer for fp in d.source_footprints))
+        sources = sorted(set(fp.source for fp in d.source_footprints))
+
+        lookup = {
+            (fp.wafer, fp.source): fp.obsids
+            for fp in d.source_footprints
+        }
+
+        wafer_col = wafers
+        source_cols = []
+        for source in sources:
+            col = []
+            for wafer in wafers:
+                obsids = lookup.get((wafer, source), [])
+                col.append(make_obsid_links(obsids))
+            source_cols.append(col)
+    else:
+        wafer_col = []
+        source_cols = []
+        sources = []
 
     table_columns = [wafer_col] + source_cols
     header_labels = ["Wafers"] + sources
