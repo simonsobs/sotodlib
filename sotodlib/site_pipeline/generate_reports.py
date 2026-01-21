@@ -168,6 +168,8 @@ def _main(cfg: str,
     cfg = GenerateReportConfig.from_yaml(cfg)
     base_path = os.path.join(cfg.output_root, cfg.report_interval)
 
+    n_failed = 0
+
     for start_time, stop_time in tqdm(cfg.time_intervals, total=len(cfg.time_intervals)):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         subdir = os.path.join(base_path, time_str)
@@ -243,8 +245,12 @@ def _main(cfg: str,
         except Exception as e:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
+            n_failed += 1
 
     create_manifest(cfg.output_root, os.path.join(cfg.output_root, "manifest.json"))
+
+    if n_failed > 0:
+        raise RuntimeError(f"{n_failed} reports failed to generate")
 
 
 def render_report(
