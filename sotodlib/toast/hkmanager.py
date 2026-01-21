@@ -127,10 +127,11 @@ class HKManager(MutableMapping):
             # The user is requesting "all" fields.  We will prune this list to exclude
             # fields related to the HWP and wire grid encoders, which are excessively
             # large and rarely used for downstream analysis.
-            selected = list()
-            for fld in all_fields:
-                if fld ....
-                    selected.append(fld)
+            # selected = list()
+            # for fld in all_fields:
+            #     if fld ....
+            #         selected.append(fld)
+            selected = all_fields
         else:
             selected = fields
         # Load the data
