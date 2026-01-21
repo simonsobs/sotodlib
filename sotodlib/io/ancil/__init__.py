@@ -36,4 +36,4 @@ ANCIL_ENGINES = {}
 from . import configcls
 from . import utils
 
-from . import apex, scan_props, so_hk, so_obs, pwv
+from . import apex, so_hk, pwv
