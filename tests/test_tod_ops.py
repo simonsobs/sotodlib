@@ -265,14 +265,14 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.timeconst_filter(timeconst='timeconst'),
                 tod_ops.filters.timeconst_filter(timeconst=1e-3),
                 tod_ops.filters.identity_filter(),
-                tod_ops.filters.delay(1e-3),
+                tod_ops.filters.timeshift(dt=1e-3),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
             y = filt(f, tod)
             sig_filt = tod_ops.fourier_filter(tod, filt)
             sigma1 = sig_filt.std(axis=1)
             print(f'Filter takes sigma from {sigma0} to {sigma1}')
-            if not isinstance(filt, (tod_ops.filters.identity_filter, tod_ops.filters.delay)):
+            if not isinstance(filt, (tod_ops.filters.identity_filter, tod_ops.filters.timeshift)):
                 self.assertTrue(np.all(sigma1 < sigma0))
 
         # Confirm fail if not uniform per-wafer

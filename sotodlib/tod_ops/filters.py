@@ -349,13 +349,14 @@ def gain(freqs, tod, gain=1.):
     return gain * np.ones(len(freqs))
 
 @fft_filter
-def delay(freqs, tod, dt=0, invert=False):
-    """Filter that simply applies a delay.
+def timeshift(freqs, tod, dt=0, invert=False):
+    """Filter that shifts the signal in time.
 
     Args:
-        dt: amount of delay to apply in second.
+        dt: Amount of time shift to apply in second. Positive value will
+            cause the sginal to be moved to later samples of the array.
         invert (bool): If true, returns the inverse transfer function,
-            to deconvolve the delay.
+            to deconvolve the time shift.
 
     """
     if invert:
