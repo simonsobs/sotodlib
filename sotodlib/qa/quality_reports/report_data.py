@@ -84,7 +84,7 @@ class ReportDataConfig:
         return cls(**data)
 
     @classmethod
-    def from_yaml(cls, path: str) -> "ReportDataConfig":
+    def from_yaml(cls, path: Union[str, Dict]) -> "ReportDataConfig":
         with open(path, "r") as f:
             return cls.from_dict(yaml.safe_load(f))
 
@@ -123,7 +123,7 @@ class ObsInfo:
             obs_tube_slot=data["tube_slot"],
             boresight=-data["roll_center"] if data["roll_center"] is not None else np.nan,
             el_center=data["el_center"] if data["el_center"] is not None else np.nan,
-            hwp_freq_mean=data["hwp_freq_mean"] if ("hwp_freq_mean" in data and data["hwp_freq_mean"] is not None) else np.nan
+            hwp_freq_mean=data["hwp_freq_mean"] if ("hwp_freq_mean" in data and data["hwp_freq_mean"] is not None) else np.nan,
         )
         return obs_info
 
