@@ -304,6 +304,7 @@ def render_report(
             "Number of Cal Observations": len([o for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"]),
             "Duration of CMB Observations (hrs)": np.round(np.sum(o.duration for o in data.obs_list if o.obs_subtype == "cmb") / 3600, 1),
             "Duration of Cal Observations (hrs)": np.round(np.sum(o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs") / 3600, 1),
+            "Average PWV (mm)": np.round(np.nanmean([o.pwv for o in data.obs_list]), 3),
         }
     }
 
