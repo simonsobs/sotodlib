@@ -2,7 +2,6 @@ import numpy as np
 import pyfftw
 import inspect
 import scipy.signal as signal
-from operator import attrgetter
 
 import logging
 
@@ -350,6 +349,21 @@ def gain(freqs, tod, gain=1.):
     return gain * np.ones(len(freqs))
 
 @fft_filter
+def delay(freqs, tod, dt=0, invert=False):
+    """Filter that simply applies a delay.
+
+    Args:
+        dt: amount of delay to apply in second.
+        invert (bool): If true, returns the inverse transfer function,
+            to deconvolve the delay.
+
+    """
+    if invert:
+        return np.exp(2j * np.pi * freqs * dt)
+    else:
+        return np.exp(-2j * np.pi * freqs * dt)
+
+@fft_filter
 def low_pass_butter4(freqs, tod, fc):
     """4th-order low-pass filter with f3db at fc (Hz).
 
@@ -419,7 +433,7 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        timeconst = tod.get(timeconst)
+        timeconst = tod[timeconst]
     if np.isscalar(timeconst):
         timeconst = np.full(tod.dets.count, timeconst)
 
