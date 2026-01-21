@@ -758,6 +758,7 @@ def compute_boresight_pointing(
         obs.shared[times_key].data[slc],
         bore_azel,
         use_qpoint=True,
+        so3g_compat_mode=True,
     )
 
     # Gather all samples to rank zero and set the shared object elements.
