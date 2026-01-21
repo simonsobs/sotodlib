@@ -354,7 +354,7 @@ def timeshift(freqs, tod, dt=0, invert=False):
 
     Args:
         dt: Amount of time shift to apply in second. Positive value will
-            cause the sginal to be moved to later samples of the array.
+            cause the signal to be moved to later samples of the array.
         invert (bool): If true, returns the inverse transfer function,
             to deconvolve the time shift.
 
