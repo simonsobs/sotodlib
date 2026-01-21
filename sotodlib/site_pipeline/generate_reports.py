@@ -43,25 +43,54 @@ def generate_coverage_map(ctx_path: str, obs_id: str):
     return w
 
 
+def parse_range(folder_name):
+    try:
+        start, end = folder_name.split("_")
+        return dt.datetime.strptime(start, "%Y%m%d"), dt.datetime.strptime(end, "%Y%m%d")
+    except Exception:
+        return None, None
+
+
 def create_manifest(base_dir: str, output_file: str):
-    """Create a javascript manifest for navigating between pages"""
     manifest = []
-    for parent in [os.path.join(base_dir, "weekly"), os.path.join(base_dir, "monthly")]:
+
+    for cadence in ["weekly", "monthly"]:
+        parent = os.path.join(base_dir, cadence)
         if not os.path.exists(parent):
             continue
-        for folder_name in np.sort(os.listdir(parent)):
+
+        entries = []
+        candidates = []
+
+        for folder_name in sorted(os.listdir(parent)):
             folder_path = os.path.join(parent, folder_name)
             if not os.path.isdir(folder_path):
                 continue
+
             index_path = os.path.join(folder_path, "report.html")
-            if os.path.exists(index_path):
-                label = f"{os.path.basename(parent)} / {folder_name}"
-                rel_path = os.path.relpath(index_path, start=base_dir).replace(os.sep, "/")
-                rel_path = f"../../{rel_path}"
-                manifest.append({
-                    "label": label,
-                    "rel_path": rel_path
-                })
+            if not os.path.exists(index_path):
+                continue
+
+            rel_path = os.path.relpath(index_path, start=base_dir).replace(os.sep, "/")
+            rel_path = f"../../{rel_path}"
+
+            entries.append({
+                "label": f"{cadence} / {folder_name}",
+                "rel_path": rel_path
+            })
+
+            start, end = parse_range(folder_name)
+            if end is not None:
+                candidates.append((end, start, rel_path))
+
+        if candidates:
+            _, _, latest_path = max(candidates)
+            entries.insert(0, {
+                "label": f"{cadence} / latest",
+                "rel_path": latest_path
+            })
+
+        manifest.extend(entries)
 
     with open(output_file, "w") as f:
         json.dump(manifest, f, indent=2)
