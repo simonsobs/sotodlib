@@ -19,6 +19,7 @@ from sotodlib import coords, mapmaking
 from sotodlib.core import Context
 from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
 from so3g.proj import coords as so3g_coords
 from pixell import enmap, wcsutils, colors, memory
@@ -30,7 +31,7 @@ from pixell.mpiutils import FakeCommunicator
 class Cfg:
     """
     Class to configure make-atomic-filterbin-map
-    
+
     Args
     --------
     context: str
@@ -491,6 +492,12 @@ def main(
     return True
 
 
+def cli_main(config_file: str, nprocs: int):
+    rank, executor, as_completed_callable = get_exec_env(nprocs)
+    if rank == 0:
+        main(config_file, executor, as_completed_callable)
+
+
 def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     if parser is None:
         p = ArgumentParser()
@@ -505,7 +512,4 @@ def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:
     return p
 
 if __name__ == '__main__':
-    args = get_parser().parse_args()
-    rank, executor, as_completed_callable = get_exec_env(args.nprocs)
-    if rank == 0:
-        main(args.config_file, executor, as_completed_callable)
+    main_launcher(cli_main, get_parser)
