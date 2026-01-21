@@ -20,6 +20,62 @@ from . import configcls as cc
 logger = logging.getLogger(__name__)
 
 
+@cc.register_engine('weather-station', cc.WeatherStationConfig)
+class WeatherStation(utils.AncilEngine):
+    _fields = [
+        ('wind_speed', 'float'),
+        ('wind_dir', 'float'),
+        ('uv', 'float'),
+        ('ambient_temp', 'float'),
+    ]
+
+    def getter(self, targets=None, results=None, **kwargs):
+        time_ranges = self._target_time_ranges(targets)
+
+        cfg = hkdb.HkConfig.from_yaml(self.cfg.hkdb_config)
+        cfg.aliases = {k: f'env-vantage.weather_data.{k}'
+                       for k in ['temp_outside', 'UV', 'wind_speed', 'wind_dir']}
+
+        db = hkdb.HkDb(cfg)
+        lspec = hkdb.LoadSpec(
+            cfg=cfg, start=0, end=0,
+            fields=cfg.aliases,
+            hkdb=db,
+        )
+        for time_range in time_ranges:
+            output = {
+                'wind_speed': np.nan,
+                'wind_dir': np.nan,
+                'uv': np.nan,
+                'ambient_temp': np.nan,
+            }
+
+            lspec.start, lspec.end = map(float, time_range)  # de-numpy
+            result = hkdb.load_hk(lspec, show_pb=False)
+
+            if hasattr(result, 'temp_outside'):
+                output['ambient_temp'] = np.nanmedian(result.temp_outside[1]).round(2)
+
+            if hasattr(result, 'wind_speed'):
+                s = (np.isfinite(result.wind_speed[1])
+                     * np.isfinite(result.wind_dir[1]))
+                wspd = result.wind_speed[1][s] * 1.609 # miles to km.
+                wphi = np.radians(result.wind_dir[1][s])
+                vx, vy = wspd * np.cos(wphi), wspd * np.sin(wphi)
+                speed = ((np.mean(vx)**2 + np.mean(vy)**2)**.5).round(1)
+                direc = (np.rad2deg(np.arctan2(np.mean(vy),
+                                               np.mean(vx))) % 360.).round(1)
+                output.update({
+                    'wind_speed': speed,
+                    'wind_dir': direc,
+                })
+
+            if hasattr(result, 'uv'):
+                output['uv'] = np.nanmedian(result.UV[1]).round(1),
+
+            yield utils.denumpy(output)
+
+
 @cc.register_engine('toco-pwv', cc.TocoPwvConfig)
 class TocoPwv(utils.LowResTable):
     _fields = [
