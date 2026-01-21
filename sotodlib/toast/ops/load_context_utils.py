@@ -45,6 +45,7 @@ def read_and_preprocess_wafers(
     ignore_preprocess_archive=False,
     context=None,
     context_file=None,
+    daq_units=False,
 ):
     """Read the wafer data.
 
@@ -64,6 +65,7 @@ def read_and_preprocess_wafers(
         ignore_preprocess_db (bool): Ignore the 'archive' field in the preprocessing configuration.
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
+        daq_units (bool):  If True, convert raw signal back to DAQ units.
 
     Returns:
         (dict):  The AxisManager data for each wafer on this process.
@@ -76,6 +78,8 @@ def read_and_preprocess_wafers(
         rank = 0
     else:
         rank = gcomm.rank
+
+    rescale_to_daq = 2**15 / np.pi
 
     results = dict()
     for wf, reader in wafer_readers.items():
@@ -157,6 +161,9 @@ def read_and_preprocess_wafers(
                 msg = f"LoadContext {obs_name} apply preproc to {wf}"
                 msg += f" in {elapsed} seconds"
                 log.debug(msg)
+            if daq_units:
+                if "signal" in axtod:
+                    axtod["signal"] *= rescale_to_daq
             results[wf] = axtod
     return results
 

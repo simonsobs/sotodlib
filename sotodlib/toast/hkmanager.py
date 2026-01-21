@@ -124,7 +124,13 @@ class HKManager(MutableMapping):
         )
         all_fields = hkdb.get_feed_list(test_spec)
         if fields is None or len(fields) == 0:
-            selected = list(all_fields)
+            # The user is requesting "all" fields.  We will prune this list to exclude
+            # fields related to the HWP and wire grid encoders, which are excessively
+            # large and rarely used for downstream analysis.
+            selected = list()
+            for fld in all_fields:
+                if fld ....
+                    selected.append(fld)
         else:
             selected = fields
         # Load the data
