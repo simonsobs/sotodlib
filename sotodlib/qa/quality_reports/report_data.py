@@ -252,9 +252,9 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
 
     keys = ['time', 'num_valid_dets', 'bandpass']
     if cfg.platform == "lat":
-        keys += ['array_net_T', 'det_net_T']
+        keys += ['array_noise_T', 'det_noise_T']
     elif cfg.platform in ['satp1', 'satp2', 'satp3']:
-        keys += [f"{prefix}_{suffix}" for prefix in ["array_net", "det_net"] for suffix in ["T", "Q", "U"]]
+        keys += [f"{prefix}_{suffix}" for prefix in ["array_noise", "det_noise"] for suffix in ["T", "Q", "U"]]
 
     query = f"""
         SELECT """ + ", ".join(keys) +  f""" from "autogen"."preprocesstod" WHERE (
@@ -291,7 +291,7 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scal
 
     df["obs_id"] = df["timestamp"].apply(find_obsid)
 
-    nep_cols = [c for c in df.columns if "_net_" in c]
+    nep_cols = [c for c in df.columns if "_noise_" in c]
     agg_dict = {"num_valid_dets": "sum", **{c: "sum" for c in nep_cols}}
 
     totals = (
@@ -322,7 +322,7 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scal
         row = tuple(vals["num_valid_dets"] for _, vals in band_totals.items())
         obs_entry.num_valid_dets = np.array([row], dtype=det_dtype)
 
-        for key, attr_name in zip(["array_net_", "det_net_"], ["array_nep", "det_nep"]):
+        for key, attr_name in zip(["array_noise_", "det_noise_"], ["array_nep", "det_nep"]):
             all_keys = sorted({
                 k
                 for vals in band_totals.values() if isinstance(vals, dict)
@@ -458,7 +458,7 @@ class ReportData:
         else:
             logger.warn("pwv data not found")
             for o in obs_list:
-                o.pwv = -9999.
+                o.pwv = np.nan
 
         data: "ReportData" = cls(
             cfg=cfg, obs_list=obs_list, pwv=None, longterm_obs_df=longterm_obs_df
