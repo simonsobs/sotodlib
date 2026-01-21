@@ -168,3 +168,43 @@ class PwvComboConfig(AncilEngineConfig):
     #: Name of the friend dataset from which to retrieve APEX
     #: radiometer data.
     apex_dataset: str = 'apex-pwv'
+
+
+@dataclass
+class ScanPropsConfig(HkExtractConfig):
+    # Overrides.
+    dataset_name: str = 'scan'
+    obsdb_format: str = '{dataset}_{field}'
+    obsdb_query: str = '{data_found} is null or {data_found} == 0'
+
+    archive_block_seconds: int = 2000000
+    dataset_block_seconds: int = 100000
+    aliases: dict = field(default_factory=lambda: {
+            'cmd_az': 'acu.acu_status.Azimuth_commanded_position',
+            'cur_az': 'acu.acu_status.Azimuth_current_position',
+            'udp_az': 'acu.acu_udp_stream.Corrected_Azimuth',
+    })
+
+
+@dataclass
+class WeatherStationConfig(LowResTableConfig):
+    # Overrides.
+    dataset_name: str = 'weather_station'
+    obsdb_query: str = '{wind_speed} is null'
+
+    #: Config file for accessing the site hkdb.
+    hkdb_config: str = None
+
+
+@dataclass
+class HwpStatsConfig(AncilEngineConfig):
+    # Overrides
+    dataset_name: str = 'hwp'
+    obsdb_format: str = '{dataset}_{field}'
+    obsdb_query: str = '{vel} is null and type=="obs"'
+
+    #: Path to ManifestDb for HWP angle solution.
+    hwp_angles: str = None
+
+    #: Path to ManifestDb for HWP angle model.
+    hwp_angle_model: str = None
