@@ -25,6 +25,8 @@ from so3g.proj import coords as so3g_coords
 from pixell import enmap, wcsutils, colors, memory
 from pixell import utils as putils
 from pixell.mpiutils import FakeCommunicator
+from mapcat.helper import settings
+from mapcat.database import AtomicMapTable
 
 
 @dataclass
@@ -359,9 +361,9 @@ def main(
     # if we do we will not run them again.
     if isinstance(args.atomic_db, str):
         if os.path.isfile(args.atomic_db) and not args.only_hits:
-            engine = create_engine("sqlite:///%s" % args.atomic_db, echo=False)
-            Session = sessionmaker(bind=engine)
-            session = Session()
+            # engine = create_engine("sqlite:///%s" % args.atomic_db, echo=False)
+            # Session = sessionmaker(bind=engine)
+            # session = Session()
 
             keys_to_remove = []
             # Now we have obslists and splits ready, we look through the database
@@ -369,13 +371,9 @@ def main(
             for key, value in obslists.items():
                 missing_split = False
                 for split_label in split_labels:
-                    query_ = select(mapmaking.AtomicInfo).filter_by(
-                        obs_id=value[0][0],
-                        telescope=obs_infos[value[0][3]].telescope,
-                        freq_channel=key[2],
-                        wafer=key[1],
-                        split_label=split_label)
-                    matches = session.execute(query_).scalars().all()
+                    with settings.session() as session:
+                        query_ = select(AtomicMapTable).where((AtomicMapTable.obs_id == value[0][0]) & (AtomicMapTable.telescope == obs_infos[value[0][3]].telescope) & (AtomicMapTable.freq_channel == key[2]) & (AtomicMapTable.wafer == key[1]) & (AtomicMapTable.split_label == split_label))
+                        matches = session.execute(statement).scalars().all()
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
@@ -438,6 +436,9 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
+        
+        prefix_relative = "%s/atomic_%010d_%s_%s" % (
+            t5, t, detset, band)
 
         if not args.only_hits:
             info_list = []
@@ -452,7 +453,7 @@ def main(
                 info['ctime']=int(t)
                 info['split_label']=split_label
                 info['split_detail'] = ''
-                info['prefix_path'] = str(prefix + '_%s' % split_label)
+                info['prefix_path'] = str(prefix_relative + '_%s' % split_label)
                 info['elevation'] = obs_infos[obslist[0][3]].el_center
                 info['azimuth'] = obs_infos[obslist[0][3]].az_center
                 info['sun_distance'] = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
@@ -496,8 +497,10 @@ def main(
             if d_ is not None:
                 list_infos = []
                 for n_split in range(len(split_labels)):
-                    list_infos.append(mapmaking.AtomicInfo.from_dict(d_[n_split]))
-                mapmaking.atomic_db_aux(args.atomic_db, list_infos)
+                    list_infos.append(AtomicMapTable(**d_[n_split]))
+                with settings.session() as session:
+                    session.add_all(list_infos)
+                    session.commit()
         except Exception as e:
             future_write_to_log(e, errlog[-1])
             continue
