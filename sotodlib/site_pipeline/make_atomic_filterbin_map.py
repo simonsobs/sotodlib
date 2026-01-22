@@ -367,7 +367,7 @@ def main(
                 for split_label in split_labels:
                     with settings.session() as session:
                         query_ = select(AtomicMapTable).where((AtomicMapTable.obs_id == value[0][0]) & (AtomicMapTable.telescope == obs_infos[value[0][3]].telescope) & (AtomicMapTable.freq_channel == key[2]) & (AtomicMapTable.wafer == key[1]) & (AtomicMapTable.split_label == split_label))
-                        matches = session.execute(statement).scalars().all()
+                        matches = session.execute(query_).scalars().all()
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
