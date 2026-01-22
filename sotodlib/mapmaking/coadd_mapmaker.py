@@ -14,6 +14,9 @@ import os
 from tqdm import tqdm
 import datetime as dt
 import logging
+from mapcat.helper import settings
+from mapcat.database import AtomicMapCoaddTable, AtomicMapTable
+from sqlmodel import select
 
 from . import safe_invert_div
 
@@ -53,9 +56,9 @@ class CoaddMapmaker:
     logger : Logger, optional
         Logger for printing on the screen.
     """
-    def __init__(self, data, shape, wcs, geom_file_path, 
+    def __init__(self, maps, shape, wcs, geom_file_path, 
                  wmap_coadd, weights_coadd, hits_coadd, logger=None):
-        self.data = data
+        self.maps = maps
         self.shape = shape
         self.wcs = wcs
         self.geom_file_path = geom_file_path
@@ -64,7 +67,7 @@ class CoaddMapmaker:
         self.hits_coadd = hits_coadd
         self.map_coadd = None
         
-        self.coadd_atomic = self.data.get('coadd_atomic', True)
+        self.coadd_atomic = True
         
         if logger is None:
             logger = logging.getLogger("coadd")
@@ -118,16 +121,27 @@ class CoaddMapmaker:
         self.logger.info(f'wrote weights to {oname}'+'_weights.fits')
         self.logger.info(f'wrote hits to {oname}'+'_hits.fits')
 
-        conn = sqlite3.connect(output_db)
-        cur = conn.cursor()
-        col_names = ['telescope', 'freq_channel', 'split_label', 'prefix_path', 'geom_file_path', 'obslist', 'start_time', 'stop_time']
-        placeholders = ','.join(['?'] * len(col_names))
-        row_values = [platform, band, split_label, oname, self.geom_file_path, self.data['obslist'], start_time, stop_time]
-        insert_stmt = f'INSERT OR REPLACE INTO {interval} ({",".join(col_names)}) VALUES ({placeholders})'
-        cur.execute(insert_stmt, row_values)
-        conn.commit()
-        conn.close()
-        self.logger.info(f'added entry to {interval} table in {output_db}')
+        map_name = oname.split('/')[-1]
+        prefix_path = f'{interval}/coadd_{time_str}_{band}_{split_label}'
+        with settings.session() as session:
+            data = AtomicMapCoaddTable(
+                coadd_name=map_name,
+                prefix_path=prefix_path,
+                platform=platform,
+                interval=interval,
+                start_time=start_time,
+                stop_time=stop_time,
+                freq_channel=band,
+                geom_file_path=self.geom_file_path,
+                split_label=split_label,
+                atomic_maps=self.maps if self.coadd_atomic else [],
+                parent_coadds=self.maps if not self.coadd_atomic else []
+            )
+
+            session.add(data)
+            session.commit()
+
+        self.logger.info(f'added entry {map_name} to {output_db}')
         
         if plot:
             params = {"downgrade":4, "colorbar":True, "ticks":20, "color":"planck", 'mask':0, 'range':2000 }
@@ -159,60 +173,36 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     
     if lower_interval:
         logger.debug('Attempting to coadd from existing coadded maps')
-        columns = ['telescope', 'freq_channel', 'split_label', 'prefix_path', 'geom_file_path', 'obslist', 'start_time', 'stop_time']
-        conn = sqlite3.connect(output_db)
-        cur = conn.cursor()
-        query_stmt = f"SELECT {','.join(columns)} FROM {lower_interval} WHERE telescope = ? AND freq_channel = ? AND split_label = ? AND start_time >= ? AND stop_time <= ?"
-        cur.execute(query_stmt, (platform,band,split_label,start_time,stop_time,))
-        rows = cur.fetchall()
-        conn.close()
+        with settings.session() as session:
+            statement = select(AtomicMapCoaddTable).where((AtomicMapCoaddTable.interval == lower_interval) & (AtomicMapCoaddTable.platform == platform) & (AtomicMapCoaddTable.freq_channel == band) & (AtomicMapCoaddTable.split_label == split_label) & (AtomicMapCoaddTable.start_time >= start_time) & (AtomicMapCoaddTable.stop_time <= stop_time))
+            maps = session.execute(statement).scalars().all()
+            map_ids = [m.coadd_id for m in maps]
         
-        if len(rows) == 0:
+        
+        if len(maps) == 0:
             logger.debug('No existing coadds found. Coadding from atomic maps')
             coadd_atomic = True
     
     if coadd_atomic:
-        columns = ['obs_id', 'telescope', 'freq_channel', 'ctime', 'split_label', 'prefix_path']
-        conn = sqlite3.connect(atomic_db)
-        cur = conn.cursor()
-        if '+' in band:
-            query_stmt = f"SELECT {','.join(columns)} FROM atomic WHERE telescope = ? AND split_label = ? AND ctime >= ? AND ctime <= ?"
-            cur.execute(query_stmt, (platform,split_label,start_time,stop_time,))
-        else:
-            query_stmt = f"SELECT {','.join(columns)} FROM atomic WHERE telescope = ? AND split_label = ? AND ctime >= ? AND ctime <= ? AND freq_channel = ?"
-            cur.execute(query_stmt, (platform,split_label,start_time,stop_time,band,))
-        rows = cur.fetchall()
-        conn.close()
-        
-    data = {}
-    for col in columns:
-        data[col] = []
-    for j, row in enumerate(rows):
-        for k, item in enumerate(row):
-            data[columns[k]].append(item)
-
-    if coadd_atomic:
-        obslist = ','.join(np.unique(data['obs_id']))
-        data['coadd_atomic'] = True
-    else:
-        combined_list = []
-        for obslist in data['obslist']:
-            combined_list.extend(obslist.split(','))
-        
-        obslist = ','.join(np.unique(combined_list))
-        data['coadd_atomic'] = False
-    
-    data['obslist'] = obslist
+        with settings.session() as session:
+            if '+' in band:
+                statement = select(AtomicMapTable).where((AtomicMapTable.telescope == platform) & (AtomicMapTable.split_label == split_label) & (AtomicMapTable.ctime >= start_time) & (AtomicMapTable.ctime <= stop_time))
+            else:
+                statement = select(AtomicMapTable).where((AtomicMapTable.telescope == platform) & (AtomicMapTable.freq_channel == band) & (AtomicMapTable.split_label == split_label) & (AtomicMapTable.ctime >= start_time) & (AtomicMapTable.ctime <= stop_time))
+            maps = session.execute(statement).scalars().all()
+            map_ids = [m.atomic_map_id for m in maps]
     
     if not overwrite:
-        conn = sqlite3.connect(output_db)
-        cur = conn.cursor()
-        query_stmt = f"SELECT * FROM {interval} WHERE telescope = ? AND freq_channel = ? AND split_label = ? AND start_time = ? AND stop_time = ? AND obslist = ?"
-        cur.execute(query_stmt, (platform,band,split_label,start_time,stop_time,obslist,))
-        rows = cur.fetchall()
-        conn.close()
-        if len(rows) > 0:
-            return False
+        with settings.session() as session:
+            statement = select(AtomicMapCoaddTable).where((AtomicMapCoaddTable.interval == interval) & (AtomicMapCoaddTable.platform == platform) & (AtomicMapCoaddTable.freq_channel == band) & (AtomicMapCoaddTable.split_label == split_label) & (AtomicMapCoaddTable.start_time == start_time) & (AtomicMapCoaddTable.stop_time == stop_time)).order_by(AtomicMapCoaddTable.coadd_id.desc())
+            coadd = session.execute(statement).scalars().first()
+            if coadd is not None:
+                atomic_parent_ids = [a.atomic_map_id for a in coadd.atomic_maps]
+                coadd_parent_ids = [c.coadd_id for c in coadd.parent_coadds]
+        
+                if (map_ids == atomic_parent_ids) or (map_ids == coadd_parent_ids):
+                    return False
+            
 
     if '+' in band:
         band = band.split('+')[0]
@@ -225,8 +215,9 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
         weights_coadd = enmap.zeros((3,)+shape, wcs=wcs)
     hits_coadd = enmap.zeros((3,)+shape, wcs=wcs)
     
-    mapmaker = CoaddMapmaker(data, shape, wcs, geom_file_path, 
+    mapmaker = CoaddMapmaker(maps, shape, wcs, geom_file_path, 
                              wmap_coadd, weights_coadd, hits_coadd, logger=logger)
+    mapmaker.coadd_atomic = coadd_atomic
     
     return mapmaker
     
@@ -285,15 +276,19 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     if not mapmaker:
         return False, "Map found in database and overwrite=False. Skipping."
 
-    if len(mapmaker.data['prefix_path']) == 0:
+    if len(mapmaker.maps) == 0:
         return False, "No fits files found to coadd. Skipping."
-    mapmaker.logger.info(f"# of fits files: {len(mapmaker.data['prefix_path'])}")
+    mapmaker.logger.info(f"# of fits files: {len(mapmaker.maps)}")
     
     mapmaker.logger.info(f"Using geometry from {mapmaker.geom_file_path}")
-    for file in tqdm(mapmaker.data['prefix_path'], total=len(mapmaker.data['prefix_path'])):
-        mapmaker.add_map(file)
+    for m in tqdm(mapmaker.maps, total=len(mapmaker.maps)):
+        if mapmaker.coadd_atomic:
+            full_prefix_path = os.path.join(settings.atomic_parent, m.prefix_path)
+        else:
+            full_prefix_path = os.path.join(settings.atomic_coadd_parent, m.prefix_path)
+        mapmaker.add_map(full_prefix_path)
 
-    if mapmaker.data.get('coadd_atomic', True):
+    if mapmaker.coadd_atomic:
         iweights = safe_invert_div(mapmaker.weights_coadd)
         mapmaker.map_coadd = enmap.map_mul(iweights, mapmaker.wmap_coadd)
     else:
