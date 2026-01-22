@@ -5,11 +5,11 @@ import time
 import yaml
 
 from sotodlib import core
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils import logging
 from sotodlib.io import ancil
 
 
-logger = util.init_logger('update-obsdb-ancil', 'update-obsdb-ancil: ')
+logger = logging.init_logger('update-obsdb-ancil', 'update-obsdb-ancil: ')
 
 DAY = 86400
 DEFAULT_CONFIG = {
