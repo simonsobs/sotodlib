@@ -11,9 +11,6 @@ import yaml
 import traceback
 import ephem
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-
 import numpy as np
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context
@@ -27,6 +24,7 @@ from pixell import utils as putils
 from pixell.mpiutils import FakeCommunicator
 from mapcat.helper import settings
 from mapcat.database import AtomicMapTable
+from sqlmodel import select
 
 
 @dataclass
@@ -361,10 +359,6 @@ def main(
     # if we do we will not run them again.
     if isinstance(args.atomic_db, str):
         if os.path.isfile(args.atomic_db) and not args.only_hits:
-            # engine = create_engine("sqlite:///%s" % args.atomic_db, echo=False)
-            # Session = sessionmaker(bind=engine)
-            # session = Session()
-
             keys_to_remove = []
             # Now we have obslists and splits ready, we look through the database
             # to remove the maps we already have from it
