@@ -9,9 +9,6 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
-import flacarray as fa
-FA = False
-
 from sotodlib.core.metadata import ResultSet, ObsDb
 from sotodlib.io import metadata, hkdb
 
@@ -499,12 +496,8 @@ class HkExtract(AncilEngine):
                             if k not in dset:
                                 continue
                             try:
-                                if not FA:
-                                    vects[k] = (dset[k]['timestamp'][()],
-                                              dset[k]['value'][()])
-                                else:
-                                    vects[k] = (fa.hdf5.read_array(dset[k]['timestamp']),
-                                                fa.hdf5.read_array(dset[k]['value']))
+                                vects[k] = (dset[k]['timestamp'][()],
+                                          dset[k]['value'][()])
                             except Exception as e:
                                 logger.error(f'Invalid data in {filename} : {dataset}.')
                                 raise e
@@ -556,16 +549,8 @@ class HkExtract(AncilEngine):
                     for k in field_list:
                         if output[k][0] is not None:
                             g1 = g.create_group(k)
-                            if not FA:
-                                g1.create_dataset('timestamp', data=output[k][0])
-                                g1.create_dataset('value', data=output[k][1])
-                            else:
-                                fa.hdf5.write_array(output[k][0],
-                                                g1.create_group('timestamp'),
-                                                quanta=.005)
-                                fa.hdf5.write_array(output[k][1],
-                                                g1.create_group('value'),
-                                                quanta=.001)
+                            g1.create_dataset('timestamp', data=output[k][0])
+                            g1.create_dataset('value', data=output[k][1])
 
                 except Exception as e:
                     logger.error(f'Problem storing {dataset} in {filename}, removing')
@@ -585,11 +570,7 @@ class HkExtract(AncilEngine):
                 for k in field_list:
                     if k not in ds:
                         continue
-                    if not FA:
-                        t, v = ds[k]['timestamp'][()], ds[k]['value'][()]
-                    else:
-                        t, v = (fa.hdf5.read_array(ds[k]['timestamp']),
-                                fa.hdf5.read_array(ds[k]['value']))
+                    t, v = ds[k]['timestamp'][()], ds[k]['value'][()]
                     s = (time_range[0] <= t) * (t < time_range[1])
                     if s.any():
                         output[k][0].append(t[s])
