@@ -150,7 +150,9 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 with jdb.locked(job) as j:
                     if overwrite == True:
                         j.jstate = "open"
-                        j.tags["error"] = None
+                        for _t in j._tags:
+                            if _t.key == "error":
+                                _t.value = None
             else:
                 if job.jstate == JState.done:
                     done += 1
