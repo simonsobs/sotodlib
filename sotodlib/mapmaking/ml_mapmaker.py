@@ -644,6 +644,7 @@ class SignalSrcsamp(SignalCut):
         """
         # First scan our mask to find which samples need this
         # treatment
+        ctime  = obs.timestamps
         if self.recenter:
             rec = smutils.evaluate_recentering(self.recenter, ctime=ctime[len(ctime) // 2],
                     geom=(self.mask.shape, self.mask.wcs), site=smutils.unarr(obs.site))

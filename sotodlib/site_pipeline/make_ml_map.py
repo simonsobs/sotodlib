@@ -12,6 +12,7 @@ def get_parser(parser=None):
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
+    parser.add_argument("-O", "--ots",  type=str, default=None, help="Optics tubes to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
@@ -34,6 +35,7 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
     parser.add_argument("--hits", action="store_true", help="Write hits maps")
@@ -115,10 +117,11 @@ def main(**args):
     with bench.mark('context'):
         context = Context(args.context)
 
+    ots = args.ots.split(",") if args.ots else None
     wafers  = args.wafers.split(",") if args.wafers else None
     bands   = args.bands .split(",") if args.bands  else None
     sub_ids = mapmaking.get_subids(args.query, context=context)
-    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands)
+    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands, ots=ots)
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if args.tods:
@@ -147,6 +150,7 @@ def main(**args):
         sys.exit(1)
 
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
+    to_skip = []
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
         pass_prefix = prefix + "pass%d_" % (ipass+1)
@@ -194,6 +198,7 @@ def main(**args):
         signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, recenter=recenter, tiled=args.tiled>0, interpol=args.interpol)
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
+            signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, recenter=recenter, dtype=dtype_tod)
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
             # This *must* come after all the other signals due to how it zeros out the
             # affected samples in the tod (inherited from SignalCut). Might have been better
@@ -203,6 +208,7 @@ def main(**args):
         sidelobe_cutters = {}
 
         nkept = 0
+        to_skip_all = comm.allreduce(to_skip)
         # TODO: Fix the task distribution. The current one doesn't care which mpi
         # task gets which tods, which sabotages the pixel-saving effects of tiled maps!
         # To be able to distribute the tods sensibly, we need a rough estimate of where
@@ -214,6 +220,10 @@ def main(**args):
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
+            if sub_id in to_skip_all:
+                L.debug("Skipped %s (Cut in previous pass)" % (sub_id))
+                continue
+
             try:
                 meta = context.get_meta(sub_id)
                 # Optionally restrict to maximum number of detectors. This is mainly
@@ -231,12 +241,14 @@ def main(**args):
                 if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
                     continue
                 # Check nans
                 mask = np.logical_not(np.isfinite(obs.signal))
                 if mask.sum() > 0:
                     L.debug("Skipped %s (a nan in signal)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
                     continue
                 # Check all 0s
                 zero_dets = np.sum(obs.signal, axis=1)
@@ -298,6 +310,7 @@ def main(**args):
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
                         L.debug("Skipped %s (more than 50pc of detectors cut by sens)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
+                        to_skip += [sub_id]
                         continue
                     else:
                         obs.restrict("dets", good)
@@ -308,9 +321,10 @@ def main(**args):
                     # Calibrate to K_cmb
                     #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs, maxcut=0.3)
+                    good_dets = mapmaking.find_usable_detectors(obs, args.maxcut)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
+                        to_skip += [sub_id]
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
                         continue
@@ -393,11 +407,19 @@ def main(**args):
                 L.debug("Datacount: %s full" % (sub_id))
                 continue
 
-        nkept = comm.allreduce(nkept)
-        if nkept == 0:
+        nkept_all = np.array(comm.allgather(nkept))
+        if np.sum(nkept_all) == 0:
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
             sys.exit(1)
+           
+        if np.any(nkept_all == 0):
+            if nkept == 0:
+                L.info("No tods assigned to this process. Pruning")
+            comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
+            for signal in mapmaker.signals:
+                if hasattr(signal, "comm"):
+                    signal.comm = comm
 
         L.info("Done building")
 
