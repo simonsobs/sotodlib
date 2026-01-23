@@ -35,6 +35,7 @@ from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
 
 from ..instrument import SOSite
+from ..hkmanager import HKManager
 
 from .load_context_utils import (
     compute_boresight_pointing,
@@ -122,10 +123,55 @@ class LoadContext(Operator):
         help="Text file containing observation IDs to load",
     )
 
+    hk_site_root = Unicode(
+        None,
+        allow_none=True,
+        help="Load site housekeeping from this path",
+    )
+
+    hk_site_db = Unicode(
+        None,
+        allow_none=True,
+        help="Path to DB for site housekeeping",
+    )
+
+    hk_site_fields = List(
+        list(), help="Restrict loading to only these site fields"
+    )
+
+    hk_site_aliases = Dict(
+        dict(), help="Optional convenience aliases for site fields"
+    )
+
+    hk_platform_root = Unicode(
+        None,
+        allow_none=True,
+        help="Load telescope platform housekeeping from this path",
+    )
+
+    hk_platform_db = Unicode(
+        None,
+        allow_none=True,
+        help="Path to DB for telescope platform housekeeping",
+    )
+
+    hk_platform_fields = List(
+        list(), help="Restrict loading to only these platform fields"
+    )
+
+    hk_platform_aliases = Dict(
+        dict(), help="Optional convenience aliases for platform fields"
+    )
+
     preprocess_config = Unicode(
         None,
         allow_none=True,
         help="Apply site-pipeline pre-processing with this configuration",
+    )
+
+    ignore_preprocess_archive = Bool(
+        False,
+        help="If True alway compute preprocess on the fly, don't load from archive.",
     )
 
     observations = List(list(), help="List of observation IDs to load")
@@ -363,14 +409,30 @@ class LoadContext(Operator):
                             olist.append(line.strip())
             if comm.comm_world is not None:
                 olist = comm.comm_world.bcast(olist, root=0)
-            self._observations = olist
+            self._raw_observations = olist
         else:
-            self._observations = self.observations
+            self._raw_observations = self.observations
+
+        # Construct the set of wafer-observations we are using
+        self._observations = dict()
+        wfobs_pat = re.compile(r"(.*)[-_](ufm.*)")
+        for rawobs in self._raw_observations:
+            mat = wfobs_pat.match(rawobs)
+            if mat is None:
+                # This is a whole observation, match any wafer
+                self._observations[rawobs] = None
+            else:
+                # This is a single wafer
+                mat_obs = mat.group(1)
+                mat_wf = mat.group(2)
+                if mat_obs not in self._observations:
+                    self._observations[mat_obs] = set()
+                self._observations[mat_obs].add(mat_wf)
 
         obs_props = None
         preproc_conf = None
         if comm.world_rank == 0:
-            obs_list = list(sorted(self._observations))
+            obs_list = list(sorted(self._observations.keys()))
             if self.preprocess_config is not None:
                 with open(self.preprocess_config, "r") as f:
                     preproc_conf = yaml.safe_load(f)
@@ -390,7 +452,7 @@ class LoadContext(Operator):
             # If we are using preprocessing, load the archive DB and cut any
             # observations or wafer slots that do not exist.
             preproc_lookup = None
-            if preproc_conf is not None:
+            if (preproc_conf is not None) and (not self.ignore_preprocess_archive):
                 preproc_lookup = dict()
                 preproc_db = preproc_conf["archive"]["index"]
                 con = sqlite3.connect(preproc_db)
@@ -444,6 +506,20 @@ class LoadContext(Operator):
                 else:
                     wafer_slots = raw_wafer_slots
                     stream_ids = raw_stream_ids
+
+                # If we have an input list of specific wafer-observations, prune the
+                # list of stream_ids now.
+                if self._observations[obs_id] is None:
+                    # Keep everything
+                    keep_stream_ids = stream_ids
+                else:
+                    keep_stream_ids = list()
+                    for sid in stream_ids:
+                        if sid in self._observations[obs_id]:
+                            keep_stream_ids.append(sid)
+                if len(keep_stream_ids) == 0:
+                    # No wafers for this obs
+                    continue
                 sprops = dict()
                 sprops["session_name"] = obs_id
                 sprops["session_start"] = float(row["start_time"])
@@ -452,7 +528,7 @@ class LoadContext(Operator):
                 sprops["tele_name"] = str(row["telescope"])
                 sprops["n_wafers"] = int(row["wafer_count"])
                 sprops["wafer_slots"] = wafer_slots
-                sprops["wafers"] = stream_ids
+                sprops["wafers"] = keep_stream_ids
                 session_props.append(sprops)
 
             # Close the databases
@@ -558,6 +634,21 @@ class LoadContext(Operator):
 
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
+
+            # Optionally load housekeeping data
+            if self.hk_site_root is not None or self.hk_platform_root is not None:
+                ob.hk = HKManager(
+                    ob.comm.comm_group,
+                    ob.shared[self.times].data,
+                    site_root=self.hk_site_root,
+                    site_db=self.hk_site_db,
+                    site_fields=self.hk_site_fields,
+                    site_aliases=self.hk_site_aliases,
+                    plat_root=self.hk_platform_root,
+                    plat_db=self.hk_platform_db,
+                    plat_fields=self.hk_platform_fields,
+                    plat_aliases=self.hk_platform_aliases,
+                )
 
             # Compute the boresight pointing and observatory position
             if have_pointing:
@@ -1024,6 +1115,7 @@ class LoadContext(Operator):
             wafer_readers,
             wafer_dets,
             preconfig=pconf,
+            ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
         )
@@ -1041,7 +1133,6 @@ class LoadContext(Operator):
         ax_boresight_el = ax_name_fp_subst(self.ax_boresight_el, fp_array)
         ax_boresight_roll = ax_name_fp_subst(self.ax_boresight_roll, fp_array)
         ax_hwp_angle = ax_name_fp_subst(self.ax_hwp_angle, fp_array)
-        ax_det_signal = ax_name_fp_subst(self.ax_det_signal, fp_array)
         ax_flags = list()
         for axname, bit in self.ax_flags:
             full_name = ax_name_fp_subst(axname, fp_array)

@@ -221,7 +221,10 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
         show_pb=cfg.show_hk_pb,
     )
 
-    return result
+    if "env-radiometer-class.pwvs.pwv" in result.data.keys():
+        return result.data["env-radiometer-class.pwvs.pwv"]
+    else:
+        return None
 
 
 def get_hk_and_pwv_data(cfg: ReportDataConfig):
@@ -229,15 +232,23 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
     Load the pwv from either the CLASS or APEX radiometer.
     Merge both datasets when available.
     """
-    result = load_pwv(cfg)
-    result_apex = get_apex_data(cfg)
+    try:
+        result = load_pwv(cfg)
+    except Exception as e:
+        logger.error(f"load_pwv failed with {e}")
+        result = None
+    try:
+        result_apex = get_apex_data(cfg)
+    except Exception as e:
+        logger.error(f"get_apex_data failed with {e}")
+        result_apex = None
     if result_apex is not None:
         result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
 
-    if hasattr(result, 'pwv'):
+    if result is not None:
         if result_apex is not None:
-            combined_times = np.concatenate((result.pwv[0], result_apex[0]))
-            combined_data = np.concatenate((result.pwv[1], result_apex[1]))
+            combined_times = np.concatenate((result[0], result_apex[0]))
+            combined_data = np.concatenate((result[1], result_apex[1]))
 
             sorted_indices = np.argsort(combined_times)
             sorted_times = combined_times[sorted_indices]
@@ -314,7 +325,7 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo]) -> None:
 
     for obs_id, band_totals in totals_dict.items():
         band_totals.pop("NC", None)
-        if not obs_id:
+        if not obs_id or obs_id not in obsids:
             continue
         obs_entry = obs_list[obsids.index(obs_id)]
         obs_entry.num_valid_dets = str(band_totals)

@@ -13,7 +13,9 @@ understood issues
 """
 
 import os
+import re
 import argparse
+import numpy as np
 import datetime as dt
 from typing import Optional
 
@@ -138,12 +140,32 @@ class SecondFail(BookError):
         msg += _last_line(self.book)
         return msg
 
+class ObsBookTooShort(BookError):
+    @staticmethod
+    def has_error(book):
+        return 'ObsBookTooShort' in book.message
+    def fix_book(self):
+        assert self.book.type == 'obs'
+        utils.set_book_wont_bind(self.imprint, self.book)
+    def report_error(self):
+        return f"{self.book.bid} too short (<60s)"
+
 class MissingReadoutIDs(BookError):
     @staticmethod
     def has_error(book):
         return 'MissingReadoutIDError' in book.message
     def fix_book(self):
-        utils.set_book_wont_bind(self.imprint, self.book)
+        if self.book.type == "oper":
+            utils.set_book_wont_bind(self.imprint, self.book)
+            return
+        remove_oid = re.findall(r"obs_ufm\S*_\S*", self.book.message)
+        if len(remove_oid) == self.book.bid.split("_")[-1].count('1'):
+            utils.set_book_wont_bind(self.imprint, self.book)
+            return
+        for oid in remove_oid:
+                self.book = utils.remove_level2_obs_from_book(
+                    self.imprint, self.book, oid.strip('.')
+                )
     def report_error(self):
         return f"{self.book.bid} does not have readout ids"
 
@@ -152,7 +174,21 @@ class NoScanFrames(BookError):
     def has_error(book):
         return 'NoScanFrames' in book.message
     def fix_book(self):
-        utils.set_book_wont_bind(self.imprint, self.book)
+        if (
+            self.book.type == "oper" or 
+            self.book.stop-self.book.start < dt.timedelta(minutes=5)
+        ):
+            utils.set_book_wont_bind(self.imprint, self.book)
+        else :
+            remove_oid = re.findall(r"obs_ufm\S*_\S*", self.book.message)
+            if len(remove_oid) == self.book.bid.split("_")[-1].count('1'):
+                utils.set_book_wont_bind(self.imprint, self.book)
+                return
+            for oid in remove_oid:
+                self.book = utils.remove_level2_obs_from_book(
+                    self.imprint, self.book,
+                    oid
+                )
     def report_error(self):
         return f"{self.book.bid} does not have detector data"
 
@@ -190,7 +226,45 @@ class NoMountData(BookError):
         else: 
             raise ValueError(f"What book got me here? {self.book.bid}")
     def report_error(self):
-        return f"{self.book.bid} does not ACU data reading out"
+        return f"{self.book.bid} does not ACU data overlapping detector data"
+
+class DroppedMountData(BookError):
+    """Error thrown when at least 200 samples from one of the mount fields has been 
+    dropped.
+    """
+    max_drop_time_to_fix = 300
+    dropped = None
+
+    @staticmethod
+    def has_error(book):
+        return "DroppedMountData" in book.message
+
+    def fix_book(self):
+        if self.dropped is None:
+            self.report_error()
+
+        if self.book.type == 'obs':
+            if self.dropped > self.max_drop_time_to_fix:
+                print(f"ACU readout dropped for {self.dropped} seconds. Autofixing"
+                      f"only allowed if drop is less than {self.max_drop_time_to_fix}")
+                return
+            utils.set_book_rebind(self.imprint, self.book)
+            self.imprint.bind_book(self.book, require_acu=False,)
+
+        elif self.book.type == 'oper':
+            utils.set_book_rebind(self.imprint, self.book)
+            self.imprint.bind_book(self.book, require_acu=False,)
+        else: 
+            raise ValueError(f"What book got me here? {self.book.bid}")
+
+    def report_error(self):
+        pattern = r"dropped\s*\[(.*?)\]\s*samples over\s*\[(.*?)\]"
+        m = re.search(pattern, self.book.message.split("\n")[-2])
+        self.dropped = sum([float(x) for x in m.group(2).split()])
+        return (
+            f"{self.book.bid} has the ACU dropping out {len(m.group(2).split())} time(s) "
+            f"for a total of {self.dropped} seconds"
+        )
 
 class TimingSystemOff(BookError):
     """Two places this error is thrown. If we get to the timing counter
@@ -244,16 +318,45 @@ class FileTooLargeError(BookError):
         return msg
 
 class BadTimeSamples(BookError):
+    max_drops_to_fix = 10000
+    dropped = None
+
     @staticmethod
     def has_error(book):
         return "BadTimeSamples" in book.message
+
     def fix_book(self):
-        utils.set_book_rebind(self.imprint, self.book)        
-        self.imprint.bind_book(self.book, allow_bad_timing=True,)
+        if "time samples not increasing" in self.book.message:
+            print("cannot autofix samples not increasing")
+            return
+        
+        if self.dropped is None:
+            self.report_error()
+        
+        ## if all our dropped values are less than the limit. Fix
+        if np.all([x<=self.max_drops_to_fix for x in self.dropped.values()]):
+            utils.set_book_rebind(self.imprint, self.book)        
+            self.imprint.bind_book(self.book, allow_bad_timing=True,)
+        ## if all our dropped values are more than the limit. Don't Bind
+        elif np.all([x>self.max_drops_to_fix for x in self.dropped.values()]):
+            print(f"All obs_ids have more than {self.max_drops_to_fix}"
+                   " will not bind book")
+            utils.set_book_wont_bind(self.imprint, self.book)
+        ## if only some of the observations have dropped timing. remove them
+        else:
+            remove_oid = [k for k,x in self.dropped.items() 
+                          if x>self.max_drops_to_fix]
+            for oid in remove_oid:
+                self.book = utils.remove_level2_obs_from_book(
+                    self.imprint, self.book, oid
+                )
+                
     def report_error(self):
         msg = f"{self.book.bid} has dropped time samples\n"
+        self.dropped = {}
         for l in self.book.message.split('\n'):
             if len(l)>0 and l[0] == '\t':
+                self.dropped[l.split("\t")[1].split(":")[0]] = int(l.split("\t")[1].split(":")[-1])
                 msg += l + "\n"
         return msg
 
@@ -261,10 +364,12 @@ AUTOFIX_ERRORS = [
     SecondFail,
     BookDirHasFiles,
     MissingReadoutIDs,
+    ObsBookTooShort,
     NoScanFrames,
     NoHWPData,
     DuplicateAncillaryData,
     NoMountData,
+    DroppedMountData,
     TimingSystemOff,
     FileTooLargeError,
     BadTimeSamples,

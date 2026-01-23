@@ -2,6 +2,7 @@ import numpy as np
 from operator import attrgetter
 import copy
 import warnings
+import re
 
 from so3g.proj import Ranges, RangesMatrix
 
@@ -377,7 +378,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
 
 class PSDCalc(_Preprocess):
-    """ Calculate the PSD of the data and add it to the Preprocessing AxisManager under the
+    """ Calculate the PSD of the data and add it to the AxisManager under the
     "psd" field.
 
     Note: noverlap = 0 amd full_output = True are recommended to get unbiased
@@ -388,13 +389,12 @@ class PSDCalc(_Preprocess):
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
-        "calc":
+        "process":
           "nperseg": 1024 # optional
           "noverlap": 0 # optional
           "wrap_name": "psd" # optional
           "subscan": False # optional
           "full_output": True # optional
-        "save": True
 
     .. autofunction:: sotodlib.tod_ops.fft_ops.calc_psd
     """
@@ -406,19 +406,19 @@ class PSDCalc(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def calc_and_save(self, aman, proc_aman):
-        full_output = self.calc_cfgs.get('full_output')
+    def process(self, aman, proc_aman, sim=False):
+        full_output = self.process_cfgs.get('full_output')
         if full_output:
             freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                                        **self.calc_cfgs)
+                                                        **self.process_cfgs)
         else:
             freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
-                                                  **self.calc_cfgs)
+                                                  **self.process_cfgs)
 
         fft_aman = core.AxisManager(aman.dets,
                                     core.OffsetAxis("nusamps", len(freqs)))
         pxx_axis_map = [(0, "dets"), (1, "nusamps")]
-        if self.calc_cfgs.get('subscan', False):
+        if self.process_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
             if full_output:
@@ -430,15 +430,16 @@ class PSDCalc(_Preprocess):
         if full_output:
             fft_aman.wrap("nseg", nseg)
 
+        aman.wrap(self.wrap, fft_aman)
+
+        return aman, proc_aman
+
+    def calc_and_save(self, aman, proc_aman):
         if "frequency_cutoffs" in proc_aman:
             proc_aman["frequency_cutoffs"].wrap(self.wrap, proc_aman["frequency_cutoffs"][self.signal])
 
-        self.save(proc_aman, fft_aman)
         return aman, proc_aman
 
-    def save(self, proc_aman, fft_aman):
-        if not(self.save_cfgs is None):
-            proc_aman.wrap(self.wrap, fft_aman)
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
             return
@@ -452,7 +453,77 @@ class PSDCalc(_Preprocess):
             filename = filename.replace('{name}', f'{ufm}_{self.wrap}')
 
             plot_psd(aman, signal=attrgetter(f"{self.wrap}.Pxx")(proc_aman),
-                     xx=attrgetter(f"{self.wrap}.freqs")(proc_aman), filename=filename, **self.plot_cfgs)
+                     xx=attrgetter(f"{self.wrap}.freqs")(aman), filename=filename, **self.plot_cfgs)
+
+class NoiseRatio(_Preprocess):
+    """ Compute ratios of "signal band" to white noise in PSDs.
+
+    Example config block::
+
+    - name: "noise_ratio"
+      psd: "psdQ"
+      wrap: "noise_ratio_Q"
+      subscan: False
+      calc:
+        f_sel: [0.04, 0.14]
+        f_wn: [0.6, 1.0]
+      save: True
+      select:
+        r_max: 1.19
+        select_per_detector: True
+
+    .. autofunction:: sotodlib.tod_ops.fft_ops.noise_ratio
+"""
+    name = "noise_ratio"
+
+    def __init__(self, step_cfgs):
+        self.psd = step_cfgs.get('psd', 'psd')
+        self.wrap = step_cfgs.get('wrap', 'noise_ratio')
+        self.subscan = step_cfgs.get('subscan', False)
+
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
+        pxx = psd.Pxx_ss if self.subscan else psd.Pxx
+
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+
+        calc_aman = tod_ops.fft_ops.noise_ratio(proc_aman, pxx, psd.freqs, subscan=self.subscan, **self.calc_cfgs)
+        self.save(proc_aman, calc_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, calc_aman):
+        if self.save_cfgs is None:
+            return
+        else:
+            proc_aman.wrap(self.wrap, calc_aman)
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        per_detector = self.select_cfgs.get("select_per_detector", True)
+        if per_detector:
+            noise_ratio = proc_aman[self.wrap]["rdets"]
+        else:
+            noise_ratio = proc_aman[self.wrap]["rmean"]
+
+        if self.subscan:
+            noise_ratio = np.nanmean(noise_ratio, axis=-1) # Mean over subscans
+        keep = np.ones_like(meta.dets.vals, dtype=bool)
+        keep &= (noise_ratio <= np.float64(self.select_cfgs["r_max"]))
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 
 class GetStats(_Preprocess):
@@ -583,9 +654,9 @@ class Noise(_Preprocess):
         super().__init__(step_cfgs)
 
     def calc_and_save(self, aman, proc_aman):
-        if self.psd not in proc_aman:
-            raise ValueError("PSD is not saved in Preprocessing AxisManager")
-        psd = proc_aman[self.psd]
+        if self.psd not in aman:
+            raise ValueError("PSD is not saved in AxisManager")
+        psd = aman[self.psd]
         pxx = psd.Pxx_ss if self.subscan else psd.Pxx
 
         if "frequency_cutoffs" in proc_aman:
@@ -640,8 +711,10 @@ class Noise(_Preprocess):
             if calc_wn or wn_est is None:
                 if not self.subscan:
                     calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets")])
+                    calc_aman.wrap("std", fcfgs['wn_est']*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets")])
                 else:
                     calc_aman.wrap("white_noise", fcfgs['wn_est'], [(0,"dets"), (1,"subscans")])
+                    calc_aman.wrap("std", fcfgs['wn_est']*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets"), (1,"subscans")])
         else:
             wn_f_low = self.calc_cfgs.get("low_f", 5)
             wn_f_high = self.calc_cfgs.get("high_f", 10)
@@ -654,9 +727,11 @@ class Noise(_Preprocess):
             if not self.subscan:
                 calc_aman = core.AxisManager(aman.dets)
                 calc_aman.wrap("white_noise", wn, [(0,"dets")])
+                calc_aman.wrap("std", wn*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets")])
             else:
                 calc_aman = core.AxisManager(aman.dets, aman.subscan_info.subscans)
                 calc_aman.wrap("white_noise", wn, [(0,"dets"), (1,"subscans")])
+                calc_aman.wrap("std", wn*np.sqrt(psd.freqs[-1]-psd.freqs[0]), [(0,"dets"), (1,"subscans")])
 
         self.save(proc_aman, calc_aman)
         return aman, proc_aman
@@ -865,7 +940,7 @@ class EstimateHWPSS(_Preprocess):
 
                     # calculate amplitude of each mode
                     mode_labels = list(proc_aman.hwpss_stats.modes.vals)
-                    num_re = re.compile("^[SC](\d+)$")
+                    num_re = re.compile(r"^[SC](\d+)$")
                     nums = sorted(list(set([num_re.match(l).group(1) for l in mode_labels])))
                     coeff_amp = np.zeros((coeff.shape[0], len(nums)), coeff.dtype)
                     amp_labels = []
@@ -1415,6 +1490,7 @@ class SSOFootprint(_Preprocess):
 
             planet_aman.wrap('mean_distance', np.round(np.mean(np.rad2deg(np.sqrt(xi_p**2 + eta_p**2))), 1))
 
+            planet = re.sub('[^0-9a-zA-Z]+', '', planet)
             sso_aman.wrap(planet, planet_aman)
         self.save(proc_aman, sso_aman)
 
@@ -1479,6 +1555,70 @@ class DarkDets(_Preprocess):
             return meta
         else:
             return keep
+
+class LoadPremadeFlags(_Preprocess):
+    """Load premade flags from aman.
+
+    Saves results in proc_aman under the "premade_flags_name" field of aman.
+    In addtion, you can select detectors based on the loaded flags.
+    This is mainly used for simulation for planet mapmaking.
+    When simulated planet is made, we need corresponding flags 
+    to carry out the same preprocessing as the real planet mapmaking.
+    This class is useful whenever you want to premake custum flags and use it.
+    
+    E.g., if aman contains 'sim_jupiter_flag', you can load it to proc_aman as follows:
+
+    Example config block::
+
+        - name : "load_premade_flags"
+            load_premade_flag_name: 'sim_jupiter_flag'
+            calc:
+                inv_flag: True
+            save: True
+            select: # optional
+                kind: "any"
+                invert: True
+    
+    """
+    name = "load_premade_flags"
+    def __init__(self, step_cfgs):
+        self.premade_flags_name = step_cfgs.get('load_premade_flag_name', 'premade_flags')
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        print('flags_name', self.premade_flags_name)
+        premade_flags = aman.flags.get(self.premade_flags_name)
+        source_aman = core.AxisManager(aman.dets, aman.samps)
+        source_aman.wrap(self.premade_flags_name, premade_flags, [(0, 'dets'), (1, 'samps')])
+
+        if self.calc_cfgs.get('inv_flag'):
+            source_aman.wrap(self.premade_flags_name + '_inv',
+                            RangesMatrix.from_mask(~premade_flags.mask()),
+                            [(0, 'dets'), (1, 'samps')])
+                    
+        self.save(proc_aman, source_aman)
+        return aman, proc_aman
+
+    def save(self, proc_aman, source_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.premade_flags_name, source_aman)            
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = flag_cut_select(proc_aman[self.premade_flags_name][self.premade_flags_name],
+                              kind=self.select_cfgs.get("kind", 'all'),
+                              invert=self.select_cfgs.get('invert', False))
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
+    
 
 class SourceFlags(_Preprocess):
     """Calculate the source flags in the data.
@@ -2562,6 +2702,48 @@ class TrimFlagEdge(_Preprocess):
 
         return aman, proc_aman
 
+class AcuDropFlags(_Preprocess):
+    """Expands ACU drop flag fields in aman to all detectors.  ACU drop flags
+    indicate where samples are missing from the ACU data due to aggregator
+    failures.
+
+    Example config block::
+
+        - name: "acu_drop_flags"
+          calc:
+            buffer: 200 # disable buffering by setting to False or None.
+            name: "acu_drop_flags"
+            merge: True
+          save: True
+    """
+
+    name = "acu_drop_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        if "acu_drops" in aman.flags:
+            acu_drops = RangesMatrix([aman.flags.get("acu_drops") for _ in range(aman.dets.count)])
+            buffer = self.calc_cfgs.get("buffer", 200)
+            if buffer:
+                acu_drops = acu_drops.buffer(buffer)
+        else:
+            acu_drops = RangesMatrix.zeros(
+                shape=(aman.dets.count, aman.samps.count))
+
+        if self.calc_cfgs.get("merge", True):
+            aman.flags.wrap('acu_drop_flags', acu_drops, [(0, 'dets'), (1, 'samps')])
+
+        flag_aman = core.AxisManager(aman.dets, aman.samps)
+        flag_aman.wrap(self.calc_cfgs['name'], acu_drops, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, flag_aman)
+
+        return aman, proc_aman
+
+    def save(self, proc_aman, flag_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("acu_drops", flag_aman)
+
 class SmurfGapsFlags(_Preprocess):
     """Expand smurfgaps flag of each stream_id to all detectors
     smurfgaps flags indicates the samples of each stream_id where the
@@ -2594,6 +2776,59 @@ class SmurfGapsFlags(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("smurfgaps", flag_aman)
 
+class GetTauHWP(_Preprocess):
+    """Analyze observation with hwp spinning up or spinning down and
+    compute the timeconstant of detectors from hwp speed dependence of
+    the angle of half-wave plate synchronous signal.
+
+    Example config block::
+
+        - name: "get_tau_hwp"
+          calc:
+            width: 1000
+            apodize_samps: 2000
+            trim_samps: 2000
+            min_fhwp: 1
+            max_fhwp: 2
+            demod_mode: 4
+            name: "tau_hwp"
+            merge: False
+          save: True
+
+    .. autofunction:: sotodlib.hwp.hwp.get_tau_hwp
+    """
+    name = "get_tau_hwp"
+
+    def calc_and_save(self, aman, proc_aman):
+        tau_hwp_aman = hwp.get_tau_hwp(aman, **self.calc_cfgs)
+        self.save(proc_aman, tau_hwp_aman)
+
+    def save(self, proc_aman, tau_hwp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
+
+class Move(_Preprocess):
+    """Rename or remove a data field.
+    To delete the field, pass new_name=None.
+
+    Example config block::
+
+        - name: "move"
+          process:
+            name: "name"
+            new_name: "new_name"
+
+    .. autofunction:: sotodlib.core.axisman.AxisManager.move
+    """
+    name = 'move'
+
+    def process(self, aman, proc_aman, sim=False):
+        aman.move(**self.process_cfgs)
+        return aman, proc_aman
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -2611,6 +2846,7 @@ _Preprocess.register(GlitchDetection)
 _Preprocess.register(Jumps)
 _Preprocess.register(FixJumps)
 _Preprocess.register(PSDCalc)
+_Preprocess.register(NoiseRatio)
 _Preprocess.register(Noise)
 _Preprocess.register(Calibrate)
 _Preprocess.register(EstimateHWPSS)
@@ -2626,6 +2862,7 @@ _Preprocess.register(SubPolyf)
 _Preprocess.register(DetBiasFlags)
 _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
+_Preprocess.register(LoadPremadeFlags)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
 _Preprocess.register(GetStats)
@@ -2640,4 +2877,8 @@ _Preprocess.register(BadSubscanFlags)
 _Preprocess.register(CorrectIIRParams)
 _Preprocess.register(DetcalNanCuts)
 _Preprocess.register(TrimFlagEdge)
+_Preprocess.register(AcuDropFlags)
 _Preprocess.register(SmurfGapsFlags)
+_Preprocess.register(GetTauHWP)
+_Preprocess.register(Move)
+

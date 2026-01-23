@@ -65,7 +65,7 @@ class DemodMapmaker:
         self.singlestream = singlestream
 
     def add_obs(self, id, obs, noise_model=None, split_labels=None,
-                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
+                use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
                 apply_wobble=True):
         """
         This function will accumulate an obs into the DemodMapmaker object, i.e. will add to 
@@ -493,7 +493,7 @@ def write_demod_maps(prefix, data, info, unit='K', split_labels=['full']):
             data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                               data.wmap[n_split], unit=unit+'^-1')
             data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                              data.weights[n_split], unit=unit+'^2')
+                              data.weights[n_split], unit=unit+'^-2')
             data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                               data.signal.hits[n_split], unit='hits')
 
@@ -503,7 +503,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     dtype_tod=np.float32, dtype_map=np.float32,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
-                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.white_noise',
+                    unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
                     apply_wobble=True):
     """
     Make a demodulated map from the list of observations in obslist.
@@ -624,6 +624,16 @@ def make_demod_map(context, obslist, noise_model, info,
     n_dets = comm.allreduce(n_dets)
     for subinfo in info:
         subinfo['number_dets'] = n_dets
+
+        # Blindly add *all* scalars in this aman to sub_info.
+        # The ones in the AtomicInfo class will be automatically added to the AtomicInfo, the others ignored.
+        info_aman_name = 'preprocess.split_flags'
+        if obs is not None and info_aman_name in obs:
+            info_aman = obs[info_aman_name]
+            for info_entry in info_aman.keys():
+                if np.isscalar(info_aman[info_entry]):
+                    if info_entry not in subinfo:  # Don't overwrite existing entries
+                        subinfo[info_entry] = info_aman[info_entry]
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
         return errors, outputs, None

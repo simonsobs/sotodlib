@@ -539,8 +539,8 @@ class SignalCut(Signal):
         """Process the added observations, determining our degrees of freedom etc.
         Should be done before calling forward and backward."""
         if self.ready: return
-        self.rhs = np.concatenate(self.rhs)
-        self.div = np.concatenate(self.div)
+        self.rhs = np.concatenate(self.rhs) if len(self.rhs) > 0 else np.zeros(0, self.dtype)
+        self.div = np.concatenate(self.div) if len(self.div) > 0 else np.zeros(0, self.dtype)
         self.dof = smutils.ArrayZipper(self.rhs.shape, dtype=self.dtype, comm=self.comm)
         self.ready = True
 
@@ -683,7 +683,7 @@ class SignalSrcsamp(SignalCut):
         Should be done before calling forward and backward."""
         if self.ready: return
         SignalCut.prepare(self)
-        self.distsamps= np.concatenate(self.distsamps)
+        self.distsamps = np.concatenate(self.distsamps) if len(self.distsamps) > 0 else np.zeros(0, self.dtype)
         x             = np.minimum(self.distsamps/self.redge, 1)
         self.epsilon  = np.exp(np.log(self.eps_edge) * (1-x) + np.log(self.eps_core) * x)
         self.epsilon *= self.div

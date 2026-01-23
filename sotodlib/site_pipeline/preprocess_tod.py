@@ -2,7 +2,7 @@ import os
 import yaml
 import time
 import logging
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, List
 import numpy as np
 import argparse
 import traceback
@@ -13,11 +13,13 @@ import copy
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
+from sotodlib.site_pipeline.utils.obsdb import get_obslist
 from sotodlib.preprocess import preprocess_util as pp_util
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 
-logger = sp_util.init_logger("preprocess")
+logger = init_logger("preprocess")
 
 def dummy_preproc(obs_id, group_list, logger,
                   configs, overwrite, run_parallel):
@@ -78,7 +80,7 @@ def preprocess_tod(obs_id,
     """
 
     outputs = []
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = init_logger("preprocess", verbosity=verbosity)
 
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
@@ -134,6 +136,8 @@ def preprocess_tod(obs_id,
     else:
         make_lmsi = False
 
+    new_plots = None
+
     n_fail = 0
     for group in groups:
         logger.info(f"Beginning run for {obs_id}:{group}")
@@ -180,7 +184,7 @@ def preprocess_tod(obs_id,
         from pathlib import Path
         import lmsi.core as lmsi
 
-        if os.path.exists(new_plots):
+        if new_plots is not None and os.path.exists(new_plots):
             lmsi.core([Path(x.name) for x in Path(new_plots).glob("*.png")],
                       Path(configs["lmsi_config"]),
                       Path(os.path.join(new_plots, 'index.html')))
@@ -323,21 +327,21 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           min_ctime: Optional[int] = None,
           max_ctime: Optional[int] = None,
           update_delay: Optional[int] = None,
-          tags: Optional[str] = None,
+          tags: Optional[List[str]] = None,
           planet_obs: bool = False,
           verbosity: Optional[int] = None,
           nproc: Optional[int] = 4,
           raise_error: Optional[bool] = False):
 
     configs, context = pp_util.get_preprocess_context(configs)
-    logger = sp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = init_logger("preprocess", verbosity=verbosity)
 
     errlog = os.path.join(os.path.dirname(configs['archive']['index']),
                           'errlog.txt')
 
-    obs_list = sp_util.get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
-                                   max_ctime=max_ctime, update_delay=update_delay, tags=tags,
-                                   planet_obs=planet_obs)
+    obs_list = get_obslist(context, query=query, obs_id=obs_id, min_ctime=min_ctime,
+                           max_ctime=max_ctime, update_delay=update_delay, tags=tags,
+                           planet_obs=planet_obs)
 
     if len(obs_list)==0:
         logger.warning(f"No observations returned from query: {query}")
@@ -399,11 +403,13 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
         if db_datasets:
             if err is None:
-                logger.info(f'Processing future result db_dataset: {db_datasets}')
+                logger.info(f'Processing future result')
                 for db_dataset in db_datasets:
-                    pp_util.cleanup_mandb(err, db_dataset, configs, logger)
+                    pp_util.cleanup_mandb(err, db_dataset, configs,
+                                          logger, overwrite)
             else:
-                pp_util.cleanup_mandb(err, db_datasets, configs, logger)
+                pp_util.cleanup_mandb(err, db_datasets, configs,
+                                      logger, overwrite)
 
     if raise_error and n_fail > 0:
         raise RuntimeError(f"preprocess_tod: {n_fail}/{len(run_list)} obs_ids failed")
@@ -415,7 +421,7 @@ def main(configs: str,
          min_ctime: Optional[int] = None,
          max_ctime: Optional[int] = None,
          update_delay: Optional[int] = None,
-         tags: Optional[str] = None,
+         tags: Optional[List[str]] = None,
          planet_obs: bool = False,
          verbosity: Optional[int] = None,
          nproc: Optional[int] = 4,
@@ -439,4 +445,4 @@ def main(configs: str,
               raise_error=raise_error)
 
 if __name__ == '__main__':
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

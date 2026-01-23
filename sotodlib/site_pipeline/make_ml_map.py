@@ -36,6 +36,9 @@ def get_parser(parser=None):
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
+    parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
+    parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
+    parser.add_argument("--hits", action="store_true", help="Write hits maps")
     return parser
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
@@ -67,7 +70,7 @@ def main(**args):
     from sotodlib.core import Context, AxisManager, IndexAxis
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
-    from sotodlib.coords import pointing_model
+    from sotodlib.coords import pointing_model, sidelobes
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
     from sotodlib.core import metadata
@@ -187,7 +190,8 @@ def main(**args):
         # split into two parts signal.translate_single and signal.forward_single). But I don't think those
         # building blocks would be very reusable, and the full thing is more general.
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
-        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args.window)
+        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window)
+        elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
@@ -195,8 +199,13 @@ def main(**args):
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, recenter=recenter, dtype=dtype_tod)
+            signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
+            # This *must* come after all the other signals due to how it zeros out the
+            # affected samples in the tod (inherited from SignalCut). Might have been better
+            # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+        sidelobe_cutters = {}
 
         nkept = 0
         to_skip_all = comm.allreduce(to_skip)
@@ -360,6 +369,11 @@ def main(**args):
                 mmask = obs.flags.glitch_flags.mask()
                 L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
 
+                # sidelobes cuts
+                cutss = sidelobes.sidelobe_cut(obs, args, sidelobe_cutters)
+                for cut in cutss:
+                    obs.flags.glitch_flags += cut
+
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
                 nmat_file = nmat_dir + "/nmat_%s.hdf" % name
@@ -417,6 +431,9 @@ def main(**args):
         signal_map.write(prefix, "div", signal_map.div, unit=args.unit+'^-2')
         signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args.unit)
         L.info("Wrote rhs, div, bin")
+        if args.hits:
+            signal_map.write(prefix, "hits", signal_map.hits, unit='hits')
+            L.info("Wrote hits")
 
         # Set up initial condition
         x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
@@ -442,5 +459,5 @@ def main(**args):
         eval_prev     = mapmaker.evaluator(step.x_zip)
 
 if __name__ == '__main__':
-    from sotodlib.site_pipeline import util
-    util.main_launcher(main, get_parser)
+    from sotodlib.site_pipeline.utils.pipeline import main_launcher
+    main_launcher(main, get_parser)

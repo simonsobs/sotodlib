@@ -18,11 +18,13 @@ from typing import Optional, Union, Dict, List, Any, Tuple, Literal, Callable
 from queue import Queue
 import argparse
 
+from so3g.proj import RangesMatrix
 from sotodlib import core
 from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.hwp import get_hwpss, subtract_hwpss
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
@@ -41,9 +43,11 @@ BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
             'uhf': {'lb': 'f220', 'hb': 'f280'},
             'lf': {'lb': 'f030', 'hb': 'f040'}}
 
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
-    sp_util.init_logger("det_cal")
+    sp_init_logger("det_cal")
 
 
 def get_data_root(ctx: core.Context, obs_id:str) -> str:
@@ -82,6 +86,10 @@ class DetCalCfg:
     h5_path: str
         Path to the HDF5 file to use for the det_cal database. Default to
         "det_cal.h5".
+    h5_unix_digits: int
+        Number of digits of unixtime to be added to h5_path. For example if
+        h5_unix_digits = 4, h5_path will be modified to "det_cal_1700.h5".
+        Defaults to 0.
     cache_failed_obsids: bool
         If True, will cache failed obs-ids to avoid re-running them. Defaults to
         True.
@@ -116,8 +124,11 @@ class DetCalCfg:
         *,
         raise_exceptions: bool = False,
         apply_cal_correction: bool = True,
+        hwpss_subtraction: bool = False,
+        metadata_list: Union[str, List[str]] = 'all',
         index_path: str = "det_cal.sqlite",
         h5_path: str = "det_cal.h5",
+        h5_unix_digits: int = 0,
         cache_failed_obsids: bool = True,
         failed_cache_file: str = "failed_obsids.yaml",
         show_pb: bool = True,
@@ -131,9 +142,10 @@ class DetCalCfg:
     ) -> None:
         self.root_dir = root_dir
         self.context_path = os.path.expandvars(context_path)
-        ctx = core.Context(self.context_path)
+        self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
         self.apply_cal_correction = apply_cal_correction
+        self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
         self.show_pb = show_pb
         self.run_method = run_method
@@ -160,6 +172,7 @@ class DetCalCfg:
 
         self.index_path = parse_path(index_path)
         self.h5_path = parse_path(h5_path)
+        self.h5_unix_digits = h5_unix_digits
         self.failed_cache_file = parse_path(failed_cache_file)
 
         kw = {"show_pb": False, "default_nprocs": self.nprocs_result_set}
@@ -348,7 +361,7 @@ def get_obs_info(cfg: DetCalCfg, obs_id: str) -> ObsInfoResult:
     res = ObsInfoResult(obs_id)
 
     try:
-        ctx = core.Context(cfg.context_path)
+        ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
         am = ctx.get_obs(
             obs_id,
             samples=(0, 1),
@@ -457,6 +470,75 @@ class CalRessetResult:
     result_set: Optional[np.ndarray] = None
 
 
+def biases_flags(bsa, buffer=200):
+    """
+    Make flags that mask bias steps
+
+    Args
+        bsa: sodetlib BiasStepAnalysis object
+        buffer: Number of samples to buffer flags
+    Returns
+        RangesMatrix
+    """
+    mask = np.zeros((bsa.am.dets.count, bsa.am.samps.count),
+                    dtype=bool)
+    for i, bg in enumerate(bsa.bgmap):
+        if bg == -1:
+            continue
+        mask[i][bsa.edge_idxs[bg][0]:bsa.edge_idxs[bg][-1]] = 1
+    flags = RangesMatrix.from_mask(mask).buffer(buffer)
+    return flags
+
+
+def fill_zeros_biases(am):
+    # fill the zeros in biases by non-zero values before
+    # zeros in the beginning will be filled by non-zero values after
+    for bias in am.biases:
+        last = None
+        for i in range(len(bias)):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+        last = None
+        for i in range(len(bias)-1, -1, -1):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+
+def load_and_reanalyze_bs(bsa, ctx, obs_id):
+    """
+    Load raw data of biassteps and reanalyze it with hwpss subtraction
+
+    Args
+        bsa: sodetlib BiasStepAnalysis object
+        ctx: Context object
+        obs_id: observation id of bias steps
+    """
+    am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
+    am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
+            [(0, 'samps')])
+    if np.all(am.hwp_angle == 0):
+        return
+
+    bsa.am = am
+    zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
+    if zero_bias_count > 0:
+        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
+        fill_zeros_biases(am)
+    bsa._find_bias_edges()
+    flags = biases_flags(bsa)
+    get_hwpss(am, flags=flags, merge_stats=True)
+    subtract_hwpss(am, subtract_name='signal')
+    bsa._get_step_response()
+    bsa._compute_dc_params()
+    bsa._fit_tau_effs()
+    del bsa.am
+
+
 def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                    executor=None, as_completed_callable=None) -> CalRessetResult:
     """
@@ -502,6 +584,15 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                     # This will edit IVA dicts in place
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
+
+        if cfg.hwpss_subtraction:
+            # Reanalyze biasstep with hwpss subtraction
+            ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
+            bias_step_obsids = get_cal_obsids(ctx, obs_id, "bias_steps")
+
+            for dset, bsa in bsas.items():
+                oid = bias_step_obsids[dset]
+                load_and_reanalyze_bs(bsa, ctx, oid)
 
         iva = list(ivas.values())[0]
         rtm_bit_to_volt = iva.meta["rtm_bit_to_volt"]
@@ -672,7 +763,7 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
     This will included non-processed obs-ids that are not found in the fail cache,
     and will be limitted to cfg.num_obs.
     """
-    ctx = core.Context(cfg.context_path)
+    ctx = core.Context(cfg.context_path, metadata_list=cfg.metadata_list)
     # Find all obs_ids that have not been processed
     with open(cfg.failed_cache_file, "r") as f:
         failed_cache = yaml.safe_load(f)
@@ -720,14 +811,23 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         msg = result.fail_msg
         if msg is None:
             msg = "unknown error"
+        if 'sotodlib.core.metadata.loader.LoaderError' in msg:
+            logger.error(f"obs_id {obs_id} failed due to medatada loader "
+                         "error, try again later")
+            return
         add_to_failed_cache(cfg, obs_id, msg)
         return
 
     logger.info(f"Adding obs_id {obs_id} to dataset")
     rset = ResultSet.from_friend(result.result_set)
-    write_dataset(rset, cfg.h5_path, obs_id, overwrite=True)
+    h5_path = cfg.h5_path
+    if cfg.h5_unix_digits:
+        name, ext = os.path.splitext(cfg.h5_path)
+        unixtime = obs_id.split('_')[1][:cfg.h5_unix_digits]
+        h5_path = f"{name}_{unixtime}{ext}"
+    write_dataset(rset, h5_path, obs_id, overwrite=True)
     db = core.metadata.ManifestDb(cfg.index_path)
-    relpath = os.path.relpath(cfg.h5_path, start=os.path.dirname(cfg.index_path))
+    relpath = os.path.relpath(h5_path, start=os.path.dirname(cfg.index_path))
     db.add_entry(
         {"obs:obs_id": obs_id, "dataset": obs_id}, filename=relpath, replace=True
     )
@@ -897,4 +997,4 @@ def main(config_file: str):
         _main(cfg, executor, as_completed_callable)
 
 if __name__ == "__main__":
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

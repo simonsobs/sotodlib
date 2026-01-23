@@ -17,7 +17,7 @@ from . import fourier_filter
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                        psat_range=None, rn_range=None, si_nan=False,
-                       merge=True, overwrite=True,
+                       phase_to_pW=None, merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
@@ -39,6 +39,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         Tuple (lower_bound, upper_bound) for r_n det selection.
     si_nan : bool
         If true, flag dets where s_i is NaN. Default is false.
+    phase_to_pW : Tuple
+        Tuple (lower_bound, upper_bound) for phase_to_pW det selection.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -84,6 +86,9 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         ranges.append(detcal.r_n <= rn_range[1])
     if si_nan:
         ranges.append(np.isnan(detcal.s_i) == False)
+    if phase_to_pW is not None:
+        ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
+        ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
 
     msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
@@ -113,26 +118,27 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                   detcal.r_frac >= rfrac_range[0],
                   detcal.r_frac <= rfrac_range[1]
                  ]
+        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
+
         if psat_range is not None:
+            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
             ranges.append(detcal.p_sat*1e12 >= psat_range[0])
             ranges.append(detcal.p_sat*1e12 <= psat_range[1])
         
         if rn_range is not None:
+            msk_names.extend(['r_n_gt', 'r_n_lt'])
             ranges.append(detcal.r_n >= rn_range[0])
             ranges.append(detcal.r_n <= rn_range[1])
-
+            
+        if phase_to_pW is not None:
+            msk_names.extend(['phase_to_pW_gt', 'phase_to_pW_lt'])
+            ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
+            ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
+        
         for range in ranges:
             msk = ~(np.all([range], axis=0))
             msks.append(RangesMatrix([Ranges.ones_like(x) if Y
                                       else Ranges.zeros_like(x) for Y in msk]))
-
-        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
-        
-        if psat_range is not None:
-            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
-            
-        if rn_range is not None:
-            msk_names.extend(['r_n_gt', 'r_n_lt'])
 
         for i, msk in enumerate(msks):
             if 'samps' in aman:
@@ -396,11 +402,13 @@ def get_glitch_flags(aman,
         subscan_indices = np.array([[0, fvec.shape[-1]]])
 
     msk = np.zeros_like(fvec, dtype='bool')
+    iqr_ranges = np.zeros_like(fvec)
     if fvec.ndim == 1:
         for ss in subscan_indices:
             iqr_range = 0.741 * stats.iqr(fvec[ss[0]:ss[1]:ds])
             # get flags
             msk[ss[0]:ss[1]] = fvec[ss[0]:ss[1]] > iqr_range * n_sig
+            iqr_ranges[ss[0]:ss[1]] = iqr_range
         msk[:edge_guard] = False
         msk[-edge_guard:] = False
         flag = Ranges.from_bitmask(msk)
@@ -409,6 +417,7 @@ def get_glitch_flags(aman,
             iqr_range = 0.741 * stats.iqr(fvec[:,ss[0]:ss[1]:ds], axis=1)
             # get flags
             msk[:,ss[0]:ss[1]] = fvec[:,ss[0]:ss[1]] > iqr_range[:, None] * n_sig
+            iqr_ranges[:,ss[0]:ss[1]] = iqr_range[:, None]
         msk[:,:edge_guard] = False
         msk[:,-edge_guard:] = False
         flag = RangesMatrix([Ranges.from_bitmask(m) for m in msk])
@@ -427,7 +436,7 @@ def get_glitch_flags(aman,
             # do not compress into csr_array
             glitches = core.AxisManager(aman.samps)
             data = np.zeros_like(fvec)
-            data[msk] = fvec[msk] / iqr_range
+            data[msk] = fvec[msk] / iqr_ranges[msk]
             glitches.wrap("glitch_flags", flag, [(0, "samps")])
             glitches.wrap("glitch_detection", data, [(0, "samps")])
         else:
@@ -436,7 +445,7 @@ def get_glitch_flags(aman,
             )
             indices = np.concatenate([np.where(msk[i])[0] for i in range(aman.dets.count)])
             data = np.concatenate(
-                [fvec[i][msk[i]] / iqr_range[i] for i in range(aman.dets.count)]
+                [fvec[i][msk[i]] / iqr_ranges[i][msk[i]] for i in range(aman.dets.count)]
             )
             smat = csr_array(
                 (data, indices, indptr), shape=(aman.dets.count, aman.samps.count)

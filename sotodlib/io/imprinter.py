@@ -30,7 +30,7 @@ from .load_smurf import (
 from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
-from ..site_pipeline.util import init_logger
+from ..site_pipeline.utils.logging import init_logger
 
 
 ####################
@@ -81,6 +81,14 @@ class FileTooLargeError(Exception):
     """Exception raised when we find level 2 files that are larger than our
     maximum allowable sizes"""
     pass
+
+MIN_OBS_BOOK_DURATION = 60
+class ObsBookTooShort(Exception):
+    """Exception raised when asked to bind an observation book less than
+    MIN_OBS_BOOK_DURATION long. We throw an exception instead of not registering them so
+    that we can set them as won't bind, and then get the files passed into stray."""
+    pass
+
 
 ###################
 # database schema #
@@ -252,6 +260,7 @@ class Imprinter:
         self.daq_node = self.config.get("daq_node")        
         self.output_root = self.config.get("output_root")
         self.g3tsmurf_config = self.config.get("g3tsmurf")
+        self.require_hwp = self.config.get("require_hwp", True)
         g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         self.lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
@@ -676,6 +685,14 @@ class Imprinter:
         if book.type in ["obs", "oper"]:
             book_path = self.get_book_abs_path(book)
 
+            if book.type == "obs":
+                book_dur = (book.stop-book.start).total_seconds()
+                if book_dur < MIN_OBS_BOOK_DURATION:
+                    raise ObsBookTooShort(
+                        f"{book.bid} only {book_dur} seconds long. Too short for "
+                        f"an observation book"
+                    )
+
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
             # a dictionary of {stream_id: [file_paths]}
@@ -797,10 +814,6 @@ class Imprinter:
             raise BookBoundError(f"Book {bid} is already bound")
         assert book.type in VALID_OBSTYPES
 
-        ## LATs don't have HWPs. We can change this if we ever make LAT HWPs :D
-        ## or if we ever plan to run the SATs without HWPs
-        if 'lat' in self.daq_node:
-            require_hwp = False
         err = None
         try:
             # find appropriate binder for the book type
@@ -853,7 +866,7 @@ class Imprinter:
         ignore_tags=False,
         ancil_drop_duplicates=False,
         allow_bad_timing=False,
-        require_hwp=True,
+        require_hwp=None,
         require_acu=True,
         require_monotonic_times=True,
         min_ctime=None, max_ctime=None,
@@ -899,7 +912,8 @@ class Imprinter:
         """
         if session is None:
             session = self.get_session()
-
+        if require_hwp is None:
+            require_hwp = self.require_hwp
         bid, status, message, err = self._run_book_binding(
             book,
             session=session,
@@ -1543,8 +1557,8 @@ class Imprinter:
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             if np.any(checks):
-                self.logger.warning(
-                    f"Found {sum(checks)} channels without readout_id. Were fixed tones running?"
+                self.logger.info(
+                    f"Found {sum(checks)} channels without readout_id. Assume fixed tones are running."
                 )
             # make sure all rchannel ids are sorted
             assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
