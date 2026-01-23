@@ -477,7 +477,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
         if sys == "cel" or sys == "equ":
             return lonlat
         elif sys == "hor":
-            return so3g.proj.CelestialSightLine.az_el(ctime, -1*lonlat[0], np.pi/2 - lonlat[1], site=site, weather=weather).coords()[0,:2]
+            return so3g.proj.CelestialSightLine.az_el(ctime, lonlat[0], lonlat[1], site=site, weather=weather).coords()[0,:2]
         else:
             raise NotImplementedError
     def get_pos(name, ctime, sys=None):
