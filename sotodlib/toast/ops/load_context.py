@@ -25,7 +25,7 @@ from toast.traits import (
 )
 from toast.ops.operator import Operator
 from toast.ops.pipeline import Pipeline
-from toast.utils import Logger
+from toast.utils import Logger, replace_unicode_arrays
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -638,6 +638,10 @@ class LoadContext(Operator):
 
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
+
+            # Now that all metadata has been loaded, ensure that all unicode
+            # numpy arrays are converted to fixed-width byte strings.
+            ob._internal = replace_unicode_arrays(ob._internal)
 
             # Optionally load housekeeping data
             if self.hk_site_root is not None or self.hk_platform_root is not None:

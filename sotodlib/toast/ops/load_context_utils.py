@@ -15,7 +15,7 @@ from toast.timing import function_timer, Timer
 from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
-from toast.io.hdf_utils import unicode_array_to_fixed, replace_unicode_arrays
+from toast.utils import unicode_array_to_fixed, replace_unicode_arrays
 
 from ...coords import pointing_model
 from ...core import Context, AxisManager
