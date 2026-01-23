@@ -97,6 +97,95 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb-ancil
+------------------
+
+This script may be used to update ancillary data archives and then to
+update an ObsDb with reduced statistics from those archives.
+
+Each ancillary data source is associated with a class in the
+:module>`sotodlib.io.ancil`; the code there defines how the data is to
+be obtained, reduced, and summarized for obsdb purposes.
+
+The main processing commands are ``update-base-data`` and
+``update-obsdb``.  For each of these, the caller can specify which
+configured datasets they want to run on, and what time range to
+consider for the update.
+
+For example, to perform a bulk update of all ancillary data archives,
+considering data from the past week, run::
+
+  so-site-pipeline update-obsdb-ancil \
+    update-base-data -c ancil.yaml --lookback-days=7
+
+
+To then update the specified obsdb, run::
+
+  so-site-pipeline update-obsdb-ancil \
+    update-obsdb -c ancil.yaml --lookback-days=7
+
+
+In automation (e.g. from cronjob) users will most likely use the
+``run-job`` command, which can run a pre-configured series of
+operations (different combinations of ``update-base-data`` and
+``update-obsdb``).  That might look like::
+
+  so-site-pipeline update-obsdb-ancil \
+    run-job -c ancil.yaml standard_7day_update
+
+
+Configuration
+`````````````
+
+The configuration file is yaml.  In addition to some general settings
+at root level, two large sub-blocks are used to define the data
+archives (``datasets``) and the different job definitions
+(``job_defs``).  Here's an annotated example:
+
+.. code-block:: yaml
+
+  # ObsDb to use for update-obsdb jobs
+  target_obsdb: /so/metadata/obsdb.sqlite
+
+  # Datasets -- the entry names are looked up in
+  # the io.ancil registered engines.
+  datasets:
+    apex-pwv:
+      data_dir: apex/
+    toco-pwv:
+      data_dir: toco/
+      hkdb_config: "/db_configs/hkdb-site.cfg"
+    pwv-combo: {}
+
+  # job_defs -- a list of named jobs; this is like
+  # a shortcut for running common operations.
+  job_defs:
+    - name: basic
+      steps:
+        - command: "update-base-data"
+          lookback_days: 7
+        - command: "update-obsdb"
+          lookback_days: 3
+          redo: true
+        - command: "update-obsdb"
+          lookback_days: 7
+
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb_ancil
+   :func: get_parser
+   :prog: update-obsdb-ancil
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb_ancil
+   :members:
+   :undoc-members:
+
 update-smurf-caldbs
 -----------------------
 This update script is used to add detset and calibration metadata to manifest
@@ -1215,7 +1304,7 @@ API
 Support
 =======
 
-.. automodule:: sotodlib.site_pipeline.util
+.. automodule:: sotodlib.site_pipeline.utils
    :members:
    :undoc-members:
 

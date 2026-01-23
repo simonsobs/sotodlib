@@ -108,6 +108,11 @@ def combine_pwv(rs_toco, rs_apex, time_range):
 
 @cc.register_engine('pwv-combo', cc.PwvComboConfig)
 class PwvCombo(utils.AncilEngine):
+    """Combine and reduce PWV measurements from two data sources (APEX
+    and Toco).
+
+    """
+
     _fields = [
         ('mean', 'float'),
         ('std', 'float'),

@@ -1,7 +1,23 @@
+"""update-obsdb-ancil
+
+This script uses io.ancil modules to update archives of reduced
+ancillary data and to update an obsdb with quantities computed based
+on those ancillary data.
+
+The config file should look like this::
+
+  blah blah blah
+
+
+More details :mod:`sotodlib.io.ancil`.
+
+"""
+
 import argparse
 import itertools
 import logging
 import time
+from typing import Optional
 import yaml
 
 from sotodlib import core
@@ -16,6 +32,7 @@ DEFAULT_CONFIG = {
     'lookback_time':  7 * DAY,
     'datasets': {},
 }
+DEFAULT_CONFIG_FILENAME = 'ancil.yaml'
 
 
 def _get_engine(key, cfg):
@@ -88,49 +105,98 @@ def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
 
-    parser.add_argument('--verbose', '-v', action='count')
-    sps = parser.add_subparsers(title='commands', dest='command')
+    def add_args(p, *args):
+        if '--config-file' in args:
+            p.add_argument('--config-file', '-c', default=DEFAULT_CONFIG_FILENAME,
+                           help="Path to config file.")
+        if '--dataset' in args:
+            p.add_argument(
+                '--dataset', '-d', action='append',
+                help="""
+                Limit processing to only the specified dataset.
+                If passed multiple times, the chosen datasets are
+                processed in the corresponding order.""")
+        if '--time-range' in args:
+            p.add_argument(
+                '--time-range', nargs=2, type=float,
+                help="""
+                Restrict processing to items falling between the
+                two provided unix timestamps.""")
+            p.add_argument(
+                '--lookback-days', type=float,
+                help="""
+                As an alternative to --time-range, restrict
+                processing to items falling between the present time
+                and the specified number of days in the past.""")
 
-    p = sps.add_parser('update-base-data')
-    p.add_argument('--config-file', '-c', default='cli.yaml')
-    p.add_argument('--dataset', '-d', action='append')
-    p.add_argument('--lookback-days', type=float)
-    p.add_argument('--time-range', nargs=2, type=float)
+    parser.add_argument('--verbose', '-v', action='count', help=
+                        "Pass one or more times to increase logging verbosity.")
+    sps = parser.add_subparsers(title='Commands', dest='command')
+
+    p = sps.add_parser('update-base-data', help="""Update the base
+    data for an ancillary data archive. This will typically trigger
+    loading of the data from the source, and then reduction and
+    storage in the local archive.""")
+
+    add_args(p, '--config-file', '--dataset', '--time-range')
     p.add_argument('--full-scan', action='store_true')
 
-    p = sps.add_parser('update-obsdb')
-    p.add_argument('--config-file', '-c', default='cli.yaml')
-    p.add_argument('--dataset', '-d', action='append')
-    p.add_argument('--lookback-days', type=float)
-    p.add_argument('--time-range', nargs=2, type=float)
+    p = sps.add_parser('update-obsdb', help="""
+    Update obsdb records based on data already in the archives. This
+    is typically run after refreshing the base data with
+    update-base-data.""")
+
+    add_args(p, '--config-file', '--dataset', '--time-range')
     p.add_argument('--redo', action='store_true')
 
-    p = sps.add_parser('check')
-    p.add_argument('--config-file', '-c', default='cli.yaml')
-    p.add_argument('--dataset', '-d', action='append')
-    p.add_argument('--lookback-days', type=float)
-    p.add_argument('--time-range', nargs=2, type=float)
+    p = sps.add_parser('check', help="""Read the config file and test
+    datasets by attempting to instantiate them. This should not
+    normally touch the underlying data or attempt to load new data
+    from base sources.""")
 
-    p = sps.add_parser('test', help=
-                       "Run analysis, printing results to terminal, "
-                       "and without updating obsdb.")
-    p.add_argument('--config-file', '-c', default='cli.yaml')
-    p.add_argument('--dataset', '-d', action='append')
-    p.add_argument('--query', '-q')
-    p.add_argument('--compare', action='store_true')
-    p.add_argument('obs_id', nargs='*')
+    add_args(p, '--config-file', '--dataset', '--time-range')
 
-    p = sps.add_parser('run-job', help="Run a job as described in the config file.")
-    p.add_argument('--config-file', '-c', default='cli.yaml')
-    p.add_argument('job_name')
+    p = sps.add_parser('test', help="""Perform the obsdb data
+    reduction on a specified obs_id. Results are not saved to obsdb.""")
+
+    add_args(p, '--config-file', '--dataset')
+    p.add_argument('--query', '-q', help=
+                   """
+                   Use this obsdb query to select records for
+                   computation, instead of passing specific obs_id.""")
+    p.add_argument('--compare', action='store_true', help=
+                   """
+                   If passed, the computed values will be compared to
+                   values already present in the obsdb.""" )
+    p.add_argument('obs_id', nargs='*', help=
+                   "obs_id (pass multiple) to compute results for.")
+
+    p = sps.add_parser('run-job', help="""Run a job defined in the config file.""")
+    add_args(p, '--config-file')
+    p.add_argument('job_name', help=
+                  " Name of job to run (matched to entry in config['job_defs']).")
 
     return parser
 
 
-def main(command=None, verbose=None, lookback_days=None,
-         obs_id=None, config_file=None, dataset=None, query=None,
-         full_scan=None, redo=None, compare=None, time_range=None,
-         job_name=None):
+def main(
+        command : Optional[str]=None,
+        verbose : Optional[bool]=None,
+        config_file : Optional[str]=None,
+        time_range : Optional[list]=None,
+        dataset : Optional[list]=None,
+        lookback_days : Optional[float]=None,
+        query : Optional[str]=None,
+        obs_id : Optional[list]=None,
+        full_scan : Optional[bool]=None,
+        redo : Optional[bool]=None,
+        compare : Optional[bool]=None,
+        job_name : Optional[str]=None,
+):
+    """Entry point for CLI or job runner.  Some parameters are only
+    used by some commands.
+
+    """
     if verbose:
         ancil.logger.setLevel(logging.DEBUG)
         logger.handlers[0].setLevel(logging.DEBUG)
