@@ -61,7 +61,7 @@ def match_fixed_source(source_name):
         source_name (str): Name of fixed-position source
     Return:
         RA (float): Right Ascension of source in degrees
-        Dec (float): Decilination of source in degrees
+        Dec (float): Declination of source in degrees
         match (bool): Whether the source_name match with regular expression
     """
     m = re.match(
@@ -357,7 +357,8 @@ def _get_astrometric(source_name, timestamp, site="_default", planets=None):
 
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
-        or fixed source specification.
+        or fixed source specification with a format 'Jxxx[+-pmn]yyy',
+        where xxx and yyy are decimal numbers of RA, Dec in degrees.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
