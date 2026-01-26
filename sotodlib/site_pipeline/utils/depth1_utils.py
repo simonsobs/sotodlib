@@ -10,57 +10,11 @@ from pixell import bunch, enmap, mpi
 from pixell import utils as putils
 
 from sotodlib import coords, mapmaking
-from sotodlib.core import FlagManager, metadata
+from sotodlib.core import FlagManager
 from sotodlib.site_pipeline.utils.config import _get_config
+from sotodlib.site_pipeline.utils.constants import DEPTH1MAPMAKER_DEFAULTS, SENS_LIMITS
+from sotodlib.site_pipeline.utils.exceptions import DataMissing
 from sotodlib.tod_ops import detrend_tod
-
-DEFAULTS = {
-    "query": "1",
-    "odir": "./outputs",
-    "comps": "T",
-    "ntod": None,
-    "tods": None,
-    "nset": None,
-    "site": "so_lat",
-    "nmat": "corr",
-    "max_dets": None,
-    "verbose": 0,
-    "quiet": 0,
-    "center_at": None,
-    "window": 0.0,
-    "nmat_dir": "/nmats",
-    "nmat_mode": "build",
-    "downsample": 1,
-    "maxiter": 100,
-    "tiled": 1,
-    "wafer": None,
-    "freq": None,
-    "tasks_per_group": 1,
-    "cont": False,
-    "rhs": False,
-    "bin": False,
-    "srcsamp": None,
-    "unit": "K",
-    "mapcat_database_type": "sqlite",
-    "mapcat_database_name": "mapcat.db",
-    "mapcat_depth_one_parent": "./",
-    "min_dets": 50,
-}
-
-SENS_LIMITS = {
-    "f030": 120,
-    "f040": 80,
-    "f090": 100,
-    "f150": 140,
-    "f220": 300,
-    "f280": 750,
-}
-
-LoaderError = metadata.loader.LoaderError
-
-
-class DataMissing(Exception):
-    pass
 
 
 def sensitivity_cut(
@@ -329,36 +283,8 @@ def calibrate_obs(
     return obs, good
 
 
-def write_depth1_map(
-    prefix: str,
-    data: np.ndarray,
-    dtype: np.typing.DTypeLike = np.float32,
-    binned: bool = False,
-    rhs: bool = False,
-    unit: str = "K",
-):
-
-    data.signal.write(prefix, "map", data.map.astype(dtype), unit=unit)
-    data.signal.write(prefix, "ivar", data.ivar.astype(dtype), unit=f"{unit}^-2")
-    data.signal.write(prefix, "time", data.tmap.astype(dtype))
-
-    if binned:
-        data.signal.write(prefix, "bin", data.bin.astype(dtype), unit=unit)
-
-    if rhs:
-        data.signal.write(
-            prefix, "rhs", data.signal.rhs.astype(dtype), unit=f"{unit}^-1"
-        )
-
-
-def write_depth1_info(oname: str, info: Dict[Any, Any]):
-
-    putils.mkdir(os.path.dirname(oname))
-    bunch.write(oname, info)
-
-
 def create_mapmaker_config(
-    defaults: dict = DEFAULTS, config_file: Optional[str] = None, **args
+    defaults: dict = DEPTH1MAPMAKER_DEFAULTS, config_file: Optional[str] = None, **args
 ) -> dict:
 
     config = dict(defaults)

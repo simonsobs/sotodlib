@@ -9,18 +9,15 @@ from pixell import bunch, enmap, mpi, tilemap, utils, wcsutils
 from sotodlib import mapmaking
 from sotodlib.core import Context
 from sotodlib.preprocess import preprocess_util as pp_util
-from sotodlib.site_pipeline.utils.depth1_utils import (DEFAULTS, DataMissing,
-                                                       LoaderError,
-                                                       _get_config,
-                                                       calibrate_obs,
-                                                       create_mapmaker_config,
-                                                       find_footprint,
-                                                       read_tods,
-                                                       write_depth1_map)
-from sotodlib.site_pipeline.utils.mapcat import (commit_depth1_map,
-                                                 commit_depth1_tods,
-                                                 map_to_calculate)
 
+from sotodlib.site_pipeline.utils.config import _get_config
+from sotodlib.site_pipeline.utils.constants import DEPTH1MAPMAKER_DEFAULTS
+from sotodlib.site_pipeline.utils.exceptions import DataMissing, LoaderError
+from sotodlib.site_pipeline.utils.depth1_utils import (
+    calibrate_obs, create_mapmaker_config, find_footprint, read_tods)
+from sotodlib.site_pipeline.utils.io import write_depth1_map
+from sotodlib.site_pipeline.utils.mapcat import (
+    commit_depth1_map, commit_depth1_tods, map_to_calculate)
 
 def get_parser(parser=None):
     if parser is None:
@@ -236,7 +233,7 @@ def make_depth1_map(
     )
 
 
-def main(config_file, defaults=DEFAULTS, **args):
+def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
 
     dtype_tod = np.float32
     dtype_map = np.float64
@@ -438,6 +435,6 @@ def main(config_file, defaults=DEFAULTS, **args):
 
 
 if __name__ == "__main__":
-    from sotodlib.site_pipeline import util
+    from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
