@@ -2,6 +2,7 @@
 
 import argparse
 import inspect
+from typing import Any, Dict
 
 import yaml
 
@@ -235,3 +236,10 @@ def lookup_conditional(source, key, tags=None, default=KeyError):  # make_source
             if t in source:
                 return lookup_conditional(source[t], None, tags=tags, default=default)
         return default
+
+def _get_config(config_file: str) -> Dict[Any, Any]:
+    try:
+        config = yaml.safe_load(open(config_file, "r"))
+    except Exception as e:
+        raise RuntimeError(f"Failed to load config {config_file}: {e}")
+    return config

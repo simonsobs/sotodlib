@@ -6,12 +6,12 @@ if TYPE_CHECKING:
 
 import numpy as np
 import so3g
-import yaml
 from pixell import bunch, enmap, mpi
 from pixell import utils as putils
 
 from sotodlib import coords, mapmaking
 from sotodlib.core import FlagManager, metadata
+from sotodlib.site_pipeline.utils.config import _get_config
 from sotodlib.tod_ops import detrend_tod
 
 DEFAULTS = {
@@ -97,14 +97,6 @@ def measure_rms(
     rms *= dt**0.5
 
     return rms
-
-
-def _get_config(config_file: str) -> Dict[Any, Any]:
-    try:
-        config = yaml.safe_load(open(config_file, "r"))
-    except Exception as e:
-        raise RuntimeError(f"Failed to load config {config_file}: {e}")
-    return config
 
 
 def tele2equ(

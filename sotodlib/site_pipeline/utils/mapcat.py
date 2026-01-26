@@ -3,6 +3,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 from mapcat.database import DepthOneMapTable, TODDepthOneTable
 from mapcat.helper import Settings
+from sqlmodel import select
 
 
 def map_to_calculate(
@@ -10,10 +11,9 @@ def map_to_calculate(
 ) -> bool:
 
     with Settings(**mapcat_settings).session() as session:
-        existing_map = (
-            session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
-        )
-        map_tods = existing_map.tods if existing_map else []
+        map_query = select(DepthOneMapTable).where(DepthOneMapTable.map_name == map_name)
+        existing_map = session.execute(map_query).first()
+        map_tods = existing_map[0].tods if existing_map else []
 
         total_tods = np.sum([map_tod.wafer_count for map_tod in map_tods])
 
@@ -84,15 +84,18 @@ def commit_depth1_tods(
                 "wafer_slots_list": obs_info["wafer_slots_list"],
                 "stream_ids_list": obs_info["stream_ids_list"],
             }
-            existing_tod = (
-                session.query(TODDepthOneTable).filter_by(**tod_depth1_entry).first()
-            )
+            tod_select_values = [
+                getattr(TODDepthOneTable, key) == value
+                for key, value in tod_depth1_entry.items()
+            ]
+            tod_query = select(TODDepthOneTable).where(*tod_select_values)
+            existing_tod = session.execute(tod_query).first()
             tod = TODDepthOneTable(map_name=map_name, **tod_depth1_entry)
             if existing_tod is None:
                 session.add(tod)
                 tods.append(tod)
             else:
-                tods.append(existing_tod)
+                tods.append(existing_tod[0])
         session.commit()
     return tods
 
@@ -109,11 +112,12 @@ def commit_depth1_map(
     mapcat_settings: Dict[str, str],
 ) -> None:
     with Settings(**mapcat_settings).session() as session:
-        existing_map = (
-            session.query(DepthOneMapTable).filter_by(map_name=map_name).first()
+        map_query = select(DepthOneMapTable).where(
+            DepthOneMapTable.map_name == map_name
         )
+        existing_map = session.execute(map_query).first()
         depth1map_meta = DepthOneMapTable(
-            map_id=existing_map.map_id if existing_map else None,
+            map_id=existing_map[0].map_id if existing_map else None,
             map_name=map_name,
             map_path=prefix + "_map.fits",
             ivar_path=prefix + "_ivar.fits",
