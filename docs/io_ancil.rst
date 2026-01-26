@@ -15,6 +15,8 @@ Engine configuration
    :undoc-members:
    :show-inheritance:
 
+.. _io-ancil-engines:
+
 Engines
 -------
 

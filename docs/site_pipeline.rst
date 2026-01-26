@@ -101,11 +101,13 @@ update-obsdb-ancil
 ------------------
 
 This script may be used to update ancillary data archives and then to
-update an ObsDb with reduced statistics from those archives.
-
-Each ancillary data source is associated with a class in the
-:module>`sotodlib.io.ancil`; the code there defines how the data is to
-be obtained, reduced, and summarized for obsdb purposes.
+update an ObsDb with reduced statistics from those archives.  The
+script requires a configuration file, which includes a list of
+"datasets"; each dataset corresponds to some ancillary data source and
+a method for reducing that data to be summarized in :class:`ObsDb
+<sotodlib.core.metadata.ObsDb>` columns.  Each dataset is mapped to a
+class in the :mod:`sotodlib.io.ancil` module; the code there defines
+how the data are to be obtained, stored, and reduced.
 
 The main processing commands are ``update-base-data`` and
 ``update-obsdb``.  For each of these, the caller can specify which
@@ -134,13 +136,71 @@ operations (different combinations of ``update-base-data`` and
     run-job -c ancil.yaml standard_7day_update
 
 
+For testing there are ``check`` and ``test`` commands.  The ``check``
+command simply instantiates an engine for each dataset -- basically
+checking for configuration problems and summarizing some easily
+determined state.  E.g.::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+      check --dataset apex-pwv
+
+  Loading config file ancil.yaml ...
+    dataset=apex-pwv
+      output_dir: apex/
+      files_found: 33
+
+
+The ``test`` command can be used to load data and run a reduction
+operation, targeting a specific obs in the ObsDb.  For example::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+        test --dataset apex-pwv \
+        --query "type == 'obs' and timestamp > 1760100000"
+
+  apex-pwv
+  obs_1760103123_satp1_1111111 {'mean': 0.48, 'start': 0.44, 'end': 0.51, 'span': 0.13}
+  obs_1760106068_satp1_1111111 {'mean': 0.6, 'start': 0.58, 'end': 0.82, 'span': 0.31}
+  obs_1760108443_satp1_1111111 {'mean': 0.78, 'start': 0.78, 'end': 0.78, 'span': 0.0}
+  ...
+
+Or with a specific obs_id::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+        test obs_1760168230_satp1_1111111
+
+  apex-pwv
+  obs_1760168230_satp1_1111111 {'mean': 0.56, 'start': 0.57, 'end': 0.55, 'span': 0.06}
+
+  toco-pwv
+  obs_1760168230_satp1_1111111 {'mean': 0.439, 'start': 0.459, 'end': 0.463, 'span': 0.091}
+
+  pwv-combo
+  obs_1760168230_satp1_1111111 {'mean': 0.44, 'std': 0.018, 'qual': 1.0}
+
+  weather-station
+  obs_1760168230_satp1_1111111 {'wind_speed': 1.2, 'wind_dir': 228.7, 'uv': nan, 'ambient_temp': -2.83}
+  ...
+
+
 Configuration
 `````````````
 
 The configuration file is yaml.  In addition to some general settings
 at root level, two large sub-blocks are used to define the data
 archives (``datasets``) and the different job definitions
-(``job_defs``).  Here's an annotated example:
+(``job_defs``).
+
+In the ``datasets`` block, each entry will be parsed as the
+configuration for one of the classes registered in
+:py:data:`sotodlib.io.ancil.ANCIL_ENGINES`; find links to each
+engine's configuration dataclass in the :ref:`io.ancil Engines
+section<io-ancil-engines>`.  Note that the key of each entry is
+normally used to find the engine in ANCIL_ENGINES -- but you can call
+the datasets entries whatever you want as long as the ``class`` is
+defined, in the block (i.e. instead of ``"apex-pwv": {...}`` you could
+have ``"my-weird-name": {"class": "apex-pwv", ...}``).
+
+Here's an annotated example:
 
 .. code-block:: yaml
 

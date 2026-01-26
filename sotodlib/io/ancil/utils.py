@@ -102,7 +102,19 @@ def _get_time_range(*time_ranges, now=None):
 
 
 class AncilEngine:
+    #: The class used to provide configuration for this Engine
+    #: type. (This is handled in subclassing.)
     config_class = None
+
+    #: The configuration object (matching config_class) used to set up
+    #: the instance.
+    cfg = None
+
+    #: A dict mapping name-of-friend to the Engine instance for each
+    #: friend. On construction, the values will be None -- they must be
+    #: associated using register_friends.
+    friends = None
+
     _fields = []
 
     def __init__(self, cfg):
@@ -169,6 +181,13 @@ class AncilEngine:
         return vquery.format(**self._obsdb_map())
 
     def obsdb_check(self, obsdb, create_cols=False):
+        """Check whether the obsdb contains the columns required by
+        this engine's "update_obsdb" operation.  If create_cols is
+        True, the columns will be created if they are missing and the
+        function returns True.  Otherwise the function will simply
+        return True if cols are there, and False if not.
+
+        """
         ok = False
         try:
             obsdb.conn.execute('select %s from obs limit 1' % (
@@ -196,6 +215,12 @@ class AncilEngine:
         pass
 
     def getter(self, targets=None, results=None):
+        """Generator that yields results, one by one, for entry in
+        target.  If results is provided, it must be a list of the same
+        length as targets, containing dicts which will be updated in
+        place and yielded.
+
+        """
         raise NotImplementedError()
 
     def collect(self, targets=None, results=None, show_pbar=True, for_obsdb=False):

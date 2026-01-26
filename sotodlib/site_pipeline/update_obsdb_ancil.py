@@ -4,12 +4,8 @@ This script uses io.ancil modules to update archives of reduced
 ancillary data and to update an obsdb with quantities computed based
 on those ancillary data.
 
-The config file should look like this::
-
-  blah blah blah
-
-
-More details :mod:`sotodlib.io.ancil`.
+The entry point is :func:`main` but the different command functions
+can be called directly.
 
 """
 
@@ -49,8 +45,12 @@ def _engines_iter(cfg, args_datasets):
         yield (k, _get_engine(k, cfg['datasets'][k]))
 
 
+def _get_config(config_file):
+    return DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+
+
 def update_base_data(config_file, time_range=None, datasets=None, full_scan=False):
-    cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+    cfg = _get_config(config_file)
 
     if full_scan:
         logger.info(f'Performing full update of base data.')
@@ -67,7 +67,7 @@ def update_base_data(config_file, time_range=None, datasets=None, full_scan=Fals
 
 
 def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
-    cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+    cfg = _get_config(config_file)
 
     logger.info(f'Updating obsdb')
     for dataset, engine in _engines_iter(cfg, datasets):
@@ -228,7 +228,7 @@ def main(
 
     elif command == 'test':
         # Run on some obs_ids.
-        cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+        cfg = _get_config(config_file)
 
         obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
         if query:
@@ -259,7 +259,7 @@ def main(
         print()
 
     elif command == 'run-job':
-        cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+        cfg = _get_config(config_file)
         for job_def in cfg.get('job_defs', []):
             if job_def['name'] == job_name:
                 break
