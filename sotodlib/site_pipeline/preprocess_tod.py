@@ -1,3 +1,4 @@
+from sotodlib.core.metadata.manifest import ManifestDbBatchManager
 import os
 import yaml
 import time
@@ -284,7 +285,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
     # ensure db exists up front to prevent race conditions
-    pp_util.get_preprocess_db(configs, group_by, logger)
+    db = pp_util.get_preprocess_db(configs, group_by, logger)
 
     futures = []
     futures_dict = {}
@@ -308,46 +309,50 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
-    pb_name = f"pb_{str(int(time.time()))}.txt"
-    with open(pb_name, 'w') as f:
-        for future in tqdm(as_completed_callable(futures), total=total,
-                           desc="preprocess_tod", file=f,
-                           miniters=max(1, total // 100)):
-            obs_id, group = futures_dict[future]
-            out_meta = (obs_id, group)
-            try:
-                out_dict, errors = future.result()
-                obs_errors[obs_id].append({'group': group, 'error': errors[0]})
-                logger.info(f"{obs_id}: {group} extracted successfully")
-            except Exception as e:
-                errmsg, tb = PreprocessErrors.get_errors(e)
-                logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
-                obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-                out_dict = None
-                errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
+    # batch updates to ManifestDb
+    batch_size = configs['archive'].get('batch_size', 100)
 
-            futures.remove(future)
+    with ManifestDbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
+        pb_name = f"pb_{str(int(time.time()))}.txt"
+        with open(pb_name, 'w') as f:
+            for future in tqdm(as_completed_callable(futures), total=total,
+                            desc="preprocess_tod", file=f,
+                            miniters=max(1, total // 100)):
+                obs_id, group = futures_dict[future]
+                out_meta = (obs_id, group)
+                try:
+                    out_dict, errors = future.result()
+                    obs_errors[obs_id].append({'group': group, 'error': errors[0]})
+                    logger.info(f"{obs_id}: {group} extracted successfully")
+                except Exception as e:
+                    errmsg, tb = PreprocessErrors.get_errors(e)
+                    logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
+                    obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
+                    out_dict = None
+                    errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
-            logger.info(f"Adding future result to db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
-                                  logger, overwrite)
+                futures.remove(future)
 
-            # update jobdb
-            if jobdb_path is not None:
-                tags = {}
-                tags["obs:obs_id"] = obs_id
-                for gb, g in zip(group_by, group):
-                    tags['dets:' + gb] = g
-                job = jdb.get_jobs(jclass="init", jstate=JState.open, tags=tags)
-                with jdb.locked(job) as j:
-                    j.mark_visited()
-                    if errors[0] is not None:
-                        j.jstate = JState.failed
-                        for _t in j._tags:
-                            if _t.key == "error":
-                                _t.value = errors[0]
-                    else:
-                        j.jstate = JState.done
+                logger.info(f"Adding future result to db for {obs_id}: {group}")
+                pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
+                                    logger, overwrite, db_manager=db_manager)
+
+                # update jobdb
+                if jobdb_path is not None:
+                    tags = {}
+                    tags["obs:obs_id"] = obs_id
+                    for gb, g in zip(group_by, group):
+                        tags['dets:' + gb] = g
+                    job = jdb.get_jobs(jclass="init", jstate=JState.open, tags=tags)
+                    with jdb.locked(job) as j:
+                        j.mark_visited()
+                        if errors[0] is not None:
+                            j.jstate = JState.failed
+                            for _t in j._tags:
+                                if _t.key == "error":
+                                    _t.value = errors[0]
+                        else:
+                            j.jstate = JState.done
 
     if raise_error:
         n_obs_fail = 0
