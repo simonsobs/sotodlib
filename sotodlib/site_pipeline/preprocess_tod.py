@@ -333,7 +333,6 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
                 futures.remove(future)
 
-                logger.info(f"Adding future result to db for {obs_id}: {group}")
                 pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
                                     logger, overwrite, db_manager=db_manager)
 

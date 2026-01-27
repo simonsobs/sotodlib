@@ -1373,6 +1373,8 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
          A tuple containing the error from PreprocessError, an error message,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
+    out_meta : tuple
+        The tuple (obs_id, group).
     outputs : dict
         Dictionary including entries for the temporary h5 filename
         ('temp_file') and the obs_id group metadata and db entry (db_data).
@@ -1393,6 +1395,9 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
         logger = init_logger("preprocess")
 
     if out_dict is not None and os.path.isfile(out_dict['temp_file']):
+        obs_id, group = out_meta
+        logger.info(f"Adding future result to db for {obs_id}: {group}")
+
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
