@@ -15,6 +15,7 @@ from sotodlib.hwp import hwp_angle_model
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
+from sotodlib.core.metadata import ManifestDbBatchManager
 from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
 
@@ -1349,7 +1350,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     return aman, out_dict_init, out_dict_proc, (None, None, None)
 
 
-def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False):
+def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False, db_manager=None):
     """Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
@@ -1383,6 +1384,9 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     overwrite : bool
         Optional. Delete the entry in the archive file if it exists and
         replace it with the new entry.
+    db_manager : ManifestDbBatchManager
+        Optional. External database batch manager for optimized operations.
+        If provided, uses the manager instead of creating individual connections.
     """
 
     if logger is None:
@@ -1417,11 +1421,18 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
                     for member in f_src[dts]:
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-        db = get_preprocess_db(configs, group_by, logger)
-        if len(db.inspect(out_dict['db_data'])) == 0:
-            db.add_entry(out_dict['db_data'], h5_path)
-        # make sure we close the db each time
-        db.conn.close()
+
+        if db_manager is not None:
+            # Use the batch manager
+            db_manager.add_entry(out_dict['db_data'], h5_path)
+        else:
+            # Use the original approach for backward compatibility
+            db = get_preprocess_db(configs, group_by, logger)
+            if len(db.inspect(out_dict['db_data'])) == 0:
+                db.add_entry(out_dict['db_data'], h5_path)
+            # make sure we close the db each time
+            db.conn.close()
+
         os.remove(src_file)
     elif (
         errors[0] == PreprocessErrors.LoadSuccess or
