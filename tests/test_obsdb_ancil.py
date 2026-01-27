@@ -154,14 +154,26 @@ def _get_module_test_env():
         with open(cfile, 'w') as fout:
             fout.write(yaml.dump({
                 'target_obsdb': os.path.join(tempd, 'obsdb0.sqlite'),
+                'data_prefix': tempd,
                 'datasets': {
-                    'apex-pwv': {
-                        'data_prefix': tempd,
-                    },
-                    'toco-pwv': {
-                        'data_prefix': tempd,
-                    },
+                    # PWV, default settings...
+                    'apex-pwv': {},
+                    'toco-pwv': {},
                     'pwv-combo': {},
+                    # Test output directory combos
+                    'apex1': {
+                        'class': 'apex-pwv',
+                        'data_prefix': tempd + '/prefix',
+                    },
+                    'apex2': {
+                        'class': 'apex-pwv',
+                        'data_dir': 'apex_qwv',
+                    },
+                    'apex3': {
+                        'class': 'apex-pwv',
+                        'data_prefix': tempd + '/prefix',
+                        'data_dir': 'apex_qwv',
+                    },
                 },
                 'job_defs': [
                     {'name': 'basic',
@@ -187,7 +199,7 @@ class TestAncilModules(unittest.TestCase):
     def _run_module_test(self, dataset_name, friends=[]):
         output = {}
         with _get_module_test_env() as cfile:
-            cfg = yaml.safe_load(open(cfile, 'r'))
+            cfg = uoa._get_config(cfile)
             engines = {k: ancil.utils.get_engine(k, v)
                        for k, v in cfg['datasets'].items()}
             assert dataset_name in engines
@@ -254,7 +266,7 @@ class TestAncilModules(unittest.TestCase):
              patch('sotodlib.io.ancil.apex.ApexPwv._get_raw', data_func1), \
              patch('sotodlib.io.ancil.so_hk.TocoPwv._get_raw', data_func2):
             with _get_module_test_env() as cfile:
-                cfg = yaml.safe_load(open(cfile, 'r'))
+                cfg = uoa._get_config(cfile)
                 obsdb0 = get_example()
                 obsdb0.to_file(cfg['target_obsdb'])
                 uoa.main('update-base-data', config_file=cfile,
@@ -269,6 +281,13 @@ class TestAncilModules(unittest.TestCase):
                     c = Counter(np.isfinite(rows[f]))
                     assert c[True] == 1
                     assert c[False] == 1
+                # The following files should all exist...
+                d0 = os.path.split(cfile)[0]
+                for subloc in ['apex_pwv', 'prefix/apex_pwv', 'apex_qwv', 'prefix/apex_qwv']:
+                    assert os.path.exists(
+                        os.path.join(d0, subloc, 'apex_pwv_1700000000.h5'))
+
+
 
     def test_cli_jobs(self):
         """Test for update_obsdb_ancil."""
@@ -278,7 +297,7 @@ class TestAncilModules(unittest.TestCase):
              patch('sotodlib.io.ancil.apex.ApexPwv._get_raw', data_func1), \
              patch('sotodlib.io.ancil.so_hk.TocoPwv._get_raw', data_func2):
             with _get_module_test_env() as cfile:
-                cfg = yaml.safe_load(open(cfile, 'r'))
+                cfg = uoa._get_config(cfile)
                 obsdb0 = get_example()
                 obsdb0.to_file(cfg['target_obsdb'])
 

@@ -31,22 +31,25 @@ DEFAULT_CONFIG = {
 DEFAULT_CONFIG_FILENAME = 'ancil.yaml'
 
 
-def _get_engine(key, cfg):
-    if cfg.get('class') is not None:
-        key = cfg['class']
-    cls = ancil.ANCIL_ENGINES[key]
-    return cls(cfg)
-
-
 def _engines_iter(cfg, args_datasets):
     if args_datasets is None or len(args_datasets) == 0:
         args_datasets = cfg['datasets'].keys()
     for k in args_datasets:
-        yield (k, _get_engine(k, cfg['datasets'][k]))
+        yield (k, ancil.utils.get_engine(k, cfg['datasets'][k]))
 
 
 def _get_config(config_file):
-    return DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+    cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+    datasets = cfg.get('datasets')
+    if datasets is None:
+        return cfg
+    for broadcast_key in ['data_prefix']:
+        if (val := cfg.get(broadcast_key)) is None:
+            continue
+        for ds in datasets.values():
+            if ds.get(broadcast_key) is None:
+                ds[broadcast_key] = val
+    return cfg
 
 
 def update_base_data(config_file, time_range=None, datasets=None, full_scan=False):

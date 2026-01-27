@@ -207,6 +207,11 @@ Here's an annotated example:
   # ObsDb to use for update-obsdb jobs
   target_obsdb: /so/metadata/obsdb.sqlite
 
+  # This (optionally) sets the default data_prefix used for base data
+  # in all datasets (can be overridden by setting data_prefix in a
+  # dataset config block).
+  data_prefix: /data/ancil
+
   # Datasets -- the entry names are looked up in
   # the io.ancil registered engines.
   datasets:

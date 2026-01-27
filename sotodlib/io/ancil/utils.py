@@ -202,6 +202,16 @@ class AncilEngine:
             return True
         return ok
 
+    @property
+    def _base_dir(self):
+        """Return the directory where base data should be stored."""
+        dpre, ddir = self.cfg.data_prefix, self.cfg.data_dir
+        if ddir is None:
+            ddir = self.cfg.dataset_name
+        if dpre is not None:
+            ddir = os.path.join(dpre, ddir)
+        return ddir
+
     def check_base(self):
         return {}
 
@@ -247,13 +257,6 @@ class LowResTable(AncilEngine):
     HDF5 files, as the "base data".
 
     """
-    def __init__(self, cfg):
-        super().__init__(cfg)
-        if self.cfg.data_dir is None:
-            self.cfg.data_dir = self.cfg.dataset_name + '/'
-        if self.cfg.data_prefix is not None:
-            self.cfg.data_dir = os.path.join(self.cfg.data_prefix,
-                                                self.cfg.data_dir)
 
     def _get_raw(self, time_range):
         raise NotImplementedError()
@@ -324,7 +327,7 @@ class LowResTable(AncilEngine):
 
         """
         info = {
-            'output_dir': self.cfg.data_dir,
+            'output_dir': self._base_dir,
             'files_found': 0,
         }
         time_range = _get_time_range(self.cfg.dataset_time_range)
@@ -342,7 +345,7 @@ class LowResTable(AncilEngine):
             fn = self.cfg.filename_pattern.format(
                 timestamp=t0,
                 dataset_name=self.cfg.dataset_name)
-            fn = f'{self.cfg.data_dir}/{fn}'
+            fn = os.path.join(self._base_dir, fn)
             rows.append((max(t0, time_range[0]), min(t1, t0 + ns), fn))
             t0 += ns
         return rows
@@ -381,14 +384,6 @@ class HkExtract(AncilEngine):
     """Helper class for storing extracts from HK data.
 
     """
-    def __init__(self, cfg):
-        super().__init__(cfg)
-
-        if self.cfg.data_dir is None:
-            self.cfg.data_dir = self.cfg.dataset_name + '/'
-        if self.cfg.data_prefix is not None:
-            self.cfg.data_dir = os.path.join(self.cfg.data_prefix,
-                                                self.cfg.data_dir)
 
     def _clear_dataset(self, filename, dataset):
         with h5py.File(filename, 'a') as hin:
@@ -410,7 +405,7 @@ class HkExtract(AncilEngine):
             fn = self.cfg.filename_pattern.format(
                 timestamp=t0,
                 dataset_name=self.cfg.dataset_name)
-            fn = f'{self.cfg.data_dir}/{fn}'
+            fn = os.path.join(self._base_dir, fn)
             sub_t1 = min(t0 + ns, t1)
             while t0 < sub_t1:
                 ds = f't{t0}'
@@ -426,7 +421,7 @@ class HkExtract(AncilEngine):
 
         """
         info = {
-            'output_dir': self.cfg.data_dir,
+            'output_dir': self._base_dir,
             'files_found': 0,
         }
         time_range = _get_time_range(self.cfg.dataset_time_range)
