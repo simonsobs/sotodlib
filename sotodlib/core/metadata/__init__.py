@@ -7,7 +7,7 @@ from .resultset import ResultSet
 from .detdb import DetDb
 from .obsdb import ObsDb
 from .obsfiledb import ObsFileDb
-from .manifest import ManifestDb, ManifestScheme
+from .manifest import ManifestDb, ManifestScheme, ManifestDbBatchManager
 from .loader import (
     SuperLoader, LoaderInterface, MetadataSpec,
     merge_det_info, load_metadata,

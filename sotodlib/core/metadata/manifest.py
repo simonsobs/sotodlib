@@ -40,12 +40,14 @@ The ManifestScheme includes:
 * a description of Endpoint Data to associate with valid Index Data.
 """
 
+from __future__ import annotations
 import sqlite3
 import os
 import sys
 import json
-import numpy as np
 import argparse
+import logging
+from typing import Any
 
 from . import common, resultset
 
@@ -796,6 +798,101 @@ Examples:
                    "Run the conversion steps but do not write the results anywhere.")
 
     return parser
+
+
+class ManifestDbBatchManager:
+    """Batch manager for ManifestDb operations to optimize database commits.
+
+    This class wraps an existing ManifestDb instance and batches multiple
+    add_entry operations before committing to reduce I/O overhead.
+
+    Usage:
+        .. code-block:: python
+
+            # Create or get your ManifestDb instance
+            db = ManifestDb('my_database.db')
+
+            # Use batch manager to optimize operations
+            with ManifestDbBatchManager(db, batch_size=100) as batch_manager:
+                for dataset in datasets:
+                    batch_manager.add_entry(dataset_params, filename)
+                    # Automatically commits every 100 operations
+    """
+
+    def __init__(self, db: ManifestDb, batch_size: int = 100, logger: logging.Logger | None = None):
+        """Initialize the batch manager.
+
+        Arguments
+        ---------
+        db : ManifestDb
+            Existing ManifestDb instance to manage.
+        batch_size : int
+            Number of operations to batch before committing. Default is 100.
+        logger : logging.Logger
+            Optional. Logger object. If None, uses a basic logger.
+        """
+        self.db = db
+        self.batch_size = batch_size
+        self.batch_counter = 0
+
+        if logger is None:
+            self.logger = logging.getLogger('ManifestDbBatchManager')
+        else:
+            self.logger = logger
+
+    def __enter__(self) -> ManifestDbBatchManager:
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Context manager exit - commit any remaining operations."""
+        self.force_commit()
+        return False
+
+    def add_entry(
+        self,
+        params: dict[str, Any],
+        filename: str | None = None,
+        create: bool = True,
+        replace: bool = False,
+    ) -> None:
+        """Add an entry to the database, committing only when batch size is reached.
+
+        Arguments
+        ---------
+        params : dict
+            Parameters for the database entry.
+        filename : str
+            The filename to associate with the entry.
+        create : bool
+            If False, do not create new entry in the file table.
+        replace : bool
+            If True, replace existing entry if it exists.
+        """
+        # Check if entry already exists to avoid duplicates
+        existing_entries = self.db.inspect(params)
+        if len(existing_entries) == 0:
+            # Add the entry without committing
+            self.db.add_entry(
+                params, filename=filename, create=create, commit=False, replace=replace
+            )
+            self.batch_counter += 1
+
+            # Commit if we've reached the batch size
+            if self.batch_counter >= self.batch_size:
+                self.logger.info(f'Committing batch of {self.batch_counter} operations')
+                self.db.conn.commit()
+                self.batch_counter = 0
+        else:
+            self.logger.debug(f'Entry already exists for {params}, skipping')
+
+    def force_commit(self) -> None:
+        """Force a commit of any pending operations."""
+        if self.batch_counter > 0:
+            self.logger.info(f'Forced commit of {self.batch_counter} batched operations')
+            self.db.conn.commit()
+            self.batch_counter = 0
+
 
 def main(args=None):
     """Entry point for the so-metadata tool."""
