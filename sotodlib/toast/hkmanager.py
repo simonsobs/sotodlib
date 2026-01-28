@@ -2,16 +2,16 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import copy
+import re
 from collections.abc import MutableMapping
 
 import numpy as np
 from scipy.interpolate import CubicSpline, PchipInterpolator
 
-from toast.utils import Logger
+from toast.utils import Logger, replace_byte_arrays, array_equal
 from toast.io.hdf_utils import (
     load_meta_object,
     save_meta_object,
-    replace_unicode_arrays,
 )
 
 from ..io import hkdb
@@ -53,6 +53,17 @@ class HKManager(MutableMapping):
 
     """
 
+    # Exclude the massive HWP and WG housekeeping data by default, since
+    # this information is only used to build the HWP angle and WG calibration
+    # metadata.  Loading these fields dramatically increases the load time
+    # for normal use.  These can still be forcibly loaded by specifying them
+    # in the `plat_fields` list.
+    exclude_by_default = [
+        r"^hwp-.*",
+        r"^wg-.*",
+        r"^acu.acu_udp_stream.*",
+    ]
+
     def __init__(
         self,
         comm=None,
@@ -87,7 +98,7 @@ class HKManager(MutableMapping):
                 # Load data on just one process per group
                 self._load_hk_data(site_root, site_db, site_fields, site_aliases)
 
-        # Load the plot HK data
+        # Load the platform HK data
         if plat_root is not None:
             if plat_db is None:
                 raise RuntimeError("If plat_root is specified, plat_db is required")
@@ -103,6 +114,7 @@ class HKManager(MutableMapping):
     def _load_hk_data(self, root, db, fields, aliases):
         """Helper function to do the actual loading."""
         log = Logger.get()
+        exclude_pat = [re.compile(x) for x in self.exclude_by_default]
         conf = hkdb.HkConfig.from_dict(
             {
                 "hk_root": root,
@@ -127,11 +139,14 @@ class HKManager(MutableMapping):
             # The user is requesting "all" fields.  We will prune this list to exclude
             # fields related to the HWP and wire grid encoders, which are excessively
             # large and rarely used for downstream analysis.
-            # selected = list()
-            # for fld in all_fields:
-            #     if fld ....
-            #         selected.append(fld)
-            selected = all_fields
+            selected = list()
+            for fld in all_fields:
+                keep = True
+                for pat in exclude_pat:
+                    if pat.match(fld) is not None:
+                        keep = False
+                if keep:
+                    selected.append(fld)
         else:
             selected = fields
         # Load the data
@@ -145,11 +160,7 @@ class HKManager(MutableMapping):
         )
         result = hkdb.load_hk(lspec, show_pb=False)
 
-        # If any data contains a numpy array of UTF strings (e.g. '<U9' or similar),
-        # we convert those to an array of fixed-length ASCII strings.  This allows
-        # automatic serialization to HDF5 and causes fewer downstream problems.
-
-        converted = replace_unicode_arrays(result.data)
+        converted = replace_byte_arrays(result.data)
 
         self._internal.update(converted)
         if aliases is not None:
@@ -177,12 +188,24 @@ class HKManager(MutableMapping):
         itrp = CubicSpline(times, vals, extrapolate=True)
         return itrp(self._stamps)
 
-    def memory_use(self):
+    def memory_use(self, threshold=0):
+        """Return the total size of all fields and a string with the breakdown.
+
+        Args:
+            threshold (int):  Only include in the string objects larger than this.
+
+        Returns:
+            (tuple):  The (total size, info string)
+
+        """
         bytes = 0
+        fstr = ""
         for k, v in self._internal.items():
-            bytes += v[0].nbytes
-            bytes += v[1].nbytes
-        return bytes
+            fbytes = v[0].nbytes + v[1].nbytes
+            bytes += fbytes
+            if fbytes > threshold:
+                fstr += f"{k}: {fbytes} bytes\n"
+        return bytes, fstr
 
     # Mapping methods
 
@@ -222,14 +245,14 @@ class HKManager(MutableMapping):
             log.verbose(f"  keys {self._internal} != {other._internal}")
             return False
         for k, v in self._internal.items():
-            try:
-                if not np.allclose(v, other._internal[k]):
-                    log.verbose(f"  data array {v} != {other._internal[k]}")
-                    return False
-            except Exception:
-                if self._internal[k] != other._internal[k]:
-                    log.verbose(f"  data value {v} != {other._internal[k]}")
-                    return False
+            times = v[0]
+            vals = v[1]
+            other_times = other._internal[k][0]
+            other_vals = other._internal[k][1]
+            if not array_equal(times, other_times, log_prefix=f"HKManager {k} times"):
+                return False
+            if not array_equal(vals, other_vals, log_prefix=f"HKManager {k} values"):
+                return False
         if self._aliases != other._aliases:
             log.verbose(f"  aliases {self._aliases} != {other._aliases}")
             return False

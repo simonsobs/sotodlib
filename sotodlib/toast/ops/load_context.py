@@ -24,8 +24,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
-from toast.ops.pipeline import Pipeline
-from toast.utils import Logger, replace_unicode_arrays
+from toast.utils import Logger, replace_byte_arrays
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -639,9 +638,9 @@ class LoadContext(Operator):
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
 
-            # Now that all metadata has been loaded, ensure that all unicode
-            # numpy arrays are converted to fixed-width byte strings.
-            ob._internal = replace_unicode_arrays(ob._internal)
+            # Now that all metadata has been loaded, ensure that all byte strings
+            # are converted to unicode arrays.
+            ob._internal = replace_byte_arrays(ob._internal)
 
             # Optionally load housekeeping data
             if self.hk_site_root is not None or self.hk_platform_root is not None:
@@ -1336,6 +1335,7 @@ class LoadContext(Operator):
                     is_flag=(mask is not None),
                     flag_invert=do_invert,
                     flag_mask=mask,
+                    daq_units=self.daq_units,
                 )
 
         # Original wafer data no longer needed.  AxisManager does not seem to
