@@ -32,7 +32,8 @@ through ``python -m``), add a ``__main__`` handling block like this
 one::
 
   if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    from sotodlib.site_pipeline.utils.pipeline import main_launcher
+    main_launcher(main, get_parser)
 
 
 To register a properly organized submodule in the ``so-site-pipeline``

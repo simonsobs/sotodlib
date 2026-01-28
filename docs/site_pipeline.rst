@@ -1241,10 +1241,46 @@ config
    :members:
    :undoc-members:
 
+
+constants
+`````````
+
+.. automodule:: sotodlib.site_pipeline.utils.constants
+   :members:
+   :undoc-members:
+
+depth1_utils
+````````````
+
+.. automodule:: sotodlib.site_pipeline.utils.depth1_utils
+   :members:
+   :undoc-members:
+
+exceptions
+``````````
+
+.. automodule:: sotodlib.site_pipeline.utils.exceptions
+   :members:
+   :undoc-members:
+
+io
+``
+
+.. automodule:: sotodlib.site_pipeline.utils.io
+   :members:
+   :undoc-members:
+
 logging
 ```````
 
 .. automodule:: sotodlib.site_pipeline.utils.logging
+   :members:
+   :undoc-members:
+
+mapcat
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.mapcat
    :members:
    :undoc-members:
 
