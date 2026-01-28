@@ -15,6 +15,7 @@ from toast.timing import function_timer, Timer
 from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
+from toast.utils import replace_byte_arrays, byte_array_to_unicode
 
 from ...coords import pointing_model
 from ...core import Context, AxisManager
@@ -44,6 +45,7 @@ def read_and_preprocess_wafers(
     ignore_preprocess_archive=False,
     context=None,
     context_file=None,
+    daq_units=False,
 ):
     """Read the wafer data.
 
@@ -63,6 +65,7 @@ def read_and_preprocess_wafers(
         ignore_preprocess_db (bool): Ignore the 'archive' field in the preprocessing configuration.
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
+        daq_units (bool):  If True, convert raw signal back to DAQ units.
 
     Returns:
         (dict):  The AxisManager data for each wafer on this process.
@@ -75,6 +78,8 @@ def read_and_preprocess_wafers(
         rank = 0
     else:
         rank = gcomm.rank
+
+    rescale_to_daq = 2**15 / np.pi
 
     results = dict()
     for wf, reader in wafer_readers.items():
@@ -125,19 +130,17 @@ def read_and_preprocess_wafers(
             # Apply pointing model, UNLESS we are applying a preprocess config
             # on load and that config includes the pointing model
             if "pointing_model" in axtod:
-                if (
-                    preconfig is None
-                    or "pointing_model" not in [i['name'] for i in preconfig["process_pipe"]]
-                ):
+                if preconfig is None or "pointing_model" not in [
+                    i["name"] for i in preconfig["process_pipe"]
+                ]:
                     pointing_model.apply_pointing_model(axtod)
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
                 # Did we already apply it in the preprocessing?
-                if (
-                    preconfig is None
-                    or "hwp_angle_model" not in [i['name'] for i in preconfig["process_pipe"]]
-                ):
+                if preconfig is None or "hwp_angle_model" not in [
+                    i["name"] for i in preconfig["process_pipe"]
+                ]:
                     axtod = apply_hwp_angle_model(axtod)
                     timer.stop()
                     elapsed = timer.seconds()
@@ -158,6 +161,9 @@ def read_and_preprocess_wafers(
                 msg = f"LoadContext {obs_name} apply preproc to {wf}"
                 msg += f" in {elapsed} seconds"
                 log.debug(msg)
+            if daq_units:
+                if "signal" in axtod:
+                    axtod["signal"] *= rescale_to_daq
             results[wf] = axtod
     return results
 
@@ -219,14 +225,16 @@ def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_ba
             field_axes = axman._assignments[key]
             if len(field_axes) == 0:
                 # This data is not associated with an axis.
-                om[key] = axman[key]
+                om[key] = replace_byte_arrays(axman[key])
             elif len(field_axes) == 1 and field_axes[0] == det_axis:
                 # This is a detector property
                 if fp_key in fp_cols:
                     msg = f"Context meta key '{fp_key}' is duplicated in nested"
                     msg += " AxisManagers"
                     raise RuntimeError(msg)
-                fp_cols[fp_key] = Column(name=fp_key, data=np.array(axman[key]))
+                fp_cols[fp_key] = Column(
+                    name=fp_key, data=np.array(byte_array_to_unicode(axman[key]))
+                )
     if obs_base is not None and len(om) == 0:
         # There were no meta data keys- delete this dict
         del obs_meta[obs_base]
@@ -376,6 +384,7 @@ def distribute_detector_data(
     is_flag=False,
     flag_invert=False,
     flag_mask=None,
+    daq_units=False,
 ):
     """Communicate detector data from the reading processes to the destinations.
 
@@ -406,6 +415,7 @@ def distribute_detector_data(
         is_flag (bool):  If True, this field is a flag.
         flag_invert (bool):  If True, invert the meaning of the flag values.
         flag_mask (np.uint8):  The flag mask (or None).
+        daq_units (bool):  If True, AxisManager signal is in DAQ units.
 
     Returns:
         None
@@ -568,8 +578,12 @@ def distribute_detector_data(
                             flag_invert,
                         )
                     else:
+                        if daq_units:
+                            send_data = np.nan_to_num(sdata_2d, nan=-2147483648).astype(np.int32)
+                        else:
+                            send_data = sdata_2d
                         for idet in range(n_send_det):
-                            obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[idet]
+                            obs.detdata[field][idet + recv_dets[0], :] = send_data[idet]
                     # Update per-detector flags
                     dflags = {
                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
@@ -614,8 +628,12 @@ def distribute_detector_data(
                 )
             else:
                 # Just assign
+                if daq_units:
+                    recv_data = np.nan_to_num(recv_2d, nan=-2147483648).astype(np.int32)
+                else:
+                    recv_data = recv_2d
                 for idet in range(n_recv_det):
-                    obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
+                    obs.detdata[field][idet + recv_dets[0], :] = recv_data[idet]
             # Update per-detector flags
             dflags = {
                 obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
@@ -641,7 +659,10 @@ def distribute_detector_data(
     # is printed and the detector is cut.
     dflags = dict()
     for det in obs.local_detectors:
-        nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+        if daq_units:
+            nnan = np.count_nonzero(obs.detdata[field][det] == -2147483648)
+        else:
+            nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
         if nnan > 0:
             msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
             log.warning(msg)
@@ -750,6 +771,7 @@ def compute_boresight_pointing(
         obs.shared[times_key].data[slc],
         bore_azel,
         use_qpoint=True,
+        so3g_compat_mode=True,
     )
 
     # Gather all samples to rank zero and set the shared object elements.
