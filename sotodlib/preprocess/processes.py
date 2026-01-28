@@ -3017,6 +3017,8 @@ class GlitchClassification(_Preprocess):
             n_buffer: 5
             trained_forest_name: "trained_forest"
           save: True
+
+    .. autofunction:: sotodlib.tod_ops.glitch_classification.classify_glitch_stats
     """
     name = "classify_glitches"
 
@@ -3038,11 +3040,8 @@ class GlitchClassification(_Preprocess):
         # get the glitch snippets
         snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.glitches.samps.offset)
 
-        # compute the stats for classification
-        stats = gc.build_dataframe_for_classification(snippets)
-
         # classify the glitches
-        predictions = gc.classify_glitch_stats(stats, trained_forest_name)
+        predictions, stats = gc.classify_snippets(snippets, trained_forest_name)
 
         # wrap the ranges and dets in an axis manager
         snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
