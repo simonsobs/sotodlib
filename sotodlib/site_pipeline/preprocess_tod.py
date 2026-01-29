@@ -310,7 +310,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     total = len(futures)
 
     # batch updates to ManifestDb
-    batch_size = configs['archive'].get('batch_size', 100)
+    batch_size = configs['archive'].get('batch_size', 1)
 
     with ManifestDbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
         pb_name = f"pb_{str(int(time.time()))}.txt"
