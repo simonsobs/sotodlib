@@ -819,7 +819,7 @@ class ManifestDbBatchManager:
                     # Automatically commits every 100 operations
     """
 
-    def __init__(self, db: ManifestDb, batch_size: int = 1, logger: logging.Logger | None = None):
+    def __init__(self, db: ManifestDb, batch_size: int = 100, logger: logging.Logger | None = None):
         """Initialize the batch manager.
 
         Arguments
