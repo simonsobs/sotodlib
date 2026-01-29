@@ -6,7 +6,7 @@ io.ancil
    :inherited-members:
 
 
-Engine configuration
+Module configuration
 --------------------
 
 .. automodule:: sotodlib.io.ancil.configcls
@@ -17,14 +17,23 @@ Engine configuration
 
 .. _io-ancil-engines:
 
-Engines
--------
+Modules
+--------
+
+Housekeeping Data
+``````````````````
+
+.. automodule:: sotodlib.io.ancil.so_hk
+   :members:
+
+APEX radiometer
+```````````````
 
 .. automodule:: sotodlib.io.ancil.apex
    :members:
 
-.. automodule:: sotodlib.io.ancil.pwv
-   :members:
+PWV combinations
+````````````````
 
-.. automodule:: sotodlib.io.ancil.so_hk
+.. automodule:: sotodlib.io.ancil.pwv
    :members:

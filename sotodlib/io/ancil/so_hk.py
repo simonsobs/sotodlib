@@ -1,3 +1,9 @@
+"""This ancil submodule specializes in datastreams saved to SO HK data feeds, including:
+
+- the Toco radiometer data
+
+"""
+
 import h5py
 import logging
 import math

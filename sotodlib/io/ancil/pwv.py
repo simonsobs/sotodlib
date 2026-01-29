@@ -1,3 +1,8 @@
+"""This ancil submodule specializes in combining PWV readings from the
+APEX and Toco radiometers.
+
+"""
+
 #
 # Combine PWV data sources to get PWV stats for each observation.
 #

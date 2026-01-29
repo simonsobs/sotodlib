@@ -12,8 +12,9 @@ from . import ANCIL_ENGINES
 
 def register_engine(token: str, config_class):
     """Class decorator used to register an AncilEngine in
-    ANCIL_ENGINES and to define the config_class class variable.  Use
-    like this::
+    ANCIL_ENGINES and to define the config_class class variable and to
+    annotate the config_class docstring with a reference to the class.
+    Use like this::
 
       @cc.register_engine(cc.MyPreciousDataConfig, 'my-precious')
       class MyPreciousData(base.AncilEngine):
@@ -23,6 +24,10 @@ def register_engine(token: str, config_class):
     def _deco(cls):
         cls.engine_id = token
         cls.config_class = config_class
+        m, n = config_class.__module__, config_class.__name__
+        d = config_class.__doc__
+        config_class.__doc__ += \
+            f"\n\nConfig class for :class:`{m}.{n}`."
         ANCIL_ENGINES[token] = cls
         return cls
     return _deco
@@ -40,16 +45,30 @@ class AncilEngineConfig:
     #: value).
     dataset_name: str = None
 
-    #: Default prefix (directory) for base data archive storage.
+    #: Prefix (directory name) for base data archive storage. This
+    #: is intended to be set externally to some top-level storage
+    #: location for some set of archives.
     data_prefix : str = None
+
+    #: Directory where data archive should be stored. This is taken
+    #: relative to data_prefix, unless an absolute path is specified.
+    #: Subclasses will usually recommend a value.
     data_dir: str = None
 
     #: List of "friend" definitions that the class expects to have
     #: registered.
     friends : field(default_factory=list) = None
 
-    #: Test for obsdb query that finds records needing update
+    #: Format string to use when turning internal field values into
+    #: obsdb column names. This must be None or else include
+    #: ``{field}``; it may also include ``{dataset}``, which will
+    #: be replaced with the ``dataset_name``.
     obsdb_format: str = None
+
+    #: Query string to use on the obsdb for identifying records that
+    #: require an update.  Instead of field names, put each internal
+    #: fieldname as a variable (e.g. ``{mean} is null``) and it will be
+    #: reprocessed according to ``obsdb_format`` spec.
     obsdb_query: str = None
 
 
@@ -85,7 +104,7 @@ class HkExtractConfig(AncilEngineConfig):
     #: defines what fields are extracted and stored in the archive.
     aliases: dict = field(default_factory=dict)
 
-    #: hkdb config filename to target.
+    #: Config file for accessing the relevant hkdb.
     hkdb_config: str = None
 
     #: Number of seconds in each HDF5 base data file.
@@ -108,7 +127,13 @@ class HkExtractConfig(AncilEngineConfig):
     dtypes: dict = field(default_factory=dict)
 
 
-# Specific engine config.
+#
+# Specific engine config classes.
+#
+# Note that the register_engine decorator will automatically add a
+# simple class docstring that links back to the Engine class.
+#
+
 
 @dataclass
 class ApexPwvConfig(LowResTableConfig):
@@ -119,20 +144,27 @@ class ApexPwvConfig(LowResTableConfig):
 
 
 @dataclass
+class TocoPwvConfig(LowResTableConfig):
+    # Overrides.
+    dataset_name: str = 'toco_pwv'
+    obsdb_format: str = '{dataset}_{field}'
+    obsdb_query: str = '{mean} is null and {start} is null and {end} is null'
+
+    #: Config file for accessing the site hkdb.
+    hkdb_config: str = None
+
+
+@dataclass
 class PwvComboConfig(AncilEngineConfig):
     # Overrides.
     dataset_name: str = 'pwv'
     obsdb_format: str = '{dataset}_{field}'
     obsdb_query: str = '{mean} is null'
 
+    #: Name of the friend dataset from which to retrieve Toco
+    #: radiometer data.
     toco_dataset: str = 'toco-pwv'
+
+    #: Name of the friend dataset from which to retrieve APEX
+    #: radiometer data.
     apex_dataset: str = 'apex-pwv'
-
-
-@dataclass
-class TocoPwvConfig(LowResTableConfig):
-    obsdb_query: str = '{mean} is null and {start} is null and {end} is null'
-
-    dataset_name: str = 'toco_pwv'
-    obsdb_format: str = '{dataset}_{field}'
-    hkdb_config: str = None
