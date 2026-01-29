@@ -52,7 +52,8 @@ def _get_config(config_file):
     return cfg
 
 
-def update_base_data(config_file, time_range=None, datasets=None, full_scan=False):
+def update_base_data(config_file, time_range=None, datasets=None,
+                     full_scan=False, verbose=None):
     cfg = _get_config(config_file)
 
     if full_scan:
@@ -69,8 +70,11 @@ def update_base_data(config_file, time_range=None, datasets=None, full_scan=Fals
     logger.info(f'Finished updating base data.')
 
 
-def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
+def update_obsdb(config_file, time_range=None, datasets=None, redo=False,
+                 verbose=None):
     cfg = _get_config(config_file)
+
+    show_pbar = verbose is None or verbose > 0
 
     logger.info(f'Updating obsdb')
     for dataset, engine in _engines_iter(cfg, datasets):
@@ -94,7 +98,7 @@ def update_obsdb(config_file, time_range=None, datasets=None, redo=False):
 
         recs_it = iter(recs)
         while rec_bunch := list(itertools.islice(recs_it, 200)):
-            results = engine.collect(rec_bunch, for_obsdb=True)
+            results = engine.collect(rec_bunch, for_obsdb=True, show_pbar=show_pbar)
             logger.info(f' ... updating obsdb.')
             obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
             for rec, result in zip(rec_bunch, results):
@@ -200,7 +204,9 @@ def main(
     used by some commands.
 
     """
-    if verbose:
+    if verbose is None:
+        verbose = 0
+    if verbose > 0:
         ancil.logger.setLevel(logging.DEBUG)
         logger.handlers[0].setLevel(logging.DEBUG)
 
@@ -213,11 +219,13 @@ def main(
 
     if command == 'update-base-data':
         update_base_data(config_file, datasets=dataset,
-                         time_range=time_range, full_scan=full_scan)
+                         time_range=time_range, full_scan=full_scan,
+                         verbose=verbose)
 
     elif command == 'update-obsdb':
         update_obsdb(config_file, datasets=dataset,
-                     time_range=time_range, redo=redo)
+                     time_range=time_range, redo=redo,
+                     verbose=verbose)
 
     elif command == 'check':
         # Just trial load the config, processors.

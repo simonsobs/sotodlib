@@ -233,7 +233,7 @@ class AncilEngine:
         """
         raise NotImplementedError()
 
-    def collect(self, targets=None, results=None, show_pbar=True, for_obsdb=False):
+    def collect(self, targets=None, results=None, show_pbar=False, for_obsdb=False):
         output = list(self.getter(targets=tqdm(targets, disable=not show_pbar),
                                   results=results))
         remap = self._obsdb_map()
