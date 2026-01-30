@@ -488,7 +488,7 @@ class ManifestDb:
         where_str = ''
         if len(q):
             where_str = 'where %s' % q
-        c.execute('select `%s` ' % ('`,`'.join(cols)) + 
+        c.execute('select `%s` ' % ('`,`'.join(cols)) +
                   'from map join files on map.file_id=files.id %s' % where_str, p)
         rows = c.fetchall()
         rp.insert(0, 'filename')
@@ -664,7 +664,7 @@ class ManifestDb:
         q = f"select distinct {','.join(fields)} from map"
         c = self.conn.execute(q)
         return resultset.ResultSet.from_cursor(c)
-        
+
     def validate(self):
         """
         Checks that the database is following internal rules.
