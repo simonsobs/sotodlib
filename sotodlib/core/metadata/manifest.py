@@ -800,7 +800,7 @@ Examples:
     return parser
 
 
-class ManifestDbBatchManager:
+class DbBatchManager:
     """Batch manager for ManifestDb operations to optimize database commits.
 
     This class wraps an existing ManifestDb instance and batches multiple
@@ -813,10 +813,10 @@ class ManifestDbBatchManager:
             db = ManifestDb('my_database.db')
 
             # Use batch manager to optimize operations
-            with ManifestDbBatchManager(db, batch_size=100) as batch_manager:
+            with DbBatchManager(db, batch_size=100) as manager:
                 for dataset in datasets:
-                    batch_manager.add_entry(dataset_params, filename)
-                    # Automatically commits every 100 operations
+                    manager.add_entry(dataset_params, filename)
+                    # automatically commits every 100 operations
     """
 
     def __init__(self, db: ManifestDb, batch_size: int = 100, logger: logging.Logger | None = None):
@@ -828,19 +828,19 @@ class ManifestDbBatchManager:
             Existing ManifestDb instance to manage.
         batch_size : int
             Number of operations to batch before committing. Default is 100.
-        logger : logging.Logger
-            Optional. Logger object. If None, uses a basic logger.
+        logger : logging.Logger, optional
+            Logger object. If None, uses a basic logger.
         """
         self.db = db
         self.batch_size = batch_size
         self.batch_counter = 0
 
         if logger is None:
-            self.logger = logging.getLogger('ManifestDbBatchManager')
+            self.logger = logging.getLogger('DbBatchManager')
         else:
             self.logger = logger
 
-    def __enter__(self) -> ManifestDbBatchManager:
+    def __enter__(self) -> DbBatchManager:
         """Context manager entry."""
         return self
 
@@ -862,7 +862,7 @@ class ManifestDbBatchManager:
         ---------
         params : dict
             Parameters for the database entry.
-        filename : str
+        filename : str, optional
             The filename to associate with the entry.
         create : bool
             If False, do not create new entry in the file table.
@@ -892,6 +892,91 @@ class ManifestDbBatchManager:
             self.logger.info(f'Forced commit of {self.batch_counter} batched operations')
             self.db.conn.commit()
             self.batch_counter = 0
+
+
+class MultiDbBatchManager:
+    """Batch manager for multiple database operations to optimize commits.
+
+    This class wraps multiple database instances and batches operations
+    before committing to reduce I/O overhead. Each database can have its
+    own batch size.
+
+    Usage:
+        .. code-block:: python
+
+            db1 = ManifestDb('database1.db')
+            db2 = ManifestDb('database2.db')
+            db3 = ManifestDb('database3.db')
+
+            # All databases use the same batch size
+            with MultiDbBatchManager([db1, db2, db3], batch_size=100) as managers:
+                manager1, manager2, manager3 = managers
+                for dataset in datasets:
+                    manager1.add_entry(...)
+                    manager2.add_entry(...)
+                    manager3.add_entry(...)
+
+            # Or use different batch sizes per database
+            with MultiDbBatchManager([db1, db2], batch_size=[100, 50]) as (mgr1, mgr2):
+                mgr1.add_entry(...)
+                mgr2.add_entry(...)
+    """
+
+    def __init__(
+        self,
+        databases: list[ManifestDb],
+        batch_size: int | list[int] = 100,
+        logger: logging.Logger | None = None,
+    ):
+        """Initialize the multi-database batch manager.
+
+        Arguments
+        ---------
+        databases : list
+            List of database instances to manage.
+        batch_size : int or list[int]
+            Batch size(s) for the databases. If an int, same size is used for
+            all databases. If a list, must match the length of databases list.
+            Default is 100.
+        logger : logging.Logger, optional
+            Logger object. If None, uses a basic logger.
+
+        Raises
+        ------
+        ValueError
+            If batch_size is a list but doesn't match databases length.
+        """
+        # Handle batch_size as either int or list
+        if isinstance(batch_size, int):
+            self.batch_sizes = [batch_size] * len(databases)
+        else:
+            if len(batch_size) != len(databases):
+                msg = (
+                    f"batch_size length ({len(batch_size)}) must match "
+                    f"databases length ({len(databases)})"
+                )
+                raise ValueError(msg)
+            self.batch_sizes = batch_size
+
+        # Create individual managers for each database
+        self.managers = [
+            DbBatchManager(db=db, batch_size=size, logger=logger)
+            for db, size in zip(databases, self.batch_sizes)
+        ]
+
+    def __enter__(self) -> tuple:
+        """Context manager entry - returns tuple of individual managers."""
+        return tuple(self.managers)
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Context manager exit - commit all pending operations."""
+        self.force_commit_all()
+        return False
+
+    def force_commit_all(self) -> None:
+        """Force commit of all pending operations across all databases."""
+        for manager in self.managers:
+            manager.force_commit()
 
 
 def main(args=None):

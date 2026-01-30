@@ -1,4 +1,3 @@
-from sotodlib.core.metadata.manifest import ManifestDbBatchManager
 import os
 import yaml
 import time
@@ -15,6 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
+from sotodlib.core.metadata.manifest import DbBatchManager
 from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.obsdb import get_obslist
@@ -312,9 +312,9 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     # batch updates to ManifestDb
     batch_size = configs['archive'].get('batch_size', 1)
 
-    with ManifestDbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
-        pb_name = f"pb_{str(int(time.time()))}.txt"
-        with open(pb_name, 'w') as f:
+    pb_name = f"pb_{str(int(time.time()))}.txt"
+    with open(pb_name, 'w') as f:
+        with DbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
             for future in tqdm(as_completed_callable(futures), total=total,
                             desc="preprocess_tod", file=f,
                             miniters=max(1, total // 100)):
