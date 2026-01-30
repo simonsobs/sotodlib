@@ -247,6 +247,39 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
     P = coords.P.for_tod(tod, sight, **kw)
     return P
 
+def get_each_detcen_P(tod, az, el, sight=None, boresight_centered=False, **kw):
+    """Get a standard Projection Matrix for detector-centered/boresight-centered coordinates.
+    Detector-centered coordinates are useful for beam characterization.
+    Reference/cross polarization follows Ludwig 3-I definition.
+    Currently this function is assumed to apply axismanager that include one detector.
+
+    Args:
+      tod: AxisManager of the observation
+      azpl: azimuth of the target source (rad)
+      el: elevation of the target source (rad)
+      sight: CelestialSightLine object.
+      boresight_centered:
+            If True, the output Projection Matrix is in boresight-centered coordinate system instead.
+
+    Return:
+         a Projection Matrix
+
+    """
+    if sight is None:
+        sight = so3g.proj.CelestialSightLine.for_horizon(tod.timestamps, tod.boresight.az, tod.boresight.el, roll= tod.boresight.roll)
+    pq = so3g.proj.quat.rotation_lonlat(-az, el)
+
+    xieta_gamma0 = so3g.proj.quat.rotation_xieta(tod.focal_plane.xi[0],tod.focal_plane.eta[0],0) # assumed axis manager include one detector.
+    if boresight_centered:
+        detQ = ~sight.Q * pq # fixed Boresight center instead of detector center
+    else:
+        detQ = ~xieta_gamma0 * ~sight.Q * pq # This `~xieta_gamma0` is for moving to center for each detector
+    xis, etas, _  = so3g.proj.quat.decompose_xieta(detQ)
+    sight.Q = so3g.proj.quat.rotation_xieta(xis, etas, 0) * ~xieta_gamma0
+    # Additional `~xieta_gamma0` here is used for cancelling the one that will be accounted for in so3g by default.
+    rot = so3g.proj.quat.rotation_lonlat(0, 0)
+    P = coords.P.for_tod(tod, sight=sight, rot=rot, **kw)
+    return P
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
                        n_modes=10, low_pass=None,
