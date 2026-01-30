@@ -528,6 +528,11 @@ following:
   ``dets:passband`` example above) it can be convenient.  Doing this
   requires including ``obs:obs_id`` (or some other ObsDb column) in
   the dataset.
+- Committing changes to the database (i.e. writing them to disk) can be
+  slow, especially on certain filesystems.  If you are making many
+  updates in a row to the metadata index, consider using
+  :py:class:`ManifestDbBatchManager` (see example there) to reduce I/O
+  overhead.
 
 
 .. _metadata-archives:
@@ -880,6 +885,13 @@ ManifestDb reference
 *The class documentation of ManifestDb should appear below.*
 
 .. autoclass:: ManifestDb
+   :special-members: __init__
+   :members:
+
+ManifestDbBatchManager reference
+--------------------------------
+
+.. autoclass:: ManifestDbBatchManager
    :special-members: __init__
    :members:
 
@@ -1582,7 +1594,7 @@ Alternately, the values of tags can be used in query strings::
   >>> obsdb.query("(hwp_fast==1 and drift=='rising') or (hwp_fast==0 and drift='setting')",
     tags=['hwp_fast'])
   ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 2 rows>
-    
+
 
 Getting a description of a single observation
 ---------------------------------------------
@@ -1606,7 +1618,7 @@ So here we see that the observation is associated with tags
 ``'hwp_fast'`` and ``'cryo_problem'``.
 
 .. _obsdb-names-section:
- 
+
 Standardized ObsDb field names
 ==============================
 
@@ -1828,5 +1840,3 @@ Usage
    :module: sotodlib.core.metadata.cli
    :func: get_parser
    :prog: so-metadata
-
-
