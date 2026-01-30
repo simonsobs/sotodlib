@@ -1384,8 +1384,8 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     overwrite : bool
         Optional. Delete the entry in the archive file if it exists and
         replace it with the new entry.
-    db_manager : ManifestDbBatchManager
-        Optional. External database batch manager for optimized operations.
+    db_manager : DbBatchManager, optional
+        External database batch manager for optimized operations.
         If provided, uses the manager instead of creating individual connections.
     """
 
