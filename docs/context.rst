@@ -531,7 +531,8 @@ following:
 - Committing changes to the database (i.e. writing them to disk) can be
   slow, especially on certain filesystems.  If you are making many
   updates in a row to the metadata index, consider using
-  :py:class:`ManifestDbBatchManager` (see example there) to reduce I/O
+  :py:class:`DbBatchManager` or :py:class:`MultiDbBatchManager`
+  (see examples in their respective API documentations) to reduce I/O
   overhead.
 
 
@@ -888,10 +889,17 @@ ManifestDb reference
    :special-members: __init__
    :members:
 
-ManifestDbBatchManager reference
---------------------------------
+DbBatchManager reference
+------------------------
 
-.. autoclass:: ManifestDbBatchManager
+.. autoclass:: DbBatchManager
+   :special-members: __init__
+   :members:
+
+MultiDbBatchManager reference
+-----------------------------
+
+.. autoclass:: MultiDbBatchManager
    :special-members: __init__
    :members:
 
