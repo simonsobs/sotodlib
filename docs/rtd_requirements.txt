@@ -2,6 +2,3 @@ numpy<2
 matplotlib
 toml
 quaternionarray
-pandas
-sklearn
-scikit
