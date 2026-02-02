@@ -370,7 +370,7 @@ def main(**args):
                 L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
 
                 # sidelobes cuts
-                cutss = sidelobes.sidelobe_cut(obs, args, sidelobe_cutters)
+                cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
                 for cut in cutss:
                     obs.flags.glitch_flags += cut
 
