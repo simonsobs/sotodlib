@@ -4,6 +4,7 @@
 
 import os
 import copy
+import shutil
 
 import numpy as np
 import astropy.units as u
@@ -70,6 +71,12 @@ class ToastContextTest(TestCase):
             return
         world, procs, rank = toast.get_world()
 
+        vol_path = os.path.join(self.outdir, "test_hk")
+        if rank == 0 and os.path.isdir(vol_path):
+            shutil.rmtree(vol_path)
+        if world is not None:
+            world.barrier()
+
         data = simulation_test_data(
             world,
             telescope_name="SAT1",
@@ -109,7 +116,6 @@ class ToastContextTest(TestCase):
         )
         demod_data = demod.apply(data)
 
-        vol_path = os.path.join(self.outdir, "test_hk")
         toast.ops.SaveHDF5(
             volume=vol_path,
             detdata=[
@@ -127,10 +133,10 @@ class ToastContextTest(TestCase):
         toast.ops.LoadHDF5(volume=vol_path).apply(new_data)
 
         for old_ob, new_ob in zip(demod_data.obs, new_data.obs):
-            if old_ob != new_ob:
+            if not old_ob.__eq__(new_ob, approx=True):
                 print(f"OLD: {old_ob} not equal to")
                 print(f"NEW: {new_ob}", flush=True)
-                #self.assertTrue(False)
+                self.assertTrue(False)
 
         close_data_and_comm(new_data)
         close_data_and_comm(demod_data)

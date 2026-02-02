@@ -51,6 +51,28 @@ def get_source_list_fromstr(target_source):
             return isource
     raise ValueError(f'Source "{target_source}" not found in {SOURCE_LIST}.')
 
+def match_fixed_source(source_name):
+    """Match source_name against a regular expression and if it has the
+    format 'Jxxx[+-pmn]yyy', where xxx and yyy are decimal numbers,
+    then RA, Dec = xxx, yyy in degrees will be returned.
+    If it doesn't match, nans are returned as RA and Dec.
+
+    Args:
+        source_name (str): Name of fixed-position source
+    Return:
+        RA (float): Right Ascension of source in degrees
+        Dec (float): Declination of source in degrees
+        match (bool): Whether the source_name match with regular expression
+    """
+    m = re.match(
+        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
+    if m:
+        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
+        ra, dec = float(m['ra_deg']), sign * float(m['dec_deg'])
+        return ra, dec, m
+    else:
+        return np.nan, np.nan, m
+
 class SlowSource:
     """Class to track the time-dependent position of a slow-moving source,
     such as a Solar System planet in equatorial coordinates.
@@ -335,7 +357,8 @@ def _get_astrometric(source_name, timestamp, site="_default", planets=None):
 
     Args:
       source_name: Planet name; in capitalized format, e.g. "Jupiter",
-        or fixed source specification.
+        or fixed source specification with a format 'Jxxx[+-pmn]yyy',
+        where xxx and yyy are decimal numbers of RA, Dec in degrees.
       timestamp: unix timestamp.
       site (str or so3g.proj.EarthlySite): if this is a string, the
         site will be looked up in so3g.proj.SITES dict.
@@ -380,10 +403,15 @@ def _get_astrometric(source_name, timestamp, site="_default", planets=None):
         except (ValueError, KeyError):
             pass
     else:
-        options = list(planets.names().values())
-        raise ValueError(
-            f'Failed to find a match for "{source_name}" in ephemeris: {options}'
-        )
+        ra, dec, m = match_fixed_source(source_name)
+        if m:
+            # convert from degrees to hours
+            target = skyfield_api.Star(ra_hours=ra/15., dec_degrees=dec)
+        else:
+            options = list(planets.names().values())
+            raise ValueError(
+                f'Failed to find a match for "{source_name}" in ephemeris: {options}'
+            )
 
     if isinstance(site, str):
         site = so3g.proj.SITES[site]
@@ -426,14 +454,10 @@ def get_source_pos(source_name, timestamp, site='_default'):
 
     """
     # Check against fixed-position template...
-    m = re.match(
-        r'[jJ](?P<ra_deg>\d+(\.\d*)?)(?P<dec_sign>[+-pmn])(?P<dec_deg>\d+(\.\d*)?)', source_name)
+    ra, dec, m = match_fixed_source(source_name)
     if m:
-        sign = (-1)**(m['dec_sign'] in ['-', 'm', 'n'])
-        ra, dec = float(m['ra_deg']) * \
-            coords.DEG, sign * float(m['dec_deg']) * coords.DEG
-        return ra, dec, float('inf')
-    
+        return ra * coords.DEG, dec * coords.DEG, float('inf')
+
     # Derive from skyfield astrometric object
     planets, amet0 = _get_astrometric(source_name, timestamp, site)
     ra, dec, distance = amet0.radec()

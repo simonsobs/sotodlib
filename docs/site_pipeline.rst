@@ -1215,9 +1215,55 @@ API
 Support
 =======
 
-.. automodule:: sotodlib.site_pipeline.util
+utils
+-----
+
+Utilities for site_pipeline.
+
+alerts
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.alerts
    :members:
    :undoc-members:
+
+archive
+```````
+
+.. automodule:: sotodlib.site_pipeline.utils.archive
+   :members:
+   :undoc-members:
+
+config
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.config
+   :members:
+   :undoc-members:
+
+logging
+```````
+
+.. automodule:: sotodlib.site_pipeline.utils.logging
+   :members:
+   :undoc-members:
+
+obsdb
+`````
+
+.. automodule:: sotodlib.site_pipeline.utils.obsdb
+   :members:
+   :undoc-members:
+
+pipeline
+````````
+
+.. automodule:: sotodlib.site_pipeline.utils.pipeline
+   :members:
+   :undoc-members:
+
+jobdb
+-----
 
 .. automodule:: sotodlib.site_pipeline.jobdb
    :members:
