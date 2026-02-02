@@ -11,7 +11,7 @@ maintainers = [
   {name = "Simons Observatory Collaboration"},
   {email = "so_software@simonsobservatory.org"},
 ]
-requires-python = ">=3.9, <3.13"
+requires-python = ">=3.10, <3.14"
 dependencies = [
   "numpy",
   "scipy",
@@ -37,10 +37,10 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering :: Astronomy",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
@@ -56,6 +56,7 @@ site_pipeline = [
   "pandas",
   "alphashape",
   "slack-sdk",
+  "requests",
 ]
 tests = [
   "socs",

@@ -21,14 +21,15 @@ from scipy.optimize import curve_fit, minimize
 from datetime import datetime
 import argparse as ap
 import yaml
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from dataclasses import dataclass
 import matplotlib
 matplotlib.use('agg')
 
 opj = os.path.join
 
-logger = util.init_logger(__name__)
+logger = init_logger(__name__)
 
 
 def find_source(
@@ -1296,4 +1297,4 @@ def get_parser(parser=None):
 
 
 if __name__ == "__main__":
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

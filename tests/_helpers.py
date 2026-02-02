@@ -144,7 +144,7 @@ def observing_schedule(telescope, mpicomm=None, temp_dir=None):
                 "--start",
                 "2025-01-01 00:00:00",
                 "--stop",
-                "2025-01-01 03:00:00",
+                "2025-01-01 03:30:00",  # yields 4 observations
                 "--out",
                 sch_file,
             ]
@@ -198,7 +198,7 @@ def calibration_schedule(telescope):
     return schedule
 
 
-def create_comm(mpicomm):
+def create_comm(mpicomm, groupsize=None):
     """Create a toast communicator.
 
     Use the specified MPI communicator to attempt to create 2 process groups.
@@ -218,9 +218,10 @@ def create_comm(mpicomm):
         toastcomm = toast.Comm(world=mpicomm)
     else:
         worldsize = mpicomm.size
-        groupsize = 1
-        if worldsize >= 2:
-            groupsize = worldsize // 2
+        if groupsize is None:
+            groupsize = 1
+            if worldsize >= 2:
+                groupsize = worldsize // 2
         toastcomm = toast.Comm(world=mpicomm, groupsize=groupsize)
     return toastcomm
 
@@ -237,6 +238,7 @@ def simulation_test_data(
     el_nods=[-1 * u.degree, 1 * u.degree],
     thin_fp=4,
     cal_schedule=False,
+    groupsize=None,
 ):
     """Create a data object with a simple ground sim.
 
@@ -257,7 +259,7 @@ def simulation_test_data(
         raise RuntimeError("TOAST is not importable, cannot simulate test data")
 
     # Create the communicator
-    toastcomm = create_comm(mpicomm)
+    toastcomm = create_comm(mpicomm, groupsize=groupsize)
 
     hwp_rpm = 120.0
     hwp_name = defaults.hwp_angle
@@ -305,6 +307,7 @@ def simulation_test_data(
         scan_accel_az=3 * u.degree / u.second ** 2,
         use_ephem=False,
         use_qpoint=True,
+        so3g_compat_mode=True,
     )
     sim_ground.apply(data)
 

@@ -86,6 +86,8 @@ def get_weights(args, obs):
         cl_bb = spec["cl_BB"].to_value(u.uK**2)
         high_mean = np.mean(cl_bb[ell_high])
         low_mean = np.mean(cl_bb[ell_slc])
+        if np.isnan(low_mean) or np.isnan(high_mean) or low_mean == 0:
+            continue
         noise[oindex] = low_mean
         weights[oindex] = high_mean / low_mean
         print(

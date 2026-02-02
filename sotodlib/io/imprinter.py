@@ -30,7 +30,7 @@ from .load_smurf import (
 from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
-from ..site_pipeline.util import init_logger
+from ..site_pipeline.utils.logging import init_logger
 
 
 ####################
@@ -81,6 +81,14 @@ class FileTooLargeError(Exception):
     """Exception raised when we find level 2 files that are larger than our
     maximum allowable sizes"""
     pass
+
+MIN_OBS_BOOK_DURATION = 60
+class ObsBookTooShort(Exception):
+    """Exception raised when asked to bind an observation book less than
+    MIN_OBS_BOOK_DURATION long. We throw an exception instead of not registering them so
+    that we can set them as won't bind, and then get the files passed into stray."""
+    pass
+
 
 ###################
 # database schema #
@@ -676,6 +684,14 @@ class Imprinter:
 
         if book.type in ["obs", "oper"]:
             book_path = self.get_book_abs_path(book)
+
+            if book.type == "obs":
+                book_dur = (book.stop-book.start).total_seconds()
+                if book_dur < MIN_OBS_BOOK_DURATION:
+                    raise ObsBookTooShort(
+                        f"{book.bid} only {book_dur} seconds long. Too short for "
+                        f"an observation book"
+                    )
 
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
@@ -1541,8 +1557,8 @@ class Imprinter:
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
                 )
             if np.any(checks):
-                self.logger.warning(
-                    f"Found {sum(checks)} channels without readout_id. Were fixed tones running?"
+                self.logger.info(
+                    f"Found {sum(checks)} channels without readout_id. Assume fixed tones are running."
                 )
             # make sure all rchannel ids are sorted
             assert list(ch_info.rchannel) == sorted(ch_info.rchannel)

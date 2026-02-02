@@ -493,7 +493,7 @@ def write_demod_maps(prefix, data, info, unit='K', split_labels=['full']):
             data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                               data.wmap[n_split], unit=unit+'^-1')
             data.signal.write(prefix, "%s_weights"%split_labels[n_split],
-                              data.weights[n_split], unit=unit+'^2')
+                              data.weights[n_split], unit=unit+'^-2')
             data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                               data.signal.hits[n_split], unit='hits')
 
@@ -504,7 +504,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
                     unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
-                    apply_wobble=True):
+                    apply_wobble=True, compress=True):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -566,6 +566,8 @@ def make_demod_map(context, obslist, noise_model, info,
     apply_wobble : bool, optional
         Correct wobble deflection. This requires aman.wobble_params metadata in the
         context
+    compress : bool, optional
+        If running preprocessing from scratch, whether to compress the files
 
     Returns
     -------
@@ -604,14 +606,15 @@ def make_demod_map(context, obslist, noise_model, info,
     for oi in range(len(obslist)):
         obs_id, detset, band = obslist[oi][:3]
         name = "%s:%s:%s" % (obs_id, detset, band)
-        error, output_init, output_proc, obs = preprocess_util.preproc_or_load_group(obs_id,
+        obs, output_init, output_proc, error = preprocess_util.preproc_or_load_group(obs_id,
                                                 configs_init=preproc_init,
                                                 configs_proc=preproc_proc,
                                                 dets={'wafer_slot':detset, 'wafer.bandpass':band},
                                                 logger=L,
-                                                overwrite=False)
-        errors.append(error) ; outputs.append((output_init, output_proc)) ;
-        if error not in [None,'load_success']:
+                                                overwrite=False,
+                                                compress=compress)
+        errors.append(error[0]) ; outputs.append((output_init, output_proc)) ;
+        if error[0] not in [None,'load_success']:
             L.info('tod %s:%s:%s failed in the preproc database'%(obs_id,detset,band))
             continue
         obs.wrap("weather", np.full(1, "toco"))
@@ -624,6 +627,16 @@ def make_demod_map(context, obslist, noise_model, info,
     n_dets = comm.allreduce(n_dets)
     for subinfo in info:
         subinfo['number_dets'] = n_dets
+
+        # Blindly add *all* scalars in this aman to sub_info.
+        # The ones in the AtomicInfo class will be automatically added to the AtomicInfo, the others ignored.
+        info_aman_name = 'preprocess.split_flags'
+        if obs is not None and info_aman_name in obs:
+            info_aman = obs[info_aman_name]
+            for info_entry in info_aman.keys():
+                if np.isscalar(info_aman[info_entry]):
+                    if info_entry not in subinfo:  # Don't overwrite existing entries
+                        subinfo[info_entry] = info_aman[info_entry]
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
         return errors, outputs, None

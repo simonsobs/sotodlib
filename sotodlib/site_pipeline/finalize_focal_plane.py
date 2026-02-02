@@ -30,9 +30,9 @@ from sotodlib.coords.fp_containers import (
 from sotodlib.coords.pointing_model import apply_pointing_model
 from sotodlib.core import AxisManager, Context, IndexAxis, metadata
 from sotodlib.io.metadata import read_dataset
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
 
-logger = util.init_logger(__name__, "finalize_focal_plane: ")
+logger = init_logger(__name__, "finalize_focal_plane: ")
 
 
 def _create_db(filename, per_obs, obs_ids, start_time, stop_time):

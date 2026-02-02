@@ -6,7 +6,7 @@ import datetime as dt
 from typing import Optional
 from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.alerts import send_alert
 
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -100,7 +100,7 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
             print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
-            alert = sp_util.send_alert(alert_webhook, alertname=book.bid, tag='bookbinder', error=str(e), timestamp=book.start)
+            alert = send_alert(alert_webhook, alertname=book.bid, tag='bookbinder', error=str(e), timestamp=book.start)
             print(alert)
 
 
