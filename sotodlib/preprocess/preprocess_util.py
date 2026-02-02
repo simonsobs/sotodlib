@@ -734,7 +734,15 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
             aman = context_init.get_obs(meta_proc, no_signal=True)
+
+            # One needs to correct HWP model and gamma
+            # before loading in the simulated map
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
+            if hasattr(aman.det_info, "wiregrid_cal"):
+                aman.move(
+                    name="det_info.wiregrid_cal.gamma",
+                    new_name="focal_plane.gamma"
+                )
             aman.move("signal", None)
 
             logger.info("Reading in simulated map")
