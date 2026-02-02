@@ -115,6 +115,7 @@ def reduce_data(job, otherargs, runargs, data):
     if job.operators.splits.enabled:
         wrk.splits(job, otherargs, runargs, data)
     else:
+        wrk.median_detrend(job, otherargs, runargs, data)
         wrk.mapmaker_ml(job, otherargs, runargs, data)
         wrk.mapmaker(job, otherargs, runargs, data)
         wrk.mapmaker_filterbin(job, otherargs, runargs, data)
@@ -249,6 +250,7 @@ def main():
     wrk.setup_cadence_map(operators)
     wrk.setup_crosslinking_map(operators)
 
+    wrk.setup_median_detrend(operators)
     wrk.setup_mapmaker_ml(operators)
     wrk.setup_mapmaker(operators, templates)
     wrk.setup_mapmaker_filterbin(operators)

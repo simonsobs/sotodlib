@@ -289,8 +289,8 @@ class ObsDb(object):
                 placeholders = ', '.join(['?'] * (len(obs_key) + 1))
                 c.execute(f'INSERT OR REPLACE INTO tags ({columns}) VALUES ({placeholders})',
                             tuple(obs_key.values()) + (t,))
-            if commit:
-                self.conn.commit()
+        if commit:
+            self.conn.commit()
         return self
 
     def copy(self, map_file=None, overwrite=False):
@@ -410,7 +410,14 @@ class ObsDb(object):
 
           When filtering is activated in this way, the returned
           results must satisfy all the criteria (i.e. the individual
-          constraints are AND-ed).
+          constraints are AND-ed). If your tag name contains special 
+          characters (e.g. '-'), you will need to enclose it in 
+          backticks when using it in a query string, e.g.:
+ 
+            obsdb.query('`bad-tag`=1', tags=['bad-tag'])
+
+          For this reason, we generally advise against the use of 
+          non-alphanumeric characters in tags.
 
         """
         sort_text = ''
@@ -431,14 +438,14 @@ class ObsDb(object):
                     val = None
                 if val is None:
                     join_type = 'left join'
-                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as {t}")
+                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
                 elif val == '0':
                     join_type = 'left join'
-                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as {t}")
-                    query_text += f' and {t}==0'
+                    extra_fields.append(f"ifnull(tt{tagi}.obs_id,'') != '' as '{t}'")
+                    query_text += f' and "{t}"=0'
                 else:
                     join_type = 'join'
-                    extra_fields.append(f'1 as {t}')
+                    extra_fields.append(f'1 as "{t}"')
                 joins += (f" {join_type} (select distinct obs_id from tags where tag='{t}') as tt{tagi} on "
                           f"obs.obs_id = tt{tagi}.obs_id")
         extra_fields = ''.join([','+f for f in extra_fields])
