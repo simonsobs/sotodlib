@@ -257,12 +257,12 @@ def _main(
                         futures.remove(future)
 
                     enmap.write_map(map_fits_file, data.w)
-                    f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10)
+                    f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
                     enplot.write(map_png_file, f[0])
                 else:
                     data.w = enmap.read_map(map_fits_file)
                     if not os.path.exists(map_png_file):
-                        f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10)
+                        f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
                         enplot.write(map_png_file, f[0])
 
             if not os.path.exists(report_file) or cfg.overwrite_html and not cfg.skip_html:
