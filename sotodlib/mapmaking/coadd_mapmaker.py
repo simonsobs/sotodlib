@@ -174,7 +174,13 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     if lower_interval:
         logger.debug('Attempting to coadd from existing coadded maps')
         with settings.session() as session:
-            statement = select(AtomicMapCoaddTable).where((AtomicMapCoaddTable.interval == lower_interval) & (AtomicMapCoaddTable.platform == platform) & (AtomicMapCoaddTable.freq_channel == band) & (AtomicMapCoaddTable.split_label == split_label) & (AtomicMapCoaddTable.start_time >= start_time) & (AtomicMapCoaddTable.stop_time <= stop_time))
+            statement = select(AtomicMapCoaddTable)
+            statement = statement.where(AtomicMapCoaddTable.interval == lower_interval)
+            statement = statement.where(AtomicMapCoaddTable.platform == platform)
+            statement = statement.where(AtomicMapCoaddTable.freq_channel == band)
+            statement = statement.where(AtomicMapCoaddTable.split_label == split_label)
+            statement = statement.where(AtomicMapCoaddTable.start_time >= start_time)
+            statement = statement.where(AtomicMapCoaddTable.stop_time <= stop_time)
             maps = session.execute(statement).scalars().all()
             map_ids = [m.coadd_id for m in maps]
         
@@ -186,15 +192,31 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     if coadd_atomic:
         with settings.session() as session:
             if '+' in band:
-                statement = select(AtomicMapTable).where((AtomicMapTable.telescope == platform) & (AtomicMapTable.split_label == split_label) & (AtomicMapTable.ctime >= start_time) & (AtomicMapTable.ctime <= stop_time))
+                statement = select(AtomicMapTable)
+                statement = statement.where(AtomicMapTable.telescope == platform)
+                statement = statement.where(AtomicMapTable.split_label == split_label)
+                statement = statement.where(AtomicMapTable.ctime >= start_time)
+                statement = statement.where(AtomicMapTable.ctime <= stop_time)
             else:
-                statement = select(AtomicMapTable).where((AtomicMapTable.telescope == platform) & (AtomicMapTable.freq_channel == band) & (AtomicMapTable.split_label == split_label) & (AtomicMapTable.ctime >= start_time) & (AtomicMapTable.ctime <= stop_time))
+                statement = select(AtomicMapTable)
+                statement = statement.where(AtomicMapTable.telescope == platform)
+                statement = statement.where(AtomicMapTable.freq_channel == band)
+                statement = statement.where(AtomicMapTable.split_label == split_label)
+                statement = statement.where(AtomicMapTable.ctime >= start_time)
+                statement = statement.where(AtomicMapTable.ctime <= stop_time)
             maps = session.execute(statement).scalars().all()
             map_ids = [m.atomic_map_id for m in maps]
     
     if not overwrite:
         with settings.session() as session:
-            statement = select(AtomicMapCoaddTable).where((AtomicMapCoaddTable.interval == interval) & (AtomicMapCoaddTable.platform == platform) & (AtomicMapCoaddTable.freq_channel == band) & (AtomicMapCoaddTable.split_label == split_label) & (AtomicMapCoaddTable.start_time == start_time) & (AtomicMapCoaddTable.stop_time == stop_time)).order_by(AtomicMapCoaddTable.coadd_id.desc())
+            statement = select(AtomicMapCoaddTable)
+            statement = statement.where(AtomicMapCoaddTable.interval == interval)
+            statement = statement.where(AtomicMapCoaddTable.platform == platform)
+            statement = statement.where(AtomicMapCoaddTable.freq_channel == band)
+            statement = statement.where(AtomicMapCoaddTable.split_label == split_label)
+            statement = statement.where(AtomicMapCoaddTable.start_time == start_time)
+            statement = statement.where(AtomicMapCoaddTable.stop_time == stop_time)
+            statement = statement.order_by(AtomicMapCoaddTable.coadd_id.desc())
             coadd = session.execute(statement).scalars().first()
             if coadd is not None:
                 atomic_parent_ids = [a.atomic_map_id for a in coadd.atomic_maps]
