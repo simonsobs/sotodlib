@@ -375,8 +375,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
     # ensure dbs exist up front to prevent race conditions
-    pp_util.get_preprocess_db(configs_init, group_by, logger)
-    pp_util.get_preprocess_db(configs_proc, group_by, logger)
+    db_init = pp_util.get_preprocess_db(configs_init, group_by, logger)
+    db_proc = pp_util.get_preprocess_db(configs_proc, group_by, logger)
 
     futures = []
     futures_dict = {}
@@ -401,56 +401,64 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
+    batch_size_init = configs_init['archive'].get('batch_size', 1)
+    batch_size_proc = configs_proc['archive'].get('batch_size', 1)
+
     pb_name = f"pb_{str(int(time.time()))}.txt"
     with open(pb_name, 'w') as f:
-        for future in tqdm(as_completed_callable(futures), total=total,
-                               desc="multilayer_preprocess_tod", file=f,
-                               miniters=max(1, total // 100)):
-            obs_id, group = futures_dict[future]
-            out_meta = (obs_id, group)
-            try:
-                out_dict_init, out_dict_proc, errors = future.result()
-                obs_errors[obs_id].append({'group': group, 'error': errors[0]})
-                logger.info(f"{obs_id}: {group} extracted successfully")
-            except Exception as e:
-                errmsg, tb = PreprocessErrors.get_errors(e)
-                logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
-                obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-                out_dict_init = None
-                out_dict_proc = None
-                errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
+        with MultiDbBatchManager(
+            [db_init, db_proc], batch_sizes=[batch_size_init, batch_size_proc], logger=logger
+        ) as (db_mgr_init, db_mgr_proc):
+            for future in tqdm(as_completed_callable(futures), total=total,
+                                desc="multilayer_preprocess_tod", file=f,
+                                miniters=max(1, total // 100)):
+                obs_id, group = futures_dict[future]
+                out_meta = (obs_id, group)
+                try:
+                    out_dict_init, out_dict_proc, errors = future.result()
+                    obs_errors[obs_id].append({'group': group, 'error': errors[0]})
+                    logger.info(f"{obs_id}: {group} extracted successfully")
+                except Exception as e:
+                    errmsg, tb = PreprocessErrors.get_errors(e)
+                    logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
+                    obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
+                    out_dict_init = None
+                    out_dict_proc = None
+                    errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
-            futures.remove(future)
+                futures.remove(future)
 
-            # only run if first layer was run
-            if out_dict_init is not None:
-                logger.info(f"Adding future result to init db for {obs_id}: {group}")
-                pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
-                                      configs_init, logger, overwrite)
-            logger.info(f"Adding future result to proc db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
-                                  configs_proc, logger, overwrite)
+                # only run if first layer was run
+                if out_dict_init is not None:
+                    logger.info(f"Adding future result to init db for {obs_id}: {group}")
+                    pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
+                                        configs_init, logger, overwrite,
+                                        db_manager=db_mgr_init)
+                logger.info(f"Adding future result to proc db for {obs_id}: {group}")
+                pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
+                                    configs_proc, logger, overwrite,
+                                    db_manager=db_mgr_proc)
 
-            # update jobdb
-            if jobdb_path is not None:
-                tags = {}
-                tags["obs:obs_id"] = obs_id
-                for gb, g in zip(group_by, group):
-                    tags['dets:' + gb] = g
-                jobs = jdb.get_jobs(jstate=JState.open, tags=tags)
+                # update jobdb
+                if jobdb_path is not None:
+                    tags = {}
+                    tags["obs:obs_id"] = obs_id
+                    for gb, g in zip(group_by, group):
+                        tags['dets:' + gb] = g
+                    jobs = jdb.get_jobs(jstate=JState.open, tags=tags)
 
-                for job in jobs:
-                    # init layer state will be JState.done if already run
-                    if job.jstate == JState.open:
-                        with jdb.locked(job) as j:
-                            j.mark_visited()
-                            if errors[0] is not None:
-                                j.jstate = JState.failed
-                                for _t in j._tags:
-                                    if _t.key == "error":
-                                        _t.value = errors[0]
-                            else:
-                                j.jstate = JState.done
+                    for job in jobs:
+                        # init layer state will be JState.done if already run
+                        if job.jstate == JState.open:
+                            with jdb.locked(job) as j:
+                                j.mark_visited()
+                                if errors[0] is not None:
+                                    j.jstate = JState.failed
+                                    for _t in j._tags:
+                                        if _t.key == "error":
+                                            _t.value = errors[0]
+                                else:
+                                    j.jstate = JState.done
     if raise_error:
         n_obs_fail = 0
         n_groups_fail = 0

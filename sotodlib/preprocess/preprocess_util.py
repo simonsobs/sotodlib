@@ -19,8 +19,7 @@ from sotodlib.site_pipeline.jobdb import JState
 from sotodlib.core.util import H5ContextManager
 
 from .. import core
-
-from . import _Preprocess, Pipeline, processes
+from . import Pipeline
 
 
 class PreprocessErrors:
@@ -1380,7 +1379,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     return aman, out_dict_init, out_dict_proc, (None, None, None)
 
 
-def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False):
+def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=False, db_manager=None):
     """Function to update the manifest db when data is collected from the
     ``preproc_or_load_group`` function. If used in an mpi framework this
     function is expected to be run from rank 0 after a ``comm.gather``.
@@ -1403,6 +1402,8 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
          A tuple containing the error from PreprocessError, an error message,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
+    out_meta : tuple
+        The tuple (obs_id, group).
     outputs : dict
         Dictionary including entries for the temporary h5 filename
         ('temp_file') and the obs_id group metadata and db entry (db_data).
@@ -1414,12 +1415,18 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
     overwrite : bool
         Optional. Delete the entry in the archive file if it exists and
         replace it with the new entry.
+    db_manager : DbBatchManager, optional
+        External database batch manager for optimized operations.
+        If provided, uses the manager instead of creating individual connections.
     """
 
     if logger is None:
         logger = init_logger("preprocess")
 
     if out_dict is not None and os.path.isfile(out_dict['temp_file']):
+        obs_id, group = out_meta
+        logger.info(f"Adding future result to db for {obs_id}: {group}")
+
         # Expects archive policy filename to be <path>/<filename>.h5 and then this adds
         # <path>/<filename>_<xxx>.h5 where xxx is a number that increments up from 0
         # whenever the file size exceeds 10 GB.
@@ -1448,11 +1455,18 @@ def cleanup_mandb(out_dict, out_meta, errors, configs, logger=None, overwrite=Fa
                     for member in f_src[dts]:
                         if isinstance(f_src[f'{dts}/{member}'], h5py.Dataset):
                             f_src.copy(f_src[f'{dts}/{member}'], f_dest[f'{dts}'], f'{dts}/{member}')
-        db = get_preprocess_db(configs, group_by, logger)
-        if len(db.inspect(out_dict['db_data'])) == 0:
-            db.add_entry(out_dict['db_data'], h5_path)
-        # make sure we close the db each time
-        db.conn.close()
+
+        if db_manager is not None:
+            # Use the batch manager
+            db_manager.add_entry(out_dict['db_data'], h5_path)
+        else:
+            # Use the original approach for backward compatibility
+            db = get_preprocess_db(configs, group_by, logger)
+            if len(db.inspect(out_dict['db_data'])) == 0:
+                db.add_entry(out_dict['db_data'], h5_path)
+            # make sure we close the db each time
+            db.conn.close()
+
         os.remove(src_file)
     elif (
         errors[0] == PreprocessErrors.LoadSuccess or
