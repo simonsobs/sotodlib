@@ -61,7 +61,7 @@ jobs:
 
       - name: Install sotodlib
         run: |
-          python3 -m pip install -vv .[all]
+          python3 -m pip install -vv .[site_pipeline,test]
 
       - name: Run Serial Tests
         run: |
