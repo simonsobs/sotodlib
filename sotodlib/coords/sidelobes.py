@@ -3,7 +3,7 @@ from pixell import enmap, utils, coordsys
 from sotodlib import coords, mapmaking
 import so3g
 
-def sidelobe_cut(obs, args, sidelobe_cutters, object_list=None):
+def get_cuts(aman, args, sidelobe_cutters=None, object_list=None):
     """
     Function to calculate cuts (RangesMatrix) for Sun and Moon
     from a binary sidelobe mask with an arbitrary shape.
@@ -12,20 +12,20 @@ def sidelobe_cut(obs, args, sidelobe_cutters, object_list=None):
     
     Parameters
     ----------
-    obs : sotodlib.core.AxisManager
+    aman : sotodlib.core.AxisManager
         An observation axis manager.
     args : dict
         An argument dictionary, which must contains the path to the
-        masks in mask_sun and mask_moon. This is only used for these
+        masks in sun_mask and moon_mask. This is only used for these
         paths.
-    sidelobe_cutters : dict
+    sidelobe_cutters : dict, optional
         A dict holding SidelobeCutter for each sun and moon. In the
         first run this should be empty and will be filled. Subsequent
         runs will use these precalculated objects.
     object_list : list, optional
-        A list of the objects we want to mask. If None, sun and moon
-        will be run.
-    
+        A list of strings indicating the objects to mask.
+        If None, sun and moon will be run.
+
     Returns
     -------
     cutss : list
@@ -34,18 +34,19 @@ def sidelobe_cut(obs, args, sidelobe_cutters, object_list=None):
     """
     
     if object_list is None: object_list = ["sun", "moon"]
+    if sidelobe_cutters is None: sidelobe_cutters = {}
     cutss = []
     for name in object_list:
         if name not in sidelobe_cutters:
             fname = args[name + "_mask"]
             if not fname: raise ValueError("config setting %s_mask missing for sidelobe cut" % name)
-            sidelobe_cutters[name] = SidelobeCutter(fname, objname=name, dtype=obs.signal.dtype)
+            sidelobe_cutters[name] = SidelobeCutter(fname, objname=name, dtype=aman.signal.dtype)
         cutter = sidelobe_cutters[name]
-        cuts   = cutter.make_cuts(obs)
+        cuts   = cutter.make_cuts(aman)
         cutss.append(cuts)
     return cutss
 
-def Simplecut(ndets, nsamps):
+def _simple_cut(ndets, nsamps):
     return so3g.proj.RangesMatrix.zeros((ndets,nsamps))
 
 class SidelobeCutter:
@@ -58,39 +59,25 @@ class SidelobeCutter:
         self.rise_tol = rise_tol
         self.dtype = dtype
     
-    def make_cuts(self, obs):
+    def make_cuts(self, aman):
         # First check if the object is above the horizon. We just check the endpoints
         # to keep things simple
-        ts    = obs.timestamps[[0,-1]]
-        hor   = coordsys.transform(self.sys_pixell, "hor", coordsys.Coords(ra=0, dec=0), ctime=ts, site="so", weather=mapmaking.unarr(obs.weather))
+        ts    = aman.timestamps[[0,-1]]
+        hor   = coordsys.transform(self.sys_pixell, "hor", coordsys.Coords(ra=0, dec=0), ctime=ts, site="so", weather=mapmaking.unarr(aman.weather))
         risen = np.any(hor.el > self.rise_tol)
-        if not risen: return Simplecut(obs.signal.shape[0], obs.signal.shape[1])
+        if not risen: return _simple_cut(aman.signal.shape[0], aman.signal.shape[1])
         # Ok, it's above the horizon, check which samples are affected
-        try:
-            recenter = mapmaking.parse_recentering(self.sys_sotodlib)
-            rot = mapmaking.recentering_to_quat_lonlat(*mapmaking.evaluate_recentering(
-                recenter, ctime=obs.timestamps[len(obs.timestamps) // 2],
-                geom=(self.lmap.shape, self.lmap.wcs),
-                site=mapmaking.unarr(obs.site),
-            ))
-            pmat = coords.pmat.P.for_tod(obs, comps='T', geom=(self.lmap.shape, self.lmap.wcs),
-                rot=rot, threads="domdir", weather=mapmaking.unarr(obs.weather),
-                site=mapmaking.unarr(obs.site)
-            )
-            tod  = np.zeros(obs.signal.shape[:2], dtype=self.dtype)
-            forward(tod, self.lmap, pmat)
-        except RuntimeError:
-            # This happens when the interpolated pointing ends up outside the -npix:+2npix range
-            # that gpu_mm allows. This can happen when a detector moves too close to the north pole
-            # in the object-centered coordinates, which in CAR makes it seem to teleport by 180
-            # degrees. When combined with unwinding, some jumps being sligthly less than 180 and
-            # some slightly more than 180 can lead to the numbers drifting over a large range.
-            # It might be better to catch this by just looking for values too close to the poles
-            # explicitly instead of relying on gpu_mm to catch things itself
-            #L.print("Error cutting %s sidelobes for %s: Pointing overflow. Skipping cut" % (self.objname, id), level=2, color=colors.red)
-            return Simplecut(obs.signal.shape[0], obs.signal.shape[1])
+        recenter = mapmaking.parse_recentering(self.sys_sotodlib)
+        rot = mapmaking.recentering_to_quat_lonlat(*mapmaking.evaluate_recentering(
+            recenter, ctime=aman.timestamps[len(aman.timestamps) // 2],
+            geom=(self.lmap.shape, self.lmap.wcs),
+            site=mapmaking.unarr(aman.site),
+        ))
+        pmat = coords.pmat.P.for_tod(aman, comps='T', geom=(self.lmap.shape, self.lmap.wcs),
+            rot=rot, threads="domdir", weather=mapmaking.unarr(aman.weather),
+            site=mapmaking.unarr(aman.site)
+        )
+        tod  = np.zeros(aman.signal.shape[:2], dtype=self.dtype)
+        pmat.from_map(dest=tod, signal_map=self.lmap, comps="T",)
         cuts = so3g.proj.RangesMatrix.from_mask(tod.astype(int)) #here the mask is expected to be int
         return cuts
-
-def forward(tod, map, pmat):
-    pmat.from_map(dest=tod, signal_map=map, comps="T",)

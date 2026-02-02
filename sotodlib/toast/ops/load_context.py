@@ -24,8 +24,7 @@ from toast.traits import (
     Float,
 )
 from toast.ops.operator import Operator
-from toast.ops.pipeline import Pipeline
-from toast.utils import Logger
+from toast.utils import Logger, replace_byte_arrays
 from toast.dist import distribute_discrete
 from toast.observation import default_values as defaults
 
@@ -135,13 +134,9 @@ class LoadContext(Operator):
         help="Path to DB for site housekeeping",
     )
 
-    hk_site_fields = List(
-        list(), help="Restrict loading to only these site fields"
-    )
+    hk_site_fields = List(list(), help="Restrict loading to only these site fields")
 
-    hk_site_aliases = Dict(
-        dict(), help="Optional convenience aliases for site fields"
-    )
+    hk_site_aliases = Dict(dict(), help="Optional convenience aliases for site fields")
 
     hk_platform_root = Unicode(
         None,
@@ -330,6 +325,10 @@ class LoadContext(Operator):
 
     bandwidth = Float(0.2, help="Fractional bandwith used in analytic bandpass")
 
+    daq_units = Bool(
+        False, help="If True, convert raw data to original int32 DAQ units"
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -354,6 +353,10 @@ class LoadContext(Operator):
             if self.context_file is not None:
                 msg = "Only one of the context or context_file should be specified"
                 raise RuntimeError(msg)
+
+        if self.daq_units and self.preprocess_config is not None:
+            msg = "Cannot convert raw signal to DAQ units if passing data through preprocessing"
+            raise RuntimeError(msg)
 
         # Build our detector selection dictionary.  Merge our explicit traits
         # with any pre-existing detector selection.
@@ -635,8 +638,14 @@ class LoadContext(Operator):
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
 
+            # Now that all metadata has been loaded, ensure that all byte strings
+            # are converted to unicode arrays.
+            ob._internal = replace_byte_arrays(ob._internal)
+
             # Optionally load housekeeping data
             if self.hk_site_root is not None or self.hk_platform_root is not None:
+                hk_timer = Timer()
+                hk_timer.start()
                 ob.hk = HKManager(
                     ob.comm.comm_group,
                     ob.shared[self.times].data,
@@ -648,6 +657,11 @@ class LoadContext(Operator):
                     plat_db=self.hk_platform_db,
                     plat_fields=self.hk_platform_fields,
                     plat_aliases=self.hk_platform_aliases,
+                )
+                log.debug_rank(
+                    f"LoadContext {obs_name} load House Keeping in",
+                    comm=comm.comm_group,
+                    timer=hk_timer,
                 )
 
             # Compute the boresight pointing and observatory position
@@ -1052,9 +1066,14 @@ class LoadContext(Operator):
                 dtype=np.float64,
             )
         if ax_det_signal is not None:
-            ob.detdata.create(
-                self.det_data, dtype=np.float64, units=self.det_data_units
-            )
+            if self.daq_units:
+                ob.detdata.create(
+                    self.det_data, dtype=np.int32, units=u.dimensionless_unscaled
+                )
+            else:
+                ob.detdata.create(
+                    self.det_data, dtype=np.float64, units=self.det_data_units
+                )
             ob.detdata.create(self.det_flags, dtype=np.uint8)
 
         if meta is not None:
@@ -1118,6 +1137,7 @@ class LoadContext(Operator):
             ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
+            daq_units=self.daq_units,
         )
 
         log.debug_rank(
@@ -1315,6 +1335,7 @@ class LoadContext(Operator):
                     is_flag=(mask is not None),
                     flag_invert=do_invert,
                     flag_mask=mask,
+                    daq_units=self.daq_units,
                 )
 
         # Original wafer data no longer needed.  AxisManager does not seem to
