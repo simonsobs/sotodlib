@@ -72,6 +72,12 @@ These functions support and are used within the driver processing scripts
 above and are useful for saving, loading, and verifying preprocessing archives
 and databases.
 
+.. autoclass:: sotodlib.preprocess.preprocess_util.PreprocessErrors
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autofunction:: sotodlib.preprocess.preprocess_util.filter_preproc_runlist_by_jobdb
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.init_logger
 
@@ -87,7 +93,7 @@ and databases.
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.find_db
 
-.. autofunction:: sotodlib.preprocess.preprocess_util.save_group
+.. autofunction:: sotodlib.preprocess.preprocess_util.get_preproc_group_out_dict
 
 .. autofunction:: sotodlib.preprocess.preprocess_util.save_group_and_cleanup
 

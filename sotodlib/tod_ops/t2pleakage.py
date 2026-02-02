@@ -6,6 +6,7 @@ from sotodlib.tod_ops import filters, apodize
 from sotodlib.tod_ops.fft_ops import calc_psd, calc_wn
 from scipy.odr import ODR, Model, RealData
 from lmfit import Model as LmfitModel
+from scipy.fft import rfft, rfftfreq
 
 
 def t2p_fit(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demodU',
@@ -300,6 +301,126 @@ def get_t2p_coeffs(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demo
 
     return out_aman
 
+def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demodU',
+                           fs=None, fit_freq_range=(0.01, 0.1), wn_freq_range=(0.2, 1.9),
+                           subtract_sig=False, merge_stats=True, t2p_stats_name='t2p_stats',
+                          ):
+    """
+    Compute the leakage coefficients from temperature (T) to polarization (Q and U) in Fourier
+    domain. Return an axismanager of the coefficients with their statistical uncertainties and 
+    reduced chi-squared values for the fit.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager object containing the TOD data.
+    T_sig_name : str
+        Name of the temperature signal in `aman`. Default is 'dsT'.
+    Q_sig_name : str
+        Name of the Q polarization signal in `aman`. Default is 'demodQ'.
+    U_sig_name : str
+        Name of the U polarization signal in `aman`. Default is 'demodU'.
+    fs: float
+        The sampling frequency. If it is None, it will be calculated. Default is None.
+    fit_range_freq: tuple
+        The start/end frequencies of the t2p fit. Default is (0.01, 0.1).
+    wn_freq_range: tuple
+        The start/end frequencies to calculate the white noise level of demod signal. 
+        Default is (0.2, 1.9).
+    subtract_sig : bool
+        Whether to subtract the calculated leakage from the polarization signals. Default is False.
+    merge_stats : bool
+        Whether to merge the calculated statistics back into `aman`. Default is True.
+    t2p_stats_name : str
+        Name under which to wrap the output AxisManager containing statistics. Default is 't2p_stats'.
+
+    Returns
+    -------
+    out_aman : AxisManager
+                An AxisManager containing leakage coefficients, their errors, and reduced
+                chi-squared statistics.
+    """
+    if fs is None:
+        fs = np.median(1/np.diff(aman.timestamps))
+    N = aman.samps.count
+    freqs = rfftfreq(N, d=1/fs)
+    I_fs = rfft(aman[T_sig_name], axis=1)
+    Q_fs = rfft(aman[Q_sig_name], axis=1)
+    U_fs = rfft(aman[U_sig_name], axis=1)
+    
+    coeffsQ = np.zeros(aman.dets.count)
+    errorsQ = np.zeros(aman.dets.count)
+    redchi2sQ = np.zeros(aman.dets.count)
+    coeffsU = np.zeros(aman.dets.count)
+    errorsU = np.zeros(aman.dets.count)
+    redchi2sU = np.zeros(aman.dets.count)
+
+    fit_mask = (fit_freq_range[0] < freqs) & (freqs < fit_freq_range[1])
+    wn_mask = (wn_freq_range[0] < freqs) & (freqs < wn_freq_range[1])
+
+    def leakage_model(B, x):
+        return B[0] * x
+
+    model = Model(leakage_model)
+
+    for i in range(aman.dets.count):
+        # fit Q
+        Q_wnl = np.nanmean(np.abs(Q_fs[i][wn_mask]))
+        x = np.real(I_fs[i])[fit_mask]
+        y = np.real(Q_fs[i])[fit_mask]
+        sx = Q_wnl / np.sqrt(2) * np.ones_like(x)
+        sy = Q_wnl * np.ones_like(y)
+        try:
+            data = RealData(x=x, 
+                            y=y, 
+                            sx=sx, 
+                            sy=sy)
+            odr = ODR(data, model, beta0=[1e-3])
+            output = odr.run()
+            coeffsQ[i] = output.beta[0]
+            errorsQ[i] = output.sd_beta[0]
+            redchi2sQ[i] = output.sum_square / (len(x) - 2)
+        except:
+            coeffsQ[i] = np.nan
+            errorsQ[i] = np.nan
+            redchi2sQ[i] = np.nan
+
+        #fit U
+        U_wnl = np.nanmean(np.abs(U_fs[i][wn_mask]))
+        x = np.real(I_fs[i])[fit_mask]
+        y = np.real(U_fs[i])[fit_mask]
+        sx = U_wnl / np.sqrt(2) * np.ones_like(x)
+        sy = U_wnl * np.ones_like(y)
+        try:
+            data = RealData(x=x, 
+                            y=y, 
+                            sx=sx, 
+                            sy=sy)
+            odr = ODR(data, model, beta0=[1e-3])
+            output = odr.run()
+            coeffsU[i] = output.beta[0]
+            errorsU[i] = output.sd_beta[0]
+            redchi2sU[i] = output.sum_square / (len(x) - 2)
+        except:
+            coeffsU[i] = np.nan
+            errorsU[i] = np.nan
+            redchi2sU[i] = np.nan
+
+    out_aman = core.AxisManager(aman.dets, aman.samps)
+    out_aman.wrap('coeffsQ', coeffsQ, [(0, 'dets')])
+    out_aman.wrap('errorsQ', errorsQ, [(0, 'dets')])
+    out_aman.wrap('redchi2sQ', redchi2sQ, [(0, 'dets')])
+    out_aman.wrap('coeffsU', coeffsU, [(0, 'dets')])
+    out_aman.wrap('errorsU', errorsU, [(0, 'dets')])
+    out_aman.wrap('redchi2sU', redchi2sU, [(0, 'dets')])
+
+    if subtract_sig:
+        subtract_t2p(aman, out_aman)
+    if merge_stats:
+        aman.wrap(t2p_stats_name, out_aman)
+
+    return out_aman
+
 def subtract_t2p(aman, t2p_aman, T_signal=None):
     """
     Subtract T to P leakage.
@@ -329,3 +450,63 @@ def subtract_t2p(aman, t2p_aman, T_signal=None):
         aman.demodU -= np.multiply(T_signal.T, t2p_aman.coeffsU).T
     else:
         raise ValueError('no leakage coefficients found in axis manager')
+
+def get_t2p_cuts(aman, t2p_aman=None, redchi2s=True, error=True, lam=False, 
+                 redchi2s_lims=(0.1, 3), error_lims=(0, 0.03), lam_lims=(0, 0.01),
+                 in_place=False):
+    """
+    Restrict detectors based on the t2p fit stats or t2p coefficient.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod.
+    t2p_aman : AxisManager
+        Axis manager with Q and U leakage coeffients.
+        If joint fitting was used in get_t2p_coeffs, Q coeffs are in 
+        fields ``lamQ`` and ``AQ`` and U coeffs are in ``lamU`` and 
+        ``AU``. Otherwise Q coeff is in field ``coeffsQ`` and U coeff 
+        in ``coeffsU``.
+    redchi2s : bool
+        If True, restrict detectors based on redchi2s values.
+    error : bool
+        If True, restrict detectors based on fit errors of lamQ and lamU.
+    lam : bool
+        If True, restrict detectors based on the amplitude of lamQ and lamU.
+    redchi2s_lims : tuple
+        The lower and upper limit of acceptable redchi2s.
+    error_lims : tuple
+        The lower and upper limit of acceptable errors.
+    lam_lims : tuple
+        The lower and upper limit of acceptable leakage coefficient.
+    """
+    if t2p_aman is None:
+        if 't2p_stats' not in aman:
+            raise ValueError('t2p_aman must be provided or already in aman')
+        t2p_aman = aman.t2p_stats
+    mask = np.ones(aman.dets.count, dtype=bool)
+    if redchi2s:
+        if 'redchi2s' in t2p_aman:
+            redchi2s_t2p = t2p_aman.redchi2s
+        elif 'redchi2sQ' in t2p_aman:
+            redchi2s_t2p = t2p_aman.redchi2sQ + t2p_aman.redchi2sU
+        mask_redchi2s = (redchi2s_lims[0] < redchi2s_t2p) & (redchi2s_t2p < redchi2s_lims[1])
+        mask = np.logical_and(mask, mask_redchi2s)
+    if error:
+        if 'lamQ_error' in t2p_aman:
+            error_t2p = np.sqrt(t2p_aman.lamQ_error**2+t2p_aman.lamU_error**2)
+        elif 'errorsQ' in t2p_aman:
+            error_t2p = np.sqrt(t2p_aman.errorsQ**2+t2p_aman.errorsU**2)
+        mask_error = (error_lims[0] < error_t2p) & (error_t2p < error_lims[1])
+        mask = np.logical_and(mask, mask_error)
+    if lam:
+        if 'lamQ' in t2p_aman:
+            lam_t2p = np.sqrt(t2p_aman.lamQ**2 + t2p_aman.lamU**2)
+        elif 'coeffsQ' in t2p_aman:
+            lam_t2p = np.sqrt(t2p_aman.coeffsQ**2 + t2p_aman.coeffsU**2)
+        mask_lam = (lam_lims[0] < lam_t2p) & (lam_t2p < lam_lims[1])
+        mask = np.logical_and(mask, mask_lam)
+    if in_place:
+        aman.restrict('dets', aman.dets.vals[mask])
+    else:
+        return mask

@@ -485,6 +485,8 @@ def biases_flags(bsa, buffer=200):
     for i, bg in enumerate(bsa.bgmap):
         if bg == -1:
             continue
+        if len(bsa.edge_idxs[bg]) == 0:
+            continue
         mask[i][bsa.edge_idxs[bg][0]:bsa.edge_idxs[bg][-1]] = 1
     flags = RangesMatrix.from_mask(mask).buffer(buffer)
     return flags
