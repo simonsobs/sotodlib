@@ -229,6 +229,7 @@ def _load_ctx(config):
         logger.warning("No observations provided in configuration")
     amans = []
     dets = config["context"].get("dets", {})
+    failed = []
     for obs_id in obs_ids:
         roll = ctx.obsdb.get(obs_id)["roll_center"]
         if roll is None:
@@ -238,8 +239,9 @@ def _load_ctx(config):
             continue
         try:
             aman = ctx.get_meta(obs_id, dets=dets)
-        except metadata.loader.LoaderError:
+        except: # metadata.loader.LoaderError:
             logger.error("Failed to load %s, skipping", obs_id)
+            failed += [obs_id]
             continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
@@ -273,6 +275,8 @@ def _load_ctx(config):
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
     obs_ids = [aman.obs_info.obs_id for aman in amans]
+    if len(failed) > 0:
+        logger.error("Failed to load %s", str(failed))
 
     # Figure out stream_ids and OTs
     query_all = f"type=='obs' and start_time>{config['start_time']} and stop_time<{config['stop_time']}"
