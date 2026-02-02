@@ -96,6 +96,9 @@ class Cfg:
     apply_wobble: bool
         Correct wobble deflection. This requires
         aman.wobble_params metadata in the context
+    compress: bool
+        When running preprocess from scratch, whether to
+        compress the files
     center_at: str
     max_dets: int
     fixed_time: int
@@ -146,7 +149,8 @@ class Cfg:
         unit: str = 'K',
         use_psd: bool = True,
         wn_label: str = 'preprocess.noiseQ_mapmaking.std',
-        apply_wobble: bool = True
+        apply_wobble: bool = True,
+        compress: bool = True,
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -185,6 +189,7 @@ class Cfg:
         self.use_psd = use_psd
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
+        self.compress = compress
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -390,11 +395,23 @@ def main(
     L.info(f'Running {len(obslists_arr)} maps after removing duplicate maps')
 
     # clean up lingering files from previous incomplete runs
+    for p_config in preprocess_config:
+        fname = p_config['archive']['policy']['filename']
+        os.makedirs(os.path.dirname(fname), exist_ok=True)
+
     if len(preprocess_config)==1:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
     else:
+        group_by = np.atleast_1d(preprocess_config[0]['subobs'].get('use', 'detset'))
+
         policy_dir_init = os.path.join(os.path.dirname(preprocess_config[0]['archive']['policy']['filename']), 'temp')
+        preprocess_util.get_preprocess_db(preprocess_config[0], group_by, L)
+
         policy_dir_proc = os.path.join(os.path.dirname(preprocess_config[1]['archive']['policy']['filename']), 'temp_proc')
+        preprocess_util.get_preprocess_db(preprocess_config[1], group_by, L)
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
@@ -469,7 +486,8 @@ def main(
             singlestream=args.singlestream,
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
-            wn_label=args.wn_label,apply_wobble=args.apply_wobble)
+            wn_label=args.wn_label,apply_wobble=args.apply_wobble,
+            compress=args.compress)
             for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
@@ -486,8 +504,11 @@ def main(
         futures.remove(future)
         for ii in range(len(errors)):
             for idx_prepoc in range(len(preprocess_config)):
-                if isinstance(outputs[ii][idx_prepoc], dict):
-                    preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
+                if outputs[ii][idx_prepoc] is not None:
+                    oid = outputs[ii][idx_prepoc]['db_data']['obs:obs_id']
+                    group = [v for k, v in outputs[ii][idx_prepoc]['db_data'].items() if 'dets' in k]
+                    preprocess_util.cleanup_mandb(outputs[ii][idx_prepoc], (oid, group), (errors[ii], None, None),
+                          preprocess_config[idx_prepoc], L)
     L.info("Done")
     return True
 
