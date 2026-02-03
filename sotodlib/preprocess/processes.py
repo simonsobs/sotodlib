@@ -21,6 +21,7 @@ from sotodlib.preprocess import preprocess_util as pp_util
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
+from ..tod_ops import glitch as gl, glitch_classification as gc
 
 logger = pp_util.init_logger("preprocess")
 
@@ -2993,6 +2994,80 @@ class Move(_Preprocess):
         aman.move(**self.process_cfgs)
         return aman, proc_aman
 
+
+class GlitchClassification(_Preprocess):
+    """Classify glitches using a random forest.
+
+    Returns the probability of being each type of glitch: 0: Point Sources,
+    1: Point Sources + Other 2: Cosmic Rays, 3: Electronic Glitches.
+
+    Saves results in proc_aman under the "glitch_snippets" field.
+
+    Takes the following ``calc`` config options:
+    :n_thres: (int) Minimum number of detectors flagged as glitch simultaneously to be
+        considered for classification. Default is 2.
+    :n_buffer: (int) Number of samples to buffer around the glitch. Default is 5.
+    :trained_forest_name: (str) Name of the trained random forest to use for classification.
+
+    Example config block::
+
+        - name : "classify_glitches"
+          flags: "glitches.glitch_flags"
+          calc:
+            n_thres: 2
+            n_buffer: 5
+            trained_forest_name: "trained_forest"
+          save: True
+
+    .. autofunction:: sotodlib.tod_ops.glitch_classification.classify_glitch_stats
+    """
+    name = "classify_glitches"
+
+    def __init__(self, step_cfgs):
+        self.flags = step_cfgs.get("flags", "glitches.glitch_flags")
+        super().__init__(step_cfgs)
+
+    def calc_and_save(self, aman, proc_aman):
+        n_thres = self.calc_cfgs.get("n_thres", 2)
+        n_buffer = self.calc_cfgs.get("n_buffer", 5)
+        trained_forest_name = self.calc_cfgs.get("trained_forest_name", "trained_forest")
+
+        # get the number of detectors flagged as glitch (at each sample)
+        glitch_flags = proc_aman.get(self.flags)  # size: (ndets, nsamps)
+        n_flagged = np.sum(glitch_flags.mask(), axis=0)
+
+        # get the ranges when >= `n_thres` detectors are flagged simultaneously
+        snippet_ranges = gl.ranges_from_n_flagged(n_flagged, n_thres=n_thres, buffer=n_buffer)
+
+        # compile list of dets in each range
+        det_mask = gl.get_det_mask(glitch_flags, snippet_ranges)
+
+        # get the glitch snippets
+        snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
+
+        # classify the glitches
+        predictions, stats = gc.classify_snippets(snippets, trained_forest_name)
+
+        # wrap the ranges and dets in an axis manager
+        snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
+                                        core.LabelAxis("stat_names", list(stats.columns)),
+                                        core.LabelAxis("pred_cols", list(predictions.columns)))
+        snippet_aman.wrap("snippet_ranges", snippet_ranges, [(0, 'samps')])
+        snippet_aman.wrap("det_mask", np.array(det_mask), [(0, 'snippets'), (1, 'dets')])
+        snippet_aman.wrap("stats", stats.to_numpy(), [(0, 'snippets'), (1, 'stat_names')])
+        snippet_aman.wrap("predictions", predictions.to_numpy(), [(0, 'snippets'), (1, 'pred_cols')])
+        snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
+        self.save(proc_aman, snippet_aman)
+
+        return aman, proc_aman
+
+    def save(self, proc_aman, snippet_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("glitch_snippets", snippet_aman)
+
+
 _Preprocess.register(SplitFlags)
 _Preprocess.register(SubtractT2P)
 _Preprocess.register(EstimateT2P)
@@ -3047,3 +3122,4 @@ _Preprocess.register(SmurfGapsFlags)
 _Preprocess.register(GetTauHWP)
 _Preprocess.register(Move)
 _Preprocess.register(CutBadDistribution)
+_Preprocess.register(GlitchClassification)
