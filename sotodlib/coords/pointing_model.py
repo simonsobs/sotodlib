@@ -238,7 +238,8 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
         * q_cr_roll * q_cr_center
     )
 
-    # El sag v1, this does not handle signs correctly
+    # El sag v1 -- note that el will be in the el <= 90 branch already, so the model
+    # cannot be used to treat el > 90 and el < 90 differently.
     if version == 'lat_v1':
         az, el, roll = quat.decompose_lonlat(q_notilt)* np.array([-1, 1, 1])[..., None]
         cr = el - roll - np.deg2rad(60)    
