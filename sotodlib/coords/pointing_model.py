@@ -190,6 +190,8 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     cr = cr + params['enc_offset_cr']
 
     # El sag v2
+    # Because the sag is applied to the raw encoder value, the sag at el is not
+    # necessarily the same as the sag at 180 - el.
     if version == 'lat_v2':
         el_sag = params['el_sag_quad']*(el - params['el_sag_pivot'])**2
         el_sag += params['el_sag_lin']*(el - params['el_sag_pivot'])
