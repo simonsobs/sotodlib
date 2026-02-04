@@ -192,6 +192,7 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     # El sag v2
     # Because the sag is applied to the raw encoder value, the sag at el is not
     # necessarily the same as the sag at 180 - el.
+    el_sag = 0
     if version == 'lat_v2':
         el_sag = params['el_sag_quad']*(el - params['el_sag_pivot'])**2
         el_sag += params['el_sag_lin']*(el - params['el_sag_pivot'])
@@ -253,11 +254,8 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
 
     # Apply tilt and decompose 
     q_hs = q_base_tilt * q_notilt
-    new_az, el, _ = quat.decompose_lonlat(q_hs)* np.array([-1, 1, 1])[..., None]
+    new_az, el, roll = quat.decompose_lonlat(q_hs)* np.array([-1, 1, 1])[..., None]
 
-    # Get new roll with the modified el
-    roll = el - cr - np.deg2rad(60)
-    
     # Make corrected az as close as possible to the input az.    
     change = ((new_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
     az = az_orig + change
