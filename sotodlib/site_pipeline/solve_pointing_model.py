@@ -491,6 +491,12 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
                    [(0, core.LabelAxis("xieta", ["xi", "eta"]))],
                    [(1, "samps")])
     full_aman.wrap("fit_residuals", full_residuals, [(0, "samps")])
+    
+    # Just for compatibility
+    modelfit_aman = core.AxisManager()
+    modelfit_aman.wrap("xi", full_modeled[0], overwrite=True)
+    modelfit_aman.wrap("eta", full_modeled[1], overwrite=True)
+    full_aman.wrap("modeled_fits", modelfit_aman, overwrite=True)
     del(full_modeled)
     del(full_residuals)
         
@@ -716,6 +722,7 @@ def main(config_path: str):
                                        save_figure=True,
                                        plotlims=plotlims)
             plotter.plot_full_residuals_across_focalplane()
+            plotter.plot_full_deltas_across_focalplane()
             plotter.plot_full_histogram()
             plotter.plot_full_unmodeled_residuals()
         logger.info("done")
@@ -1121,6 +1128,7 @@ def main(config_path: str):
                                        save_figure=True,
                                        plotlims=plotlims)
             plotter.plot_full_residuals_across_focalplane()
+            plotter.plot_full_deltas_across_focalplane()
             plotter.plot_full_histogram()
             plotter.plot_full_unmodeled_residuals()
 
@@ -1271,7 +1279,6 @@ class ModelFitsPlotter:
             plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Az{tag}.png", dpi=350)
         plt.close()
    
-            
     def plot_full_residuals_across_focalplane(self):
         platform = self.platform
         plot_dir = self.plot_dir
@@ -1299,6 +1306,33 @@ class ModelFitsPlotter:
             plt.xlim(-.31, .31);plt.ylim(-.31, .31)
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitResiduals{tag}.png", dpi=350)
+
+    def plot_full_deltas_across_focalplane(self):
+        platform = self.platform
+        plot_dir = self.plot_dir
+        tag = self.tag
+        append = self.append_string
+        ancil = self.aman.ancil
+        
+        xi, eta, _ = self.aman.nominal_xieta_locs
+        dxi = self.aman.modeled_fits.xi - self.aman.nominal_xieta_locs[0]
+        deta = self.aman.modeled_fits.eta - self.aman.nominal_xieta_locs[1]
+        roll_c = self.aman.roll_c
+
+        fig, ax = plt.subplots()
+        im = ax.quiver(xi, eta, dxi, deta, roll_c, angles='xy', scale=np.deg2rad(24), scale_units='xy', alpha=.8)
+        sm = cm.ScalarMappable(cmap=im.cmap, norm=im.norm)
+        sm.set_array([])
+        plt.colorbar(sm, ax=ax, label='Roll')
+        ax.set_xlabel('Xi (rad)')
+        ax.set_ylabel('Eta (rad)')
+        plt.title('Fit Deltas across Focal Plane\n(Not averaged per det)')
+        if platform == 'lat':
+            plt.xlim(-.042, .042);plt.ylim(-.042, .042)
+        else:
+            plt.xlim(-.31, .31);plt.ylim(-.31, .31)
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitDeltas{tag}.png", dpi=350)
 
     def plot_full_histogram(self):
         platform = self.platform
