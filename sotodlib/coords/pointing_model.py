@@ -192,7 +192,6 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     # El sag v2
     # Because the sag is applied to the raw encoder value, the sag at el is not
     # necessarily the same as the sag at 180 - el.
-    el_sag = 0
     if version == 'lat_v2':
         el_sag = params['el_sag_quad']*(el - params['el_sag_pivot'])**2
         el_sag += params['el_sag_lin']*(el - params['el_sag_pivot'])
@@ -243,7 +242,6 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     # cannot be used to treat el > 90 and el < 90 differently.
     if version == 'lat_v1':
         az, el, roll = quat.decompose_lonlat(q_notilt)* np.array([-1, 1, 1])[..., None]
-        cr = el - roll - np.deg2rad(60)    
     
         el_sag = params['el_sag_quad']*(el - params['el_sag_pivot'])**2
         el_sag += params['el_sag_lin']*(el - params['el_sag_pivot'])
