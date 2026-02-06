@@ -35,7 +35,7 @@ def _to_timestamp(targets):
             a = a.strip().replace(' ', 'T')
             if 'T' not in a:
                 a = a + 'T00:00:00'
-                out.append(_str_to_timestamp(a))
+            out.append(_str_to_timestamp(a))
         else:
             raise ValueError(f"Cannot interpret as timestamp: '{a}'")
     return np.array(out)
