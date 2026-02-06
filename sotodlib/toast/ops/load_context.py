@@ -755,7 +755,11 @@ class LoadContext(Operator):
                     band = fp_cols[
                         f"det_info{self.ax_pathsep}wafer{self.ax_pathsep}bandpass"
                     ].data
-                freq = [float(b[1:]) for b in band]
+
+                fpat = re.compile(r"^f[\d]+$")
+                freq = [
+                    float(b[1:]) if fpat.match(b) is not None else 0.0 for b in band
+                ]
                 bandcenter = np.array(freq) * u.GHz
                 bandwidth = bandcenter * self.bandwidth
                 fp_cols["bandcenter"] = Column(name="bandcenter", data=bandcenter)
