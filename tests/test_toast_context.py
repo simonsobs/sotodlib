@@ -143,6 +143,64 @@ class ToastContextTest(TestCase):
         close_data_and_comm(data)
 
 
+    # def test_context_loader(self):
+    #     if not toast_available:
+    #         return
+    #     world, procs, rank = toast.get_world()
+
+    #     vol_path = os.path.join(self.outdir, "loader")
+    #     if rank == 0 and os.path.isdir(vol_path):
+    #         shutil.rmtree(vol_path)
+    #     if world is not None:
+    #         world.barrier()
+
+    #     data = simulation_test_data(
+    #         world,
+    #         telescope_name="SAT1",
+    #         wafer_slot=None,
+    #         bands="SAT_f090",
+    #         sample_rate=40.0 * u.Hz,
+    #         thin_fp=16,
+    #         cal_schedule=False,
+    #     )
+    #     self._fake_hk(data)
+
+    #     toast.ops.DefaultNoiseModel().apply(data)
+    #     toast.ops.SimNoise().apply(data)
+
+    #     toast.ops.SaveHDF5(
+    #         volume=vol_path,
+    #         detdata=[
+    #             (defaults.det_data, {"quanta": 1.0e-10}),
+    #             (defaults.det_flags, {"level": 6}),
+    #         ],
+    #     ).apply(data)
+
+    #     if world is not None:
+    #         # This test will intermittently fail if the files are still
+    #         # being written while the loading starts
+    #         world.barrier()
+        
+    #     # Create a context for the volume
+
+
+    #     # Read data
+
+    #     new_data = toast.Data(comm=data.comm)
+    #     sotoast.ops.LoadContext().apply(new_data)
+
+    #     # Compare
+
+    #     for old_ob, new_ob in zip(data.obs, new_data.obs):
+    #         if not old_ob.__eq__(new_ob, approx=True):
+    #             print(f"OLD: {old_ob} not equal to")
+    #             print(f"NEW: {new_ob}", flush=True)
+    #             self.assertTrue(False)
+
+    #     close_data_and_comm(new_data)
+    #     close_data_and_comm(data)
+
+
 
 if __name__ == "__main__":
     unittest.main()
