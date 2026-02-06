@@ -751,11 +751,23 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, sim=True)
+            
+            if len(aman.dets.vals) == 0:
+                logger.info(f"No detectors after proc in obs {obs_id}")
+                return None
 
             if init_only:
                 return aman
 
             if t2ptemplate_aman is not None:
+                if len(aman.dets.vals) != len(t2ptemplate_aman.dets.vals):
+                    logger.warning(
+                        "T2P template and simulations do not share the same " \
+                        f"detectors: {len(t2ptemplate_aman.dets.vals)} vs. " \
+                        f"{len(aman.dets.vals)}"
+                    )
+                    t2ptemplate_aman.restrict("dets", aman.dets.vals)
+
                 # Replace Q,U with simulated timestreams
                 t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
                 t2ptemplate_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
