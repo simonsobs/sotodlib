@@ -51,7 +51,7 @@ class TocoPwv(utils.LowResTable):
             hkdb=db,
         )
 
-        lspec.start, lspec.end = map(float, time_range)
+        lspec.start, lspec.end = map(float, time_range)  # de-numpy
         result = hkdb.load_hk(lspec, show_pb=False)
         if not hasattr(result, 'pwv'):
             result.pwv = [[], []]

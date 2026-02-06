@@ -17,11 +17,11 @@ from typing import Optional
 import yaml
 
 from sotodlib import core
-from sotodlib.site_pipeline.utils import logging
+from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.io import ancil
 
 
-logger = logging.init_logger('update-obsdb-ancil', 'update-obsdb-ancil: ')
+logger = init_logger('update-obsdb-ancil', 'update-obsdb-ancil: ')
 
 DAY = 86400
 DEFAULT_CONFIG = {
@@ -199,6 +199,7 @@ def main(
         redo : Optional[bool]=None,
         compare : Optional[bool]=None,
         job_name : Optional[str]=None,
+        _chain_count: Optional[int]=0,
 ):
     """Entry point for CLI or job runner.  Some parameters are only
     used by some commands.
@@ -209,6 +210,9 @@ def main(
     if verbose > 0:
         ancil.logger.setLevel(logging.DEBUG)
         logger.handlers[0].setLevel(logging.DEBUG)
+
+    # Try to prevent job loops...
+    assert _chain_count < 16
 
     if time_range is None:
         if lookback_days is not None:
@@ -230,7 +234,7 @@ def main(
     elif command == 'check':
         # Just trial load the config, processors.
         print(f'Loading config file {config_file} ...')
-        cfg = DEFAULT_CONFIG | yaml.safe_load(open(config_file, 'rb'))
+        cfg = _get_config(config_file)
         for dataset, engine in _engines_iter(cfg, dataset):
             print(f'  dataset={dataset}')
             for k, v in engine.check_base().items():
@@ -280,7 +284,7 @@ def main(
         for step in job_def['steps']:
             print('Step ...')
             step_cfg = {'config_file': config_file} | step
-            main(**step_cfg)
+            main(**step_cfg, _chain_count=_chain_count+1)
 
     else:
         raise RuntimeError(f"Invalid command: {command}")
