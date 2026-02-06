@@ -57,6 +57,7 @@ site_pipeline = [
   "alphashape",
   "slack-sdk",
   "requests",
+  "tilemaker",
 ]
 tests = [
   "socs",
