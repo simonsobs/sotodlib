@@ -227,7 +227,12 @@ class IntensityTemplates(Operator):
             )
             local_intensity_dets = []
             for det in local_dets:
-                if fp[det]["det_info:wafer:type"] != "DARK":
+                key = "det_info:wafer:type"
+                if key in fp.properties and fp[det]["det_info:wafer:type"] == "DARK":
+                    is_optical = False
+                else:
+                    is_optical = True
+                if is_optical:
                     local_intensity_dets.append(det)
             if self.source_pattern is not None:
                 pat = re.compile(self.source_pattern)
