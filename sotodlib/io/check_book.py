@@ -12,10 +12,13 @@ from spt3g import core
 import os
 import fnmatch
 import glob
+import logging
 import yaml
 
 import numpy as np
 
+
+logger = logging.getLogger(__name__)
 
 # The default config for BookScanner.
 
@@ -37,8 +40,8 @@ _DEFAULT_CONFIG = {
     'tolerate_missing_ancil_timestamps': False,
     'tolerate_timestamps_value_discrepancy': False,
     'tolerate_stray_files': False,
-    'remove_fixed_tones': False, 
     'tolerate_missing_extra_files': False,
+    'ignore_fixed_tones': False,
 }
     
 
@@ -74,10 +77,12 @@ class BookScanner:
           raise RuntimeError("This book contains errors.")
 
       # Get stuff for the obsfiledb (paths relative to ...)
-      detset_rows, file_rows = bs.prep_obsfiledb('/')
+      detset_rows, file_rows = bs.get_obsfiledb_info('/')
 
     """
-    def __init__(self, book_dir, config={}):
+    logger = logger  # cache module-level logger
+
+    def __init__(self, book_dir, config={}, logger=None):
         self.config = dict(_DEFAULT_CONFIG, **config)
         self.book_dir = book_dir
         self.results = {
@@ -88,6 +93,8 @@ class BookScanner:
             'ready': False,
             'metadata': None,
         }
+        if logger is not None:
+            self.logger = logger
 
     def go(self):
         """Scan a book for completeness and consistency; record misc. metadata
@@ -99,7 +106,7 @@ class BookScanner:
             self.check_meta()
             self.gapfill_meta()
         except Exception as e:
-            print('Failed in section 1!')
+            self.logger.error('Failed in section 1!')
             self.report()
             raise e
 
@@ -107,7 +114,7 @@ class BookScanner:
         try:
             self.check_file_presence()
         except Exception as e:
-            print('Failed in section 2!')
+            self.logger.error('Failed in section 2!')
             self.report()
             raise e
 
@@ -115,7 +122,7 @@ class BookScanner:
             # 3. Check sample range, timestamp alignment, etc.
             self.check_frames()
         except Exception as e:
-            print('Failed in section 3!')
+            self.logger.error('Failed in section 3!')
             self.report()
             raise e
 
@@ -328,14 +335,13 @@ class BookScanner:
                 self._err(None, f'sample_ranges from metadata is not as found in files.')
         self.results['sample_ranges'] = sample_ranges
 
-    def prep_obsfiledb(self, filebase_root, db=None):
+    def get_obsfiledb_info(self, filebase_root):
         """Get entries ready for obsfiledb addition.
 
         Args:
           filebase_root (str): Path relative to which the file paths should
             be specified.  If this is '/' then an absolute path will
             be recorded.
-          db (ObsFileDb): database to commit the results to, if you want.
 
         Returns:
           detset_rows: list of implicated detsets, with each entry a
@@ -356,7 +362,17 @@ class BookScanner:
                 # if detsets don't need to be in the correct order just find the
                 # right one.
                 detset = [x for x in meta['detsets'] if stream_id in x][0]
-            detset_rows.append((detset, det_lists[stream_id]))
+
+            # Screen out "fixed tones".  We don't want these in the
+            # obsfiledb detsets.
+            dets = [d for d in det_lists[stream_id] if "NONE" not in d]
+            n_fixed_tone = len(det_lists[stream_id]) - len(dets)
+            if not self.config['ignore_fixed_tones']:
+                # Yes, "ignore" just means don't even talk about it.
+                self.logger.warn(f'Suppressing {n_fixed_tone} fixed tones '
+                                 f'in {stream_id}')
+            detset_rows.append((detset, dets))
+
             for index in range(meta['file_count']):
                 pattern = self.config['stream_file_pattern']
                 path = self._get_filename(
@@ -373,23 +389,14 @@ class BookScanner:
                      'sample_stop': sample_ranges[index][1],
                      })
 
-        if db is not None:
-            for name, dets in detset_rows:
-                if len(db.get_dets(name)) == 0:
-                    if self.config['remove_fixed_tones']:
-                        dets = [d for d in dets if not "NONE" in d]
-                    db.add_detset(name, dets)
-            for row in file_rows:
-                db.add_obsfile(**row)
-
         return detset_rows, file_rows
-    
+
     def report(self):
         """Print a summary of warning and error messages."""
-        print('Warnings:')
+        self.logger.info('Warnings:')
         for err in self.results['warnings']:
-            print(err)
-        print('Errors:')
+            self.logger.info(err)
+        self.logger.info('Errors:')
         for err in self.results['errors']:
-            print(err)
+            self.logger.info(err)
 

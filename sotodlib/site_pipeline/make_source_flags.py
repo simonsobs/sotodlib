@@ -7,7 +7,9 @@ import yaml
 
 import sotodlib
 from sotodlib import core, coords, site_pipeline
-from . import util
+from .utils.config import parse_quantity, lookup_conditional
+from .utils.archive import ArchivePolicy
+from .utils.pipeline import main_launcher
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +84,8 @@ def main(config_file=None, verbose=0, obs_id=None):
 
         # Load / compute mask parameters.
         mask_params = config['mask_params']['default']
-        mask_res = util.parse_quantity(
-            util.lookup_conditional(
+        mask_res = parse_quantity(
+            lookup_conditional(
                 config['mask_params'], 'res', default=[1, 'arcmin']),
             'deg').value
 
@@ -115,7 +117,7 @@ def main(config_file=None, verbose=0, obs_id=None):
         aman.wrap('source_flags', flags, [(0, 'dets'), (1, 'samps')])
 
         # Get file + dataset from policy.
-        policy = util.ArchivePolicy.from_params(config['archive']['policy'])
+        policy = ArchivePolicy.from_params(config['archive']['policy'])
         dest_file, dest_dataset = policy.get_dest(obs_id)
         aman.save(dest_file, dest_dataset, overwrite=True)
 
@@ -129,4 +131,4 @@ def main(config_file=None, verbose=0, obs_id=None):
     return tod, aman
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

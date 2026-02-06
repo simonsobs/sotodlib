@@ -18,7 +18,7 @@ from sotodlib.io.datapkg_utils import load_configs
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False):
+         index_via_actions: bool=False, checked_file: Optional[str]=None):
     """
     Arguments
     ---------
@@ -36,6 +36,10 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         will be necessary for data older than Oct 2022 but creates concurancy 
         issues on systems (like the site) running automatic deletion of level 2 
         data.
+    checked_file: str
+        a file name that contains a list of observations that would by default 
+        cause errors to be thrown during this script but have been manually
+        checked and dealt with
     """
     show_pb = True if verbosity > 1 else False
 
@@ -103,6 +107,24 @@ def main(config: Optional[str] = None, update_delay: float = 2,
             raise_list_readout_ids.append(obs.obs_id)
 
     if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
+        logger.info(
+            f"Found observations with bad timing or missing readout ids "
+            "checking to see if they've been manually cleared"
+        )
+        if checked_file is None or not os.path.exists(checked_file):
+            logger.warning(
+                f"File {checked_file} does not exist so cannot check if "
+                "problematic observations have been manually cleared"
+            )
+            cleared = []
+        else:
+            with open(checked_file) as f:
+                cleared = [c.strip("\n").strip() for c in f.readlines()]
+        raise_list_timing = [x for x in raise_list_timing if x not in cleared]
+        raise_list_readout_ids = [
+            x for x in raise_list_readout_ids if x not in cleared
+        ]
+    if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
         raise ValueError(
             f"Found {len(raise_list_timing)} observations with bad timing"
             f" obs_ids are {raise_list_timing}.\nFound "
@@ -122,6 +144,8 @@ def get_parser(parser=None):
                         default=2, type=int)
     parser.add_argument('--index-via-actions', help="Look through action folders to create observations",
                         action="store_true")
+    parser.add_argument("--checked-file", 
+        help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
     return parser
 
 if __name__ == '__main__':

@@ -70,8 +70,7 @@ Installing sotodlib
 
 You can either install directly to your conda environment / virtualenv::
 
-    %> cd sotodlib
-    %> pip install .
+    %> pip install sotodlib
 
 Or (if you are frequently hacking on this code) you can install the package in
 "develop" mode, which installs symlinks from your conda environment /
@@ -85,13 +84,18 @@ Optional Dependencies
 
 There are several optional dependencies that you may want to install depending
 on which features of sotodlib you would like to use. These provided via
-dependency groups and can be installed using the syntax::
+dependency groups and can be installed using the syntax from your source checkout::
 
+    %> pip install -r requirements.txt
     %> pip install .[group1,group2]
 
 Current groups are:
 
-- ``site_pipeline`` - Modules required within ``sotodlib.site_pipeline``
+- ``site_pipeline`` - Modules required within ``sotodlib.site_pipeline``. Please install the required dependencies using the command from your source checkout::
+
+    %> pip install -r requirements.txt
+    %> pip install .[site_pipeline]
+
 
 Running Tests
 ------------------

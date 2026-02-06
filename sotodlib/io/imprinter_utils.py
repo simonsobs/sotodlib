@@ -8,6 +8,7 @@ import os
 import os.path as op
 import shutil
 import time
+import numpy as np
 
 from sotodlib.io.imprinter import ( 
     Books,
@@ -17,6 +18,8 @@ from sotodlib.io.imprinter import (
     BOUND,
     UPLOADED,
     DONE,    
+    ObsSet,
+    G3tObservations,
 )
 
 from .load_smurf import (
@@ -99,6 +102,63 @@ def set_book_rebind(imprint, book, update_level2=False):
         for _, obs in obs_dict.items():
             SMURF.update_observation_files(obs, g3session, force=True)
 
+def delete_level2_obs_and_book(imprint, book, session=None):
+    """When there are certain readout communication errors, smurf will blindly 
+    stream full rate data that is nonsense. For these, we don't want to keep 
+    the data in stray books because it's nonsense and it's massive. Delete the 
+    level 2 files, observation, and the book.
+    """
+    assert book.type == "oper", f"This function is for oper books"
+    set_book_rebind(imprint, book)
+    
+    if session is None:
+        session = imprint.get_session()
+    print(f"Removing Level 2 for {book.bid}")
+    obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+    g3session, SMURF = imprint.get_g3tsmurf_session(
+        return_archive=True
+    )
+    for _, obs in obs_dict.items():
+        SMURF.delete_observation_files(
+            obs, g3session, dry_run=False
+        )  
+    for o in book.obs:
+        session.delete(o)
+    session.delete(book)
+    session.commit()   
+
+
+def remove_level2_obs_from_book(imprint, book, bad_obs_id):
+    """If one level2 observation is problematic, delete that book and re-register without it.
+    """
+    assert book.type == "obs", f"Book should be an 'obs' book"
+
+    # keep staged clean
+    set_book_rebind(imprint, book)
+    odic = imprint.get_g3tsmurf_obs_for_book(book)
+    obs_ids = [k for k in odic.keys()]
+    assert bad_obs_id in obs_ids, f"{bad_obs_id} not in book {book.bid}"
+    
+    new_obs_list = [o for o in obs_ids if o != bad_obs_id]
+    g3session = imprint.get_g3tsmurf_session()
+    olist = [
+        g3session.query(G3tObservations).filter(
+            G3tObservations.obs_id == o
+        ).one() for o in new_obs_list
+    ]
+    oset = ObsSet(
+        olist,
+        mode=book.type, 
+        slots=imprint.tubes[book.tel_tube]['slots'],
+        tel_tube=book.tel_tube
+    )
+    session = imprint.get_session()
+    for o in book.obs:
+        session.delete(o)
+    session.delete(book)
+    session.commit()
+    return imprint.register_book(oset, session=session)
+
 def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     """ helper function for when a level 2 observation could span multiple
     books. Creates a list of ObsSets with that obs_id, prints info to screen and
@@ -169,7 +229,7 @@ def block_fix_bad_timing(imprint):
     """Run through and try rebinding all books with bad timing"""
     failed_books = imprint.get_failed_books()
     fix_list = []
-    for book in failed_book:
+    for book in failed_books:
         if "TimingSystemOff" in book.message:
             fix_list.append(book)
     for book in fix_list:
@@ -179,6 +239,75 @@ def block_fix_bad_timing(imprint):
             f"Binding book {book.bid} while accepting bad timing"
         )
         imprint.bind_book(book, allow_bad_timing=True)
+
+def report_smurf_timestamp_error(imprint, book):
+    set_book_rebind(imprint, book)
+    binder = imprint._get_binder_for_book(book)
+
+    for sid, stream in binder.streams.items():
+        try:
+            stream.preprocess()
+        except Exception as e:
+            print(f"Did not finish preprocessing {sid} received error: {e}")
+
+    binder.set_min_max_ctime()
+
+    msg="          \t error ctime  \t missed time \t time since start \t time until stop\n"
+    for sid, stream in binder.streams.items():
+        msk = np.all([
+            stream.times >= binder.min_ctime,
+            stream.times <= binder.max_ctime,
+        ], axis=0)
+        idxs = np.where(np.diff(stream.times[msk]) <= 0)[0]
+        msg += f"{sid}"
+        if len(idxs) == 0:
+            msg += "\tNo Errors"
+        for x in idxs:
+            msg += f"\t{stream.times[msk][x]:5f}\t{np.diff(stream.times[msk])[x]:5f}"
+            msg += f"\t{stream.times[msk][x]-binder.min_ctime:5f}"
+            msg += f"\t{binder.max_ctime-stream.times[msk][x]:5f}\n"
+    
+    ## reset to failed
+    book.status = FAILED
+    imprint.get_session().commit()
+    
+    del binder
+    return msg
+
+def report_acu_timestamp_error(imprint, book, max_dt=10):
+    set_book_rebind(imprint, book)
+    binder = imprint._get_binder_for_book(book)
+    binder.preprocess()
+    ancil = binder.ancil
+
+    msg="          \t error ctime  \t missed time \t time since start \t time until stop\n"
+
+    for fld in ['az', 'el', 'boresight', 'corotator_enc']:
+        f = getattr(ancil.hkdata, fld)
+        if f is None:
+            continue
+        msk = np.all([
+            f.times >= binder.min_ctime,
+            f.times <= binder.max_ctime,
+        ], axis=0)
+        msg += f"{f.addr}"
+        if np.sum(msk) <= 2:
+            msg += f"does not overlap detector data\n"
+            continue
+        idxs = np.where(np.diff(f.times[msk])>max_dt)[0]
+        if len(idxs) == 0:
+            msg += f"\t has no drops\n"
+        for x in idxs:
+            msg += f"\t{f.times[msk][x]:5f}\t{np.diff(f.times[msk])[x]:5f}"
+            msg += f"\t{f.times[msk][x]-binder.min_ctime:5f}"
+            msg += f"\t{binder.max_ctime-f.times[msk][x]:5f}\n"
+    
+    ## reset to failed
+    book.status = FAILED
+    imprint.get_session().commit()
+    
+    del binder
+    return msg
 
 def get_timecode_final(imprint, time_code, type='all'):
     """Check if all required entries in the g3tsmurf database are present for

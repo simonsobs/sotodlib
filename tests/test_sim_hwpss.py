@@ -28,7 +28,7 @@ from ._helpers import (calibration_schedule, close_data_and_comm,
 from sotodlib.toast.ops import pos_to_chi
 
 
-class SimMuMUXCrosstalkTest(unittest.TestCase):
+class SimHWPSSTest(unittest.TestCase):
 
     def test_sim_hwpss(self):
         if not toast_available:

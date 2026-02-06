@@ -29,6 +29,7 @@ Welcome to SOTODLib's documentation!
    reference.rst
    dev.rst
    metrics.rst
+   utils.rst
 
 Indices and tables
 ==================

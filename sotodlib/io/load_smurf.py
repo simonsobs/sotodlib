@@ -263,7 +263,6 @@ class G3tSmurf:
             g3tsmurf_db: "/path/to/g3tsmurf.db"
             g3thk_db: "/path/to/g3hk.db"
 
-
             finalization:
                 servers:
                     - smurf-suprsync: "smurf-sync-so1" ## instance-id
@@ -616,7 +615,7 @@ class G3tSmurf:
                 f"Database file {db_file.name} appears already deleted on disk"
             )
         else:
-            my_logger.info(f"Deleting file {db_file.name}")
+            my_logger.debug(f"Deleting file {db_file.name}")
 
             if not dry_run:
                 os.remove(db_file.name)
@@ -625,7 +624,7 @@ class G3tSmurf:
                 base, _ = os.path.split(db_file.name)
                 if len(os.listdir(base)) == 0:
                     os.rmdir(base)
-        my_logger.info(f"Deleting database entry for {db_file.name}")
+        my_logger.debug(f"Deleting database entry for {db_file.name}")
         if not dry_run:
             session.delete(db_file)
             session.commit()
@@ -649,7 +648,7 @@ class G3tSmurf:
             The active session
         """
 
-        band = int(re.findall("b\d.txt", cha)[0][1])
+        band = int(re.findall(r"b\d.txt", cha)[0][1])
 
         ch_assign = session.query(ChanAssignments).filter(
             ChanAssignments.ctime == ctime,
@@ -1171,6 +1170,7 @@ class G3tSmurf:
         if my_logger is None:
             my_logger = logger
 
+        my_logger.info(f"Deleting Observation {obs.obs_id}")
         ## first remove the tags
         tags = (
             session.query(Tags)
@@ -1180,7 +1180,7 @@ class G3tSmurf:
             .all()
         )
         for t in tags:
-            my_logger.info(f"Deleting Tag ({t.tag, t.obs_id}) from database")
+            my_logger.debug(f"Deleting Tag ({t.tag, t.obs_id}) from database")
             if not dry_run:
                 session.delete(t)
 
@@ -1189,7 +1189,7 @@ class G3tSmurf:
             self.delete_file(f, session, dry_run=dry_run, my_logger=my_logger)
 
         ## then remove the observation
-        my_logger.info(f"Deleting Observation {obs.obs_id} from database")
+        my_logger.debug(f"Deleting Observation {obs.obs_id} from database")
         if not dry_run:
             session.delete(obs)
             session.commit()
@@ -1580,7 +1580,7 @@ class G3tSmurf:
                     # same folder
                     root = os.path.join("/", *path.split("/")[:-1])
                     fname = path.split("/")[-1]
-                    fband = int(re.findall("b\d.txt", fname)[0][1])
+                    fband = int(re.findall(r"b\d.txt", fname)[0][1])
                     cha_times = [
                         int(f.split("_")[0])
                         for f in os.listdir(root)
@@ -2036,7 +2036,7 @@ def make_DetDb_single_obs(obsfiledb, obs_id):
         len(ch_list),
         dtype=[
             ("idx", int),
-            ("rchannel", np.unicode_, 30),
+            ("rchannel", np.str_, 30),
             ("band", int),
             ("channel", int),
             ("freqs", float),
@@ -2616,7 +2616,7 @@ def _get_tuneset_channel_names(status, ch_map, archive):
             j = np.where(msk)[0][0]
             ruids.append(names[j])
         except:
-            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            logger.debug(f"Information retrival error for Detector {ch_map[i]}")
             ruids.append(
                 "sch_NONE_{}_{:03d}".format(ch_map["band"][i], ch_map["channel"][i])
             )
@@ -2687,7 +2687,7 @@ def _get_detset_channel_names(status, ch_map, obsfiledb):
             j = np.where(msk)[0][0]
             ruids.append(names[j])
         except:
-            logger.info(f"Information retrival error for Detector {ch_map[i]}")
+            logger.debug(f"Information retrival error for Detector {ch_map[i]}")
             ruids.append(
                 "sch_NONE_{}_{:03d}".format(ch_map["band"][i], ch_map["channel"][i])
             )
@@ -2755,7 +2755,7 @@ def get_channel_info(
         len(ch_list),
         dtype=[
             ("idx", int),
-            ("rchannel", np.unicode_, 30),
+            ("rchannel", np.str_, 30),
             ("band", int),
             ("channel", int),
             ("freqs", float),

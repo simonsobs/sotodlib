@@ -19,7 +19,10 @@ import sotodlib
 import so3g
 from sotodlib import core, coords, site_pipeline, tod_ops
 
-from . import util
+from .utils.logging import init_logger
+from .utils.config import parse_quantity, lookup_conditional
+from .utils.archive import ArchivePolicy
+from .utils.pipeline import main_launcher
 
 logger = None
 
@@ -205,7 +208,7 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
     """Entry point."""
     config = _get_config(config_file)
 
-    logger = util.init_logger(__name__, 'make_uncal_beam_map: ')
+    logger = init_logger(__name__, 'make_uncal_beam_map: ')
     if verbose >= 1:
         logger.setLevel('INFO')
     if verbose >= 2:
@@ -320,13 +323,13 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
 
         # Figure out the resolution
         reses = [
-            util.lookup_conditional(config['mapmaking'], 'res', tags=[b])
+            lookup_conditional(config['mapmaking'], 'res', tags=[b])
             for b in band_splits.keys()]
         assert(all([r == reses[0] for r in reses]))  # Resolution conflict
-        res_deg = util.parse_quantity(reses[0], 'deg').value
+        res_deg = parse_quantity(reses[0], 'deg').value
 
         # Where to put things.
-        policy = util.ArchivePolicy.from_params(
+        policy = ArchivePolicy.from_params(
             config['archive']['policy'])
 
         dest_dir = policy.get_dest(**map_info)
@@ -380,8 +383,8 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
             logger.info(f' -- writing plots to {plot_filename}...')
 
             band_mask = (tod.det_info['band'] == key)
-            zoom_size = util.parse_quantity(
-                util.lookup_conditional(pcfg, 'zoom', tags=[key]),
+            zoom_size = parse_quantity(
+                lookup_conditional(pcfg, 'zoom', tags=[key]),
                 'deg').value
 
             plot_map(bundle, plot_filename, zoom_size=zoom_size,
@@ -393,4 +396,4 @@ def main(config_file=None, obs_id=None, verbose=0, test=False):
 
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

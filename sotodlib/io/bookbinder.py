@@ -15,9 +15,9 @@ import sys
 import shutil
 import yaml
 import datetime as dt
-from zipfile import ZipFile
+from zipfile import ZipFile, ZIP_DEFLATED
 import sotodlib
-from sotodlib.site_pipeline.util import init_logger
+from sotodlib.site_pipeline.utils.logging import init_logger
 from .datapkg_utils import walk_files
 
 
@@ -26,11 +26,23 @@ if not log.hasHandlers():
     init_logger('bookbinder')
 
 class TimingSystemOff(Exception):
-    """Exception raised when we try to bind books where the timing system is found to be off and the books have imprecise timing counters"""
+    """Exception raised when we try to bind books when the SMuRF slot says it has low
+    precision timing or downsample is not set to external"""
+    pass
+
+class TimingCounterError(Exception):
+    """Exception raised when timing counters are not behaving correctly but the system
+    believes it has high-precision timing."""
     pass
 
 class NoScanFrames(Exception):
     """Exception raised when we try and bind a book but the SMuRF file contains not Scan frames (so no detector data)"""
+    pass
+
+MAX_DROPPED_SAMPLES = 200
+class BadTimeSamples(Exception):
+    """Exception raised when there are drops in the time samples in the 
+    UFM timestreams"""
     pass
 
 class NoHKFiles(Exception):
@@ -38,7 +50,13 @@ class NoHKFiles(Exception):
     pass
 
 class NoMountData(Exception):
-    """Exception raised when we cannot find mount data"""
+    """Exception raised when we cannot find mount data overlapping detector data"""
+    pass
+
+MAX_DROPPED_HK = 200
+class DroppedMountData(Exception):
+    """Exception raised when at least MAX_DROPPED_HK samples have been dropped from a 
+    mount field"""
     pass
 
 class NoHWPData(Exception):
@@ -47,6 +65,10 @@ class NoHWPData(Exception):
 
 class DuplicateAncillaryData(Exception):
     """Exception raised when we find the HK data has copies of the same timestamps"""
+    pass
+
+class NonMonotonicAncillaryTimes(Exception):
+    """Exception raised when we find the HK data has timestamps that are not strictly increasing monotonically"""
     pass
 
 class BookDirHasFiles(Exception):
@@ -157,7 +179,7 @@ class HkDataField:
             self.times.append(np.array(block.times) / core.G3Units.s)
             self.data.append(block[self.field])
 
-    def finalize(self, drop_duplicates=False):
+    def finalize(self, drop_duplicates=False, require_monotonic_times=True):
         """Finalize data, and store in numpy array"""
         self.times = np.hstack(self.times, dtype=np.float64)
         self.data = np.hstack(self.data)
@@ -177,9 +199,15 @@ class HkDataField:
                 )
             self.times = self.times[idxs]
             self.data = self.data[idxs]
-        assert np.all(np.diff(self.times)>0), \
-               f"Times from {self.addr} are not increasing"
-        
+        if not np.all(np.diff(self.times)>0):
+            bad = np.sum( np.diff(self.times) <= 0)
+            msg = f"Times from {self.addr} have {bad} samples that are " \
+                "not increasing"
+            if require_monotonic_times:
+                raise NonMonotonicAncillaryTimes(msg)
+            else:
+                log.warning(msg)
+                        
 @dataclass
 class HkData:
     """
@@ -196,7 +224,7 @@ class HkData:
     def from_dict(cls, d: Dict[str, str]):
         """
         Creates HkData object from a dict of field addresses. Addresses must be formatted like ``<instance_id>.<feed>.<field>``.
-        Keys of dict must be valide fields of HkData class, such as ``az`` or ``el``.
+        Keys of dict must be valid fields of HkData class, such as ``az`` or ``el``.
         """
         kw = {}
         for k, v in d.items():
@@ -215,12 +243,34 @@ class HkData:
             if isinstance(f, HkDataField):
                 f.process_frame(frame)
 
-    def finalize(self, drop_duplicates=True):
+    def finalize(self, drop_duplicates=True, require_monotonic_times=True):
         """Finalizes HkDatafields"""
         for fld in fields(self):
             f = getattr(self, fld.name)
             if isinstance(f, HkDataField):
-                f.finalize(drop_duplicates=drop_duplicates)
+                f.finalize(
+                    drop_duplicates=drop_duplicates,
+                    require_monotonic_times=require_monotonic_times,
+                )
+
+def validate_mount_field(hk_field: HkDataField, times):
+        diff_times = hk_field.times[:-1] + 0.5*np.diff(hk_field.times)
+        m = (times[0] <= diff_times) & (diff_times <= times[-1])
+        err = None
+        if m.sum() < 2:
+            err= NoMountData(
+                f"No mount data overlapping with detector data: {hk_field.addr}"
+            )
+        arr = np.diff(hk_field.times)/np.median(np.diff(hk_field.times))            
+        if np.any(arr[m] > MAX_DROPPED_HK):
+            ## don't change error message without changing imprinter CLI
+            err= DroppedMountData(
+                f"{hk_field.addr} dropped "
+                f"{arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
+                f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
+                "seconds. Interpolation may be questionable."
+            )
+        return arr > 2, err
 
 class AncilProcessor:
     """
@@ -258,7 +308,8 @@ class AncilProcessor:
     """
     def __init__(self, files, book_id, hk_fields: Dict, 
                  drop_duplicates=False, require_hwp=True, 
-                 require_acu=True, log=None
+                 require_acu=True, require_monotonic_times=True, 
+                 log=None
                  ):
         self.hkdata: HkData = HkData.from_dict(hk_fields)
 
@@ -270,7 +321,7 @@ class AncilProcessor:
         self.drop_duplicates = drop_duplicates
         self.require_hwp = require_hwp
         self.require_acu = require_acu
-
+        self.require_monotonic_times = require_monotonic_times
         if log is None:
             self.log = logging.getLogger('bookbinder')
         else:
@@ -335,7 +386,10 @@ class AncilProcessor:
                 )
                 self.hkdata.hwp_freq = None
         
-        self.hkdata.finalize(drop_duplicates=self.drop_duplicates)
+        self.hkdata.finalize(
+            drop_duplicates=self.drop_duplicates,
+            require_monotonic_times=self.require_monotonic_times,
+        )
         self.preprocessed = True
 
     def bind(self, outdir, times, frame_idxs, file_idxs):
@@ -360,38 +414,33 @@ class AncilProcessor:
         cur_file_idx = None
         out_files = []
 
-        def validate_mount_field(hk_field: HkDataField, max_dt=None):
-            m = (times[0] <= hk_field.times) & (hk_field.times <= times[-1])
-            if m.sum() < 2:
-                raise NoMountData(
-                    f"No mount data overlapping with detector data: {hk_field.addr}"
-                )
-            if max_dt is not None:
-                _max_dt = np.max(np.diff(hk_field.times[m]))
-                if _max_dt > max_dt:
-                    raise NoMountData(
-                        f"Max data spacing {_max_dt}s is higher than {max_dt}s for {hk_field.addr}. "
-                        "Interpolation may be questionable."
-                    )
-
         # go through and interpolate ACU times to detector times
         acu_interp_data = {}
+        acu_invalid_data = {}
         for fld in ['az', 'el', 'boresight', 'corotator_enc']:
             f = getattr(self.hkdata, fld)
             if f is not None:
-                try:
-                    validate_mount_field(f, max_dt=10)
-                    acu_interp_data[fld] = np.interp(
-                        times, f.times, f.data
-                    )
-                except NoMountData as e:
+                invalid, err = validate_mount_field(f, times)
+                acu_interp_data[fld] = np.interp(
+                    times, f.times, f.data
+                )
+                acu_invalid_data[fld] = np.interp( 
+                    times, f.times[:-1]+0.5*np.diff(f.times), 
+                    invalid
+                )>0
+                if err is not None:
                     if self.require_acu:
-                        raise e
+                        raise err
                     else:
-                        self.log.warning(e)
-                        acu_interp_data[fld] = None
+                        self.log.warning(err)
+                        ## remove field entirely if there's no data
+                        if isinstance(err, NoMountData):
+                            acu_interp_data[fld]=None
+                            acu_invalid_data[fld]=None
+                
             else: 
                 acu_interp_data[fld] = None
+                acu_invalid_data[fld]=None
 
         az = acu_interp_data['az']
         el = acu_interp_data['el']
@@ -422,10 +471,18 @@ class AncilProcessor:
             if az is not None:
                 anc_data['az_enc'] = core.G3VectorDouble(az[m])
                 anc_data['el_enc'] = core.G3VectorDouble(el[m])
+                anc_data['flag_az_enc'] = core.G3VectorBool(acu_invalid_data['az'][m])
+                anc_data['flag_el_enc'] = core.G3VectorBool(acu_invalid_data['el'][m])
             if boresight is not None:
                 anc_data['boresight_enc'] = core.G3VectorDouble(boresight[m])
+                anc_data['flag_boresight_enc'] = core.G3VectorBool(
+                    acu_invalid_data['boresight'][m]
+                )
             if corotator_enc is not None:
                 anc_data['corotator_enc'] = core.G3VectorDouble(corotator_enc[m])
+                anc_data['flag_corotator_enc'] = core.G3VectorBool(
+                    acu_invalid_data['corotator_enc'][m]
+                )
             oframe['ancil'] = anc_data
             writer(oframe)
             anc_frame_data.append(anc_data)
@@ -494,7 +551,8 @@ class AncilProcessor:
 
 class SmurfStreamProcessor:
     def __init__(self, obs_id, files, book_id, readout_ids,
-                 log=None, allow_bad_timing=False):
+                 log=None, allow_bad_timing=False, min_ctime=None,
+                 max_ctime=None):
         self.files = files
         self.obs_id = obs_id
         self.stream_id = None
@@ -512,6 +570,8 @@ class SmurfStreamProcessor:
         self.out_files = []
         self.book_id = book_id
         self.allow_bad_timing = allow_bad_timing
+        self.min_ctime = min_ctime
+        self.max_ctime = max_ctime
 
         if log is None:
             self.log = logging.getLogger('bookbinder')
@@ -562,10 +622,25 @@ class SmurfStreamProcessor:
 
         if len(ts) == 0:
             raise NoScanFrames(f"{self.obs_id} has no detector data")
+
         self.times = np.hstack(ts)
         self.smurf_frame_counters = np.hstack(smurf_frame_counters)
         self.frame_idxs = np.hstack(frame_idxs)
-
+ 
+        if self.min_ctime is None:
+            self.min_ctime = np.min(self.times)
+        if self.max_ctime is None:
+            self.max_ctime = np.max(self.times)
+        
+        msk = np.all([
+            self.times >= self.min_ctime,
+            self.times <= self.max_ctime,
+        ], axis=0)
+        if np.any(np.diff(self.times[msk]) <= 0):
+            raise BadTimeSamples(
+                f"{self.obs_id} has time samples not increasing"
+            )
+        
         timing = timing and (not self.timing_paradigm=='Low Precision')
         
         if (not self.allow_bad_timing) and (not timing):
@@ -634,6 +709,10 @@ class SmurfStreamProcessor:
         _, offsets = np.unique(self.frame_idxs, return_index=True)
         # Sample idx within each in-frame for every input sample
         in_offset_idxs = np.arange(len(self.times)) - offsets[self.frame_idxs]
+
+        # Mask to use to separate out non-resonator signal from resonator signal
+        tracked_chans = np.array(['NONE' not in r for r in self.readout_ids], dtype=bool)
+        readout_id_arr = np.array(self.readout_ids)
 
         # Handle file writers
         writer = None
@@ -725,7 +804,7 @@ class SmurfStreamProcessor:
                 )
                 raise ValueError(f"Cannot finish binding {self.obs_id}")
             elif np.any(~filled):
-                self.log.debug(
+                self.log.warning(
                     f"{np.sum(~filled)} missing samples in out-frame {oframe_idx}"
                 )
                 # Missing samples at the beginning / end of a frame will be
@@ -751,7 +830,8 @@ class SmurfStreamProcessor:
             oframe['flag_smurfgaps'] = core.G3VectorBool(~filled)
 
             ts = core.G3VectorTime(ts * core.G3Units.s)
-            oframe['signal'] = so3g.G3SuperTimestream(self.readout_ids, ts, data)
+            oframe['signal'] = so3g.G3SuperTimestream(readout_id_arr[tracked_chans], ts, data[tracked_chans, :])
+            oframe['untracked'] = so3g.G3SuperTimestream(readout_id_arr[~tracked_chans], ts, data[~tracked_chans, :])
             oframe['primary'] = so3g.G3SuperTimestream(self.primary_names, ts, primary)
             oframe['tes_biases'] = so3g.G3SuperTimestream(self.bias_names, ts, biases)
             oframe['stream_id'] = self.stream_id
@@ -803,10 +883,16 @@ class BookBinder:
         multiple copies of the same data
     require_acu: bool, optional
         if true, will throw error if we do not find Mount data
+    require_monotonic_times: bool, optional
+        if true, will throw error if we ever see timestamps not increasing or going backwards
     require_hwp: bool, optional
         if true, will throw error if we do not find HWP data
     allow_bad_time: bool, optional
         if not true, books will not be bound if the timing systems signals are not found. 
+    min_ctime: float, optional
+        if not None, will cut book to this minimum ctime
+    max_ctime: float optional
+        if not None, will cut book to this maximum ctime
     
     Attributes
     -----------
@@ -821,11 +907,12 @@ class BookBinder:
     file_idxs : np.ndarray
         Array of output file indices for all output frames in the book
     """
-    def __init__(self, book, obsdb, filedb, data_root, readout_ids, outdir, hk_fields,
-                 max_samps_per_frame=50_000, max_file_size=1e9, 
-                ignore_tags=False, ancil_drop_duplicates=False, 
+    def __init__(self, book, obsdb, filedb, data_root, readout_ids, 
+                outdir, hk_fields, max_samps_per_frame=50_000, max_file_size=1e9, ignore_tags=False, ancil_drop_duplicates=False, 
                 require_hwp=True, require_acu=True,
-                allow_bad_timing=False):
+                require_monotonic_times=True,
+                allow_bad_timing=False,
+                min_ctime=None, max_ctime=None):
         self.filedb = filedb
         self.book = book
         self.data_root = data_root
@@ -841,6 +928,8 @@ class BookBinder:
         self.max_file_size = max_file_size
         self.ignore_tags = ignore_tags
         self.allow_bad_timing = allow_bad_timing
+        self.min_ctime = min_ctime
+        self.max_ctime = max_ctime
 
         if os.path.exists(outdir):
             # don't count hidden files, possibly from NFS processes
@@ -888,6 +977,7 @@ class BookBinder:
             drop_duplicates=ancil_drop_duplicates,
             require_hwp=require_hwp,
             require_acu=require_acu,
+            require_monotonic_times=require_monotonic_times,
         )
         self.streams = {}
         for obs_id, files in filedb.items():
@@ -900,14 +990,43 @@ class BookBinder:
                 )
             self.streams[stream_id] = SmurfStreamProcessor(
                 obs_id, files, book.bid, readout_ids[obs_id], log=self.log,
-                allow_bad_timing=self.allow_bad_timing,
+                allow_bad_timing=self.allow_bad_timing, 
+                min_ctime=self.min_ctime, max_ctime=self.max_ctime,
             )
 
         self.times = None
         self.frame_idxs = None
         self.file_idxs = None
         self.meta_files = None
-        
+
+    def set_min_max_ctime(self):
+        """Function to be run after stream.preprocess is finished to set the ctimes.
+        Splitting this out because it is useful for debugging purposes as well
+        """   
+        for stream in self.streams.values():
+            assert stream.times is not None, "All streams must be preprocessed"
+        t0 = np.max([s.times[0] for s in self.streams.values()])
+        if self.min_ctime is not None:
+            assert self.min_ctime >= t0, \
+                f"{self.min_ctime} is less than the first time found in"\
+                f" the detector data {t0}"
+            self.log.warning(
+                f"Over-riding minimum ctime from {t0} to {self.min_ctime}"
+            )
+        else:
+            self.min_ctime = t0
+
+        t1 = np.min([s.times[-1] for s in self.streams.values()])
+        if self.max_ctime is not None:
+            assert self.max_ctime <= t1, \
+                f"{self.max_ctime} is greater than the last time found in"\
+                f" the detector data {t1}"
+            self.log.warning(
+                f"Over-riding maximum ctime from {t1} to {self.max_ctime}"
+            )
+        else:
+            self.max_ctime = t1
+
     def preprocess(self):
         """
         Runs preprocessing steps for the book. Preprocesses smurf and ancillary
@@ -919,14 +1038,13 @@ class BookBinder:
 
         for stream in self.streams.values():
             stream.preprocess()
+        self.set_min_max_ctime()
 
-        t0 = np.max([s.times[0] for s in self.streams.values()])
-        t1 = np.min([s.times[-1] for s in self.streams.values()])
         # prioritizes the last stream
         # implicitly assumes co-sampled (this is where we could throw errors
         # after looking for co-sampled data)
         ts, _ = fill_time_gaps(stream.times) 
-        m = (t0 <= ts) & (ts <= t1)
+        m = (self.min_ctime <= ts) & (ts <= self.max_ctime)
         ts = ts[m]
 
         self.ancil.preprocess()
@@ -956,11 +1074,58 @@ class BookBinder:
             file_idxs.append(totsize[idx] // self.max_file_size)
         file_idxs = np.array(file_idxs, dtype=int)
 
-        self.log.info("Finished preprocessing data")
-
         self.times = ts
         self.frame_idxs = frame_idxs
         self.file_idxs = file_idxs
+
+        self.check_timesamples()
+        self.log.info("Finished preprocessing data")
+
+    def check_timesamples(self, atol=1e-4):
+        """
+        Checks for missing timesamples in individual streams relative to the 
+        book times. Makes sure individual readout slots haven't dropped too many
+        points
+        """
+        if self.times is None:
+            raise ValueError(
+                "Preprocess must have been run to check_timesamples"
+            )
+        
+        self.dropped = {}
+        for u, s in self.streams.items():
+            sample_map = find_ref_idxs(self.times, s.times)
+            mapped = np.abs(self.times[sample_map] - s.times) < atol
+            diffs = np.diff(sample_map[mapped])
+            idx = np.where( diffs>1)[0]
+            self.dropped[u] = sum( [diffs[i]-1 for i in idx] )
+        
+        if np.all( [x==0 for x in self.dropped.values()] ):
+            ## no dropped samples from any slot
+            return
+
+        ## do not change the format of these messages without also changing the 
+        ## autofixing behavior that is built off these messages.
+        msg = '\n'.join([
+            f"\t{self.streams[u].obs_id}: {x}" for u, x in self.dropped.items()
+        ])
+        if np.any( [x>MAX_DROPPED_SAMPLES for x in self.dropped.values()]):
+            if (not self.allow_bad_timing):
+                raise BadTimeSamples(
+                    f"Streams have more than {MAX_DROPPED_SAMPLES} time samples"
+                    f" missing. Pass `allow_bad_timing=True` to bind anyway. "
+                    "Missing samples:\n" + msg
+                )
+            else:
+                self.log.warning(
+                    f"Streams have more than {MAX_DROPPED_SAMPLES} time samples"
+                    f" missing. Missing Samples: \n" + msg
+                )
+        else:
+            self.log.warning(
+                f"Streams have time samples missing. Missing Samples: \n" + msg
+            )
+
 
     def copy_smurf_files_to_book(self):
         """
@@ -1039,6 +1204,7 @@ class BookBinder:
         meta['n_frames'] = len(np.unique(self.frame_idxs))
         meta['n_samples'] = len(self.times)
         meta['session_id'] = self.book.bid.split('_')[1]
+        meta['filled_samples'] = {k:int(x) for k,x in self.dropped.items()}
 
         sample_ranges = []
         for file_idx in np.unique(self.file_idxs):
@@ -1128,7 +1294,7 @@ class BookBinder:
             If True, will enable a progress bar.
         """
         self.preprocess()
-
+        
         self.log.info(f"Binding data to {self.outdir}")
         if not os.path.exists(self.outdir):
             os.makedirs(self.outdir)
@@ -1231,7 +1397,7 @@ class TimeCodeBinder:
             with ZipFile(self.outdir, mode='x') as zf:
                 for f in self.file_list:
                     relpath = os.path.relpath(f, self.indir)
-                    zf.write(f, arcname=relpath)
+                    zf.write(f, arcname=relpath, compress_type=ZIP_DEFLATED)
         elif self.file_list is None:
             shutil.copytree(
                 self.indir,
@@ -1322,13 +1488,31 @@ def get_frame_times(frame, allow_bad_timing=False):
 
     counters = np.all( np.diff(c0)!=0 ) and np.all( np.diff( c2 )!=0)
 
-    if counters:
-        return True, counters_to_timestamps(c0, c2)
-    elif allow_bad_timing:
-        return False, np.array(frame['data'].times) / core.G3Units.s
-    else:
-        ## don't change this error message. used in Imprinter CLI
-        raise TimingSystemOff("Timing counters not incrementing")
+    if not counters:
+        if allow_bad_timing:
+            return False, np.array(frame['data'].times) / core.G3Units.s
+        else:
+            raise TimingCounterError("Timing counters not incrementing")
+             
+    s, ns = split_ts_bits(c2)
+
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+    
+    # Look for evidence of counters de-syncing. 
+    stat = c2-(c0/480000) - np.round(c2-(c0/480000))
+    counters = ((np.ptp(stat)<0.001)+(np.abs(np.mean(stat))<0.0025))
+
+    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
+
+    if not counters and not allow_bad_timing:
+        raise TimingCounterError(
+            f"Timing counters diverging from normal. ptp: {np.ptp(stat)}, "
+            f"mean: {np.abs(np.mean(stat))}"
+        )
+
+    return counters, ts
 
 def split_ts_bits(c):
     """
@@ -1340,14 +1524,6 @@ def split_ts_bits(c):
     b = c & MAXINT
     return a, b
 
-def counters_to_timestamps(c0, c2):
-    s, ns = split_ts_bits(c2)
-
-    # Add 20 years in seconds (accounting for leap years) to handle
-    # offset between EPOCH time referenced to 1990 relative to UNIX time.
-    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
-    ts = np.round(c2 - (c0 / 480000) ) + c0 / 480000
-    return ts
 
 def find_ref_idxs(refs, vs):
     """

@@ -126,6 +126,38 @@ class Timer:
             elapsed=self.elapsed)
         self.print_func(self.text)
 
+def get_fplane(tod, dets=None, focal_plane=None, hwp=False):
+    """Return a FocalPlane object for the AxisManager tod.
+
+    Args:
+      dets (list of str): If set, the detectors will be restricted to this list.
+      focal_plane (AxisManager): A sub-axis-manager containing the detector
+        layout and response information. Defaults to tod.focal_plane.
+        This must contain at least the xi and eta members. Optional members are
+        gamma, T, P, Q and U, which are used to specify the detector response.
+        Typically these would be used like this:
+          gamma: Only detector polariztion angle specified. Detectors assumed to
+            have 100% response in total intensity and polarization.
+          gamma, P: Detector polarization angle and polarization efficiency.
+          gamma, T, P: As above, but also including total intensity. This is
+            usually unnecessary, but in demodulation mapmaking it's sometimes
+            useful to support polarization-sensitive detectors with no sensitivity
+            to total intensity.
+          T, Q, U: Alternative to specifying polarization angles. The detectors'
+            response to T, Q and U are directly specified in the focal plane frame.
+            Equivalent to gamma = arctan(U,Q)/2, P = (Q**2+U**2)**0.5.
+
+    Returns:
+      A FocalPlane object, which simply encapsulates a numpy array of detector
+      quaternions and a numpy array of detector responses to total intensity
+      and polarization.
+    """
+    dets   = _valid_arg(dets, tod.dets.vals, src=tod)
+    fp     = _valid_arg(focal_plane, 'focal_plane', src=tod)
+    fp     = fp.restrict("dets", dets)
+    kwargs = {key:getattr(fp,key) for key in ["gamma","T","P","Q","U"] if key in fp}
+    fplane = so3g.proj.FocalPlane.from_xieta(fp.xi, fp.eta, **kwargs, hwp=hwp)
+    return fplane
 
 def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
               boresight=None, sight=None):
@@ -146,10 +178,8 @@ def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
       correspond to RA and dec of equatorial coordinates.  Psi is is
       the parallactic rotation, measured from North towards West
       (opposite the direction of standard Position Angle).
-
     """
     dets = _valid_arg(dets, tod.dets.vals, src=tod)
-    fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
     if sight is None:
         timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
         boresight = _valid_arg(boresight, 'boresight', src=tod)
@@ -158,8 +188,8 @@ def get_radec(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
             site='so', weather='typical')
     else:
         sight = _get_csl(_valid_arg(sight, 'sight', src=tod))
-    fp = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
-    asm = so3g.proj.Assembly.attach(sight, fp)
+    fplane = get_fplane(tod, dets=dets, focal_plane=focal_plane)
+    asm    = so3g.proj.Assembly.attach(sight, fplane)
     output = np.zeros((len(dets), len(sight.Q), 4))
     proj = so3g.proj.Projectionist()
     proj.get_coords(asm, output=output)
@@ -193,13 +223,12 @@ def get_horiz(tod, wrap=False, dets=None, timestamps=None, focal_plane=None,
     dets = _valid_arg(dets, tod.dets.vals, src=tod)
     timestamps = _valid_arg(timestamps, 'timestamps', src=tod)
     boresight = _valid_arg(boresight, 'boresight', src=tod)
-    fp = _valid_arg(focal_plane, 'focal_plane', src=tod)
 
     sight = so3g.proj.CelestialSightLine.for_horizon(
         timestamps, boresight.az, boresight.el, roll=boresight.roll)
 
-    fp = so3g.proj.FocalPlane.from_xieta(dets, fp.xi, fp.eta, fp.gamma)
-    asm = so3g.proj.Assembly.attach(sight, fp)
+    fplane = get_fplane(tod, dets=dets, focal_plane=focal_plane)
+    asm = so3g.proj.Assembly.attach(sight, fplane)
     output = np.zeros((len(dets), len(timestamps), 4))
     proj = so3g.proj.Projectionist()
     proj.get_coords(asm, output=output)
@@ -317,38 +346,72 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     # Get a convex hull focal plane.
     (xi0, eta0), R, xieta1 = get_focal_plane_cover(
         focal_plane=fp0, count=16)
-    fake_dets = ['hull%i' % i for i in range(xieta1.shape[1])]
-    fp1 = so3g.proj.FocalPlane.from_xieta(fake_dets, xieta1[0], xieta1[1])
+    fp1 = so3g.proj.FocalPlane.from_xieta(xieta1[0], xieta1[1])
 
-    asm = so3g.proj.Assembly.attach(sight, fp1)
-    planar = np.zeros((len(fake_dets), n_samp, 4))
-    proj = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
+    asm    = so3g.proj.Assembly.attach(sight, fp1)
+    planar = np.zeros((xieta1.shape[1], n_samp, 4))
+    proj   = so3g.proj.Projectionist.for_geom((1,1), wcs_kernel)
     if rot:
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
+    # planar is now [ndet,nsamp,{ira,idec}] in intermediate
+    # coordinates in radians. These will be 0 at the
+    # reference point, and span at most [-pi,pi] in ira
+    # and [-pi/2,pi/2] in idec
 
-    # Get the pixel extrema in the form [{xmin,ymin},{xmax,ymax}]
-    delts  = wcs_kernel.wcs.cdelt * DEG
-    ranges = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    # Sometimes a patch will end up straddling the edege of the
+    # map. For example, for a standard CAR projection with a
+    # reference point at ra=dec=0, a patch centered on ra=180
+    # would be half on one side of the map, half on the other,
+    # with a wide stretch of nothing between. For most projections
+    # there's nothing we can do about this, but for the special case
+    # of non-oblique cylindrical projections, we can modify crval
+    # and crpix to construct a compatible pixelization centered on
+    # the patch center.
+    recenter = wcsutils.is_separable(wcs_kernel)
+    if recenter:
+        # First part of recentering:
+        # Unwind each detector in ra to avoid angle jumps, letting
+        # us measure the actual extent of the patch.
+        planar[:,:,0] = utils.unwind(planar[:,:,0])
+        # Harmonize detectors. This assumes that the detectors won't
+        # be more than 180° away from each other at any given time
+        offs = np.round((planar[:,0,0]-planar[0,0,0])/(2*np.pi))*(2*np.pi)
+        planar[:,:,0] -= offs[:,None]
+
+    # Go from intermediate coordinates to pixel coordiantes.
+    # We add crpix because planar is relative to the ref-point.
+    # NB! This makes it 1-based!
+    delts   = wcs_kernel.wcs.cdelt * DEG
+    pixbox  = utils.minmax(planar[:,:,:2]/delts,(0,1))
+    pixbox += wcs_kernel.wcs.crpix
     del planar
-
-    # These planar ranges are in units of pixels away from the
-    # reference point.  The reference point is not necessarily on a
-    # pixel center -- that depends on whether crpix is an integer.  So
-    # transform ranges by +(crpix - 1), making them relative to the
-    # bottom left pixel of wcs_kernel.  Note the -1 here accounts for
-    # FITS numbering of pixels starting at (1, 1).
-    ranges += (wcs_kernel.wcs.crpix - 1)
-
-    # Round ranges, which in pixel offset units, to nearest integer.
-    corners = utils.nint(ranges)
-
-    # Start a new WCS. Adjust crpix to put our footprint in the
-    # bottom-left pixel.
+    # Use these to construct a wcs with lower-left corner
+    # as close to pixbox[0] as possible. We don't want to
+    # change the pixel grid alignment though, so round to
+    # nearest whole pixel
+    p1, p2 = utils.floor(pixbox)
     w = wcs_kernel.deepcopy()
-    w.wcs.crpix -= corners[0]
-    shape = tuple(corners[1] - corners[0] + 1)[::-1]
+    # Adjust crpix so p1 → 1.
+    w.wcs.crpix -= p1-1
+    # If we cover the whole width of the sky, even after unwrapping,
+    # then this might end up being 1 pixel too wide, giving a sky
+    # slightly > 360° which can cause some minor problems.
+    # Can't remove the +1 though, as that would sometimes chop off
+    # a pixel from the exposed area. Either just ignore, since
+    # this is a hypothetical case very unlikely to actually happen,
+    # or add a special case. NB! This case *will* trigger regularly
+    # due to wrapping if recentering is turned off.
+    shape = (p2-p1+1)[::-1]
+
+    if recenter:
+        # Second part of recentering. Modify crval[0]
+        x_mid  = shape[-1]//2+1
+        ra_mid = w.wcs.crval[0] + (x_mid-w.wcs.crpix[0])*w.wcs.cdelt[0]
+        w.wcs.crpix[0] = x_mid
+        w.wcs.crval[0] = ra_mid
+
     return (shape, w)
 
 
@@ -674,3 +737,62 @@ class ScalarLastQuat(np.ndarray):
             temp[..., 1:] = self[..., :3]
             return so3g.proj.quat.G3VectorQuat(temp)
         raise ValueError("Can only convert 1- or 2-d arrays to G3.")
+
+def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
+    """
+    Constructs a deflected CelestialSightLine using HWP-synchronous
+    pointing correction using combined wobble metadata that contains 
+    both amp and phase fields.
+    
+    This function will raise ValueError unless all detectors belong to a single
+    wafer and frequency band. It extracts the corresponding deflection amplitude
+    and phase from the metadata, computes the wobble correction quaternion, and
+    applies it to the boresight pointing.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        AxisManager for the observation, must include hwp_angle, timestamps, 
+        and boresight.az/el, as well as det_info with wafer and band info.
+
+    wobble_meta : AxisManager
+        Metadata tree containing both amp and phase fields under
+        wobble_meta.{amp, phase}
+
+    site : str
+        Observatory site identifier for sightline generation (default 'so').
+
+    weather : str
+        Atmospheric condition tag for sightline model (default 'typical').
+
+    Returns
+    -------
+    sight : CelestialSightLine
+        The sightline with the wobble correction quaternion applied.
+    """
+    wafer_slots = np.unique(aman.det_info.wafer_slot)
+    bands = np.unique(aman.det_info.wafer.bandpass)
+
+    if len(wafer_slots) != 1 or len(bands) != 1:
+        raise ValueError("Detectors span multiple wafer_slots or bands.")
+    # the amp and phase are the same for a given wafer, so we can take any of them, in this case for detector index 0
+    # !!!!! this won't work for mixing more than one wafer.
+    # the metadata has amplitudes in arcmin, and phases in radians
+    amp = wobble_meta.amp[0]/60.*np.pi/180.0
+    phase = wobble_meta.phase[0]
+
+    dxi = amp * np.cos(aman.hwp_angle - phase)
+    deta = -amp * np.sin(aman.hwp_angle - phase)
+    deflq = so3g.proj.quat.rotation_xieta(xi=dxi, eta=deta)
+
+    sight = so3g.proj.CelestialSightLine.az_el(
+        aman.timestamps,
+        aman.boresight.az,
+        aman.boresight.el,
+        roll=aman.boresight.roll,
+        weather=weather,
+        site=site,
+    )
+    sight.Q = sight.Q * ~deflq
+    return sight
+

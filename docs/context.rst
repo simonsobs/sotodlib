@@ -528,6 +528,12 @@ following:
   ``dets:passband`` example above) it can be convenient.  Doing this
   requires including ``obs:obs_id`` (or some other ObsDb column) in
   the dataset.
+- Committing changes to the database (i.e. writing them to disk) can be
+  slow, especially on certain filesystems.  If you are making many
+  updates in a row to the metadata index, consider using
+  :py:class:`DbBatchManager` or :py:class:`MultiDbBatchManager`
+  (see examples in their respective API documentations) to reduce I/O
+  overhead.
 
 
 .. _metadata-archives:
@@ -880,6 +886,20 @@ ManifestDb reference
 *The class documentation of ManifestDb should appear below.*
 
 .. autoclass:: ManifestDb
+   :special-members: __init__
+   :members:
+
+DbBatchManager reference
+------------------------
+
+.. autoclass:: DbBatchManager
+   :special-members: __init__
+   :members:
+
+MultiDbBatchManager reference
+-----------------------------
+
+.. autoclass:: MultiDbBatchManager
    :special-members: __init__
    :members:
 
@@ -1545,7 +1565,7 @@ few queries::
   >>> obsdb.query('hwp_speed >= 2.')
   ResultSet<[obs_id,timestamp,hwp_speed], 1 rows>
 
-  >>> obsdb.query('hwp_speed > 1. and drift=="rising"')
+  >>> obsdb.query("hwp_speed > 1. and drift=='rising'")
   ResultSet<[obs_id,timestamp,hwp_speed], 1 rows>
 
 The object returned by obsdb.query is a :py:obj:`ResultSet`, from
@@ -1579,10 +1599,10 @@ end of some of the tag strings::
 
 Alternately, the values of tags can be used in query strings::
 
-  >>> obsdb.query('(hwp_fast==1 and drift=="rising") or (hwp_fast==0 and drift="setting")',
+  >>> obsdb.query("(hwp_fast==1 and drift=='rising') or (hwp_fast==0 and drift='setting')",
     tags=['hwp_fast'])
   ResultSet<[obs_id,timestamp,hwp_speed,drift,hwp_fast], 2 rows>
-    
+
 
 Getting a description of a single observation
 ---------------------------------------------
@@ -1606,7 +1626,7 @@ So here we see that the observation is associated with tags
 ``'hwp_fast'`` and ``'cryo_problem'``.
 
 .. _obsdb-names-section:
- 
+
 Standardized ObsDb field names
 ==============================
 
@@ -1828,5 +1848,3 @@ Usage
    :module: sotodlib.core.metadata.cli
    :func: get_parser
    :prog: so-metadata
-
-
