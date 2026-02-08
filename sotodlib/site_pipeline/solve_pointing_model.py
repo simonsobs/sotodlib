@@ -926,11 +926,10 @@ def main(config_path: str):
     model_solved_params = minimize(
         objective_model_func_lmfit_joint,
         fit_params,
-        method="lbfgsb", # "nelder",
+        method=config.get("fit_method", "nelder"),
         nan_policy="omit",
         args=(pm_version, epochs, xieta_model, use_weights),
-        workers=-1,
-        options={'maxcor': 10}
+        **config.get("fit_options", {}),
     )
     logger.info("Ran 1st Minimization")
 
@@ -1004,6 +1003,7 @@ def main(config_path: str):
                 plotter.plot_residuals_histograms()
                 plotter.plot_dets_in_these_obs()
 
+    tot_bad = 0
     if iterate_cutoff is not None:
         logger.info("Iterating parameter solution")
         logger.info(f"Using {iterate_cutoff} as cutoff")
@@ -1022,6 +1022,7 @@ def main(config_path: str):
                 len(bad_fit_inds),
                 cutoff,
             )
+            tot_bad += len(bad_fit_inds)
 
             if len(bad_fit_inds) != 0:
                 if fit_type == "ufm_center":
@@ -1049,14 +1050,16 @@ def main(config_path: str):
                 epoch["solver_aman"].weights[bad_fit_inds] = 0.0
             epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
 
+        if tot_bad == 0:
+            logger.info("No bad points found so not running second fit!")
+    if tot_bad > 0:
         model_solved_params = minimize(
             objective_model_func_lmfit_joint,
-            fit_params,
-            method="lbfgsb",
+            model_solved_params,
+            method=config.get("fit_method", "nelder"),
             nan_policy="omit",
             args=(pm_version, epochs, xieta_model, use_weights),
-            workers=-1,
-            options={'maxcor': 10}
+            **config.get("fit_options", {}),
         )
 
         test_params = _round_params(model_solved_params.params.valuesdict(), 8)
