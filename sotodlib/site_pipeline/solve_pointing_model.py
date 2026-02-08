@@ -346,16 +346,8 @@ def _init_fit_params(config, epochs):
 
     return fit_params, epochs
 
-def objective_model_func_lmfit(
-    params, pm_version, solver_aman, xieta_model, weights=True
-):
-    if xieta_model == "measured":
-        xi_mod, eta_mod = model_measured_xieta(params, pm_version, solver_aman)
-        xi_ref, eta_ref, _ = solver_aman.measured_xieta_data
-    elif xieta_model == "template":
-        xi_mod, eta_mod = model_template_xieta(params, pm_version, solver_aman)
-        xi_ref, eta_ref, _ = solver_aman.nominal_xieta_locs
 
+def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
     # For simplicity we do the floating of OTs to just the model
     # We are recomputing information that should just be cached here...
     # TODO: Fix that
@@ -378,6 +370,19 @@ def objective_model_func_lmfit(
         eta_mod[msk] += eta_cent
         xi_mod[msk] *= ot_pars[3]
         eta_mod[msk] *= ot_pars[4]
+    return xi_mod, eta_mod
+
+def objective_model_func_lmfit(
+    params, pm_version, solver_aman, xieta_model, weights=True
+):
+    if xieta_model == "measured":
+        xi_mod, eta_mod = model_measured_xieta(params, pm_version, solver_aman)
+        xi_ref, eta_ref, _ = solver_aman.measured_xieta_data
+    elif xieta_model == "template":
+        xi_mod, eta_mod = model_template_xieta(params, pm_version, solver_aman)
+        xi_ref, eta_ref, _ = solver_aman.nominal_xieta_locs
+
+    xi_mod, eta_mod = _apply_ot_float(xi_mod, eta_mod, solver_aman, params)
 
     dist = np.sqrt((xi_ref - xi_mod) ** 2 + (eta_ref - eta_mod) ** 2)
     #print(np.nansum(dist))
@@ -477,6 +482,7 @@ def apply_model_params(xieta_model, pointing_model, pm_version, aman, use_inds=N
         modeled_fits = model_template_xieta(
             pointing_model, pm_version, aman
         )      
+    modeled_fits = _apply_ot_float(modeled_fits[0], modeled_fits[1], solver_aman, params)
     rms, fit_residuals = calc_RMS_and_residuals(modeled_fits, model_reference, aman.weights, use_inds=use_inds)
     return modeled_fits, fit_residuals, rms, model_reference
 
