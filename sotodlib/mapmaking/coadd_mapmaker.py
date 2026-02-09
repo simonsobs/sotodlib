@@ -287,11 +287,6 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     plot : bool
         Set to True to also output PNG plots when writing maps.
     """
-    print('MAPCAT_DATABASE_NAME:', os.environ.get('MAPCAT_DATABASE_NAME', ''))
-    print('MAPCAT_DATABASE_TYPE:', os.environ.get('MAPCAT_DATABASE_TYPE', ''))
-    print('MAPCAT_ATOMIC_PARENT:', os.environ.get('MAPCAT_ATOMIC_PARENT', ''))
-    print('MAPCAT_ATOMIC_COADD_PARENT:', os.environ.get('MAPCAT_ATOMIC_COADD_PARENT', ''))
-
     mapmaker = setup_coadd_map(atomic_db, output_db, band, platform, 
                                split_label, start_time, stop_time, interval, 
                                geom_file_prefix, mapcat_settings,

@@ -139,23 +139,6 @@ class CoaddAtomicConfig:
             self.time_intervals.append((start, stop))
             start += delta
             
-#         if os.environ.get('MAPCAT_DATABASE_NAME', '') == '':
-#             os.environ['MAPCAT_DATABASE_NAME'] = self.mapcat_database_name
-#         if os.environ.get('MAPCAT_DATABASE_TYPE', '') == '':
-#             os.environ['MAPCAT_DATABASE_TYPE'] = self.mapcat_database_type
-#         if os.environ.get('MAPCAT_ATOMIC_PARENT', '') == '':
-#             os.environ['MAPCAT_ATOMIC_PARENT'] = self.mapcat_atomic_parent
-#         if os.environ.get('MAPCAT_ATOMIC_COADD_PARENT', '') == '':
-#             os.environ['MAPCAT_ATOMIC_COADD_PARENT'] = self.mapcat_atomic_coadd_parent
-            
-#         print('MAPCAT_DATABASE_NAME:', os.environ.get('MAPCAT_DATABASE_NAME', ''))
-#         print('MAPCAT_DATABASE_TYPE:', os.environ.get('MAPCAT_DATABASE_TYPE', ''))
-#         print('MAPCAT_ATOMIC_PARENT:', os.environ.get('MAPCAT_ATOMIC_PARENT', ''))
-#         print('MAPCAT_ATOMIC_COADD_PARENT:', os.environ.get('MAPCAT_ATOMIC_COADD_PARENT', ''))
-        # import sys
-        # sys.exit(0)
-            
-            
     @classmethod
     def from_yaml(cls, path) -> "CoaddAtomicConfig":
         with open(path, "r") as f:
