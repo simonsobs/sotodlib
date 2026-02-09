@@ -116,6 +116,8 @@ def smurf_detset_info(config: Union[str, dict],
     stream_maps = {}
     for tube in imprinter.tubes:
         for s, slot in enumerate(imprinter.tubes[tube]['slots']):
+            if imprinter.tubes[tube]['slots'].count(slot) > 1:
+                s='.'
             stream_maps[slot] = (f'ws{s}', tube)
 
     c = ctx.obsfiledb.conn.execute('select distinct name from detsets')
