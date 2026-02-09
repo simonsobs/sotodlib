@@ -8,26 +8,41 @@ from sklearn.ensemble import RandomForestClassifier
 from sotodlib.tod_ops import filter_stats_functions as func
 
 
-cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
-        'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Number of Peaks',
-        'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp']
+stat_dict = {
+    'Number of Detectors': func.num_of_det,
+    'Y and X Extent Ratio': func.x_and_y_histogram_extent_ratio,
+    'Mean abs(Correlation)': func.mean_correlation,
+    'Mean abs(Time Lag)': func.mean_time_lags,
+    'Y Hist Max and Adjacent/Number of Detectors': func.max_and_adjacent_y_pos_ratio,
+    'Within 0.1 of Y Hist Max/Number of Detectors': func.max_and_near_y_pos_ratio,
+    'Number of Peaks': func.compute_num_peaks,
+}
 
+def get_default_stats():
+    """Return the default set of summary statistics for glitch classification.
 
-def compute_summary_stats(snippet):
+    Returns
+    -------
+    list
+        A list of the default summary statistics for glitch classification.
+    """
+    return stat_dict.keys()
 
+def compute_summary_stats(snippet, stats=None):
     '''
     Compute all of the summary statistics for glitch classification
 
     Input: snippet: snippet object/axis manager computed with
     sotodlib.tod_ops.glitch.extract_snippets
-    Output: stats: numpy.ndarray with all of the summary statistics
+    Optional: stats: list of summary statistics to compute
+    (default: all in stat_dict)
+    Output: stats_arr: numpy.ndarray with all of the summary statistics
     required for glitch classification
     '''
+    if stats is None:
+        stats = get_default_stats()
 
-    data = detrend_tod(snippet, method = 'median')
-
-    tstart, tstop = snippet.timestamps[0], snippet.timestamps[-1]
+    signal = detrend_tod(snippet, method = 'median')
 
     roll_corr = -np.mean(snippet.boresight.roll)  # roll correction
     xi, eta = snippet.focal_plane.xi, snippet.focal_plane.eta
@@ -36,60 +51,9 @@ def compute_summary_stats(snippet):
 
     x_t, y_t = x_wnans[np.logical_not(np.isnan(x_wnans))], y_wnans[np.logical_not(np.isnan(y_wnans))]
 
-    det_num = func.num_of_det(x_t)
+    stats_arr = np.array([stat_dict[stat](signal, x_t, y_t) for stat in stats]).T
 
-    hist_ratio = func.x_and_y_histogram_extent_ratio(x_t, y_t)
-
-    time_lag = func.mean_time_lags(data)
-
-    corr = func.mean_correlation(data)
-
-    near = func.max_and_near_y_pos_ratio(y_t)
-
-    adjacent = func.max_and_adjacent_y_pos_ratio(y_t)
-
-    num_peaks = func.compute_num_peaks(data)
-
-    # Enter the summary statistics into an array
-    # Indices correspond those in `cols`
-    stats = np.full(len(cols), np.nan)
-    stats[0] = det_num
-    stats[1] = hist_ratio
-    stats[2] = corr
-    stats[3] = time_lag
-    stats[4] = adjacent
-    stats[5] = near
-    stats[6] = num_peaks
-    # stats[7]  # obs_id
-    # stats[8]  # snippet number
-    stats[9] = tstart
-    stats[10] = tstop
-
-    return stats
-
-def build_dataframe_for_classification(snippets):
-    """
-    Compute the summary statistics to be used for classification for a list of
-    glitch snippets and return them as a pandas DataFrame.
-
-    Parameters
-    ----------
-    snippets: list
-        A list of glitch snippets, each of which is an AxisManager object
-        containing the glitch data.
-
-    Returns
-    -------
-    df: pandas.DataFrame
-        A DataFrame containing the summary statistics of each glitch snippet.
-    """
-
-    df = pd.DataFrame([compute_summary_stats(s) for s in snippets], columns = cols)
-
-    df['Obs ID'] = snippets[0].obs_info.obs_id
-    df['Snippet'] = range(1, len(snippets) + 1)
-
-    return df
+    return stats_arr
 
 
 def split_into_training_and_test(df, train_per):
@@ -110,18 +74,21 @@ def split_into_training_and_test(df, train_per):
 
     return df_train, df_test, train_inds
 
-def training_forest(df_train, cols, n_trees = 50, max_depth = 15):
+def training_forest(df_train, stats = None, n_trees = 50, max_depth = 15):
 
     '''
     Train random forest.
 
-    Input: df_train: pandas data frame of training data, cols: list of columns of stats to train with
-    Optional: n_trees: number of trees in forest (default = 50),
+    Input: df_train: pandas data frame of training data
+    Optional: stats: list of columns of stats to train with (default = all in stat_dict),
+    n_trees: number of trees in forest (default = 50),
     max_depth: maximum number of splits for each tree (default = 15)
     Output: forest: trained random forest
     '''
+    if stats is None:
+        stats = get_default_stats()
 
-    X, Y = df_train[cols], df_train['Train_Lab']
+    X, Y = df_train[stats], df_train['Train_Lab']
 
     forest = RandomForestClassifier(criterion='entropy', n_estimators = n_trees, random_state=1, n_jobs=2, max_depth = max_depth)
 
@@ -166,42 +133,44 @@ def classify_data_forest(df_classify, trained_forest):
 
     return preds
 
-def classify_glitch_stats(stats, trained_forest):
+def classify_snippets(snippets, trained_forest):
     """
     From their summary statistics, classify the glitch snippets using a trained
     random forest.
 
     Parameters
     ----------
-    stats: pandas.DataFrame or numpy.ndarray
-        The summary statistics for the glitches. If numpy.ndarray, the columns
-        are assumed to match the feature names of the trained random forest.
+    snippets: list
+        A list of glitch snippets, each of which is an AxisManager object
+        containing the glitch data.
     trained_forest: RandomForestClassifier or str
         The trained random forest classifier. If a string is provided, it is
         assumed to be the filename of a pickled RandomForestClassifier object.
 
     Returns
     -------
-    pandas.DataFrame
+    df_preds: pandas.DataFrame
         The predictions for the glitches and the probabilities for each category.
+    df_stats: pandas.DataFrame
+        The computed statistics used for classifying the glitches.
     """
     if isinstance(trained_forest, str):
         trained_forest = pk.load(open('{}.pkl'.format(trained_forest), 'rb'))
 
-    # Remove rows with invalid values
-    df_stats = pd.DataFrame(stats, columns = trained_forest.feature_names_in_) \
-                    .replace([np.inf, -np.inf], np.nan).dropna()
+    # Compute the summary statistics used in the provided trained_forest
+    stats = trained_forest.feature_names_in_
+    df_stats = pd.DataFrame([compute_summary_stats(s, stats=stats) for s in snippets], columns = stats)
 
-    # Classify
-    df_predictions = classify_data_forest(df_stats, trained_forest)
+    # Classify, after removing rows with invalid values
+    df_preds = classify_data_forest(df_stats.replace([np.inf, -np.inf], np.nan).dropna(), trained_forest)
 
     # Insert rows of NaNs for missing indices (assumed to be due to removed rows)
-    missing_idxs = [i for i in range(stats.shape[0]) if i not in df_predictions.index]
+    missing_idxs = df_stats.index.difference(df_preds.index)
     for i in missing_idxs:
-        df_predictions.loc[i] = np.full(df_predictions.shape[1], np.nan)
-    df_predictions.sort_index(inplace=True)
+        df_preds.loc[i] = np.full(df_preds.shape[1], np.nan)
+    df_preds.sort_index(inplace=True)
 
-    return df_predictions
+    return df_preds, df_stats
 
 def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0', '#FFE660'], \
  save = False, save_file_name = 'forest_confusion_matrix', outdir = os.getcwd(), show = True):

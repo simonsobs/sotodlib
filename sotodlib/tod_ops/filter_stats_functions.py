@@ -3,19 +3,19 @@ import scipy as sp
 import scipy.stats as ss
 
 
-def num_of_det(x_pos):
+def num_of_det(signal, x_pos, y_pos):
 
     '''
     Compute the number of detectors affected by the glitch
 
     Input: x_pos: x positions across the focal plane
-    Output: number of detectirs affected
+    Output: number of detectors affected
     '''
 
     return len(x_pos)
 
 
-def x_and_y_histogram_extent_ratio(x_pos, y_pos):
+def x_and_y_histogram_extent_ratio(signal, x_pos, y_pos):
 
     '''
     Compute the ratio of the extents of the x position and y position
@@ -29,26 +29,26 @@ def x_and_y_histogram_extent_ratio(x_pos, y_pos):
 
     return hist_ratio
 
-def mean_time_lags(data):
+def mean_time_lags(signal, x_pos, y_pos):
 
     '''
     Compute the mean of the absolute value of the time lags between detectors.
 
-    Input: data: detector TOD signals (snippet.signal). Works better with
+    Input: signal: detector TOD signals (snippet.signal). Works better with
     detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
     Output: mean of the absolute value of the time lags
     '''
 
-    lags = np.full((len(data), len(data)), np.nan)
+    lags = np.full((len(signal), len(signal)), np.nan)
 
 
-    for i in range(len(data)):
-            if len(data[i]) >= 2:
-                for j in range(len(data)):
+    for i in range(len(signal)):
+            if len(signal[i]) >= 2:
+                for j in range(len(signal)):
                     if j > i:
 
                         #compute the time delays between detector pair
-                        time_delay_pos = np.fft.ifft(np.fft.fft(data[i])*np.conjugate(np.fft.fft(data[j])))
+                        time_delay_pos = np.fft.ifft(np.fft.fft(signal[i])*np.conjugate(np.fft.fft(signal[j])))
 
                         #find the maximum time delay; corresponds to the time shift required to achieve the maximum correlation
                         max_time_delay_pos = np.max(time_delay_pos)
@@ -56,7 +56,7 @@ def mean_time_lags(data):
                         time_delay_ind_t = np.where(time_delay_pos == max_time_delay_pos)[0][0]
 
                         #determine the difference between the required time shift and the length of the TOD
-                        shift_t = time_delay_ind_t - len(data[i])
+                        shift_t = time_delay_ind_t - len(signal[i])
 
                         #Take the smaller value between the required time shift and shift defined above. This allows for shifts backwards instead of looping around the TOD.
                         if np.abs(shift_t) < time_delay_ind_t:
@@ -71,26 +71,25 @@ def mean_time_lags(data):
     return time_lag
 
 
-def mean_correlation(data):
+def mean_correlation(signal, x_pos, y_pos):
 
     '''
     Compute the mean of the absolute value of the Pearson correlation coefficient between detectors.
 
-    Input: data: detector TOD signals (snippet.signal). Works better with
+    Input: signal: detector TOD signals (snippet.signal). Works better with
     detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
     Output: mean of the absolute value of the correlations
     '''
 
-    corr_coeff = np.full((len(data), len(data)), np.nan)
+    corr_coeff = np.full((len(signal), len(signal)), np.nan)
 
-    for i in range(len(data)):
-            if len(data[i]) >= 2:
-                for j in range(len(data)):
+    for i in range(len(signal)):
+            if len(signal[i]) >= 2:
+                for j in range(len(signal)):
                     if j >= i:
 
                         #compute the Pearson correlation coefficient between detector pair
-                        corr_t = ss.pearsonr(data[i], data[j])[0]
-
+                        corr_t = ss.pearsonr(signal[i], signal[j])[0]
                         corr_coeff[i, j] = corr_t
                         # corr_coeff[j, i] = corr_t
 
@@ -99,14 +98,14 @@ def mean_correlation(data):
     return mean_corr
 
 
-def max_and_near_y_pos_ratio(y_pos):
+def max_and_near_y_pos_ratio(signal, x_pos, y_pos):
 
     '''
-    Compute the ratio of the maximum of the y hisotgram bin and positions within 0.1 on either side of the focal plane
+    Compute the ratio of the maximum of the y histogram bin and positions within 0.1 on either side of the focal plane
     compared to the total number of detectors.
 
     Input: y_pos: y positions across the focal plane
-    Output: sum of maximum and 0.1 to either side of the y hisotgram bins divided by the total number of detectors
+    Output: sum of maximum and 0.1 to either side of the y histogram bins divided by the total number of detectors
     '''
 
     #determine the peak of the y histogram and its index
@@ -125,13 +124,13 @@ def max_and_near_y_pos_ratio(y_pos):
 
 
 
-def max_and_adjacent_y_pos_ratio(y_pos):
+def max_and_adjacent_y_pos_ratio(signal, x_pos, y_pos):
 
     '''
-    Compute the ratio of the maximum and adjacent y hisotgram bins compared to the total number of detectors.
+    Compute the ratio of the maximum and adjacent y histogram bins compared to the total number of detectors.
 
     Input: y_pos: y positions across the focal plane
-    Output: sum of maximum and adjacent y hisotgram bins divided by the total number of detectors
+    Output: sum of maximum and adjacent y histogram bins divided by the total number of detectors
     '''
 
     #determine the peak of the y histogram and its index
@@ -155,13 +154,13 @@ def max_and_adjacent_y_pos_ratio(y_pos):
     return sum_near/det_num
 
 
-def compute_num_peaks(data):
+def compute_num_peaks(signal, x_pos, y_pos):
 
     '''
     Computes the number of peaks in the combined TOD from the different detectors.
 
-    Input: data: detector TODs computed using data = snippet.data that has been
-    demeaned and detrended
+    Input: signal: detector TOD signals (snippet.signal). Works better with
+    detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
     Output: the number of peaks
     '''
 
@@ -170,11 +169,11 @@ def compute_num_peaks(data):
     kernel = np.ones(kernel_size) / kernel_size
 
     #smooth the data
-    max_vals_t = np.convolve(np.max(data, axis = 0), kernel, mode='same')
+    max_vals_t = np.convolve(np.max(signal, axis = 0), kernel, mode='same')
 
-    mean_vals_t = np.convolve(np.mean(data, axis = 0), kernel, mode='same')
+    mean_vals_t = np.convolve(np.mean(signal, axis = 0), kernel, mode='same')
 
-    std_vals_t = np.std(data)
+    std_vals_t = np.std(signal)
 
     vals_for_peaks = np.zeros(len(max_vals_t))
 
