@@ -59,6 +59,7 @@ site_pipeline = [
   "slack-sdk",
   "requests",
   "mapcat",
+  "GitPython",
 ]
 tests = [
   "socs",
