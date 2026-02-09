@@ -59,9 +59,12 @@ if not logger.hasHandlers():
 
 
 
-def main(config: Union[str, dict], 
-        overwrite:Optional[bool]=False,
-        skip_detset=False, skip_detcal=False):
+def main(
+    config: Union[str, dict],
+    overwrite: Optional[bool] = False,
+    skip_detset: Optional[bool] = False,
+    skip_detcal: Optional[bool] = False,
+):
     if not skip_detset:
         smurf_detset_info(config, overwrite)
     if not skip_detcal:
@@ -367,9 +370,17 @@ def get_obs_with_detsets(ctx, detset_idx):
     """Gets all observations with type 'obs' that have detset data"""
     db = core.metadata.ManifestDb(detset_idx)
     detsets = db.get_entries(['dataset'])['dataset']
-    obs_ids = set()
-    for dset in detsets:
-        obs_ids = obs_ids.union(ctx.obsfiledb.get_obs_with_detset(dset))
+
+    values = ",".join("?" for _ in detsets)
+    query = f"""
+        SELECT DISTINCT obs_id
+        FROM files
+        WHERE detset IN ({values})
+    """
+
+    c = ctx.obsfiledb.conn.execute(query, detsets)
+    obs_ids = set([r[0] for r in c])
+
     return obs_ids
 
 
