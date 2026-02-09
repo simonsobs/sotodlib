@@ -1224,7 +1224,7 @@ class Imprinter:
 
         # get wafers
         if stream_ids is None:
-            streams = self.tubes[tube].get("slots")
+            streams = list(set(self.tubes[tube].get("slots"))) ## use unique stream_ids
             if streams is None:
                 raise ValueError(
                     f"Imprinter missing slot / stream_id" " information for {source}"
