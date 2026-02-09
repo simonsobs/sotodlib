@@ -14,7 +14,7 @@ import os
 from tqdm import tqdm
 import datetime as dt
 import logging
-from mapcat.helper import settings
+from mapcat.helper import Settings
 from mapcat.database import AtomicMapCoaddTable, AtomicMapTable
 from sqlmodel import select
 
@@ -102,7 +102,7 @@ class CoaddMapmaker:
         self.hits_coadd += hits
             
     def write(self, output_root, output_db, band, platform, split_label, start_time, 
-              stop_time, interval, unit='K', plot=False):
+              stop_time, interval, mapcat_settings, unit='K', plot=False):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         if isinstance(start_time, dt.datetime):
             start_time = start_time.timestamp()
@@ -123,7 +123,7 @@ class CoaddMapmaker:
 
         map_name = oname.split('/')[-1]
         prefix_path = f'{interval}/coadd_{time_str}_{band}_{split_label}'
-        with settings.session() as session:
+        with Settings(**mapcat_settings).session() as session:
             data = AtomicMapCoaddTable(
                 coadd_name=map_name,
                 prefix_path=prefix_path,
@@ -155,7 +155,7 @@ class CoaddMapmaker:
         
 def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
                     start_time, stop_time, interval, geom_file_prefix, 
-                    overwrite=False, logger=None):
+                    mapcat_settings, overwrite=False, logger=None):
     """
     Queries the atomic database and setup the CoaddMapmaker object.
     """
@@ -173,7 +173,7 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     
     if lower_interval:
         logger.debug('Attempting to coadd from existing coadded maps')
-        with settings.session() as session:
+        with Settings(**mapcat_settings).session() as session:
             statement = select(AtomicMapCoaddTable)
             statement = statement.where(AtomicMapCoaddTable.interval == lower_interval)
             statement = statement.where(AtomicMapCoaddTable.platform == platform)
@@ -190,25 +190,19 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
             coadd_atomic = True
     
     if coadd_atomic:
-        with settings.session() as session:
-            if '+' in band:
-                statement = select(AtomicMapTable)
-                statement = statement.where(AtomicMapTable.telescope == platform)
-                statement = statement.where(AtomicMapTable.split_label == split_label)
-                statement = statement.where(AtomicMapTable.ctime >= start_time)
-                statement = statement.where(AtomicMapTable.ctime <= stop_time)
-            else:
-                statement = select(AtomicMapTable)
-                statement = statement.where(AtomicMapTable.telescope == platform)
+        with Settings(**mapcat_settings).session() as session:
+            statement = select(AtomicMapTable)
+            statement = statement.where(AtomicMapTable.telescope == platform)
+            statement = statement.where(AtomicMapTable.split_label == split_label)
+            statement = statement.where(AtomicMapTable.ctime >= start_time)
+            statement = statement.where(AtomicMapTable.ctime <= stop_time)
+            if '+' not in band:
                 statement = statement.where(AtomicMapTable.freq_channel == band)
-                statement = statement.where(AtomicMapTable.split_label == split_label)
-                statement = statement.where(AtomicMapTable.ctime >= start_time)
-                statement = statement.where(AtomicMapTable.ctime <= stop_time)
             maps = session.execute(statement).scalars().all()
             map_ids = [m.atomic_map_id for m in maps]
     
     if not overwrite:
-        with settings.session() as session:
+        with Settings(**mapcat_settings).session() as session:
             statement = select(AtomicMapCoaddTable)
             statement = statement.where(AtomicMapCoaddTable.interval == interval)
             statement = statement.where(AtomicMapCoaddTable.platform == platform)
@@ -244,16 +238,16 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     return mapmaker
     
 def write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
-                    start_time, stop_time, interval, unit='K', plot=False):
+                    start_time, stop_time, interval, mapcat_settings, unit='K', plot=False):
     """
     Wrapper for CoaddMapmaker write function.
     """
     mapmaker.write(output_root, output_db, band, platform, split_label, start_time, 
-                   stop_time, interval, unit=unit, plot=plot)
+                   stop_time, interval, mapcat_settings, unit=unit, plot=plot)
         
 def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_label,
-                   start_time, stop_time, interval, geom_file_prefix, overwrite=False,
-                   unit='K', logger=None, plot=False):
+                   start_time, stop_time, interval, geom_file_prefix, mapcat_settings,
+                   overwrite=False, unit='K', logger=None, plot=False):
     """
     Makes coadded atomic maps from a given time interval.
     
@@ -281,6 +275,8 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
         Examples: ["daily", "weekly", "monthly"]
     geom_file_prefix : str
         Prefix path to geometry file, omitting the band.
+    mapcat_settings : Dict[str, str]
+        Dictionary of mapcat settings
     overwrite : bool
         Set to True to re-run coadding and overwrite database if time interval
         found in database.
@@ -291,9 +287,15 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     plot : bool
         Set to True to also output PNG plots when writing maps.
     """
+    print('MAPCAT_DATABASE_NAME:', os.environ.get('MAPCAT_DATABASE_NAME', ''))
+    print('MAPCAT_DATABASE_TYPE:', os.environ.get('MAPCAT_DATABASE_TYPE', ''))
+    print('MAPCAT_ATOMIC_PARENT:', os.environ.get('MAPCAT_ATOMIC_PARENT', ''))
+    print('MAPCAT_ATOMIC_COADD_PARENT:', os.environ.get('MAPCAT_ATOMIC_COADD_PARENT', ''))
+
     mapmaker = setup_coadd_map(atomic_db, output_db, band, platform, 
                                split_label, start_time, stop_time, interval, 
-                               geom_file_prefix, overwrite=overwrite, logger=logger)
+                               geom_file_prefix, mapcat_settings,
+                               overwrite=overwrite, logger=logger)
     
     if not mapmaker:
         return False, "Map found in database and overwrite=False. Skipping."
@@ -305,9 +307,9 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     mapmaker.logger.info(f"Using geometry from {mapmaker.geom_file_path}")
     for m in tqdm(mapmaker.maps, total=len(mapmaker.maps)):
         if mapmaker.coadd_atomic:
-            full_prefix_path = os.path.join(settings.atomic_parent, m.prefix_path)
+            full_prefix_path = os.path.join(mapcat_settings["atomic_parent"], m.prefix_path)
         else:
-            full_prefix_path = os.path.join(settings.atomic_coadd_parent, m.prefix_path)
+            full_prefix_path = os.path.join(mapcat_settings["atomic_coadd_parent"], m.prefix_path)
         mapmaker.add_map(full_prefix_path)
 
     if mapmaker.coadd_atomic:
@@ -316,8 +318,8 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     else:
         mapmaker.map_coadd = np.nan_to_num(mapmaker.wmap_coadd / mapmaker.weights_coadd, nan=0.0)
 
-    write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
-                    start_time, stop_time, interval, unit=unit, plot=plot)
+    write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label,
+                    start_time, stop_time, interval, mapcat_settings, unit=unit, plot=plot)
 
     
     return True, "Done."
