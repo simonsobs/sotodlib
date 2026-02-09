@@ -284,15 +284,25 @@ class Imprinter:
                     self.logger.warning(f"Tube {tube} missing wafer_slots "
                     "entry. Are you using an old configuration format?")
                     continue
-                
+
+            slot_int = 0
             for slot in self.tube_configs[tube]['wafer_slots']:
+                assert 'wafer_slot' in slot, f"wafer_slot entry missing in {slot}"
+                assert slot['wafer_slot'] == f"ws{slot_int}", f"wafer_slot {slot} out of order"
+                slot_int += 1
                 if slot['stream_id'].lower() == 'none':
                     self.tubes[tube]['slots'].append(
                         f"NONE_{slot['wafer_slot']}"
                     )
                 else:
                     self.tubes[tube]['slots'].append(slot['stream_id'])
-                                        
+            
+            # check for duplicate stream_ids
+            if len(self.tubes[tube]['slots']) != len(set(self.tubes[tube]['slots'])):
+                for slot in self.tube_configs[tube]['wafer_slots']:
+                    if self.tubes[tube]['slots'].count(slot['stream_id']) > 1:
+                        assert 'wafer' in slot, f"Duplicate stream-id {slot['stream_id']} requires wafer information"
+                                    
         # raise error if database does not exist
         if not op.exists(self.db_path):
             if not make_db:
