@@ -56,6 +56,9 @@ class UpdateDetMatchesConfig:
         Name of the metadata entry in the context that contains detset info.
     detcal_meta_name: str
         Name of the metadata entry in the context that contains det_cal info.
+    ufms: Optional[List[str]]
+        List of ufm names to run update_det_match on.  Will run on all ufms
+        for which detsets exist if None.
     show_pb: bool
         Will show progress bar when scanning freq-offset.
     apply_solution_pointing: bool
@@ -95,6 +98,7 @@ class UpdateDetMatchesConfig:
     match_pars: Optional[Dict] = None
     detset_meta_name : str = 'smurf'
     detcal_meta_name: str = 'det_cal'
+    ufms: Optional[List[str]] = None
     show_pb: bool = False
     apply_solution_pointing: bool = True
     write_relpath: bool = True
@@ -169,6 +173,8 @@ class Runner:
 
     def get_remaining_detsets(self) -> List[str]:
         detsets_all = set(self.detset_db.get_entries(['dataset'])['dataset'])
+        if self.cfg.ufms:
+            detsets_all = set([d for d in detsets_all if '_'.join(d.split('_')[:2]) in self.cfg.ufms])
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
