@@ -481,8 +481,8 @@ def apply_model_params(xieta_model, pointing_model, pm_version, aman, use_inds=N
         model_reference = aman.nominal_xieta_locs  
         modeled_fits = model_template_xieta(
             pointing_model, pm_version, aman
-        )      
-    modeled_fits = _apply_ot_float(modeled_fits[0], modeled_fits[1], solver_aman, params)
+        )
+    modeled_fits = _apply_ot_float(modeled_fits[0], modeled_fits[1], aman, pointing_model)
     rms, fit_residuals = calc_RMS_and_residuals(modeled_fits, model_reference, aman.weights, use_inds=use_inds)
     return modeled_fits, fit_residuals, rms, model_reference
 
@@ -536,11 +536,15 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
                    np.array([ufm_list.index(d) for d in full_aman.det_ufm]), 
                    [(0, "samps")])
     # Apply model to data.   
+    xieta_model = config.get("xieta_model", "measured")
     (full_modeled, full_residuals, rms, _ 
-    ) = apply_model_params("template",
+    ) = apply_model_params(xieta_model,
                            params,
                            config.get("pm_version"),
                            full_aman)
+    to_comp = "nominal_xieta_locs"
+    if xieta_model == "measured":
+        to_comp = "measured_xieta_data"
     full_aman.wrap("full_modeled", np.array(full_modeled),
                    [(0, core.LabelAxis("xieta", ["xi", "eta"]))],
                    [(1, "samps")])
@@ -568,13 +572,13 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
         obs_roll.append(np.nanmedian(full_aman.roll_c[inds]))
         obs_resid.append(np.nanmean(full_aman.fit_residuals[inds]))
         obs_dxi.append(np.nanmean((full_aman.full_modeled[0] -
-                                   full_aman.nominal_xieta_locs[0])[inds]/DEG*60))
+                                   full_aman[to_comp][0])[inds]/DEG*60))
         obs_deta.append(np.nanmean((full_aman.full_modeled[1] -
-                                    full_aman.nominal_xieta_locs[1])[inds]/DEG*60))
+                                    full_aman[to_comp][1])[inds]/DEG*60))
         obs_std_xi.append(np.nanstd((full_aman.full_modeled[0] -
-                                     full_aman.nominal_xieta_locs[0])[inds]/DEG*60))
+                                     full_aman[to_comp][0])[inds]/DEG*60))
         obs_std_eta.append(np.nanstd((full_aman.full_modeled[1] -
-                                     full_aman.nominal_xieta_locs[1])[inds]/DEG*60))     
+                                     full_aman[to_comp][1])[inds]/DEG*60))     
         (ufm_az, ufm_el, ufm_roll, ufm_resid, 
          ufm_dxi, ufm_deta, ufm_std_xi,
          ufm_std_eta, ufm_wafer_num
@@ -586,16 +590,16 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
             ufm_roll.append(np.nanmedian(full_aman.roll_c[inds][ufm_inds]))
             ufm_resid.append(np.nanmean(full_aman.fit_residuals[inds][ufm_inds]))
             ufm_dxi.append(np.nanmean((full_aman.full_modeled[0] - 
-                                       full_aman.nominal_xieta_locs[0])[inds][ufm_inds]/DEG*60))
+                                       full_aman[to_comp][0])[inds][ufm_inds]/DEG*60))
             ufm_deta.append(np.nanmean(
                 (full_aman.full_modeled[1] -
-                full_aman.nominal_xieta_locs[1])[inds][ufm_inds]/DEG*60))
+                full_aman[to_comp][1])[inds][ufm_inds]/DEG*60))
             ufm_std_xi.append(np.nanstd(
                 (full_aman.full_modeled[0] -
-                 full_aman.nominal_xieta_locs[0])[inds][ufm_inds]/DEG*60))
+                 full_aman[to_comp][0])[inds][ufm_inds]/DEG*60))
             ufm_std_eta.append(np.nanstd(
                 (full_aman.full_modeled[1] -
-                 full_aman.nominal_xieta_locs[1])[inds][ufm_inds]/DEG*60))
+                 full_aman[to_comp][1])[inds][ufm_inds]/DEG*60))
             ufm_wafer_num.append(np.nanmedian(full_aman.det_wafer[inds][ufm_inds]))           
         all_ufm_az.append(ufm_az)
         all_ufm_el.append(ufm_el)
@@ -643,11 +647,11 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
         
     full_aman.wrap("dxi",
                    (full_aman.full_modeled[0] - 
-                    full_aman.nominal_xieta_locs[0])/DEG*60,
+                    full_aman[to_comp][0])/DEG*60,
                    [(0, "samps")])
     full_aman.wrap("deta",
                    (full_aman.full_modeled[1] - 
-                    full_aman.nominal_xieta_locs[1])/DEG*60,
+                    full_aman[to_comp][1])/DEG*60,
                    [(0, "samps")])
     obsids=np.array([int(D.split('_')[1]) for D in full_aman.obs_info.obs_ids])
     per_obs_stats.wrap("obsids", obsids)
@@ -1046,7 +1050,7 @@ def main(config_path: str):
                 # Print RMS of initial fits without outlying data points before
                 # zero-ing the weights.
                 good_fit_inds = np.where(fit_residuals_i1 < cutoff)[0]
-                _, _, masked_rms, _ = apply_model_params(xieta_model, 
+                _, _, masked_rms, _ = apply_model_params(xieta_model,
                                                         epoch["solver_aman"].pointing_model, 
                                                         pm_version, 
                                                         epoch["solver_aman"],
@@ -1164,6 +1168,20 @@ def main(config_path: str):
         dbfile = "db.sqlite"
         db = _create_db(dbfile, save_dir)
         for epoch in epochs:
+            solver_aman = epoch["solver_aman"]
+            # Remove OT float parameters
+            if config["float_ots"]:
+                ot_float_aman = core.AxisManager()
+                for ot in np.unique(solver_aman.ot_list):
+                    for par in [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]:
+                        if par not in solver_aman.pointing_model._assignments:
+                            continue
+                        ot_float_aman.wrap(par, solver_aman.pointing_model[par])
+                        solver_aman.pointing_model.move(par, None)
+                solver_aman.wrap("ot_float_aman", ot_float_aman)
+            epoch["solver_aman"] = solver_aman
+
+
             epoch["solver_aman"].save(h5_filename, group=epoch["name"], overwrite=True)
             db.add_entry(
                 {"obs:timestamp": (epoch["begin_timerange"], epoch["end_timerange"]), "dataset": f"{epoch['name']}/pointing_model"},
@@ -1181,6 +1199,8 @@ def main(config_path: str):
                 test_params = epoch["solver_aman"].pointing_model_i1
             else:
                 test_params = epoch["solver_aman"].pointing_model  
+                if "ot_float_aman" in epoch["solver_aman"]._assignments:
+                    test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
             
             full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
             logger.info(f"for this epoch: {epoch["name"]}")
