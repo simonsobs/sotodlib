@@ -255,8 +255,9 @@ class PreprocessValidDets(PreprocessQA):
 
 
 # inherit from PreprocessQA to reuse available_obs method
-class PreprocessArrayNET(PreprocessQA):
-    """Generate a QA metric for array NET values for each wafer slot and bandpass.
+class PreprocessArrayNoise(PreprocessQA):
+    """Generate a QA metric for array Noise (usually NEP) values
+    for each wafer slot and bandpass.
 
     The config entry supports a `process_args` block where the following
     options can be specified:
@@ -273,7 +274,7 @@ class PreprocessArrayNET(PreprocessQA):
     """
 
     _influx_meas = "preprocesstod"
-    _influx_field = "array_net"
+    _influx_field = "array_noise"
 
     def __init__(
         self,
@@ -335,9 +336,9 @@ class PreprocessArrayNET(PreprocessQA):
         }
 
 # inherit from PreprocessQA to reuse available_obs method
-class PreprocessDetNET(PreprocessQA):
-    """Generate a QA metric for per detector NET values for each wafer slot
-    and bandpass.
+class PreprocessDetNoise(PreprocessQA):
+    """Generate a QA metric for per detector noise (usually NEP) values
+    for each wafer slot and bandpass.
 
     The config entry supports a `process_args` block where the following
     options can be specified:
@@ -354,7 +355,7 @@ class PreprocessDetNET(PreprocessQA):
     """
 
     _influx_meas = "preprocesstod"
-    _influx_field = "det_net"
+    _influx_field = "det_noise"
 
     def __init__(
         self,
