@@ -19,6 +19,7 @@ from .report_data import ReportData, Footprint
 
 
 def get_wafers(platform: str):
+    """Get wafer and tube slots"""
     if platform  == "lat":
         tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
         wafer_slots = ["ws0", "ws1", "ws2"]
@@ -32,6 +33,9 @@ def get_wafers(platform: str):
 
 
 def get_discrete_distinct_colors(n, reverse=False):
+    """Get a list of colors from a list or interpolate between them.
+    First and last color are fixed for idle and CMB obs
+    """
     base_colors = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377', '#BBBBBB']
     n_base = len(base_colors)
 
@@ -58,6 +62,9 @@ def get_discrete_distinct_colors(n, reverse=False):
 
 @dataclass
 class Colors:
+    """
+    Helper class for getting a list of colors.
+    """
     names: List[str]
     reverse: bool = False
     colormap: Dict[str, str] = field(init=False)
@@ -81,6 +88,7 @@ class ObsEfficiencyPlots:
 
 
 def obsdb_line_plot(x, y, xlabel, ylabel, title, xlim):
+    """Generic function to make a Plotly scatter plot."""
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(

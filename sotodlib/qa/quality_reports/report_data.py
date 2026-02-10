@@ -40,7 +40,7 @@ class ReportDataConfig:
         make_cov_map: bool = True,
         cal_targets: Optional[List[str]] = None,
         show_hk_pb: bool = False,
-        noise_scale_factor: float = 1000000
+        noise_scale_factor: float = 1
     ) -> None:
         self.ctx_path: str = ctx_path
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
