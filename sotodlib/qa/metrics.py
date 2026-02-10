@@ -82,9 +82,9 @@ class QAMetric(object):
         """
         # query influx log measurement for observations of this field
         res = self.monitor.client.query(
-            f"select {self._influx_field}, observation from {self._influx_log}"
+            f"SELECT observation FROM {self._influx_log} WHERE \"metric_type\" = '{self._influx_field}'"
         ).get_points()
-        return [r["observation"] for r in res]
+        return [r["observation"] for r in list(res)]
 
     def process_and_record(self, obs_id, meta=None):
         """ Generate a metric for this obs_id and record it to InfluxDB.
@@ -101,8 +101,8 @@ class QAMetric(object):
         if meta.obs_info.obs_id != obs_id:
             raise Exception(f"Metadata does not correspond to obs_id {obs_id}.")
         line = self._process(meta)
-        log_tags = {"observation": obs_id}  # used to identify this entry
-        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags)
+        log_tags = {"metric_type": self._influx_field}  # used to identify this entry
+        self.monitor.record(**line, log=self._influx_log, measurement=self._influx_meas, log_tags=log_tags, qa_metrics=True, obs_id=obs_id)
         self.monitor.write()
 
     def get_new_obs(self):
@@ -255,8 +255,9 @@ class PreprocessValidDets(PreprocessQA):
 
 
 # inherit from PreprocessQA to reuse available_obs method
-class PreprocessArrayNET(PreprocessQA):
-    """Generate a QA metric for array NET values for each wafer slot and bandpass.
+class PreprocessArrayNoise(PreprocessQA):
+    """Generate a QA metric for array Noise (usually NEP) values
+    for each wafer slot and bandpass.
 
     The config entry supports a `process_args` block where the following
     options can be specified:
@@ -273,7 +274,7 @@ class PreprocessArrayNET(PreprocessQA):
     """
 
     _influx_meas = "preprocesstod"
-    _influx_field = "array_net"
+    _influx_field = "array_noise"
 
     def __init__(
         self,
@@ -335,9 +336,9 @@ class PreprocessArrayNET(PreprocessQA):
         }
 
 # inherit from PreprocessQA to reuse available_obs method
-class PreprocessDetNET(PreprocessQA):
-    """Generate a QA metric for per detector NET values for each wafer slot
-    and bandpass.
+class PreprocessDetNoise(PreprocessQA):
+    """Generate a QA metric for per detector noise (usually NEP) values
+    for each wafer slot and bandpass.
 
     The config entry supports a `process_args` block where the following
     options can be specified:
@@ -354,7 +355,7 @@ class PreprocessDetNET(PreprocessQA):
     """
 
     _influx_meas = "preprocesstod"
-    _influx_field = "det_net"
+    _influx_field = "det_noise"
 
     def __init__(
         self,
@@ -546,7 +547,7 @@ class HWPSolMeanRate(HWPSolQA):
     def _gen_value(self, meta):
         good_samp = ~meta.hwp_solution[f"filled_flag_{self._encoder}"]
         nsamp = good_samp.sum()
-        rate = np.nan if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
+        rate = 0.0 if nsamp == 0 else (meta.hwp_solution[f"hwp_rate_{self._encoder}"] * good_samp).sum() / nsamp
         return rate
 
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2023 Simons Observatory.
+# Copyright (c) 2023-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Timestream processing filters.
 """
@@ -116,7 +116,7 @@ def hn_map(job, otherargs, runargs, data):
         job_ops.h_n.pixel_pointing = job.pixels_final
         job_ops.h_n.pixel_dist = job_ops.binner_final.pixel_dist
         job_ops.h_n.output_dir = otherargs.out_dir
-        job_ops.h_n.save_pointing = otherargs.full_pointing
+        job_ops.h_n.save_pointing |= otherargs.full_pointing
         job_ops.h_n.apply(data)
 
 
@@ -154,7 +154,7 @@ def cadence_map(job, otherargs, runargs, data):
         job_ops.cadence_map.pixel_pointing = job.pixels_final
         job_ops.cadence_map.pixel_dist = job_ops.binner_final.pixel_dist
         job_ops.cadence_map.output_dir = otherargs.out_dir
-        job_ops.cadence_map.save_pointing = otherargs.full_pointing
+        job_ops.cadence_map.save_pointing |= otherargs.full_pointing
         job_ops.cadence_map.apply(data)
 
 
@@ -192,5 +192,5 @@ def crosslinking_map(job, otherargs, runargs, data):
         job_ops.crosslinking.pixel_pointing = job.pixels_final
         job_ops.crosslinking.pixel_dist = job_ops.binner_final.pixel_dist
         job_ops.crosslinking.output_dir = otherargs.out_dir
-        job_ops.crosslinking.save_pointing = otherargs.full_pointing
+        job_ops.crosslinking.save_pointing |= otherargs.full_pointing
         job_ops.crosslinking.apply(data)

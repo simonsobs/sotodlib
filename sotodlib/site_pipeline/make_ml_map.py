@@ -140,7 +140,8 @@ def main(**args):
         # split into two parts signal.translate_single and signal.forward_single). But I don't think those
         # building blocks would be very reusable, and the full thing is more general.
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
-        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, downweight=[1e-4, 0.25, 0.50], window=args.window)
+        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window)
+        elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
@@ -148,6 +149,9 @@ def main(**args):
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
+            # This *must* come after all the other signals due to how it zeros out the
+            # affected samples in the tod (inherited from SignalCut). Might have been better
+            # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
 
@@ -323,5 +327,5 @@ def main(**args):
         eval_prev     = mapmaker.evaluator(step.x_zip)
 
 if __name__ == '__main__':
-    from sotodlib.site_pipeline import util
-    util.main_launcher(main, get_parser)
+    from sotodlib.site_pipeline.utils.pipeline import main_launcher
+    main_launcher(main, get_parser)

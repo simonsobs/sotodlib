@@ -202,7 +202,7 @@ class MLMapmaker(Operator):
         help="Set verbosity in MLMapmaker.  If None, use toast loglevel",
     )
 
-    weather = Unicode("vacuum", help="Weather to assume when making maps")
+    weather = Unicode("toco", help="Weather to assume when making maps")
     site    = Unicode("so",     help="Site to use when making maps")
 
     maxiter = List(
@@ -305,7 +305,7 @@ class MLMapmaker(Operator):
     @traitlets.validate("nmat_type")
     def _check_nmat_type(self, proposal):
         check = proposal["value"]
-        allowed = ["NmatUncorr", "NmatDetvecs", "NmatWhite", "NmatUnit", "Nmat"]
+        allowed = ["NmatUncorr", "NmatDetvecs", "NmatDetvecsDCT", "NmatWhite", "NmatUnit", "Nmat"]
         if check not in allowed:
             msg = f"nmat_type must be one of {allowed}, not {check}"
             raise traitlets.TraitError(msg)
@@ -420,7 +420,7 @@ class MLMapmaker(Operator):
              view_ranges = np.array(
                  [[x.first, x.last] for x in ob.intervals[self.view]]
              )
-             ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, nsample)
+             ranges += so3g.proj.ranges.Ranges.from_array(view_ranges.astype(np.int32), nsample)
 
         # Convert the focalplane offsets into the expected form
         det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}
@@ -460,6 +460,9 @@ class MLMapmaker(Operator):
         axobs.wrap("weather", np.full(1, self.weather))
         axobs.wrap("site",    np.full(1, "so"))
 
+        # median detrend added to TOAST workflow script
+        #axobs.signal -= np.median(axobs.signal, axis=-1, keepdims=True)
+
         if self.truncate_tod:
             # FFT-truncate for faster fft ops
             axobs.restrict("samps", [0, fft.fft_len(axobs.samps.count)])
@@ -484,6 +487,21 @@ class MLMapmaker(Operator):
         # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
         return axobs
+
+    @function_timer
+    def _add_obs(self, mapmaker, name, axobs, nmat, signal_estimate):
+        """ Add data to the mapmaker
+
+        Singled out for more granular timing
+        """
+        mapmaker.add_obs(
+            name,
+            axobs,
+            deslope=self.deslope,
+            noise_model=nmat,
+            signal_estimate=signal_estimate,
+        )
+        return
 
     @function_timer
     def _init_mapmaker(
@@ -666,7 +684,7 @@ class MLMapmaker(Operator):
                 )
 
         # nmat_type is guaranteed to be a valid Nmat class
-        if self.nmat_type == 'NmatDetvecs':
+        if self.nmat_type in ['NmatDetvecs', 'NmatDetvecsDCT']:
             noise_model = getattr(mm, self.nmat_type)(downweight=self.downweight)
         else:
             noise_model = getattr(mm, self.nmat_type)()
@@ -746,13 +764,8 @@ class MLMapmaker(Operator):
                 else:
                     signal_estimate = None
 
-                mapmaker.add_obs(
-                    ob.name,
-                    axobs,
-                    deslope=self.deslope,
-                    noise_model=nmat,
-                    signal_estimate=signal_estimate,
-                )
+                self._add_obs(mapmaker, ob.name, axobs, nmat, signal_estimate)
+
                 del axobs
                 del signal_estimate
 

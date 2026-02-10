@@ -145,5 +145,22 @@ class CoordsUtilsTest(unittest.TestCase):
             assert(abs(sig_meas - sig * DEG) < .001*DEG)
 
 
+    def test_lat_v1(self):
+        az, el, roll = full_vectors(az=np.linspace(-90, 90, 100),
+                                    el=60)
+        params = {'version': 'lat_v1'}
+        az1, el1, roll1 = to_deg(*pm.model_lat_v1(params, *to_rad(az, el, roll)))
+
+        # Backwards compatibility for not providing el sag or base tilt
+        params['enc_offset_az'] = 1. * DEG
+        az1, el1, roll1 = to_deg(*pm.model_lat_v1(params, *to_rad(az, el, roll)))
+        assert np.all(center_branch(az1 - az) > 0)
+
+        # Try an el sag
+        params['el_sag_lin'] = 1
+        az2, el2, roll2 = to_deg(*pm.model_lat_v1(params, *to_rad(az, el, roll)))
+        assert np.all(np.isclose(el/el2, 2))
+
+
 if __name__ == '__main__':
     unittest.main()

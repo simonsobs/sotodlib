@@ -15,7 +15,7 @@ from typing import Optional, Union, Callable
 
 from sotodlib import core
 from sotodlib.hwp.g3thwp import G3tHWP
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.utils.procs_pool import get_exec_env
 
 max_trial = 5
@@ -37,7 +37,7 @@ encodings = {
     'quad_2': {'type': 'flacarray'},
 }
 
-logger = util.init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
+logger = init_logger('make_hwp_solutions', 'make-hwp-solutions: ')
 
 
 def get_parser(parser=None):

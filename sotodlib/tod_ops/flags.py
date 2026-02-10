@@ -16,8 +16,8 @@ from . import filters
 from . import fourier_filter 
 
 def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
-                       psat_range=None, rn_range=None, si_nan=False,
-                       merge=True, overwrite=True,
+                       psat_range=None, rn_range=None, si_range=None,
+                       phase_to_pW=None, merge=True, overwrite=True,
                        name='det_bias_flags', full_output=False):
     """
     Function for selecting detectors in appropriate bias range.
@@ -37,8 +37,10 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
         If None, no flags are not applied from P_SAT. 
     rn_range : Tuple
         Tuple (lower_bound, upper_bound) for r_n det selection.
-    si_nan : bool
-        If true, flag dets where s_i is NaN. Default is false.
+    si_range : Tuple
+        Tuple (lower_bound, upper_bound) for s_i det selection.
+    phase_to_pW : Tuple
+        Tuple (lower_bound, upper_bound) for phase_to_pW det selection.
     merge : bool
         If true, merges the generated flag into aman.
     overwrite : bool
@@ -82,8 +84,12 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     if rn_range is not None:
         ranges.append(detcal.r_n >= rn_range[0])
         ranges.append(detcal.r_n <= rn_range[1])
-    if si_nan:
-        ranges.append(np.isnan(detcal.s_i) == False)
+    if si_range is not None:
+        ranges.append(detcal.s_i >= si_range[0])
+        ranges.append(detcal.s_i <= si_range[1])
+    if phase_to_pW is not None:
+        ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
+        ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
 
     msk = ~(np.all(ranges, axis=0))
     # Expand mask to ndets x nsamps RangesMatrix
@@ -113,26 +119,32 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
                   detcal.r_frac >= rfrac_range[0],
                   detcal.r_frac <= rfrac_range[1]
                  ]
+        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
+
         if psat_range is not None:
+            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
             ranges.append(detcal.p_sat*1e12 >= psat_range[0])
             ranges.append(detcal.p_sat*1e12 <= psat_range[1])
         
         if rn_range is not None:
+            msk_names.extend(['r_n_gt', 'r_n_lt'])
             ranges.append(detcal.r_n >= rn_range[0])
             ranges.append(detcal.r_n <= rn_range[1])
 
+        if si_range is not None:
+            msk_names.extend(['s_i_gt', 's_i_lt'])
+            ranges.append(detcal.s_i >= si_range[0])
+            ranges.append(detcal.s_i <= si_range[1])
+            
+        if phase_to_pW is not None:
+            msk_names.extend(['phase_to_pW_gt', 'phase_to_pW_lt'])
+            ranges.append(detcal.phase_to_pW >= phase_to_pW[0])
+            ranges.append(detcal.phase_to_pW <= phase_to_pW[1])
+        
         for range in ranges:
             msk = ~(np.all([range], axis=0))
             msks.append(RangesMatrix([Ranges.ones_like(x) if Y
                                       else Ranges.zeros_like(x) for Y in msk]))
-
-        msk_names = ['bg', 'r_tes', 'r_frac_gt', 'r_frac_lt']
-        
-        if psat_range is not None:
-            msk_names.extend(['p_sat_gt', 'p_sat_lt'])
-            
-        if rn_range is not None:
-            msk_names.extend(['r_n_gt', 'r_n_lt'])
 
         for i, msk in enumerate(msks):
             if 'samps' in aman:
@@ -1164,3 +1176,65 @@ def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
     if merge:
         aman.flags.wrap('smurfgaps', smurfgaps, [(0, 'dets'), (1, 'samps')])
     return smurfgaps
+
+def get_good_distribution_flags(aman, param_name='wn_signal',
+                                outlier_range=(0.5, 2.), kurtosis_threshold=2.,
+                               blame_max=False, blame_min=False):
+    """
+    Get detector cuts based on the detectors which fit within a gaussian distribution.
+    Outlier and kurtosis thresholds set the cuts and param name determines which
+    statistic's distribution is evaluated to generate the cuts. This either cuts 
+    one detector at a time at the max or min of the distribution (blame max/min) or it 
+    determines if the distribution is screwed high or low and cuts max if high and min if low
+    this is the default behavior.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        Input axis manager.
+    param_name : str
+        Field in aman where to evaluate distribution of.
+    outlier_range : tuple
+        Min and max of distribution allowed
+    kurtosis_threshold : float
+        Maximum allowed kurtosis of final distribution
+    blame_max : bool
+        If true, iteratively removes the maximum value from the
+        distribution until the kurtosis threshold is met.
+        ``blame_min`` cannot be True when ``blame_max`` is True.
+        Default is False.
+    blame_min : bool
+        Same as ``blame_max`` but removes the minimum value.
+
+    Returns
+    -------
+    det_mask : list(bool)
+        Boolean mask for cuts True for keep and False for cut.
+    """
+    det_mask = np.full(aman.dets.count, True, dtype=bool)
+    ratio = aman[param_name]/np.nanmedian(aman[param_name])
+    outlier_mask = (ratio<outlier_range[0]) | (outlier_range[1]<ratio)
+
+    det_mask[outlier_mask] = False
+    while True:
+        if len(aman.dets.vals[det_mask]) > 0:
+            distributions = aman[param_name][det_mask]
+        else:
+            break
+        kurtosis_wn = stats.kurtosis(distributions)
+        if np.abs(kurtosis_wn) < kurtosis_threshold:
+            break
+        else:
+            assert (blame_max==False) or (blame_min==False)
+            if blame_max:
+                det_mask[aman[param_name] >= np.nanmax(distributions)] = False
+            elif blame_min:
+                det_mask[aman[param_name] <= np.nanmin(distributions)] = False
+            else:
+                max_is_bad_factor = np.nanmax(distributions)/np.nanmedian(distributions)
+                min_is_bad_factor = np.nanmedian(distributions)/np.nanmin(distributions)
+                if max_is_bad_factor > min_is_bad_factor:
+                    det_mask[aman[param_name] >= np.nanmax(distributions)] = False
+                else:
+                    det_mask[aman[param_name] <= np.nanmin(distributions)] = False
+    return det_mask

@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2024 Simons Observatory.
+# Copyright (c) 2023-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 import numpy as np
@@ -167,11 +167,11 @@ def select_pointing(job, otherargs, runargs, data):
     if hasattr(job_ops, "binner"):
         job_ops.binner.pixel_pointing = job.pixels_solve
         job_ops.binner.stokes_weights = job.weights_solve
-        job_ops.binner.full_pointing = otherargs.full_pointing
+        job_ops.binner.full_pointing |= otherargs.full_pointing
     if hasattr(job_ops, "binner_final"):
         job_ops.binner_final.pixel_pointing = job.pixels_final
         job_ops.binner_final.stokes_weights = job.weights_final
-        job_ops.binner_final.full_pointing = otherargs.full_pointing
+        job_ops.binner_final.full_pointing |= otherargs.full_pointing
         # If we are not using a different binner for our final binning, use the
         # same one as the solve.
         if not job_ops.binner_final.enabled:
