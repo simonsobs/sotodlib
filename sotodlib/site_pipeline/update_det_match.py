@@ -134,6 +134,9 @@ class UpdateDetMatchesConfig:
             if self.resonator_set_dir is None:
                 raise ValueError("Must specify resonator_set_dir for solution_type='resonator_set'")
 
+        if self.ufms is not None:
+            self.ufms = [u.lower() for u in self.ufms]
+
 
 class Runner:
     def __init__(self, cfg: UpdateDetMatchesConfig):
