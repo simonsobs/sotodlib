@@ -979,6 +979,19 @@ timestreams. A typical configuration file could look like this:
         # Path to housekeeping data (this is used for extracting pwv)
         hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
+update-mapviewer-dbs
+----------
+
+This module maintains databases for mapviewer instances that show atomic/depth-1 maps
+per instrument.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_mapviewer_dbs
+   :func: get_parser
+   :prog: update-mapviewer-dbs
 
 QDS Monitor
 ===========
