@@ -106,7 +106,7 @@ def create_layers(data):
       wmap_types = ["I", "Q", "U"]
       for idx in range(len(wmap_types)):
         coadd_layer = create_layer(
-          layer_id=f"layer-{data["obs_id"]}-{data["wafer"]}-{data["freq_channel"]}-coadd-{idx}",
+          layer_id=f"layer-{data['obs_id']}-{data['wafer']}-{data['freq_channel']}-coadd-{idx}",
           name=wmap_types[idx],
           quantity=f"T ({wmap_types[idx]})",
           units="uK",
