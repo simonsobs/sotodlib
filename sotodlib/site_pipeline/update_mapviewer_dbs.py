@@ -1,13 +1,20 @@
+"""update_mapviewer_dbs.py
+
+This module maintains databases for mapviewer instances that show atomic/depth-1 maps
+per instrument. 
+
+"""
+
 import os
 import subprocess
 import sqlite3
-import csv
 import json
 import datetime
 import tempfile
 from pathlib import Path
 import argparse
 from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
 logger = init_logger('update_mapviewer_dbs', 'update_mapviewer_dbs: ')
 
@@ -16,6 +23,9 @@ logger = init_logger('update_mapviewer_dbs', 'update_mapviewer_dbs: ')
 # ------------------------------------------------------------------------------
 
 def create_map_group(data):
+  """
+  Create a map group, the highest level of hierarchy for the mapviewer's layers structure.
+  """
   map_group = {}
   map_group["name"] = data["obs_id"]
   map_group["description"] = "Maps from " + data["telescope"] + " at " + str(datetime.datetime.fromtimestamp(int(data["ctime"])))
@@ -23,6 +33,9 @@ def create_map_group(data):
   return map_group
 
 def create_map(data):
+  """
+  Create a map to be associated with a map group.
+  """
   map = {}
   map["map_id"] = data["obs_id"] + "-" + data["wafer"]
   map["name"] = data["wafer"]
@@ -31,6 +44,9 @@ def create_map(data):
   return map
 
 def create_band(data):
+  """
+  Create a band to be associated with a map.
+  """
   band = {}
   band["band_id"] = "band-" + data["obs_id"] + "-" + data["wafer"] + "-" + data["freq_channel"]
   band["name"] = data["freq_channel"]
@@ -47,6 +63,9 @@ def create_layer(
     description="",
     cmap="RdBu_r",
   ):
+  """
+  Create a layer to be associated with a band.
+  """
   layer = {}
   layer["layer_id"] = layer_id
   layer["name"] = name
@@ -60,6 +79,11 @@ def create_layer(
   return layer
 
 def create_layers(data):
+  """
+  Create layers from the _hits.fits, _wmap.fits, _weights.fits files associated with a particular
+  database row's prefix_path, setting reasonable default attributes depending on the type of
+  fits file.
+  """
   layers = []
   # db seems to have an extraneous forward slash, so let's just clean it up
   normalized_prefix_path = os.path.normpath(data["prefix_path"])
@@ -124,46 +148,55 @@ def create_layers(data):
         layers.append(wmap_layer)
   return layers
 
-def generate_sat_map_groups(sat_instrument, cutoff_days):
-  REMOTE_DB_PATH = f"/so/site-pipeline/{sat_instrument}/maps/{sat_instrument}_atomic_250423m/atomic_db.sqlite"
+class AtomicDBQueryError(RuntimeError):
+    pass
 
-  # Define the SQL query with parameterized NUMBER_OF_DAYS
-  sql = (
-    "SELECT * "
-    "FROM atomic "
-    f"WHERE ctime >= (strftime('%s','now') - ({cutoff_days}*86400)) AND valid=1 "
-    "ORDER BY ctime DESC;"
-  )
+def query_database(db_path: Path, cutoff_days: int):
+  """
+    Get the rows of data in an instrument's database whose 'ctime' attribute
+    is >= (now - cutoff_days)
+  """
+  cutoff_seconds = cutoff_days * 86400
 
-  # Build SQL command
-  sqlite_cmd = [
-    "sqlite3",
-    "-header",
-    "-csv",
-    REMOTE_DB_PATH,
-    sql
-  ]
+  sql = """
+      SELECT *
+      FROM atomic
+      WHERE ctime >= (strftime('%s','now') - ?)
+        AND valid = 1
+      ORDER BY ctime DESC;
+  """
 
   try:
-    result = subprocess.run(
-      sqlite_cmd,
-      text=True,
-      capture_output=True,
-      timeout=30  # Add a timeout in case the query hangs
-    )
-  except subprocess.TimeoutExpired:
-    logger.error("Query to " + sat_instrument + " db timed out. Exiting.")
-    exit(1)
+    conn = sqlite3.connect(db_path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.execute(sql, (cutoff_seconds,))
+    rows = cursor.fetchall()
+    return [dict(row) for row in rows]
+  
+  except sqlite3.Error as exc:
+    raise AtomicDBQueryError(
+        f"Query to {db_path} failed: {exc}"
+    ) from exc
+  
+  finally:
+    if conn is not None:
+      conn.close()
 
-  if result.returncode != 0:
-    logger.error("Query to " + sat_instrument + " db failed with exit code {result.returncode}")
 
-  # If stdout is empty, give some useful feedback
-  if not result.stdout.strip():
-    logger.info("No output from query to " + sat_instrument + ". You may wish to increase the cutoff_days parameter.")
+def generate_sat_map_groups(instrument_name: str, instrument_db_path: Path, cutoff_days: int):
+  """
+  Generate map groups specific to SAT databases
+  """
+  try:
+    query_results = query_database(instrument_db_path, cutoff_days)
+  except AtomicDBQueryError as exc:
+    logger.error(str(exc))
 
-  # Parse CSV output
-  query_results = csv.DictReader(result.stdout.splitlines())
+  # If query_results is empty, give some useful feedback and early return
+  if not query_results:
+    logger.info("No output from query to " + instrument_name + ". You may wish to increase the cutoff_days parameter.")
+    return None
+
   map_groups = {}
   rows = []
   for row_data in query_results:
@@ -173,8 +206,6 @@ def generate_sat_map_groups(sat_instrument, cutoff_days):
     if (map_group is None):
       map_groups[row_data["ctime"]] = create_map_group(row_data)
     
-    maps = map_groups[row_data["ctime"]]["maps"]
-
     existing_map = None
     for map_obj in map_groups[row_data["ctime"]]["maps"]:
       if (map_obj["name"] == row_data["wafer"]):
@@ -196,49 +227,90 @@ def generate_sat_map_groups(sat_instrument, cutoff_days):
 # ------------------------------------------------------------------------------
 
 
+def get_instrument_name(instruments_db_path: Path):
+    """
+    Extract instrument name from path like:
+    /so/site-pipeline/<instrument>/...
+    """
+    parts = instruments_db_path.parts
+    try:
+       idx = parts.index("site-pipeline")
+       return parts[idx + 1]
+    except:
+       return None
+
+
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser(
             description="Generate and populate tilemaker databases for SAT instruments"
         )
     parser.add_argument(
-        "--root",
-        default="/so/services/mapviewer",
-        help="Root directory where instrument DBs are stored",
+        "--mapviewer-dbs-root-path",
+        type=Path,
+        default=Path("/so/services/mapviewer"),
+        help="Path to root directory where mapviewer-compatible DBs are stored",
     )
     parser.add_argument(
-        "--instruments",
+        "--instrument-db-paths",
         nargs="+",
-        default=["satp1", "satp3"],
-        help="SAT instruments to process",
+        type=Path,
+        help="Paths to an instrument's atomic/depth-1 SQLite DB file",
     )
     parser.add_argument(
         "--cutoff-days",
         type=int,
         default=1,
-        help="Delete map groups older than this many days",
+        help="Delete map groups older than this many days and repopulate with maps whose 'ctime' is greater than or equal to (now - cutoff_days)",
     )
     return parser
 
 
-def main(root, instruments, cutoff_days):
-    logger.info("Updating mapviewer dbs")
-    ROOT = Path(root)
-    # ------------------------------------------------------------------------------
-    # BEGIN: Update databases for SAT instruments
-    # ------------------------------------------------------------------------------
-    for instrument in instruments:
-        logger.info("Updating mapviewer db for " + instrument)
-        instrument_dir = ROOT / instrument
-        instrument_dir.mkdir(parents=True, exist_ok=True)
+def main(mapviewer_dbs_root_path: Path, instrument_db_paths: list[Path], cutoff_days: int):
+    """
+    Create or update databases for mapviewer instances of each instrument, as available
 
-        DB_PATH = instrument_dir / f"{instrument}.db"
+    Arguments
+    ----------
+    mapviewer_dbs_root_path : Path
+        Path to root directory where mapviewer-compatible DBs are stored
+    instrument_db_paths : list[Path]
+        Paths to an instrument's atomic/depth-1 SQLite DB file
+    cutoff_days: int
+        Delete map groups older than this many days and repopulate with maps whose 'ctime'
+        is greater than or equal to (now - cutoff_days)
+    """
+    if instrument_db_paths is None:
+       logger.info("Missing instrument-db-paths required to update mapviewer dbs. Exiting update.")
+       return
+    
+    logger.info("Updating mapviewer dbs")
+    # Enforce paths just in case
+    root = Path(mapviewer_dbs_root_path)
+    instrument_db_paths = [Path(p) for p in instrument_db_paths]
+
+    # ------------------------------------------------------------------------------
+    # BEGIN: Update databases for instruments
+    # ------------------------------------------------------------------------------
+    for instrument_db_path in instrument_db_paths:
+        # Try to determine the instrument name and, if not recognized, skip
+        instrument_name = get_instrument_name(instrument_db_path)
+        
+        if (instrument_name is None):
+           logger.warning("Instrument name not recognized from the instrument_db_path '" + instrument_db_path + "'. Exiting update for this path.")
+           continue
+
+        logger.info("Updating mapviewer db for " + instrument_name)
+        instrument_mapviewer_dir = root / instrument_name
+        instrument_mapviewer_dir.mkdir(parents=True, exist_ok=True)
+
+        instrument_mapviewer_db_path = instrument_mapviewer_dir / f"{instrument_name}.db"
 
         # ------------------------------------------------------------------------------
         # a. If db exists, delete any map groups that are older than a day
         # ------------------------------------------------------------------------------
-        if DB_PATH.exists():
-            conn = sqlite3.connect(DB_PATH)
+        if instrument_mapviewer_db_path.exists():
+            conn = sqlite3.connect(instrument_mapviewer_db_path)
             try:
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("""
@@ -261,10 +333,14 @@ def main(root, instruments, cutoff_days):
 
         # Tell tilemaker to use a database for its configurations
         os.environ.update({
-            "TILEMAKER_CONFIG_PATH": f"sqlite:///{DB_PATH}",
+            "TILEMAKER_CONFIG_PATH": f"sqlite:///{instrument_mapviewer_db_path}",
         })
 
-        map_groups = generate_sat_map_groups(instrument, cutoff_days)
+        map_groups = generate_sat_map_groups(instrument_name, instrument_db_path, cutoff_days)
+
+        # Skip tilemaker-db call if map_groups is null
+        if map_groups is None:
+           continue
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as f:
             json.dump(
@@ -277,6 +353,4 @@ def main(root, instruments, cutoff_days):
 
 
 if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
-    main(**vars(args))
+    main_launcher(main, get_parser)
