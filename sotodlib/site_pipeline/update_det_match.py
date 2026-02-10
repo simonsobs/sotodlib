@@ -410,7 +410,7 @@ def update_manifests(runner: Runner, detset):
         db = core.metadata.ManifestDb(db_path)
         if detset not in db.get_entries(['dataset'])['dataset']:
             db.add_entry({
-                'obs:timestamp': runner.cfg.start_time, runner.cfg.stop_time),
+                'obs:timestamp': (runner.cfg.start_time, runner.cfg.stop_time),
                 'dets:detset': detset,
                 'dataset': detset,
             }, h5_path)
