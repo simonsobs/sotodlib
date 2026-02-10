@@ -3012,6 +3012,7 @@ class GlitchClassification(_Preprocess):
     Example config block::
 
         - name : "classify_glitches"
+          flags: "glitches.glitch_flags"
           calc:
             n_thres: 2
             n_buffer: 5
@@ -3022,13 +3023,17 @@ class GlitchClassification(_Preprocess):
     """
     name = "classify_glitches"
 
+    def __init__(self, step_cfgs):
+        self.flags = step_cfgs.get("flags", "glitches.glitch_flags")
+        super().__init__(step_cfgs)
+
     def calc_and_save(self, aman, proc_aman):
         n_thres = self.calc_cfgs.get("n_thres", 2)
         n_buffer = self.calc_cfgs.get("n_buffer", 5)
         trained_forest_name = self.calc_cfgs.get("trained_forest_name", "trained_forest")
 
         # get the number of detectors flagged as glitch (at each sample)
-        glitch_flags = proc_aman.glitches.glitch_flags  # size: (ndets, nsamps)
+        glitch_flags = proc_aman.get(self.flags)  # size: (ndets, nsamps)
         n_flagged = np.sum(glitch_flags.mask(), axis=0)
 
         # get the ranges when >= `n_thres` detectors are flagged simultaneously
@@ -3038,7 +3043,7 @@ class GlitchClassification(_Preprocess):
         det_mask = gl.get_det_mask(glitch_flags, snippet_ranges)
 
         # get the glitch snippets
-        snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.glitches.samps.offset)
+        snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
 
         # classify the glitches
         predictions, stats = gc.classify_snippets(snippets, trained_forest_name)
