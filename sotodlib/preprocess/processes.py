@@ -332,7 +332,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
-        self.save_name = self.save_cfgs.get('jumps_name', 'jumps')
+        self.save_name = step_cfgs.get('save', {}).get('jumps_name', 'jumps')
 
         super().__init__(step_cfgs)
 
@@ -720,7 +720,7 @@ class Noise(_Preprocess):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
         self.subscan = step_cfgs.get('subscan', False)
-        self.save_name = self.save_cfgs.get('wrap', 'noise')
+        self.save_name = step_cfgs.get('save', {}).get('wrap', 'noise')
 
         super().__init__(step_cfgs)
 
@@ -965,7 +965,7 @@ class EstimateHWPSS(_Preprocess):
     _influx_percentiles = [0, 50, 75, 90, 95, 100]
 
     def __init__(self, step_cfgs):
-        self.save_name = self.calc_cfgs.get("hwpss_stats_name")
+        self.save_name = step_cfgs.get('calc', {}).get("hwpss_stats_name")
 
         super().__init__(step_cfgs)
 
@@ -1314,7 +1314,7 @@ class AzSS(_Preprocess):
     name = "azss"
 
     def __init__(self, step_cfgs):
-        self.save_name = self.calc_cfgs.get("azss_stats_name")
+        self.save_name = step_cfgs.get('calc', {}).get("azss_stats_name")
 
         super().__init__(step_cfgs)
 
@@ -3137,7 +3137,7 @@ class GetTauHWP(_Preprocess):
     name = "get_tau_hwp"
 
     def __init__(self, step_cfgs):
-        self.save_name = self.calc_cfgs.get('name')
+        self.save_name = step_cfgs.get('calc', {}).get('name')
 
         super().__init__(step_cfgs)
 
