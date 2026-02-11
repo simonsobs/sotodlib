@@ -25,6 +25,14 @@ if len(logger.handlers) == 0:
 logger.setLevel(logging.INFO)
 
 
+def get_detset_time(detset: str) -> float:
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
+    return float(detset.split('_')[-2])
+
+
 @dataclass
 class UpdateDetMatchesConfig:
     """
@@ -105,6 +113,8 @@ class UpdateDetMatchesConfig:
     solution_type: str = 'kaiwen_handmade'
     resonator_set_dir: Optional[str] = None
     time_before_cache_failure: float = float(3600 * 24 * 7)
+    start_time: float = 0
+    stop_time: float = 2**32
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -205,13 +215,6 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         rs.name = 'sol'
         return rs
 
-def get_detset_time(detset: str) -> float:
-    """
-    Gets timestamp associated with a detset. Will parse this from the detset
-    name, assuming it is of the form <stream_id>_<time>_tune.
-    """
-    return float(detset.split('_')[-2])
-
 def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
     if time.time() - get_detset_time(detset) < cfg.time_before_cache_failure:
         logger.info(f"{detset} is too recent to add to failed cache")
@@ -269,14 +272,27 @@ def run_match(runner: Runner, detset: str) -> bool:
         True if match was successful
     """
     # Find obs-id with cal info
-    obs_all = set(runner.ctx.obsdb.query("type=='obs'")['obs_id'])
+    obs_all = set(runner.ctx.obsdb.query(f"type=='obs' and "
+                                         f"start_time > {runner.cfg.start_time} and "
+                                         f"stop_time < {runner.cfg.stop_time}"
+                                        )['obs_id']
+                 )
     cur = runner.ctx.obsfiledb.conn.execute(f"""
         select distinct obs_id from files where detset=='{detset}'
     """)
     obsids_with_cal = set(runner.detcal_db.get_entries(['dataset'])['dataset'])
     obs_dset = {r[0] for r in cur}
+
     obs_ids = sorted(list(
-        obs_all.intersection(obs_dset).intersection(obsids_with_cal)), 
+        obs_all.intersection(obs_dset)
+    ))
+
+    # If there are no obs_ids for the detset
+    if len(obs_ids) == 0:
+        return False
+
+    obs_ids = sorted(list(
+        set(obs_ids).intersection(obsids_with_cal)),
         key=lambda s:s.split('_')[1])[::-1]
     if len(obs_ids) == 0:
         add_to_failed_cache(
@@ -383,6 +399,7 @@ def update_manifests(runner: Runner, detset):
         write_dataset(core.metadata.ResultSet.from_friend(arr), h5_path, detset, overwrite=True)
         if not os.path.exists(db_path):
             scheme = core.metadata.ManifestScheme()
+            scheme.add_range_match("obs:timestamp")
             scheme.add_exact_match('dets:detset')
             scheme.add_data_field('dataset')
             db = core.metadata.ManifestDb(db_path, scheme=scheme)
@@ -393,8 +410,9 @@ def update_manifests(runner: Runner, detset):
         db = core.metadata.ManifestDb(db_path)
         if detset not in db.get_entries(['dataset'])['dataset']:
             db.add_entry({
+                'obs:timestamp': (runner.cfg.start_time, runner.cfg.stop_time),
                 'dets:detset': detset,
-                'dataset': detset
+                'dataset': detset,
             }, h5_path)
         else:
             logger.warning(f"Dataset {detset} already exists in db: {db_path}")
