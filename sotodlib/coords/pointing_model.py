@@ -242,6 +242,8 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     # cannot be used to treat el > 90 and el < 90 differently.
     if version == 'lat_v1':
         az, el, roll = quat.decompose_lonlat(q_notilt)* np.array([-1, 1, 1])[..., None]
+        # Cache the cr value before el sag, to use "preserve odd hack" below.
+        cr = el - roll - np.deg2rad(60)
     
         el_sag = params['el_sag_quad']*(el - params['el_sag_pivot'])**2
         el_sag += params['el_sag_lin']*(el - params['el_sag_pivot'])
@@ -253,6 +255,9 @@ def model_lat_v1_v2(params, az, el, roll, version='lat_v1'):
     # Apply tilt and decompose 
     q_hs = q_base_tilt * q_notilt
     new_az, el, roll = quat.decompose_lonlat(q_hs)* np.array([-1, 1, 1])[..., None]
+    if version == 'lat_v1':
+        # Preserve odd hack in v1:
+        roll = el - cr - np.deg2rad(60)
 
     # Make corrected az as close as possible to the input az.    
     change = ((new_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
