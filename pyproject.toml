@@ -52,6 +52,7 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
+  "sodetlib",
   "let-me-scroll-it",
   "plotly",
   "pandas",
