@@ -256,9 +256,10 @@ def _main(
                             data.w += future.result()
                         futures.remove(future)
 
-                    enmap.write_map(map_fits_file, data.w)
-                    f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
-                    enplot.write(map_png_file, f[0])
+                    if data.w:
+                        enmap.write_map(map_fits_file, data.w)
+                        f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
+                        enplot.write(map_png_file, f[0])
                 else:
                     data.w = enmap.read_map(map_fits_file)
                     if not os.path.exists(map_png_file):
@@ -348,8 +349,8 @@ def render_report(
             "Number of Cal Observations": len([o for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"]),
             "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cmb"])) / 3600, 1),
             "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"])) / 3600, 1),
-            "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cmb"])) / 3600, 2),
-            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"])) / 3600, 2),
+            "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb"]) else 0,
+            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb" and obs.obs_type == "obs"]) else 0,
             "Average PWV (mm)": np.round(np.nanmean([o.pwv for o in data.obs_list]), 3),
         }
     }
