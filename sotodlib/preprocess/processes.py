@@ -2034,7 +2034,7 @@ class FourierFilter(_Preprocess):
         self.signal_name = step_cfgs.get('signal_name', 'signal')
         # By default signal is overwritted by the filtered signal
         self.wrap_name = step_cfgs.get('wrap_name', 'signal')
-        self.save_anem = None
+        self.save_name = None
 
         super().__init__(step_cfgs)
 
