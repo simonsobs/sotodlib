@@ -247,14 +247,14 @@ def get_parser(parser=None):
         )
     parser.add_argument(
         "--mapviewer-dbs-root-path",
-        type=Path,
-        default=Path("/so/services/mapviewer"),
+        type=str,
+        default="/so/services/mapviewer",
         help="Path to root directory where mapviewer-compatible DBs are stored",
     )
     parser.add_argument(
         "--instrument-db-paths",
         nargs="+",
-        type=Path,
+        type=str,
         help="Paths to an instrument's atomic/depth-1 SQLite DB file",
     )
     parser.add_argument(
@@ -266,15 +266,15 @@ def get_parser(parser=None):
     return parser
 
 
-def main(mapviewer_dbs_root_path: Path, instrument_db_paths: list[Path], cutoff_days: int):
+def main(mapviewer_dbs_root_path: str, instrument_db_paths: list[str], cutoff_days: int):
     """
     Create or update databases for mapviewer instances of each instrument, as available
 
     Arguments
     ----------
-    mapviewer_dbs_root_path : Path
+    mapviewer_dbs_root_path : str
         Path to root directory where mapviewer-compatible DBs are stored
-    instrument_db_paths : list[Path]
+    instrument_db_paths : list[str]
         Paths to an instrument's atomic/depth-1 SQLite DB file
     cutoff_days: int
         Delete map groups older than this many days and repopulate with maps whose 'ctime'
@@ -285,14 +285,15 @@ def main(mapviewer_dbs_root_path: Path, instrument_db_paths: list[Path], cutoff_
        return
     
     logger.info("Updating mapviewer dbs")
-    # Enforce paths just in case
+
+    # Convert string paths to Path objects
     root = Path(mapviewer_dbs_root_path)
-    instrument_db_paths = [Path(p) for p in instrument_db_paths]
+    instrument_db_path_objects = [Path(p) for p in instrument_db_paths]
 
     # ------------------------------------------------------------------------------
     # BEGIN: Update databases for instruments
     # ------------------------------------------------------------------------------
-    for instrument_db_path in instrument_db_paths:
+    for instrument_db_path in instrument_db_path_objects:
         # Try to determine the instrument name and, if not recognized, skip
         instrument_name = get_instrument_name(instrument_db_path)
         
