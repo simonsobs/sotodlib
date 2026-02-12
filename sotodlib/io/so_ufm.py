@@ -507,7 +507,7 @@ def _process_row_lf(row):
         label = f'{_get("array_name")}_{det_type}_Mp{mux_pos}b{b}D'
     else:
         det_type = 'OPTC'
-        label = '{array}_{bandpass}_p{pixel_num:02d}{pol}'.format(**output)
+        label = '{array}_{bandpass}_Hn{pixel_num:02d}{pol}'.format(**output)
 
     output.update({
         'det_id': label,
