@@ -52,6 +52,14 @@ class CoaddAtomicConfig:
         Path to directory for output map files.
     plot : bool
         Set to True to also output PNG plots when writing maps.
+    mapcat_database_name : str
+        Path to mapcat database.
+    mapcat_database_type : str
+        Choices: ["sqlite", "postgresql"]
+    mapcat_atomic_parent : str
+        Path to base directory of atomic maps
+    mapcat_atomic_coadd_parent : str
+        Path to base directory of atomic coadd maps
     """
     def __init__(
         self,
@@ -68,7 +76,11 @@ class CoaddAtomicConfig:
         unit: str = 'K',
         overwrite: bool = False,
         output_root: str = None,
-        plot: bool = False
+        plot: bool = False,
+        mapcat_database_name: str = os.environ.get('MAPCAT_DATABASE_NAME', ''),
+        mapcat_database_type: str = os.environ.get('MAPCAT_DATABASE_TYPE', ''),
+        mapcat_atomic_parent: str = os.environ.get('MAPCAT_ATOMIC_PARENT', ''),
+        mapcat_atomic_coadd_parent: str = os.environ.get('MAPCAT_ATOMIC_COADD_PARENT', ''),
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.interval = interval
@@ -81,6 +93,10 @@ class CoaddAtomicConfig:
         self.overwrite = overwrite
         self.output_root = output_root
         self.plot = plot
+        self.mapcat_database_name = mapcat_database_name
+        self.mapcat_database_type = mapcat_database_type
+        self.mapcat_atomic_parent = mapcat_atomic_parent
+        self.mapcat_atomic_coadd_parent = mapcat_atomic_coadd_parent
         
         def convert_to_datetime(
             time: Union[dt.datetime, float, str, None],
@@ -139,6 +155,11 @@ def main(config_file: str, verbosity: int) -> None:
 
     logger.info(f"Database initialized at {cfg.output_db}")
     init_output_db(cfg.output_db, cfg.interval)
+    
+    mapcat_settings = {"database_type": cfg.mapcat_database_type,
+                       "database_name": cfg.mapcat_database_name,
+                       "atomic_parent": cfg.mapcat_atomic_parent,
+                       "atomic_coadd_parent": cfg.mapcat_atomic_coadd_parent,}
 
     for start_time, stop_time in cfg.time_intervals:
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
@@ -152,7 +173,8 @@ def main(config_file: str, verbosity: int) -> None:
                                                    cfg.split_label, start_time, stop_time, 
                                                    cfg.interval, cfg.geom_file_prefix, 
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
-                                                   logger=logger, plot=cfg.plot)
+                                                   logger=logger, plot=cfg.plot, 
+                                                   mapcat_settings=mapcat_settings)
                 if not success:
                     logger.warning(err)
             except Exception as e:
