@@ -28,7 +28,17 @@ def _buffered_times(t, buffer_t):
         np.array([t - buffer_t, t + buffer_t], dtype='float64').T)
 
 
-params_250721 = [
+# The PWV correction model version 250701 includes corrections to both
+# APEX and Toco readings.  Toco readings are debiased using a
+# non-linear correction that amounts to a removing a gaussian-shaped
+# feature centered around 1.43 mm.  APEX readings are adjusted with a
+# linear correction to make them consistent on average with corrected
+# Toco readings.  For more details see wiki:
+#
+#   https://simonsobs.atlassian.net/wiki/x/FgBBRQ
+#
+
+params_250701 = [
     # Linear model for rescaling apex to toco scale
     [0.78, 0.04],
     # Gaussian params for removing bias bump from toco radiometer
@@ -38,11 +48,11 @@ params_250721 = [
 def _gaussian(v, amp, mu, sigma):
     return amp * np.exp(-0.5 * (v - mu)**2 / sigma**2)
 
-def defeature_toco_250721(v):
-    return v + _gaussian(v, *params_250721[1])
+def defeature_toco_250701(v):
+    return v + _gaussian(v, *params_250701[1])
 
-def apex_to_tocolin_250721(v):
-    m, b = params_250721[0]
+def apex_to_tocolin_250701(v):
+    m, b = params_250701[0]
     return m * v + b
 
 
@@ -69,8 +79,8 @@ def combine_pwv(rs_toco, rs_apex, time_range):
 
     del rs_toco, rs_apex
 
-    toco_cor['pwv'] = defeature_toco_250721(toco_cor['pwv'])
-    apex_cor['pwv'] = apex_to_tocolin_250721(apex_cor['pwv'])
+    toco_cor['pwv'] = defeature_toco_250701(toco_cor['pwv'])
+    apex_cor['pwv'] = apex_to_tocolin_250701(apex_cor['pwv'])
 
     times = np.hstack((toco_cor['timestamp'], apex_cor['timestamp']))
     pwv = np.hstack((toco_cor['pwv'], apex_cor['pwv']))
