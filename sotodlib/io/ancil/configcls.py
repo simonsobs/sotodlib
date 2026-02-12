@@ -90,43 +90,6 @@ class LowResTableConfig(AncilEngineConfig):
     dtypes: list = None
 
 
-@dataclass
-class HkExtractConfig(AncilEngineConfig):
-    """Helper class for data archives that are based on SO
-    Housekeeping data.  Provide support for extraction and repackaging
-    based on hkdb.
-
-    """
-    dataset_name: str = None
-
-    #: Map from internal field name (e.g. "udp_az") to full hkdb field
-    #: name (e.g. "acu.acu_udp_stream.Corrected_Azimuth").  This
-    #: defines what fields are extracted and stored in the archive.
-    aliases: dict = field(default_factory=dict)
-
-    #: Config file for accessing the relevant hkdb.
-    hkdb_config: str = None
-
-    #: Number of seconds in each HDF5 base data file.
-    archive_block_seconds: int = 20000000
-
-    #: Number of seconds in each HDF5 base data group (must divide
-    #: archive_block_seconds evenly).
-    dataset_block_seconds: int = 1000000
-
-    #: Time range for this dataset to consider.
-    dataset_time_range: list[float] = (1704000000, None)
-
-    #: Pattern for generating filenames.
-    filename_pattern: str = '{dataset_name}_{timestamp}.h5'
-
-    #: Default (numpy) datatype for storing in base data archive.
-    default_dtype: str = 'float32'
-
-    #: Datatypes to override specific fields.
-    dtypes: dict = field(default_factory=dict)
-
-
 #
 # Specific engine config classes.
 #
