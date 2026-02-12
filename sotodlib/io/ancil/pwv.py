@@ -3,9 +3,6 @@ APEX and Toco radiometers.
 
 """
 
-#
-# Combine PWV data sources to get PWV stats for each observation.
-#
 import numpy as np
 from scipy.interpolate import interp1d
 
@@ -57,7 +54,18 @@ def apex_to_tocolin_250701(v):
 
 
 def combine_pwv(rs_toco, rs_apex, time_range):
-    """
+    """Combine Toco and Apex PWV datasets (provided as ResultSet with
+    timestamp and pwv columns) and produce statistics covering the
+    stated time_range (timestamp, timestamp).
+
+    The provided datasets should extend at least a few minutes beyond
+    the time_range boundaries, so as to facilitate interpolation.
+
+    PWV correction model is applied to the data before combination.
+    Then, Toco points are used as much as possible but filled in with
+    APEX whenever there's a gap of more than 10 minutes in the Toco
+    stream.
+
     """
     # The idea is to use toco where you can, but fill it in with apex.
 
@@ -123,8 +131,22 @@ def combine_pwv(rs_toco, rs_apex, time_range):
 
 @cc.register_engine('pwv-combo', cc.PwvComboConfig)
 class PwvCombo(utils.AncilEngine):
-    """Combine and reduce PWV measurements from two data sources (APEX
-    and Toco).
+    """Combine and reduce PWV measurements from two data sources (APEX and
+    Toco).  Note the values ultimately recorded are a combination of
+    all available readings (from both sources) in the relevant time
+    range.  Each source is corrected, using a model, to make them
+    intercompatible and descriptive of the site.
+
+    There is no explicitly managed "base data" for this module, as it
+    relies on base data from Apex and Toco modules.
+
+    The fields computed for obsdb are:
+
+    - "mean": average corrected radiometer readings in mm.
+    - "std": stdev of such readings.
+    - "qual": a quality indicator (0 to 1) indicating roughly what
+      fraction of the requested time interval is covered by the
+      datasets.
 
     """
 

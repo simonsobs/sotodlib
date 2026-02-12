@@ -70,17 +70,24 @@ def _parse_apex_csv(text):
     return utils.ResultSet(keys=headers, src=rows)
 
 
-def get_apex(t0, t1, url=None, raw=False):
+def get_apex(t0, t1, url=None, raw=False, max_rows=75000):
     if url is None:
         url = APEX_DATA_URL
-    t0, t1 = map(_timestamp_to_str, _to_timestamp([t0, t1]))
+    t0, t1 = _to_timestamp([t0, t1])
+    # We expect about 1 point per minute.
+    if (t1 - t0) > max_rows * 60 * .95:
+        raise ValueError(f"Time range requested ({t1-t0} s) might "
+                         f"require more than {max_rows} rows.")
+    t0, t1 = map(_timestamp_to_str, [t0, t1])
     data = {
         'wdbo': 'csv/download',
-        'max_rows_returned': 79400,
+        'max_rows_returned': max_rows,
         'start_date': f'{t0}..{t1}',
-        #'shutter': 'SHUTTER_OPEN',
         'tab_pwv': 'on',
-        #'tab_shutter': 'on',
+        ## Don't ask for shutter column, but also don't insist that
+        ## shutter be open; process the nans.
+        # 'shutter': 'SHUTTER_OPEN',
+        # 'tab_shutter': 'on',
     }
     r = requests.post(url, data=data)
     if raw:

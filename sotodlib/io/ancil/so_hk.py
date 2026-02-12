@@ -20,17 +20,6 @@ from . import configcls as cc
 logger = logging.getLogger(__name__)
 
 
-# Model for converting APEX PWV to Toco PWV.
-_A2T_LIN = np.array([0.78775417, 0.04700976])
-_A2T_GAUSS = (0.18090913, 1.60488581, 0.38610678)
-
-def apex_pwv_to_toco_pwv(v):
-    a, mu, sig = _A2T_GAUSS
-    gau = a*np.exp(-0.5*(x - mu)**2 / sig**2)
-    lin = np.polyval(_A2T_LIN, v)
-    return lin + gau
-
-
 @cc.register_engine('toco-pwv', cc.TocoPwvConfig)
 class TocoPwv(utils.LowResTable):
     _fields = [
@@ -73,7 +62,8 @@ class TocoPwv(utils.LowResTable):
                 }
                 continue
 
-            # Replace out-of-bounds negative with 0.15
+            # Replace out-of-bounds negative with 0.15, because that in
+            # the middle of the dead zone.
             p[p<0.3] = 0.15
             # Note any out-of-bounds positive points
             high = (p > 3.)
