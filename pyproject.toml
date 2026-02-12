@@ -52,6 +52,7 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
+  "sodetlib",
   "let-me-scroll-it",
   "plotly",
   "pandas",
@@ -59,6 +60,7 @@ site_pipeline = [
   "slack-sdk",
   "mapcat",
   "requests",
+  "tilemaker",
   "GitPython",
 ]
 tests = [
