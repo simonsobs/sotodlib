@@ -36,6 +36,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
     parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
+    parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
     parser.add_argument("--hits", action="store_true", help="Write hits maps")
@@ -370,9 +371,10 @@ def main(**args):
                 L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
 
                 # sidelobes cuts
-                cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
-                for cut in cutss:
-                    obs.flags.glitch_flags += cut
+                if not args.no_sidelobe:
+                    cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
+                    for cut in cutss:
+                        obs.flags.glitch_flags += cut
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
