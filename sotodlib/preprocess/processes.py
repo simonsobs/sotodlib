@@ -85,7 +85,7 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("det_bias_flags", dbc_aman)
+            proc_aman.wrap(self.save_name, dbc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -155,7 +155,7 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("trends", trend_aman)
+            proc_aman.wrap(self.save_name, trend_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -239,7 +239,7 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.glitch_name, glitch_aman)
+            proc_aman.wrap(self.save_name, glitch_aman)
  
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -332,7 +332,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
 
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
-        self.save_name = step_cfgs.get('save', {}).get('jumps_name', 'jumps')
+        self.save_name = 'jumps' if isinstance(step_cfgs.get('save'), bool) else step_cfgs.get('save', {}).get('jumps_name', 'jumps')
 
         super().__init__(step_cfgs)
 
@@ -361,8 +361,7 @@ class Jumps(_FracFlaggedMixIn, _Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            name = self.save_cfgs.get('jumps_name', 'jumps')
-            proc_aman.wrap(name, jump_aman)
+            proc_aman.wrap(self.save_name, jump_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -517,7 +516,7 @@ class NoiseRatio(_Preprocess):
         if self.save_cfgs is None:
             return
         else:
-            proc_aman.wrap(self.wrap, calc_aman)
+            proc_aman.wrap(self.save_name, calc_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -595,7 +594,7 @@ class GetStats(_Preprocess):
 
     def save(self, proc_aman, stats_aman):
         if not(self.save_cfgs is None):
-            proc_aman.wrap(self.wrap, stats_aman)
+            proc_aman.wrap(self.save_name, stats_aman)
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -720,7 +719,7 @@ class Noise(_Preprocess):
         self.psd = step_cfgs.get('psd', 'psd')
         self.fit = step_cfgs.get('fit', False)
         self.subscan = step_cfgs.get('subscan', False)
-        self.save_name = step_cfgs.get('save', {}).get('wrap', 'noise')
+        self.save_name = 'noise' if isinstance(step_cfgs.get('save'), bool) else step_cfgs.get('save', {}).get('wrap_name', 'noise')
 
         super().__init__(step_cfgs)
 
@@ -820,16 +819,8 @@ class Noise(_Preprocess):
     def save(self, proc_aman, noise):
         if self.save_cfgs is None:
             return
-
-        if isinstance(self.save_cfgs, bool):
-            if self.save_cfgs:
-                proc_aman.wrap("noise", noise)
-                return
-
-        if self.save_cfgs['wrap_name'] is None:
-            proc_aman.wrap("noise", noise)
-        else:
-            proc_aman.wrap(self.save_cfgs['wrap_name'], noise)
+        if self.save_cfgs:
+            proc_aman.wrap(self.save_name, noise)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -976,10 +967,10 @@ class EstimateHWPSS(_Preprocess):
         return aman, proc_aman
 
     def save(self, proc_aman, hwpss_stats):
-        if self.save_cfgs is None:
-            return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["hwpss_stats_name"], hwpss_stats)
+            proc_aman.wrap(self.save_name, hwpss_stats)
+        else:
+            return
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -1177,7 +1168,7 @@ class A2Stats(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("a2_stats", a2_stats)
+            proc_aman.wrap(self.save_name, a2_stats)
 
 class Apodize(_Preprocess):
     """Apodize the edges of a signal. All process configs go to `apodize_cosine`
@@ -1331,7 +1322,7 @@ class AzSS(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs["azss_stats_name"], azss_stats)
+            proc_aman.wrap(self.save_name, azss_stats)
 
     def process(self, aman, proc_aman, sim=False):
         if 'subtract_in_place' in self.calc_cfgs:
@@ -1494,7 +1485,7 @@ class FlagTurnarounds(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("turnaround_flags", turn_aman)
+            proc_aman.wrap(self.save_name, turn_aman)
 
     def process(self, aman, proc_aman, sim=False):
         tod_ops.flags.get_turnaround_flags(aman, **self.process_cfgs)
@@ -1658,7 +1649,7 @@ class SSOFootprint(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("sso_footprint", sso_aman)
+            proc_aman.wrap(self.save_name, sso_aman)
 
     def plot(self, aman, proc_aman, filename):
         if self.plot_cfgs is None:
@@ -1705,7 +1696,7 @@ class DarkDets(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("darks", dark_aman)
+            proc_aman.wrap(self.save_name, dark_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -1768,7 +1759,7 @@ class LoadPremadeFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.premade_flags_name, source_aman)            
+            proc_aman.wrap(self.save_name, source_aman)            
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -1873,7 +1864,7 @@ class SourceFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.source_flags_name, source_aman)
+            proc_aman.wrap(self.save_name, source_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -1881,7 +1872,7 @@ class SourceFlags(_Preprocess):
         if proc_aman is None:
             source_flags = meta.preprocess.source_flags
         else:
-            source_flags = proc_aman[self.source_flags_name]
+            source_flags = proc_aman[self.save_name]
 
         if isinstance(self.select_cfgs, bool):
             if self.select_cfgs:
@@ -1971,7 +1962,7 @@ class HWPAngleModel(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("hwp_angle", hwp_angle_aman)
+            proc_aman.wrap(self.save_name, hwp_angle_aman)
 
 class FourierFilter(_Preprocess):
     """
@@ -2210,7 +2201,7 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.run_name, pca_aman)
+            proc_aman.wrap(self.save_name, pca_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -2338,7 +2329,7 @@ class GetCommonMode(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.wrap_name, common_aman)
+            proc_aman.wrap(self.save_name, common_aman)
 
 class FilterForSources(_Preprocess):
     """
@@ -2418,7 +2409,7 @@ class PTPFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("ptp_flags", ptp_aman)
+            proc_aman.wrap(self.save_name, ptp_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -2467,7 +2458,7 @@ class InvVarFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("inv_var_flags", inv_var_aman)
+            proc_aman.wrap(self.save_name, inv_var_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -2525,7 +2516,7 @@ class EstimateT2P(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("t2p", t2p_aman)
+            proc_aman.wrap(self.save_name, t2p_aman)
 
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -2601,7 +2592,7 @@ class SplitFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("split_flags", split_flg_aman)
+            proc_aman.wrap(self.save_name, split_flg_aman)
 
 class UnionFlags(_Preprocess):
     """Do the union of relevant flags for mapping
@@ -2782,7 +2773,7 @@ class SubtractQUCommonMode(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap('qu_common_mode_coeffs', aman['qu_common_mode_coeffs'])
+            proc_aman.wrap(self.save_name, aman['qu_common_mode_coeffs'])
 
     def process(self, aman, proc_aman, sim=False):
         if 'qu_common_mode_coeffs' in proc_aman:
@@ -2863,7 +2854,7 @@ class FocalplaneNanFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("fp_flags", fp_aman)
+            proc_aman.wrap(self.save_name, fp_aman)
     
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
@@ -3074,7 +3065,7 @@ class AcuDropFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("acu_drops", flag_aman)
+            proc_aman.wrap(self.save_name, flag_aman)
 
 class SmurfGapsFlags(_Preprocess):
     """Expand smurfgaps flag of each stream_id to all detectors
@@ -3111,7 +3102,7 @@ class SmurfGapsFlags(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap("smurfgaps", flag_aman)
+            proc_aman.wrap(self.save_name, flag_aman)
 
 class GetTauHWP(_Preprocess):
     """Analyze observation with hwp spinning up or spinning down and
@@ -3149,7 +3140,7 @@ class GetTauHWP(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.calc_cfgs['name'], tau_hwp_aman)
+            proc_aman.wrap(self.save_name, tau_hwp_aman)
 
 class Move(_Preprocess):
     """Rename or remove a data field.
