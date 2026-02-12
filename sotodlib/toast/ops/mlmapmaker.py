@@ -420,7 +420,7 @@ class MLMapmaker(Operator):
              view_ranges = np.array(
                  [[x.first, x.last] for x in ob.intervals[self.view]]
              )
-             ranges += so3g.proj.ranges.Ranges.from_array(view_ranges, nsample)
+             ranges += so3g.proj.ranges.Ranges.from_array(view_ranges.astype(np.int32), nsample)
 
         # Convert the focalplane offsets into the expected form
         det_to_row = {y["name"]: x for x, y in enumerate(fp.detector_data)}

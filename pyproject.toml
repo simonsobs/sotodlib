@@ -29,6 +29,7 @@ dependencies = [
   "psycopg2-binary",
   "lmfit",
   "flacarray>=0.3.4",
+  "numpy-quaternion", # Required quietly by pixell.coordsys
   "h5py",
 ]
 dynamic=["version"]
@@ -51,6 +52,7 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
+  "sodetlib",
   "let-me-scroll-it",
   "plotly",
   "pandas",
@@ -58,6 +60,7 @@ site_pipeline = [
   "slack-sdk",
   "requests",
   "tilemaker",
+  "GitPython",
 ]
 tests = [
   "socs",
