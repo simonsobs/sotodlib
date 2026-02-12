@@ -89,10 +89,10 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
     Arguments
     ---------
 
-    jdb : JobDB
-        The preprocessing jobdb class.
+    jdb : JobManager
+        The preprocessing jobdb.
     jclass : str
-        The job name.
+        The jobdb class name.
     db : ManifestDb or None
         Preprocessing database.
     run_list : list
@@ -149,7 +149,9 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 with jdb.locked(job) as j:
                     if overwrite == True:
                         j.jstate = "open"
-                        j.tags["error"] = None
+                        for _t in j._tags:
+                            if _t.key == "error":
+                                _t.value = None
             else:
                 if job.jstate == JState.done:
                     done += 1
@@ -164,6 +166,35 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
 
     return run_list
 
+
+def reopen_failed_preproc_jobs(jdb, jclass, error=None):
+    """Helper function to re-open jobs that failed with particular errors
+    so that they can be re-run with the run_from_jobdb argument.
+
+    Arguments
+    ---------
+
+    jdb : JobManager or str
+        The preprocessing jobdb or a path to an existing jobdb file.
+    jclass : str
+        The jobdb class name.
+    error : str or None
+        The PreprocessError name to re-open. If None, re-open all failed jobs.
+    """
+    if isinstance(jdb, str):
+        if not os.path.isfile(jdb):
+            return
+        jdb = JobManager(sqlite_file=jdb)
+
+    failed_jobs = jdb.get_jobs(jclass=jclass, jstate=JState.failed)
+
+    for job in failed_jobs:
+        if job.tags['error'] == error or error is None:
+            with jdb.locked(job) as j:
+                j.jstate=JState.open
+                for _t in j._tags:
+                    if _t.key == "error":
+                        _t.value = None
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
