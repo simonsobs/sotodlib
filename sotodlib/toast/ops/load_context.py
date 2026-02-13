@@ -1,6 +1,7 @@
 # Copyright (c) 2022-2024 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
+import copy
 import re
 import sqlite3
 import yaml
@@ -596,7 +597,7 @@ class LoadContext(Operator):
 
             # If we have an observation with a specific wafer, modify the detector
             # selection dictionary to include only that wafer.
-            obs_dets_select = dets_select
+            obs_dets_select = copy.deepcopy(dets_select)
             if obs_props[obindx]["wafer"] != "all":
                 if obs_dets_select is None:
                     obs_dets_select = dict()
@@ -722,6 +723,8 @@ class LoadContext(Operator):
         # hence one reader).
         if rank == 0:
             # Load metadata
+            msg = f"LoadContext {obs_name} metadata using dets_select={dets_select}"
+            log.debug(msg)
             ctx = open_context(context=self.context, context_file=self.context_file)
             meta = ctx.get_meta(session_name, dets=dets_select)
             if self.context_file is not None:
@@ -755,7 +758,11 @@ class LoadContext(Operator):
                     band = fp_cols[
                         f"det_info{self.ax_pathsep}wafer{self.ax_pathsep}bandpass"
                     ].data
-                freq = [float(b[1:]) for b in band]
+
+                fpat = re.compile(r"^f[\d]+$")
+                freq = [
+                    float(b[1:]) if fpat.match(b) is not None else 0.0 for b in band
+                ]
                 bandcenter = np.array(freq) * u.GHz
                 bandwidth = bandcenter * self.bandwidth
                 fp_cols["bandcenter"] = Column(name="bandcenter", data=bandcenter)
