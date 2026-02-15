@@ -147,6 +147,9 @@ def boresight_vs_time(d: ReportData) -> go.Figure:
     boresight = [o.boresight if o.boresight is not None else np.nan for o in d.obs_list]
     boresight = np.round(boresight, 1)
 
+    if not tstamps:
+        return go.Figure()
+
     if d.cfg.platform == "lat":
         el_center = [o.el_center if o.el_center is not None else np.nan for o in d.obs_list]
         tstamps, boresight, el_center = zip(*sorted(zip(tstamps, boresight, el_center)))
@@ -194,6 +197,9 @@ def hwp_freq_vs_time(d: ReportData) -> go.Figure:
         hwp_freq_mean = [o.hwp_freq_mean if o.hwp_freq_mean is not None else np.nan for o in d.obs_list]
         hwp_freq_mean = np.round(hwp_freq_mean, 2)
 
+        if not tstamps:
+            return go.Figure()
+
         tstamps, hwp_freq_mean = zip(*sorted(zip(tstamps, hwp_freq_mean)))
         tstamps = [
             dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
@@ -213,7 +219,7 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     nwafers = len(wafers)
 
     times = pd.date_range(d.cfg.start_time, d.cfg.stop_time, nsegs).to_pydatetime()
-    tstamps= np.array([t.timestamp() for t in times])
+    tstamps = np.array([t.timestamp() for t in times])
 
     obs_types = ["cmb", "obs", "cal", "oper"] + d.cfg.cal_targets + ["idle"]
     obs_values = {k: i for i, k in enumerate(obs_types)}
@@ -346,29 +352,30 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
             secondary_y=False,
         )
 
-    # PWV trace
-    ds_factor = 10
-    #pwvs = deepcopy(d.pwv[1][::ds_factor])
-    #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-    #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+    if d.obs_list:
+        # PWV trace
+        ds_factor = 10
+        #pwvs = deepcopy(d.pwv[1][::ds_factor])
+        #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
+        #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
 
-    ts, pwvs = zip(*sorted(
-        ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
-    ))
-    ts = list(ts)
-    pwvs = list(pwvs)
+        ts, pwvs = zip(*sorted(
+            ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
+        ))
+        ts = list(ts)
+        pwvs = list(pwvs)
 
-    fig.add_trace(
-        go.Scatter(
-            x=ts,
-            y=pwvs,
-            mode="markers",
-            name="PWV [mm]",
-            line=dict(color="#CC79A7", width=2, dash="solid"),
-            opacity=0.6,
-        ),
-        secondary_y=True,
-    )
+        fig.add_trace(
+            go.Scatter(
+                x=ts,
+                y=pwvs,
+                mode="markers",
+                name="PWV [mm]",
+                line=dict(color="#CC79A7", width=2, dash="solid"),
+                opacity=0.6,
+            ),
+            secondary_y=True,
+        )
 
     # layout
     fig.update_layout(
@@ -563,28 +570,29 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
             i += 1
 
     # PWV trace
-    ds_factor = 10
-    #pwvs = deepcopy(d.pwv[1][::ds_factor])
-    #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-    #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+    if d.obs_list:
+        ds_factor = 10
+        #pwvs = deepcopy(d.pwv[1][::ds_factor])
+        #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
+        #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
 
-    ts, pwvs = zip(*sorted(
-        ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
-    ))
-    ts = list(ts)
-    pwvs = list(pwvs)
+        ts, pwvs = zip(*sorted(
+            ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
+        ))
+        ts = list(ts)
+        pwvs = list(pwvs)
 
-    fig.add_trace(
-        go.Scatter(
-            x=ts,
-            y=pwvs,
-            mode="markers",
-            name="PWV [mm]",
-            line=dict(color="#CC79A7", width=2, dash="solid"),
-            opacity=0.6,
-        ),
-        secondary_y=True,
-    )
+        fig.add_trace(
+            go.Scatter(
+                x=ts,
+                y=pwvs,
+                mode="markers",
+                name="PWV [mm]",
+                line=dict(color="#CC79A7", width=2, dash="solid"),
+                opacity=0.6,
+            ),
+            secondary_y=True,
+        )
 
     # layout
     fig.update_layout(

@@ -461,7 +461,7 @@ class ReportData:
                 o.pwv = np.nan
 
         data: "ReportData" = cls(
-            cfg=cfg, obs_list=obs_list, pwv=None, longterm_obs_df=longterm_obs_df
+            cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
         )
 
         if cfg.load_source_footprints:
@@ -489,8 +489,8 @@ class ReportData:
 
             if "cfg" not in hdf.attrs:
                 hdf.attrs["cfg"] = json.dumps(d)
-            if self.pwv is not None and "pwv" not in hdf:
-                hdf.create_dataset("pwv", data=self.pwv)
+            # if self.pwv is not None and "pwv" not in hdf:
+            #     hdf.create_dataset("pwv", data=self.pwv)
 
             for obs in self.obs_list:
                 if obs.obs_id not in hdf:
