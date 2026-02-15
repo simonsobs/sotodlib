@@ -256,7 +256,7 @@ def _main(
                             data.w += future.result()
                         futures.remove(future)
 
-                    if data.w:
+                    if data.w is not None:
                         enmap.write_map(map_fits_file, data.w)
                         f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
                         enplot.write(map_png_file, f[0])
@@ -350,10 +350,13 @@ def render_report(
             "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cmb"])) / 3600, 1),
             "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"])) / 3600, 1),
             "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb"]) else 0,
-            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb" and obs.obs_type == "obs"]) else 0,
+            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb" and o.obs_type == "obs"]) else 0,
             "Average PWV (mm)": np.round(np.nanmean([o.pwv for o in data.obs_list]), 3),
         }
     }
+
+    if cfg.platform in ["satp1", "satp2", "satp3"]:
+        jinja_data["general_stats"]["Number of Wiregrid Observations"] = len([o for o in data.obs_list if "wiregrid" in o.obs_tags])
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
