@@ -52,6 +52,37 @@ def _get_config(config_file):
     return cfg
 
 
+def import_records(config_file, time_range=None):
+    cfg = _get_config(config_file)
+    target_db = cfg['target_obsdb']
+    if cfg.get('upstream_obsdb') is None:
+        raise RuntimeError("No upstream_obsdb is configured.")
+
+    upstream_db = cfg['upstream_obsdb']
+
+    logger.info(f'Checking for new records in {upstream_db} ...')
+    db = core.metadata.ObsDb(target_db)
+    db_up = core.metadata.ObsDb(upstream_db)
+    report = core.metadata.obsdb.diff_obsdbs(db, db_up)
+    if not report['different']:
+        logger.info(' ... databases are in sync.')
+        return
+    if not report['patchable']:
+        logger.error(' ... upstream and target have irreconcilable differences.')
+        raise RuntimeError("Target obsdb cannot be patched to match upstream.")
+
+    pd = report['patch_data']
+    if len(pd['remove_obs']):
+        raise RuntimeError("obsdb specifies obs removal.")
+    if len(pd['remove_tags']):
+        raise RuntimeError("obsdb specifies tags removal.")
+
+    logger.info(f'Adding records -- {len(pd["new_obs"])} new obs '
+                f'and {len(pd["new_tags"])} new tags ...')
+    core.metadata.obsdb.patch_obsdb(pd, db)
+    logger.info(' ... done')
+
+
 def update_base_data(config_file, time_range=None, datasets=None,
                      full_scan=False, verbose=None):
     cfg = _get_config(config_file)
@@ -156,6 +187,12 @@ def get_parser(parser=None):
     add_args(p, '--config-file', '--dataset', '--time-range')
     p.add_argument('--redo', action='store_true')
 
+    p = sps.add_parser('import-records', help="""Prepare the
+    target obsdb for updates by pulling in rows from a primary
+    "upstream" obsdb.""")
+
+    add_args(p, '--config-file')
+
     p = sps.add_parser('check', help="""Read the config file and test
     datasets by attempting to instantiate them. This should not
     normally touch the underlying data or attempt to load new data
@@ -230,6 +267,9 @@ def main(
         update_obsdb(config_file, datasets=dataset,
                      time_range=time_range, redo=redo,
                      verbose=verbose)
+
+    elif command == 'import-records':
+        import_records(config_file)
 
     elif command == 'check':
         # Just trial load the config, processors.
