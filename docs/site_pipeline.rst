@@ -97,6 +97,176 @@ Module documentation
    :members:
    :undoc-members:
 
+update-obsdb-ancil
+------------------
+
+This script may be used to update ancillary data archives and then to
+update an ObsDb with reduced statistics from those archives.  The
+script requires a configuration file, which includes a list of
+"datasets"; each dataset corresponds to some ancillary data source and
+a method for reducing that data to be summarized in :class:`ObsDb
+<sotodlib.core.metadata.ObsDb>` columns.  Each dataset is mapped to a
+class in the :mod:`sotodlib.io.ancil` module; the code there defines
+how the data are to be obtained, stored, and reduced.
+
+The main processing commands are ``update-base-data`` and
+``update-obsdb``.  For each of these, the caller can specify which
+configured datasets they want to run on, and what time range to
+consider for the update.
+
+For example, to perform a bulk update of all ancillary data archives,
+considering data from the past week, run::
+
+  so-site-pipeline update-obsdb-ancil \
+    update-base-data -c ancil.yaml --lookback-days=7
+
+
+To then update the specified obsdb, run::
+
+  so-site-pipeline update-obsdb-ancil \
+    update-obsdb -c ancil.yaml --lookback-days=7
+
+
+In automation (e.g. from cronjob) users will most likely use the
+``run-job`` command, which can run a pre-configured series of
+operations (different combinations of ``update-base-data`` and
+``update-obsdb``).  That might look like::
+
+  so-site-pipeline update-obsdb-ancil \
+    run-job -c ancil.yaml standard_7day_update
+
+
+For testing there are ``check`` and ``test`` commands.  The ``check``
+command simply instantiates an engine for each dataset -- basically
+checking for configuration problems and summarizing some easily
+determined state.  E.g.::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+      check --dataset apex-pwv
+
+  Loading config file ancil.yaml ...
+    dataset=apex-pwv
+      output_dir: apex/
+      files_found: 33
+
+
+The ``test`` command can be used to load data and run a reduction
+operation, targeting a specific obs in the ObsDb.  For example::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+        test --dataset apex-pwv \
+        --query "type == 'obs' and timestamp > 1760100000"
+
+  apex-pwv
+  obs_1760103123_satp1_1111111 {'mean': 0.48, 'start': 0.44, 'end': 0.51, 'span': 0.13}
+  obs_1760106068_satp1_1111111 {'mean': 0.6, 'start': 0.58, 'end': 0.82, 'span': 0.31}
+  obs_1760108443_satp1_1111111 {'mean': 0.78, 'start': 0.78, 'end': 0.78, 'span': 0.0}
+  ...
+
+Or with a specific obs_id::
+
+  >>> so-site-pipeline update-obsdb-ancil \
+        test obs_1760168230_satp1_1111111
+
+  apex-pwv
+  obs_1760168230_satp1_1111111 {'mean': 0.56, 'start': 0.57, 'end': 0.55, 'span': 0.06}
+
+  toco-pwv
+  obs_1760168230_satp1_1111111 {'mean': 0.439, 'start': 0.459, 'end': 0.463, 'span': 0.091}
+
+  pwv-combo
+  obs_1760168230_satp1_1111111 {'mean': 0.44, 'std': 0.018, 'qual': 1.0}
+
+  weather-station
+  obs_1760168230_satp1_1111111 {'wind_speed': 1.2, 'wind_dir': 228.7, 'uv': nan, 'ambient_temp': -2.83}
+  ...
+
+
+Configuration
+`````````````
+
+The configuration file is yaml.  In addition to some general settings
+at root level, two large sub-blocks are used to define the data
+archives (``datasets``) and the different job definitions
+(``job_defs``).
+
+In the ``datasets`` block, each entry will be parsed as the
+configuration for one of the classes registered in
+:py:data:`sotodlib.io.ancil.ANCIL_ENGINES`; find links to each
+engine's configuration dataclass in the :ref:`io.ancil Engines
+section<io-ancil-engines>`.  Note that the key of each entry is
+normally used to find the engine in ANCIL_ENGINES -- but you can call
+the datasets entries whatever you want as long as the ``class`` is
+defined, in the block (i.e. instead of ``"apex-pwv": {...}`` you could
+have ``"my-weird-name": {"class": "apex-pwv", ...}``).
+
+Here's an annotated example:
+
+.. code-block:: yaml
+
+  # ObsDb to use for update-obsdb jobs
+  target_obsdb: /so/metadata/obsdb.sqlite
+
+  # This (optionally) sets the default data_prefix used for base data
+  # in all datasets (can be overridden by setting data_prefix in a
+  # dataset config block).
+  data_prefix: /data/ancil
+
+  # Datasets -- the entry names are looked up in
+  # the io.ancil registered engines.
+  datasets:
+    apex-pwv:
+      data_dir: apex/
+    toco-pwv:
+      data_dir: toco/
+      hkdb_config: "/db_configs/hkdb-site.cfg"
+    pwv-combo: {}
+
+  # job_defs -- a list of named jobs; this is like
+  # a shortcut for running common operations.
+  job_defs:
+    - name: basic
+      steps:
+        - command: "update-base-data"
+          lookback_days: 7
+          carry_fail: true
+        - command: "update-obsdb"
+          lookback_days: 3
+          redo: true
+        - command: "update-obsdb"
+          lookback_days: 7
+
+
+Each block in the job_defs list will be run, in sequence.  The dict is
+passed through to the command being run unaltered, except as noted:
+
+- ``config_file``, if not specified explicitly, will be set to the
+  path of this file.
+- ``command`` provides the name of the sub-command to run (as if it
+  had been specified on command line).
+- ``ignore_fail``, if set to true, will cause the step to not block
+  completion of subsequent steps if it fails; the script may exit
+  successfully in the end.
+- ``carry_fail``, if set to true, will permit subsequent steps to
+  run, if this step fails, but will cause the whole job to fail, in
+  the end.
+
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_obsdb_ancil
+   :func: get_parser
+   :prog: update-obsdb-ancil
+
+Module documentation
+````````````````````
+
+.. automodule:: sotodlib.site_pipeline.update_obsdb_ancil
+   :members:
+   :undoc-members:
+
 update-smurf-caldbs
 -----------------------
 This update script is used to add detset and calibration metadata to manifest
