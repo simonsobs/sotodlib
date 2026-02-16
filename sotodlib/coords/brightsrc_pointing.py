@@ -1,10 +1,12 @@
+# These functions are used for fitting detector positions from bright point sources
+# called by site_pipeline.get_brightsrc_pointing_step1 and site_pipeline.get_brightsrc_pointing_step2 
 import os
 import re
 from tqdm import tqdm
 import numpy as np
 from scipy import interpolate
 from scipy.optimize import curve_fit
-from joblib import Parallel, delayed
+#from joblib import Parallel, delayed
 
 from sotodlib import core
 from sotodlib import coords
@@ -20,11 +22,12 @@ from scipy.ndimage import maximum_filter
 
 def get_planet_trajectory(tod, planet, _split=20, return_model=False):
     """
-    Generate the trajectory of a given planet over a specified time range.
+    Generate the trajectory in horizon coordinates of a given planet over a specified time range.
 
     Parameters:
-        tod : An axis manager
-        planet (str): The name of the planet for which to generate the trajectory.
+        tod : An axis manager containing a timestamps field, which is used to 
+        determine the time range and generate the trajectory.
+        planet (str): The name of the object for which to generate the trajectory. e.g. "moon" or "saturn"
         _split (int, optional): Number of points to interpolate the trajectory. Defaults to 20.
         return_model (bool, optional): If True, returns interpolation functions of az and el. Defaults to False.
 
@@ -34,7 +37,6 @@ def get_planet_trajectory(tod, planet, _split=20, return_model=False):
         If return_model is False:
             array: Array of quaternions representing trajectory of the planet at each timestamp.
     """
-    print(planet)
     timestamps_sparse = np.linspace(tod.timestamps[0], tod.timestamps[-1], _split)
     
     planet_az_sparse = np.zeros_like(timestamps_sparse)
@@ -136,7 +138,8 @@ def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.),
 
 def get_rough_hit_time(tod, wafer_slot, sso_name, circle_r_deg=7.,optics_config_fn=None):
     """
-    Estimate the rough hit time for a axismanager, wafer_slot, and sso_name.
+    Estimate the rough hit time, which is the amount of time for which the source
+    is within some distance from the center of a wafer slot.
 
     Parameters:
         tod : An AxisManager object
@@ -166,6 +169,8 @@ def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf,
                            signal='signal', wafer_mask_deg=8., res_deg=0.3, cuts=None,):
     """
     Generate boresight-centered maps from Time-Ordered Data (TOD) for each individual detector.
+    This script modifies tod.focal_plane and tod.boresight
+    
     Parameters:
         tod : an axismanager object
         sso_name (str): Name of the planet for which the trajectory is calculated.

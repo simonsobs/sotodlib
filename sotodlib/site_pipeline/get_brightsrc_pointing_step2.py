@@ -6,7 +6,7 @@ import argparse
 import time
 import glob
 from tqdm import tqdm
-from joblib import Parallel, delayed
+import logging
 
 from scipy.optimize import curve_fit
 from sotodlib.core import metadata
@@ -18,9 +18,14 @@ from sotodlib import tod_ops
 import so3g
 from so3g.proj import quat
 import sotodlib.coords.planets as planets
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.preprocess import Pipeline
-logger = util.init_logger(__name__, 'update_pointing: ')
+from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+
+logger = logging.getLogger("get_brightsrc_pointing_step2")
+if not logger.hasHandlers():
+    sp_init_logger("get_brightsrc_pointing_step2")
 
 def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter', 'mars', 'saturn']):
     obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
@@ -71,16 +76,14 @@ def wrapper_gaussian2d_nonlin(xieta, xi0, eta0, fwhm_xi, fwhm_eta, phi, a, *args
 
 def wrap_fp_rset(tod, fp_rset):
     tod.restrict('dets', tod.dets.vals[np.isin(tod.dets.vals, fp_rset['dets:readout_id'])])
+    _, ind_tod, ind_rset = core.util.get_coindices(tod.dets.vals, fp_rset['dets:readout_id'])
     focal_plane = core.AxisManager(tod.dets)
     focal_plane.wrap_new('xi', shape=('dets', ))
     focal_plane.wrap_new('eta', shape=('dets', ))
-    focal_plane.wrap_new('gamma', shape=('dets', ))
-
-    for di, det in enumerate(tod.dets.vals):
-        di_rset = np.where(fp_rset['dets:readout_id'] == det)[0][0]
-        focal_plane.xi[di] = fp_rset['xi'][di_rset]
-        focal_plane.eta[di] = fp_rset['eta'][di_rset]
-        focal_plane.gamma[di] = fp_rset['gamma'][di_rset]
+    focal_plane.wrap_new('gamma', shape=('dets', ))  
+    focal_plane.xi[ind_tod] = fp_rset['xi'][ind_rset]
+    focal_plane.eta[ind_tod] = fp_rset['eta'][ind_rset]
+    focal_plane.gamma[ind_tod] = fp_rset['gamma'][ind_rset]
 
     if 'focal_plane' in tod._fields.keys():
         tod.move('focal_plane', None)
@@ -367,7 +370,7 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
                   address='focal_plane',
                   overwrite=True)
         
-    return
+    return f"Finished processing {obs_id}, {wafer_slot}"
 
 def main_one_wafer_dummy(configs, obs_id, wafer_slot, restrict_dets_for_debug=False):
     if type(configs) == str:
@@ -421,14 +424,6 @@ def combine_pointings(pointing_result_files):
     for det, val in combined_dict.items():
         focal_plane.rows.append((det, val['xi'], val['eta'], val['gamma'], val['xi_err'], val['eta_err'], val['R2'], val['redchi2']))
     return focal_plane
-
-def parallel_process_wafer_slot(configs, obs_id, wafer_slot, sso_name, restrict_dets_for_debug):
-    logger.info(f'Processing {obs_id}, {wafer_slot}')
-    main_one_wafer(configs=configs,
-                   obs_id=obs_id,
-                   wafer_slot=wafer_slot,
-                   sso_name=sso_name,
-                   restrict_dets_for_debug=restrict_dets_for_debug)
 
 def main_one_obs(configs, obs_id, sso_name=None,
                 restrict_dets_for_debug=False):
@@ -484,16 +479,18 @@ def main_one_obs(configs, obs_id, sso_name=None,
             n_jobs = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
         except: 
             n_jobs = -1
-        Parallel(n_jobs=n_jobs)(
-            delayed(parallel_process_wafer_slot)(
-                configs,
-                obs_id, 
-                wafer_slot, 
-                sso_name, 
-                restrict_dets_for_debug
-            ) 
-            for wafer_slot in processed_wafer_slots
-        )
+        rank, executor, as_completed_callable = get_exec_env(nprocs=n_jobs)
+        futures = [executor.submit(
+                    main_one_wafer, 
+                       configs=configs,
+                       obs_id=obs_id,
+                       wafer_slot=wafer_slot,
+                       sso_name=sso_name,
+                       restrict_dets_for_debug=restrict_dets_for_debug,
+                    ) 
+                    for wafer_slot in processed_wafer_slots]
+        for future in as_completed_callable(futures):
+            logger.info(future.result())
     else:
         logger.info('Continuing with serial processing of wafers.')
         for wafer_slot in processed_wafer_slots:
@@ -567,20 +564,20 @@ def main(configs, min_ctime=None, max_ctime=None, update_delay=None,
 def get_parser():
     parser = argparse.ArgumentParser(description="Get updated result of pointings with tod-based results")
     parser.add_argument("configs", type=str, help="Path to the configuration file")
-    parser.add_argument('--min_ctime', type=int, help="Minimum timestamp for the beginning of an observation list")
-    parser.add_argument('--max_ctime', type=int, help="Maximum timestamp for the beginning of an observation list")
+    parser.add_argument('--min-ctime', type=int, help="Minimum timestamp for the beginning of an observation list")
+    parser.add_argument('--max-ctime', type=int, help="Maximum timestamp for the beginning of an observation list")
     parser.add_argument('--update-delay', type=int, help="Number of days (unit is days) in the past to start observation list.")                         
-    parser.add_argument("--obs_id", type=str, 
+    parser.add_argument("--obs-id", type=str, 
                         help="Specific observation obs_id to process. If provided, overrides other filtering parameters.")
                          
-    parser.add_argument("--wafer_slot", type=str, default=None, 
+    parser.add_argument("--wafer-slot", type=str, default=None, 
                         help="Wafer slot to be processed (e.g., 'ws0', 'ws3'). Valid only when obs_id is specified.")
                          
-    parser.add_argument("--sso_name", type=str, default=None,
+    parser.add_argument("--sso-name", type=str, default=None,
                         help="Name of solar system object (e.g., 'moon', 'jupiter'). If not specified, get sso_name from observation tags. "\
                        + "Valid only when obs_id is specified")                     
-    parser.add_argument("--restrict_dets_for_debug", type=str, default=False)
+    parser.add_argument("--restrict-dets-for-debug", type=str, default=False)
     return parser
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

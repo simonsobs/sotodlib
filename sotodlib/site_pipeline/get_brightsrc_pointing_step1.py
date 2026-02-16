@@ -4,7 +4,7 @@ import yaml
 import argparse
 import time
 import glob
-from joblib import Parallel, delayed
+import logging 
 
 from sotodlib import core
 from sotodlib import coords
@@ -12,10 +12,14 @@ from sotodlib import tod_ops
 from sotodlib.coords import brightsrc_pointing as bsp
 from sotodlib.io import metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
-
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.preprocess import Pipeline
-logger = util.init_logger(__name__, 'make_map_based_pointing: ')
+from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+
+logger = logging.getLogger("get_brightsrc_pointing_step1")
+if not logger.hasHandlers():
+    sp_init_logger("get_brightsrc_pointing_step1")
 
 def _get_sso_names_from_tags(ctx, obs_id, candidate_names=['moon', 'jupiter', 'mars', 'saturn']):
     obs_tags = ctx.obsdb.get(obs_id, tags=True)['tags']
@@ -109,7 +113,7 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
                                                             filename=result_filename,
                                                             force_zero_roll=True,
                                                             edge_avoidance = edge_avoidance_deg*coords.DEG)
-    return
+    return f"Finished processing {obs_id}, {wafer_slot}"
 
 def main_one_wafer_dummy(configs, obs_id, wafer_slot, restrict_dets_for_debug=False):
     if type(configs) == str:
@@ -169,15 +173,6 @@ def combine_pointings(pointing_result_files):
         focal_plane.rows.append((det, val['xi'], val['eta'], val['gamma'], val['R2']))
     return focal_plane
 
-def parallel_process_wafer_slot(configs, obs_id, wafer_slot, sso_name, restrict_dets_for_debug):
-    logger.info(f'Processing {obs_id}, {wafer_slot}')
-    main_one_wafer(configs=configs,
-                   obs_id=obs_id,
-                   wafer_slot=wafer_slot,
-                   sso_name=sso_name,
-                   restrict_dets_for_debug=restrict_dets_for_debug)
-
-
 def main_one_obs(configs, obs_id, sso_name=None,
                  restrict_dets_for_debug=False):
     if type(configs) == str:
@@ -234,17 +229,19 @@ def main_one_obs(configs, obs_id, sso_name=None,
             n_jobs = -1    
 
         logger.info('Entering wafer pool')
-        Parallel(n_jobs=n_jobs)(
-            delayed(parallel_process_wafer_slot)(
-                configs,
-                obs_id,
-                wafer_slot,
-                sso_name,
-                restrict_dets_for_debug,
-            )
-            for wafer_slot in processed_wafer_slots
-        )
-        logger.info('Exiting wafer pool')
+        rank, executor, as_completed_callable = get_exec_env(nprocs=n_jobs)
+        futures = [executor.submit(
+                    main_one_wafer,
+                        configs=configs,
+                        obs_id=obs_id,
+                        wafer_slot=wafer_slot,
+                        sso_name=sso_name,
+                        restrict_dets_for_debug=restrict_dets_for_debug,
+                    )
+                    for wafer_slot in processed_wafer_slots]
+        for future in as_completed_callable(futures):
+            logger.info(future.result())
+            
     else:
         logger.info('Continuing with serial processing of wafers.')
         for wafer_slot in processed_wafer_slots:
@@ -328,20 +325,20 @@ def main(configs, min_ctime=None, max_ctime=None, update_delay=None,
 def get_parser():
     parser = argparse.ArgumentParser(description="Process TOD data and update pointing")
     parser.add_argument("configs", type=str, help="Path to the configuration file")
-    parser.add_argument('--min_ctime', type=int, help="Minimum timestamp for the beginning of an observation list")
-    parser.add_argument('--max_ctime', type=int, help="Maximum timestamp for the beginning of an observation list")
+    parser.add_argument('--min-ctime', type=int, help="Minimum timestamp for the beginning of an observation list")
+    parser.add_argument('--max-ctime', type=int, help="Maximum timestamp for the beginning of an observation list")
     parser.add_argument('--update-delay', type=int, help="Number of days (unit is days) in the past to start observation list.")
-    parser.add_argument("--obs_id", type=str, 
+    parser.add_argument("--obs-id", type=str, 
                         help="Specific observation obs_id to process. If provided, overrides other filtering parameters.")
                          
-    parser.add_argument("--wafer_slot", type=str, default=None, 
+    parser.add_argument("--wafer-slot", type=str, default=None, 
                         help="Wafer slot to be processed (e.g., 'ws0', 'ws3'). Valid only when obs_id is specified.")
                          
-    parser.add_argument("--sso_name", type=str, default=None,
+    parser.add_argument("--sso-name", type=str, default=None,
                         help="Name of solar system object (e.g., 'moon', 'jupiter'). If not specified, get sso_name from observation tags. "\
                        + "Valid only when obs_id is specified")                     
-    parser.add_argument("--restrict_dets_for_debug", type=str, default=False)
+    parser.add_argument("--restrict-dets-for-debug", type=str, default=False)
     return parser
 
 if __name__ == '__main__':
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

@@ -1,3 +1,4 @@
+import pdb
 import numpy as np
 from operator import attrgetter
 import copy
@@ -1784,7 +1785,7 @@ class SourceFlags(_Preprocess):
                     source_aman.wrap(source + '_inv',
                                     RangesMatrix.ones([aman.dets.count, aman.samps.count]),
                                     [(0, 'dets'), (1, 'samps')])
-
+                  
         self.save(proc_aman, source_aman)
 
         return aman, proc_aman
@@ -1991,12 +1992,7 @@ class FourierFilter(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
-        return aman, proc_aman
-
-class ReduceFlags(_Preprocess):
-    name = 'reduce_flags'
-    def process(self, aman, proc_aman, sim=False):
-        aman.flags.reduce(**self.process_cfgs)       
+        return aman, proc_aman  
 
 class DetcalNanCuts(_Preprocess):
     """
@@ -2524,9 +2520,9 @@ class UnionFlags(_Preprocess):
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
         return aman, proc_aman
-
+            
 class CombineFlags(_Preprocess):
-    """Do the conbine of relevant flags for mapping
+    """Do the combination of relevant flags for mapping
     
 
     Saves results for aman under the "flags.[total_flags_label]" field.
@@ -2537,8 +2533,11 @@ class CombineFlags(_Preprocess):
           process:
             flag_labels: ['glitches.glitch_flags', 'source_flags.jupiter_inv']
             total_flags_label: 'glitch_flags'
-            method: 'union' # You can select a method from ['union', '+', 'intersect', '*'].
-            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. Lentgh must match the length of flag_labels.
+            method: 'union' # You can select a method from ['union', '+', 'intersect', '*', 'except', '-'].
+            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. 
+               # Length of list must match the length of flag_labels.
+               # If a list, the first method must be '+', as if adding the first flag set to an empty flag set. 
+               # Operations are performed strictly from Left to Right, '*' are not performed first.
 
     """
     name = "combine_flags"
@@ -2548,13 +2547,12 @@ class CombineFlags(_Preprocess):
         if isinstance(self.process_cfgs['method'], list):
             if len(self.process_cfgs['flag_labels']) != len(self.process_cfgs['method']):
                 raise ValueError("The length of method does not match to the length of flag_labels")
-            elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
-                raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
-        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
+            elif any(method not in ['+', 'union', '*', 'intersect', '-', 'except'] for method in self.process_cfgs['method']):
+                raise ValueError("One or more methods in list are not valid")
+        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect', '-', 'except']:
             self.process_cfgs['method'] =  ['+'] + (len(self.process_cfgs['flag_labels']) - 1)*[self.process_cfgs['method']]
         else:
-            raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
-        
+            raise ValueError("The method matches neither list nor the one of the valid operations")
         total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for i, (method, label) in enumerate(zip(self.process_cfgs['method'], self.process_cfgs['flag_labels'])):
             _label = attrgetter(label)
@@ -2567,6 +2565,8 @@ class CombineFlags(_Preprocess):
                     total_flags += _label(proc_aman) # The + operator is the union operator in this case
                 elif method in ['*', 'intersect']:
                     total_flags *= _label(proc_aman) # The * operator is the intersect operator in this case
+                elif method in ['-', 'except']:
+                    total_flags *= ~ _label(proc_aman) # The - operator is the except operator in this case
 
         if 'flags' not in aman._fields:
             from sotodlib.core import FlagManager

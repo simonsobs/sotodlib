@@ -196,10 +196,10 @@ The output database ``wafer_info.sqlite`` and HDF5 file
 if it does not exist.
 
 
-get_brightsrc_pointing_part1  and  get_brightsrc_pointing_part2
----------------------------------------------------------------
+get_brightsrc_pointing_part1  
+----------------------------
 
-The two-part ``get_brightsrc_pointing`` script set will  will run solve for the xieta
+The two-part ``get_brightsrc_pointing_part{}`` script set will solve for the xieta
 coordinates of detectors that observe a bright source during an observation.
 
 It is a two part process that requires a map step and then a TOD step.
@@ -212,21 +212,14 @@ It is recommended to run with ``parallel_job: True`` in the config files if anal
 multiple wafers at once. 
 Otherwise, specify a wafer slot or restrict detectors in command line args to debug.
 
+Command Line arguments:
 .. argparse::
-   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part1  or _part2
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part1
    :func: get_parser
 
-Command Line arguments:
- - ``configs``
- - ``--obs_id``
- - ``--sso_name``
 
-Optional Command Line arguments:
- - ``--wafer_slot``  e.g. ws0
- - ``--restrict_dets_for_debug``  integer, or comma separated list of det readout_ids.
-
-There are options to include min_ctime and max_ctime arguments, which will process all observations
-in the time frame. (not recommended)  
+There options to include min_ctime and max_ctime arguments, which will process all observations
+in the time frame, is not recommended unless severely restricting the detectors for debugging.
 
 
 Generated results
@@ -237,20 +230,28 @@ The Step 1 map-based analysis scripts will generate the following outputs in the
 
   * All single maps are packaged in a single hdf file, with detector readout_id as the keys in the h5py file. 
 
- 2. Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/map_based_results`` as specified in the Step 1 config file. Script will append 'force_zero_roll' onto the specified results_dir if True in config file. Load ResultSet with keyword 'focal_plane'
+ 2. Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/map_based_results``
+ as specified in the Step 1 config file. Script will append 'force_zero_roll' onto the specified results_dir
+ if True in config file. Load ResultSet with keyword 'focal_plane'
 
   * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, R2], N rows>``
 
 
-The Step 2 TOD-based analysis scripts will use the map-based results as a starting point and then generate the finalized outputs in the specified directory:
+The Step 2 TOD-based analysis scripts will use the map-based results as a starting point
+ and then generate the finalized outputs in the specified directory:
 
- 1.  Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/tod_based_results`` as specified in config file for Step-2. Script will append 'force_zero_roll' onto the specified results_dir if True in config file. Load ResultSet with keyword 'focal_plane'
+ 1.  Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/tod_based_results``
+ as specified in config file for Step-2. Script will append 'force_zero_roll' onto the specified results_dir
+ if True in config file. Load ResultSet with keyword 'focal_plane'
 
   * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, xi_err, eta_err, R2, redchi2], N rows>``
  
 Configuration Files
 ```````````````````
-The configuration files to be input as ``configs`` in the command line arguments should have the following arguments as well as any preprocessing steps wished to be taken. Only processing steps that are agnostic of det-match can be used to do initial analyses without formalized metadata.
+The configuration files to be input as ``configs`` in the command line should 
+have the following arguments as well as any preprocessing steps wished to be taken.
+Only processing steps that are agnostic of det-match can be used to do
+initial analyses without formalized metadata.
 
 The parameters in these examples could be used for SAT mid-freq moon observations.
 
@@ -259,14 +260,14 @@ Step 1 Config:
 .. code-block:: yaml
 
   context_file: /path/to/context.yaml
-  query_tags: ['moon'=1] #(alternatively specify --sso_name in kwargs)
+  query_tags: ['moon=1'] #(alternatively specify --sso_name in kwargs)
 
   optics_config_fn: '/global/cfs/cdirs/sobs/users/elleshaw/process_brightsrc/ufm_to_fp.yaml'
   single_det_maps_dir: /path/to/results/single_det_maps
   results_dir: /path/to/results/map_based_results
 
   parallel_job: True  #For job submission. Parallel across wafers.
-  wafer_mask_det: 8.  #mask around detector to cut TOD when source too far away. 
+  wafer_mask_det: 8.  # (degrees) mask around detector to cut TOD when source too far away. 
   res_deg: 0.3
   xieta_bs_offset: [0., 0.]  #Good to input xieta offset in radians. (!!! for satp2)
   save_normal_roll: False  #false for SAT, true for LAT
@@ -308,20 +309,22 @@ The parameters in these examples are used for SAT mid-freq moon observations.
 .. code-block:: yaml
 
   context_file: /path/to/context.yaml
-  query_tags: ['moon'=1] #(alternatively specify --sso_name in kwargs)
+  query_tags: ['moon=1'] #(alternatively specify --sso_name in kwargs)
 
   optics_config_fn: '/global/cfs/cdirs/sobs/users/elleshaw/process_brightsrc/ufm_to_fp.yaml'
   fp_hdf_dir: /path/to/results/map_based_results from step 1 config file. 
-      # If force_zero_roll is was True, then append _force_zero_roll to the end. Just make sure it matches where the results from Step 1 are.
+      # If force_zero_roll is was True, then append _force_zero_roll to the end.
+      # Just make sure it matches where the results from Step 1 are.
   result_dir: /path/to/resuls/tod_based_results #Where you want the final Step2 results to show up.
   
   parallel_job: True
   force_zero_roll: True  #Results will show up roatated in the xi-eta results as they are on the sky.
   ds_factor: 40
-  mask_deg: 2.5  # size for circular mask around SSO (helps exclude focal plane reflections too)
+  mask_deg: 2.5  # (degrees) size for circular mask around SSO (helps exclude focal plane reflections too)
   fit_func_name: 'gaussian2d_nonlin'
-  max_non_linear_order: 3  #Suggested to use 1 for jupiter or sso's that do not saturate.
-  fwhm_init_deg: 0.5  # Lower for SATp2
+  max_non_linear_order: 3  #Suggested to use 1 for jupiter or sso's 
+                           #that do not saturate.
+  fwhm_init_deg: 0.5  # (degrees) Lower for SATp2
   error_estimation_method: 'force_one_redchi2'
   flag_name_rms_calc: 'around_source'
   flag_rms_calc_exclusive: False
@@ -351,27 +354,28 @@ The parameters in these examples are used for SAT mid-freq moon observations.
           cutoff: 1.9
           width: 0.2
     - name: 'source_flags'
+      source_flags_name: 'source_wide'
+      save: True
       calc:
-        merge: True
-        max_pix: 10000000000
-        source_flags_name: 'source_wide'
         mask:
           shape: circle
           xyr: [0., 0., 5.0]
-    - name: 'source_flags'
-      calc:
         merge: True
         max_pix: 10000000000
-        source_flags_name: 'source_narrow'
+    - name: 'source_flags'
+      source_flags_name: 'source_narrow'
+      save: True
+      calc:
         mask:
           shape: circle
           xyr: [0., 0., 3.0]
-    - name: 'reduce_flags'
+        merge: True
+        max_pix: 10000000000
+    - name: 'combine_flags'
       process:
-        flags: ['source_wide', 'source_narrow']
-        method: 'except'
-        wrap: True
-        new_flag: 'around_source'
+        flag_labels: ['source_wide.moon', 'source_narrow.moon']
+        method: 'except' 
+        total_flags_label: 'around_source'
     - name: 'flag_turnarounds'
       process:
         truncate: True
@@ -395,7 +399,7 @@ Example NERSC slurm job submission config file
   
   #SBATCH --cpus-per-task=14
   #SBATCH --time=00:30:00
-  #SBATCH --mem=220G``  #(may require regular queue and up to 400 Gb for extra long observations)
+  #SBATCH --mem=220G`` #(may need regular queue & up to 400 Gb for long obs)
   
   export OMP_NUM_THREADS=1
   set -e
@@ -411,10 +415,14 @@ Example NERSC slurm job submission config file
 
   if (($map)); then
     echo submitted map job;
-    srun -n 1 -N 1 -c 14 python3 /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step1.py $yfile --obs_id=${2} --sso_name="moon";
+    srun -n 1 -N 1 -c 14 python3 
+       /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step1.py $yfile
+       --obs_id=${2} --sso_name="moon";
   else
     echo submitted tod job;
-    srun -n 1 -N 1 -c 14 python3 /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile --obs_id=${2} --sso_name="moon";
+    srun -n 1 -N 1 -c 14 python3 
+        /path/to/sotodlib/site_pipeline/get_brightsrc_pointing_step2.py $yfile 
+        --obs_id=${2} --sso_name="moon";
   fi
 
 
@@ -498,6 +506,16 @@ entries mater.
         - db: "/path/to/det_info/wafer/det_info_manifest.db"
           det_info: true
           multi: true
+
+
+get_brightsrc_pointing_part2
+----------------------------
+See Part 1 for description
+
+.. argparse::
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
+   :func: get_parser
+
 
 update_det_match
 ------------------
