@@ -608,9 +608,12 @@ def diff_obsdbs(obsdb_left, obsdb_right, return_detail=False):
     if len(common):
         common, i0, i1 = util.get_coindices(*(f['obs_id'] for f in full))
         diffs = []
+        Li, Ri = ([_f.keys.index(k) for k in common_cols]
+                  for _f in full)
         for i, (_i0, _i1) in enumerate(zip(i0, i1)):
-            L = tuple(full[0][_i0][k] for k in common_cols)
-            R = tuple(full[1][_i1][k] for k in common_cols)
+            Lrow, Rrow = full[0].rows[_i0], full[1].rows[_i1]
+            L = tuple(Lrow[_i] for _i in Li)
+            R = tuple(Rrow[_i] for _i in Ri)
             if L != R:
                 diffs.append((L, R))
         if len(diffs):
