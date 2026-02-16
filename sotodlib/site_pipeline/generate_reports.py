@@ -3,7 +3,7 @@ from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.mapmaking.utils import downsample_obs
 from sotodlib import coords
 from pixell import enmap, enplot
-from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig
+from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig, get_hk_and_pwv_data
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List, Callable
 import numpy as np
 import datetime as dt
@@ -236,6 +236,7 @@ def _main(
                 data.save(data_file)
             else:
                 data = ReportData.load(data_file)
+                data.pwv = get_hk_and_pwv_data(data_cfg)
 
             if data_cfg.make_cov_map:
                 if not os.path.exists(map_fits_file) or cfg.overwrite_data:

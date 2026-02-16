@@ -352,24 +352,39 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
             secondary_y=False,
         )
 
+    # PWV trace
     if d.obs_list:
-        # PWV trace
         ds_factor = 10
-        #pwvs = deepcopy(d.pwv[1][::ds_factor])
-        #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-        #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+        pwvs = np.array(deepcopy(d.pwv[1][::ds_factor]))
+        ts = np.array([dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]])
 
-        ts, pwvs = zip(*sorted(
-            ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
-        ))
-        ts = list(ts)
-        pwvs = list(pwvs)
+        mask = pwvs >= 3
+
+        starts = np.where(np.diff(np.concatenate([[0], mask.astype(int), [0]])) == 1)[0]
+        ends = np.where(np.diff(np.concatenate([[0], mask.astype(int), [0]])) == -1)[0]
+
+        for i, (s, e) in enumerate(zip(starts, ends)):
+            fig.add_trace(
+                go.Scatter(
+                    x=ts[s:e],
+                    y=np.full(e-s, 4.0),
+                    fill="tozeroy",
+                    mode="none",
+                    fillcolor="rgba(128,128,128,0.1)",
+                    connectgaps=False,
+                    showlegend=(i==0),
+                    name="PWV ≥ 3 mm/No data" if i==0 else None
+                ),
+                secondary_y=True
+            )
+
+        pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
 
         fig.add_trace(
             go.Scatter(
                 x=ts,
                 y=pwvs,
-                mode="markers",
+                #mode="lines",
                 name="PWV [mm]",
                 line=dict(color="#CC79A7", width=2, dash="solid"),
                 opacity=0.6,
@@ -572,21 +587,36 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
     # PWV trace
     if d.obs_list:
         ds_factor = 10
-        #pwvs = deepcopy(d.pwv[1][::ds_factor])
-        #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-        #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+        pwvs = np.array(deepcopy(d.pwv[1][::ds_factor]))
+        ts = np.array([dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]])
 
-        ts, pwvs = zip(*sorted(
-            ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
-        ))
-        ts = list(ts)
-        pwvs = list(pwvs)
+        mask = pwvs >= 3
+
+        starts = np.where(np.diff(np.concatenate([[0], mask.astype(int), [0]])) == 1)[0]
+        ends = np.where(np.diff(np.concatenate([[0], mask.astype(int), [0]])) == -1)[0]
+
+        for i, (s, e) in enumerate(zip(starts, ends)):
+            fig.add_trace(
+                go.Scatter(
+                    x=ts[s:e],
+                    y=np.full(e-s, 4.0),
+                    fill="tozeroy",
+                    mode="none",
+                    fillcolor="rgba(128,128,128,0.1)",
+                    connectgaps=False,
+                    showlegend=(i==0),
+                    name="PWV ≥ 3 mm/No data" if i==0 else None
+                ),
+                secondary_y=True
+            )
+
+        pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
 
         fig.add_trace(
             go.Scatter(
                 x=ts,
                 y=pwvs,
-                mode="markers",
+                #mode="lines",
                 name="PWV [mm]",
                 line=dict(color="#CC79A7", width=2, dash="solid"),
                 opacity=0.6,
