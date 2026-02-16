@@ -464,6 +464,7 @@ def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) 
                     showscale=False,
                     opacity=0.7,
                     name=f"longterm {b}",
+                    showlegend=True,
                 )
             )
 
@@ -706,6 +707,7 @@ def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
                         showscale=False,
                         opacity=0.7,
                         name=f"longterm {b}",
+                        showlegend=True,
                     )
                 )
                 i += 1
