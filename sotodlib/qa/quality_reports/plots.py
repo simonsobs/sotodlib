@@ -384,7 +384,7 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
             go.Scatter(
                 x=ts,
                 y=pwvs,
-                #mode="lines",
+                mode="markers",
                 name="PWV [mm]",
                 line=dict(color="#CC79A7", width=2, dash="solid"),
                 opacity=0.6,
@@ -617,7 +617,7 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
             go.Scatter(
                 x=ts,
                 y=pwvs,
-                #mode="lines",
+                mode="markers",
                 name="PWV [mm]",
                 line=dict(color="#CC79A7", width=2, dash="solid"),
                 opacity=0.6,

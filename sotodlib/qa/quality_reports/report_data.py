@@ -219,10 +219,17 @@ def get_hk_and_pwv_data(cfg: ReportDataConfig):
     except Exception as e:
         logger.error(f"get_apex_data failed with {e}")
         result_apex = None
+
     if result_apex is not None:
+        result_apex['timestamps'] = np.array(result_apex['timestamps'])[result_apex['pwv'] < 999]
+        result_apex['pwv'] = np.array(result_apex['pwv'])[result_apex['pwv'] < 999]
+
         result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
 
     if result is not None:
+        result = (np.array(result[0])[result[1] <= 3], np.array(result[1])[result[1] <= 3])
+        result = (np.array(result[0])[result[1] > 0], np.array(result[1])[result[1] > 0])
+
         if result_apex is not None:
             combined_times = np.concatenate((result[0], result_apex[0]))
             combined_data = np.concatenate((result[1], result_apex[1]))
@@ -453,7 +460,7 @@ class ReportData:
             for o in obs_list:
                 m = np.logical_and.reduce([pwv[0] >= o.start_time, pwv[0] <= o.stop_time])
                 _pwv = np.nanmean(pwv[1][m])
-                if -0.1 < _pwv < 3.5:
+                if -0.1 < _pwv < 4.0:
                     o.pwv = _pwv
         else:
             logger.warn("pwv data not found")
