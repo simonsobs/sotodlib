@@ -321,10 +321,27 @@ def main(
         else:
             raise RuntimeError(f"Job '{job_name}' not found in {config_file} job_defs entry.")
 
+        fail_count = 0
         for step in job_def['steps']:
             print('Step ...')
             step_cfg = {'config_file': config_file} | step
-            main(**step_cfg, _chain_count=_chain_count+1)
+            ignore_fail = step_cfg.pop('ignore_fail', False)
+            carry_fail = step_cfg.pop('carry_fail', False)
+            soldier_on = ignore_fail or carry_fail
+            try:
+                main(**step_cfg, _chain_count=_chain_count+1)
+            except Exception as e:
+                logger.error(f"Error on step {step}")
+                if soldier_on:
+                    logger.warn(f"Step raised error (carry={carry_fail}); "
+                                "will continue with next steps.")
+                    logger.warn(f"Exception was: {e}")
+                    if carry_fail:
+                        fail_count += 1
+                else:
+                    raise e
+        if fail_count:
+            raise RuntimeError(f"Job carry-failed on {fail_count} errors.")
 
     else:
         raise RuntimeError(f"Invalid command: {command}")

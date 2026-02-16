@@ -229,11 +229,27 @@ Here's an annotated example:
       steps:
         - command: "update-base-data"
           lookback_days: 7
+          carry_fail: true
         - command: "update-obsdb"
           lookback_days: 3
           redo: true
         - command: "update-obsdb"
           lookback_days: 7
+
+
+Each block in the job_defs list will be run, in sequence.  The dict is
+passed through to the command being run unaltered, except as noted:
+
+- ``config_file``, if not specified explicitly, will be set to the
+  path of this file.
+- ``command`` provides the name of the sub-command to run (as if it
+  had been specified on command line).
+- ``ignore_fail``, if set to true, will cause the step to not block
+  completion of subsequent steps if it fails; the script may exit
+  successfully in the end.
+- ``carry_fail``, if set to true, will permit subsequent steps to
+  run, if this step fails, but will cause the whole job to fail, in
+  the end.
 
 
 Command line arguments
