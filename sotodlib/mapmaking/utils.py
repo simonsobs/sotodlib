@@ -1,3 +1,4 @@
+import sys
 import logging
 import os
 from typing import Optional, Any, Union
@@ -380,7 +381,7 @@ def expand_ids(obs_ids, context=None, bands=None):
                         sub_ids.append("%s:ws%d:%s" % (obs_id, si, band))
     return sub_ids
 
-def filter_subids(subids, wafers=None, bands=None):
+def filter_subids(subids, wafers=None, bands=None, ots=None):
     subids = np.asarray(subids)
     if wafers is not None:
         wafs   = astr_tok(subids,":",1)
@@ -388,6 +389,11 @@ def filter_subids(subids, wafers=None, bands=None):
     if bands is not None:
         bpass  = astr_tok(subids,":",2)
         subids = subids[np.isin(bpass, bands)]
+    if ots is not None:
+        # Somewhat hacky implementation
+        obs_ids = astr_tok(subids, ":",0)
+        has_ot = np.prod([np.char.find(obs_ids, ot) for ot in ots], 0)
+        subids = subids[has_ot >= 0]
     return subids
 
 def astr_cat(*arrs):
@@ -484,10 +490,16 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
             elif name == "auto":
                 return np.array([0,0]) # would use geom here
             else:
-                obj = getattr(ephem, name)()
-                djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
-                obj.compute(djd)
-                return np.array([obj.a_ra, obj.a_dec])
+                try:
+                    planet = coords.planets.SlowSource.for_named_source(
+                        name, ctime)
+                    ra0, dec0 = planet.pos(tod.timestamps.mean())
+                except:
+                    obj = getattr(ephem, name)()
+                    djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
+                    obj.compute(djd)
+                    ra0, dec0 = obj.a_ra, obj.a_dec
+                return np.array([ra0, dec0])
         else:
             return to_cel(name, sys, ctime, site, weather)
     p1 = get_pos(info["from"], ctime, info["from_sys"])
@@ -569,8 +581,11 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
-    ncut  = rangemat_sum(obs[glitch_flags])
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags", to_null : str = "flags.expected_flags"):
+    flag = obs[glitch_flags]
+    if to_null != "" and to_null in obs._fields:
+        flag = flag*~obs[to_null]
+    ncut  = rangemat_sum(flag)
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -830,3 +845,27 @@ def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
             session.commit()
         except exc.IntegrityError:
             session.rollback()
+
+
+def prune_mpi(comm, ranks_to_keep):
+    """
+    Prune unneeded MPI procs.
+
+    Arguments:
+
+        comm: The MPI communicator currently in use.
+
+        ranks_to_keep: List of current ranks to keep in the new communicator.
+
+    Returns:
+
+        comm: Modified communicator with only the processes we want to keep.
+    """
+    group = comm.Get_group()
+    new_group = group.Incl(ranks_to_keep)
+    new_comm = comm.Create(new_group)
+    if comm.rank not in ranks_to_keep:
+        sys.exit(0)
+    comm = new_comm
+
+    return comm
