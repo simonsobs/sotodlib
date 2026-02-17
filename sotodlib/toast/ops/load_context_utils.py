@@ -45,7 +45,6 @@ def read_and_preprocess_wafers(
     ignore_preprocess_archive=False,
     context=None,
     context_file=None,
-    daq_units=False,
 ):
     """Read the wafer data.
 
@@ -65,7 +64,6 @@ def read_and_preprocess_wafers(
         ignore_preprocess_db (bool): Ignore the 'archive' field in the preprocessing configuration.
         context (Context):  The pre-existing Context or None.
         context_file (str):  The context file to open or None.
-        daq_units (bool):  If True, convert raw signal back to DAQ units.
 
     Returns:
         (dict):  The AxisManager data for each wafer on this process.
@@ -78,8 +76,6 @@ def read_and_preprocess_wafers(
         rank = 0
     else:
         rank = gcomm.rank
-
-    rescale_to_daq = 2**15 / np.pi
 
     results = dict()
     for wf, reader in wafer_readers.items():
@@ -161,9 +157,6 @@ def read_and_preprocess_wafers(
                 msg = f"LoadContext {obs_name} apply preproc to {wf}"
                 msg += f" in {elapsed} seconds"
                 log.debug(msg)
-            if daq_units:
-                if "signal" in axtod:
-                    axtod["signal"] *= rescale_to_daq
             results[wf] = axtod
     return results
 
@@ -415,7 +408,7 @@ def distribute_detector_data(
         is_flag (bool):  If True, this field is a flag.
         flag_invert (bool):  If True, invert the meaning of the flag values.
         flag_mask (np.uint8):  The flag mask (or None).
-        daq_units (bool):  If True, AxisManager signal is in DAQ units.
+        daq_units (bool):  If True, convert AxisManager signal to DAQ units.
 
     Returns:
         None
@@ -425,6 +418,8 @@ def distribute_detector_data(
     gcomm = obs.comm.comm_group
     rank = obs.comm.group_rank
     gsize = obs.comm.group_size
+
+    rescale_to_daq = float(2**15) / np.pi
 
     # If the blocks of detector data exceed 2^30 elements in total, they might hit
     # MPI limitations on the communication message sizes.  Work around that here.
@@ -583,9 +578,9 @@ def distribute_detector_data(
                                 nan_mask = np.isnan(sdata_2d[idet])
                                 if np.count_nonzero(nan_mask) > 0:
                                     det_flags[idet] = 1
-                                obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[
-                                    idet
-                                ].astype(np.int32, casting="unsafe")
+                                obs.detdata[field][idet + recv_dets[0], :] = (
+                                    0.5 + rescale_to_daq * sdata_2d[idet]
+                                ).astype(np.int32)
                             else:
                                 obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[
                                     idet
@@ -639,9 +634,9 @@ def distribute_detector_data(
                         nan_mask = np.isnan(recv_2d[idet])
                         if np.count_nonzero(nan_mask) > 0:
                             det_flags[idet] = 1
-                        obs.detdata[field][idet + recv_dets[0], :] = recv_2d[
-                            idet
-                        ].astype(np.int32, casting="unsafe")
+                        obs.detdata[field][idet + recv_dets[0], :] = (
+                            0.5 + rescale_to_daq * recv_2d[idet]
+                        ).astype(np.int32)
                     else:
                         obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
             # Update per-detector flags
