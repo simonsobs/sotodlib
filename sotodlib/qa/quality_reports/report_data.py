@@ -10,6 +10,7 @@ import json
 import h5py
 import logging
 import numpy as np
+import sys
 from influxdb import InfluxDBClient
 from collections import defaultdict
 
@@ -21,7 +22,17 @@ from pixell import enmap, enplot
 
 
 logger = logging.getLogger(__name__)
+
+for h in logger.handlers[:]:
+    logger.removeHandler(h)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+
+logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+logger.propagate = False
+
 
 class ReportDataConfig:
     def __init__(
@@ -102,6 +113,10 @@ class ObsInfo:
     obs_tube_slot: str
     obs_tags: str = ""
     pwv: float = np.nan
+    temp: float = np.nan
+    uv: float = np.nan
+    wind_speed: float = np.nan
+    wind_dir: float = np.nan
     el_center: float = np.nan
     boresight: float = np.nan
     hwp_freq_mean: float = np.nan
@@ -176,6 +191,31 @@ def get_apex_data(cfg: ReportDataConfig):
     return outdata
 
 
+def load_hkdb(cfg: ReportDataConfig) -> hkdb.HkResult:
+    """
+    Load hkdb data from the range specified in the ReportDataConfig.
+    Uses hk_cfg file or dict specified in the config.
+    """
+    if isinstance(cfg.hk_cfg, str):
+        hk_cfg: HkConfig = HkConfig.from_yaml(cfg.hk_cfg)
+    elif isinstance(cfg.hk_cfg, dict):
+        hk_cfg = HkConfig.from_dict(cfg.hk_cfg)
+    else:
+        hk_cfg = cfg.hk_cfg
+
+    result = hkdb.load_hk(
+        hkdb.LoadSpec(
+            cfg=hk_cfg,
+            start=cfg.start_time.timestamp() - cfg.buffer_time,
+            end=cfg.stop_time.timestamp() + cfg.buffer_time,
+            fields=["pwv", "temp", "uv", "wind_spd", "wind_dir"],
+        ),
+        show_pb=cfg.show_hk_pb,
+    )
+
+    return result.data
+
+
 def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
     """
     Load PWV data from the range specified in the ReportDataConfig.
@@ -204,16 +244,11 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
         return None
 
 
-def get_hk_and_pwv_data(cfg: ReportDataConfig):
+def get_and_merge_apex_pwv(cfg: ReportDataConfig, result=None):
     """
-    Load the pwv from either the CLASS or APEX radiometer.
-    Merge both datasets when available.
+    Load the pwv from the APEX radiometer and merges.
+    Merge with Toco PWV when available.
     """
-    try:
-        result = load_pwv(cfg)
-    except Exception as e:
-        logger.error(f"load_pwv failed with {e}")
-        result = None
     try:
         result_apex = get_apex_data(cfg)
     except Exception as e:
@@ -443,14 +478,25 @@ class ReportData:
         else:
             longterm_obs_df = None
 
+        try:
+            hkdb_data = load_hkdb(cfg)
+        except Exception as e:
+            logger.error(f"load_hkdb failed with {e}")
+            hkdb_data = None
+
+        if hkdb_data is not None and "env-radiometer-class.pwvs.pwv" in hkdb_data.keys():
+            toco_pwv = hkdb_data["env-radiometer-class.pwvs.pwv"]
+        else:
+            toco_pwv = None
+
         logger.info("Loading PWV data")
-        pwv = get_hk_and_pwv_data(cfg)
+        pwv = get_and_merge_apex_pwv(cfg, toco_pwv)
 
         logger.info("Loading QDS data")
         qds_df = load_qds_data(cfg)
 
         if qds_df is not None:
-            logger.info("Merging PWV and QDS data with obs list")
+            logger.info("Merging QDS data with obs list")
             merge_qds_and_obs_list(qds_df, obs_list, cfg.noise_scale_factor)
         else:
             logger.warn("QDS data not found")
@@ -466,6 +512,65 @@ class ReportData:
             logger.warn("pwv data not found")
             for o in obs_list:
                 o.pwv = np.nan
+
+        # temperature
+        if (
+            hkdb_data is not None and
+            "env-vantage.weather_data.temp_outside" in hkdb_data.keys()
+           ):
+            temp = hkdb_data["env-vantage.weather_data.temp_outside"]
+            for o in obs_list:
+                m = np.logical_and.reduce([temp[0] >= o.start_time, temp[0] <= o.stop_time])
+                _temp = np.nanmean(temp[1][m])
+                o.temp = _temp
+        else:
+            logger.warn("temperature data not found")
+            for o in obs_list:
+                o.temp = np.nan
+        # uv
+        if (
+            hkdb_data is not None and
+            "env-vantage.weather_data.UV" in hkdb_data.keys()
+           ):
+            uv = hkdb_data["env-vantage.weather_data.UV"]
+            for o in obs_list:
+                m = np.logical_and.reduce([uv[0] >= o.start_time, uv[0] <= o.stop_time])
+                _uv = np.nanmean(uv[1][m])
+                o.uv = _uv
+        else:
+            logger.warn("UV data not found")
+            for o in obs_list:
+                o.uv = np.nan
+
+        # wind speed
+        if (
+            hkdb_data is not None and
+            "env-vantage.weather_data.wind_speed" in hkdb_data.keys()
+           ):
+            wind_speed = hkdb_data["env-vantage.weather_data.wind_speed"]
+            for o in obs_list:
+                m = np.logical_and.reduce([wind_speed[0] >= o.start_time, wind_speed[0] <= o.stop_time])
+                _wind_speed = np.nanmean(wind_speed[1][m])
+                o.wind_speed = _wind_speed
+        else:
+            logger.warn("wind speed data not found")
+            for o in obs_list:
+                o.wind_speed = np.nan
+
+        # wind direction
+        if (
+            hkdb_data is not None and
+            "env-vantage.weather_data.wind_dir" in hkdb_data.keys()
+           ):
+            wind_dir = hkdb_data["env-vantage.weather_data.wind_dir"]
+            for o in obs_list:
+                m = np.logical_and.reduce([wind_dir[0] >= o.start_time, wind_dir[0] <= o.stop_time])
+                _wind_dir = np.nanmean(wind_dir[1][m])
+                o.wind_dir = _wind_dir
+        else:
+            logger.warn("wind direction data not found")
+            for o in obs_list:
+                o.wind_dir = np.nan
 
         data: "ReportData" = cls(
             cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
