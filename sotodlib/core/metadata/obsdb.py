@@ -518,7 +518,7 @@ class ObsDb(object):
         rs = self.query()
         fields = {}
         for k in rs.keys:
-            items = list(set(rs[k]))
+            items = np.unique(rs[k])
             fields[k] = (len(items), _short_list(items))
 
         # Count occurances of each tag ...
@@ -584,10 +584,12 @@ def diff_obsdbs(obsdb_left, obsdb_right, return_detail=False):
                 'detail': detail}
 
     full = [db.query() for db in [obsdb_left, obsdb_right]]
-    if full[0].keys != full[1].keys:
+
+    common_cols = full[1].keys
+    if not (set(full[0].keys) >= set(common_cols)):
         return failure_declaration(
-            'obsdb_left and obsdb_right have different column names.',
-            detail=[full[0].keys, full[1].keys])
+            'obsdb_left is missing some columns found in obsdb_right.',
+            detail=set(common_cols).difference(full[0].keys))
 
     # Convert to arrays.
     obs_ids = [set(f['obs_id']) for f in full]
@@ -606,9 +608,14 @@ def diff_obsdbs(obsdb_left, obsdb_right, return_detail=False):
     if len(common):
         common, i0, i1 = util.get_coindices(*(f['obs_id'] for f in full))
         diffs = []
+        Li, Ri = ([_f.keys.index(k) for k in common_cols]
+                  for _f in full)
         for i, (_i0, _i1) in enumerate(zip(i0, i1)):
-            if full[0][_i0] != full[1][_i1]:
-                diffs.append((full[0][_i0], full[1][_i1]))
+            Lrow, Rrow = full[0].rows[_i0], full[1].rows[_i1]
+            L = tuple(Lrow[_i] for _i in Li)
+            R = tuple(Rrow[_i] for _i in Ri)
+            if L != R:
+                diffs.append((L, R))
         if len(diffs):
             return failure_declaration(
                 f'obsdb_left and obsdb_right have {len(diffs)} obs '

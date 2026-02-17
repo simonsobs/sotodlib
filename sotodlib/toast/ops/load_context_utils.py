@@ -636,14 +636,14 @@ def distribute_detector_data(
                 # Just assign
                 for idet in range(n_recv_det):
                     if daq_units:
-                        nan_mask = np.isnan(recv_data[idet])
+                        nan_mask = np.isnan(recv_2d[idet])
                         if np.count_nonzero(nan_mask) > 0:
                             det_flags[idet] = 1
-                        obs.detdata[field][idet + recv_dets[0], :] = recv_data[
+                        obs.detdata[field][idet + recv_dets[0], :] = recv_2d[
                             idet
                         ].astype(np.int32, casting="unsafe")
                     else:
-                        obs.detdata[field][idet + recv_dets[0], :] = recv_data[idet]
+                        obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
             # Update per-detector flags
             dflags = {
                 obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid

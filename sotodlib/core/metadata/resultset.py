@@ -137,7 +137,8 @@ class ResultSet(object):
         self.rows = [tuple(r) for r in cursor]
         return self
 
-    def asarray(self, simplify_keys=False, hdf_compat=False):
+    def asarray(self, simplify_keys=False, hdf_compat=False,
+                dtypes=None):
         """Get a numpy structured array containing a copy of this data.  The
         names of the fields are taken from self.keys.
 
@@ -149,13 +150,22 @@ class ResultSet(object):
           hdf_compat: If True, then 'U'-type columns (Unicode strings)
             are converted to 'S'-type (byte strings), so it can be
             stored in an HDF5 dataset.
+          dtypes: A dict mapping key to preferred numpy dtype (use
+            this to force floats into float32, for example).
 
         """
         keys = [k for k in self.keys]
         if simplify_keys:  # remove prefixes
             keys = [k.split('.')[-1] for k in keys]
             assert(len(set(keys)) == len(keys))  # distinct.
-        columns = tuple(map(_smart_array_cast, zip(*self.rows)))
+        _dtypes = {k: None for k in self.keys} | (dtypes if dtypes is not None else {})
+        if len(self.rows):
+            cdata = zip(*self.rows)
+        else:
+            cdata = [[] for k in keys]
+        columns = [_smart_array_cast(c, dtype=_dtypes[k], field_detail=k)
+                   for k, c in zip(keys, cdata)]
+
         if hdf_compat:
             # Translate any Unicode columns to strings.
             new_cols = []
