@@ -379,7 +379,7 @@ def render_report(
     }
 
     if cfg.platform in ["satp1", "satp2", "satp3"]:
-        jinja_data["general_stats"]["Number of Wiregrid Observations"] = len([o for o in data.obs_list if "wiregrid" in o.obs_tags])
+        jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in data.obs_list if "wiregrid" in o.obs_tags])) / 3600, 1)
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
