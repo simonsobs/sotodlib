@@ -18,6 +18,11 @@ from typing import List, Tuple, TYPE_CHECKING, Dict, Any, Optional
 from .report_data import ReportData, Footprint
 
 
+MARKER_COLORS = ["#E69F00", "#56B4E9", "#009E73",
+          "#F0E442", "#0072B2", "#D55E00"]
+MARKER_SYMBOLS = ["circle", "square", "diamond", "cross", "x", "triangle-up"]
+
+
 def get_wafers(platform: str):
     """Get wafer and tube slots"""
     if platform  == "lat":
@@ -87,19 +92,30 @@ class ObsEfficiencyPlots:
     heatmap: go.Figure
 
 
-def obsdb_line_plot(x, y, xlabel, ylabel, title, xlim, hovertext=None):
+def obsdb_scatter_plot(x, y, xlabel, ylabel, title, xlim, symbols=None, name=None, hovertext=None, fig=None):
     """Generic function to make a Plotly scatter plot."""
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode='markers',
-            name=ylabel,
-            hovertext=hovertext,
-            line=dict(color="#0072B2", width=2),
-            marker=dict(size=8)
-        ))
+
+    marker_symbol_map = {}
+    for i, s in enumerate(np.unique(symbols)):
+        marker_symbol_map[s] = MARKER_SYMBOLS[i]
+
+    marker_symbols = [marker_symbol_map.get(s, "circle") for s in symbols]
+
+    if fig is None:
+        fig = go.Figure()
+    for symbol in np.unique(symbols):
+        m = [s == symbol for s in symbols]
+        fig.add_trace(
+            go.Scatter(
+                x=np.array(x)[m],
+                y=np.array(y)[m],
+                mode='markers',
+                hovertext=hovertext,
+                marker=dict(size=8, symbol=np.array(marker_symbols)[m]),
+                name=f"{name}_{symbol}",
+                showlegend=True,
+            )
+        )
 
     # layout
     fig.update_layout(
@@ -147,6 +163,7 @@ def boresight_vs_time(d: ReportData) -> go.Figure:
     tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
     boresight = [o.boresight if o.boresight is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
     obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+    sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
     boresight = np.round(boresight, 1)
 
     if not tstamps:
@@ -154,34 +171,46 @@ def boresight_vs_time(d: ReportData) -> go.Figure:
 
     if d.cfg.platform == "lat":
         el_center = [o.el_center if o.el_center is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
-        tstamps, boresight, el_center, obs_ids = zip(*sorted(zip(tstamps, boresight, el_center, obs_ids)))
+        tstamps, boresight, el_center, obs_ids, sub_types = zip(*sorted(zip(tstamps, boresight, el_center, obs_ids, sub_types)))
         el_center = list(el_center)
     else:
-        tstamps, boresight, obs_ids = zip(*sorted(zip(tstamps, boresight, obs_ids)))
+        tstamps, boresight, obs_ids, sub_types = zip(*sorted(zip(tstamps, boresight, obs_ids, sub_types)))
     tstamps = list(tstamps)
     boresight = list(boresight)
     obs_ids = list(obs_ids)
+    sub_types = list(sub_types)
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    fig = obsdb_line_plot(tstamps, boresight, "Time (UTC)", "Boresight [deg]", "Boresight",
-                         xlim=[d.cfg.start_time, d.cfg.stop_time], hovertext=obs_ids)
+    fig = obsdb_scatter_plot(tstamps, boresight, "Time (UTC)", "Boresight [deg]", "Boresight",
+                             xlim=[d.cfg.start_time, d.cfg.stop_time], symbols=sub_types,
+                             name="bore", hovertext=obs_ids)
 
     if d.cfg.platform == "lat":
         corot = np.array(boresight) + np.array(el_center) - 60
 
-        fig.add_trace(
-        go.Scatter(
-            x=tstamps,
-            y=corot,
-            mode='markers',
-            name="Corotator [deg]",
-            line=dict(color="#E69F00", width=2),
-            marker=dict(size=8),
-            yaxis="y2",
-        ))
+        marker_symbol_map = {}
+        for i, sub_type in enumerate(np.unique(sub_types)):
+            marker_symbol_map[sub_type] = MARKER_SYMBOLS[i]
+
+        marker_symbols = [marker_symbol_map.get(s, "circle") for s in sub_types]
+
+        for sub_type in np.unqiue(sub_types):
+            m = [s == sub_type for s in sub_types]
+            fig.add_trace(
+                go.Scatter(
+                    x=np.array(tstamps)[m],
+                    y=np.array(corot)[m],
+                    mode='markers',
+                    name=f"corot_{sub_type}",
+                    line=dict(color="#E69F00", width=2),
+                    marker=dict(size=8, symbol=np.array(marker_symbols)[m]),
+                    yaxis="y2",
+                    hovertext=obs_ids,
+                )
+            )
 
         fig.update_layout(
         yaxis2=dict(
@@ -198,19 +227,21 @@ def el_vs_time(d: ReportData) -> go.Figure:
     tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
     el_center = [o.el_center if o.el_center is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
     obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+    sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
     el_center = np.round(el_center, 2)
 
     if not tstamps:
         return go.Figure()
 
-    tstamps, el_center, obs_ids = zip(*sorted(zip(tstamps, el_center, obs_ids)))
+    tstamps, el_center, obs_ids, sub_types = zip(*sorted(zip(tstamps, el_center, obs_ids, sub_types)))
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    return obsdb_line_plot(tstamps, el_center, "Time (UTC)", "Elevation [deg]", "Elevation",
-                          xlim=[d.cfg.start_time, d.cfg.stop_time], hovertext=obs_ids)
+    return obsdb_scatter_plot(tstamps, el_center, "Time (UTC)", "Elevation [deg]", "Elevation",
+                          xlim=[d.cfg.start_time, d.cfg.stop_time], symbols=sub_types,
+                          name="el", hovertext=obs_ids)
 
 
 def temp_vs_time(d: ReportData) -> go.Figure:
@@ -218,20 +249,21 @@ def temp_vs_time(d: ReportData) -> go.Figure:
     tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
     temp = [o.temp if o.temp is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
     obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+    sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
     temp = np.round(temp, 2)
 
     if not tstamps:
         return go.Figure()
 
-    tstamps, temp, obs_ids = zip(*sorted(zip(tstamps, temp, obs_ids)))
+    tstamps, temp, obs_ids, sub_types = zip(*sorted(zip(tstamps, temp, obs_ids, sub_types)))
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    return obsdb_line_plot(tstamps, temp, "Time (UTC)", "Ambient Temperature [deg C]",
+    return obsdb_scatter_plot(tstamps, temp, "Time (UTC)", "Ambient Temperature [deg C]",
                            "Ambient Temperature", xlim=[d.cfg.start_time, d.cfg.stop_time],
-                           hovertext=obs_ids)
+                           symbols=sub_types, name="temp", hovertext=obs_ids)
 
 
 def uv_vs_time(d: ReportData) -> go.Figure:
@@ -239,20 +271,21 @@ def uv_vs_time(d: ReportData) -> go.Figure:
     tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
     uv = [o.uv if o.uv is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
     obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+    sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
     uv = np.round(uv, 2)
 
     if not tstamps:
         return go.Figure()
 
-    tstamps, uv, obs_ids = zip(*sorted(zip(tstamps, uv, obs_ids)))
+    tstamps, uv, obs_ids, sub_types = zip(*sorted(zip(tstamps, uv, obs_ids, sub_types)))
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    return obsdb_line_plot(tstamps, uv, "Time (UTC)", "UV Index",
-                           "UV Index", xlim=[d.cfg.start_time, d.cfg.stop_time],
-                           hovertext=obs_ids)
+    return obsdb_scatter_plot(tstamps, uv, "Time (UTC)", "UV Index",
+                              "UV Index", xlim=[d.cfg.start_time, d.cfg.stop_time],
+                              symbols=sub_types, name="uv_index", hovertext=obs_ids)
 
 
 def wind_speed_vs_time(d: ReportData) -> go.Figure:
@@ -260,20 +293,21 @@ def wind_speed_vs_time(d: ReportData) -> go.Figure:
     tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
     wind_speed = [o.wind_speed if o.wind_speed is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
     obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+    sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
     wind_speed = np.round(wind_speed, 2)
 
     if not tstamps:
         return go.Figure()
 
-    tstamps, wind_speed, obs_ids = zip(*sorted(zip(tstamps, wind_speed, obs_ids)))
+    tstamps, wind_speed, obs_ids, sub_types = zip(*sorted(zip(tstamps, wind_speed, obs_ids, sub_types)))
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    return obsdb_line_plot(tstamps, wind_speed, "Time (UTC)", "Wind Speed [km / s]",
+    return obsdb_scatter_plot(tstamps, wind_speed, "Time (UTC)", "Wind Speed [km / s]",
                            "Wind Speed", xlim=[d.cfg.start_time, d.cfg.stop_time],
-                           hovertext=obs_ids)
+                           symbols=sub_types, name="wind_spd", hovertext=obs_ids)
 
 
 def wind_dir_vs_time(d: ReportData) -> go.Figure:
@@ -281,20 +315,21 @@ def wind_dir_vs_time(d: ReportData) -> go.Figure:
     tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
     wind_dir = [o.wind_dir if o.wind_dir is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
     obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+    sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
     wind_dir = np.round(wind_dir, 2)
 
     if not tstamps:
         return go.Figure()
 
-    tstamps, wind_dir, obs_ids = zip(*sorted(zip(tstamps, wind_dir, obs_ids)))
+    tstamps, wind_dir, obs_ids, sub_types = zip(*sorted(zip(tstamps, wind_dir, obs_ids, sub_types)))
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    return obsdb_line_plot(tstamps, wind_dir, "Time (UTC)", "Wind Dir [deg]",
+    return obsdb_scatter_plot(tstamps, wind_dir, "Time (UTC)", "Wind Dir [deg]",
                            "Wind Dir", xlim=[d.cfg.start_time, d.cfg.stop_time],
-                           hovertext=obs_ids)
+                           symbols=sub_types, name="wind_dir", hovertext=obs_ids)
 
 
 def scan_type_vs_time(d: ReportData) -> go.Figure:
@@ -304,6 +339,7 @@ def scan_type_vs_time(d: ReportData) -> go.Figure:
     tstamps = []
     scan_types = []
     obs_ids = []
+    sub_types = []
 
     for o in d.obs_list:
         if o.obs_type != "obs":
@@ -313,18 +349,20 @@ def scan_type_vs_time(d: ReportData) -> go.Figure:
             tstamps.append(o.start_time)
             scan_types.append(matches[0])
             obs_ids.append(o.obs_id)
+            sub_types.append(o.obs_subtype)
 
     if not tstamps:
         return go.Figure()
 
-    tstamps, scan_types, obs_ids = zip(*sorted(zip(tstamps, scan_types, obs_ids)))
+    tstamps, scan_types, obs_ids, sub_types = zip(*sorted(zip(tstamps, scan_types, obs_ids, sub_types)))
     tstamps = [
         dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
         for t in tstamps
     ]
 
-    return obsdb_line_plot(tstamps, scan_types, "Time (UTC)", "Scan Type", "Scan Type",
-                          xlim=[d.cfg.start_time, d.cfg.stop_time], hovertext=obs_ids)
+    return obsdb_scatter_plot(tstamps, scan_types, "Time (UTC)", "Scan Type", "Scan Type",
+                              xlim=[d.cfg.start_time, d.cfg.stop_time], symbols=sub_types,
+                              name="scan_type", hovertext=obs_ids)
 
 
 def hwp_freq_vs_time(d: ReportData) -> go.Figure:
@@ -333,19 +371,21 @@ def hwp_freq_vs_time(d: ReportData) -> go.Figure:
         tstamps = [o.start_time for o in d.obs_list if o.obs_type == "obs"]
         hwp_freq_mean = [o.hwp_freq_mean if o.hwp_freq_mean is not None else np.nan for o in d.obs_list if o.obs_type == "obs"]
         obs_ids = [o.obs_id for o in d.obs_list if o.obs_type == "obs"]
+        sub_types = [o.obs_subtype for o in d.obs_list if o.obs_type == "obs"]
         hwp_freq_mean = np.round(hwp_freq_mean, 2)
 
         if not tstamps:
             return go.Figure()
 
-        tstamps, hwp_freq_mean, obs_ids = zip(*sorted(zip(tstamps, hwp_freq_mean, obs_ids)))
+        tstamps, hwp_freq_mean, obs_ids, sub_types = zip(*sorted(zip(tstamps, hwp_freq_mean, obs_ids, sub_types)))
         tstamps = [
             dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
             for t in tstamps
         ]
 
-        return obsdb_line_plot(tstamps, hwp_freq_mean, "Time (UTC)", "Mean HWP Freq [Hz]", "Mean HWP Freq",
-                              xlim=[d.cfg.start_time, d.cfg.stop_time], hovertext=obs_ids)
+        return obsdb_scatter_plot(tstamps, hwp_freq_mean, "Time (UTC)", "Mean HWP Freq [Hz]", "Mean HWP Freq",
+                                  xlim=[d.cfg.start_time, d.cfg.stop_time], symbols=sub_types,
+                                  name="hwp_freq", hovertext=obs_ids)
     else:
         return go.Figure()
 
@@ -449,11 +489,6 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     return ObsEfficiencyPlots(pie=pie, heatmap=heatmap)
 
 
-colors = ["#E69F00", "#56B4E9", "#009E73",
-              "#F0E442", "#0072B2", "#D55E00"]
-markers = ["circle", "square", "diamond", "cross", "x", "triangle-up"]
-
-
 def pwv_vs_time(d: ReportData, fig: go.Figure, ds_factor: int=5):
     """ Helper function to plot PWV vs time"""
     pwvs = np.array(deepcopy(d.pwv[1][::ds_factor]))
@@ -522,8 +557,8 @@ def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
                 mode="markers",
                 name=f"Valid Dets ({b})",
                 marker=dict(
-                    color=colors[i % len(colors)],
-                    symbol=markers[i % len(markers)],
+                    color=MARKER_COLORS[i % len(MARKER_COLORS)],
+                    symbol=MARKER_SYMBOLS[i % len(MARKER_SYMBOLS)],
                     size=8,
                     line=dict(width=1, color="black"),
                 ),
@@ -602,7 +637,7 @@ def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) 
                 go.Histogram2dContour(
                     x=long_pwvs,
                     y=long_yields[b],
-                    colorscale=[[0, colors[i]], [1, colors[i]]],
+                    colorscale=[[0, MARKER_COLORS[i]], [1, MARKER_COLORS[i]]],
                     contours_coloring="lines",
                     showscale=False,
                     opacity=0.7,
@@ -633,8 +668,8 @@ def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) 
                 mode="markers",
                 name=f"Valid Dets ({b})",
                 marker=dict(
-                    color=colors[i % len(colors)],
-                    symbol=markers[i % len(markers)],
+                    color=MARKER_COLORS[i % len(MARKER_COLORS)],
+                    symbol=MARKER_SYMBOLS[i % len(MARKER_SYMBOLS)],
                     size=8,
                     line=dict(width=1, color="black"),
                 ),
@@ -717,8 +752,8 @@ def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
                     mode="markers",
                     name=f"{pol.split('_')[-1]} ({b})",
                     marker=dict(
-                        color=colors[i % len(colors)],
-                        symbol=markers[i % len(markers)],
+                        color=MARKER_COLORS[i % len(MARKER_COLORS)],
+                        symbol=MARKER_SYMBOLS[i % len(MARKER_SYMBOLS)],
                         size=8,
                         line=dict(width=1, color="black"),
                     ),
@@ -808,7 +843,7 @@ def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
                     go.Histogram2dContour(
                         x=long_pwvs,
                         y=long_nep,
-                        colorscale=[[0, colors[i]], [1, colors[i]]],
+                        colorscale=[[0, MARKER_COLORS[i]], [1, MARKER_COLORS[i]]],
                         contours_coloring="lines",
                         showscale=False,
                         opacity=0.7,
@@ -848,8 +883,8 @@ def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
                     mode="markers",
                     name=f"{pol.split('_')[-1]} ({b})",
                     marker=dict(
-                        color=colors[i % len(colors)],
-                        symbol=markers[i % len(markers)],
+                        color=MARKER_COLORS[i % len(MARKER_COLORS)],
+                        symbol=MARKER_SYMBOLS[i % len(MARKER_SYMBOLS)],
                         size=8,
                         line=dict(width=1, color="black"),
                     ),

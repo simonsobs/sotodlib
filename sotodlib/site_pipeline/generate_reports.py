@@ -356,6 +356,23 @@ def render_report(
         stop_time_str = data.cfg.stop_time
     else:
         stop_time_str = data.cfg.stop_time.isoformat()
+
+    unique_obs = []
+    # since lat obs_ids are per-tube (for stimulator too), keep only those whose start
+    # times are further than some tolerance apart.
+    if cfg.platform == "lat":
+        start_times = []
+        for o in data.obs_list:
+            # keep only observations and not operations
+            if o.obs_type != "obs":
+                continue
+            is_close = any(abs(o.start_time - start_time) <= 20 for start_time in start_times)
+            if not is_close:
+                unique_obs.append(o)
+                start_times.append(o.start_time)
+    else:
+        unique_obs = [o for o in data.obs_list if o.obs_type == "obs"]
+
     jinja_data = {
         "data": data,
         "report_interval": cfg.report_interval.capitalize(),
@@ -367,19 +384,22 @@ def render_report(
             "Platform": cfg.platform,
             "Start time": dt.datetime.fromisoformat(start_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
             "Stop time": dt.datetime.fromisoformat(stop_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
-            "Number of Observations": len([o for o in data.obs_list if o.obs_type == "obs"]),
-            "Number of CMB Observations": len([o for o in data.obs_list if o.obs_subtype == "cmb"]),
-            "Number of Cal Observations": len([o for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"]),
-            "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cmb"])) / 3600, 1),
-            "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"])) / 3600, 1),
-            "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb"]) else 0,
-            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in data.obs_list if o.obs_subtype == "cmb" and o.obs_type == "obs"]) else 0,
-            "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in data.obs_list]), 3),
+            "Number of Observations": len([o for o in unique_obs]),
+            "Number of CMB Observations": len([o for o in unique_obs if o.obs_subtype == "cmb"]),
+            "Number of Cal Observations": len([o for o in unique_obs if o.obs_subtype == "cal"]),
+            "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb"])) / 3600, 1),
+            "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cal"])) / 3600, 1),
+            "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cmb"]) else 0,
+            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
+            "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
         }
     }
 
     if cfg.platform in ["satp1", "satp2", "satp3"]:
-        jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in data.obs_list if "wiregrid" in o.obs_tags])) / 3600, 1)
+        jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "wiregrid" in o.obs_tags])) / 3600, 1)
+    elif cfg.platform == "lat":
+        jinja_data["general_stats"]["Time Spent on Stimulator Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "stimulator" in o.obs_tags])) / 3600, 1)
+
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
