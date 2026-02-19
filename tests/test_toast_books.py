@@ -1,7 +1,6 @@
 # Copyright (c) 2023-2023 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
-"""Test toast data export.
-"""
+"""Test toast data export."""
 
 import os
 import shutil
@@ -11,12 +10,17 @@ import re
 import numpy as np
 import astropy.units as u
 
-from unittest import TestCase
+import unittest
 
 # Import so3g before any other packages that import spt3g
 import so3g
 
-from ._helpers import create_outdir, simulation_test_multitube, close_data_and_comm
+from ._helpers import (
+    create_outdir,
+    simulation_test_multitube,
+    close_data_and_comm,
+    mpi_multi,
+)
 
 
 try:
@@ -32,7 +36,7 @@ except ImportError:
     toast_available = False
 
 
-class ToastBooksTest(TestCase):
+class ToastBooksTest(unittest.TestCase):
     def setUp(self):
         fixture_name = os.path.splitext(os.path.basename(__file__))[0]
         if not toast_available:
@@ -41,6 +45,7 @@ class ToastBooksTest(TestCase):
         world, procs, rank = toast.get_world()
         self.outdir = create_outdir(fixture_name, mpicomm=world)
 
+    @unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
     def test_book_saveload(self):
         if not toast_available:
             return
@@ -98,7 +103,7 @@ class ToastBooksTest(TestCase):
             noise_dir=noise_dir,
             frame_intervals=None,
             gzip=True,
-            hwp_angle=None, # This is LAT data
+            hwp_angle=None,  # This is LAT data
         )
 
         # Save the data

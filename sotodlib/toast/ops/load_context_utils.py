@@ -15,6 +15,7 @@ from toast.timing import function_timer, Timer
 from toast.utils import Logger
 from toast.dist import distribute_uniform
 from toast.observation import default_values as defaults
+from toast.utils import replace_byte_arrays, byte_array_to_unicode
 
 from ...coords import pointing_model
 from ...core import Context, AxisManager
@@ -125,19 +126,17 @@ def read_and_preprocess_wafers(
             # Apply pointing model, UNLESS we are applying a preprocess config
             # on load and that config includes the pointing model
             if "pointing_model" in axtod:
-                if (
-                    preconfig is None
-                    or "pointing_model" not in [i['name'] for i in preconfig["process_pipe"]]
-                ):
+                if preconfig is None or "pointing_model" not in [
+                    i["name"] for i in preconfig["process_pipe"]
+                ]:
                     pointing_model.apply_pointing_model(axtod)
 
             # If the axis manager has a HWP angle solution, apply it.
             if "hwp_solution" in axtod:
                 # Did we already apply it in the preprocessing?
-                if (
-                    preconfig is None
-                    or "hwp_angle_model" not in [i['name'] for i in preconfig["process_pipe"]]
-                ):
+                if preconfig is None or "hwp_angle_model" not in [
+                    i["name"] for i in preconfig["process_pipe"]
+                ]:
                     axtod = apply_hwp_angle_model(axtod)
                     timer.stop()
                     elapsed = timer.seconds()
@@ -219,14 +218,16 @@ def parse_metadata(axman, obs_meta, fp_cols, path_sep, det_axis, obs_base, fp_ba
             field_axes = axman._assignments[key]
             if len(field_axes) == 0:
                 # This data is not associated with an axis.
-                om[key] = axman[key]
+                om[key] = replace_byte_arrays(axman[key])
             elif len(field_axes) == 1 and field_axes[0] == det_axis:
                 # This is a detector property
                 if fp_key in fp_cols:
                     msg = f"Context meta key '{fp_key}' is duplicated in nested"
                     msg += " AxisManagers"
                     raise RuntimeError(msg)
-                fp_cols[fp_key] = Column(name=fp_key, data=np.array(axman[key]))
+                fp_cols[fp_key] = Column(
+                    name=fp_key, data=np.array(byte_array_to_unicode(axman[key]))
+                )
     if obs_base is not None and len(om) == 0:
         # There were no meta data keys- delete this dict
         del obs_meta[obs_base]
@@ -376,6 +377,7 @@ def distribute_detector_data(
     is_flag=False,
     flag_invert=False,
     flag_mask=None,
+    daq_units=False,
 ):
     """Communicate detector data from the reading processes to the destinations.
 
@@ -406,6 +408,7 @@ def distribute_detector_data(
         is_flag (bool):  If True, this field is a flag.
         flag_invert (bool):  If True, invert the meaning of the flag values.
         flag_mask (np.uint8):  The flag mask (or None).
+        daq_units (bool):  If True, convert AxisManager signal to DAQ units.
 
     Returns:
         None
@@ -415,6 +418,8 @@ def distribute_detector_data(
     gcomm = obs.comm.comm_group
     rank = obs.comm.group_rank
     gsize = obs.comm.group_size
+
+    rescale_to_daq = float(2**15) / np.pi
 
     # If the blocks of detector data exceed 2^30 elements in total, they might hit
     # MPI limitations on the communication message sizes.  Work around that here.
@@ -569,7 +574,17 @@ def distribute_detector_data(
                         )
                     else:
                         for idet in range(n_send_det):
-                            obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[idet]
+                            if daq_units:
+                                nan_mask = np.isnan(sdata_2d[idet])
+                                if np.count_nonzero(nan_mask) > 0:
+                                    det_flags[idet] = 1
+                                obs.detdata[field][idet + recv_dets[0], :] = (
+                                    0.5 + rescale_to_daq * sdata_2d[idet]
+                                ).astype(np.int32)
+                            else:
+                                obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[
+                                    idet
+                                ]
                     # Update per-detector flags
                     dflags = {
                         obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
@@ -615,7 +630,15 @@ def distribute_detector_data(
             else:
                 # Just assign
                 for idet in range(n_recv_det):
-                    obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
+                    if daq_units:
+                        nan_mask = np.isnan(recv_2d[idet])
+                        if np.count_nonzero(nan_mask) > 0:
+                            det_flags[idet] = 1
+                        obs.detdata[field][idet + recv_dets[0], :] = (
+                            0.5 + rescale_to_daq * recv_2d[idet]
+                        ).astype(np.int32)
+                    else:
+                        obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
             # Update per-detector flags
             dflags = {
                 obs.local_detectors[recv_dets[0] + x]: defaults.det_mask_invalid
@@ -638,15 +661,17 @@ def distribute_detector_data(
     del send_data
 
     # Every process checks its local data for NaN values.  If any are found, a warning
-    # is printed and the detector is cut.
-    dflags = dict()
-    for det in obs.local_detectors:
-        nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
-        if nnan > 0:
-            msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
-            log.warning(msg)
-            dflags[det] = defaults.det_mask_invalid
-    obs.update_local_detector_flags(dflags)
+    # is printed and the detector is cut.  If we are using DAQ units, those detectors
+    # with NaNs were already cut during the float to int32 conversion above.
+    if not daq_units:
+        dflags = dict()
+        for det in obs.local_detectors:
+            nnan = np.count_nonzero(np.isnan(obs.detdata[field][det]))
+            if nnan > 0:
+                msg = f"{obs.name}:{det} has {nnan} NaN values.  Cutting."
+                log.warning(msg)
+                dflags[det] = defaults.det_mask_invalid
+        obs.update_local_detector_flags(dflags)
 
 
 @function_timer
@@ -750,6 +775,7 @@ def compute_boresight_pointing(
         obs.shared[times_key].data[slc],
         bore_azel,
         use_qpoint=True,
+        so3g_compat_mode=True,
     )
 
     # Gather all samples to rank zero and set the shared object elements.

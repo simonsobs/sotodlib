@@ -2,7 +2,6 @@ import numpy as np
 import pyfftw
 import inspect
 import scipy.signal as signal
-from operator import attrgetter
 
 import logging
 
@@ -298,15 +297,33 @@ fft_apply_filter = FilterApplyFunc.deco
 # Filtering Functions
 #################
 @fft_filter
-def counter_1_over_f(freqs, tod, fk, n):
+def counter_1_over_f(freqs, tod, fk=None, n=None):
     """
     Counter 1/f filter for noise w/ PSD that follows:
     
     w*(1 + (fk/f)**n) 
     where w is the white noise level, fk is the knee frequency, and
     n is the 1/f index.
+    You need the (fk, n) pair or noise_fit_stats to apply this filter.
+
+    Arguments
+    ---------
+        fk : float or nparray
+            The knee frequency of the noise.
+        n : float or nparray
+            The 1/f index of the noise.
+        noise_fit_stats : str
+            The name of the 1/f fit result that is wrapped in the tod.
+            This is an output of ``fft_ops.fit_noise_model``.
     """
-    return 1/(1+(fk/freqs)**n)
+    if (fk is None or n is None):
+        raise ValueError("You must input the (fk, n).")
+    elif np.isscalar(fk) and np.isscalar(n):
+        return 1/(1+(fk/freqs)**n)
+    elif len(fk) == tod.dets.count and len(n) == tod.dets.count:
+        return 1 / (1 + (fk[:, None]/freqs[None,:])**n[:, None])
+    else:
+        raise ValueError("The fk and n must be a float value or array-like with length of number of detectors")
 
 @fft_filter
 def identity_filter(freqs, tod, invert=False):
@@ -330,6 +347,22 @@ def gain(freqs, tod, gain=1.):
 
     """
     return gain * np.ones(len(freqs))
+
+@fft_filter
+def timeshift(freqs, tod, dt=0, invert=False):
+    """Filter that shifts the signal in time.
+
+    Args:
+        dt: Amount of time shift to apply in second. Positive value will
+            cause the signal to be moved to later samples of the array.
+        invert (bool): If true, returns the inverse transfer function,
+            to deconvolve the time shift.
+
+    """
+    if invert:
+        return np.exp(2j * np.pi * freqs * dt)
+    else:
+        return np.exp(-2j * np.pi * freqs * dt)
 
 @fft_filter
 def low_pass_butter4(freqs, tod, fc):
@@ -385,9 +418,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
 
     Args:
 
-      timeconst: Array of time constant values (one per detector).
-        Alternately, a string indicating what member of tod to use for
-        the time constants array.  Defaults to 'timeconst'.
+      timeconst: Array of time constant values (one per detector),
+        or a scalar value, or a string indicating what field of tod
+        to use for the time constants array. Defaults to 'timeconst'.
       invert (bool): If true, returns the inverse transfer function,
         to deconvolve the time constants.
 
@@ -401,9 +434,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        # attrgetter used to retrieve a field multiple layers deep.
-        _f = attrgetter(timeconst)
-        timeconst = _f(tod)
+        timeconst = tod[timeconst]
+    if np.isscalar(timeconst):
+        timeconst = np.full(tod.dets.count, timeconst)
 
     if target is None:
         filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]

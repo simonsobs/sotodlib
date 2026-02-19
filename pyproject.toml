@@ -11,7 +11,7 @@ maintainers = [
   {name = "Simons Observatory Collaboration"},
   {email = "so_software@simonsobservatory.org"},
 ]
-requires-python = ">=3.9, <3.13"
+requires-python = ">=3.10, <3.14"
 dependencies = [
   "numpy",
   "scipy",
@@ -29,6 +29,8 @@ dependencies = [
   "psycopg2-binary",
   "lmfit",
   "flacarray>=0.3.4",
+  "numpy-quaternion", # Required quietly by pixell.coordsys
+  "h5py",
 ]
 dynamic=["version"]
 classifiers = [
@@ -36,10 +38,10 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering :: Astronomy",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
@@ -50,10 +52,15 @@ classifiers = [
 site_pipeline = [
   "influxdb",
   "venn",
+  "sodetlib",
   "let-me-scroll-it",
   "plotly",
   "pandas",
   "alphashape",
+  "slack-sdk",
+  "requests",
+  "tilemaker",
+  "GitPython",
 ]
 tests = [
   "socs",
@@ -72,6 +79,10 @@ toast_so_sim = "sotodlib.toast.scripts.so_sim:cli"
 toast_so_map = "sotodlib.toast.scripts.so_map:cli"
 toast_so_transfer = "sotodlib.toast.scripts.so_transfer:cli"
 toast_so_convert = "sotodlib.toast.scripts.so_convert:cli"
+toast_so_sim_telescope = "sotodlib.toast.scripts.so_sim_telescope:main"
+so-toast-run = "sotodlib.toast.scripts.so_run:cli"
+so-toast-stats = "sotodlib.toast.scripts.so_stats:cli"
+so-toast-coadd = "sotodlib.toast.scripts.so_coadd:cli"
 get_wafer_offset = "sotodlib.toast.scripts.get_wafer_offset:main"
 
 [tool.versioneer]

@@ -1,12 +1,13 @@
 import plotly
 from plotly.subplots import make_subplots
-import matplotlib.colors as mcolors
 from plotly.colors import DEFAULT_PLOTLY_COLORS
+import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import matplotlib.colors as mcolors
+import os
 import pandas as pd
 from dataclasses import dataclass, field
-import plotly.express as px
 import datetime as dt
 from copy import deepcopy
 import ast
@@ -14,14 +15,27 @@ from collections import defaultdict
 
 from typing import List, Tuple, TYPE_CHECKING, Dict, Any, Optional
 
-from .report_data import ReportData, Footprint, obs_list_to_arr
+from .report_data import ReportData, Footprint
 
-band_colors = [
-    "#D55E00",
-    "#56B4E9",
-]
+
+def get_wafers(platform: str):
+    """Get wafer and tube slots"""
+    if platform  == "lat":
+        tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
+        wafer_slots = ["ws0", "ws1", "ws2"]
+        wafers = [f"{x}_{y}" for x in tube_slots for y in wafer_slots]
+    elif platform in ["satp1", "satp2", "satp3"]:
+        wafers = [f"ws{i} " for i in range(7)]
+    else:
+        raise ValueError(f"Uknown platform {platform}")
+
+    return wafers
+
 
 def get_discrete_distinct_colors(n, reverse=False):
+    """Get a list of colors from a list or interpolate between them.
+    First and last color are fixed for idle and CMB obs
+    """
     base_colors = ['#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE', '#AA3377', '#BBBBBB']
     n_base = len(base_colors)
 
@@ -48,6 +62,9 @@ def get_discrete_distinct_colors(n, reverse=False):
 
 @dataclass
 class Colors:
+    """
+    Helper class for getting a list of colors.
+    """
     names: List[str]
     reverse: bool = False
     colormap: Dict[str, str] = field(init=False)
@@ -70,16 +87,129 @@ class ObsEfficiencyPlots:
     heatmap: go.Figure
 
 
-def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
-    if d.cfg.platform  == "lat":
-        tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
-        wafer_slots = ["ws0", "ws1", "ws2"]
-        wafers = [f"{x}_{y}" for x in tube_slots for y in wafer_slots]
-    elif d.cfg.platform in ["satp1", "satp2", "satp3"]:
-        wafers = [f"ws{i} " for i in range(7)]
-    else:
-        raise ValueError(f"Uknown platform {d.cfg.platform}")
+def obsdb_line_plot(x, y, xlabel, ylabel, title, xlim):
+    """Generic function to make a Plotly scatter plot."""
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode='markers',
+            name=ylabel,
+            line=dict(color="#0072B2", width=2),
+            marker=dict(size=8)
+        ))
 
+    # layout
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=140, b=40),
+        height=550,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+            y=0.92,
+            yanchor="top",
+            font=dict(size=18),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text=xlabel,
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+        range=[xlim[0], xlim[1]]
+    )
+    fig.update_yaxes(
+        title_text=ylabel,
+        showgrid=True,
+        gridcolor="lightgray",
+    )
+
+    return fig
+
+
+def boresight_vs_time(d: ReportData) -> go.Figure:
+    """Boresight angle and corotator in degrees vs time"""
+    tstamps = [o.start_time for o in d.obs_list]
+    boresight = [o.boresight if o.boresight is not None else np.nan for o in d.obs_list]
+    boresight = np.round(boresight, 1)
+
+    if d.cfg.platform == "lat":
+        el_center = [o.el_center if o.el_center is not None else np.nan for o in d.obs_list]
+        tstamps, boresight, el_center = zip(*sorted(zip(tstamps, boresight, el_center)))
+        el_center = list(el_center)
+    else:
+        tstamps, boresight = zip(*sorted(zip(tstamps, boresight)))
+    tstamps = list(tstamps)
+    boresight = list(boresight)
+    tstamps = [
+        dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
+        for t in tstamps
+    ]
+
+    fig = obsdb_line_plot(tstamps, boresight, "Time (UTC)", "Boresight [deg]", "Boresight",
+                         xlim=[d.cfg.start_time, d.cfg.stop_time])
+
+    if d.cfg.platform == "lat":
+        corot = np.array(boresight) + np.array(el_center) - 60
+
+        fig.add_trace(
+        go.Scatter(
+            x=tstamps,
+            y=corot,
+            mode='markers',
+            name="Corotator [deg]",
+            line=dict(color="#E69F00", width=2),
+            marker=dict(size=8),
+            yaxis="y2",
+        ))
+
+        fig.update_layout(
+        yaxis2=dict(
+            title="Corotator [deg]",
+            overlaying="y",
+            side="right"
+        ))
+
+    return fig
+
+
+def hwp_freq_vs_time(d: ReportData) -> go.Figure:
+    """Mean HWP frequency vs time"""
+    if d.cfg.platform in ["satp1", "satp2", "satp3"]:
+        tstamps = [o.start_time for o in d.obs_list]
+        hwp_freq_mean = [o.hwp_freq_mean if o.hwp_freq_mean is not None else np.nan for o in d.obs_list]
+        hwp_freq_mean = np.round(hwp_freq_mean, 2)
+
+        tstamps, hwp_freq_mean = zip(*sorted(zip(tstamps, hwp_freq_mean)))
+        tstamps = [
+            dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
+            for t in tstamps
+        ]
+
+        return obsdb_line_plot(tstamps, hwp_freq_mean, "Time (UTC)", "Mean HWP Freq [Hz]", "Mean HWP Freq",
+                              xlim=[d.cfg.start_time, d.cfg.stop_time])
+    else:
+        return go.Figure()
+
+
+def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
+    """Plot heatmap of wafer vs time and pie chart showing observation efficiency"""
+
+    wafers = get_wafers(d.cfg.platform)
     nwafers = len(wafers)
 
     times = pd.date_range(d.cfg.start_time, d.cfg.stop_time, nsegs).to_pydatetime()
@@ -175,137 +305,475 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     return ObsEfficiencyPlots(pie=pie, heatmap=heatmap)
 
 
-def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) -> go.Figure:
-    fig = go.Figure()
-
-    if longterm_data is not None:
-        band_data = defaultdict(lambda: {"pwv": [], "yield": []})
-
-        for obs in longterm_data.obs_list:
-            if not obs.num_valid_dets:
-                continue
-
-            band_yields = ast.literal_eval(obs.num_valid_dets)
-
-            for band, val in band_yields.items():
-                if np.isfinite(val):
-                    band_data[band]["pwv"].append(obs.pwv)
-                    band_data[band]["yield"].append(val)
-
-        band_index = 0
-        for band, vals in band_data.items():
-            fig.add_trace(
-                go.Histogram2dContour(
-                    x=vals["pwv"],
-                    y=vals["yield"],
-                    colorscale=[[0, band_colors[band_index]], [1, band_colors[band_index]]],
-                    contours_coloring="lines",
-                    showscale=False,
-                    opacity=0.7,
-                    name=f"longterm {band}"
-                )
-            )
-            band_index +=1
-
-    band_index = 0
-    band_data = defaultdict(lambda: {'x': [], 'y': [], 'hover': []})
-
-    for obs in d.obs_list:
-        ts = dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc).isoformat()
-        if obs.num_valid_dets:
-            for band, val in ast.literal_eval(obs.num_valid_dets).items():
-                if not np.isfinite(val):
-                    continue
-                band_data[band]['x'].append(obs.pwv)
-                band_data[band]['y'].append(val)
-                band_data[band]['hover'].append(obs.obs_id)
-
-    for band, data in band_data.items():
-        color = band_colors[band_index % len(band_colors)]
-        fig.add_trace(
-            go.Scatter(
-                x=data['x'],
-                y=data['y'],
-                mode="markers",
-                name=f"{band}",
-                marker=dict(color=color),
-                hovertext=data['hover'],
-            )
-        )
-        band_index += 1
-
-    fig.update_layout(
-        xaxis=dict(title="PWV"),
-        yaxis=dict(title="Valid Dets"),
-        height=500,
-        margin=dict(l=0, r=0, t=0, b=0),
-    )
-    return fig
-
+colors = ["#E69F00", "#56B4E9", "#009E73",
+              "#F0E442", "#0072B2", "#D55E00"]
+markers = ["circle", "square", "diamond", "cross", "x", "triangle-up"]
 
 
 def pwv_and_yield_vs_time(d: "ReportData") -> go.Figure:
+    """PWV and yield as a function of time"""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Collect yields per band
-    yields_by_band = defaultdict(list)
-    times_by_band = defaultdict(list)
-    hover_by_band = defaultdict(list)
+    yields = defaultdict(list)
+    times = defaultdict(list)
+    hover = defaultdict(list)
 
+    # build a dict keyed off of bandpass for data from all obs
     for obs in d.obs_list:
         obs_time = dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc)
-        if obs.num_valid_dets:
-            for band, val in ast.literal_eval(obs.num_valid_dets).items():
-                times_by_band[band].append(obs_time)
-                yields_by_band[band].append(val)
-                hover_by_band[band].append(obs.obs_id)
+        if obs.num_valid_dets.size > 0:
+            for b in obs.num_valid_dets.dtype.names:
+                times[b].append(obs_time)
+                yields[b].append(obs.num_valid_dets[b][0])
+                hover[b].append(obs.obs_id)
 
-    band_index = 0
-
-    for band in sorted(yields_by_band):
-        color = band_colors[band_index % len(band_colors)]
+    # yield trace
+    for i, b in enumerate(sorted(yields)):
         fig.add_trace(
             go.Scatter(
-                x=times_by_band[band],
-                y=yields_by_band[band],
-                mode='markers',
-                name=f"Valid Dets ({band})",
-                marker=dict(color=color),
-                hovertext=hover_by_band[band],
+                x=times[b],
+                y=yields[b],
+                mode="markers",
+                name=f"Valid Dets ({b})",
+                marker=dict(
+                    color=colors[i % len(colors)],
+                    symbol=markers[i % len(markers)],
+                    size=8,
+                    line=dict(width=1, color="black"),
+                ),
+                hovertext=hover[b],
             ),
             secondary_y=False,
         )
-        band_index += 1
 
-    # Add PWV trace
+    # PWV trace
     ds_factor = 10
-    pwvs = deepcopy(d.pwv[1][::ds_factor])
-    pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
-    ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+    #pwvs = deepcopy(d.pwv[1][::ds_factor])
+    #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
+    #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+
+    ts, pwvs = zip(*sorted(
+        ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
+    ))
+    ts = list(ts)
+    pwvs = list(pwvs)
 
     fig.add_trace(
         go.Scatter(
             x=ts,
             y=pwvs,
-            mode='lines',
-            name="PWV",
-            marker=dict(color="#E69F00"),
-            opacity=0.5,
+            mode="markers",
+            name="PWV [mm]",
+            line=dict(color="#CC79A7", width=2, dash="solid"),
+            opacity=0.6,
         ),
-        secondary_y=True
+        secondary_y=True,
     )
 
-    # Axis labels and layout
-    fig.update_yaxes(title_text='Num Valid Dets', secondary_y=False)
-    fig.update_yaxes(title_text='PWV', secondary_y=True)
+    # layout
     fig.update_layout(
-        margin={k: 0 for k in ['l', 'r', 't', 'b']},
-        height=500
+        margin=dict(l=40, r=40, t=80, b=40),
+        height=550,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+        title=dict(
+            text="Valid Detectors and PWV",
+            x=0.5,
+            xanchor="center",
+            y=0.97,
+            yanchor="top",
+            font=dict(size=18),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text="Time (UTC)",
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text="Num Valid Dets",
+        secondary_y=False,
+        showgrid=True,
+        gridcolor="lightgray",
+    )
+    fig.update_yaxes(
+        title_text="PWV [mm]",
+        secondary_y=True,
+        showgrid=True,
     )
 
     return fig
 
 
+def yield_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None) -> go.Figure:
+    """Number of valid detectors as a function of PWV. Current interval is plotted over
+    longterm contours.
+    """
+    fig = go.Figure()
+
+    if longterm_data is not None:
+        long_yields = defaultdict(list)
+        long_pwvs = []
+        for obs in longterm_data.obs_list:
+            if obs.num_valid_dets.size > 0:
+                if np.isfinite(obs.pwv):
+                    long_pwvs.append(obs.pwv)
+                    for b in obs.num_valid_dets.dtype.names:
+                        long_yields[b].append(obs.num_valid_dets[b][0])
+
+        for i, b in enumerate(sorted(long_yields)):
+            fig.add_trace(
+                go.Histogram2dContour(
+                    x=long_pwvs,
+                    y=long_yields[b],
+                    colorscale=[[0, colors[i]], [1, colors[i]]],
+                    contours_coloring="lines",
+                    showscale=False,
+                    opacity=0.7,
+                    name=f"longterm {b}",
+                )
+            )
+
+    yields = defaultdict(list)
+    pwvs = []
+    hover = defaultdict(list)
+
+    # build a dict keyed off of bandpass for data from all obs
+    for obs in d.obs_list:
+        if obs.num_valid_dets.size > 0:
+             if np.isfinite(obs.pwv):
+                pwvs.append(obs.pwv)
+                for b in obs.num_valid_dets.dtype.names:
+                    yields[b].append(obs.num_valid_dets[b][0])
+                    hover[b].append(obs.obs_id)
+
+    # yield and pwv trace
+    for i, b in enumerate(sorted(yields)):
+        fig.add_trace(
+            go.Scatter(
+                x=pwvs,
+                y=yields[b],
+                mode="markers",
+                name=f"Valid Dets ({b})",
+                marker=dict(
+                    color=colors[i % len(colors)],
+                    symbol=markers[i % len(markers)],
+                    size=8,
+                    line=dict(width=1, color="black"),
+                ),
+                hovertext=hover[b],
+            )
+        )
+
+    # layout
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=80, b=40),
+        height=550,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+        title=dict(
+            text="Valid Detectors and PWV",
+            x=0.5,
+            xanchor="center",
+            y=0.97,
+            yanchor="top",
+            font=dict(size=18),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text="PWV [mm]",
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text="Num Valid Dets",
+        showgrid=True,
+        gridcolor="lightgray",
+    )
+
+    return fig
+
+
+def pwv_and_nep_vs_time(d: "ReportData", field_name: str = None) -> go.Figure:
+    """PWV and NEPs as a function of time"""
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    neps = defaultdict(lambda: defaultdict(list))
+    times = defaultdict(list)
+    hover = defaultdict(list)
+
+    # build a dict keyed off of bandpass for data from all obs
+    for obs in d.obs_list:
+        obs_time = dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc)
+        if field_name == "array":
+            field = obs.array_nep
+        elif field_name == "det":
+            field = obs.det_nep
+        if field.size > 0:
+            for b in obs.array_nep.dtype.names:
+                times[b].append(obs_time)
+                hover[b].append(obs.obs_id)
+                for i, pol in enumerate(field[b].dtype.names):
+                    if pol not in neps[b].keys():
+                        neps[b][pol] = []
+                    neps[b][pol].append(field[b][0][i])
+
+    # nep trace
+    i = 0
+    for b in sorted(neps):
+        for pol, nep in neps[b].items():
+            fig.add_trace(
+                go.Scatter(
+                    x=times[b],
+                    y=nep,
+                    mode="markers",
+                    name=f"{pol.split('_')[-1]} ({b})",
+                    marker=dict(
+                        color=colors[i % len(colors)],
+                        symbol=markers[i % len(markers)],
+                        size=8,
+                        line=dict(width=1, color="black"),
+                    ),
+                    hovertext=hover[b],
+                ),
+                secondary_y=False,
+            )
+            i += 1
+
+    # PWV trace
+    ds_factor = 10
+    #pwvs = deepcopy(d.pwv[1][::ds_factor])
+    #pwvs[(pwvs > 4) | (pwvs < .1)] = np.nan
+    #ts = [dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in d.pwv[0][::ds_factor]]
+
+    ts, pwvs = zip(*sorted(
+        ((dt.datetime.fromtimestamp(o.start_time, tz=dt.timezone.utc), o.pwv) for o in d.obs_list)
+    ))
+    ts = list(ts)
+    pwvs = list(pwvs)
+
+    fig.add_trace(
+        go.Scatter(
+            x=ts,
+            y=pwvs,
+            mode="markers",
+            name="PWV [mm]",
+            line=dict(color="#CC79A7", width=2, dash="solid"),
+            opacity=0.6,
+        ),
+        secondary_y=True,
+    )
+
+    # layout
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=140, b=40),
+        height=550,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+        title=dict(
+            text=f"{field_name.capitalize()} NEP and PWV",
+            x=0.5,
+            xanchor="center",
+            y=0.92,
+            yanchor="top",
+            font=dict(size=18),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text="Time (UTC)",
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text=r"$\rm{NEP\ [aW/\sqrt{Hz}]}$",
+        secondary_y=False,
+        showgrid=True,
+        gridcolor="lightgray",
+    )
+    fig.update_yaxes(
+        title_text="PWV [mm]",
+        secondary_y=True,
+        showgrid=True,
+    )
+
+    return fig
+
+
+def nep_vs_pwv(d: "ReportData", longterm_data: Optional["ReportData"] = None,
+               field_name: str = None) -> go.Figure:
+    """NEP as a function of PWV. Current interval is plotted over longterm contours.
+    """
+    fig = go.Figure()
+
+    if longterm_data is not None:
+        long_neps = defaultdict(lambda: defaultdict(list))
+        long_pwvs = []
+
+        for obs in longterm_data.obs_list:
+            if field_name == "array":
+                field = obs.array_nep
+            elif field_name == "det":
+                field = obs.det_nep
+            if field.size > 0:
+                if np.isfinite(obs.pwv):
+                    long_pwvs.append(obs.pwv)
+                    for b in field.dtype.names:
+                        for i, pol in enumerate(field[b].dtype.names):
+                            if pol not in long_neps[b].keys():
+                                long_neps[b][pol] = []
+                            long_neps[b][pol].append(field[b][0][i])
+
+        i = 0
+        for b in sorted(long_neps):
+            for pol, long_nep in long_neps[b].items():
+                fig.add_trace(
+                    go.Histogram2dContour(
+                        x=long_pwvs,
+                        y=long_nep,
+                        colorscale=[[0, colors[i]], [1, colors[i]]],
+                        contours_coloring="lines",
+                        showscale=False,
+                        opacity=0.7,
+                        name=f"longterm {b}",
+                    )
+                )
+                i += 1
+
+    neps = defaultdict(lambda: defaultdict(list))
+    pwvs = []
+    hover = defaultdict(list)
+
+    # build a dict keyed off of bandpass for data from all obs
+    for obs in d.obs_list:
+        if field_name == "array":
+            field = obs.array_nep
+        elif field_name == "det":
+            field = obs.det_nep
+        if field.size > 0:
+            if np.isfinite(obs.pwv):
+                pwvs.append(obs.pwv)
+                for b in field.dtype.names:
+                    hover[b].append(obs.obs_id)
+                    for i, pol in enumerate(field[b].dtype.names):
+                        if pol not in neps[b].keys():
+                            neps[b][pol] = []
+                        neps[b][pol].append(field[b][0][i])
+
+    i = 0
+    for b in sorted(neps):
+        for pol, nep in neps[b].items():
+            fig.add_trace(
+                go.Scatter(
+                    x=pwvs,
+                    y=nep,
+                    mode="markers",
+                    name=f"{pol.split('_')[-1]} ({b})",
+                    marker=dict(
+                        color=colors[i % len(colors)],
+                        symbol=markers[i % len(markers)],
+                        size=8,
+                        line=dict(width=1, color="black"),
+                    ),
+                    hovertext=hover[b],
+                )
+            )
+            i += 1
+
+    # layout
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=140, b=40),
+        height=550,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+        title=dict(
+            text=f"{field_name.capitalize()} NEP and PWV",
+            x=0.5,
+            xanchor="center",
+            y=0.92,
+            yanchor="top",
+            font=dict(size=18),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text="PWV [mm]",
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text=r"$\rm{NEP\ [aW/\sqrt{Hz}]}$",
+        showgrid=True,
+        gridcolor="lightgray",
+    )
+
+    return fig
+
+def cov_map_plot(map_png_file: str, embed:bool=True) -> str:
+    import base64
+
+    if map_png_file is None or not os.path.isfile(map_png_file):
+        return "<p>Coverage map not found</p>"
+
+    # Embed image as base64 (guaranteed to work)
+    if embed:
+        with open(map_png_file, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+
+        return (
+            f'<img src="data:image/png;base64,{b64}" '
+            f'style="max-width:100%; height:auto;" '
+            f'alt="Coverage Map">'
+        )
+
+    # Otherwise use relative path
+    return (
+        f'<img src="./{os.path.basename(map_png_file)}" '
+        f'style="max-width:100%; height:auto;" '
+        f'alt="Coverage Map">'
+    )
 @dataclass
 class SourceFootprintPlots:
     focalplane: go.Figure
@@ -322,9 +790,9 @@ def source_footprints(d: "ReportData") -> go.Figure:
         angs = np.arange(-np.pi / 2, 3 * np.pi / 2, np.pi / 3)
         x0s = [0] + [np.cos(a) * wafer_sep for a in angs]
         y0s = [0] + [np.sin(a) * wafer_sep for a in angs]
-        
+
         wafers = ['ws0', 'ws1', 'ws6', 'ws5', 'ws4', 'ws3', 'ws2']
-        
+
         wafer_centers = {}
         for i, wafer in enumerate(wafers):
             wafer_centers[wafer] = (x0s[i], y0s[i])
@@ -341,14 +809,14 @@ def source_footprints(d: "ReportData") -> go.Figure:
                -0.02117608, -0.01556659, -0.0099571 , -0.02117957,  0.01579872,
                 0.02117957,  0.0099571 ,  0.03112446,  0.03673045,  0.02551671,
                 0.01556834,  0.02117608,  0.01021716]
-        
+
         wafers = ['c1_ws0', 'c1_ws1', 'c1_ws2',
                   'i1_ws0', 'i1_ws1', 'i1_ws2',
                   'i3_ws0', 'i3_ws1', 'i3_ws2',
                   'i4_ws0', 'i4_ws1', 'i4_ws2',
                   'i5_ws0', 'i5_ws1', 'i5_ws2',
                   'i6_ws0', 'i6_ws1', 'i6_ws2']
-        
+
         wafer_centers = {}
         for i, wafer in enumerate(wafers):
             wafer_centers[wafer] = (x0s[i], y0s[i])
@@ -362,7 +830,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
             ]
         )
         return pts
-    
+
     xs = [x for x, y in wafer_centers.values()]
     ys = [y for x, y in wafer_centers.values()]
 
@@ -380,10 +848,10 @@ def source_footprints(d: "ReportData") -> go.Figure:
         x_max = x_mid + y_span / 2
     x_margin = x_span * 0.05
     y_margin = x_span * 0.05
-    
+
     x_range = [x_min - 1.1*wafer_rad, x_max + 1.1*wafer_rad]
     y_range = [y_min - 1.1*wafer_rad, y_max + 1.1*wafer_rad]
-    
+
     def get_normalized_positions(positions, x_range, y_range, fig_width, fig_height):
         x0, x1 = x_range
         y0, y1 = y_range
@@ -413,9 +881,9 @@ def source_footprints(d: "ReportData") -> go.Figure:
                 norm_positions[key] = (x_paper, y_paper)
 
         return norm_positions
-    
+
     norm_positions = get_normalized_positions(wafer_centers, x_range, y_range, 700, 700)
-    
+
     def normalize_values(values, target_total=100):
         total = sum(values)
         if total == 0:
@@ -439,7 +907,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
                 hoverinfo="skip",
             )
         )
-        
+
         fig.add_annotation(
             x=x0,
             y=y0 + 0.9*wafer_rad,
@@ -454,11 +922,11 @@ def source_footprints(d: "ReportData") -> go.Figure:
 
     ntargets = 0
     target_colors = {}
-    if d.source_footprints is not None:        
+    if d.source_footprints is not None:
         wafer_map = defaultdict(list)
         for fp in d.source_footprints:
             wafer_map[fp.wafer].append(fp)
-            
+
         if wafer_map:
             for wafer, group in wafer_map.items():
                 x, y = norm_positions[wafer]
@@ -468,7 +936,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
                     f"Wafer: {fp.wafer}<br>Source: {fp.source}<br>Count: {fp.count}<br>ObsIDs:<br>" + "<br>".join(fp.obsids)
                     for fp in group
                 ]
-                
+
                 x0 = x - pie_width / 2
                 x1 = x + pie_width / 2
                 y0 = y - pie_width / 2
@@ -514,15 +982,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
         height=800,
         margin=dict(t=50, b=50, l=50, r=50)
     )
-    
-    wafers = sorted(set(fp.wafer for fp in d.source_footprints))
-    sources = sorted(set(fp.source for fp in d.source_footprints))
-    
-    lookup = {
-        (fp.wafer, fp.source): fp.obsids
-        for fp in d.source_footprints
-    }
-    
+
     def make_obsid_links(obsids):
         if not obsids:
             return ""
@@ -531,15 +991,28 @@ def source_footprints(d: "ReportData") -> go.Figure:
             for obsid in obsids
         ]
         return "<br>".join(links) + ("<br>" if len(links) == 1 else "")
-    
-    wafer_col = wafers
-    source_cols = []
-    for source in sources:
-        col = []
-        for wafer in wafers:
-            obsids = lookup.get((wafer, source), [])
-            col.append(make_obsid_links(obsids))
-        source_cols.append(col)
+
+    if d.source_footprints is not None:
+        wafers = sorted(set(fp.wafer for fp in d.source_footprints))
+        sources = sorted(set(fp.source for fp in d.source_footprints))
+
+        lookup = {
+            (fp.wafer, fp.source): fp.obsids
+            for fp in d.source_footprints
+        }
+
+        wafer_col = wafers
+        source_cols = []
+        for source in sources:
+            col = []
+            for wafer in wafers:
+                obsids = lookup.get((wafer, source), [])
+                col.append(make_obsid_links(obsids))
+            source_cols.append(col)
+    else:
+        wafer_col = []
+        source_cols = []
+        sources = []
 
     table_columns = [wafer_col] + source_cols
     header_labels = ["Wafers"] + sources
@@ -560,12 +1033,12 @@ def source_footprints(d: "ReportData") -> go.Figure:
             height=30
         )
     )])
-    
+
     table.update_layout(
         width=500,
         height=400 + 30 * len(wafers),
         margin=dict(l=20, r=20, t=20, b=20),
         dragmode=False
     )
-    
+
     return SourceFootprintPlots(focalplane=fig, table=table)

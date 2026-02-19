@@ -6,6 +6,7 @@ import datetime as dt
 from typing import Optional
 from sotodlib.io.imprinter import Imprinter, Books, FAILED
 import sotodlib.io.imprinter_utils as utils
+from sotodlib.site_pipeline.utils.alerts import send_alert
 
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -36,19 +37,23 @@ def _bookbinding_helper(platform, bid ):
     return imprint._run_book_binding(bid)
 
 
-def main(config: str, n_proc:int=1):
+def main(config: str, n_proc:int=1, alert_webhook: str=''):
     """Make books based on imprinter db
     
     Parameters
     ----------
     config : str
         path to imprinter configuration file
+    n_proc : int
+        Number of processes
+    alert_webhook : str
+        Webhook URL to send alerts
     """
     imprinter = Imprinter(
         config, 
         db_args={'connect_args': {'check_same_thread': False}}
     )
-
+    
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
@@ -95,6 +100,8 @@ def main(config: str, n_proc:int=1):
             print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
+            alert = send_alert(alert_webhook, alertname=book.bid, tag='bookbinder', error=str(e), timestamp=book.start)
+            print(alert)
 
 
 def get_parser(parser=None):
@@ -108,6 +115,10 @@ def get_parser(parser=None):
     parser.add_argument(
         "--n-proc", type=int, default=1,
         help="The number of processes to run for operations books"
+    )
+    parser.add_argument(
+        "--alert-webhook", type=str, default='',
+        help="Webhook address to send error alerts"
     )
     return parser
 

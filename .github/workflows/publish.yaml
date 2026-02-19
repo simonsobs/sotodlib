@@ -24,21 +24,19 @@ jobs:
       contents: read  # Required to checkout the repository
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Fetch full history for tags
-          ref: ${{ github.ref_name }}
       
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       
       - name: Verify we're on the correct tag
         run: |
           echo "Current tag: $(git describe --tags --exact-match)"
-          echo "Expected tag: ${{ github.ref_name }}"
-          git describe --tags --exact-match | grep -q "${{ github.ref_name }}"
+          git checkout "refs/tags/$(git describe --tags --exact-match)"
 
       - name: Build
         run: |
