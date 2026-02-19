@@ -793,6 +793,11 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     return sight
 
 def normalize_geometry(shape, wcs):
+    """Analyze (shape, wcs) and return a pixel-compatible (shape, wcs)
+    that positions the reference pixel in a way that works with so3g projection
+    routines. Only cylindrical projections are affected.
+    
+    """
     # Can't freely change wcs for non-separable geometries
     # (so non-cylindrical ones), as this would change the geometry
     # in an incompatible way

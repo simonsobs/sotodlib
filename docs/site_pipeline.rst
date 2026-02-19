@@ -163,7 +163,7 @@ make_det_info_wafer
 ```````````````````
 
 This script uses basic array construction inputs to assemble a table
-of information about a set of UFMs and save it toan HDF5 file.  The
+of information about a set of UFMs and save it to an HDF5 file.  The
 resulting datasets may be used to populate ``det_info.wafer``, once
 the ``det_id`` of the readout channels is known.  The detector info
 mapping created by this script is re-usable as long as the UFM
@@ -189,6 +189,18 @@ values, add a config file entry like this::
   bandpass_remap:
     90: 220
     150: 280
+
+
+For LF arrays, the inputs and outputs are somewhat different and the
+config should include ``mode: LF``; e.g.::
+
+  output_dir: ./lat_wafer_info_260211
+  array_info_dir: "/home/pipeline/site-pipeline-configs/shared/detmapping/design/"
+
+  mode: LF
+
+  stream_ids:
+    - mfm_lot1
 
 
 The output database ``wafer_info.sqlite`` and HDF5 file
@@ -979,6 +991,19 @@ timestreams. A typical configuration file could look like this:
         # Path to housekeeping data (this is used for extracting pwv)
         hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
+update-mapviewer-dbs
+----------
+
+This module maintains databases for mapviewer instances that show atomic/depth-1 maps
+per instrument.
+
+Command line arguments
+``````````````````````
+
+.. argparse::
+   :module: sotodlib.site_pipeline.update_mapviewer_dbs
+   :func: get_parser
+   :prog: update-mapviewer-dbs
 
 QDS Monitor
 ===========

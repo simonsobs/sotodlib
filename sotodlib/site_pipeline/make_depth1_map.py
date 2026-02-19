@@ -34,10 +34,8 @@ def get_parser(parser=None):
         "--area", type=str, help="Path to FITS file describing the mapping geometry"
     )
     parser.add_argument("--odir", type=str, help="Directory for saving output maps")
-    parser.add_argument(
-        "--preprocess_config", type=str, help="Preprocess configuration file"
-    )
-    parser.add_argument("-C", "--comps", type=str, help="T,Q, and/or U")
+    parser.add_argument("--preprocess-config", type=str, help="Preprocess configuration file")
+    parser.add_argument('-C', "--comps",   type=str, help="T,Q, and/or U")
     parser.add_argument("-c", "--context", type=str, help="Context containing TODs")
     parser.add_argument(
         "-n",
