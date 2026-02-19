@@ -262,6 +262,7 @@ def main(config: str,
             #Stream_ids and wafers
             try:
                 stream_ids = index["stream_ids"]
+                unused_ids_check = stream_ids[:]
                 wafer_slots = index["wafer_slots"]
                 wafer_count = 0
                 wafer_slots_list = ""
@@ -270,10 +271,12 @@ def main(config: str,
                     if slot["stream_id"] in stream_ids:
                         wafer_slots_list += slot["wafer_slot"]+","
                         wafer_count += 1
+                        unused_ids_check.pop(unused_ids_check.index(slot["stream_id"]))
                 very_clean["wafer_count"] = wafer_count
                 very_clean["wafer_slots_list"] = wafer_slots_list[:-1] #Eliminate last comma
                 very_clean["stream_ids_list"] = stream_ids_list
-                if len(stream_ids) > wafer_count: #More stream ids than wafers. Opposite not broken because LF has fewer streams than wafers
+                if len(unused_ids_check)>0: 
+                    #Some stream_ids not linked to wafers.
                     logger.error("Missing info on some stream_ids")
                     continue
                 bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
