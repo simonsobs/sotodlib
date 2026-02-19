@@ -992,7 +992,7 @@ timestreams. A typical configuration file could look like this:
         hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
 make-depth1-map
--------------------------
+---------------
 
 This script will create depth1 maps.
 
@@ -1046,7 +1046,7 @@ A typical configuration file could look like this:
 
 
 update-mapviewer-dbs
-----------
+--------------------
 
 This module maintains databases for mapviewer instances that show atomic/depth-1 maps
 per instrument.
