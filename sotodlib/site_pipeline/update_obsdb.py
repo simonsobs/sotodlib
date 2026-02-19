@@ -262,20 +262,21 @@ def main(config: str,
             #Stream_ids and wafers
             try:
                 stream_ids = index["stream_ids"]
-                bookcartobsdb.add_obs_columns(["wafer_count int"])
-                very_clean["wafer_count"] = len(stream_ids)
                 wafer_slots = index["wafer_slots"]
-                if len(wafer_slots) < len(stream_ids):
-                    logger.error("Missing info on some stream_ids")
-                    continue
-                bookcartobsdb.add_obs_columns(["wafer_slots_list str", "stream_ids_list str"])
+                wafer_count = 0
                 wafer_slots_list = ""
                 stream_ids_list = ",".join(stream_ids)
                 for slot in wafer_slots:
                     if slot["stream_id"] in stream_ids:
                         wafer_slots_list += slot["wafer_slot"]+","
-                very_clean["wafer_slots_list"] = wafer_slots_list[:-1]#Eliminate last comma
+                        wafer_count += 1
+                very_clean["wafer_count"] = wafer_count
+                very_clean["wafer_slots_list"] = wafer_slots_list[:-1] #Eliminate last comma
                 very_clean["stream_ids_list"] = stream_ids_list
+                if len(stream_ids) > wafer_count: #More stream ids than wafers. Opposite not broken because LF has fewer streams than wafers
+                    logger.error("Missing info on some stream_ids")
+                    continue
+                bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
             except KeyError:
                 logger.error("Unable to find stream_ids or wafer slots")
 
