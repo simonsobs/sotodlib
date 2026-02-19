@@ -2580,14 +2580,20 @@ class SubtractT2P(_Preprocess):
         super().__init__(step_cfgs)
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
-        if data_aman is not None:
+        if sim and data_aman is not None:
             data_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
             data_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
 
-            t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(
-                data_aman,
-                merge_stats=False
-            )
+            if self.process_cfgs.get("fit_in_freq"):
+                t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs_in_freq(
+                    data_aman,
+                    merge_stats=False
+                )
+            else:
+                t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(
+                    data_aman,
+                    merge_stats=False
+                )
             tod_ops.t2pleakage.subtract_t2p(
                 aman,
                 t2p_aman,
