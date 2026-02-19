@@ -427,7 +427,9 @@ class PSDCalc(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         full_output = self.process_cfgs.get('full_output')
         if full_output:
             freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
@@ -2867,7 +2869,9 @@ class ScanFreqCut(_Preprocess):
         
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         scan_freq = tod_ops.utils.get_scan_freq(aman)
         hpf_cfg = {'type': 'sine2', 'cutoff': scan_freq, 'trans_width': scan_freq/10}
         filt = tod_ops.get_hpf(hpf_cfg)
@@ -3231,7 +3235,9 @@ class Move(_Preprocess):
 
         super().__init__(step_cfgs)
 
-    def process(self, aman, proc_aman, sim=False):
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
         aman.move(**self.process_cfgs)
         return aman, proc_aman
 
