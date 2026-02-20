@@ -188,7 +188,7 @@ def mycontiguous(a):
     b[...] = a[...]
     return b
 
-def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbose=False):
+def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose=False):
     ndet = ft.shape[0]
     vecs = np.zeros([ndet,0])
     if not skip_mean:
@@ -201,22 +201,24 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=False, verbos
         d    = ft[:,b[0]:b[1]]
         cov  = measure_cov(d)
         cov  = project_out_from_matrix(cov, vecs)
-        e, v = np.linalg.eig(cov)
+        e, v = np.linalg.eigh(cov)
         e, v = e.real, v.real
-        #e, v = e[::-1], v[:,::-1]
+        e, v = e[::-1], v[:,::-1]
         accept = np.full(len(e), True, bool)
         if eig_lim is not None:
             # Compute median, exempting modes we don't have enough data to measure
             nsamp    = b[1]-b[0]+1
             median_e = np.median(np.sort(e)[::-1][:nsamp])
             accept  &= e/median_e >= eig_lim[bi]
-        if verbose: print("bin %d: %4d modes above eig_lim" % (bi, np.sum(accept)))
+        if verbose:
+            print("bin %d: %4d modes above eig_lim" % (bi, np.sum(accept)))
         if single_lim is not None and e.size:
             # Reject modes too concentrated into a single mode. Since v is normalized,
             # values close to 1 in a single component must mean that all other components are small
             singleness = np.max(np.abs(v),0)
             accept    &= singleness < single_lim[bi]
-        if verbose: print("bin %d: %4d modes also above single_lim" % (bi, np.sum(accept)))
+        if verbose:
+            print("bin %d: %4d modes also above single_lim" % (bi, np.sum(accept)))
         e, v = e[accept], v[:,accept]
         vecs = np.concatenate([vecs,v],1)
     return vecs
