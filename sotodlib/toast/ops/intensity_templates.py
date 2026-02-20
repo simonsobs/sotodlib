@@ -1,4 +1,4 @@
-# Copyright (c) 2025 by the parties listed in the AUTHORS file.
+# Copyright (c) 2025-2026 by the parties listed in the AUTHORS file.
 # All rights reserved.  Use of this source code is governed by
 # a BSD-style license that can be found in the LICENSE file.
 
@@ -240,7 +240,7 @@ class IntensityTemplates(Operator):
                     det for det in local_intensity_dets
                     if pat.match(det) is not None
                 ]
-            if gcomm.size == 1:
+            if gcomm is None or gcomm.size == 1:
                 intensity_dets = local_intensity_dets
             else:
                 proc_dets = gcomm.gather(local_intensity_dets)
@@ -271,7 +271,8 @@ class IntensityTemplates(Operator):
                 if intensity_det not in ob.local_detectors:
                     continue
                 all_tod[idet] = ob.detdata[self.det_data][intensity_det]
-            all_tod = gcomm.allreduce(all_tod)
+            if gcomm is not None:
+                all_tod = gcomm.allreduce(all_tod)
 
             # Get the relevant focalplane keys to go with the data.
             # We concatenate all the keys together and each unique
