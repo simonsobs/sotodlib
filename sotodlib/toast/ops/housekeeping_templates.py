@@ -162,14 +162,6 @@ class HouseKeepingTemplates(Operator):
         """
         log = Logger.get()
         gcomm = data.comm.comm_group
-        wcomm = data.comm.comm_world
-        timer0 = Timer()
-        timer0.start()
-
-        if detectors is None:
-            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
-        else:
-            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         if self.hkkey is None:
             msg = f"You must set the `hkkey` trait before applying "
@@ -352,11 +344,6 @@ class HouseKeepingTemplates(Operator):
 
             hktemplates["det_to_key"] = det_to_key
             ob[self.template_name] = hktemplates
-
-        if detectors is None:
-            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
-        else:
-            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
         return
 

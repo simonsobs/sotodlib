@@ -203,13 +203,6 @@ class IntensityTemplates(Operator):
         log = Logger.get()
         wcomm = data.comm.comm_world
         gcomm = data.comm.comm_group
-        timer0 = Timer()
-        timer0.start()
-
-        if detectors is None:
-            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
-        else:
-            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         if (wcomm is None or wcomm.rank == 0) and self.cache_dir is not None:
             os.makedirs(self.cache_dir, exist_ok=True)
@@ -472,11 +465,6 @@ class IntensityTemplates(Operator):
 
             intensity_templates["det_to_key"] = det_to_key
             ob[self.template_name] = intensity_templates
-
-        if detectors is None:
-            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
-        else:
-            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
         return
 

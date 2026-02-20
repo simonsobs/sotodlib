@@ -46,14 +46,6 @@ class ReadoutFilter(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
-        wcomm = data.comm.comm_world
-        timer0 = Timer()
-        timer0.start()
-
-        if detectors is None:
-            log.info_rank(f"Applying {type(self).__name__}", comm=wcomm)
-        else:
-            log.debug_rank(f"Applied {type(self).__name__}", comm=wcomm)
 
         for ob in data.obs:
             if self.iir_params not in ob:
@@ -103,11 +95,6 @@ class ReadoutFilter(Operator):
                 # We are filtering all detectors at once
                 signal = ob.detdata[self.det_data][local_dets, :]
                 self._filter_detectors(rate, freq, signal, ob[self.iir_params])
-
-        if detectors is None:
-            log.info_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
-        else:
-            log.debug_rank(f"Applied {type(self).__name__} in", comm=wcomm, timer=timer0)
 
     @function_timer
     def _filter_detectors(self, rate, freq, det_array, iir_props):
