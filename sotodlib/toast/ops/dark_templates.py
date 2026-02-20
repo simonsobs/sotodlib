@@ -22,6 +22,7 @@ from toast.utils import Environment, Logger
 from toast.ops import Operator
 from toast.ops.demodulation import Lowpass
 
+from .utils import persistent_pickle_load
 
 XAXIS, YAXIS, ZAXIS = np.eye(3)
 
@@ -199,34 +200,9 @@ class DarkTemplates(Operator):
             cached_dark_tod = {}
             if self.cache_dir is not None:
                 fname_cache = os.path.join(self.cache_dir, f"{ob.name}.pck")
-                if os.path.isfile(fname_cache):
-                    # Combine new and cached dark TOD
-                    log.info_rank(
-                        f"Loading dark TOD from "
-                        f"{fname_cache}",
-                        comm=gcomm,
-                    )
-                    # Loading the file will fail if another process is
-                    # writing it. We will try up to 6 times and wait
-                    # 10 seconds between each try
-                    n_try_max = 3
-                    for n_try in range(n_try_max):
-                        try:
-                            with open(fname_cache, "rb") as f:
-                                cached_dark_tod = pickle.load(f)
-                        except EOFError:
-                            if n_try == n_try_max - 1:
-                                log.warning(
-                                    f"EOF at {fname_cache}, will overwrite"
-                                )
-                                break
-                            else:
-                                log.warning(
-                                    f"EOF at {fname_cache}, waiting for 10 seconds"
-                                )
-                                sleep(10)
-                                continue
-                        break  # success
+                result = persistent_pickle_load(fname_cache)
+                if result is not None:
+                    cached_dark_tod = result
             else:
                 fname_cache = None
 
