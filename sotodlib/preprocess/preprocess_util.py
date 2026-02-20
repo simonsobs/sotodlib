@@ -632,7 +632,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         return None
     else:
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
-        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+
+        if not ignore_cfg_check:
+            aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
         if (
             ignore_cfg_check or
@@ -747,6 +749,7 @@ def run_pipeline_stepgroups(pipe, aman, run_last_step=False):
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
+                                       ignore_cfg_check=False,
                                        data_amans=None):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
@@ -779,6 +782,9 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only : bool
         Optional. Whether or not to run the dependent pipeline.
+    ignore_cfg_check : bool
+        If True, do not attempt to validate that configs_init is the same as
+        the config used to create the existing init db.
     data_amans: dict (Optional)
         A dictionary of AxisManagers with keys (step, process.name)
         filled with AxisManager processed up to step-1. This is used
@@ -811,10 +817,14 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         return None
     else:
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
-        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-        if check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
-                           logger=logger):
+        if not ignore_cfg_check:
+            aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+
+        if ignore_cfg_check or check_cfg_match(
+            aman_cfgs_ref,
+            meta_proc.preprocess['pcfg_ref'],
+            logger=logger):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all proc pipeline processes")

@@ -57,7 +57,7 @@ class Detrend(_Preprocess):
         self.save_name = None
 
         super().__init__(step_cfgs)
-    
+
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if data_aman is not None:
             raise NotImplementedError("No support for using data AxisManager in process")
@@ -2583,6 +2583,8 @@ class SubtractT2P(_Preprocess):
 
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if sim and data_aman is not None:
+
+            data_aman.restrict("dets", aman.dets.vals)
             data_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
             data_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
 
