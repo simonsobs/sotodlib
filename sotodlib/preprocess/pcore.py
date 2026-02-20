@@ -37,8 +37,9 @@ class _Preprocess(object):
         self.save_cfgs = step_cfgs.get("save")
         self.select_cfgs = step_cfgs.get("select")
         self.plot_cfgs = step_cfgs.get("plot")
-        self.skip_on_sim = step_cfgs.get("skip_on_sim", False)
-    def process(self, aman, proc_aman, sim=False):
+        self.skip_on_sim = step_cfgs.get("skip_on_sim")
+        self.use_data_aman = step_cfgs.get("use_data_aman", False)
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
         """ This function makes changes to the time ordered data AxisManager.
         Ex: calibrating or detrending the timestreams. This function will use
         any configuration information under the ``process`` key of the
@@ -56,6 +57,9 @@ class _Preprocess(object):
         sim: Bool
             False by default when analyzing data. Should be True when doing 
             Transfer Function simulations and determining which steps should be run.
+        data_aman: AxisManager (Optional)
+            An AxisManager containing the preprocessed data to be used by
+            this process.
         """
         if self.process_cfgs is None:
             return aman, proc_aman
@@ -435,8 +439,14 @@ class Pipeline(list):
             super().extend( [self._check_item(item) for item in other])
     def __setitem__(self, index, item):
         super().__setitem__(index, self._check_item(item))
+    def __getitem__(self, index):
+        result = super().__getitem__(index)
+        if isinstance(index, slice):
+            return Pipeline(result)
+        else:
+            return result
     
-    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False):
+    def run(self, aman, proc_aman=None, select=True, sim=False, update_plot=False, data_amans=None):
         """
         The main workhorse function for the pipeline class. This function takes
         an AxisManager TOD and successively runs the pipeline of preprocessing
@@ -472,6 +482,11 @@ class Pipeline(list):
             given ``proc_aman`` is ``aman.preprocess``. This assumes
             ``process.calc_and_save()`` has been run on this aman before and
             has injested flags and other information into ``proc_aman``.
+        data_amans: dict (Optional)
+            A dictionary of AxisManagers with keys (step, process.name)
+            filled with AxisManager processed up to step-1. This is used
+            to pre-load all data AxisManager which could be required when
+            processing simulations (e.g. to provide a T2P template)
 
         Returns
         -------
@@ -520,10 +535,21 @@ class Pipeline(list):
 
         success = 'end'
         for step, process in enumerate(self):
+            if sim and (process.skip_on_sim is None):
+                raise ValueError(f"Process {process.name} missing required field `skip_on_sim`")
             if sim and process.skip_on_sim:
                 continue
             self.logger.debug(f"Running {process.name}")
-            aman, proc_aman = process.process(aman, proc_aman, sim)
+            if (data_amans is not None) and process.use_data_aman:
+                try:
+                    data_aman = data_amans[step, process.name]
+                except KeyError:
+                    raise KeyError(f"Requested to use data AxisManager for process {process.name} but not found in data_amans")
+            else:
+                if process.use_data_aman and sim:
+                    raise ValueError(f"Process {process.name} requested to use data_aman but none was provided to Pipeline.run()")
+                data_aman = None
+            process.process(aman, proc_aman, sim, data_aman)
             if run_calc:
                 aman, proc_aman = process.calc_and_save(aman, proc_aman)
                 process.plot(aman, proc_aman, filename=os.path.join(self.plot_dir, '{ctime}/{obsid}', f'{step+1}_{{name}}.png'))
