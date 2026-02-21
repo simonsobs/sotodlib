@@ -114,18 +114,19 @@ class NmatUncorr(Nmat):
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
             downweight=[], window=2, nwin=None, verbose=False, bins=None,
-            D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000):
+            D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000, skip_mean=True):
         # This is all taken from act, not tuned to so yet
-        if bin_edges is None: bin_edges = np.array([
-            0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
-            1.20, 1.40, 1.70, 2.00, 2.40, 2.80, 3.40, 3.80,
-            4.60, 5.00, 5.50, 6.00, 6.50, 7.00, 8.00, 9.00, 10.0, 11.0,
-            12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 22.0,
-            24.0, 26.0, 28.0, 30.0, 32.0, 36.5, 41.0,
-            45.0, 50.0, 55.0, 65.0, 70.0, 80.0, 90.0,
-            100., 110., 120., 130., 140., 150., 160., 170.,
-            180., 190.
-        ])
+        if bin_edges is None:
+            bin_edges = np.array([
+                0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
+                1.20, 1.40, 1.70, 2.00, 2.40, 2.80, 3.40, 3.80,
+                4.60, 5.00, 5.50, 6.00, 6.50, 7.00, 8.00, 9.00, 10.0, 11.0,
+                12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 22.0,
+                24.0, 26.0, 28.0, 30.0, 32.0, 36.5, 41.0,
+                45.0, 50.0, 55.0, 65.0, 70.0, 80.0, 90.0,
+                100., 110., 120., 130., 140., 150., 160., 170.,
+                180., 190.
+            ])
         self.bin_edges = bin_edges
         self.mode_bins = mode_bins
         self.eig_lim   = np.zeros(len(mode_bins))+eig_lim
@@ -136,6 +137,7 @@ class NmatDetvecs(Nmat):
         self.window = window
         self.nwin   = nwin
         self.bmin_eigvec = bmin_eigvec
+        self.skip_mean   = skip_mean
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
 
@@ -157,9 +159,13 @@ class NmatDetvecs(Nmat):
         if np.any(np.diff(mode_bins) < 0):
             raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
         # Then use these to get our set of basis vectors
-        vecs = find_modes_jon(ftod, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, verbose=self.verbose)
+        vecs = find_modes_jon(ftod, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, skip_mean=self.skip_mean, verbose=self.verbose)
         nmode= vecs.shape[1]
-        if vecs.size == 0: raise errors.ModelError("Could not find any noise modes")
+        if nmode == 0:
+            if self.verbose:
+                print("NmatDetvecs: Could not find any noise modes, defaulting to uncorrelated noise model")
+            noise_uncorr = NmatUncorr(window=self.window)
+            return noise_uncorr.build_fourier(ftod, nsamp, srate, nwin=nwin)
         # Cut bins that extend beyond our max frequency
         bin_edges = self.bin_edges[self.bin_edges < srate/2 * 0.99]
         bins      = makebins(bin_edges, srate, nfreq, nmin=5, rfun=np.round)
