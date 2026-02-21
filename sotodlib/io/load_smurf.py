@@ -678,7 +678,7 @@ class G3tSmurf:
             ch_made = [c.channel for c in ch_assign.channels]
             for notch in notches:
                 # smurf did not assign a channel
-                if notch[2] == -1:
+                if int(notch[2]) == -1:
                     continue
                 if int(notch[2]) in ch_made:
                     continue
@@ -694,21 +694,7 @@ class G3tSmurf:
                     chan_assignment=ch_assign,
                     band=ch_assign.band,
                 )
-
-                if ch.channel == -1:
-                    logger.warning(
-                        f"Un-assigned channel made in Channel Assignment {ch_assign.name}"
-                    )
-                    continue
-                check = (
-                    session.query(Channels)
-                    .filter(
-                        Channels.ca_id == ch_assign.id, Channels.channel == ch.channel
-                    )
-                    .one_or_none()
-                )
-                if check is None:
-                    session.add(ch)
+                session.add(ch)
         session.commit()
 
     def _assign_set_from_file(
@@ -756,17 +742,11 @@ class G3tSmurf:
                     )
                     .one_or_none()
                 )
-            else:
-                cha = session.query(ChanAssignments).filter(
-                    ChanAssignments.stream_id == stream_id,
-                    ChanAssignments.ctime <= ctime,
-                    ChanAssignments.band == band,
-                )
-
-                cha = cha.order_by(db.desc(ChanAssignments.ctime)).first()
-            if cha is None:
-                logger.error(f"Missing Channel Assignment for tune file {tune_path}")
-                continue
+                if cha is None:
+                    raise ValueError(
+                        f"Missing a database entry for Channel Assignment {cha_name} "
+                        f"in tune file {tune_path}"
+                    )
             assign_set.append(cha)
         return assign_set
 
@@ -1575,24 +1555,8 @@ class G3tSmurf:
         ):
             if pattern in fpattern:
                 try:
-                    # decide if this is the last channel assignment in the directory
-                    # needed because we often get multiple channel assignments in the
-                    # same folder
-                    root = os.path.join("/", *path.split("/")[:-1])
-                    fname = path.split("/")[-1]
-                    fband = int(re.findall(r"b\d.txt", fname)[0][1])
-                    cha_times = [
-                        int(f.split("_")[0])
-                        for f in os.listdir(root)
-                        if f"b{fband}.txt" in f.split("_")[-1]
-                    ]
-                    if ctime != np.max(cha_times):
-                        continue
-                    logger.debug(
-                        f"Add new channel assignment: {stream_id},{ctime}, {path}"
-                    )
                     self.add_new_channel_assignment(
-                        stream_id, ctime, fname, path, session
+                        stream_id, ctime, path.split("/")[-1], path, session
                     )
                 except Exception as e:
                     self._process_index_error(
