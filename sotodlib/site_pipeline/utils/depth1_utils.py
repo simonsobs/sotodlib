@@ -20,6 +20,25 @@ from sotodlib.tod_ops import detrend_tod
 def sensitivity_cut(
     rms_uKrts: np.ndarray, sens_lim: float, med_tol: float = 0.2, max_lim: float = 100
 ) -> np.ndarray:
+    """Sensitivity cuts for mapmakers, based on white noise of individual detectors
+
+    Parameters
+    ----------
+    rms_uKrts : ndarray
+        RMS per det with shape Ndets, in units of uK*sqrt(s).
+    sens_lim : float
+        Fixed limit sensitivity.
+    med_tol : float, optional
+        Median tolerance for rejection of outliers.
+    max_lim : float, optional
+        Also reject very noisy detectors with noise higher than
+        max_lim*sens_lim
+
+    Returns
+    -------
+    good: ndarray
+        A boolean array with good and bad detectors.
+    """
 
     # First reject detectors with unreasonably low noise
     # Also reject far too noisy detectors
@@ -137,6 +156,34 @@ def find_footprint(
     return_pixboxes: bool = False,
     pad: int = 1,
 ) -> Tuple[Any, Any, Optional[np.ndarray]]:
+    """Find an enmap geometry (shape, wcs) that encompass
+    all TODs composing a depth-1 map. Useful to limit the
+    size of the depth-1 map to only the necessary.
+    
+
+    Parameters
+    ----------
+    tods : list
+        List of Axis Managers containing the observations in a
+        depth-1 map. These will don't have signal, but only the
+        ancillary data required (boresight, focal_plane,
+        timestamps, etc).
+    ref_wcs : WCS dict
+        Reference wcs to build the geometry of the map.
+    comm : MPI communicator, optional
+    return_pixboxes : bool, optional
+        whether or not also return the pixboxes of the obs.
+    pad : int, optional
+
+    Returns
+    -------
+    shape : tuple
+        Shape of the geometry, (N pixels in X, N pixels in Y).
+    wcs : WCS dict
+        WCS of the map.
+    pixboxes : list, optional
+        List of pixboxes for each input obs.
+    """
 
     # Measure the pixel bounds of each observation relative to our
     # reference wcs
