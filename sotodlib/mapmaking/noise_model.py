@@ -62,9 +62,12 @@ class NmatUncorr(Nmat):
     def build_fourier(self, ftod, nsamp, srate, nwin=0):
         ps = np.abs(ftod)**2
         del ftod
-        if   self.spacing == "exp": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
-        elif self.spacing == "lin": bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
-        else: raise ValueError("Unrecognized spacing '%s'" % str(self.spacing))
+        if self.spacing == "exp":
+            bins = utils.expbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
+        elif self.spacing == "lin":
+            bins = utils.linbin(ps.shape[-1], nbin=self.nbin, nmin=self.nmin)
+        else:
+            raise ValueError("Unrecognized spacing '%s'" % str(self.spacing))
         ps_binned  = utils.bin_data(bins, ps) / nsamp
         ips_binned = 1/ps_binned
         # Compute the representative inverse variance per sample
