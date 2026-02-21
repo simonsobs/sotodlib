@@ -112,11 +112,9 @@ class NmatUncorr(Nmat):
         return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=data.window, nwin=data.nwin)
 
 class NmatDetvecs(Nmat):
-    def __init__(self, bin_edges=None, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20],
-            downweight=[], window=2, nwin=None, verbose=False, bins=None,
-            D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000, skip_mean=True):
-        # This is all taken from act, not tuned to so yet
-        if bin_edges is None:
+    def __init__(self, bin_edges="act_default", nbin=100, nmin=10, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20], downweight=[], 
+                window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000, skip_mean=True):
+        if bin_edges == "act_default":
             bin_edges = np.array([
                 0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
                 1.20, 1.40, 1.70, 2.00, 2.40, 2.80, 3.40, 3.80,
@@ -127,7 +125,17 @@ class NmatDetvecs(Nmat):
                 100., 110., 120., 130., 140., 150., 160., 170.,
                 180., 190.
             ])
+        elif bin_edges in ["exp", "lin"]:
+            pass # Computed later in build_fourier
+        elif isinstance(bin_edges, (list, np.ndarray)):
+            bin_edges = np.ascontiguousarray(bin_edges)
+        else:
+            raise ValueError(
+                f"bin_edges must be 'act_default', 'exp', 'lin', a list, or a numpy array, got {bin_edges!r}"
+            )
         self.bin_edges = bin_edges
+        self.nbin       = nbin
+        self.nmin       = nmin
         self.mode_bins = mode_bins
         self.eig_lim   = np.zeros(len(mode_bins))+eig_lim
         self.single_lim= np.zeros(len(mode_bins))+single_lim
@@ -153,8 +161,8 @@ class NmatDetvecs(Nmat):
     def build_fourier(self, ftod, nsamp, srate, nwin=0, **kwargs):
         ndet, nfreq = ftod.shape
         dtype       = utils.real_dtype(ftod.dtype)
-        # First build our set of eigenvectors in two bins. The first goes from
-        # 0.25 to 4 Hz the second from 4Hz and up
+        # First build our set of eigenvectors.
+        # Default mode_bins=[0.25,4.0,20] builds them in two bins: the first from 0.25 to 4 Hz the second from 4 to 20 Hz
         mode_bins = makebins(self.mode_bins, srate, nfreq, nmin=self.bmin_eigvec, rfun=np.ceil, cap=False)
         if np.any(np.diff(mode_bins) < 0):
             raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
@@ -166,9 +174,16 @@ class NmatDetvecs(Nmat):
                 print("NmatDetvecs: Could not find any noise modes, defaulting to uncorrelated noise model")
             noise_uncorr = NmatUncorr(window=self.window)
             return noise_uncorr.build_fourier(ftod, nsamp, srate, nwin=nwin)
-        # Cut bins that extend beyond our max frequency
-        bin_edges = self.bin_edges[self.bin_edges < srate/2 * 0.99]
-        bins      = makebins(bin_edges, srate, nfreq, nmin=5, rfun=np.round)
+        # Compute frequency bins when needed
+        if self.bin_edges in ["exp", "lin"]:
+             if self.bin_edges == "exp":
+                bins = utils.expbin(nfreq, nbin=self.nbin, nmin=self.nmin)
+             else:
+                bins = utils.linbin(nfreq, nbin=self.nbin, nmin=self.nmin)
+        else:
+            # When provided a custom array cut bins that extend beyond our max frequency
+            bin_edges = self.bin_edges[self.bin_edges < srate/2 * 0.99]
+            bins      = makebins(bin_edges, srate, nfreq, nmin=5, rfun=np.round)
         nbin      = len(bins)
         # Now measure the power of each basis vector in each bin. The residual
         # noise will be modeled as uncorrelated
@@ -208,7 +223,7 @@ class NmatDetvecs(Nmat):
 
         return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
                 window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
-                bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
+                mode_bins= self.mode_bins, bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
 
     def apply(self, tod, inplace=True, slow=False):
         self.check_ready()
