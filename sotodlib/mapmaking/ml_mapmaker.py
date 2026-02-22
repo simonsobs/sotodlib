@@ -43,7 +43,7 @@ class MLMapmaker:
         self.ready = False
         self.glitch_flags_path = glitch_flags
 
-    def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None):
+    def add_obs(self, id, obs, deslope=True, noise_model=None, signal_estimate=None, **kwargs):
         # Prepare our tod
         ctime = obs.timestamps
         srate = (len(ctime) - 1) / (ctime[-1] - ctime[0])
@@ -78,7 +78,7 @@ class MLMapmaker:
         tod = nmat.apply(tod)
         # Add the observation to each of our signals
         for signal in self.signals:
-            signal.add_obs(id, obs, nmat, tod)
+            signal.add_obs(id, obs, nmat, tod, **kwargs)
         # Save what we need about this observation
         self.data.append(
             bunch.Bunch(
@@ -321,7 +321,7 @@ class SignalMap(Signal):
             self.div = enmap.zeros((ncomp, ncomp) + shape, wcs, dtype=dtype)
             self.hits = enmap.zeros(shape, wcs, dtype=dtype)
 
-    def add_obs(self, id, obs, nmat, Nd, pmap=None, cuts=None):
+    def add_obs(self, id, obs, nmat, Nd, pmap=None, cuts=None, **kwargs):
         """Add and process an observation, building the pointing matrix
         and our part of the RHS. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
@@ -519,7 +519,7 @@ class SignalCut(Signal):
         self.div = []
         self.cut_field = cut_field
 
-    def add_obs(self, id, obs, nmat, Nd, cuts=None):
+    def add_obs(self, id, obs, nmat, Nd, cuts=None, **kwargs):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data.
@@ -643,7 +643,7 @@ class SignalSrcsamp(SignalCut):
         # Distance of of our extra degrees of freedom
         self.distsamps  = []
 
-    def add_obs(self, id, obs, nmat, Nd):
+    def add_obs(self, id, obs, nmat, Nd, **kwargs):
         """Add and process an observation. "obs" should be an Observation axis manager,
         nmat a noise model, representing the inverse noise covariance matrix,
         and Nd the result of applying the noise model to the detector time-ordered data.
