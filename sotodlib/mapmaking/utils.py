@@ -410,21 +410,24 @@ def infer_comps(ncomp): return ["T","QU","TQU"][ncomp-1]
 
 def parse_recentering(desc):
     """Parse an object centering description, as provided by the --center-at argument.
-    The format is [from=](ra:dec|name),[to=(ra:dec|name)],[up=(ra:dec|name|system)]
+    The format is [from=](ra:dec|name),[to=(ra:dec|name)],[up=(ra:dec|name|system)],[from_sys=sys],[to_sys=sys],[up_sys=sys]
     from: specifies which point is to be centered. Given as either
-      * a ra:dec pair in degrees
+      * a ra:dec pair in degrees (or l:b pair if from_sys=gal)
       * the name of a pre-defined celestial object (e.g. Saturn), which should not move
         appreciably in celestial coordinates during a TOD
     to: the point at which to recenter. Optional. Given as either
-      * a ra:dec pair in degrees
+      * a ra:dec pair in degrees (or l:b pair if to_sys=gal)
       * the name of a pre-defined celestial object
       Defaults to ra=0,dec=0 or ra=0,dec=90, depending on the projection
     up: which direction should point up after recentering. Optional. Given as either
       * the name of a coordinate system (e.g. hor, cel, gal), in which case
         up will point towards the north pole of that system
-      * a ra:dec pair in degrees
+      * a ra:dec pair in degrees (or l:b pair if up_sys=gal)
       * the name of a pre-defined celestial object
       Defualts to the celestial north pole
+    from_sys, to_sys, up_sys: coordinate system for interpreting coordinates.
+      Supported systems: "cel"/"equ" (celestial/equatorial), "gal" (galactic), "hor" (horizontal).
+      Defaults to "cel" (celestial).
 
     Returns "info", a bunch representing the recentering specification in more python-friendly
     terms. This can later be passed to evaluate_recentering to get the actual euler angles that perform
@@ -439,11 +442,11 @@ def parse_recentering(desc):
         Centers on Uranus, but up is up in horizontal coordinates. Appropriate for beam mapping
       * Uranus,up=hor,to=0:90
         As above, but explicitly recenters on the north pole
+      * 0:0,from_sys=gal
+        Centers on the galactic center (l=0°, b=0°), with up being celestial north
+      * 0:0,from_sys=gal,up_sys=gal
+        Centers on galactic center, with up being the galactic north pole
     """
-    # If necessary the syntax above could be extended with from_sys, to_sys and up-sys, which
-    # so one could specify galactic coordiantes for example. Or one could generalize
-    # from ra:dec to phi:theta[:sys], where sys would default to cel. But for how I think
-    # this is enough.
     args = desc.split(",")
     info  = {"to":"auto", "up":"cel", "from_sys":"cel", "to_sys":"cel", "up_sys":"cel"}
     for ai, arg in enumerate(args):
@@ -475,6 +478,13 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
             return lonlat
         elif sys == "hor":
             return so3g.proj.CelestialSightLine.az_el(ctime, lonlat[0], lonlat[1], site=site, weather=weather).coords()[0,:2]
+        elif sys == "gal":
+            from pixell.reproject import coordinates
+            lonlat = np.asarray(lonlat)
+            if lonlat.ndim == 1:
+                lonlat = lonlat[:, None]
+            result = coordinates.transform('gal', 'cel', lonlat)
+            return result[:, 0] if result.shape[1] == 1 else result
         else:
             raise NotImplementedError
     def get_pos(name, ctime, sys=None):
@@ -514,6 +524,129 @@ def recentering_to_quat_lonlat(p1, p2, pu):
     R     = quat.euler(2, ra2)*quat.euler(1, np.pi/2-dec2)*quat.euler(2, np.pi-rau2)*R
     a = quat.decompose_lonlat(R*quat.rotation_lonlat(ra1,dec1))
     return R
+
+def get_coord_sys_rotation(coord_sys):
+    """Get the rotation quaternion that transforms from equatorial (celestial)
+    coordinates to the target coordinate system.
+
+    This is used to produce maps in coordinate systems other than equatorial.
+    The rotation is applied to detector pointing quaternions before projection.
+
+    Args:
+        coord_sys: Target coordinate system. Supported values:
+            - 'cel' or 'equ' or None: Celestial/equatorial (no rotation)
+            - 'gal': Galactic coordinates
+
+    Returns:
+        Quaternion representing the rotation from equatorial to the target
+        coordinate system, or None for celestial (identity rotation).
+
+    Notes:
+        For galactic coordinates, uses the rotation quaternion from
+        pixell.coordsys.equ_rots which is based on the IAU 1958 standard.
+    """
+    if coord_sys is None or coord_sys == 'cel' or coord_sys == 'equ':
+        return None
+    elif coord_sys == 'gal':
+        # Use pixell's precomputed quaternion for equatorial -> galactic
+        # and convert to so3g quaternion format
+        from pixell import coordsys
+        import quaternion
+        from so3g.proj import quat
+        pixell_q = coordsys.equ_rots['gal']
+        arr = quaternion.as_float_array(pixell_q)  # [w, x, y, z]
+        return quat.quat(*arr)
+    else:
+        raise ValueError(f"Unknown coordinate system: {coord_sys}. "
+                        f"Supported: 'cel'/'equ' (celestial), 'gal' (galactic)")
+
+def get_combined_rotation(coord_sys, recenter, ctime, geom=None, site=None):
+    """Compute the combined rotation for coordinate system transformation and recentering.
+
+    This handles the correct composition of rotations when both a coordinate system
+    transformation and recentering are specified.
+
+    Args:
+        coord_sys: Target coordinate system ('cel', 'gal', or None)
+        recenter: Recentering specification dict from parse_recentering()
+        ctime: Timestamp for evaluating time-dependent positions
+        geom: Map geometry (optional)
+        site: Site specification (optional)
+
+    Returns:
+        Quaternion representing the combined rotation, or None if no rotation needed.
+    """
+    rot_coordsys = get_coord_sys_rotation(coord_sys)
+
+    if recenter is None:
+        return rot_coordsys
+
+    if coord_sys is None or coord_sys in ('cel', 'equ'):
+        # No coordinate transformation, just standard recentering in equatorial
+        return recentering_to_quat_lonlat(*evaluate_recentering(recenter, ctime, geom, site))
+
+    elif coord_sys == 'gal':
+        # For galactic coordinates, we need to:
+        # 1. First transform pointing from equatorial to galactic (rot_coordsys)
+        # 2. Then recenter in galactic space
+
+        # Get the recentering target position in galactic coordinates
+        from_pos = recenter.get('from')
+        from_sys = recenter.get('from_sys', 'cel')
+        to_pos = recenter.get('to', 'auto')
+        up_sys = recenter.get('up_sys', 'cel')
+
+        # Convert 'from' position to galactic if needed
+        if from_sys == 'gal':
+            gal_from = from_pos  # Already in galactic (l, b)
+        else:
+            # Convert from equatorial to galactic using pixell
+            from pixell.reproject import coordinates
+            eq_pos = np.asarray(from_pos)
+            if eq_pos.ndim == 1:
+                eq_pos = eq_pos[:, None]
+            gal_from = coordinates.transform('cel', 'gal', eq_pos)
+            if gal_from.shape[1] == 1:
+                gal_from = gal_from[:, 0]
+
+        # Determine target position (default to origin)
+        if to_pos == 'auto' or to_pos is None:
+            gal_to = [0, 0]
+        elif isinstance(to_pos, list):
+            # If to_sys is specified, handle conversion
+            to_sys = recenter.get('to_sys', 'cel')
+            if to_sys == 'gal':
+                gal_to = to_pos
+            else:
+                from pixell.reproject import coordinates
+                eq_to = np.asarray(to_pos)
+                if eq_to.ndim == 1:
+                    eq_to = eq_to[:, None]
+                gal_to = coordinates.transform('cel', 'gal', eq_to)
+                if gal_to.shape[1] == 1:
+                    gal_to = gal_to[:, 0]
+        else:
+            gal_to = [0, 0]
+
+        # Determine 'up' direction in galactic coordinates
+        # For galactic maps, default to galactic north pole (not celestial north)
+        if up_sys == 'gal' or up_sys == 'cel':
+            # Use galactic north pole for galactic maps
+            gal_up = [0, np.pi/2]
+        else:
+            # Convert from other coordinate systems if needed
+            from pixell.reproject import coordinates
+            # For now, just use galactic north
+            gal_up = [0, np.pi/2]
+
+        # Compute recentering rotation in galactic space
+        rot_recenter_gal = recentering_to_quat_lonlat(gal_from, gal_to, gal_up)
+
+        # Compose: first transform to galactic, then recenter
+        return rot_recenter_gal * rot_coordsys
+
+    else:
+        raise ValueError(f"Unknown coordinate system: {coord_sys}")
 
 def highpass(tod, fknee=1e-2, alpha=3):
     ft   = fft.rfft(tod)

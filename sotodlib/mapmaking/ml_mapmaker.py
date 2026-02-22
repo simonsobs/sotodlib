@@ -333,17 +333,14 @@ class SignalMap(Signal):
         pcut   = PmatCut(cuts)  # could pass this in, but fast to construct
         if pmap is None:
             # Build the local geometry and pointing matrix for this observation
-            if self.recenter:
-                rot = smutils.recentering_to_quat_lonlat(
-                    *smutils.evaluate_recentering(
-                        self.recenter,
-                        ctime=ctime[len(ctime) // 2],
-                        geom=self.rhs.geometry,
-                        site=smutils.unarr(obs.site),
-                    )
-                )
-            else:
-                rot = None
+            # Use get_combined_rotation to correctly compose coord_sys and recentering
+            rot = smutils.get_combined_rotation(
+                self.sys,
+                self.recenter,
+                ctime=ctime[len(ctime) // 2],
+                geom=self.rhs.geometry,
+                site=smutils.unarr(obs.site),
+            )
             pmap = coords.pmat.P.for_tod(
                 obs,
                 comps=self.comps,

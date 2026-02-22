@@ -19,6 +19,7 @@ def get_parser(parser=None):
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet",   action="count", default=0)
     parser.add_argument("-@", "--center-at", type=str, default=None)
+    parser.add_argument(      "--coord-sys", type=str, default=None, help="Coordinate system for the output map: 'cel' (celestial/equatorial, default) or 'gal' (galactic)")
     parser.add_argument("-w", "--window",  type=float, default=0.0)
     parser.add_argument("-i", "--inject",  type=str,   default=None, help="Path to map to inject. Equatorial coordinates")
     parser.add_argument(      "--nocal",   action="store_true", help="Disable calibration. Useful for sims")
@@ -145,7 +146,7 @@ def main(**args):
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
-        signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, recenter=recenter, tiled=args.tiled>0, interpol=args.interpol)
+        signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, sys=args.coord_sys, recenter=recenter, tiled=args.tiled>0, interpol=args.interpol)
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
