@@ -9,6 +9,12 @@ import re
 DEG = np.pi/180
 
 
+if hasattr(so3g.proj.quat, "quat"):
+    legacy_spt3g = True
+else:
+    legacy_spt3g = False
+
+
 def _get_csl(sight):
     """Return the CelestialSightLine equivalent of sight.  If sight is
     already of that class, it is returned.  If it's a G3VectorQuat or
@@ -710,7 +716,9 @@ class ScalarLastQuat(np.ndarray):
             obj = np.empty(arr.shape)
             obj[:,:3] = arr[:,1:]
             obj[:,3] = arr[:,0]
-        elif isinstance(arr, so3g.proj.quat.quat):
+        elif legacy_spt3g and isinstance(arr, so3g.proj.quat.quat):
+            obj = np.array((arr.b, arr.c, arr.d, arr.a))
+        elif not legacy_spt3g and isinstance(arr, so3g.proj.quat.Quat):
             obj = np.array((arr.b, arr.c, arr.d, arr.a))
         else:
             obj = np.asarray(arr)
@@ -726,7 +734,10 @@ class ScalarLastQuat(np.ndarray):
             raise ValueError("Last axis must have 4 elements.")
         if self.ndim == 1:
             b, c, d, a = self[:].astype(float)
-            return so3g.proj.quat.quat(a, b, c, d)
+            if legacy_spt3g:
+                return so3g.proj.quat.quat(a, b, c, d)
+            else:
+                return so3g.proj.quat.Quat(a, b, c, d)
         if self.ndim == 2:
             temp = np.zeros(self.shape, float)
             temp[..., 0] = self[..., 3]
@@ -737,9 +748,9 @@ class ScalarLastQuat(np.ndarray):
 def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     """
     Constructs a deflected CelestialSightLine using HWP-synchronous
-    pointing correction using combined wobble metadata that contains 
+    pointing correction using combined wobble metadata that contains
     both amp and phase fields.
-    
+
     This function will raise ValueError unless all detectors belong to a single
     wafer and frequency band. It extracts the corresponding deflection amplitude
     and phase from the metadata, computes the wobble correction quaternion, and
@@ -748,7 +759,7 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     Parameters
     ----------
     aman : AxisManager
-        AxisManager for the observation, must include hwp_angle, timestamps, 
+        AxisManager for the observation, must include hwp_angle, timestamps,
         and boresight.az/el, as well as det_info with wafer and band info.
 
     wobble_meta : AxisManager
@@ -796,7 +807,7 @@ def normalize_geometry(shape, wcs):
     """Analyze (shape, wcs) and return a pixel-compatible (shape, wcs)
     that positions the reference pixel in a way that works with so3g projection
     routines. Only cylindrical projections are affected.
-    
+
     """
     # Can't freely change wcs for non-separable geometries
     # (so non-cylindrical ones), as this would change the geometry
