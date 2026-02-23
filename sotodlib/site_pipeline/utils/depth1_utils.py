@@ -204,7 +204,17 @@ def find_footprint(
     """Find an enmap geometry (shape, wcs) that encompass
     all TODs composing a depth-1 map. Useful to limit the
     size of the depth-1 map to only the necessary.
-    
+
+    Caveats: there might be edge cases covering a wide range
+    of R.A. where the combined depth-1 map ends up wrapping on
+    the other edge. The end result is a map which covers 360deg
+    in R.A. The reason is that a priori you don't know where the
+    center of the overall depth-1 map is. So if the depth-1 map
+    exposes an area >180deg wide in R.A., you might end up with
+    this issue. In the future we might add some mechanism that
+    finds the middle-point of the hypothetical perfectly
+    unwrapped patch, which would allow us to find the optimal
+    wrapping.
 
     Parameters
     ----------
