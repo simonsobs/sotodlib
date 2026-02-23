@@ -262,7 +262,7 @@ def main(config: str,
             #Stream_ids and wafers
             try:
                 stream_ids = index["stream_ids"]
-                unused_ids_check = stream_ids[:]
+                unused_ids_check = np.ones(len(stream_ids))
                 wafer_slots = index["wafer_slots"]
                 wafer_count = 0
                 wafer_slots_list = ""
@@ -271,13 +271,15 @@ def main(config: str,
                     if slot["stream_id"] in stream_ids:
                         wafer_slots_list += slot["wafer_slot"]+","
                         wafer_count += 1
-                        unused_ids_check.pop(unused_ids_check.index(slot["stream_id"]))
+                        unused_ids_check[stream_ids.index(slot["stream_id"])] = 0
                 very_clean["wafer_count"] = wafer_count
                 very_clean["wafer_slots_list"] = wafer_slots_list[:-1] #Eliminate last comma
                 very_clean["stream_ids_list"] = stream_ids_list
-                if len(unused_ids_check)>0: 
+                if np.any(unused_ids_check)!=0: 
                     #Some stream_ids not linked to wafers.
-                    logger.error("Missing info on some stream_ids")
+                    bad_streams = [sid for sid, uic in zip(stream_ids, unused_ids_check) if uic == 1]
+                    bad_streams_string = ", ".join(map(str, bad_streams))
+                    logger.error(f"Missing info on some stream_ids: {bad_streams_string}")
                     continue
                 bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
             except KeyError:
