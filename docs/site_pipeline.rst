@@ -1161,8 +1161,62 @@ timestreams. A typical configuration file could look like this:
         # Path to housekeeping data (this is used for extracting pwv)
         hk_data_path: /global/cfs/cdirs/sobs/data/site/hk/
 
+make-depth1-map
+---------------
+
+This script will create depth1 maps.
+
+Configuration yaml file
+````````````````````````
+
+The mapmaker is configured by supplying a yaml file with ``--config-file``.
+
+.. argparse::
+   :module: sotodlib.site_pipeline.make_depth1_map
+   :func: get_parser
+   :prog: make-depth1-map
+
+A typical configuration file could look like this:
+
+.. code-block:: yaml
+
+        # Query
+        query: "1"
+
+        # Context file containing TODs
+        context: 'context.yaml'
+        # A preprocess database configuration file that will tell the script how to process the timestreams
+        preprocess_config: ./lat_config_mf.yaml
+        # Telescope info
+        site: 'so_lat'
+
+        # Mapping area footprint
+        area: 'geometry.fits'
+
+        # Output Directory and file name prefix
+        odir: './output/'
+
+        # Mapmaking meta
+        comps: 'T' # TQU
+        downsample: 1 # Downsample TOD by this factor
+        tiled: 0 # Tiling boolean (0 or 1)
+        unit: 'K'
+        maxiter: 2
+        srcsamp: 'srcsamp_mask.fits'
+        
+        # Scripting tools
+        verbose: True
+        quiet: False
+        tasks_per_group: 4
+
+        # Database integration
+        mapcat_database_name: './mapcat.sqlite'
+        mapcat_depth_one_parent: './output/'
+
+
+
 update-mapviewer-dbs
-----------
+--------------------
 
 This module maintains databases for mapviewer instances that show atomic/depth-1 maps
 per instrument.
@@ -1436,10 +1490,46 @@ config
    :members:
    :undoc-members:
 
+
+constants
+`````````
+
+.. automodule:: sotodlib.site_pipeline.utils.constants
+   :members:
+   :undoc-members:
+
+depth1_utils
+````````````
+
+.. automodule:: sotodlib.site_pipeline.utils.depth1_utils
+   :members:
+   :undoc-members:
+
+exceptions
+``````````
+
+.. automodule:: sotodlib.site_pipeline.utils.exceptions
+   :members:
+   :undoc-members:
+
+io
+``
+
+.. automodule:: sotodlib.site_pipeline.utils.io
+   :members:
+   :undoc-members:
+
 logging
 ```````
 
 .. automodule:: sotodlib.site_pipeline.utils.logging
+   :members:
+   :undoc-members:
+
+mapcat
+``````
+
+.. automodule:: sotodlib.site_pipeline.utils.mapcat
    :members:
    :undoc-members:
 
