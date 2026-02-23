@@ -714,7 +714,7 @@ class ScalarLastQuat(np.ndarray):
             obj = np.empty(arr.shape)
             obj[:,:3] = arr[:,1:]
             obj[:,3] = arr[:,0]
-        elif isinstance(arr, so3g.proj.quat.quat):
+        elif isinstance(arr, so3g.proj.quat.Quat):
             obj = np.array((arr.b, arr.c, arr.d, arr.a))
         else:
             obj = np.asarray(arr)
@@ -730,7 +730,7 @@ class ScalarLastQuat(np.ndarray):
             raise ValueError("Last axis must have 4 elements.")
         if self.ndim == 1:
             b, c, d, a = self[:].astype(float)
-            return so3g.proj.quat.quat(a, b, c, d)
+            return so3g.proj.quat.Quat(a, b, c, d)
         if self.ndim == 2:
             temp = np.zeros(self.shape, float)
             temp[..., 0] = self[..., 3]
@@ -741,9 +741,9 @@ class ScalarLastQuat(np.ndarray):
 def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     """
     Constructs a deflected CelestialSightLine using HWP-synchronous
-    pointing correction using combined wobble metadata that contains 
+    pointing correction using combined wobble metadata that contains
     both amp and phase fields.
-    
+
     This function will raise ValueError unless all detectors belong to a single
     wafer and frequency band. It extracts the corresponding deflection amplitude
     and phase from the metadata, computes the wobble correction quaternion, and
@@ -752,7 +752,7 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     Parameters
     ----------
     aman : AxisManager
-        AxisManager for the observation, must include hwp_angle, timestamps, 
+        AxisManager for the observation, must include hwp_angle, timestamps,
         and boresight.az/el, as well as det_info with wafer and band info.
 
     wobble_meta : AxisManager
