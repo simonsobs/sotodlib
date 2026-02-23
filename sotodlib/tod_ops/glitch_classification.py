@@ -2,8 +2,8 @@ import numpy as np
 from sotodlib.tod_ops import detrend_tod
 import os, pickle as pk
 
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 
 from sotodlib.tod_ops import filter_stats_functions as func
 
@@ -26,7 +26,7 @@ def get_default_stats():
     list
         A list of the default summary statistics for glitch classification.
     """
-    return stat_dict.keys()
+    return list(stat_dict.keys())
 
 def compute_summary_stats(snippet, stats=None):
     '''
@@ -56,80 +56,86 @@ def compute_summary_stats(snippet, stats=None):
     return stats_arr
 
 
-def split_into_training_and_test(df, train_per):
+def split_into_training_and_test(data, labels, train_size=None, random_state=None):
 
     '''
-    Split pandas dataframe into training and test set.
+    Split data and labels into training and test sets.
 
-    Input: df: pandas data frame, train_per: percent of the data for training set in decimal form
-    Output: df_train: pandas dataframe of the training data, df_test: pandas dataframe of the test data,
-    inds: array of the indicies of the training data in orginal dataframe
+    Input: data: numpy.ndarray of shape (n_samples, n_features),
+    labels: numpy.ndarray of shape (n_samples,),
+    Optional: train_size: fraction of the data for training set in decimal form
+    random_state: random state for reproducibility
+    Output: data_train, labels_train: training data and labels,
+    data_test, labels_test: test data and labels
     '''
 
-    train_inds = np.random.choice(a = df.shape[0], size = int(df.shape[0]*train_per), replace = False)
+    data_train, data_test, labels_train, labels_test = train_test_split(
+        data, labels, train_size=train_size, random_state=random_state)
 
-    df_train = df.iloc[train_inds]
+    return data_train, labels_train, data_test, labels_test
 
-    df_test = df.drop(df.index[train_inds])
-
-    return df_train, df_test, train_inds
-
-def training_forest(df_train, stats = None, n_trees = 50, max_depth = 15):
+def train_forest(X_train, y_train, stats=None, n_trees=50, max_depth=15):
 
     '''
     Train random forest.
 
-    Input: df_train: pandas data frame of training data
-    Optional: stats: list of columns of stats to train with (default = all in stat_dict),
+    Input: X_train: numpy.ndarray of shape (n_samples, n_features) with training data,
+    y_train: numpy.ndarray of shape (n_samples,) with training labels
+    Optional: stats: list of feature names corresponding to columns of X_train
+    (default = all in stat_dict),
     n_trees: number of trees in forest (default = 50),
     max_depth: maximum number of splits for each tree (default = 15)
-    Output: forest: trained random forest
+    Output: forest: trained random forest (set with feature_names_in_)
     '''
     if stats is None:
         stats = get_default_stats()
 
-    X, Y = df_train[stats], df_train['Train_Lab']
+    if X_train.shape[1] != len(stats):
+        raise ValueError(
+            f"Number of columns in X_train ({X_train.shape[1]}) does not "
+            f"match number of stat names ({len(stats)})")
 
-    forest = RandomForestClassifier(criterion='entropy', n_estimators = n_trees, random_state=1, n_jobs=2, max_depth = max_depth)
+    forest = RandomForestClassifier(criterion='entropy', n_estimators=n_trees, random_state=1, n_jobs=2, max_depth=max_depth)
 
-    forest.fit(X, Y)
+    forest.fit(X_train, y_train)
+    forest.feature_names_in_ = np.array(stats)
 
     return forest
 
 
-def classify_data_forest(df_classify, trained_forest):
+PRED_COLUMNS = ['Glitch Prediction', 'Probability of being a Point Source',
+                'Probability of being a Point Source + Other',
+                'Probability of being a Cosmic Ray',
+                'Probability of being an Electronic Glitch']
+
+
+def classify_data_forest(X_classify, trained_forest):
 
     """Classify glitches using a random forest.
 
     Parameters:
-        df_classify (pandas.DataFrame):
-            DataFrame of data to classify
+        X_classify (numpy.ndarray):
+            2D array of shape (n_samples, n_features). Assumes columns are
+            ordered to match trained_forest.feature_names_in_.
         trained_forest (RandomForestClassifier):
-            Trained random forest
+            Trained random forest.
 
     Returns:
-        pandas.DataFrame:
-            DataFrame with columns for the predicted labels for the glitches
-            and the probabilities of them belonging to each category.
-            Labels: int from 0-3 corresponding to
-            0: Point Sources
-            1: Point Sources + Other
-            2: Cosmic Rays
-            3: Electronic Glitches
+        numpy.ndarray:
+            2D array of shape (n_samples, 5). Columns correspond to
+            PRED_COLUMNS:
+            0: Glitch Prediction (int label 0-3 for the classes below)
+            1: Probability of being a Point Source
+            2: Probability of being a Point Source + Other
+            3: Probability of being a Cosmic Ray
+            4: Probability of being an Electronic Glitch
     """
-
-    col_preds = ['Glitch Prediction', 'Probability of being a Point Source',
-                'Probability of being a Point Source + Other', 'Probability of being a Cosmic Ray',
-                'Probability of being an Electronic Glitch']
-
-    X_classify = df_classify[trained_forest.feature_names_in_]
 
     y_pred_forest = trained_forest.predict(X_classify)
 
     y_pred_forest_probs = trained_forest.predict_proba(X_classify)
 
-    preds = pd.DataFrame(np.column_stack((y_pred_forest, y_pred_forest_probs)),
-                    columns = col_preds, index = df_classify.index)
+    preds = np.column_stack((y_pred_forest, y_pred_forest_probs))
 
     return preds
 
@@ -149,43 +155,51 @@ def classify_snippets(snippets, trained_forest):
 
     Returns
     -------
-    df_preds: pandas.DataFrame
-        The predictions for the glitches and the probabilities for each category.
-    df_stats: pandas.DataFrame
-        The computed statistics used for classifying the glitches.
+    preds: numpy.ndarray
+        2D array of shape (n_snippets, 5) with predictions and probabilities.
+        Columns correspond to PRED_COLUMNS. Rows with invalid stats are NaN.
+    stats_array: numpy.ndarray
+        2D array of shape (n_snippets, n_stats) with the computed statistics
+        used for classification.
+    col_names: dict
+        Dictionary with keys 'preds' and 'stats', giving the column names
+        for ``preds`` and ``stats_array``.
     """
     if isinstance(trained_forest, str):
-        trained_forest = pk.load(open('{}.pkl'.format(trained_forest), 'rb'))
+        with open('{}.pkl'.format(trained_forest), 'rb') as f:
+            trained_forest = pk.load(f)
 
-    # Compute the summary statistics used in the provided trained_forest
-    stats = trained_forest.feature_names_in_
-    df_stats = pd.DataFrame([compute_summary_stats(s, stats=stats) for s in snippets], columns = stats)
+    # Compute the summary statistics in the order the forest expects
+    stat_names = list(trained_forest.feature_names_in_)
+    stats_array = np.array([compute_summary_stats(s, stats=stat_names) for s in snippets])
 
-    # Classify, after removing rows with invalid values
-    df_preds = classify_data_forest(df_stats.replace([np.inf, -np.inf], np.nan).dropna(), trained_forest)
+    # Build a mask of valid rows (no inf or nan)
+    valid_mask = np.all(np.isfinite(stats_array), axis=1)
 
-    # Insert rows of NaNs for missing indices (assumed to be due to removed rows)
-    missing_idxs = df_stats.index.difference(df_preds.index)
-    for i in missing_idxs:
-        df_preds.loc[i] = np.full(df_preds.shape[1], np.nan)
-    df_preds.sort_index(inplace=True)
+    # Classify only valid rows
+    preds = np.full((len(snippets), len(PRED_COLUMNS)), np.nan)
+    if np.any(valid_mask):
+        preds[valid_mask] = classify_data_forest(stats_array[valid_mask], trained_forest)
 
-    return df_preds, df_stats
+    col_names = {'preds': list(PRED_COLUMNS), 'stats': stat_names}
 
-def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0', '#FFE660'], \
- save = False, save_file_name = 'forest_confusion_matrix', outdir = os.getcwd(), show = True):
+    return preds, stats_array, col_names
+
+def plot_confusion_matrix(pred_labs, true_labs, colours=['purple', 'coral', '#40A0A0', '#FFE660'],
+                         save=False, save_file_name='forest_confusion_matrix',
+                         outdir=os.getcwd(), show=True):
 
     '''
     Plot confusion matrix.
 
-    Input: pred_labs: predicted labels,
-    df: pandas data frame of data ensure Glitch column is present for labels, title: plot title (str)
+    Input: pred_labs: numpy.ndarray of predicted labels,
+    true_labs: numpy.ndarray of true labels
     Optional: colours: list colours for plotting, save: True or False for if you want to save the figure,
     save_file_name: file name for plots, outdir: output directory, show: True or False for if you want to show the plot
     Output: No output, plot will show and/or save
     '''
 
-    acc = accuracy_score(df['Train_Lab'], pred_labs)
+    acc = accuracy_score(true_labs, pred_labs)
 
     plt.rcParams['xtick.labelsize'] = 14
     plt.rcParams['ytick.labelsize'] = 14
@@ -194,7 +208,7 @@ def plot_confusion_matrix(pred_labs, df, colours = ['purple', 'coral', '#40A0A0'
     leg_labs = ['Point Sources', 'Point Sources + Other', 'Cosmic Rays', 'Other']
 
 
-    cm = confusion_matrix(df['Train_Lab'], pred_labs)
+    cm = confusion_matrix(true_labs, pred_labs)
 
     cmn = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 

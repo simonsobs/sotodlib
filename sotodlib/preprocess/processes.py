@@ -3046,16 +3046,16 @@ class GlitchClassification(_Preprocess):
         snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
 
         # classify the glitches
-        predictions, stats = gc.classify_snippets(snippets, trained_forest_name)
+        preds, stats, col_names = gc.classify_snippets(snippets, trained_forest_name)
 
         # wrap the ranges and dets in an axis manager
         snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
-                                        core.LabelAxis("stat_names", list(stats.columns)),
-                                        core.LabelAxis("pred_cols", list(predictions.columns)))
+                                        core.LabelAxis("stat_names", col_names['stats']),
+                                        core.LabelAxis("pred_cols", col_names['preds']))
         snippet_aman.wrap("snippet_ranges", snippet_ranges, [(0, 'samps')])
         snippet_aman.wrap("det_mask", np.array(det_mask), [(0, 'snippets'), (1, 'dets')])
-        snippet_aman.wrap("stats", stats.to_numpy(), [(0, 'snippets'), (1, 'stat_names')])
-        snippet_aman.wrap("predictions", predictions.to_numpy(), [(0, 'snippets'), (1, 'pred_cols')])
+        snippet_aman.wrap("stats", stats, [(0, 'snippets'), (1, 'stat_names')])
+        snippet_aman.wrap("predictions", preds, [(0, 'snippets'), (1, 'pred_cols')])
         snippet_aman.wrap("training_set_name", trained_forest_name, core.LabelAxis("training_set_name", trained_forest_name))
         self.save(proc_aman, snippet_aman)
 

@@ -31,6 +31,7 @@ dependencies = [
   "flacarray>=0.3.4",
   "numpy-quaternion", # Required quietly by pixell.coordsys
   "h5py",
+  "scikit-learn",
 ]
 dynamic=["version"]
 classifiers = [
