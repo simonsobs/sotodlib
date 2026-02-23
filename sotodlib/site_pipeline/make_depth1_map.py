@@ -9,15 +9,10 @@ from pixell import bunch, enmap, mpi, tilemap, utils, wcsutils
 from sotodlib import mapmaking
 from sotodlib.core import Context
 from sotodlib.preprocess import preprocess_util as pp_util
-
+from sotodlib.site_pipeline.utils import depth1_utils as d1u
+from sotodlib.site_pipeline.utils import mapcat as mc
 from sotodlib.site_pipeline.utils.config import _get_config
-from sotodlib.site_pipeline.utils.constants import DEPTH1MAPMAKER_DEFAULTS
-from sotodlib.site_pipeline.utils.exceptions import DataMissing, LoaderError
-from sotodlib.site_pipeline.utils.depth1_utils import (
-    calibrate_obs, create_mapmaker_config, find_footprint, read_tods)
-from sotodlib.site_pipeline.utils.io import write_depth1_map
-from sotodlib.site_pipeline.utils.mapcat import (
-    commit_depth1_map, commit_depth1_tods, map_to_calculate)
+
 
 def get_parser(parser=None):
     if parser is None:
@@ -165,10 +160,10 @@ def make_depth1_map(
                 dets={"wafer_slot": detset, "wafer.bandpass": band},
                 context=context,
             )
-        except LoaderError:
+        except d1u.LoaderError:
             # this means the obs is not on the preprocessing db, so we skip it
             continue
-        obs, _ = calibrate_obs(
+        obs, _ = d1u.calibrate_obs(
             obs, band, site=site, nocal=False, unit=unit, min_dets=min_dets
         )
         if obs is None:
@@ -201,7 +196,7 @@ def make_depth1_map(
 
     nobs_kept = comm.allreduce(nobs_kept)
     if nobs_kept == 0:
-        raise DataMissing("All data cut")
+        raise d1u.DataMissing("All data cut")
     mapmaker.prepare()
     # mapmaker doesn't know about time_rhs, so handle it manually
     if signal_map.tiled:
@@ -231,12 +226,12 @@ def make_depth1_map(
     )
 
 
-def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
+def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
 
     dtype_tod = np.float32
     dtype_map = np.float64
 
-    args = create_mapmaker_config(defaults=defaults, config_file=config_file, args=args)
+    args = d1u.create_mapmaker_config(defaults=defaults, config_file=config_file, args=args)
 
     warnings.simplefilter("ignore")
     # Set up our communicators
@@ -310,7 +305,7 @@ def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
         try:
             # Read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds = read_tods(
+            my_tods, my_inds = d1u.read_tods(
                 context,
                 obslist,
                 comm=comm_intra,
@@ -336,15 +331,15 @@ def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
             all_inds = utils.allgatherv(my_inds, comm_intra)
             all_costs = utils.allgatherv(my_costs, comm_intra)
             if len(all_inds) == 0:
-                raise DataMissing("No valid tods")
+                raise d1u.DataMissing("No valid tods")
             if sum(all_costs) == 0:
-                raise DataMissing("No valid detectors in any tods")
+                raise d1u.DataMissing("No valid detectors in any tods")
 
             # Estimate the scan profile and footprint. The scan profile can be done
             # with a single task, but that task might not be the first one, so just
             # make it mpi-aware like the footprint stuff
-            subshape, subwcs, _ = find_footprint(my_tods, wcs, comm=comm_intra)
-        except DataMissing as e:
+            subshape, subwcs, _ = d1u.find_footprint(my_tods, wcs, comm=comm_intra)
+        except d1u.DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
             L.info(f"Skipping {map_name} with {e}")
             continue
@@ -360,7 +355,7 @@ def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
                 L.info(f"Map {map_name} has not data.")
             continue
 
-        map_calculate = map_to_calculate(
+        map_calculate = mc.map_to_calculate(
             map_name=map_name, inds_to_use=my_inds, mapcat_settings=mapcat_settings
         )
         if not map_calculate:
@@ -370,7 +365,7 @@ def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
 
         # Write out the depth1 metadata
         if comm_intra.rank == 0:
-            tods = commit_depth1_tods(
+            tods = mc.commit_depth1_tods(
                 map_name=map_name,
                 obslist=obslist,
                 obs_infos=obs_infos,
@@ -405,17 +400,17 @@ def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
             )
 
             # Write them
-            write_depth1_map(
+            d1u.write_depth1_map(
                 prefix,
                 mapdata,
-                dtype=dtype_tod,
+                dtype=dtype_map,
                 binned=args["bin"],
                 rhs=args["rhs"],
                 unit=args["unit"],
             )
             if comm_intra.rank == 0:
                 L.info(f"Finished map {map_name}")
-                commit_depth1_map(
+                mc.commit_depth1_map(
                     map_name=map_name,
                     prefix=prefix,
                     detset=detset,
@@ -427,7 +422,7 @@ def main(config_file, defaults=DEPTH1MAPMAKER_DEFAULTS, **args):
                     mapcat_settings=mapcat_settings,
                 )
 
-        except DataMissing as e:
+        except d1u.DataMissing as e:
             L.info(f"Skipping {map_name} with {e}")
     return True
 
