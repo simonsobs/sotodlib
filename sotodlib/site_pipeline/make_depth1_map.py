@@ -98,7 +98,7 @@ def get_parser(parser=None):
         help="For automatic mapmaking, how many days back to map",
     )
     parser.add_argument("--min-dur",
-        type=int,
+        type=float,
         help='Minimum duration of obs to be included, in seconds. Default is 5 minutes'
     )
     return parser
