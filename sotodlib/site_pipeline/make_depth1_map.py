@@ -285,9 +285,11 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
     else:
         raise ValueError(f"Unrecognized noise model '{args['nmat']}'")
 
+    if not os.path.isfile(args['query']):
+        args['query'] += f" and duration>{args['min_dur']}"
+
     if (args['update_delay'] is not None):
         # this is only to be used for running automatic maps on prefect
-        args['query'] += f" and duration>{args['min_dur']}"
         min_ctime = int(time.time()) - args['update_delay']*86400
         args['query'] += f" and timestamp>={min_ctime}"
 
