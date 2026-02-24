@@ -24,7 +24,7 @@ def get_parser(parser=None):
         help="Path to mapmaker config.yaml file",
     )
 
-    parser.add_argument("--query", type=str)
+    parser.add_argument("--query",type=str)
     parser.add_argument(
         "--area", type=str, help="Path to FITS file describing the mapping geometry"
     )
@@ -91,6 +91,15 @@ def get_parser(parser=None):
         "--min-dets",
         type=int,
         help="Minimum number of detectors for an obs (per wafer per freq)",
+    )
+    parser.add_argument(
+        "--update-delay",
+        type=float,
+        help="For automatic mapmaking, how many days back to map",
+    )
+    parser.add_argument("--min-dur",
+        type=int,
+        help='Minimum duration of obs to be included, in seconds. Default is 5 minutes'
     )
     return parser
 
@@ -275,6 +284,12 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
         )
     else:
         raise ValueError(f"Unrecognized noise model '{args['nmat']}'")
+
+    if (args['update_delay'] is not None):
+        # this is only to be used for running automatic maps on prefect
+        args['query'] += f" and duration>{args['min_dur']}"
+        min_ctime = int(time.time()) - args['update_delay']*86400
+        args['query'] += f" and timestamp>={min_ctime}"
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
         context,
