@@ -1236,6 +1236,10 @@ class BookBinder:
 
         # build detset list in same order as slots
         meta['stream_ids'] = self.book.slots.split(',')
+        if len(meta['stream_ids']) != len(set(meta['stream_ids'])):
+            assert meta['tube_flavor'] == 'lf', "Only LF can have duplicate stream_ids"
+            meta['stream_ids'] = list(dict.fromkeys(meta['stream_ids']))
+            
         for sid in meta['stream_ids']:
             detsets.append(
                 [obs.tunesets[0].name for _,obs in self.obsdb.items() 
