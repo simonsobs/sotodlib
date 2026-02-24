@@ -3192,7 +3192,7 @@ class GlitchClassification(_Preprocess):
             trained_forest_name: "trained_forest"
           save: True
 
-    .. autofunction:: sotodlib.tod_ops.glitch_classification.classify_glitch_stats
+    .. autofunction:: sotodlib.tod_ops.glitch_classification.classify_snippets
     """
     name = "classify_glitches"
 

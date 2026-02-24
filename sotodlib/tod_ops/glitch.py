@@ -5,6 +5,27 @@ from ..core import AxisManager
 
 
 def ranges_from_n_flagged(n_flagged, n_thres=2, buffer=5):
+    """Build a Ranges object from the number of simultaneously flagged detectors.
+
+    Selects samples where the number of flagged detectors meets or exceeds
+    *n_thres*, then buffers each range by *buffer* samples on each side.
+
+    Parameters
+    ----------
+    n_flagged : numpy.ndarray
+        1-D array giving the number of detectors flagged at each sample.
+    n_thres : int, optional
+        Minimum number of simultaneously flagged detectors to form a
+        range.  Default is 2.
+    buffer : int, optional
+        Number of samples to pad on each side of each range.  Default
+        is 5.
+
+    Returns
+    -------
+    so3g.proj.Ranges
+        Ranges where at least *n_thres* detectors are flagged.
+    """
     return Ranges.from_bitmask(n_flagged >= n_thres).buffer(buffer)
 
 def get_det_mask(ranges_matrix, ranges):
@@ -33,6 +54,21 @@ def get_det_mask(ranges_matrix, ranges):
     return det_mask
 
 def ranges2slices(r, offset=0):
+    """Convert a Ranges object to a list of Python slices.
+
+    Parameters
+    ----------
+    r : so3g.proj.Ranges
+        The ranges to convert.
+    offset : int, optional
+        An integer offset added to both the start and stop of every
+        range.  Default is 0.
+
+    Returns
+    -------
+    list of slice
+        One slice per range.
+    """
     slices = [slice(r_[0]+offset, r_[1]+offset) for r_ in r.ranges()]
     return slices
 
@@ -63,7 +99,21 @@ def build_snippet_layouts(aman, slices, dets_affected):
     return snippets
 
 def extract_snippet(aman, snippet_layout, in_place=False):
-    """Restricts the aman data according to the snippet_layout (affected dets, samps)
+    """Restrict an AxisManager to the detectors and samples in a snippet layout.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The full data axis manager.
+    snippet_layout : AxisManager
+        An axis manager whose axes define the restriction.
+    in_place : bool, optional
+        If *True*, modify *aman* in place.  Default is *False*.
+
+    Returns
+    -------
+    AxisManager
+        The restricted axis manager.
     """
     return aman.restrict_axes(snippet_layout._axes, in_place=in_place)
 

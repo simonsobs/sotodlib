@@ -297,6 +297,7 @@ Flagging and Products
 .. autoclass:: sotodlib.preprocess.processes.Trends
 .. autoclass:: sotodlib.preprocess.processes.GlitchDetection
 .. autoclass:: sotodlib.preprocess.processes.GlitchFill
+.. autoclass:: sotodlib.preprocess.processes.GlitchClassification
 .. autoclass:: sotodlib.preprocess.processes.Noise
 .. autoclass:: sotodlib.preprocess.processes.FlagTurnarounds
 .. autoclass:: sotodlib.preprocess.processes.DarkDets

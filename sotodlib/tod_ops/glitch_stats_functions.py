@@ -4,40 +4,70 @@ import scipy.stats as ss
 
 
 def num_of_det(signal, x_pos, y_pos):
+    """Return the number of detectors affected by the glitch.
 
-    '''
-    Compute the number of detectors affected by the glitch
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector signals (unused, accepted for a uniform interface).
+    x_pos : numpy.ndarray
+        X focal-plane positions of affected detectors.
+    y_pos : numpy.ndarray
+        Y focal-plane positions (unused, accepted for a uniform interface).
 
-    Input: x_pos: x positions across the focal plane
-    Output: number of detectors affected
-    '''
+    Returns
+    -------
+    int
+        Number of detectors.
+    """
 
     return len(x_pos)
 
 
 def x_and_y_histogram_extent_ratio(signal, x_pos, y_pos):
+    """Compute the ratio of the y to x histogram extents.
 
-    '''
-    Compute the ratio of the extents of the x position and y position
-    histograms.
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector signals (unused, accepted for a uniform interface).
+    x_pos : numpy.ndarray
+        X focal-plane positions of affected detectors.
+    y_pos : numpy.ndarray
+        Y focal-plane positions of affected detectors.
 
-    Input: x_pos: x positions and y_pos: y positions across the focal plane
-    Output: ratio of the extents of the x and y histograms
-    '''
+    Returns
+    -------
+    float
+        Ratio ``(max(y) - min(y)) / (max(x) - min(x))``.
+    """
 
     hist_ratio = (np.max(y_pos) - np.min(y_pos))/(np.max(x_pos) - np.min(x_pos))
 
     return hist_ratio
 
 def mean_time_lags(signal, x_pos, y_pos):
+    """Compute the mean absolute time lag between detector pairs.
 
-    '''
-    Compute the mean of the absolute value of the time lags between detectors.
+    Uses cross-correlation via FFT to estimate the time delay between
+    each pair of detectors, then returns the mean of the absolute
+    values.
 
-    Input: signal: detector TOD signals (snippet.signal). Works better with
-    detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
-    Output: mean of the absolute value of the time lags
-    '''
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector TOD signals of shape ``(n_dets, n_samps)``.  Works
+        better with detrended data.
+    x_pos : numpy.ndarray
+        X focal-plane positions (unused, accepted for a uniform interface).
+    y_pos : numpy.ndarray
+        Y focal-plane positions (unused, accepted for a uniform interface).
+
+    Returns
+    -------
+    float
+        Mean of the absolute time lags.
+    """
 
     lags = np.full((len(signal), len(signal)), np.nan)
 
@@ -72,14 +102,23 @@ def mean_time_lags(signal, x_pos, y_pos):
 
 
 def mean_correlation(signal, x_pos, y_pos):
+    """Compute the mean absolute Pearson correlation between detector pairs.
 
-    '''
-    Compute the mean of the absolute value of the Pearson correlation coefficient between detectors.
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector TOD signals of shape ``(n_dets, n_samps)``.  Works
+        better with detrended data.
+    x_pos : numpy.ndarray
+        X focal-plane positions (unused, accepted for a uniform interface).
+    y_pos : numpy.ndarray
+        Y focal-plane positions (unused, accepted for a uniform interface).
 
-    Input: signal: detector TOD signals (snippet.signal). Works better with
-    detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
-    Output: mean of the absolute value of the correlations
-    '''
+    Returns
+    -------
+    float
+        Mean of the absolute Pearson correlation coefficients.
+    """
 
     corr_coeff = np.full((len(signal), len(signal)), np.nan)
 
@@ -99,14 +138,25 @@ def mean_correlation(signal, x_pos, y_pos):
 
 
 def max_and_near_y_pos_ratio(signal, x_pos, y_pos):
+    """Ratio of detectors near the y-histogram peak to total detectors.
 
-    '''
-    Compute the ratio of the maximum of the y histogram bin and positions within 0.1 on either side of the focal plane
-    compared to the total number of detectors.
+    Counts the detectors whose y-positions fall within 0.1 of the
+    peak histogram bin and divides by the total number of detectors.
 
-    Input: y_pos: y positions across the focal plane
-    Output: sum of maximum and 0.1 to either side of the y histogram bins divided by the total number of detectors
-    '''
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector signals (unused, accepted for a uniform interface).
+    x_pos : numpy.ndarray
+        X focal-plane positions (unused, accepted for a uniform interface).
+    y_pos : numpy.ndarray
+        Y focal-plane positions of affected detectors.
+
+    Returns
+    -------
+    float
+        Fraction of detectors within 0.1 of the y-histogram peak.
+    """
 
     #determine the peak of the y histogram and its index
     y_max = np.max(np.histogram(y_pos)[0])
@@ -125,13 +175,25 @@ def max_and_near_y_pos_ratio(signal, x_pos, y_pos):
 
 
 def max_and_adjacent_y_pos_ratio(signal, x_pos, y_pos):
+    """Ratio of detectors in the peak and adjacent y-histogram bins to total.
 
-    '''
-    Compute the ratio of the maximum and adjacent y histogram bins compared to the total number of detectors.
+    Sums the counts in the peak bin and its immediate neighbours,
+    then divides by the total number of detectors.
 
-    Input: y_pos: y positions across the focal plane
-    Output: sum of maximum and adjacent y histogram bins divided by the total number of detectors
-    '''
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector signals (unused, accepted for a uniform interface).
+    x_pos : numpy.ndarray
+        X focal-plane positions (unused, accepted for a uniform interface).
+    y_pos : numpy.ndarray
+        Y focal-plane positions of affected detectors.
+
+    Returns
+    -------
+    float
+        Fraction of detectors in the peak and adjacent y-histogram bins.
+    """
 
     #determine the peak of the y histogram and its index
     y_max = np.max(np.histogram(y_pos)[0])
@@ -155,14 +217,27 @@ def max_and_adjacent_y_pos_ratio(signal, x_pos, y_pos):
 
 
 def compute_num_peaks(signal, x_pos, y_pos):
+    """Count the number of peaks in the combined detector TOD.
 
-    '''
-    Computes the number of peaks in the combined TOD from the different detectors.
+    Smooths the per-sample maximum across detectors, selects prominent
+    samples, and counts the peaks detected by
+    :func:`scipy.signal.find_peaks`.
 
-    Input: signal: detector TOD signals (snippet.signal). Works better with
-    detrended TODs, e.g., sotodlib.tod_ops.detrend_tod(snippet))
-    Output: the number of peaks
-    '''
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Detector TOD signals of shape ``(n_dets, n_samps)``.  Works
+        better with detrended data.
+    x_pos : numpy.ndarray
+        X focal-plane positions (unused, accepted for a uniform interface).
+    y_pos : numpy.ndarray
+        Y focal-plane positions (unused, accepted for a uniform interface).
+
+    Returns
+    -------
+    int
+        Number of peaks found.
+    """
 
     #make a smoothing kernel
     kernel_size = 3

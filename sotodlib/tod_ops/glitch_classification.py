@@ -5,7 +5,7 @@ import os, pickle as pk
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
-from sotodlib.tod_ops import filter_stats_functions as func
+from sotodlib.tod_ops import glitch_stats_functions as func
 
 
 stat_dict = {
@@ -21,6 +21,15 @@ stat_dict = {
 def get_default_stats():
     """Return the default set of summary statistics for glitch classification.
 
+    These are:
+    - Number of Detectors
+    - Y and X Extent Ratio
+    - Mean abs(Correlation)
+    - Mean abs(Time Lag)
+    - Y Hist Max and Adjacent/Number of Detectors
+    - Within 0.1 of Y Hist Max/Number of Detectors
+    - Number of Peaks
+
     Returns
     -------
     list
@@ -29,16 +38,22 @@ def get_default_stats():
     return list(stat_dict.keys())
 
 def compute_summary_stats(snippet, stats=None):
-    '''
-    Compute all of the summary statistics for glitch classification
+    """Compute the summary statistics for glitch classification.
 
-    Input: snippet: snippet object/axis manager computed with
-    sotodlib.tod_ops.glitch.extract_snippets
-    Optional: stats: list of summary statistics to compute
-    (default: all in stat_dict)
-    Output: stats_arr: numpy.ndarray with all of the summary statistics
-    required for glitch classification
-    '''
+    Parameters
+    ----------
+    snippet : AxisManager
+        Axis manager containing glitch snippets computed with
+        :func:`sotodlib.tod_ops.glitch.extract_snippets`.
+    stats : list of str, optional
+        Summary statistics to compute.  Each entry must be a key of
+        ``stat_dict``.  If *None*, all default statistics are used.
+
+    Returns
+    -------
+    stats_arr : numpy.ndarray
+        Array of shape ``(n_stats,)`` with the computed summary statistics.
+    """
     if stats is None:
         stats = get_default_stats()
 
@@ -57,17 +72,30 @@ def compute_summary_stats(snippet, stats=None):
 
 
 def split_into_training_and_test(data, labels, train_size=None, random_state=None):
+    """Split data and labels into training and test sets.
 
-    '''
-    Split data and labels into training and test sets.
+    Parameters
+    ----------
+    data : numpy.ndarray
+        Array of shape ``(n_samples, n_features)``.
+    labels : numpy.ndarray
+        Array of shape ``(n_samples,)``.
+    train_size : float, optional
+        Fraction of the data to use for the training set (0 to 1).
+    random_state : int, optional
+        Random state for reproducibility.
 
-    Input: data: numpy.ndarray of shape (n_samples, n_features),
-    labels: numpy.ndarray of shape (n_samples,),
-    Optional: train_size: fraction of the data for training set in decimal form
-    random_state: random state for reproducibility
-    Output: data_train, labels_train: training data and labels,
-    data_test, labels_test: test data and labels
-    '''
+    Returns
+    -------
+    data_train : numpy.ndarray
+        Training data.
+    labels_train : numpy.ndarray
+        Training labels.
+    data_test : numpy.ndarray
+        Test data.
+    labels_test : numpy.ndarray
+        Test labels.
+    """
 
     data_train, data_test, labels_train, labels_test = train_test_split(
         data, labels, train_size=train_size, random_state=random_state)
@@ -75,18 +103,34 @@ def split_into_training_and_test(data, labels, train_size=None, random_state=Non
     return data_train, labels_train, data_test, labels_test
 
 def train_forest(X_train, y_train, stats=None, n_trees=50, max_depth=15):
+    """Train a random forest classifier for glitch classification.
 
-    '''
-    Train random forest.
+    Parameters
+    ----------
+    X_train : numpy.ndarray
+        Training data of shape ``(n_samples, n_features)``.
+    y_train : numpy.ndarray
+        Training labels of shape ``(n_samples,)``.
+    stats : list of str, optional
+        Feature names corresponding to the columns of *X_train*.  If
+        *None*, the default statistics from :func:`get_default_stats` are
+        used.
+    n_trees : int, optional
+        Number of trees in the forest.  Default is 50.
+    max_depth : int, optional
+        Maximum depth of each tree.  Default is 15.
 
-    Input: X_train: numpy.ndarray of shape (n_samples, n_features) with training data,
-    y_train: numpy.ndarray of shape (n_samples,) with training labels
-    Optional: stats: list of feature names corresponding to columns of X_train
-    (default = all in stat_dict),
-    n_trees: number of trees in forest (default = 50),
-    max_depth: maximum number of splits for each tree (default = 15)
-    Output: forest: trained random forest (set with feature_names_in_)
-    '''
+    Returns
+    -------
+    forest : sklearn.ensemble.RandomForestClassifier
+        Trained random forest with ``feature_names_in_`` set to *stats*.
+
+    Raises
+    ------
+    ValueError
+        If the number of columns in *X_train* does not match the length
+        of *stats*.
+    """
     if stats is None:
         stats = get_default_stats()
 
@@ -110,25 +154,27 @@ PRED_COLUMNS = ['Glitch Prediction', 'Probability of being a Point Source',
 
 
 def classify_data_forest(X_classify, trained_forest):
+    """Classify glitches using a trained random forest.
 
-    """Classify glitches using a random forest.
+    Parameters
+    ----------
+    X_classify : numpy.ndarray
+        2-D array of shape ``(n_samples, n_features)``.  Columns must be
+        ordered to match ``trained_forest.feature_names_in_``.
+    trained_forest : sklearn.ensemble.RandomForestClassifier
+        Trained random forest.
 
-    Parameters:
-        X_classify (numpy.ndarray):
-            2D array of shape (n_samples, n_features). Assumes columns are
-            ordered to match trained_forest.feature_names_in_.
-        trained_forest (RandomForestClassifier):
-            Trained random forest.
+    Returns
+    -------
+    preds : numpy.ndarray
+        2-D array of shape ``(n_samples, 5)``.  Columns correspond to
+        :data:`PRED_COLUMNS`:
 
-    Returns:
-        numpy.ndarray:
-            2D array of shape (n_samples, 5). Columns correspond to
-            PRED_COLUMNS:
-            0: Glitch Prediction (int label 0-3 for the classes below)
-            1: Probability of being a Point Source
-            2: Probability of being a Point Source + Other
-            3: Probability of being a Cosmic Ray
-            4: Probability of being an Electronic Glitch
+        0. Glitch Prediction (int label 0--3 for the classes below)
+        1. Probability of being a Point Source
+        2. Probability of being a Point Source + Other
+        3. Probability of being a Cosmic Ray
+        4. Probability of being an Electronic Glitch
     """
 
     y_pred_forest = trained_forest.predict(X_classify)
@@ -162,8 +208,8 @@ def classify_snippets(snippets, trained_forest):
         2D array of shape (n_snippets, n_stats) with the computed statistics
         used for classification.
     col_names: dict
-        Dictionary with keys 'preds' and 'stats', giving the column names
-        for ``preds`` and ``stats_array``.
+        Dictionary with keys ``'preds'`` and ``'stats'``, giving the column
+        names for ``preds`` and ``stats_array``.
     """
     if isinstance(trained_forest, str):
         with open('{}.pkl'.format(trained_forest), 'rb') as f:
@@ -188,16 +234,26 @@ def classify_snippets(snippets, trained_forest):
 def plot_confusion_matrix(pred_labs, true_labs, colours=['purple', 'coral', '#40A0A0', '#FFE660'],
                          save=False, save_file_name='forest_confusion_matrix',
                          outdir=os.getcwd(), show=True):
+    """Plot a confusion matrix for glitch classification results.
 
-    '''
-    Plot confusion matrix.
-
-    Input: pred_labs: numpy.ndarray of predicted labels,
-    true_labs: numpy.ndarray of true labels
-    Optional: colours: list colours for plotting, save: True or False for if you want to save the figure,
-    save_file_name: file name for plots, outdir: output directory, show: True or False for if you want to show the plot
-    Output: No output, plot will show and/or save
-    '''
+    Parameters
+    ----------
+    pred_labs : numpy.ndarray
+        Predicted labels.
+    true_labs : numpy.ndarray
+        True labels.
+    colours : list of str, optional
+        Colours for plotting.
+    save : bool, optional
+        Whether to save the figure to disk.
+    save_file_name : str, optional
+        Base file name (without extension) for saved plots.
+    outdir : str, optional
+        Output directory for saved plots.  Defaults to the current
+        working directory.
+    show : bool, optional
+        Whether to display the plot.
+    """
 
     acc = accuracy_score(true_labs, pred_labs)
 
