@@ -24,7 +24,7 @@ def get_parser(parser=None):
         help="Path to mapmaker config.yaml file",
     )
 
-    parser.add_argument("--query",type=str)
+    parser.add_argument("--query", type=str)
     parser.add_argument(
         "--area", type=str, help="Path to FITS file describing the mapping geometry"
     )
