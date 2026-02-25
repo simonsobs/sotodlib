@@ -52,7 +52,7 @@ def get_planet_trajectory(tod, planet, _split=20, return_model=False):
     else:
         planet_az = planet_az_func(tod.timestamps)
         planet_el = planet_el_func(tod.timestamps)
-        q_planet = quat.rotation_lonlat(planet_az, planet_el)
+        q_planet = quat.rotation_lonlat(-1 * planet_az, planet_el)
         return q_planet
 
 def get_wafer_centered_sight(tod=None, planet=None, q_planet=None, q_bs=None, q_wafer=None):
@@ -73,18 +73,18 @@ def get_wafer_centered_sight(tod=None, planet=None, q_planet=None, q_bs=None, q_
     Returns:
         Sightline vector for the planet trajectory centered on the center of the wafer.
     """
+    #breakpoint()
     if q_planet is None:
         q_planet = get_planet_trajectory(tod, planet)
     if q_bs is None:
-        q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
+        q_bs = quat.rotation_lonlat(-1 * tod.boresight.az, tod.boresight.el)
     if q_wafer is None:
         q_wafer = quat.rotation_xieta(np.nanmedian(tod.focal_plane.xi), 
                                      np.nanmedian(tod.focal_plane.eta))
         
     xi_wafer, eta_wafer, _ = quat.decompose_xieta(q_wafer)
-    q_wafer_f = quat.rotation_xieta(-xi_wafer, eta_wafer)
     z_to_x = quat.rotation_lonlat(0, 0)
-    sight = z_to_x * ~(q_bs * q_wafer_f) * q_planet
+    sight = z_to_x * ~(q_bs * q_wafer) * q_planet
     return sight
 
 def get_wafer_xieta(wafer_slot, optics_config_fn, xieta_bs_offset=(0., 0.), 
@@ -151,7 +151,7 @@ def get_rough_hit_time(tod, wafer_slot, sso_name, circle_r_deg=7.,optics_config_
     Returns:
         float: Estimated rough hit time within the circular region around the wafer center.
     """
-    q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
+    q_bs = quat.rotation_lonlat(-1 * tod.boresight.az, tod.boresight.el)
     q_planet = get_planet_trajectory(tod, sso_name)
     xi_wafer, eta_wafer = get_wafer_xieta(wafer_slot, optics_config_fn=optics_config_fn, 
                                             roll_bs_offset=np.median(tod.boresight.roll), wrap_to_tod=False)
@@ -186,8 +186,9 @@ def make_wafer_centered_maps(tod, sso_name, optics_config_fn, map_hdf,
     Returns:
         None
     """    
+    #breakpoint()
     q_planet = get_planet_trajectory(tod, sso_name)
-    q_bs = quat.rotation_lonlat(tod.boresight.az, tod.boresight.el)
+    q_bs = quat.rotation_lonlat(-1 * tod.boresight.az, tod.boresight.el)
     if roll_bs_offset is None:
         roll_bs_offset = np.mean(tod.boresight.roll)
         
@@ -419,7 +420,7 @@ def map_to_xieta(mT, edge_avoidance=1.0*coords.DEG, edge_check='nan',
                                                   (np.inf, beam_sigma_init*5, np.inf),),
                                        max_nfev = 1000000)
                 R2 = 1 - np.sum((_z - _gauss1d(_r, *popt))**2)/np.sum((_z - np.mean(_z))**2)
-                xi_det, eta_det, R2_det = -xi_peak, eta_peak, R2
+                xi_det, eta_det, R2_det = xi_peak, eta_peak, R2
         else:
             xi_det, eta_det, R2_det = np.nan, np.nan, np.nan
     return xi_det, eta_det, R2_det
