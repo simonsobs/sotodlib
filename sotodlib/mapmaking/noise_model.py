@@ -229,10 +229,13 @@ class NmatDetvecs(Nmat):
         E  = np.zeros([nbin,nmode])
         D  = np.zeros([nbin,ndet])
         Nd = np.zeros([nbin,ndet])
+        # Build the projection operator to solve for the per noise mode power profiles
+        pinv_vecs = np.linalg.pinv(vecs)
         for bi, b in enumerate(bins):
-            # Skip the DC mode, since it's it's unmeasurable and filtered away
+            # Skip the DC mode, since it's unmeasurable and filtered away
             b = np.maximum(1,b)
-            E[bi], D[bi], Nd[bi] = measure_detvecs(ftod[:,b[0]:b[1]], vecs)
+            ft_bin = ftod[:, b[0]:b[1]]
+            E[bi], D[bi], Nd[bi] = measure_detvecs(ft_bin, vecs, pinv_vecs)
         # Optionally downweight the lowest frequency bins
         if self.downweight != None and len(self.downweight) > 0:
             D[:len(self.downweight)] /= np.array(self.downweight)[:,None]

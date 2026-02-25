@@ -333,26 +333,30 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose
         
     return vecs
 
-def measure_detvecs(ft, vecs, nper=2):
-    # Allow too narrow bins
-    nfull = vecs.shape[1]
-    n     = min(nfull, ft.shape[-1]//nper+1)
-    vecs  = vecs[:,:n]
-    # Measure amps when we have non-orthogonal vecs
-    rhs  = vecs.T.dot(ft)
-    div  = vecs.T.dot(vecs)
-    amps = np.linalg.solve(div,rhs)
-    E    = np.mean(np.abs(amps)**2,1)
-    # Project out modes for every frequency individually
-    dclean = ft - vecs.dot(amps)
-    # The rest is assumed to be uncorrelated
-    Nu = np.mean(np.abs(dclean)**2,1)
-    # The total auto-power
-    Nd = np.mean(np.abs(ft)**2,1)
-    # Expand E to full requested len with low but
-    # non-zero power so we don't need to special-case elsewhere
-    small = np.min(Nu)*1e-6
-    E  = np.pad(E, (0,nfull-n), constant_values=small)
+def measure_detvecs(ft, vecs, pinv_vecs):
+    # Handle empty bins safely
+    if ft.shape[-1] == 0:
+        nmode = pinv_vecs.shape[0]
+        ndet = vecs.shape[0]
+        return np.zeros(nmode), np.zeros(ndet), np.zeros(ndet)
+
+    # Project spatially to find mode amplitudes (a = V^+ d)
+    amps = pinv_vecs @ ft # amps shape is (n_modes, n_freq_in_bin)
+    
+    # Compute mean power of each mode in this bin
+    E = np.mean(np.abs(amps)**2, axis=1)
+    
+    # Project modes out to get the residual clean data (d_clean = d - V a)
+    dclean = ft - (vecs @ amps)
+    
+    # Measure residual uncorrelated power (Nu) and total auto-power (Nd)
+    Nu = np.mean(np.abs(dclean)**2, axis=1)
+    Nd = np.mean(np.abs(ft)**2, axis=1)
+    
+    # Safety: Prevent absolute zero power which can break the mapamaker downstream
+    small_floor = np.min(Nu[Nu > 0]) * 1e-6 if np.any(Nu > 0) else 1e-15
+    E = np.maximum(E, small_floor)
+    
     return E, Nu, Nd
 
 def sichol(A):
