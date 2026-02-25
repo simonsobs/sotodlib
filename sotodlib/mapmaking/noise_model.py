@@ -116,7 +116,8 @@ class NmatUncorr(Nmat):
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges="act_default", nbin=100, nmin=10, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20], downweight=[], 
-                window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000, skip_mean=True):
+                window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000,
+                skip_mean=True, mp_significance=None, wnoise_band=None):
         if bin_edges == "act_default":
             bin_edges = np.array([
                 0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
@@ -149,6 +150,8 @@ class NmatDetvecs(Nmat):
         self.nwin   = nwin
         self.bmin_eigvec = bmin_eigvec
         self.skip_mean   = skip_mean
+        self.mp_significance = mp_significance
+        self.wnoise_band = wnoise_band # Expected format: [fmin, fmax]
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
 
@@ -164,13 +167,46 @@ class NmatDetvecs(Nmat):
     def build_fourier(self, ftod, nsamp, srate, nwin=0, **kwargs):
         ndet, nfreq = ftod.shape
         dtype       = utils.real_dtype(ftod.dtype)
-        # First build our set of eigenvectors.
+        # First define our eigenmode bins.
         # Default mode_bins=[0.25,4.0,20] builds them in two bins: the first from 0.25 to 4 Hz the second from 4 to 20 Hz
         mode_bins = makebins(self.mode_bins, srate, nfreq, nmin=self.bmin_eigvec, rfun=np.ceil, cap=False)
         if np.any(np.diff(mode_bins) < 0):
             raise RuntimeError(f"At least one of the frequency bins has a negative range: \n{mode_bins}")
+        
+        # If MP thresholding enabled, estimate white noise level.
+        noise_sigmas = None
+        
+        if self.mp_significance is not None:
+            if self.wnoise_band is None:
+                raise ValueError("To use Marchenko-Pastur thresholding, you must provide 'wnoise_band' (e.g.,[0.2, 1.8])\
+                                 to specify the frequency range for white noise estimation.")
+                
+            # Construct the physical frequency array for the rfft-ed data
+            freqs = np.linspace(0, srate / 2.0, nfreq)
+            
+            # Find integer indices for the start and stop of the white noise band
+            idx_start = np.searchsorted(freqs, self.wnoise_band[0])
+            idx_stop  = np.searchsorted(freqs, self.wnoise_band[1], side='right')
+            del freqs
+            if idx_start >= idx_stop:
+                raise ValueError(f"Invalid noise band {self.wnoise_band}. No frequency bins fall in this range.")
+            
+            # Calculate white noise power per detector
+            band_data = ftod[:, idx_start:idx_stop]
+            sigma_sq = np.mean(np.real(band_data * np.conj(band_data)), axis=1)
+            noise_sigmas = np.sqrt(sigma_sq)
+
         # Then use these to get our set of basis vectors
-        vecs = find_modes_jon(ftod, mode_bins, eig_lim=self.eig_lim, single_lim=self.single_lim, skip_mean=self.skip_mean, verbose=self.verbose)
+        vecs = find_modes_jon(
+            ftod,
+            mode_bins, 
+            eig_lim=self.eig_lim, 
+            single_lim=self.single_lim, 
+            skip_mean=self.skip_mean, 
+            verbose=self.verbose,
+            mp_significance=self.mp_significance,
+            noise_sigmas=noise_sigmas
+        )
         nmode= vecs.shape[1]
         if nmode == 0:
             if self.verbose:

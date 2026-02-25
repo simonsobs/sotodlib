@@ -188,39 +188,149 @@ def mycontiguous(a):
     b[...] = a[...]
     return b
 
-def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose=False):
+def mp_tw_threshold(n, gamma, significance=0.999, verbose=False):
+    """
+    Compute Marchenko-Pastur upper threshold including
+    Tracy-Widom (beta=1) finite-n correction.
+    """
+    # Tracy–Widom beta=1 quantiles
+    tw_table = {
+        0.95: 0.98,     
+        0.99: 2.02,
+        0.999: 3.27,
+        "5sigma": 6.91, # p-value of ~1e-7
+    }
+
+    if significance not in tw_table:
+        raise ValueError(
+            "Unsupported significance level.\n"
+            "Available options: 0.95, 0.99, 0.999, '5sigma'"
+        )
+
+    xi = tw_table[significance]
+    q = gamma
+
+    # MP upper edge (sigma=1)
+    lambda_plus = (1.0 + np.sqrt(q))**2
+
+    # TW fluctuation scale
+    delta = (
+        n**(-2.0 / 3.0)
+        * (1.0 + np.sqrt(q))**(4.0 / 3.0)
+        * q**(-1.0 / 6.0) 
+    )
+
+    threshold = lambda_plus + xi * delta
+
+    if verbose:
+        percent_above = 100.0 * (threshold - lambda_plus) / lambda_plus
+        print(
+            f"Modes will be selected at {significance} significance, "
+            f"cutoff at {percent_above:.3f}% above theoretical "
+            "Marchenko-Pastur upper bound."
+        )
+
+    return threshold
+
+def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose=False, mp_significance=None, noise_sigmas=None):
     ndet = ft.shape[0]
     vecs = np.zeros([ndet,0])
     if not skip_mean:
-        # Force the uniform common mode to be included. This
-        # assumes all the detectors have accurately measured gain.
-        # Forcing this avoids the possibility that we don't find
-        # any modes at all.
-        vecs = np.concatenate([vecs,np.full([ndet,1],ndet**-0.5)],1)
+        # Force the uniform common mode to be included.
+        vecs = np.concatenate([vecs, np.full([ndet, 1], ndet**-0.5)], 1)     
+    
+    # If Marchenko-Pastur Thresholding enabled, pre-compute Whitening Matrix
+    norm_mat = None
+    if mp_significance is not None:
+        if noise_sigmas is None:
+            raise ValueError("noise_sigmas must be provided to use MP thresholding")
+        
+        inv_sigmas = np.zeros_like(noise_sigmas)
+        valid_s = noise_sigmas > 1e-15
+        inv_sigmas[valid_s] = 1.0 / noise_sigmas[valid_s]
+        norm_mat = np.outer(inv_sigmas, inv_sigmas)
+        del inv_sigmas   
+    
     for bi, b in enumerate(bins):
-        d    = ft[:,b[0]:b[1]]
+        d    = ft[:, b[0]:b[1]]
         cov  = measure_cov(d)
-        cov  = project_out_from_matrix(cov, vecs)
-        e, v = np.linalg.eigh(cov)
-        e, v = e.real, v.real
-        e, v = e[::-1], v[:,::-1]
-        accept = np.full(len(e), True, bool)
-        if eig_lim is not None:
-            # Compute median, exempting modes we don't have enough data to measure
-            nsamp    = b[1]-b[0]+1
-            median_e = np.median(np.sort(e)[::-1][:nsamp])
-            accept  &= e/median_e >= eig_lim[bi]
-        if verbose:
-            print("bin %d: %4d modes above eig_lim" % (bi, np.sum(accept)))
+        cov  = project_out_from_matrix(cov, vecs)       
+        # ==================================================
+        # NEW MODE SELECTION: Marchenko-Pastur Thresholding
+        # ==================================================
+        if mp_significance is not None:
+            # 1. Whiten the covariance matrix
+            cov_white = cov * norm_mat
+            
+            # 2. Eigendecomposition of whitened data
+            e, v = np.linalg.eigh(cov_white)
+            e, v = e.real, v.real
+            e, v = e[::-1], v[:, ::-1]
+            
+            # 3. Marchenko-Pastur + Tracy-Widom Cutoff
+            nb = b[1] - b[0]
+            n_samples = 2.0 * nb  # 2 independent reals per complex sample
+            gamma_model = ndet / n_samples
+            
+            threshold = mp_tw_threshold(n_samples, gamma_model, significance=mp_significance, verbose=verbose)
+            accept = e > threshold
+            
+            if verbose:
+                print("bin %d: %4d modes above MP threshold" % (bi, np.sum(accept)))
+                
+            # 4. Extract and Un-whiten
+            if np.sum(accept) > 0:
+                w_sig_evals = e[accept]
+                w_sig_evecs = v[:, accept]
+                
+                # Denoise (subtract pure noise floor = 1.0)
+                denoised_vals = np.maximum(0, w_sig_evals - 1.0) 
+                
+                # Rescale and re-orthogonalize using SVD
+                scaled_evecs = w_sig_evecs * noise_sigmas[:, None]
+                A = scaled_evecs * np.sqrt(denoised_vals)[None, :]
+                u_svd, s_svd, vh_svd = np.linalg.svd(A, full_matrices=False)
+                
+                # Overwrite e and v with the new physical unwhitened modes
+                e = s_svd**2
+                v = u_svd
+                
+                # Reset accept array for downstream compatibility
+                accept = np.full(len(e), True, bool)
+            else:
+                e = np.array([])
+                v = np.zeros([ndet, 0])
+                accept = np.array([], dtype=bool)
+
+        # =================================================
+        # LEGACY MODE SELECTION: Standard Eigenvalue Limit
+        # =================================================
+        else:
+            e, v = np.linalg.eigh(cov)
+            e, v = e.real, v.real
+            e, v = e[::-1], v[:, ::-1]
+            accept = np.full(len(e), True, bool)
+            
+            if eig_lim is not None:
+                nsamp    = b[1]-b[0]
+                median_e = np.median(np.sort(e)[::-1][:nsamp])
+                accept  &= e/median_e >= eig_lim[bi]
+                
+            if verbose:
+                print("bin %d: %4d modes above eig_lim" % (bi, np.sum(accept)))
+
+        # Singleness check
         if single_lim is not None and e.size:
-            # Reject modes too concentrated into a single mode. Since v is normalized,
-            # values close to 1 in a single component must mean that all other components are small
-            singleness = np.max(np.abs(v),0)
+            # Reject modes too concentrated into a single detector.
+            singleness = np.max(np.abs(v), 0)
             accept    &= singleness < single_lim[bi]
-        if verbose:
-            print("bin %d: %4d modes also above single_lim" % (bi, np.sum(accept)))
-        e, v = e[accept], v[:,accept]
-        vecs = np.concatenate([vecs,v],1)
+            
+            if verbose:
+                print("bin %d: %4d modes also above single_lim" % (bi, np.sum(accept)))
+                
+        e, v = e[accept], v[:, accept]
+        vecs = np.concatenate([vecs, v], 1)
+        
     return vecs
 
 def measure_detvecs(ft, vecs, nper=2):
