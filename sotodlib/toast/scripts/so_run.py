@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2025-2025 Simons Observatory.
+# Copyright (c) 2025-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 
 """
@@ -35,22 +35,12 @@ from toast.scripts.toast_run import main as toast_run_main
 from ...core import Context
 
 
-def get_context_tasks(
-    comm, out_root, context_file, obs_file, dets_select, by_obs, by_wafer
-):
+def get_context_tasks(comm, args):
     """Get the list of tasks, given the observations and selections.
 
     Args:
         comm (MPI.Comm):  The world communicator.
-        out_root (str):  The top-level output directory.
-        context_file (str):  The context file to use.
-        obs_file (str):  The file of observation IDs to consider.
-        dets_select (str):  The global (not task-specific) dets_select
-            dictionary as a STRING (i.e. as it appears in CLI parsing).
-        by_obs (bool):  If True, divide observation IDs into separate
-            tasks.
-        by_wafer (bool):  If True, divide each observation into per-wafer
-            tasks.
+        args (namespace):  The parsed args.
 
     Returns:
         (list):  The list of tasks.
@@ -59,15 +49,15 @@ def get_context_tasks(
     tasks = None
     if comm is None or comm.rank == 0:
         olist = list()
-        with open(obs_file, "r") as f:
+        with open(args.obs_file, "r") as f:
             for line in f:
                 if re.match(r"^#.*", line) is None:
                     olist.append(line.rstrip())
 
-        if dets_select is None:
+        if args.context_dets_select is None:
             dets_select = dict()
         else:
-            dets_select = eval(dets_select)
+            dets_select = eval(args.context_dets_select)
 
         # Query the obsdb directly so that we only have one DB query,
         # rather than doing one query per observation.
@@ -82,7 +72,7 @@ def get_context_tasks(
             query_str = "1"
 
         # Open the databases and query
-        ctx = Context(context_file)
+        ctx = Context(args.context_file)
         query_result = ctx.obsdb.query(query_text=query_str, sort=sort_by)
         del ctx
 
@@ -92,7 +82,7 @@ def get_context_tasks(
             "obs_ids": list(),
             "select": dets_select,
             "telescope": None,
-            "outdir": out_root,
+            "outdir": args.out_root,
             "index": 0,
             "desc": "All observations",
         }
@@ -103,7 +93,7 @@ def get_context_tasks(
             stream_ids = list(row["stream_ids_list"].split(","))
             telescope = str(row["telescope"])
             n_samp = int(row["n_samples"])
-            if by_obs:
+            if args.task_per_obs:
                 # Building per-obs tasks
                 tasks.append(
                     {
@@ -114,13 +104,13 @@ def get_context_tasks(
                         "stream_ids": stream_ids,
                         "wafer_slots": wafer_slots,
                         "select": dets_select,
-                        "outdir": os.path.join(out_root, obs_id),
+                        "outdir": os.path.join(args.out_root, obs_id),
                         "index": itask,
                         "desc": f"{telescope}:{obs_id}",
                     }
                 )
                 itask += 1
-            elif by_wafer:
+            elif args.task_per_wafer:
                 # Per wafer tasks
                 for strm, waf in zip(stream_ids, wafer_slots):
                     dselect = dict(dets_select)
@@ -134,7 +124,7 @@ def get_context_tasks(
                             "stream_id": strm,
                             "wafer_slot": waf,
                             "select": dselect,
-                            "outdir": os.path.join(out_root, f"{obs_id}-{strm}"),
+                            "outdir": os.path.join(args.out_root, f"{obs_id}-{strm}"),
                             "index": itask,
                             "desc": f"{telescope}:{obs_id}:{strm}",
                         }
@@ -146,25 +136,133 @@ def get_context_tasks(
                     single_task["telescope"] = telescope
                 single_task["obs_ids"].append(obs_id)
 
-        if not (by_obs or by_wafer):
+        if not (args.task_per_obs or args.task_per_wafer):
             tasks.append(single_task)
     if comm is not None:
         tasks = comm.bcast(tasks, root=0)
     return tasks
 
 
-def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafer):
+def get_hdf5_tasks(comm, args):
     """Get the list of tasks, given the observations and selections.
 
     Args:
         comm (MPI.Comm):  The world communicator.
-        out_root (str):  The top-level output directory.
-        schedule_file (str):  The schedule file containing observations.
-        telescope_file (str):  The synthetic instrument model.
-        by_obs (bool):  If True, divide observation IDs into separate
-            tasks.
-        by_wafer (bool):  If True, divide each observation into per-wafer
-            tasks.
+        args (namespace):  The parsed args.
+
+    Returns:
+        (list):  The list of tasks.
+
+    """
+    tasks = None
+    if comm is None or comm.rank == 0:
+        olist = list()
+        with open(args.obs_file, "r") as f:
+            for line in f:
+                if re.match(r"^#.*", line) is None:
+                    olist.append(line.rstrip())
+
+        if args.hdf5_det_select is None:
+            det_select = dict()
+        else:
+            det_select = eval(args.hdf5_det_select)
+
+        # Combine the observation list with any custom queries
+        obs_sel = ",".join(olist)
+        sel_str = "select (name, session, samples, telescope) "
+        sel_str += f"where name in ({obs_sel})"
+        if args.hdf5_query is not None:
+            sel_str += f" and {args.hdf5_query}"
+
+        # Open the index and get the observations
+        if args.hdf5_index == "DEFAULT":
+            vindx = os.path.join(args.hdf5_volume, toast.io.VolumeIndex.default_name)
+        else:
+            vindx = args.hdf5_index
+        index = toast.io.VolumeIndex(vindx)
+        query_obs = index.select(sel_str)
+
+        # The query results are the full list of wafer-observations (not
+        # observing sessions).  That means that if we are using tasks that
+        # contain a full obs_id (session), we must accumulate those.
+
+        tasks = dict()
+        single_task = {
+            "name": "all",
+            "obs_ids": list(),
+            "select": det_select,
+            "telescope": None,
+            "outdir": args.out_root,
+            "index": 0,
+            "desc": "All observations",
+        }
+        strm_pat = re.compile(r".*_(ufm_.*)")
+        for row in query_obs:
+            obs_name = str(row[0])
+            session = str(row[1])
+            samples = int(row[2])
+            telescope = str(row[3])
+
+            # Compute the stream ID from the session and obs name
+            strm_mat = strm_pat.match(obs_name)
+            if strm_mat is None:
+                msg = f"{obs_name} does not match expected observation naming"
+                raise RuntimeError(msg)
+            stream_id = str(strm_mat.group(1))
+
+            if args.task_per_obs:
+                # Building per-obs tasks
+                if session not in tasks:
+                    # Create a new task for this session
+                    tasks[session] = {
+                        "name": f"{obs_name}",
+                        "obs_id": session,
+                        "telescope": telescope,
+                        "n_samp": samples,
+                        "stream_ids": list(),
+                        "select": det_select,
+                        "outdir": os.path.join(args.out_root, f"{session}"),
+                        "index": -1,
+                        "desc": f"{telescope}:{session}",
+                    }
+                # Now append this wafer-observation
+                tasks[session]["stream_ids"].append(stream_id)
+            elif args.task_per_wafer:
+                # Per wafer tasks
+                tasks[obs_name] = {
+                    "name": f"{obs_name}",
+                    "obs_id": session,
+                    "telescope": telescope,
+                    "n_samp": samples,
+                    "stream_id": stream_id,
+                    "select": det_select,
+                    "outdir": os.path.join(args.out_root, f"{session}-{stream_id}"),
+                    "index": -1,
+                    "desc": f"{telescope}:{session}:{stream_id}",
+                }
+            else:
+                # One task
+                if single_task["telescope"] is None:
+                    single_task["telescope"] = telescope
+                single_task["obs_ids"].append(session)
+
+        if not (args.task_per_obs or args.task_per_wafer):
+            tasks.append(single_task)
+
+        # Convert the task dictionary into a list
+        tasks = list(sorted(tasks.values(), key=lambda x: x["name"]))
+
+    if comm is not None:
+        tasks = comm.bcast(tasks, root=0)
+    return tasks
+
+
+def get_sim_tasks(comm, args):
+    """Get the list of tasks, given the observations and selections.
+
+    Args:
+        comm (MPI.Comm):  The world communicator.
+        args (namespace):  The parsed args.
 
     Returns:
         (list):  The list of tasks.
@@ -172,15 +270,15 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
     """
     tasks = list()
     if comm is None or comm.rank == 0:
-        telescope, _ = toast.io.load_instrument_file(telescope_file)
+        telescope, _ = toast.io.load_instrument_file(args.telescope_file)
         tele_name = telescope.name
         full_detdata = telescope.focalplane.detector_data
         wafers = list(set(full_detdata["wafer_slot"]))
 
         # If we are running per-wafer, split the telescope file now.
-        if by_wafer:
+        if args.task_per_wafer:
             waf_tele_files = dict()
-            tele_wafer_dir = os.path.join(out_root, "wafer_telescopes")
+            tele_wafer_dir = os.path.join(args.out_root, "wafer_telescopes")
             os.makedirs(tele_wafer_dir, exist_ok=True)
             for waf in wafers:
                 wtele_file = os.path.join(tele_wafer_dir, f"telescope_{waf}.h5")
@@ -203,15 +301,15 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
 
         # Load the schedule so we can split it.
         full_schedule = toast.schedule.GroundSchedule()
-        full_schedule.read(schedule_file)
+        full_schedule.read(args.schedule_file)
 
         single_task = {
             "name": "all",
             "obs_ids": list(),
             "telescope": tele_name,
-            "telescope_file": telescope_file,
-            "schedule_file": schedule_file,
-            "outdir": out_root,
+            "telescope_file": args.telescope_file,
+            "schedule_file": args.schedule_file,
+            "outdir": args.out_root,
             "index": 0,
             "desc": "All observations",
         }
@@ -228,9 +326,9 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
                 site_alt=full_schedule.site_alt,
             )
 
-            if by_obs:
+            if args.task_per_obs:
                 # Building per-obs tasks
-                task_dir = os.path.join(out_root, obs_id)
+                task_dir = os.path.join(args.out_root, obs_id)
                 os.makedirs(task_dir, exist_ok=True)
                 task_schedule_file = os.path.join(task_dir, "schedule.txt")
                 task_schedule.write(task_schedule_file)
@@ -239,7 +337,7 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
                         "name": f"{obs_id}",
                         "obs_id": obs_id,
                         "telescope": tele_name,
-                        "telescope_file": telescope_file,
+                        "telescope_file": args.telescope_file,
                         "schedule_file": task_schedule_file,
                         "wafer_slots": wafers,
                         "outdir": task_dir,
@@ -248,11 +346,11 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
                     }
                 )
                 itask += 1
-            elif by_wafer:
+            elif args.task_per_wafer:
                 # Per wafer tasks
                 for waf in wafers:
                     wtele_file = waf_tele_files[waf]
-                    task_dir = os.path.join(out_root, f"{obs_id}-{waf}")
+                    task_dir = os.path.join(args.out_root, f"{obs_id}-{waf}")
                     os.makedirs(task_dir, exist_ok=True)
                     task_schedule_file = os.path.join(task_dir, "schedule.ecsv")
                     task_schedule.write(task_schedule_file)
@@ -273,7 +371,7 @@ def get_sim_tasks(comm, out_root, schedule_file, telescope_file, by_obs, by_wafe
             else:
                 single_task["obs_ids"].append(obs_id)
 
-        if not (by_obs or by_wafer):
+        if not (args.task_per_obs or args.task_per_wafer):
             tasks.append(single_task)
 
     if comm is not None:
@@ -327,9 +425,19 @@ def get_task_args(task_args, parsed, task):
         # Multiple obs
         subst["{observations}"] = str(",".join(task["obs_ids"]))
 
+    # Also support using "@...@" syntax, which is less confusing
+    # in a slurm / shell script where the curly braces look similar
+    # shell variable evaluations minus the dollar sign.
+    full_subst = dict()
+    trns = {ord("{"): ord("@"), ord("}"): ord("@")}
+    for sbkey, sbval in subst.items():
+        full_subst[sbkey] = sbval
+        alt_key = sbkey.translate(trns)
+        full_subst[alt_key] = sbval
+
     for targ in task_args:
         temp = str(targ)
-        for sbkey, sbval in subst.items():
+        for sbkey, sbval in full_subst.items():
             temp = temp.replace(sbkey, sbval)
         new_args.append(temp)
     return new_args
@@ -337,10 +445,14 @@ def get_task_args(task_args, parsed, task):
 
 def cleanup_states(parsed):
     """Cleanup any stale states."""
-    in_state = MPIBatch.state_to_string(MPIBatch.RUNNING)
-    if parsed.set_running_to_open:
+    if parsed.set_failed_to_open:
+        in_state = MPIBatch.state_to_string(MPIBatch.FAILED)
+        out_state = MPIBatch.state_to_string(MPIBatch.OPEN)
+    elif parsed.set_running_to_open:
+        in_state = MPIBatch.state_to_string(MPIBatch.RUNNING)
         out_state = MPIBatch.state_to_string(MPIBatch.OPEN)
     elif parsed.set_running_to_failed:
+        in_state = MPIBatch.state_to_string(MPIBatch.RUNNING)
         out_state = MPIBatch.state_to_string(MPIBatch.FAILED)
     else:
         # Nothing to do
@@ -454,6 +566,12 @@ def main(opts=None, comm=None):
         default=False,
         help="Mark RUNNING jobs as FAILED",
     )
+    cleanup_group.add_argument(
+        "--set_failed_to_open",
+        action="store_true",
+        default=False,
+        help="Mark FAILED jobs as OPEN",
+    )
 
     task_group = parser.add_mutually_exclusive_group(required=False)
     task_group.add_argument(
@@ -488,11 +606,51 @@ def main(opts=None, comm=None):
     )
 
     parser.add_argument(
-        "--dets_select",
+        "--context_dets_select",
         required=False,
         type=str,
         default=None,
         help="Det selection (as a string) common to all tasks",
+    )
+
+    parser.add_argument(
+        "--dets_select",
+        required=False,
+        type=str,
+        default=None,
+        help="Deprecated:  alias for `context_dets_select`",
+    )
+
+    parser.add_argument(
+        "--hdf5_volume",
+        required=False,
+        type=str,
+        default=None,
+        help="HDF5 Toast volume",
+    )
+
+    parser.add_argument(
+        "--hdf5_index",
+        required=False,
+        type=str,
+        default="DEFAULT",
+        help="HDF5 Toast volume",
+    )
+
+    parser.add_argument(
+        "--hdf5_query",
+        required=False,
+        type=str,
+        default=None,
+        help="Additional query for selecting observations- merged with `obs_file`",
+    )
+
+    parser.add_argument(
+        "--hdf5_det_select",
+        required=False,
+        type=str,
+        default=None,
+        help="Detector selection to apply when loading HDF5 data",
     )
 
     # Options for pure synthetic data
@@ -516,6 +674,11 @@ def main(opts=None, comm=None):
     # Parse just the args we are using in this wrapper
     args, remaining = parser.parse_known_args(args=opts)
 
+    if args.dets_select is not None:
+        msg = "--dets_select is deprecated, use --context_dets_select instead."
+        log.warning(msg)
+        args.context_dets_select = args.dets_select
+
     # If we are printing status, just do that and exit
     if args.status:
         # Cleanup any running states if needed
@@ -533,30 +696,23 @@ def main(opts=None, comm=None):
             )
         if args.obs_file is None:
             raise RuntimeError("If using a context, must also specify obs_file")
-        tasks = get_context_tasks(
-            comm,
-            args.out_root,
-            args.context_file,
-            args.obs_file,
-            args.dets_select,
-            args.task_per_obs,
-            args.task_per_wafer,
-        )
-    else:
+        tasks = get_context_tasks(comm, args)
+    elif args.hdf5_volume is not None:
+        msg = f"Working with data from HDF5 volume {args.hdf5_volume}"
+        log.info_rank(msg, comm=comm)
+        tasks = get_hdf5_tasks(comm, args)
+    elif args.sim_schedule is not None:
         msg = f"Working with synthetic data from schedule {args.sim_schedule}"
         log.info_rank(msg, comm=comm)
         if args.sim_telescope is None or args.sim_schedule is None:
             raise RuntimeError(
                 "If using simulated observing, both telescope and schedule required"
             )
-        tasks = get_sim_tasks(
-            comm,
-            args.out_root,
-            args.sim_schedule,
-            args.sim_telescope,
-            args.task_per_obs,
-            args.task_per_wafer,
-        )
+        tasks = get_sim_tasks(comm, args)
+    else:
+        msg = "You must specify exactly one of `context_file`, `hdf5_volume`"
+        msg += " or `sim_schedule`"
+        raise RuntimeError(msg)
 
     # Cleanup any running states if needed
     cleanup_states(args)
