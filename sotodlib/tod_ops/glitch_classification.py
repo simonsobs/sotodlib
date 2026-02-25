@@ -66,7 +66,7 @@ def compute_summary_stats(snippet, stats=None):
 
     x_t, y_t = x_wnans[np.logical_not(np.isnan(x_wnans))], y_wnans[np.logical_not(np.isnan(y_wnans))]
 
-    stats_arr = np.array([stat_dict[stat](signal, x_t, y_t) for stat in stats]).T
+    stats_arr = np.array([stat_dict[stat](signal, x_t, y_t) for stat in stats])
 
     return stats_arr
 
