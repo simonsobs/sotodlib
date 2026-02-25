@@ -280,6 +280,10 @@ def main(config: str,
                     bad_streams = [sid for sid, uic in zip(stream_ids, unused_ids_check) if uic]
                     bad_streams_string = ", ".join(map(str, bad_streams))
                     logger.error(f"Missing info on some stream_ids: {bad_streams_string}")
+                    # Increment counter to trigger script fail.  Note we do not attempt to
+                    # extend bad_books_list here, as we intend to change that mechanism
+                    # in near future anyway.
+                    bad_book_counter += 1
                     continue
                 bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
             except KeyError:
