@@ -232,7 +232,7 @@ def mp_tw_threshold(n, gamma, significance=0.999, verbose=False):
 
     return threshold
 
-def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose=False, mp_significance=None, noise_sigmas=None):
+def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose=False, mp_significance=None, noise_sigmas=None, max_noise_modes=None):
     ndet = ft.shape[0]
     vecs = np.zeros([ndet,0])
     if not skip_mean:
@@ -274,6 +274,12 @@ def find_modes_jon(ft, bins, eig_lim=None, single_lim=0, skip_mean=True, verbose
             
             threshold = mp_tw_threshold(n_samples, gamma_model, significance=mp_significance, verbose=verbose)
             accept = e > threshold
+            
+            if max_noise_modes is not None and np.sum(accept) > max_noise_modes:
+                # Keep only the largest 'max_noise_modes' eigenvalues
+                # Since 'e' is sorted descending, we just take the first N
+                accept_idx = np.where(accept)[0]
+                accept[accept_idx[max_noise_modes:]] = False
             
             if verbose:
                 print("bin %d: %4d modes above MP threshold" % (bi, np.sum(accept)))
