@@ -61,6 +61,10 @@ SMURF_ACTIONS = {
     "calibrations": ["take_iv", "take_bias_steps", "take_bgmap", "take_noise"],
 }
 
+class TuneFileNotFound(Exception):
+    """Exception thrown when we're supposed to find an tune file in the SMuRF database
+    but we don't find it."""
+    pass
 
 # Types of Frames we care about indexing
 type_key = ["Observation", "Wiring", "Scan"]
@@ -2177,8 +2181,11 @@ class SmurfStatus:
         ds_mode = self.status.get(f"{ds_root}.DownsamplerMode", "Internal")
         self.downsample_external = ds_mode.lower() == 'external'
 
-        # Tries to make resonator frequency map
+        # Tries to make resonator frequency map and label fixed tones
         self.freq_map = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), np.nan)
+        self.amplitude_scales = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), np.nan)
+        self.feedback_enabled = np.full((self.NUM_BANDS, self.CHANS_PER_BAND), np.nan)
+
         band_roots = [
             f"AMCc.FpgaTopLevel.AppTop.AppCore.SysgenCryo.Base[{band}]"
             for band in range(self.NUM_BANDS)
@@ -2190,6 +2197,10 @@ class SmurfStatus:
             channel_offset = self.status.get(
                 f"{band_root}.CryoChannels.centerFrequencyArray"
             )
+            amp_scale = self.status.get(f"{band_root}.CryoChannels.amplitudeScaleArray")
+            feed_enabled = self.status.get(
+                f"{band_root}.CryoChannels.feedbackEnableArray"
+            )
 
             # Skip band if one of these fields is None
             if None in [band_center, subband_offset, channel_offset]:
@@ -2198,6 +2209,19 @@ class SmurfStatus:
             subband_offset = np.array(ast.literal_eval(subband_offset))
             channel_offset = np.array(ast.literal_eval(channel_offset))
             self.freq_map[band] = band_center + subband_offset + channel_offset
+
+            if None in [amp_scale, feed_enabled]:
+                ## if band is not reading out
+                continue
+            self.amplitude_scales[band] = np.array(ast.literal_eval(amp_scale))
+            self.feedback_enabled[band] = np.array(ast.literal_eval(feed_enabled))
+        
+        ## fixed tones have amplitude scales > 0 and feedback_enabled == 0
+        self.tone_map = np.all(
+            [~np.isnan(self.amplitude_scales), self.amplitude_scales >0,
+            ~np.isnan(self.feedback_enabled), self.feedback_enabled==0,],
+            axis=0
+        )
 
         # Calculates flux ramp reset rate (Pulled from psmurf's code)
         rtm_root = "AMCc.FpgaTopLevel.AppTop.AppCore.RtmCryoDet"
@@ -2406,6 +2430,21 @@ class SmurfStatus:
                 Channel number or list of channel numbers.
         """
         return self.mask_inv[band, chan]
+    
+    def is_fixed_tone(self, band, chan):
+        """
+        Returns True if the band and channel is a fixed tone and not a
+        resonator 
+
+        Args:
+            band : int, List[int]
+                The band number, or list of band numbers corresopnding to
+                channel input array.
+            chan : int, List[int]
+                Channel number or list of channel numbers.
+        """
+        return self.tone_map[band, chan]
+
 
 def get_channel_mask(
     ch_list, status, archive=None, obsfiledb=None, ignore_missing=True
@@ -2757,6 +2796,71 @@ def get_channel_info(
         ch_info.wrap("readout_id", np.array(ruids), ([(0, det_axis)]))
 
     return ch_info
+
+def get_book_readout_ids(status, archive, session=None):
+    """ A simplified version of readout_id loading just for imprinter. Designed
+    to throw errors if we cannot find the readout ids we expect to be able to find
+
+    Args
+    -----
+    status : SmurfStatus instance
+    archive: G3tSmurf instance 
+    session: session connection to the archive database
+    """
+
+    if session is None:
+        session = archive.Session()
+    
+    ch_list = np.arange(status.num_chans)
+    ch_map = np.zeros(
+        len(ch_list), dtype=[
+            ("idx", int), ("rchannel", np.str_, 30),
+            ("readout_id", np.str_, 40),
+            ("band", int), ("channel", int),
+            ("freqs", float), ("is_tone", bool),
+        ],
+    )
+    
+    if status.tune is None or len(status.tune)==0:
+        raise TuneFileNotFound("Tune file not listed in .g3 file status frame")
+
+    tune_file = Tunes.get_name_from_status(status)
+    tune = session.query(Tunes).filter(
+        db.or_(Tunes.name == tune_file, Tunes.name == status.tune),
+        Tunes.stream_id == status.stream_id,
+    ).one_or_none()
+    if tune is None:
+        raise TuneFileNotFound(f"Tune file {tune_file} not found in G3tSmurf archive")
+    
+    bands, channels, names = zip(
+        *[(ch.band, ch.channel, ch.name) for ch in tune.tuneset.channels]
+    )
+    
+    ch_map["idx"] = ch_list
+    for i, ch in enumerate(ch_map["idx"]):
+        sch = status.readout_to_smurf(ch)
+        ch_map[i]["rchannel"] = "r{:04d}".format(ch)
+        ch_map[i]["freqs"] = status.freq_map[sch[0], sch[1]]
+        ch_map[i]["band"] = sch[0]
+        ch_map[i]["channel"] = sch[1]
+        ch_map[i]["is_tone"] = status.is_fixed_tone(sch[0], sch[1])
+
+        msk = np.all([
+            ch_map["band"][i] == bands, 
+            ch_map["channel"][i] == channels
+        ], axis=0)
+
+        if ch_map[i]["is_tone"]:
+            assert np.sum(msk) == 0, "Fixed Tone has a readout id and it should not"
+            ch_map[i]["readout_id"] = "sch_NONE_{}_{:03d}".format(
+                ch_map["band"][i], ch_map["channel"][i]
+            )
+        else:
+            assert np.sum(msk) == 1, f"Readout id not found for (band {sch[0]}, channel {sch[1]})"
+            
+            j = np.where(msk)[0][0]
+            ch_map[i]["readout_id"] = names[j]
+    return ch_map
 
 def _get_sample_info(filenames):
     """Scan through a list of files and count samples. Starts counting
