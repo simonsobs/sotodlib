@@ -117,7 +117,7 @@ class NmatUncorr(Nmat):
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges="act_default", nbin=100, nmin=10, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20], downweight=[], 
                 window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000,
-                skip_mean=True, mp_significance=None, wnoise_band=None):
+                skip_mean=True, mp_significance=None, wnoise_band=None, max_noise_modes=None):
         if bin_edges == "act_default":
             bin_edges = np.array([
                 0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
@@ -141,8 +141,14 @@ class NmatDetvecs(Nmat):
         self.nbin       = nbin
         self.nmin       = nmin
         self.mode_bins = mode_bins
-        self.eig_lim   = np.zeros(len(mode_bins))+eig_lim
-        self.single_lim= np.zeros(len(mode_bins))+single_lim
+        if eig_lim is None:
+            self.eig_lim = None
+        else:
+            self.eig_lim   = np.zeros(len(mode_bins)) + eig_lim
+        if single_lim is None:
+            self.single_lim = None
+        else:
+            self.single_lim= np.zeros(len(mode_bins)) + single_lim
         self.verbose   = verbose
         self.downweight= downweight
         self.bins = bins
@@ -152,6 +158,7 @@ class NmatDetvecs(Nmat):
         self.skip_mean   = skip_mean
         self.mp_significance = mp_significance
         self.wnoise_band = wnoise_band # Expected format: [fmin, fmax]
+        self.max_noise_modes = max_noise_modes
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
 
@@ -205,7 +212,8 @@ class NmatDetvecs(Nmat):
             skip_mean=self.skip_mean, 
             verbose=self.verbose,
             mp_significance=self.mp_significance,
-            noise_sigmas=noise_sigmas
+            noise_sigmas=noise_sigmas,
+            max_noise_modes=self.max_noise_modes
         )
         nmode= vecs.shape[1]
         if nmode == 0:
