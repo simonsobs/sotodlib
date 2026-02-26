@@ -3177,10 +3177,14 @@ class GlitchClassification(_Preprocess):
     Saves results in proc_aman under the "glitch_snippets" field.
 
     Takes the following ``calc`` config options:
-    :n_thres: (int) Minimum number of detectors flagged as glitch simultaneously to be
-        considered for classification. Default is 2.
-    :n_buffer: (int) Number of samples to buffer around the glitch. Default is 5.
-    :trained_forest_name: (str) Name of the trained random forest to use for classification.
+
+    n_thres : int
+        Minimum number of detectors flagged as glitch simultaneously to
+        be considered for classification. Default is 2.
+    n_buffer : int
+        Number of samples to buffer around the glitch. Default is 5.
+    trained_forest_name : str
+        Name of the trained random forest to use for classification.
 
     Example config block::
 
