@@ -1482,6 +1482,8 @@ def get_pcfg_check_aman(pipe):
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], core.AxisManager())
                     for itm in memb[1].items():
                         pcfg_ref[f'{i}_{pp.name}'][memb[0]].wrap(itm[0], str(itm[1]))
+                elif not np.isscalar(memb[1]):
+                    pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], str(memb[1]))
                 else:
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], memb[1])
     return pcfg_ref

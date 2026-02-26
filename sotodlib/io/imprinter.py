@@ -284,15 +284,23 @@ class Imprinter:
                     self.logger.warning(f"Tube {tube} missing wafer_slots "
                     "entry. Are you using an old configuration format?")
                     continue
-                
-            for slot in self.tube_configs[tube]['wafer_slots']:
+
+            for slot_int, slot in enumerate(self.tube_configs[tube]['wafer_slots']):
+                assert 'wafer_slot' in slot, f"wafer_slot entry missing in {slot}"
+                assert slot['wafer_slot'] == f"ws{slot_int}", f"wafer_slot {slot} out of order"
                 if slot['stream_id'].lower() == 'none':
                     self.tubes[tube]['slots'].append(
                         f"NONE_{slot['wafer_slot']}"
                     )
                 else:
                     self.tubes[tube]['slots'].append(slot['stream_id'])
-                                        
+            
+            # check for duplicate stream_ids
+            if len(self.tubes[tube]['slots']) != len(set(self.tubes[tube]['slots'])):
+                for slot in self.tube_configs[tube]['wafer_slots']:
+                    if self.tubes[tube]['slots'].count(slot['stream_id']) > 1:
+                        assert 'wafer' in slot, f"Duplicate stream-id {slot['stream_id']} requires wafer information"
+                                    
         # raise error if database does not exist
         if not op.exists(self.db_path):
             if not make_db:
@@ -1160,6 +1168,32 @@ class Imprinter:
         )
         return q
 
+    def _attempt_incomplete_fix(self, incomplete_obs):
+        """
+        For a list of (likely) incomplete level 2 observations, see if a new level2
+        observation has been streamed from the same slot and, if so, force the 
+        completion of the previous observation.
+        """
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        for obs in incomplete_obs:
+            if obs.stop is not None:
+                ## edge case wont fix
+                continue
+            next_obs = g3session.query(G3tObservations).filter(
+                G3tObservations.stream_id == obs.stream_id,
+                G3tObservations.timestamp > obs.timestamp,
+            ).order_by(G3tObservations.timestamp).first()
+            if next_obs is not None:
+                ## we've streamed again on this readout slot.
+                ## older obs should be closed
+                self.logger.warning(
+                    f"{obs} is incomplete but we have streamed {next_obs} "
+                    "from the same slot. Attempting to set stop time"
+                )
+                SMURF.update_observation_files(
+                    obs, g3session, force_stop=True
+                )    
+
     @loop_over_tubes
     def update_bookdb_from_g3tsmurf(
         self,
@@ -1196,8 +1230,8 @@ class Imprinter:
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
         incomplete_timeouts: tuple
-            hours for raising a (warning, error) if incomplete observations are
-            found in the g3tsmurf database
+            hours passed for (attempting to complete observation, raising a error) 
+            if incomplete observations are found in the g3tsmurf database
         """
         if not self.build_det:
             return
@@ -1214,7 +1248,7 @@ class Imprinter:
 
         # get wafers
         if stream_ids is None:
-            streams = self.tubes[tube].get("slots")
+            streams = list(set(self.tubes[tube].get("slots"))) ## use unique stream_ids
             if streams is None:
                 raise ValueError(
                     f"Imprinter missing slot / stream_id" " information for {source}"
@@ -1235,7 +1269,21 @@ class Imprinter:
         # check for incomplete observations in time range
         q_incomplete = self._find_incomplete(min_ctime, max_ctime, streams)
 
-        # if we have incomplete observations in our stream_id list we cannot
+        ## if incomplete observations are more than 3 hours in the past, try and
+        ## set these to complete by seeing if we've streamed from that slot again
+        if q_incomplete.count() > 0:
+            incomplete_obs = q_incomplete.all()
+            new_ctime = min([obs.timestamp for obs in incomplete_obs])
+            if max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
+                self.logger.warning(
+                    f"Found {q_incomplete.count()} incomplete observations "
+                    f"more than {incomplete_timeouts[0]} hours in the past."
+                    " Will attempt to complete these observations"
+                )
+                self._attempt_incomplete_fix(incomplete_obs)
+                q_incomplete = self._find_incomplete(min_ctime, max_ctime, streams)
+            
+        # if we still have incomplete observations in our stream_id list we cannot
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             new_ctime = min([obs.timestamp for obs in q_incomplete.all()])

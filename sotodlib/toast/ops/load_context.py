@@ -1144,7 +1144,6 @@ class LoadContext(Operator):
             ignore_preprocess_archive=self.ignore_preprocess_archive,
             context=self.context,
             context_file=self.context_file,
-            daq_units=self.daq_units,
         )
 
         log.debug_rank(
