@@ -3171,10 +3171,14 @@ class Move(_Preprocess):
 class GlitchClassification(_Preprocess):
     """Classify glitches using a random forest.
 
-    Returns the probability of being each type of glitch: 0: Point Sources,
-    1: Point Sources + Other 2: Cosmic Rays, 3: Electronic Glitches.
+    Returns the probability of being each type of glitch:
 
-    Saves results in proc_aman under the "glitch_snippets" field.
+    - ``0``: Point Sources
+    - ``1``: Point Sources + Other
+    - ``2``: Cosmic Rays
+    - ``3``: Electronic Glitches
+
+    Saves results in ``proc_aman`` under the ``glitch_snippets`` field.
 
     Takes the following ``calc`` config options:
 
