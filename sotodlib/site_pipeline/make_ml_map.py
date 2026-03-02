@@ -1,3 +1,5 @@
+import numpy as np
+
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
     import argparse
@@ -6,9 +8,11 @@ def get_parser(parser=None):
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
+    parser.add_argument("preprocess_config", help="Preprocess configuration file")
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
+    parser.add_argument("-O", "--ots",  type=str, default=None, help="Optics tubes to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
@@ -25,22 +29,56 @@ def get_parser(parser=None):
     parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats")
     parser.add_argument(      "--nmat-mode", type=str, default="build", help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat-dir, otherwise build and save. 'load': Load from nmat-dir, error if missing. 'save': Build from tod and save.")
     parser.add_argument("-d", "--downsample", type=str, default="1",  help="Downsample TOD by this factor. ,-sep")
+    parser.add_argument("-D", "--downgrade", type=int, default=1,  help="Downgrade the input area by this factor")
     parser.add_argument(      "--maxiter",    type=str, default="500",help="Max number of CG steps per pass. ,-sep")
     parser.add_argument(      "--interpol",   type=str, default="nearest", help="Pmat interpol per pass. ,-sep")
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
+    parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
+    parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
+    parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
+    parser.add_argument("--hits", action="store_true", help="Write hits maps")
     return parser
+
+sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
+
+def measure_rms(tod, dt=1, bsize=32, nblock=10):
+    tod = tod[:,:tod.shape[1]//bsize*bsize]
+    tod = tod.reshape(tod.shape[0],-1,bsize)
+    bstep = max(1,tod.shape[1]//nblock)
+    tod = tod[:,::bstep,:][:,:nblock,:]
+    rms = np.median(np.std(tod,-1),-1)
+    # to µK√s units
+    rms *= dt**0.5
+    return rms
+
+def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
+    # First reject detectors with unreasonably low noise
+    good     = rms_uKrts >= sens_lim
+    # Also reject far too noisy detectors
+    good    &= rms_uKrts <  sens_lim*max_lim
+    # Then reject outliers
+    if np.sum(good) == 0: return good
+    ref      = np.median(rms_uKrts[good])
+    good    &= rms_uKrts > ref*med_tol
+    good    &= rms_uKrts < ref/med_tol
+    return good
 
 def main(**args):
     import numpy as np, sys, time, warnings, os, so3g
     from sotodlib.core import Context, AxisManager, IndexAxis
-    from sotodlib.io import metadata   # PerDetectorHdf5 work-around
     from sotodlib import tod_ops, mapmaking, core
     from sotodlib.tod_ops import filters
+    from sotodlib.coords import pointing_model, sidelobes
     from sotodlib.mapmaking import log
+    from sotodlib.preprocess import preprocess_util as pp_util
+    from sotodlib.core import metadata
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
     import yaml
+
+    LoaderError = metadata.loader.LoaderError
 
     #try: import moby2.analysis.socompat
     #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
@@ -52,6 +90,9 @@ def main(**args):
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args.area)
+
+    if args.downgrade > 1:
+        shape, wcs = enmap.downgrade_geometry(shape, wcs, args.downgrade)
 
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
@@ -77,10 +118,11 @@ def main(**args):
     with bench.mark('context'):
         context = Context(args.context)
 
+    ots = args.ots.split(",") if args.ots else None
     wafers  = args.wafers.split(",") if args.wafers else None
     bands   = args.bands .split(",") if args.bands  else None
     sub_ids = mapmaking.get_subids(args.query, context=context)
-    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands)
+    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands, ots=ots)
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if args.tods:
@@ -100,7 +142,16 @@ def main(**args):
     if args.srcsamp:
         srcsamp_mask  = enmap.read_map(args.srcsamp)
 
+    # set up the preprocessing
+    try:
+        preproc = yaml.safe_load(open(args.preprocess_config, 'r'))
+    except:
+        if comm.rank==0:
+            L.info(f"{args.preprocess_config} is not a valid config")
+        sys.exit(1)
+
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
+    to_skip = []
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
         pass_prefix = prefix + "pass%d_" % (ipass+1)
@@ -148,14 +199,17 @@ def main(**args):
         signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, recenter=recenter, tiled=args.tiled>0, interpol=args.interpol)
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
+            signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, recenter=recenter, dtype=dtype_tod)
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
             # This *must* come after all the other signals due to how it zeros out the
             # affected samples in the tod (inherited from SignalCut). Might have been better
             # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+        sidelobe_cutters = {}
 
         nkept = 0
+        to_skip_all = comm.allreduce(to_skip)
         # TODO: Fix the task distribution. The current one doesn't care which mpi
         # task gets which tods, which sabotages the pixel-saving effects of tiled maps!
         # To be able to distribute the tods sensibly, we need a rough estimate of where
@@ -167,6 +221,10 @@ def main(**args):
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
+            if sub_id in to_skip_all:
+                L.debug("Skipped %s (Cut in previous pass)" % (sub_id))
+                continue
+
             try:
                 meta = context.get_meta(sub_id)
                 # Optionally restrict to maximum number of detectors. This is mainly
@@ -179,8 +237,28 @@ def main(**args):
                 if len(my_dets) == 0: raise DataMissing("no dets left")
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
-                    obs = context.get_obs(sub_id, meta=meta)
-
+                    #obs = context.get_obs(sub_id, meta=meta)
+                    obs = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                if obs.dets.count < 50:
+                    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                    L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
+                    continue
+                # Check nans
+                mask = np.logical_not(np.isfinite(obs.signal))
+                if mask.sum() > 0:
+                    L.debug("Skipped %s (a nan in signal)" % (sub_id))
+                    L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
+                    continue
+                # Check all 0s
+                zero_dets = np.sum(obs.signal, axis=1)
+                mask = zero_dets == 0.0
+                if mask.any():
+                    L.debug("%s has all 0s in at least 1 detector" % (sub_id))
+                    obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
+                # Cut non-optical dets
+                obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
@@ -191,7 +269,7 @@ def main(**args):
                 obs.wrap("site",    np.full(1, SITE))
 
                 # Prepare our data. FFT-truncate for faster fft ops
-                obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
+                #obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
 
                 # Desolope to make it periodic. This should be done *before*
                 # dropping to single precision, to avoid unnecessary loss of precision due
@@ -210,37 +288,73 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
+                    # measure rms
+                    rms = measure_rms(obs.signal, dt=1/srate)
+                    if args.unit=='K':
+                        good    = sensitivity_cut(rms*1e6, sens_limits[band])
+                    elif args.unit == 'uK':
+                        good    = sensitivity_cut(rms, sens_limits[band])
+                    #nrms    = np.sum(good)
+                    # Cut detectors with too big a fraction of samples cut,
+                    # or cuts occuring too often.
+                    #cuts = obs.flags.glitch_flags.mask()
+                    #cutfrac = cuts.sum()/np.prod(cuts.shape)
+                    #cutdens = (cuts.bins[:,1]-cuts.bins[:,0])/cuts.nsamp
+                    #good   &= np.array((cutfrac < 0.1))
+                    #ndens   = dev.np.sum(good)
+                    # Cut all detectors if too large a fraction is cut
+                    #good   &= dev.np.sum(good)/meta.ndet_full > 0.25
+                    #nfinal  = dev.np.sum(good)
+                    #signal = dev.np.ascontiguousarray(signal[good]) # 600 ms!
+                    #good   = dev.get(good) # cuts, dets, fplane etc. need this on the cpu
+                    #cuts   = cuts  [good]
+                    if np.logical_not(good).sum() / obs.dets.count > 0.5:
+                        L.debug("Skipped %s (more than 50pc of detectors cut by sens)" % (sub_id))
+                        L.debug("Datacount: %s full" % (sub_id))
+                        to_skip += [sub_id]
+                        continue
+                    else:
+                        obs.restrict("dets", good)
+                    # Apply pointing model
+                    #pointing_model.apply_pointing_model(obs)
+                    # Calibrate to pW
+                    #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+                    # Calibrate to K_cmb
+                    #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.find_usable_detectors(obs, args.maxcut)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
+                        to_skip += [sub_id]
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
+                        L.debug("Datacount: %s full" % (sub_id))
                         continue
                     # Gapfill glitches. This function name isn't the clearest
-                    tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
+                    #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
                     # Gain calibration
-                    gain  = 1
-                    for gtype in ["relcal","abscal"]:
-                        gain *= obs[gtype][:,None]
-                    obs.signal *= gain
+                    #gain  = 1
+                    #for gtype in ["relcal","abscal"]:
+                    #    gain *= obs[gtype][:,None]
+                    #obs.signal *= gain
                     # Fourier-space calibration
-                    fsig  = fft.rfft(obs.signal)
-                    freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    #fsig  = fft.rfft(obs.signal)
+                    #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
+                    # iir and timeconstant will be applied in the preprocessing eventually
                     # iir filter
-                    iir_filter  = filters.iir_filter()(freq, obs)
-                    fsig       /= iir_filter
-                    gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= filters.timeconst_filter(None)(freq, obs)
-                    fft.irfft(fsig, obs.signal, normalize=True)
-                    del fsig
+                    #iir_filter  = filters.iir_filter()(freq, obs)
+                    #fsig       /= iir_filter
+                    #gain       /= iir_filter[0].real # keep track of total gain for our record
+                    #fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
+                    #fft.irfft(fsig, obs.signal, normalize=True)
+                    #del fsig
 
                     # Apply pointing correction.
                     #obs.focal_plane.xi    += obs.boresight_offset.xi
                     #obs.focal_plane.eta   += obs.boresight_offset.eta
                     #obs.focal_plane.gamma += obs.boresight_offset.gamma
-                    obs.focal_plane.xi    += obs.boresight_offset.dx
-                    obs.focal_plane.eta   += obs.boresight_offset.dy
-                    obs.focal_plane.gamma += obs.boresight_offset.gamma
+                    #obs.focal_plane.xi    += obs.boresight_offset.dx
+                    #obs.focal_plane.eta   += obs.boresight_offset.dy
+                    #obs.focal_plane.gamma += obs.boresight_offset.gamma
 
                 # Injecting at this point makes us insensitive to any bias introduced
                 # in the earlier steps (mainly from gapfilling). The alternative is
@@ -253,6 +367,14 @@ def main(**args):
 
                 if passinfo.downsample != 1:
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
+                mmask = obs.flags.glitch_flags.mask()
+                L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
+
+                # sidelobes cuts
+                if not args.no_sidelobe:
+                    cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
+                    for cut in cutss:
+                        obs.flags.glitch_flags += cut
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
@@ -282,15 +404,24 @@ def main(**args):
                     print("Writing noise model %s" % nmat_file)
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-            except (DataMissing,IndexError,ValueError) as e:
+            except (DataMissing,IndexError,ValueError,LoaderError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
+                L.debug("Datacount: %s full" % (sub_id))
                 continue
 
-        nkept = comm.allreduce(nkept)
-        if nkept == 0:
+        nkept_all = np.array(comm.allgather(nkept))
+        if np.sum(nkept_all) == 0:
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
             sys.exit(1)
+           
+        if np.any(nkept_all == 0):
+            if nkept == 0:
+                L.info("No tods assigned to this process. Pruning")
+            comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
+            for signal in mapmaker.signals:
+                if hasattr(signal, "comm"):
+                    signal.comm = comm
 
         L.info("Done building")
 
@@ -302,6 +433,9 @@ def main(**args):
         signal_map.write(prefix, "div", signal_map.div, unit=args.unit+'^-2')
         signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args.unit)
         L.info("Wrote rhs, div, bin")
+        if args.hits:
+            signal_map.write(prefix, "hits", signal_map.hits, unit='hits')
+            L.info("Wrote hits")
 
         # Set up initial condition
         x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
