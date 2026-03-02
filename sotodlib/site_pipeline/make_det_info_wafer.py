@@ -32,7 +32,7 @@ def get_array_name(stream_id):
     # ufm_mv56 -> Mv56
     return stream_id.split('_')[1].capitalize()
 
-def main(config_file=None, target=None, overwrite=False, debug=False, log_file=None):
+def main(config_file=None, target=None, overwrite=False, debug=False, log_file=None, _batch=None):
     if debug:
         logger.setLevel("DEBUG")
     
@@ -43,7 +43,16 @@ def main(config_file=None, target=None, overwrite=False, debug=False, log_file=N
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    config = yaml.safe_load(open(config_file, "r"))
+    if _batch is not None:
+        config = _batch
+    else:
+        config = yaml.safe_load(open(config_file, "r"))
+
+    if config.get('wafer_groups'):
+        for wg_config in config.pop('wafer_groups'):
+            main(config_file=None, target=target, overwrite=overwrite,
+                 _batch=config | wg_config)
+        return
 
     if target is not None and len(target) > 0:
         assert(len(target) == 2)  # array_name stream_id
