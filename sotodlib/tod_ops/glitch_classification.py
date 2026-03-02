@@ -5,37 +5,21 @@ import os, pickle as pk
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
-from sotodlib.tod_ops import glitch_stats_functions as func
+from sotodlib.tod_ops.glitch_stats import get_stat, get_all_stat_names
 
-
-stat_dict = {
-    'Number of Detectors': func.num_of_det,
-    'Y and X Extent Ratio': func.x_and_y_histogram_extent_ratio,
-    'Mean abs(Correlation)': func.mean_correlation,
-    'Mean abs(Time Lag)': func.mean_time_lags,
-    'Y Hist Max and Adjacent/Number of Detectors': func.max_and_adjacent_y_pos_ratio,
-    'Within 0.1 of Y Hist Max/Number of Detectors': func.max_and_near_y_pos_ratio,
-    'Number of Peaks': func.compute_num_peaks,
-}
 
 def get_default_stats():
     """Return the default set of summary statistics for glitch classification.
 
-    These are:
-    - Number of Detectors
-    - Y and X Extent Ratio
-    - Mean abs(Correlation)
-    - Mean abs(Time Lag)
-    - Y Hist Max and Adjacent/Number of Detectors
-    - Within 0.1 of Y Hist Max/Number of Detectors
-    - Number of Peaks
+    Returns all stat names from the
+    :mod:`~sotodlib.tod_ops.glitch_stats` registry, in registration order.
 
     Returns
     -------
-    list
-        A list of the default summary statistics for glitch classification.
+    list of str
     """
-    return list(stat_dict.keys())
+    return get_all_stat_names()
+
 
 def compute_summary_stats(snippet, stats=None):
     """Compute the summary statistics for glitch classification.
@@ -46,8 +30,8 @@ def compute_summary_stats(snippet, stats=None):
         Axis manager containing glitch snippets computed with
         :func:`sotodlib.tod_ops.glitch.extract_snippets`.
     stats : list of str, optional
-        Summary statistics to compute.  Each entry must be a key of
-        ``stat_dict``.  If *None*, all default statistics are used.
+        Summary statistics to compute.  Each entry must be a registered
+        stat name.  If *None*, all default statistics are used.
 
     Returns
     -------
@@ -57,16 +41,22 @@ def compute_summary_stats(snippet, stats=None):
     if stats is None:
         stats = get_default_stats()
 
-    signal = detrend_tod(snippet, method = 'median')
+    signal = detrend_tod(snippet, method='median')
 
     roll_corr = -np.mean(snippet.boresight.roll)  # roll correction
     xi, eta = snippet.focal_plane.xi, snippet.focal_plane.eta
     x_wnans = np.rad2deg(xi * np.cos(roll_corr) - eta * np.sin(roll_corr))
     y_wnans = np.rad2deg(eta * np.cos(roll_corr) + xi * np.sin(roll_corr))
 
-    x_t, y_t = x_wnans[np.logical_not(np.isnan(x_wnans))], y_wnans[np.logical_not(np.isnan(y_wnans))]
+    x_t = x_wnans[~np.isnan(x_wnans)]
+    y_t = y_wnans[~np.isnan(y_wnans)]
 
-    stats_arr = np.array([stat_dict[stat](signal, x_t, y_t) for stat in stats])
+    data = {'signal': signal, 'x_pos': x_t, 'y_pos': y_t}
+
+    stats_arr = np.array([
+        get_stat(s).calc(**{k: data[k] for k in get_stat(s).requires})
+        for s in stats
+    ])
 
     return stats_arr
 

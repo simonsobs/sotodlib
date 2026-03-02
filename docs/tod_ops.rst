@@ -267,13 +267,15 @@ The module can also be used through the preprocessing pipeline via the
    :members:
    :undoc-members:
 
-tod_ops.glitch_stats_functions
-==============================
+tod_ops.glitch_stats
+====================
 
-Low-level summary statistic functions used by the glitch classification
-pipeline.  Each function has the signature
-``(signal, x_pos, y_pos) -> scalar`` so that they can be composed into a
-feature vector via :data:`sotodlib.tod_ops.glitch_classification.stat_dict`.
+Low-level summary statistic classes used by the glitch classification
+pipeline.  Each statistic is a :class:`~sotodlib.tod_ops.glitch_stats.GlitchStat`
+subclass registered with the :func:`~sotodlib.tod_ops.glitch_stats.register_stat`
+decorator.  The :attr:`~sotodlib.tod_ops.glitch_stats.GlitchStat.requires`
+attribute declares which inputs each statistic needs; callers pass
+only the relevant data automatically.
 
-.. automodule:: sotodlib.tod_ops.glitch_stats_functions
+.. automodule:: sotodlib.tod_ops.glitch_stats
    :members:
