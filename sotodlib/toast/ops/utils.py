@@ -1,9 +1,15 @@
-# Copyright (c) 2018-2024 Simons Observatory.
+# Copyright (c) 2018-2026 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
+
+import os
+import pickle
 
 from astropy import constants
 from astropy import units as u
 import numpy as np
+
+from toast.utils import Environment, Logger
+
 
 def tb2s(tb, nu):
     """Convert blackbody temperature to spectral radiance s_nu at frequency nu.
@@ -66,3 +72,31 @@ def tb2tcmb(tb, nu):
     s_nu = tb2s(tb, nu)
     result = s2tcmb(s_nu, nu)
     return result.decompose()
+
+
+def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
+    """Loading the file will fail if another process is
+    writing it. We will try up to `n_ty_max` times and wait
+    `wait_time` seconds between each try
+    """
+
+    log = Logger.get()
+
+    if not os.path.isfile(fname):
+        return None
+
+    for n_try in range(n_try_max):
+        try:
+            with open(fname, "rb") as f:
+                payload = pickle.load(f)
+        except EOFError:
+            if n_try == n_try_max - 1:
+                log.warning(f"EOF at {fname}, nothing loaded")
+                return None
+            else:
+                log.warning(f"EOF at {fname}, waiting for {wait_time} seconds")
+                sleep(wait_time)
+                continue
+        break  # success
+
+    return payload
