@@ -25,30 +25,24 @@ that is, ``apply_hwp_angle_model`` and ``hwp.demod_tod``.
     parallel to the xi axis.
 
 
-The main functions of the wire grid consists of 8 functions:
-
+The main functions of the wire grid consists of 7 functions:
  - load_data
  - wrap_wg_hk
- - correct_wg_angle
  - find_operation_range
  - calc_calibration_data_set
  - fit_with_circle
  - get_cal_gamma
 
+
 One can get calibration results by calling these functions.
-``tod`` here stands for an AxisManager. For example::
+``tod`` in the scripts stands for an AxisManager. For example::
 
   # Apply HWP angle model, IIR Filtering, and demodulation before this pipeline
 
-  # Load house-keeping data of the wire grid, L3Config as an exmaple
-  raw_data_dict = load_data(L3Config(
-      path='./satp1_wg_hkdb.yaml',
-      start_time=tod.timestamps[0],
-      stop_time=tod.timestamps[-1],))
+  # Load house-keeping data of the wire grid
+  wg_cfg = wg_config(**wiregrid_config)
+  raw_data_dict = load_data(wg_cfg, tod.timestamps[0],tod.timestamps[-1])
   tod = wrap_wg_hk(tod, raw_data_dict, merge=True)
-
-  # Correct the hardware specific constants of the wire grid
-  correct_wg_angle(tod)
 
   # Find the wire grid operation range in the tod and wrap the calibration data set
   idxi, idxf = find_operation_range(
@@ -61,7 +55,32 @@ One can get calibration results by calling these functions.
   # Get gamma and wrap it into the tod
   get_cal_gamma(tod, merge=True, remove_cal_data=True)
 
-Finally, the AxisManager has the field of ``gamma_cal`` that has:
+Here, we load the wire grid data using the ``wiregrid_config``.
+The example for SATp1 at NERSC is as follows::
+
+  hk_root: '/data/satp1/hk/'
+  db_file: '/hkdb-satp1.db'
+  site: False  
+
+  aliases:
+    enc_count: 'wg-encoder.wgencoder_full.reference_count'
+    LSL1: 'wg-actuator.wgactuator.limitswitch_LSL1'
+    LSL2: 'wg-actuator.wgactuator.limitswitch_LSL2'
+    LSR1: 'wg-actuator.wgactuator.limitswitch_LSR1'
+    LSR2: 'wg-actuator.wgactuator.limitswitch_LSR2'
+    angleX: 'wg-tilt-sensor.wgtiltsensor.angleX'
+    angleY: 'wg-tilt-sensor.wgtiltsensor.angleY'
+    tempX: 'wg-tilt-sensor.wgtiltsensor.temperatureX'
+    tempY: 'wg-tilt-sensor.wgtiltsensor.temperatureY'
+    temp_rotator: 'wg-labjack.sensors_downsampled.AIN0C'
+    temp_rotation_motor: 'wg-labjack.sensors_downsampled.AIN1C'
+    temp_elec_plate: 'wg-labjack.sensors_downsampled.AIN2C'  
+  # hardware specific constants
+  wg_count: 52000 # SATP1~SATP3, JSAT(SATP4?) 
+  wg_offset: 12.13 # SAT1, MF1
+  telescope: 'satp1'
+
+Finally, the AxisManager has the field of ``wg.gamma_cal`` that has:
 
  - ``'gamma_raw'``: the calibrated angle at the j-th measurement step of the wire grid,
  - ``'gamma_raw_err'``: the set of the standard deviation of the calibrated angle for each measurement step,

@@ -30,9 +30,9 @@ from sotodlib.coords.fp_containers import (
 from sotodlib.coords.pointing_model import apply_pointing_model
 from sotodlib.core import AxisManager, Context, IndexAxis, metadata
 from sotodlib.io.metadata import read_dataset
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
 
-logger = util.init_logger(__name__, "finalize_focal_plane: ")
+logger = init_logger(__name__, "finalize_focal_plane: ")
 
 
 def _create_db(filename, per_obs, obs_ids, start_time, stop_time):
@@ -229,6 +229,7 @@ def _load_ctx(config):
         logger.warning("No observations provided in configuration")
     amans = []
     dets = config["context"].get("dets", {})
+    failed = []
     for obs_id in obs_ids:
         roll = ctx.obsdb.get(obs_id)["roll_center"]
         if roll is None:
@@ -238,8 +239,9 @@ def _load_ctx(config):
             continue
         try:
             aman = ctx.get_meta(obs_id, dets=dets)
-        except metadata.loader.LoaderError:
+        except: # metadata.loader.LoaderError:
             logger.error("Failed to load %s, skipping", obs_id)
+            failed += [obs_id]
             continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
@@ -273,6 +275,8 @@ def _load_ctx(config):
         elif tod_pointing_name not in aman:
             raise ValueError(f"No pointing found in {obs_id}")
     obs_ids = [aman.obs_info.obs_id for aman in amans]
+    if len(failed) > 0:
+        logger.error("Failed to load %s", str(failed))
 
     # Figure out stream_ids and OTs
     query_all = f"type=='obs' and start_time>{config['start_time']} and stop_time<{config['stop_time']}"
@@ -463,11 +467,14 @@ def _apply_pointing_model(config, aman):
             config["pointing_model"]["function"][1],
         )
     if "az" not in aman.pointing:
-        raise ValueError("Need to have az in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have az in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("az", np.deg2rad(aman.obs_info.az_center)*np.ones(aman.dets.count), [(0, aman.dets)])
     if "el" not in aman.pointing:
-        raise ValueError("Need to have el in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have el in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("el", np.deg2rad(aman.obs_info.el_center)*np.ones(aman.dets.count), [(0, aman.dets)])
     if "roll" not in aman.pointing:
-        raise ValueError("Need to have roll in pointing fits to apply pointing model")
+        logger.warning("\t\tNeed to have roll in pointing fits to apply pointing model! Filling from obsdb")
+        aman.pointing.wrap("roll", np.deg2rad(aman.obs_info.roll_center)*np.ones(aman.dets.count), [(0, aman.dets)])
 
     params = config["pointing_model"].get("params", {})
     if "pointing_model" in aman:
@@ -481,6 +488,7 @@ def _apply_pointing_model(config, aman):
     ancil.wrap("az_enc", np.rad2deg(aman.pointing.az))
     ancil.wrap("el_enc", np.rad2deg(aman.pointing.el))
     ancil.wrap("roll_enc", np.rad2deg(aman.pointing.roll))
+    ancil.wrap("boresight_enc", -1*np.rad2deg(aman.pointing.roll)) # for SATs
     bs = func(aman, params, ancil, False)
     q_fp = quat.rotation_xieta(aman.pointing.xi, aman.pointing.eta)
     have_gamma = False
@@ -499,7 +507,7 @@ def _apply_pointing_model(config, aman):
         ~quat.euler(2, bs.roll)
         * ~quat.rotation_lonlat(-bs.az, bs.el)
         * quat.rotation_lonlat(-1 * aman.pointing.az, aman.pointing.el)
-        * quat.euler(2, aman.pointing.roll)
+        * quat.euler(2, (not config["pointing_model"].get("force_zero_roll", False)) * aman.pointing.roll)
         * q_fp
     )
 

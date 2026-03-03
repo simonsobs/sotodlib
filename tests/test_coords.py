@@ -236,9 +236,15 @@ class CoordsUtilsTest(unittest.TestCase):
         self.assertEqual(pos1[0], pos2[0])
         self.assertEqual(pos1[1], pos2[1])
 
-        # This doesn't work but it probably should...
-        #coords.planets.get_source_azel("J1000-1000", t)
-            
+        pos1 = coords.planets.get_source_azel("J1000+1000", t)
+        pos2 = coords.planets.get_source_azel("j1000p1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
+
+        pos1 = coords.planets.get_source_azel("J1000-1000", t)
+        pos2 = coords.planets.get_source_azel("j1000m1000", t)
+        self.assertEqual(pos1[0], pos2[0])
+        self.assertEqual(pos1[1], pos2[1])
 
 class OpticsTest(unittest.TestCase):
     def test_sat_fp(self):

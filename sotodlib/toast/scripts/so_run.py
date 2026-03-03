@@ -357,6 +357,40 @@ def cleanup_states(parsed):
         break
 
 
+def print_status(parsed):
+    """Print status of tasks."""
+    states = dict()
+    for root, dirs, files in os.walk(parsed.out_root):
+        for dir in dirs:
+            task_dir = os.path.join(root, dir)
+            state_file = os.path.join(task_dir, "state")
+            if os.path.exists(state_file):
+                with open(state_file, "r") as f:
+                    task_state_str = f.readline().rstrip()
+            else:
+                task_state_str = "INVALID"
+            if task_state_str not in states:
+                states[task_state_str] = list()
+            states[task_state_str].append(dir)
+        break
+    state_order = ["OPEN", "DONE", "RUNNING", "FAILED", "INVALID"]
+    print(f"Tasks in {parsed.out_root}")
+    print("------------------------------------------------------------", flush=True)
+    for state_str in state_order:
+        if state_str in states:
+            total = len(states[state_str])
+        else:
+            total = 0
+        print(f"{state_str:<8}: {total}", flush=True)
+        if parsed.status_details is not None and parsed.status_details == state_str:
+            # Print every task
+            if state_str in states and len(states[state_str]) > 0:
+                for tsk in states[state_str]:
+                    print(f"  {tsk}", flush=True)
+            else:
+                print("  (no tasks)", flush=True)
+
+
 def main(opts=None, comm=None):
     log = toast.utils.Logger.get()
 
@@ -392,18 +426,33 @@ def main(opts=None, comm=None):
         help="Disable worker stderr / stdout redirection",
     )
 
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        default=False,
+        help="Print task status and exit",
+    )
+
+    parser.add_argument(
+        "--status_details",
+        required=False,
+        type=str,
+        default=None,
+        help="Print details of each task with this status (e.g. 'FAILED', 'RUNNING')",
+    )
+
     cleanup_group = parser.add_mutually_exclusive_group(required=False)
     cleanup_group.add_argument(
         "--set_running_to_open",
         action="store_true",
         default=False,
-        help="Mark RUNNING jobs as OPEN before starting",
+        help="Mark RUNNING jobs as OPEN",
     )
     cleanup_group.add_argument(
         "--set_running_to_failed",
         action="store_true",
         default=False,
-        help="Mark RUNNING jobs as FAILED before starting",
+        help="Mark RUNNING jobs as FAILED",
     )
 
     task_group = parser.add_mutually_exclusive_group(required=False)
@@ -466,6 +515,13 @@ def main(opts=None, comm=None):
 
     # Parse just the args we are using in this wrapper
     args, remaining = parser.parse_known_args(args=opts)
+
+    # If we are printing status, just do that and exit
+    if args.status:
+        # Cleanup any running states if needed
+        cleanup_states(args)
+        print_status(args)
+        return
 
     if args.context_file is not None:
         msg = f"Working with data from context {args.context_file}"

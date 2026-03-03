@@ -10,6 +10,8 @@ import numpy as np
 
 import astropy.units as u
 from astropy.table import QTable
+
+import toast
 from toast.instrument import Focalplane, GroundSite, Telescope
 from toast.utils import Logger, name_UID
 from toast.weather import SimWeather
@@ -366,11 +368,13 @@ class SOFocalplane(Focalplane):
             )
             # Get noise parameters.  If detector-specific entries are
             # absent, use band averages
-            net_corr = get_par_float(
-                det_data, "NET_corr", band_data["NET_corr"]
+            net_corr = get_par_float(det_data, "NET_corr", band_data["NET_corr"])
+            net = (
+                get_par_float(det_data, "NET", band_data["NET"])
+                * 1.0e-6
+                * u.K
+                * u.s**0.5
             )
-            net = get_par_float(det_data, "NET", band_data["NET"]) \
-                * 1.0e-6 * u.K * u.s**0.5
             if apply_net_corr:
                 net *= net_corr
                 net_corr = 1.0
@@ -388,8 +392,9 @@ class SOFocalplane(Focalplane):
             bandcenters.append(0.5 * (lower + upper))
             bandwidths.append(upper - lower)
 
-        meta["platescale"] = hw.data["telescopes"][meta["telescope"]]["platescale"] \
-                             * u.deg / u.mm
+        meta["platescale"] = (
+            hw.data["telescopes"][meta["telescope"]]["platescale"] * u.deg / u.mm
+        )
 
         detdata = QTable(
             [
@@ -470,6 +475,29 @@ class SOFocalplane(Focalplane):
             field_of_view=field_of_view,
             sample_rate=sample_rate,
         )
+
+    @classmethod
+    def _load_hdf5(
+        cls, handle, comm=None, detectors=None, file_det_sets=None, **kwargs
+    ):
+        """Load simulated focalplane from HDF5.
+
+        Although SOFocalplane inherits from toast.instrument.Focalplane, it
+        essentially is just a custom constructor and the actual content is
+        stored in the Focalplane base class.  When loading data we just
+        dispatch to the base class method.
+        """
+        return toast.instrument.Focalplane._load_hdf5(
+            handle,
+            comm=comm,
+            detectors=detectors,
+            file_det_sets=file_det_sets,
+            **kwargs,
+        )
+
+    def _save_hdf5(self, handle, comm=None, **kwargs):
+        """Save to HDF5 - dispatch to base class method."""
+        return super()._save_hdf5(handle, comm=comm, **kwargs)
 
 
 def update_creation_time(det_data, creation_time):

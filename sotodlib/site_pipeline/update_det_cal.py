@@ -24,7 +24,7 @@ from sotodlib.io.metadata import write_dataset, ResultSet
 from sotodlib.io.load_book import get_cal_obsids
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.hwp import get_hwpss, subtract_hwpss
-import sotodlib.site_pipeline.util as sp_util
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, Future
 import sodetlib.tes_param_correction as tpc
@@ -43,9 +43,11 @@ BAND_STR = {'mf': {'lb': 'f090', 'hb': 'f150'},
             'uhf': {'lb': 'f220', 'hb': 'f280'},
             'lf': {'lb': 'f030', 'hb': 'f040'}}
 
+from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
+
 logger = logging.getLogger("det_cal")
 if not logger.hasHandlers():
-    sp_util.init_logger("det_cal")
+    sp_init_logger("det_cal")
 
 
 def get_data_root(ctx: core.Context, obs_id:str) -> str:
@@ -75,9 +77,15 @@ class DetCalCfg:
     raise_exceptions: bool
         If Exceptions should be raised in the get_cal_resset function.
         Defaults to False.
+    fit_tau: bool
+        If True, re-fit the biasstep tau. Defaults to False.
     apply_cal_correction: bool
         If True, apply the RP calibration correction, and use corrected results
         for Rtes, Si, Pj, and loopgain when successful. Defaults to True.
+    hwpss_subtraction: bool
+        If True, reanalyze biasstep with hwpss subtraction. Defaults to False.
+    metadata_list: str or List of str
+        List of metadata labels to load. Defaults to 'all'.
     index_path: str
         Path to the index file to use for the det_cal database. Defaults to
         "det_cal.sqlite".
@@ -121,6 +129,7 @@ class DetCalCfg:
         context_path: str,
         *,
         raise_exceptions: bool = False,
+        fit_tau: bool = False,
         apply_cal_correction: bool = True,
         hwpss_subtraction: bool = False,
         metadata_list: Union[str, List[str]] = 'all',
@@ -142,6 +151,7 @@ class DetCalCfg:
         self.context_path = os.path.expandvars(context_path)
         self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
+        self.fit_tau = fit_tau
         self.apply_cal_correction = apply_cal_correction
         self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
@@ -483,9 +493,30 @@ def biases_flags(bsa, buffer=200):
     for i, bg in enumerate(bsa.bgmap):
         if bg == -1:
             continue
+        if len(bsa.edge_idxs[bg]) == 0:
+            continue
         mask[i][bsa.edge_idxs[bg][0]:bsa.edge_idxs[bg][-1]] = 1
     flags = RangesMatrix.from_mask(mask).buffer(buffer)
     return flags
+
+
+def fill_zeros_biases(am):
+    # fill the zeros in biases by non-zero values before
+    # zeros in the beginning will be filled by non-zero values after
+    for bias in am.biases:
+        last = None
+        for i in range(len(bias)):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
+
+        last = None
+        for i in range(len(bias)-1, -1, -1):
+            if bias[i] != 0:
+                last = bias[i]
+            elif last is not None:
+                bias[i] = last
 
 
 def load_and_reanalyze_bs(bsa, ctx, obs_id):
@@ -497,12 +528,17 @@ def load_and_reanalyze_bs(bsa, ctx, obs_id):
         ctx: Context object
         obs_id: observation id of bias steps
     """
-    am = ctx.get_obs(obs_id)
+    am = ctx.get_obs(obs_id, special_channels=True, reindex_dets=True)
     am.wrap('hwp_angle', am.hwp_solution.hwp_angle,
             [(0, 'samps')])
     if np.all(am.hwp_angle == 0):
         return
+
     bsa.am = am
+    zero_bias_count = sum([sum(bias == 0) for bias in am.biases])
+    if zero_bias_count > 0:
+        logger.warn(f'Patching {zero_bias_count} zero bias values in {obs_id}')
+        fill_zeros_biases(am)
     bsa._find_bias_edges()
     flags = biases_flags(bsa)
     get_hwpss(am, flags=flags, merge_stats=True)
@@ -558,6 +594,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                     # This will edit IVA dicts in place
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
+
+        if cfg.fit_tau:
+            for dset, bsa in bsas.items():
+                bsa._fit_tau_effs()
 
         if cfg.hwpss_subtraction:
             # Reanalyze biasstep with hwpss subtraction
@@ -971,4 +1011,4 @@ def main(config_file: str):
         _main(cfg, executor, as_completed_callable)
 
 if __name__ == "__main__":
-    sp_util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)

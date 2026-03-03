@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2024 Simons Observatory.
+# Copyright (c) 2023-2025 Simons Observatory.
 # Full license can be found in the top level "LICENSE" file.
 """Template regression mapmaking.
 """
@@ -174,6 +174,11 @@ def mapmaker_select_noise_and_binner(job, otherargs, runargs, data):
 
         if job_tmpls.baselines.enabled:
             job_tmpls.noise_model = noise_model
+    elif job_ops.filterbin.enabled:
+        job_ops.filterbin.binning = job_ops.binner_final
+        job_ops.filterbin.binning.full_pointing |= otherargs.full_pointing
+        job_ops.filterbin.det_data = job_ops.sim_noise.det_data
+        job_ops.filterbin.output_dir = otherargs.out_dir
 
 
 @workflow_timer

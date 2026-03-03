@@ -4,7 +4,13 @@ import so3g
 from so3g.proj import coords, quat
 import sotodlib.coords.planets as planets
 from sotodlib import core
-from sotodlib.toast.ops import sim_sso
+
+# No need for site_pipeline to be a toast API canary here...
+try:
+    from sotodlib.toast.ops import sim_sso
+except ImportError:
+    sim_sso = None
+
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset, read_dataset
 from sotodlib.tod_ops.filters import high_pass_sine2, low_pass_sine2, fourier_filter
@@ -21,14 +27,15 @@ from scipy.optimize import curve_fit, minimize
 from datetime import datetime
 import argparse as ap
 import yaml
-from sotodlib.site_pipeline import util
+from sotodlib.site_pipeline.utils.logging import init_logger
+from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from dataclasses import dataclass
 import matplotlib
 matplotlib.use('agg')
 
 opj = os.path.join
 
-logger = util.init_logger(__name__)
+logger = init_logger(__name__)
 
 
 def find_source(
@@ -1296,4 +1303,4 @@ def get_parser(parser=None):
 
 
 if __name__ == "__main__":
-    util.main_launcher(main, get_parser)
+    main_launcher(main, get_parser)
