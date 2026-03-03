@@ -1,9 +1,8 @@
 import numpy as np
 from sotodlib.tod_ops import detrend_tod
-import os, pickle as pk
+import pickle as pk
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 
 from sotodlib.tod_ops.glitch_stats import get_stat, get_all_stat_names
 
@@ -60,37 +59,6 @@ def compute_summary_stats(snippet, stats=None):
 
     return stats_arr
 
-
-def split_into_training_and_test(data, labels, train_size=None, random_state=None):
-    """Split data and labels into training and test sets.
-
-    Parameters
-    ----------
-    data : numpy.ndarray
-        Array of shape ``(n_samples, n_features)``.
-    labels : numpy.ndarray
-        Array of shape ``(n_samples,)``.
-    train_size : float, optional
-        Fraction of the data to use for the training set (0 to 1).
-    random_state : int, optional
-        Random state for reproducibility.
-
-    Returns
-    -------
-    data_train : numpy.ndarray
-        Training data.
-    labels_train : numpy.ndarray
-        Training labels.
-    data_test : numpy.ndarray
-        Test data.
-    labels_test : numpy.ndarray
-        Test labels.
-    """
-
-    data_train, data_test, labels_train, labels_test = train_test_split(
-        data, labels, train_size=train_size, random_state=random_state)
-
-    return data_train, labels_train, data_test, labels_test
 
 def train_forest(X_train, y_train, stats=None, n_trees=50, max_depth=15):
     """Train a random forest classifier for glitch classification.
@@ -220,57 +188,3 @@ def classify_snippets(snippets, trained_forest):
     col_names = {'preds': list(PRED_COLUMNS), 'stats': stat_names}
 
     return preds, stats_array, col_names
-
-def plot_confusion_matrix(pred_labs, true_labs, colours=['purple', 'coral', '#40A0A0', '#FFE660'],
-                         save=False, save_file_name='forest_confusion_matrix',
-                         outdir=os.getcwd(), show=True):
-    """Plot a confusion matrix for glitch classification results.
-
-    Parameters
-    ----------
-    pred_labs : numpy.ndarray
-        Predicted labels.
-    true_labs : numpy.ndarray
-        True labels.
-    colours : list of str, optional
-        Colours for plotting.
-    save : bool, optional
-        Whether to save the figure to disk.
-    save_file_name : str, optional
-        Base file name (without extension) for saved plots.
-    outdir : str, optional
-        Output directory for saved plots.  Defaults to the current
-        working directory.
-    show : bool, optional
-        Whether to display the plot.
-    """
-
-    acc = accuracy_score(true_labs, pred_labs)
-
-    plt.rcParams['xtick.labelsize'] = 14
-    plt.rcParams['ytick.labelsize'] = 14
-    plt.rcParams['font.size'] = 18
-
-    leg_labs = ['Point Sources', 'Point Sources + Other', 'Cosmic Rays', 'Other']
-
-
-    cm = confusion_matrix(true_labs, pred_labs)
-
-    cmn = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-    plt.figure(figsize = (10,10))
-    sns.heatmap(cmn, annot=True, fmt='.2f', xticklabels=leg_labs, yticklabels=leg_labs)
-    plt.ylabel('Actual')
-    plt.xlabel('Predicted')
-    plt.title('Overall Accuracy: {}%'.format(np.round(acc*100, 1)))
-    plt.xticks(rotation=45, ha='right')
-    plt.yticks(rotation=45, ha='right')
-    plt.tight_layout()
-
-
-    if save:
-        plt.savefig('{}/{}.png'.format(outdir, save_file_name))
-        plt.savefig('{}/{}.pdf'.format(outdir, save_file_name))
-
-    if show:
-        plt.show()
