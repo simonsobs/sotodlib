@@ -8,6 +8,10 @@ import glob
 from tqdm import tqdm
 import logging
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 from scipy.optimize import curve_fit
 from sotodlib.core import metadata
 from sotodlib.io.metadata import read_dataset, write_dataset
@@ -154,7 +158,7 @@ def update_xieta(tod,
     # if focal_plane result is specified, use the information as a prior
     if fp_hdf_file is not None:
         wrap_fp_from_hdf(tod, fp_hdf_file)
-    
+        
     # set dets without focal_plane info to have (xi, eta, gamma) = (0, 0, 0), just to avoid error
     xieta_isnan = (np.isnan(tod.focal_plane.xi)) | (np.isnan(tod.focal_plane.eta))
     gamma_isnan = np.isnan(tod.focal_plane.gamma)
@@ -213,14 +217,17 @@ def update_xieta(tod,
     xieta_dict = {}
     for di, det in enumerate(tqdm(tod.dets.vals)):
         mask_di = source_flags_ds[di]
+        bs_az = np.nanmedian(tod.boresight.az[mask_ds][mask_di])
+        bs_el = np.nanmedian(tod.boresight.el[mask_ds][mask_di])
+        
         if np.any([xieta_isnan[di], np.all(mask_di==False), tod.rms[di]==0.]):
             xieta_dict[det] = {'xi': np.nan, 'eta':  np.nan, 'xi_err': np.nan, 'eta_err': np.nan,
-                               'R2': np.nan, 'redchi2': np.nan}
+                               'R2': np.nan, 'redchi2': np.nan, 'az': np.nan, 'el': np.nan}
         else:
             ts = ts_ds[mask_di]
             d1_unix = np.median(ts)
-            xieta_det = np.array([tod.focal_plane.xi[di], tod.focal_plane.eta[di]])
 
+            xieta_det = np.array([tod.focal_plane.xi[di], tod.focal_plane.eta[di]])
             q_det = so3g.proj.quat.rotation_xieta(xieta_det[0], xieta_det[1])
             planet = planets.SlowSource.for_named_source(sso_name, d1_unix * 1.)
             ra0, dec0 = planet.pos(d1_unix)
@@ -232,7 +239,7 @@ def update_xieta(tod,
             xieta_src = xieta_src[:, mask_di]
             sig = sig_ds[di][mask_di]            
             ptp_val = np.ptp(np.percentile(sig, [0.1, 99.9]))
-            
+
             if fit_func_name == 'gaussian2d_nonlin':
                 p0 = np.array([0., 0., fwhm_init_deg*coords.DEG, fwhm_init_deg*coords.DEG, 0., ptp_val])
                 bounds = np.array(
@@ -270,16 +277,17 @@ def update_xieta(tod,
 
                 xieta_det += np.array([xi_opt, eta_opt])
                 xieta_dict[det] = {'xi': xieta_det[0], 'eta': xieta_det[1], 'xi_err': xi_err, 'eta_err': eta_err,
-                                   'R2': R2, 'redchi2': redchi2}
+                                   'R2': R2, 'redchi2': redchi2, 'az' : bs_az, 'el': bs_el}
             except RuntimeError:
                 xieta_dict[det] = {'xi': np.nan, 'eta':  np.nan, 'xi_err': np.nan, 'eta_err': np.nan,
-                                   'R2': np.nan, 'redchi2': np.nan}
+                                   'R2': np.nan, 'redchi2': np.nan, 'az': np.nan, 'el': np.nan}
             
-    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2'])
+    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2', 'az', 'el'])
     for det in tod.dets.vals:
         focal_plane.rows.append((det, xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0.,
                                  xieta_dict[det]['xi_err'], xieta_dict[det]['eta_err'], 
                                  xieta_dict[det]['R2'], xieta_dict[det]['redchi2'],
+                                 xieta_dict[det]['az'], xieta_dict[det]['el'],
                                 ))
 
     return focal_plane
