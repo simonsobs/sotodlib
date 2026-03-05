@@ -136,6 +136,7 @@ def main(config: str,
         If None or 0, there is no limit.
 
     """
+    logger.handlers[0].setLevel(logging.DEBUG)
     if verbosity == 0:
         logger.setLevel(logging.ERROR)
     elif verbosity == 1:
@@ -207,12 +208,14 @@ def main(config: str,
     else:
         book_cand_iterable = _find_books_deep(base_dir)
 
+    skipped_count = 0
     for dirpath in book_cand_iterable:
         _, book_id = os.path.split(dirpath)
         if book_id in existing and not overwrite:
             continue
         if book_id in config_dict["known_bad_books"]:
             logger.debug(f"{book_id} known to be bad, skipping it")
+            skipped_count += 1
             continue
         edit_time = os.path.getmtime(dirpath)
         if edit_time > tback:
@@ -220,6 +223,9 @@ def main(config: str,
             bookcart.append(dirpath)
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
+    if skipped_count:
+        logger.info(f"(Excluded {skipped_count} known bad books.)")
+
     #Check the books for the observations we want
     op_counter = 0
     bad_book_counter = 0
@@ -230,7 +236,7 @@ def main(config: str,
         if check_meta_type(bookpath) in accept_type:
             t1 = time.time()
             op_counter += 1
-            logger.info(f"Examining book at {bookpath}")
+            logger.info(f"Starting processing of book at {bookpath}")
             try:
                 #obsfiledb creation
                 ok, obsfiledb_info = check_book.scan_book_dir(
@@ -241,7 +247,7 @@ def main(config: str,
                     obsfiledb_info, logger, config_dict, overwrite=True)
                 logger.info(f"Ran check_book in {time.time()-t1} s")
             except Exception as e:
-                logger.error(f"Failed to add {bookpath}.")
+                logger.error(f"Failed to add {bookpath}. Error: {e}")
                 bad_book_counter += 1
                 continue
 
@@ -301,9 +307,6 @@ def main(config: str,
                     bad_streams = [sid for sid, uic in zip(stream_ids, unused_ids_check) if uic]
                     bad_streams_string = ", ".join(map(str, bad_streams))
                     logger.error(f"Missing info on some stream_ids: {bad_streams_string}")
-                    # Increment counter to trigger script fail.  Note we do not attempt to
-                    # extend bad_books_list here, as we intend to change that mechanism
-                    # in near future anyway.
                     bad_book_counter += 1
                     continue
                 bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
