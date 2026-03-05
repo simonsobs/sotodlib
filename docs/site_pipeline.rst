@@ -136,6 +136,17 @@ operations (different combinations of ``update-base-data`` and
     run-job -c ancil.yaml standard_7day_update
 
 
+This script complements the basic Book checking and indexing done by
+``site_pipeline.update_obsdb``. To import records from some upstream
+obsdb into the "target_obsdb", use the ``import-records`` command
+(this requires ``upstream_obsdb`` to be set in the config file).  To
+trigger a run of the ``site_pipeline.update_obsdb`` script, the
+``update-books`` command can be used.  Note this command should be
+provided with a config file suitable for
+``site_pipeline.update_obsdb``.  The CLI arguments ``config_file``,
+``lookback_days``, and ``redo`` are translated to ``config``,
+``recency`` and ``overwrite``, respectively.
+
 For testing there are ``check`` and ``test`` commands.  The ``check``
 command simply instantiates an engine for each dataset -- basically
 checking for configuration problems and summarizing some easily
@@ -206,6 +217,10 @@ Here's an annotated example:
 
   # ObsDb to use for update-obsdb jobs
   target_obsdb: /so/metadata/obsdb.sqlite
+
+  # ObsDb to use as a source for "import-records" (optional; will not
+  # be modified).
+  upstream_obsdb: /so/metadata/obsdb0.sqlite
 
   # This (optionally) sets the default data_prefix used for base data
   # in all datasets (can be overridden by setting data_prefix in a
