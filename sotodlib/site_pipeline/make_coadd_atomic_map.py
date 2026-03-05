@@ -176,9 +176,22 @@ def main(config_file: str, verbosity: int) -> None:
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
                                                    logger=logger, plot=cfg.plot, 
                                                    mapcat_settings=mapcat_settings)
-                commit_coadd_maps(**maps_made)
+
+
                 if not success:
                     logger.warning(err)
+                else:
+                    commit_coadd_maps(maps=maps_made["maps"],
+                                      interval=cfg.interval,
+                                      band=band,
+                                      split_label=cfg.split_label,
+                                      platform=cfg.platform,
+                                      start_time=start_time.timestamp(),
+                                      stop_time=stop_time.timestamp(),
+                                      geom_file_path=f"{cfg.geom_file_prefix}_{band}",
+                                      coadd_atomic=maps_made["coadd_atomic"],
+                                      mapcat_settings=mapcat_settings)
+
             except Exception as e:
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.error(f"Failed to coadd map for {time_str}, {band}: {tb} {e}")

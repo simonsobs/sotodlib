@@ -295,12 +295,5 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
                     start_time, stop_time, interval, mapcat_settings, unit=unit, plot=plot)
 
     return_value = {"maps": mapmaker.maps,
-                    "interval": interval,
-                    "band": band,
-                    "split_label": split_label,
-                    "platform": platform,
-                    "start_time": start_time,
-                    "stop_time": stop_time,
-                    "geom_file_path": mapmaker.geom_file_path,
-                    "coadd_atomic": True if mapmaker.coadd_atomic else False,}
+                    "coadd_atomic": mapmaker.coadd_atomic}
     return True, "Done.", return_value
