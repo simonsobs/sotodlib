@@ -33,6 +33,7 @@ from sotodlib.core import Context
 from sotodlib.site_pipeline import check_book
 from sotodlib.io import load_book
 import os
+import fnmatch
 import glob
 import yaml
 import re
@@ -110,6 +111,7 @@ def main(config: str,
          overwrite: Optional[bool] = False,
          fastwalk: Optional[bool] = False,
          limit: Optional[int] = None,
+         filter: Optional[str] = None,
          ):
     """
     Create or update an obsdb for observation or operations data.
@@ -200,10 +202,14 @@ def main(config: str,
     if fastwalk:
         abv_tback = int(f"{int(tback):05}"[:5]) #Make sure we have at least five chars
         abv_tnow = int(f"{int(tnow):05}"[:5])
-        abv_codes = np.arange(abv_tback, abv_tnow+1)
+        abv_codes = list(range(abv_tback, abv_tnow+1))
         #Build the combinations base_dir/booktype/\d{5}
+        bd_fmt = "{base_dir}/{obs_type}/{abv_code}"
+        logger.info(f"Search path limited to {bd_fmt}")
+        logger.info(f" where base_dir in {base_dir}")
+        logger.info(f" and obs_type in {accept_type}")
+        logger.info(f" and abv_code in [{abv_codes[0]}-{abv_codes[-1]}]")
         base_dir = [f"{os.path.join(x[0], x[1], str(x[2]))}" for x in product(base_dir, accept_type, abv_codes)]
-        logger.info(f"Looking in the following directories only: {str(base_dir)}")
         book_cand_iterable = _find_books_shallow(base_dir)
     else:
         book_cand_iterable = _find_books_deep(base_dir)
@@ -225,6 +231,11 @@ def main(config: str,
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
     if skipped_count:
         logger.info(f"(Excluded {skipped_count} known bad books.)")
+
+    if filter is not None:
+        bookcart = [bookpath for bookpath in bookcart
+                    if fnmatch.fnmatch(bookpath, filter)]
+        logger.info(f"Filtering to match pattern {filter}: leaves {len(bookcart)} items.")
 
     #Check the books for the observations we want
     op_counter = 0
@@ -393,6 +404,8 @@ def get_parser(parser=None):
         help="Assume known directory tree shape and speed up walkthrough")
     parser.add_argument("--limit", type=int,
         help="Limit processing to only this number of book candidates.")
+    parser.add_argument("--filter", type=str, default=None,
+        help="Limit processing to books (full path) matching this fnmatch wildcard string.")
     return parser
 
 
