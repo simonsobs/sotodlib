@@ -83,6 +83,25 @@ def telescope_lookup(telescope: str):
         logger.error("unknown telescope type given by bookbinder")
         return {}
 
+def _find_books_deep(basedirs):
+    """Use os.walk to find any directories within basedirs (including each
+    basedir itself) that contains a file M_index.yaml, and yield each
+    directory path.
+
+    """
+    for b in basedirs:
+        for dirpath, dirnames, filenames in os.walk(b):
+            if 'M_index.yaml' in filenames:
+                yield dirpath
+
+def _find_books_shallow(basedirs):
+    """Like _find_books_deep but only checks immediate subdirectories
+    within each basedir.
+
+    """
+    for b in basedirs:
+        for d in sorted(glob.glob(b + '/*/M_index.yaml')):
+            yield os.path.dirname(d)
 
 def main(config: str,
          recency: float = None,
@@ -184,21 +203,21 @@ def main(config: str,
         #Build the combinations base_dir/booktype/\d{5}
         base_dir = [f"{os.path.join(x[0], x[1], str(x[2]))}" for x in product(base_dir, accept_type, abv_codes)]
         logger.info(f"Looking in the following directories only: {str(base_dir)}")
+        book_cand_iterable = _find_books_shallow(base_dir)
+    else:
+        book_cand_iterable = _find_books_deep(base_dir)
 
-    for bd in base_dir:
-        #Find folders that are book-like and recent
-        for dirpath in glob.glob(bd + '/*'):
-            if os.path.exists(os.path.join(dirpath, "M_index.yaml")):
-                _, book_id = os.path.split(dirpath)
-                if book_id in existing and not overwrite:
-                    continue
-                if book_id in config_dict["known_bad_books"]:
-                    logger.debug(f"{book_id} known to be bad, skipping it")
-                    continue
-                edit_time = os.path.getmtime(dirpath)
-                if edit_time > tback:
-                    #Looks like a book folder and edited recently enough
-                    bookcart.append(dirpath)
+    for dirpath in book_cand_iterable:
+        _, book_id = os.path.split(dirpath)
+        if book_id in existing and not overwrite:
+            continue
+        if book_id in config_dict["known_bad_books"]:
+            logger.debug(f"{book_id} known to be bad, skipping it")
+            continue
+        edit_time = os.path.getmtime(dirpath)
+        if edit_time > tback:
+            #Looks like a book folder and edited recently enough
+            bookcart.append(dirpath)
     
     logger.info(f"Found {len(bookcart)} new books in {time.time()-tnow} s")
     #Check the books for the observations we want
