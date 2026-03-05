@@ -12,6 +12,7 @@ from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from pixell import utils as putils
 
+from sotodlib.site_pipeline.utils.mapcat import commit_coadd_maps
 
 class CoaddAtomicConfig:
     """
@@ -168,15 +169,29 @@ def main(config_file: str, verbosity: int) -> None:
         for band in cfg.bands:
             logger.info(f'Coadding band {band}')
             try:
-                success, err = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
+                success, err, maps_made = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
                                                    cfg.output_db, band, cfg.platform, 
                                                    cfg.split_label, start_time, stop_time, 
                                                    cfg.interval, cfg.geom_file_prefix, 
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
                                                    logger=logger, plot=cfg.plot, 
                                                    mapcat_settings=mapcat_settings)
+
+
                 if not success:
                     logger.warning(err)
+                else:
+                    commit_coadd_maps(maps=maps_made["maps"],
+                                      interval=cfg.interval,
+                                      band=band,
+                                      split_label=cfg.split_label,
+                                      platform=cfg.platform,
+                                      start_time=start_time.timestamp(),
+                                      stop_time=stop_time.timestamp(),
+                                      geom_file_path=f"{cfg.geom_file_prefix}_{band}",
+                                      coadd_atomic=maps_made["coadd_atomic"],
+                                      mapcat_settings=mapcat_settings)
+
             except Exception as e:
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.error(f"Failed to coadd map for {time_str}, {band}: {tb} {e}")

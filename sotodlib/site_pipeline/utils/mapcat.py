@@ -1,7 +1,12 @@
 from typing import Dict, List, Tuple
 
 import numpy as np
-from mapcat.database import DepthOneMapTable, TODDepthOneTable
+from mapcat.database import (
+    AtomicMapCoaddTable,
+    AtomicMapTable,
+    DepthOneMapTable,
+    TODDepthOneTable,
+)
 from mapcat.helper import Settings
 from sqlmodel import select
 
@@ -31,7 +36,9 @@ def map_to_calculate(
         True if the map should be calculated, False otherwise.
     """
     with Settings(**mapcat_settings).session() as session:
-        map_query = select(DepthOneMapTable).where(DepthOneMapTable.map_name == map_name)
+        map_query = select(DepthOneMapTable).where(
+            DepthOneMapTable.map_name == map_name
+        )
         existing_map = session.execute(map_query).first()
         map_tods = existing_map[0].tods if existing_map else []
 
@@ -181,3 +188,60 @@ def commit_depth1_map(
         )
         session.merge(depth1map_meta)
         session.commit()
+
+
+def get_atomic_matches(
+    key: Tuple[int, str, str],
+    value: List[Tuple[str, str, str, int]],
+    split_label: str,
+    obs_infos: np.recarray,
+    mapcat_settings: Dict[str, str],
+):
+
+    with Settings(**mapcat_settings).session() as session:
+        query_ = select(AtomicMapTable).where(
+            (AtomicMapTable.obs_id == value[0][0])
+            & (AtomicMapTable.telescope == obs_infos[value[0][3]].telescope)
+            & (AtomicMapTable.freq_channel == key[2])
+            & (AtomicMapTable.wafer == key[1])
+            & (AtomicMapTable.split_label == split_label)
+        )
+        matches = session.execute(query_).scalars().all()
+
+    return matches
+
+
+def commit_coadd_maps(
+    maps,
+    interval: str,
+    band: str,
+    split_label: str,
+    platform: str,
+    start_time: float,
+    stop_time: float,
+    geom_file_path: str,
+    coadd_atomic: bool,
+    mapcat_settings: Dict[str, str],
+) -> None:
+
+    time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
+    map_name = f"coadd_{time_str}_{band}_{split_label}"
+    prefix_path = f"{interval}/{map_name}"
+
+    with Settings(**mapcat_settings).session() as session:
+        data = AtomicMapCoaddTable(
+            coadd_name=map_name,
+            prefix_path=prefix_path,
+            platform=platform,
+            interval=interval,
+            start_time=start_time,
+            stop_time=stop_time,
+            freq_channel=band,
+            geom_file_path=geom_file_path,
+            split_label=split_label,
+            atomic_maps=maps if coadd_atomic else [],
+            parent_coadds=maps if not coadd_atomic else [],
+        )
+
+    session.add(data)
+    session.commit()
