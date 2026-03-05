@@ -12,6 +12,7 @@ from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from pixell import utils as putils
 
+from sotodlib.site_pipeline.utils.mapcat import commit_coadd_maps
 
 class CoaddAtomicConfig:
     """
@@ -168,13 +169,14 @@ def main(config_file: str, verbosity: int) -> None:
         for band in cfg.bands:
             logger.info(f'Coadding band {band}')
             try:
-                success, err = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
+                success, err, maps_made = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
                                                    cfg.output_db, band, cfg.platform, 
                                                    cfg.split_label, start_time, stop_time, 
                                                    cfg.interval, cfg.geom_file_prefix, 
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
                                                    logger=logger, plot=cfg.plot, 
                                                    mapcat_settings=mapcat_settings)
+                commit_coadd_maps(**maps_made)
                 if not success:
                     logger.warning(err)
             except Exception as e:

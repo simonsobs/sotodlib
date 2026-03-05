@@ -18,6 +18,7 @@ from sotodlib.io import hk_utils
 from sotodlib.preprocess import preprocess_util
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
+from sotodlib.site_pipeline.utils.mapcat import get_atomic_matches
 from so3g.proj import coords as so3g_coords
 from pixell import enmap, wcsutils, colors, memory
 from pixell import utils as putils
@@ -375,9 +376,7 @@ def main(
             for key, value in obslists.items():
                 missing_split = False
                 for split_label in split_labels:
-                    with Settings(**mapcat_settings).session() as session:
-                        query_ = select(AtomicMapTable).where((AtomicMapTable.obs_id == value[0][0]) & (AtomicMapTable.telescope == obs_infos[value[0][3]].telescope) & (AtomicMapTable.freq_channel == key[2]) & (AtomicMapTable.wafer == key[1]) & (AtomicMapTable.split_label == split_label))
-                        matches = session.execute(query_).scalars().all()
+                    matches = get_atomic_matches(key=key,value=value,obs_infos=obs_infos,split_label=split_label,mapcat_settings=mapcat_settings)
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
@@ -390,7 +389,6 @@ def main(
             for key in keys_to_remove:
                 obskeys.remove(key)
                 del obslists[key]
-            engine.dispose()
 
     obslists_arr = [item for key, item in obslists.items()]
 

@@ -101,8 +101,8 @@ class CoaddMapmaker:
 
         self.hits_coadd += hits
             
-    def write(self, output_root, output_db, band, platform, split_label, start_time, 
-              stop_time, interval, mapcat_settings, unit='K', plot=False):
+    def write(self, output_root, band, split_label, start_time, 
+              stop_time, interval, unit='K', plot=False):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         if isinstance(start_time, dt.datetime):
             start_time = start_time.timestamp()
@@ -120,28 +120,6 @@ class CoaddMapmaker:
         self.logger.info(f'wrote map to {oname}'+'_map.fits')
         self.logger.info(f'wrote weights to {oname}'+'_weights.fits')
         self.logger.info(f'wrote hits to {oname}'+'_hits.fits')
-
-        map_name = oname.split('/')[-1]
-        prefix_path = f'{interval}/coadd_{time_str}_{band}_{split_label}'
-        with Settings(**mapcat_settings).session() as session:
-            data = AtomicMapCoaddTable(
-                coadd_name=map_name,
-                prefix_path=prefix_path,
-                platform=platform,
-                interval=interval,
-                start_time=start_time,
-                stop_time=stop_time,
-                freq_channel=band,
-                geom_file_path=self.geom_file_path,
-                split_label=split_label,
-                atomic_maps=self.maps if self.coadd_atomic else [],
-                parent_coadds=self.maps if not self.coadd_atomic else []
-            )
-
-            session.add(data)
-            session.commit()
-
-        self.logger.info(f'added entry {map_name} to {output_db}')
         
         if plot:
             params = {"downgrade":4, "colorbar":True, "ticks":20, "color":"planck", 'mask':0, 'range':2000 }
@@ -242,8 +220,8 @@ def write_coadd_map(mapmaker, output_root, output_db, band, platform, split_labe
     """
     Wrapper for CoaddMapmaker write function.
     """
-    mapmaker.write(output_root, output_db, band, platform, split_label, start_time, 
-                   stop_time, interval, mapcat_settings, unit=unit, plot=plot)
+    mapmaker.write(output_root, band, split_label, start_time, 
+                   stop_time, interval, unit=unit, plot=plot)
         
 def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_label,
                    start_time, stop_time, interval, geom_file_prefix, mapcat_settings,
@@ -316,5 +294,13 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label,
                     start_time, stop_time, interval, mapcat_settings, unit=unit, plot=plot)
 
-    
-    return True, "Done."
+    return_value = {"maps": mapmaker.maps,
+                    "interval": interval,
+                    "band": band,
+                    "split_label": split_label,
+                    "platform": platform,
+                    "start_time": start_time,
+                    "stop_time": stop_time,
+                    "geom_file_path": mapmaker.geom_file_path,
+                    "coadd_atomic": True if mapmaker.coadd_atomic else False,}
+    return True, "Done.", return_value
