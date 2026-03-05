@@ -262,20 +262,30 @@ def main(config: str,
             #Stream_ids and wafers
             try:
                 stream_ids = index["stream_ids"]
-                bookcartobsdb.add_obs_columns(["wafer_count int"])
-                very_clean["wafer_count"] = len(stream_ids)
+                unused_ids_check = np.ones(len(stream_ids), bool)
                 wafer_slots = index["wafer_slots"]
-                if len(wafer_slots) < len(stream_ids):
-                    logger.error("Missing info on some stream_ids")
-                    continue
-                bookcartobsdb.add_obs_columns(["wafer_slots_list str", "stream_ids_list str"])
+                wafer_count = 0
                 wafer_slots_list = ""
                 stream_ids_list = ",".join(stream_ids)
                 for slot in wafer_slots:
                     if slot["stream_id"] in stream_ids:
                         wafer_slots_list += slot["wafer_slot"]+","
-                very_clean["wafer_slots_list"] = wafer_slots_list[:-1]#Eliminate last comma
+                        wafer_count += 1
+                        unused_ids_check[stream_ids.index(slot["stream_id"])] = False
+                very_clean["wafer_count"] = wafer_count
+                very_clean["wafer_slots_list"] = wafer_slots_list[:-1] #Eliminate last comma
                 very_clean["stream_ids_list"] = stream_ids_list
+                if np.any(unused_ids_check): 
+                    #Some stream_ids not linked to wafers.
+                    bad_streams = [sid for sid, uic in zip(stream_ids, unused_ids_check) if uic]
+                    bad_streams_string = ", ".join(map(str, bad_streams))
+                    logger.error(f"Missing info on some stream_ids: {bad_streams_string}")
+                    # Increment counter to trigger script fail.  Note we do not attempt to
+                    # extend bad_books_list here, as we intend to change that mechanism
+                    # in near future anyway.
+                    bad_book_counter += 1
+                    continue
+                bookcartobsdb.add_obs_columns(["wafer_count int", "wafer_slots_list str", "stream_ids_list str"])
             except KeyError:
                 logger.error("Unable to find stream_ids or wafer slots")
 

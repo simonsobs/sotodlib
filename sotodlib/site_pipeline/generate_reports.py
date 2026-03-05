@@ -3,7 +3,7 @@ from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.mapmaking.utils import downsample_obs
 from sotodlib import coords
 from pixell import enmap, enplot
-from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig
+from sotodlib.qa.quality_reports.report_data import ReportData, ReportDataConfig, load_hkdb, get_and_merge_apex_pwv
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List, Callable
 import numpy as np
 import datetime as dt
@@ -101,7 +101,7 @@ class GenerateReportConfig:
         self,
         platform: Literal["satp1", "satp2", "satp3", "lat"],
         site_url: str,
-        report_interval: Literal["weekly", "monthly"],
+        report_interval: Literal["range", "daily", "weekly", "monthly"],
         start_time: Union[dt.datetime, float, str],
         output_root: str,
         data_config: Dict[str, Any],
@@ -139,20 +139,25 @@ class GenerateReportConfig:
         self.skip_html = skip_html
 
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
-        if self.report_interval == "weekly":
-            delta = dt.timedelta(weeks=1)
-        elif self.report_interval == "monthly":
-            delta = relativedelta(months=1)
-        start: dt.datetime = self.start_time
-        self.time_intervals = []
-        now = dt.datetime.now(tz=dt.timezone.utc)
-        while start < self.stop_time:
-            stop: dt.datetime = start + delta
-            if stop > now - dt.timedelta(hours=1):
-                # Give a buffer of 1 hour to compile report for previous interval
-                break
-            self.time_intervals.append((start, stop))
-            start += delta
+        if self.report_interval == "range":
+            self.time_intervals.append((self.start_time, self.stop_time))
+        else:
+            if self.report_interval == "daily":
+                delta = dt.timedelta(days=1)
+            if self.report_interval == "weekly":
+                delta = dt.timedelta(weeks=1)
+            elif self.report_interval == "monthly":
+                delta = relativedelta(months=1)
+            start: dt.datetime = self.start_time
+            self.time_intervals = []
+            now = dt.datetime.now(tz=dt.timezone.utc)
+            while start < self.stop_time:
+                stop: dt.datetime = start + delta
+                if stop > now - dt.timedelta(hours=1):
+                    # Give a buffer of 1 hour to compile report for previous interval
+                    break
+                self.time_intervals.append((start, stop))
+                start += delta
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GenerateReportConfig":
@@ -187,7 +192,7 @@ def _main(
     if stop_time is not None:
         cfg["stop_time"] = stop_time
 
-    if report_interval is not None and report_interval in ["weekly", "monthly"]:
+    if report_interval is not None and report_interval in ["range", "daily", "weekly", "monthly"]:
         cfg["report_interval"] = report_interval
 
     if overwrite_html is not None:
@@ -236,6 +241,17 @@ def _main(
                 data.save(data_file)
             else:
                 data = ReportData.load(data_file)
+                try:
+                    hkdb_data = load_hkdb(cfg)
+                except Exception as e:
+                    hkdb_data = None
+
+                if hkdb_data is not None and "env-radiometer-class.pwvs.pwv" in hkdb_data.keys():
+                    toco_pwv = hkdb_data["env-radiometer-class.pwvs.pwv"]
+                else:
+                    toco_pwv = None
+
+                data.pwv = get_and_merge_apex_pwv(data_cfg, toco_pwv)
 
             if data_cfg.make_cov_map:
                 if not os.path.exists(map_fits_file) or cfg.overwrite_data:
@@ -249,16 +265,18 @@ def _main(
                                 o.obs_id))
 
                     total = len(futures)
-                    for future in tqdm(as_completed_callable(futures), total=total, desc="generate_cov_map"):
+                    for future in tqdm(as_completed_callable(futures), total=total,
+                                       desc="generate_cov_map"):
                         if data.w is None:
                             data.w = future.result()
                         else:
                             data.w += future.result()
                         futures.remove(future)
 
-                    enmap.write_map(map_fits_file, data.w)
-                    f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
-                    enplot.write(map_png_file, f[0])
+                    if data.w is not None:
+                        enmap.write_map(map_fits_file, data.w)
+                        f = enplot.plot(data.w, grid=True, downgrade=1, mask=0, ticks=10, colorbar=True)
+                        enplot.write(map_png_file, f[0])
                 else:
                     data.w = enmap.read_map(map_fits_file)
                     if not os.path.exists(map_png_file):
@@ -279,7 +297,7 @@ def _main(
                 )
                 # update longterm obs file
                 if longterm_path is not None and cfg.report_interval == "monthly":
-                    data.save(longterm_path, map_path=None, overwrite=False, update_footprints=False)
+                    data.save(longterm_path, overwrite=False, update_footprints=False)
         except Exception as e:
             tb = ''.join(traceback.format_tb(e.__traceback__))
             print(f"Failed to generate report for {time_str}: {tb} {e}")
@@ -311,6 +329,12 @@ def render_report(
         "obs_efficiency_heatmap": obs_efficiency_plots.heatmap,
         "obs_efficiency_pie": obs_efficiency_plots.pie,
         "boresight_vs_time": plots.boresight_vs_time(data),
+        "el_vs_time": plots.el_vs_time(data),
+        "temp_vs_time": plots.temp_vs_time(data),
+        "uv_vs_time": plots.uv_vs_time(data),
+        "wind_speed_vs_time": plots.wind_speed_vs_time(data),
+        "wind_dir_vs_time": plots.wind_dir_vs_time(data),
+        "scan_type_vs_time": plots.scan_type_vs_time(data),
         "hwp_freq_vs_time": plots.hwp_freq_vs_time(data),
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
@@ -332,6 +356,23 @@ def render_report(
         stop_time_str = data.cfg.stop_time
     else:
         stop_time_str = data.cfg.stop_time.isoformat()
+
+    unique_obs = []
+    # since lat obs_ids are per-tube (for stimulator too), keep only those whose start
+    # times are further than some tolerance apart.
+    if cfg.platform == "lat":
+        start_times = []
+        for o in data.obs_list:
+            # keep only observations and not operations
+            if o.obs_type != "obs":
+                continue
+            is_close = any(abs(o.start_time - start_time) <= 20 for start_time in start_times)
+            if not is_close:
+                unique_obs.append(o)
+                start_times.append(o.start_time)
+    else:
+        unique_obs = [o for o in data.obs_list if o.obs_type == "obs"]
+
     jinja_data = {
         "data": data,
         "report_interval": cfg.report_interval.capitalize(),
@@ -343,16 +384,22 @@ def render_report(
             "Platform": cfg.platform,
             "Start time": dt.datetime.fromisoformat(start_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
             "Stop time": dt.datetime.fromisoformat(stop_time_str).strftime("%A %m/%d/%Y  %H:%M (UTC)"),
-            "Number of Observations": len([o for o in data.obs_list if o.obs_type == "obs"]),
-            "Number of CMB Observations": len([o for o in data.obs_list if o.obs_subtype == "cmb"]),
-            "Number of Cal Observations": len([o for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"]),
-            "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cmb"])) / 3600, 1),
-            "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"])) / 3600, 1),
-            "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cmb"])) / 3600, 2),
-            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(np.array([o.duration for o in data.obs_list if o.obs_subtype == "cal" and o.obs_type == "obs"])) / 3600, 2),
-            "Average PWV (mm)": np.round(np.nanmean([o.pwv for o in data.obs_list]), 3),
+            "Number of Observations": len([o for o in unique_obs]),
+            "Number of CMB Observations": len([o for o in unique_obs if o.obs_subtype == "cmb"]),
+            "Number of Cal Observations": len([o for o in unique_obs if o.obs_subtype == "cal"]),
+            "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb"])) / 3600, 1),
+            "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cal"])) / 3600, 1),
+            "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cmb"]) else 0,
+            "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
+            "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
         }
     }
+
+    if cfg.platform in ["satp1", "satp2", "satp3"]:
+        jinja_data["general_stats"]["Time Spent on Wiregrid Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "wiregrid" in o.obs_tags])) / 3600, 1)
+    elif cfg.platform == "lat":
+        jinja_data["general_stats"]["Time Spent on Stimulator Measurements (hrs)"] = np.round(np.sum(np.array([o.duration for o in unique_obs if "stimulator" in o.obs_tags])) / 3600, 1)
+
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write(template.render(jinja_data))
