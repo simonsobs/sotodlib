@@ -517,7 +517,7 @@ def get_nearby_sources(tod=None, source_list=None, distance=1.):
 
     # Sight line
     sight = so3g.proj.CelestialSightLine.az_el(
-        tod.timestamps, tod.boresight.az, tod.boresight.el,
+        tod.timestamps, tod.boresight.az, tod.boresight.el, roll=tod.boresight.roll,
         site='so', weather='typical')
 
     # One central detector
