@@ -270,7 +270,7 @@ def get_sim_tasks(comm, args):
     """
     tasks = list()
     if comm is None or comm.rank == 0:
-        telescope, _ = toast.io.load_instrument_file(args.telescope_file)
+        telescope, _ = toast.io.load_instrument_file(args.sim_telescope)
         tele_name = telescope.name
         full_detdata = telescope.focalplane.detector_data
         wafers = list(set(full_detdata["wafer_slot"]))
@@ -301,14 +301,14 @@ def get_sim_tasks(comm, args):
 
         # Load the schedule so we can split it.
         full_schedule = toast.schedule.GroundSchedule()
-        full_schedule.read(args.schedule_file)
+        full_schedule.read(args.sim_schedule)
 
         single_task = {
             "name": "all",
             "obs_ids": list(),
             "telescope": tele_name,
-            "telescope_file": args.telescope_file,
-            "schedule_file": args.schedule_file,
+            "telescope_file": args.sim_telescope,
+            "schedule_file": args.sim_schedule,
             "outdir": args.out_root,
             "index": 0,
             "desc": "All observations",
@@ -337,7 +337,7 @@ def get_sim_tasks(comm, args):
                         "name": f"{obs_id}",
                         "obs_id": obs_id,
                         "telescope": tele_name,
-                        "telescope_file": args.telescope_file,
+                        "telescope_file": args.sim_telescope,
                         "schedule_file": task_schedule_file,
                         "wafer_slots": wafers,
                         "outdir": task_dir,
