@@ -40,6 +40,12 @@ class TestBasic(unittest.TestCase):
         job = jdb.lock(j.id)
         jdb.unlock(job.id, merge=False)
 
+        # Locking many jobs at once
+        jobs = jdb.lock(jobs_to_do)
+        with self.assertRaises(jobdb.JobLockedError):
+            job = jdb.lock(jobs)
+        jdb.unlock(jobs, merge=False)
+
         # State write-back
         for row in jobs_to_do:
             print(f'Finishing {row.id} ...')
@@ -51,15 +57,21 @@ class TestBasic(unittest.TestCase):
 
         self.assertNotEqual(len(jdb.get_jobs(jclass='jclass1', jstate='all')), 0)
 
-        # Deleting
+        # Deleting one job
         jobs_to_delete = jdb.get_jobs(jclass='jclass1', jstate='done')
-        for j in jobs_to_delete:
-            jdb.remove_job(j.id)
+        jdb.remove_job(jobs_to_delete[0].id)
+        self.assertEqual(
+            len(jdb.get_jobs(jclass='jclass1', jstate='all')),
+            len(jobs_to_delete) - 1
+        )
 
+        # Deleting many jobs
+        jobs_to_delete = jdb.get_jobs(jclass='jclass1', jstate='done')
+        jdb.remove_job(jobs_to_delete)
         self.assertEqual(len(jdb.get_jobs(jclass='jclass1', jstate='all')), 0)
 
         # Create-and-operate
-        j = jdb.create_job('jlcass2', {'obs_id': '123455'})
+        j = jdb.create_job('jclass2', {'obs_id': '123455'})
         with jdb.locked(j) as job:
             job.mark_visited()
 
@@ -93,6 +105,14 @@ class TestBasic(unittest.TestCase):
                 pass
             jdb.clear_locks('all')
             jdb.lock(jobs[0].id)
+
+        # Test locking many at once
+        with jdb.locked(jobs, count=len(jobs)):
+            for j in jobs:
+                with self.assertRaises(jobdb.JobLockedError):
+                    jdb.lock(j.id)
+            jdb.clear_locks('all')
+            jdb.lock(jobs)
 
         with self.assertRaises(jobdb.JobNotOwnedError):
             with jdb.locked(jobs, count=10) as jobs:

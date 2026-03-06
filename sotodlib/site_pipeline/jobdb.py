@@ -318,6 +318,8 @@ class JobManager:
         if isinstance(job_ids, int):
             job_ids = [job_ids]
 
+        job_ids = [(j.id if isinstance(j, Job) else j) for j in job_ids]
+
         with self.session_scope() as session:
             q = session.query(Job).filter(Job.id.in_(job_ids))
 
@@ -343,7 +345,7 @@ class JobManager:
 
         locked_jobs = [j for j in jobs if j.lock_owner == owner]
 
-        if n == 0 or len(locked_jobs) != len(job_ids):
+        if n !=len(job_ids) or len(locked_jobs) != len(job_ids):
             raise JobLockedError()
 
         return locked_jobs[0] if len(locked_jobs) == 1 else locked_jobs
@@ -408,18 +410,22 @@ class JobManager:
                     q = q.filter(Job.id == j)
                 q.update({Job.lock: None, Job.lock_owner: None})
 
-    def remove_job(self, job_id, check_locked=False):
-        with self.session_scope() as session:
-            if check_locked:
-                q = session.query(Job).filter(
-                    sqy.and_(Job.id == job_id,
-                             Job.lock == None))  # noqa: E711
-            else:
-                q = session.query(Job).filter(Job.id == job_id)
+    def remove_job(self, job_ids, check_locked=False):
+        if isinstance(job_ids, (int, Job)):
+            job_ids = [job_ids]
 
-            n = q.delete()
+        job_ids = [j.id if isinstance(j, Job) else j for j in job_ids]
+
+        with self.session_scope() as session:
+            q = session.query(Job).filter(Job.id.in_(job_ids))
+
+            if check_locked:
+                q = q.filter(Job.lock == None)  # noqa: E711
+
+            n = q.delete(synchronize_session=False)
             session.commit()
-        if n == 0:
+
+        if n != len(job_ids):
             raise JobLockedError()
 
     @contextmanager
