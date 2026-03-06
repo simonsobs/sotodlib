@@ -322,7 +322,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         jobs = jdb.get_jobs(jclass="init", jstate=JState.open)
         tags_to_job = {
             frozenset({k: v for k, v in j.tags.items() if k != 'error'}.items()): j
-            for j in existing_jobs
+            for j in jobs
         }
 
     pb_name = f"pb_{str(int(time.time()))}.txt"

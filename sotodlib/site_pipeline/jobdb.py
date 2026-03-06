@@ -343,10 +343,10 @@ class JobManager:
 
         locked_jobs = [j for j in jobs if j.lock_owner == owner]
 
-        if len(locked_jobs) != len(job_ids):
+        if n == 0 or len(locked_jobs) != len(job_ids):
             raise JobLockedError()
 
-        return locked_jobs
+        return locked_jobs[0] if len(locked_jobs) == 1 else locked_jobs
 
     def unlock(self, jobs, merge=True):
         if not isinstance(jobs, (list, tuple, set)):
