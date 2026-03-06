@@ -300,11 +300,11 @@ class JobManager:
             [session.expunge(j) for j in jobs]
         return jobs
 
-    def lock(self, job_id, owner=None, force=False):
-        """Lock a Job record by id.  If the Job is already locked, a
-        JobLockedError is raised.
+    def lock(self, job_ids, owner=None, force=False):
+        """Lock one or more Jobs record by id.  If a Job is already locked,
+        a JobLockedError is raised.
 
-        Returns a Job object that has been expunged from the database
+        Returns the Job objects that has been expunged from the database
         session.  The object attributes can be modified, but won't be
         written back to the database unless the object is merged into
         a new session.
@@ -312,43 +312,84 @@ class JobManager:
         """
         if owner is None:
             owner = self._lockstr()
+
+        now = time.time()
+
         with self.session_scope() as session:
-            q = session.query(Job)
-            if force:
-                q = q.filter(sqy.and_(Job.id == job_id))
-            else:
-                q = q.filter(sqy.and_(Job.id == job_id,
-                                      Job.lock == None))  # noqa: E711
-            n = q.update({Job.lock: time.time(), Job.lock_owner: owner})
+            q = session.query(Job).filter(Job.id.in_(job_ids))
+
+            if not force:
+                q = q.filter(Job.lock == None)
+
+            n = q.update(
+                {Job.lock: now, Job.lock_owner: owner},
+                synchronize_session=False
+            )
+
             session.commit()
 
         with self.session_scope() as session:
-            job = session.get(Job, job_id)
-            session.expunge(job)
+            jobs = (
+                session.query(Job)
+                .filter(Job.id.in_(job_ids))
+                .all()
+            )
 
-        if n == 0 or job.lock_owner != owner:
+            for job in jobs:
+                session.expunge(job)
+
+        locked_jobs = [j for j in jobs if j.lock_owner == owner]
+
+        if len(locked_jobs) != len(job_ids):
             raise JobLockedError()
 
-        return job
+        return locked_jobs
 
-    def unlock(self, job, merge=True):
-        if not merge or isinstance(job, int):
-            if isinstance(job, Job):
-                job = job.id
+    def unlock(self, jobs, merge=True):
+        if not isinstance(jobs, (list, tuple, set)):
+            jobs = [jobs]
+
+        job_ids = []
+        job_objs = []
+
+        for j in jobs:
+            if isinstance(j, Job):
+                job_ids.append(j.id)
+                job_objs.append(j)
+            else:
+                job_ids.append(j)
+
+        if not merge or not job_objs:
             with self.session_scope() as session:
-                session.query(Job).filter(Job.id == job).update(
-                    {Job.lock: None, Job.lock_owner: None})
+                session.query(Job).filter(Job.id.in_(job_ids)).update(
+                    {Job.lock: None, Job.lock_owner: None},
+                    synchronize_session=False
+                )
                 session.commit()
+
         else:
             with self.session_scope() as session:
-                j1 = session.query(Job).filter(Job.id == job.id).one()
-                if j1.lock_owner is None:
-                    raise JobNotLockedError()
-                if j1.lock_owner != job.lock_owner:
-                    raise JobNotOwnedError()
-                job.lock = None
-                job.lock_owner = None
-                session.merge(job)
+                db_jobs = (
+                    session.query(Job)
+                    .filter(Job.id.in_(job_ids))
+                    .all()
+                )
+
+                db_map = {j.id: j for j in db_jobs}
+
+                for job in job_objs:
+                    j1 = db_map[job.id]
+
+                    if j1.lock_owner is None:
+                        raise JobNotLockedError()
+
+                    if j1.lock_owner != job.lock_owner:
+                        raise JobNotOwnedError()
+
+                    job.lock = None
+                    job.lock_owner = None
+                    session.merge(job)
+
                 session.commit()
 
     def clear_locks(self, jobs=None):
@@ -407,30 +448,38 @@ class JobManager:
         """
         if owner is None:
             owner = self._lockstr()
+
         if isinstance(jobs, (int, Job)):
             jobs = [jobs]
+
+        job_ids = [j.id if isinstance(j, Job) else j for j in jobs]
+
         locked = []
-        for job in jobs:
-            if len(locked) >= (1 if count is None else count):
-                break
-            if isinstance(job, Job):
-                job = job.id
-            try:
-                j = self.lock(job)
-            except JobLockedError:
-                continue
-            locked.append(j)
+
         try:
-            if count is None:
-                if len(locked):
-                    yield locked[0]
-                else:
-                    yield None
-            else:
-                yield locked
+            with self.session_scope() as session:
+                unlocked_ids = {
+                    j.id for j in session.query(Job.id)
+                    .filter(Job.id.in_(job_ids), Job.lock == None)
+                }
+
+            selected = []
+            limit = count if count is not None else 1
+
+            for jid in job_ids:
+                if jid in unlocked_ids:
+                    selected.append(jid)
+                if len(selected) >= limit:
+                    break
+
+            if selected:
+                locked = self.lock(selected, owner=owner)
+
+            yield locked
+
         finally:
-            for j in locked:
-                self.unlock(j)
+            if locked:
+                self.unlock(locked)
 
     def get_resource(self, jclass, n=None, jstate='open', tags={}):
         jobs = self.get_jobs(jclass, jstate=jstate, tags=tags)
