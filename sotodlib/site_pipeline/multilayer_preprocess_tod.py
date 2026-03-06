@@ -104,8 +104,8 @@ def _check_init_jobdb(
 
     Arguments
     ----------
-    jdb : JobDB
-        JobDB instance.
+    jdb : JobManager
+        A preprocesing jobdb.
     init_db : ManifestDb or None
         Init preproc database.
     init_jobs_map : dict
