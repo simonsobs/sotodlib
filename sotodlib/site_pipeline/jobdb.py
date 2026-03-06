@@ -315,6 +315,9 @@ class JobManager:
 
         now = time.time()
 
+        if isinstance(job_ids, int):
+            job_ids = [job_ids]
+
         with self.session_scope() as session:
             q = session.query(Job).filter(Job.id.in_(job_ids))
 
