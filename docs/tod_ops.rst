@@ -232,3 +232,50 @@ Module containing functions for FFTs and related operations.
 
 .. automodule:: sotodlib.tod_ops.fft_ops
    :members:
+
+tod_ops.glitch
+==============
+
+Utilities for extracting and manipulating glitch “snippets” — short
+segments of data around glitch events together with the detectors they
+affect.  These snippets can be passed to the classification pipeline in
+:mod:`sotodlib.tod_ops.glitch_classification`.
+
+.. automodule:: sotodlib.tod_ops.glitch
+   :members:
+
+.. _glitch-classification:
+
+tod_ops.glitch_classification
+=============================
+
+Random-forest-based classification of glitch events into physical
+categories (point sources, cosmic rays, electronic glitches, etc.).
+
+The typical workflow is:
+
+1. Detect glitches and extract snippets with :mod:`sotodlib.tod_ops.glitch`.
+2. Compute summary statistics with :func:`compute_summary_stats`.
+3. Classify the snippets using a trained forest via :func:`classify_snippets`
+   (or train your own with :func:`train_forest`).
+
+The module can also be used through the preprocessing pipeline via the
+``classify_glitches`` step
+(see :class:`sotodlib.preprocess.processes.GlitchClassification`).
+
+.. automodule:: sotodlib.tod_ops.glitch_classification
+   :members:
+   :undoc-members:
+
+tod_ops.glitch_stats
+====================
+
+Low-level summary statistic classes used by the glitch classification
+pipeline.  Each statistic is a :class:`~sotodlib.tod_ops.glitch_stats.GlitchStat`
+subclass registered with the :func:`~sotodlib.tod_ops.glitch_stats.register_stat`
+decorator.  The :attr:`~sotodlib.tod_ops.glitch_stats.GlitchStat.requires`
+attribute declares which inputs each statistic needs; callers pass
+only the relevant data automatically.
+
+.. automodule:: sotodlib.tod_ops.glitch_stats
+   :members:
