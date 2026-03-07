@@ -486,9 +486,13 @@ class SignalMap(Signal):
     def translate(self, other, map):
         """Translate map from another SignalMap representation to the current,
         returning a new map. The new map may be a reference to the original."""
-        # Currently we don't support any actual translation, but could handle
-        # resolution changes in the future (probably not useful though)
+        # Check that the geometry doesn't change, since we don't suppor that
         self._checkcompat(other)
+        # It's possible for the tile ownership to change between mapmaking
+        # passes, since the active tiles are determined based on which tiles were
+        # actually hit.
+        if self.tiled:
+            omap = tilemap.redistribute(map, self.comm, active=self.rhs.active)
         return map
 
 class SignalCut(Signal):
