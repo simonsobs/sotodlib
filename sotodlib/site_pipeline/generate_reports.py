@@ -267,10 +267,16 @@ def _main(
                     total = len(futures)
                     for future in tqdm(as_completed_callable(futures), total=total,
                                        desc="generate_cov_map"):
-                        if data.w is None:
-                            data.w = future.result()
-                        else:
-                            data.w += future.result()
+                        try:
+                            if data.w is None:
+                                data.w = future.result()
+                            else:
+                                data.w += future.result()
+                        # for metadata errors
+                        except Exception as e:
+                            tb = ''.join(traceback.format_tb(e.__traceback__))
+                            print(f"Coverage map generation failed {time_str}: {tb} {e}")
+                            continue
                         futures.remove(future)
 
                     if data.w is not None:
