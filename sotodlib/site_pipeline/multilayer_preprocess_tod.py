@@ -406,7 +406,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     if jobdb_path is not None:
         # batch updates to JobDb
-        jdb_batch_size = configs['jobdb'].get('batch_size', 1)
+        jdb_batch_size = configs_proc['jobdb'].get('batch_size', 1)
         batched_job_count = 0
         batched_job_fields = []
 
@@ -490,15 +490,13 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
                     if (batched_job_count >= jdb_batch_size) or (len(futures) == 0):
                         jobs = [j['job'] for j in batched_job_fields]
-                        job_idx = 0
                         with jdb.locked(jobs, count=len(jobs)) as j:
-                            for job in j:
+                            for job_idx, job in enumerate(j):
                                 job.mark_visited()
                                 job.jstate = batched_job_fields[job_idx]["jstate"]
                                 for _t in job._tags:
                                     if _t.key == "error":
                                         _t.value = batched_job_fields[job_idx]["error"]
-                                job_idx += 1
                         batched_job_count = 0
                         batched_job_fields = []
 
@@ -599,7 +597,7 @@ def get_parser(parser=None):
 
 def main(configs_init: str,
          configs_proc: str,
-         query: Optional[str] = None,
+         query: str = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
