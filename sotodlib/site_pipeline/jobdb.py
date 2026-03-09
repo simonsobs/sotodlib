@@ -67,7 +67,7 @@ Forcibly unlock all jobs (though feel free to be more targeted)::
 Delete some jobs::
 
   for j in jdb.get_jobs(jclass='my_analysis'):
-    jdb.remove_job(j.id)
+    jdb.remove_jobs(j.id)
 
 
 """
@@ -308,10 +308,11 @@ class JobManager:
         """Lock one or more Jobs record by id.  If a Job is already locked,
         a JobLockedError is raised.
 
-        Returns the Job objects that has been expunged from the database
-        session.  The object attributes can be modified, but won't be
-        written back to the database unless the object is merged into
-        a new session.
+        Returns the Job object(s) that has been expunged from the database
+        session.  If a single job id is input one Job will be returned,
+        otherwise a list of Jobs will be returned.  The object attributes can
+        be modified, but won't be written back to the database unless the
+        object is merged into a new session.
 
         """
         if owner is None:
@@ -355,6 +356,7 @@ class JobManager:
         return locked_jobs[0] if len(locked_jobs) == 1 else locked_jobs
 
     def unlock(self, jobs, merge=True):
+        """Unlock one or more jobs."""
         if not isinstance(jobs, (list, tuple, set)):
             jobs = [jobs]
 
@@ -414,7 +416,7 @@ class JobManager:
                     q = q.filter(Job.id == j)
                 q.update({Job.lock: None, Job.lock_owner: None})
 
-    def remove_job(self, job_ids, check_locked=False):
+    def remove_jobs(self, job_ids, check_locked=False):
         if isinstance(job_ids, (int, Job)):
             job_ids = [job_ids]
 
@@ -435,9 +437,9 @@ class JobManager:
     @contextmanager
     def locked(self, jobs, count=None, owner=None):
         """Context Manager to grant exclusive access to one or more
-        Job.  Job record is marked as locked, and this process may
-        freely work on the job and alter the job data.  When execution
-        leaves the context, the Job will be marked as unlocked.  Note
+        Jobs.  Job records are marked as locked, and this process may
+        freely work on the jobs and alter the job data.  When execution
+        leaves the context, the Jobs will be marked as unlocked.  Note
         the _database_ is only explicitly locked while this lock is
         being acquired and released.  In between, other entities can
         do other database stuff.
@@ -610,7 +612,7 @@ def cli(args=None):
         elif args.action == 'delete':
             print('Removing jobs ...')
             for j in jobs:
-                jdb.remove_job(j)
+                jdb.remove_jobs(j)
         elif args.action.startswith('set-'):
             for k in ['open', 'done', 'failed', 'ignored']:
                 if args.action == f'set-{k}':

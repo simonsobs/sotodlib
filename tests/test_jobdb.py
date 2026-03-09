@@ -59,7 +59,7 @@ class TestBasic(unittest.TestCase):
 
         # Deleting one job
         jobs_to_delete = jdb.get_jobs(jclass='jclass1', jstate='done')
-        jdb.remove_job(jobs_to_delete[0].id)
+        jdb.remove_jobs(jobs_to_delete[0].id)
         self.assertEqual(
             len(jdb.get_jobs(jclass='jclass1', jstate='all')),
             len(jobs_to_delete) - 1
@@ -67,7 +67,7 @@ class TestBasic(unittest.TestCase):
 
         # Deleting many jobs
         jobs_to_delete = jdb.get_jobs(jclass='jclass1', jstate='done')
-        jdb.remove_job(jobs_to_delete)
+        jdb.remove_jobs(jobs_to_delete)
         self.assertEqual(len(jdb.get_jobs(jclass='jclass1', jstate='all')), 0)
 
         # Create-and-operate
