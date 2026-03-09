@@ -209,7 +209,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     exist_ok=True)
 
     # jobdb
-    jobdb_path = configs_proc["jobdb"].get("path", None)
+    jobdb_path = configs_proc.get("jobdb", {}).get("path")
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
          # get init jobs

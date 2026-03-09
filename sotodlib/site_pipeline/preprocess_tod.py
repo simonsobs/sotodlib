@@ -173,7 +173,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     os.makedirs(os.path.dirname(configs['archive']['policy']['filename']),
                 exist_ok=True)
 
-    jobdb_path = configs["jobdb"].get("path", None)
+    jobdb_path = configs.get("jobdb", {}).get("path")
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
     elif run_from_jobdb:
