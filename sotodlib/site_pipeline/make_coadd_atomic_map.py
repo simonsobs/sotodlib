@@ -2,7 +2,6 @@ from argparse import ArgumentParser
 import os
 import yaml
 import traceback
-import sqlite3
 import datetime as dt
 from dateutil.relativedelta import relativedelta
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List
@@ -154,8 +153,7 @@ def main(config_file: str, verbosity: int) -> None:
     
     putils.mkdir(cfg.output_root)
 
-    logger.info(f"Database initialized at {cfg.output_db}")
-    init_output_db(cfg.output_db, cfg.interval)
+    logger.info(f"Using database at {cfg.output_db}")
     
     mapcat_settings = {"database_type": cfg.mapcat_database_type,
                        "database_name": cfg.mapcat_database_name,
@@ -201,26 +199,6 @@ def main(config_file: str, verbosity: int) -> None:
                 tb = ''.join(traceback.format_tb(e.__traceback__))
                 logger.error(f"Failed to coadd map for {time_str}, {band}: {tb} {e}")
     return True
-
-def init_output_db(output_db, interval):
-    conn = sqlite3.connect(output_db)
-    cur = conn.cursor()
-    create_stmt = f'''
-        CREATE TABLE IF NOT EXISTS {interval} (
-            telescope TEXT,
-            freq_channel TEXT,
-            split_label TEXT,
-            prefix_path TEXT,
-            geom_file_path TEXT,
-            obslist TEXT,
-            start_time FLOAT,
-            stop_time FLOAT,
-            PRIMARY KEY (telescope, freq_channel, split_label, prefix_path, geom_file_path, obslist, start_time, stop_time)
-        )
-    '''
-    cur.execute(create_stmt)
-    conn.commit()
-    conn.close()
 
 
 def get_parser(parser: Optional[ArgumentParser] = None) -> ArgumentParser:

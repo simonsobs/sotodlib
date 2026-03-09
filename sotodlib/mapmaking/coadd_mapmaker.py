@@ -9,7 +9,6 @@ make_coadd_map.
 __all__ = ['CoaddMapmaker','make_coadd_map','setup_coadd_map','write_coadd_map','eplot']
 import numpy as np
 from pixell import enmap, enplot, utils as putils
-import sqlite3
 import os
 from tqdm import tqdm
 import datetime as dt
