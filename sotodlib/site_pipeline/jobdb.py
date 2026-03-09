@@ -73,7 +73,11 @@ Delete some jobs::
 """
 
 import sqlalchemy as sqy
-from sqlalchemy.ext.declarative import declarative_base
+try:
+    from sqlalchemy.orm import declarative_base
+except ImportError:
+    # Deprecated since SQLAlchemy 2.0, keep for backwards compatibility
+    from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, aliased
 from contextlib import contextmanager
 import argparse

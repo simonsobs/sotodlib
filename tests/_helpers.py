@@ -7,6 +7,7 @@ import os
 import datetime
 import shutil
 import tempfile
+import unittest
 
 import numpy as np
 import astropy.units as u
@@ -52,6 +53,10 @@ def mpi_multi():
         return True
     else:
         return False
+
+
+# Wrap a decorator for skipping tests when doing multi-process MPI.
+skip_if_mpi = unittest.skipIf(mpi_multi(), "Running with multiple MPI processes")
 
 
 def create_outdir(subdir=None, mpicomm=None):
