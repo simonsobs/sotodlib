@@ -14,6 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
+from sotodlib.core.metadata.manifest import MultiDbBatchManager
 from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
@@ -426,7 +427,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     pb_name = f"pb_{str(int(time.time()))}.txt"
     with open(pb_name, 'w') as f:
         with MultiDbBatchManager(
-            [db_init, db_proc], batch_sizes=[batch_size_init, batch_size_proc], logger=logger
+            [db_init, db_proc], batch_size=[batch_size_init, batch_size_proc], logger=logger
         ) as (db_mgr_init, db_mgr_proc):
             for future in tqdm(as_completed_callable(futures), total=total,
                                 desc="multilayer_preprocess_tod", file=f,
@@ -466,8 +467,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     for gb, g in zip(group_by, group):
                         tags['dets:' + gb] = g
                     # get both init and proc
-                    init_job = tags_to_job_init.get(fozenset(tags.items()), None)
-                    proc_job = tags_to_job_proc.get(fozenset(tags.items()), None)
+                    init_job = tags_to_job_init.get(frozenset(tags.items()), None)
+                    proc_job = tags_to_job_proc.get(frozenset(tags.items()), None)
 
                     if errors[0] is not None:
                         jstate = JState.failed
