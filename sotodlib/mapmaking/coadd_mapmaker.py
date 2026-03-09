@@ -271,10 +271,10 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
                                overwrite=overwrite, logger=logger)
     
     if not mapmaker:
-        return False, "Map found in database and overwrite=False. Skipping."
+        return False, "Map found in database and overwrite=False. Skipping.", None
 
     if len(mapmaker.maps) == 0:
-        return False, "No fits files found to coadd. Skipping."
+        return False, "No fits files found to coadd. Skipping.", None
     mapmaker.logger.info(f"# of fits files: {len(mapmaker.maps)}")
     
     mapmaker.logger.info(f"Using geometry from {mapmaker.geom_file_path}")

@@ -213,6 +213,8 @@ def get_atomic_matches(
 
 def commit_coadd_maps(
     maps,
+    map_name: str,
+    prefix_path: str,
     interval: str,
     band: str,
     split_label: str,
@@ -223,10 +225,6 @@ def commit_coadd_maps(
     coadd_atomic: bool,
     mapcat_settings: Dict[str, str],
 ) -> None:
-
-    time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
-    map_name = f"coadd_{time_str}_{band}_{split_label}"
-    prefix_path = f"{interval}/{map_name}"
 
     with Settings(**mapcat_settings).session() as session:
         data = AtomicMapCoaddTable(

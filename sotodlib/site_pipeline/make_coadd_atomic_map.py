@@ -181,7 +181,12 @@ def main(config_file: str, verbosity: int) -> None:
                 if not success:
                     logger.warning(err)
                 else:
+                    map_name = f"coadd_{time_str}_{band}_{cfg.split_label}"
+                    prefix_path = f"{cfg.interval}/{map_name}"
+                    
                     commit_coadd_maps(maps=maps_made["maps"],
+                                      map_name=map_name,
+                                      prefix_path=prefix_path,
                                       interval=cfg.interval,
                                       band=band,
                                       split_label=cfg.split_label,
