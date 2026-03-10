@@ -365,16 +365,16 @@ def main(**args):
                     mapmaking.inject_map(obs, map_to_inject, recenter=recenter, interpol=args.interpol)
                 utils.deslope(obs.signal, w=5, inplace=True)
 
-                if passinfo.downsample != 1:
-                    obs = mapmaking.downsample_obs(obs, passinfo.downsample)
-                mmask = obs.flags.glitch_flags.mask()
-                L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
-
                 # sidelobes cuts
                 if not args.no_sidelobe:
                     cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
                     for cut in cutss:
                         obs.flags.glitch_flags += cut
+
+                if passinfo.downsample != 1:
+                    obs = mapmaking.downsample_obs(obs, passinfo.downsample)
+                mmask = obs.flags.glitch_flags.mask()
+                L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
@@ -404,7 +404,7 @@ def main(**args):
                     print("Writing noise model %s" % nmat_file)
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-            except (DataMissing,IndexError,ValueError,LoaderError) as e:
+            except (DataMissing,IndexError,ValueError,LoaderError,TypeError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
                 L.debug("Datacount: %s full" % (sub_id))
                 continue
