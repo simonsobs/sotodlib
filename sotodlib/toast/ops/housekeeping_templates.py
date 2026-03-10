@@ -296,7 +296,8 @@ class HouseKeepingTemplates(Operator):
             # Optionally add higher order templates
 
             if self.order > 1:
-                for name, template in hktemplates.items:
+                for name in list(hktemplates.keys()):
+                    template = hktemplates[name]
                     for p in range(2, self.order + 1):
                         hktemplates[f"{name}-order{p}"] = template**p
 
