@@ -89,6 +89,7 @@ def main(**args):
     SITE    = args.site.lower()
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
+    comm_size = comm.size
     shape, wcs = enmap.read_map_geometry(args.area)
 
     if args.downgrade > 1:
@@ -215,7 +216,7 @@ def main(**args):
         # To be able to distribute the tods sensibly, we need a rough estimate of where
         # on the sky each tod is. We should be able to get this using the central
         # ctime, az and el for each tod.
-        for ind in range(comm.rank, len(sub_ids), comm.size):
+        for ind in range(comm.rank, len(sub_ids), comm_size):
             # Detsets correspond to separate files, so treat them as separate TODs.
             sub_id = sub_ids[ind]
             obs_id, wafer, band = sub_id.split(":")
@@ -415,13 +416,13 @@ def main(**args):
                 L.info("All tods failed. Giving up")
             sys.exit(1)
            
-        if np.any(nkept_all == 0):
-            if nkept == 0:
-                L.info("No tods assigned to this process. Pruning")
-            comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
-            for signal in mapmaker.signals:
-                if hasattr(signal, "comm"):
-                    signal.comm = comm
+        #if np.any(nkept_all == 0):
+        #    if nkept == 0:
+        #        L.info("No tods assigned to this process. Pruning")
+        #    comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
+        #    for signal in mapmaker.signals:
+        #        if hasattr(signal, "comm"):
+        #            signal.comm = comm
 
         L.info("Done building")
 
