@@ -189,7 +189,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
-          raise_error: bool = False):
+          raise_error: bool = False,
+          pb_path: str = ''):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
@@ -404,7 +405,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     batch_size_init = configs_init['archive'].get('batch_size', 1)
     batch_size_proc = configs_proc['archive'].get('batch_size', 1)
 
-    pb_name = f"pb_{str(int(time.time()))}.txt"
+    pb_name = os.path.join(pb_path, f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
         with MultiDbBatchManager(
             [db_init, db_proc], batch_sizes=[batch_size_init, batch_size_proc], logger=logger
@@ -551,6 +552,12 @@ def get_parser(parser=None):
         type=bool,
         default=False
     )
+    parser.add_argument(
+        '--pb-path',
+        help="Path to where to save progress bar.",
+        type=bool,
+        default=False
+    )
     return parser
 
 
@@ -568,7 +575,8 @@ def main(configs_init: str,
          compress: bool = False,
          nproc: int = 4,
          run_from_jobdb: bool = False,
-         raise_error: bool = False):
+         raise_error: bool = False,
+         pb_path: str = ''):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -588,7 +596,8 @@ def main(configs_init: str,
               nproc=nproc,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
-              raise_error=raise_error)
+              raise_error=raise_error,
+              pb_path=pb_path)
 
 
 if __name__ == '__main__':
