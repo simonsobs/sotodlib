@@ -14,6 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
+from sotodlib.core.metadata.manifest import MultiDbBatchManager
 from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
@@ -208,7 +209,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     exist_ok=True)
 
     # jobdb
-    jobdb_path = configs_proc.get("jobdb", None)
+    jobdb_path = configs_proc.get("jobdb", {}).get("path")
     if jobdb_path is not None:
         jdb = JobManager(sqlite_file=jobdb_path)
          # get init jobs
@@ -404,10 +405,29 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     batch_size_init = configs_init['archive'].get('batch_size', 1)
     batch_size_proc = configs_proc['archive'].get('batch_size', 1)
 
+    if jobdb_path is not None:
+        # batch updates to JobDb
+        jdb_batch_size = configs_proc['jobdb'].get('batch_size', 1)
+        batched_job_count = 0
+        batched_job_fields = []
+
+        # get jobs up front since it is faster
+        init_jobs = jdb.get_jobs(jclass="init", jstate=JState.open)
+        tags_to_job_init = {
+            frozenset({k: v for k, v in j.tags.items() if k != 'error'}.items()): j
+            for j in init_jobs
+        }
+
+        proc_jobs = jdb.get_jobs(jclass="proc", jstate=JState.open)
+        tags_to_job_proc = {
+            frozenset({k: v for k, v in j.tags.items() if k != 'error'}.items()): j
+            for j in proc_jobs
+        }
+
     pb_name = f"pb_{str(int(time.time()))}.txt"
     with open(pb_name, 'w') as f:
         with MultiDbBatchManager(
-            [db_init, db_proc], batch_sizes=[batch_size_init, batch_size_proc], logger=logger
+            [db_init, db_proc], batch_size=[batch_size_init, batch_size_proc], logger=logger
         ) as (db_mgr_init, db_mgr_proc):
             for future in tqdm(as_completed_callable(futures), total=total,
                                 desc="multilayer_preprocess_tod", file=f,
@@ -439,26 +459,48 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                                     configs_proc, logger, overwrite,
                                     db_manager=db_mgr_proc)
 
+
                 # update jobdb
                 if jobdb_path is not None:
                     tags = {}
                     tags["obs:obs_id"] = obs_id
                     for gb, g in zip(group_by, group):
                         tags['dets:' + gb] = g
-                    jobs = jdb.get_jobs(jstate=JState.open, tags=tags)
+                    # get both init and proc
+                    init_job = tags_to_job_init.get(frozenset(tags.items()), None)
+                    proc_job = tags_to_job_proc.get(frozenset(tags.items()), None)
 
-                    for job in jobs:
-                        # init layer state will be JState.done if already run
-                        if job.jstate == JState.open:
-                            with jdb.locked(job) as j:
-                                j.mark_visited()
-                                if errors[0] is not None:
-                                    j.jstate = JState.failed
-                                    for _t in j._tags:
-                                        if _t.key == "error":
-                                            _t.value = errors[0]
-                                else:
-                                    j.jstate = JState.done
+                    if errors[0] is not None:
+                        jstate = JState.failed
+                        jerror = errors[0]
+                    else:
+                        jstate = JState.done
+                        jerror = None
+
+                    for job in [init_job, proc_job]:
+                        if job is not None:
+                            batched_job_fields.append(
+                                {
+                                    "job": job,
+                                    "error": jerror,
+                                    "jstate": jstate,
+                                }
+                            )
+
+                            batched_job_count += 1
+
+                    if (batched_job_count >= jdb_batch_size) or (len(futures) == 0):
+                        jobs = [j['job'] for j in batched_job_fields]
+                        with jdb.locked(jobs, count=len(jobs)) as j:
+                            for job_idx, job in enumerate(j):
+                                job.mark_visited()
+                                job.jstate = batched_job_fields[job_idx]["jstate"]
+                                for _t in job._tags:
+                                    if _t.key == "error":
+                                        _t.value = batched_job_fields[job_idx]["error"]
+                        batched_job_count = 0
+                        batched_job_fields = []
+
     if raise_error:
         n_obs_fail = 0
         n_groups_fail = 0
@@ -556,7 +598,7 @@ def get_parser(parser=None):
 
 def main(configs_init: str,
          configs_proc: str,
-         query: Optional[str] = None,
+         query: str = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
