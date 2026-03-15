@@ -22,10 +22,11 @@ from .load_smurf import (
     G3tSmurf,
     Observations as G3tObservations,
     SmurfStatus,
-    get_channel_info,
+    get_book_readout_ids,
     TimeCodes,
     SupRsyncType,
     Files,
+    TuneFileNotFound,
 )
 from .datapkg_utils import load_configs, get_imprinter_config
 from .check_book import BookScanner
@@ -52,10 +53,6 @@ VALID_OBSTYPES = ["obs", "oper", "smurf", "hk", "stray", "misc"]
 # file patterns excluded from smurf books
 SMURF_EXCLUDE_PATTERNS = ["*.dat", "*_mask.txt", "*_freq.txt"]
 
-# file size limits
-MAX_OBS_LVL2_SIZE = 10 # Gb per level 2 file
-MAX_OPER_LVL2_SIZE = 5 # Gb per level 2 file
-
 class BookExistsError(Exception):
     """Exception raised when a book already exists in the database"""
     pass
@@ -77,6 +74,9 @@ class OverlapObsError(Exception):
     multiple books"""
     pass
 
+# file size limits
+MAX_OBS_LVL2_SIZE = 10 # Gb per level 2 file
+MAX_OPER_LVL2_SIZE = 5 # Gb per level 2 file
 class FileTooLargeError(Exception):
     """Exception raised when we find level 2 files that are larger than our
     maximum allowable sizes"""
@@ -87,6 +87,14 @@ class ObsBookTooShort(Exception):
     """Exception raised when asked to bind an observation book less than
     MIN_OBS_BOOK_DURATION long. We throw an exception instead of not registering them so
     that we can set them as won't bind, and then get the files passed into stray."""
+    pass
+
+class OptimizeBandAttenAction(Exception):
+    """Exception raised when asked to bind an operation book that was part of the 
+    optimize attenuation action for SMURF. We don't bind these because they produce many
+    orphan tunesets and are not used in metadata generation. We expect if we ever need to
+    do reanalysis of these operations (which is not expected) then it will be just as
+    straightforeward to do those from stray books."""
     pass
 
 
@@ -723,6 +731,16 @@ class Imprinter:
                     raise FileTooLargeError(msg)
 
             obsdb = self.get_g3tsmurf_obs_for_book(book)
+            # don't bind books where the pysmurf actions is optimize_band_atten 
+            if book.type == 'oper':
+                assert len(obsdb) == 1
+                obs = [o for o in obsdb.values()][0]
+                if obs.action_name == "optimize_band_atten":
+                    raise OptimizeBandAttenAction(
+                        f"Book {book.bid} because it is part of an "
+                        "optimize attentation action"
+                    )
+                    
             readout_ids = self.get_readout_ids_for_book(book)
             hk_fields = self.config.get('hk_fields')
 
@@ -854,7 +872,11 @@ class Imprinter:
 
             self.logger.info("Book {} bound".format(book.bid))
             status = BOUND
-            
+        except OptimizeBandAttenAction as e:
+            message = f"Book {book.bid} part of optimize attenuation operation, not binding"
+            self.logger.warning(message)
+            status = WONT_BIND
+            err = e
         except Exception as e:
             self.logger.error("Book {} failed".format(book.bid))
             err_msg = traceback.format_exc()
@@ -1583,7 +1605,7 @@ class Imprinter:
             {obs_id: [readout_ids...]}}
 
         """
-        _, SMURF = self.get_g3tsmurf_session(return_archive=True)
+        g3session, SMURF = self.get_g3tsmurf_session(return_archive=True)
         out = {}
         # load all obs and associated files
         for obs_id, files in self.get_files_for_book(book).items():
@@ -1594,23 +1616,15 @@ class Imprinter:
                     f"Readout IDs not found for {obs_id}. SMuRF system was not "
                     "set up for science observations."
                 )
-            ch_info = get_channel_info(status, archive=SMURF)
-            if "readout_id" not in ch_info:
+            try:
+                ch_info = get_book_readout_ids(status, archive=SMURF, session=g3session)
+            except TuneFileNotFound:
                 raise MissingReadoutIDError(
                     f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
-                )
-            checks = ["NONE" in rid for rid in ch_info.readout_id]
-            if np.all(checks):
-                raise MissingReadoutIDError(
-                    f"Readout IDs not found for {obs_id}. Indicates issue with G3tSmurf Indexing"
-                )
-            if np.any(checks):
-                self.logger.info(
-                    f"Found {sum(checks)} channels without readout_id. Assume fixed tones are running."
                 )
             # make sure all rchannel ids are sorted
-            assert list(ch_info.rchannel) == sorted(ch_info.rchannel)
-            out[obs_id] = ch_info.readout_id
+            assert list(ch_info["rchannel"]) == sorted(ch_info["rchannel"])
+            out[obs_id] = ch_info["readout_id"]
         return out
 
     def copy_smurf_files_to_book(self, book, book_path):
