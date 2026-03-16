@@ -40,6 +40,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
     parser.add_argument("--hits", action="store_true", help="Write hits maps")
+    parser.add_argument("--cut-type",        type=str, default="full")
     return parser
 
 sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
@@ -201,7 +202,7 @@ def main(**args):
         elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
-        signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
+        signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod, cut_type=args.cut_type)
         signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, recenter=recenter, tiled=args.tiled>0, interpol=args.interpol)
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
