@@ -21,7 +21,7 @@ from sotodlib.preprocess import preprocess_util as pp_util
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
-from ..tod_ops import glitch as gl, glitch_classification as gc
+from ..tod_ops import glitch as gl
 
 logger = pp_util.init_logger("preprocess")
 
@@ -3227,7 +3227,7 @@ class GlitchClassification(_Preprocess):
         snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
 
         # classify the glitches
-        preds, stats, col_names = gc.classify_snippets(snippets, trained_forest_name)
+        preds, stats, col_names = gl.classify_snippets(snippets, trained_forest_name)
 
         # wrap the ranges and dets in an axis manager
         snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
