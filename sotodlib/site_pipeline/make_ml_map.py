@@ -137,6 +137,11 @@ def main(**args):
         sys.exit(1)
     L.info("Found %d tods" % (len(sub_ids)))
 
+    # Define our task distribution
+    obsinfo = mapmaking.get_obsinfo_subids(sub_ids, context)
+    owner   = mapmaking.distribute_tods_ra(obsinfo, comm.size) # assumes site=so
+    myinds  = np.where(owner==comm.rank)[0]
+
     if args.inject:
         map_to_inject = enmap.read_map(args.inject).astype(dtype_map)
 
@@ -211,12 +216,13 @@ def main(**args):
 
         nkept = 0
         to_skip_all = comm.allreduce(to_skip)
+
         # TODO: Fix the task distribution. The current one doesn't care which mpi
         # task gets which tods, which sabotages the pixel-saving effects of tiled maps!
         # To be able to distribute the tods sensibly, we need a rough estimate of where
         # on the sky each tod is. We should be able to get this using the central
         # ctime, az and el for each tod.
-        for ind in range(comm.rank, len(sub_ids), comm_size):
+        for ind in myinds:
             # Detsets correspond to separate files, so treat them as separate TODs.
             sub_id = sub_ids[ind]
             obs_id, wafer, band = sub_id.split(":")
