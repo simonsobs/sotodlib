@@ -21,7 +21,7 @@ from sotodlib.preprocess import preprocess_util as pp_util
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
 from ..core import AxisManager
-from ..tod_ops import glitch as gl
+from ..tod_ops import glitch_ml as gml
 
 logger = pp_util.init_logger("preprocess")
 
@@ -3200,7 +3200,7 @@ class GlitchClassification(_Preprocess):
             trained_forest_name: "trained_forest"
           save: True
 
-    .. autofunction:: sotodlib.tod_ops.glitch_classification.classify_snippets
+    .. autofunction:: sotodlib.tod_ops.glitch_ml.classify_snippets
     """
     name = "classify_glitches"
 
@@ -3218,16 +3218,16 @@ class GlitchClassification(_Preprocess):
         n_flagged = np.sum(glitch_flags.mask(), axis=0)
 
         # get the ranges when >= `n_thres` detectors are flagged simultaneously
-        snippet_ranges = gl.ranges_from_n_flagged(n_flagged, n_thres=n_thres, buffer=n_buffer)
+        snippet_ranges = gml.ranges_from_n_flagged(n_flagged, n_thres=n_thres, buffer=n_buffer)
 
         # compile list of dets in each range
-        det_mask = gl.get_det_mask(glitch_flags, snippet_ranges)
+        det_mask = gml.get_det_mask(glitch_flags, snippet_ranges)
 
         # get the glitch snippets
-        snippets = gl.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
+        snippets = gml.get_snippets(aman, snippet_ranges, det_mask, offset=proc_aman.samps.offset)
 
         # classify the glitches
-        preds, stats, col_names = gl.classify_snippets(snippets, trained_forest_name)
+        preds, stats, col_names = gml.classify_snippets(snippets, trained_forest_name)
 
         # wrap the ranges and dets in an axis manager
         snippet_aman = core.AxisManager(proc_aman.samps, core.IndexAxis('snippets'), proc_aman.dets,
