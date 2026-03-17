@@ -26,7 +26,7 @@ MARKER_SYMBOLS = ["circle", "square", "diamond", "cross", "x", "triangle-up"]
 def get_wafers(platform: str):
     """Get wafer and tube slots"""
     if platform  == "lat":
-        tube_slots = ["c1", "i1", "i3", "i4", "i5", "i6"]
+        tube_slots = ["c1", "i1", "i2", "i3", "i4", "i5", "i6", "o1", "o2", "o3", "o4", "o5", "o6"]
         wafer_slots = ["ws0", "ws1", "ws2"]
         wafers = [f"{x}_{y}" for x in tube_slots for y in wafer_slots]
     elif platform in ["satp1", "satp2", "satp3"]:
@@ -197,7 +197,7 @@ def boresight_vs_time(d: ReportData) -> go.Figure:
 
         marker_symbols = [marker_symbol_map.get(s, "circle") for s in sub_types]
 
-        for sub_type in np.unqiue(sub_types):
+        for sub_type in np.unique(sub_types):
             m = [s == sub_type for s in sub_types]
             fig.add_trace(
                 go.Scatter(
@@ -474,7 +474,13 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
             ygap=1,
         ),
     )
-    heatmap.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=300)
+
+    if d.cfg.platform == "lat":
+        height = 700
+    elif d.cfg.platform in ["satp1", "satp2", "satp3"]:
+        height = 300
+
+    heatmap.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=height)
 
     pie = go.Figure(
         data=go.Pie(
