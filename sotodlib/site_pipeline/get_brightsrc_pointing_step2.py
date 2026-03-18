@@ -183,7 +183,7 @@ def update_xieta(tod,
                                         max_pix=1e10, 
                                         wrap='source', 
                                         mask={'shape':'circle', 'xyr':[0.,0.,mask_deg]})
-    
+
     # restrict data to duration when at least one detector hit the source
     summed_flag = np.sum(tod.flags['source'].mask()[~xieta_isnan], axis=0).astype('bool')
     idx_hit = np.where(summed_flag)[0]
@@ -219,10 +219,11 @@ def update_xieta(tod,
         mask_di = source_flags_ds[di]
         bs_az = np.nanmedian(tod.boresight.az[mask_ds][mask_di])
         bs_el = np.nanmedian(tod.boresight.el[mask_ds][mask_di])
+        bs_roll = np.nanmedian(tod.boresight.roll[mask_ds][mask_di])
         
         if np.any([xieta_isnan[di], np.all(mask_di==False), tod.rms[di]==0.]):
             xieta_dict[det] = {'xi': np.nan, 'eta':  np.nan, 'xi_err': np.nan, 'eta_err': np.nan,
-                               'R2': np.nan, 'redchi2': np.nan, 'az': np.nan, 'el': np.nan}
+                               'R2': np.nan, 'redchi2': np.nan, 'az': np.nan, 'el': np.nan, 'roll': np.nan}
         else:
             ts = ts_ds[mask_di]
             d1_unix = np.median(ts)
@@ -277,17 +278,17 @@ def update_xieta(tod,
 
                 xieta_det += np.array([xi_opt, eta_opt])
                 xieta_dict[det] = {'xi': xieta_det[0], 'eta': xieta_det[1], 'xi_err': xi_err, 'eta_err': eta_err,
-                                   'R2': R2, 'redchi2': redchi2, 'az' : bs_az, 'el': bs_el}
+                                   'R2': R2, 'redchi2': redchi2, 'az' : bs_az, 'el': bs_el, 'roll': bs_roll}
             except RuntimeError:
                 xieta_dict[det] = {'xi': np.nan, 'eta':  np.nan, 'xi_err': np.nan, 'eta_err': np.nan,
-                                   'R2': np.nan, 'redchi2': np.nan, 'az': np.nan, 'el': np.nan}
+                                   'R2': np.nan, 'redchi2': np.nan, 'az': np.nan, 'el': np.nan, 'roll': np.nan}
             
-    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2', 'az', 'el'])
+    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2', 'az', 'el', 'roll'])
     for det in tod.dets.vals:
         focal_plane.rows.append((det, xieta_dict[det]['xi'], xieta_dict[det]['eta'], 0.,
                                  xieta_dict[det]['xi_err'], xieta_dict[det]['eta_err'], 
                                  xieta_dict[det]['R2'], xieta_dict[det]['redchi2'],
-                                 xieta_dict[det]['az'], xieta_dict[det]['el'],
+                                 xieta_dict[det]['az'], xieta_dict[det]['el'], xieta_dict[det]['roll'],
                                 ))
 
     return focal_plane
@@ -401,9 +402,9 @@ def main_one_wafer_dummy(configs, obs_id, wafer_slot, restrict_dets_for_debug=Fa
     result_filename = f'focal_plane_{obs_id}_{wafer_slot}.hdf'
     
     fp_rset_dummy = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 
-                                             'xi_err', 'eta_err', 'R2', 'redchi2'])
+                                             'xi_err', 'eta_err', 'R2', 'redchi2', 'az', 'el', 'roll'])
     for det in meta.dets.vals:
-        fp_rset_dummy.rows.append((det, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan))
+        fp_rset_dummy.rows.append((det, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan))
         
     os.makedirs(result_dir, exist_ok=True)
     write_dataset(fp_rset_dummy, 
@@ -426,11 +427,14 @@ def combine_pointings(pointing_result_files):
                 combined_dict[row['dets:readout_id']]['eta_err'] = row['eta_err']
                 combined_dict[row['dets:readout_id']]['R2'] = row['R2']
                 combined_dict[row['dets:readout_id']]['redchi2'] = row['redchi2']
+                combined_dict[row['dets:readout_id']]['az'] = row['az']
+                combined_dict[row['dets:readout_id']]['el'] = row['el']
+                combined_dict[row['dets:readout_id']]['roll'] = row['roll']
 
-    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2'])
+    focal_plane = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma', 'xi_err', 'eta_err', 'R2', 'redchi2', 'az', 'el', 'roll'])
     
     for det, val in combined_dict.items():
-        focal_plane.rows.append((det, val['xi'], val['eta'], val['gamma'], val['xi_err'], val['eta_err'], val['R2'], val['redchi2']))
+        focal_plane.rows.append((det, val['xi'], val['eta'], val['gamma'], val['xi_err'], val['eta_err'], val['R2'], val['redchi2'],val['az'], val['el'], val['roll']))
     return focal_plane
 
 def main_one_obs(configs, obs_id, sso_name=None,
