@@ -168,9 +168,9 @@ def get_hdf5_tasks(comm, args):
             det_select = eval(args.hdf5_det_select)
 
         # Combine the observation list with any custom queries
-        obs_sel = ",".join(olist)
-        sel_str = "select (name, session, samples, telescope) "
-        sel_str += f"where name in ({obs_sel})"
+        obs_sel = ",".join([f"'{x}'" for x in olist])
+        sel_str = "select name, path, session, samples, telescope from observations "
+        sel_str += f"where session in ({obs_sel})"
         if args.hdf5_query is not None:
             sel_str += f" and {args.hdf5_query}"
 
@@ -184,12 +184,13 @@ def get_hdf5_tasks(comm, args):
 
         # The query results are the full list of wafer-observations (not
         # observing sessions).  That means that if we are using tasks that
-        # contain a full obs_id (session), we must accumulate those.
+        # contain a full obs_id (session), we must accumulate those.  To prevent
 
         tasks = dict()
         single_task = {
             "name": "all",
             "obs_ids": list(),
+            "obs_files": list(),
             "select": det_select,
             "telescope": None,
             "outdir": args.out_root,
@@ -199,9 +200,10 @@ def get_hdf5_tasks(comm, args):
         strm_pat = re.compile(r".*_(ufm_.*)")
         for row in query_obs:
             obs_name = str(row[0])
-            session = str(row[1])
-            samples = int(row[2])
-            telescope = str(row[3])
+            obs_path = os.path.join(args.hdf5_volume, str(row[1]))
+            session = str(row[2])
+            samples = int(row[3])
+            telescope = str(row[4])
 
             # Compute the stream ID from the session and obs name
             strm_mat = strm_pat.match(obs_name)
@@ -215,8 +217,9 @@ def get_hdf5_tasks(comm, args):
                 if session not in tasks:
                     # Create a new task for this session
                     tasks[session] = {
-                        "name": f"{obs_name}",
+                        "name": f"{session}",
                         "obs_id": session,
+                        "obs_files": list(),
                         "telescope": telescope,
                         "n_samp": samples,
                         "stream_ids": list(),
@@ -227,11 +230,13 @@ def get_hdf5_tasks(comm, args):
                     }
                 # Now append this wafer-observation
                 tasks[session]["stream_ids"].append(stream_id)
+                tasks[session]["obs_files"].append(obs_path)
             elif args.task_per_wafer:
                 # Per wafer tasks
                 tasks[obs_name] = {
-                    "name": f"{obs_name}",
+                    "name": f"{session}-{stream_id}",
                     "obs_id": session,
+                    "obs_files": [obs_path],
                     "telescope": telescope,
                     "n_samp": samples,
                     "stream_id": stream_id,
@@ -245,6 +250,7 @@ def get_hdf5_tasks(comm, args):
                 if single_task["telescope"] is None:
                     single_task["telescope"] = telescope
                 single_task["obs_ids"].append(session)
+                single_task["obs_files"].append(obs_path)
 
         if not (args.task_per_obs or args.task_per_wafer):
             tasks.append(single_task)
@@ -407,6 +413,16 @@ def get_task_args(task_args, parsed, task):
         subst["{dets_select}"] = str(task["select"]).replace(" ", "")
         if parsed.task_per_obs or parsed.task_per_wafer:
             # Single obs
+            subst["{samples}"] = str(task["n_samp"])
+    elif parsed.hdf5_volume is not None:
+        # Real or simulated HDF5
+        if len(task["obs_files"]) == 1:
+            subst["{obs_files}"] = task["obs_files"][0]
+        else:
+            subst["{obs_files}"] = ",".join(task["obs_files"])
+        subst["{dets_select}"] = str(task["select"]).replace(" ", "")
+        if parsed.task_per_obs or parsed.task_per_wafer:
+            # Single session
             subst["{samples}"] = str(task["n_samp"])
     else:
         # Synthetic data
