@@ -740,7 +740,7 @@ class Noise(_Preprocess):
                 hwp_freq = (np.sum(np.abs(np.diff(np.unwrap(aman.hwp_angle)))) /
                              (aman.timestamps[-1] - aman.timestamps[0])) / (2 * np.pi)
                 if fmax > frequency_cutoff:
-                    logger.warning(f"Upper freq={fmax} > hwp freq cutoff={np.round(frequency_cutoff, 2)}. Limiting to hwp freq cutoff.")
+                    logger.warning(f"Upper freq={fmax} > hwp freq cutoff={frequency_cutoff:.2f}. Limiting to hwp freq cutoff.")
                     fmax = frequency_cutoff
             if fmin is not None and fmin >= fmax:
                 raise ValueError(f"lower freq={fmin} >= upper freq={fmax}")
