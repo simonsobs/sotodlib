@@ -337,6 +337,10 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
     ML_fit : bool
         Whether to use the ML solution (analytic) to fit for coefficients. Default is False,
         which uses ODR to perform a linear fit.
+        We are assuming a linear model: y_i = b * x_i + eps_i, where eps_i is white noise.
+        The log likelihood for this model is: log L(b) = - (1 / (2*sigma^2)) * sum_i (y_i - b*x_i)^2  + const
+        For which the maximum likelihood estimator for b is: b_hat = sum_i (x_i * y_i) / sum_i (x_i^2)
+        This is equivalent to Ordinary Least Square (OLS) regression with no intercept.
 
     Returns
     -------
