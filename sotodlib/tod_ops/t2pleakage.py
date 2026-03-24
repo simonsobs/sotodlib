@@ -360,11 +360,15 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
         yU = np.real(U_fs[:, fit_mask])
         coeffsQ = np.sum(x * yQ, axis=1) / np.sum(x**2, axis=1)
         coeffsU = np.sum(x * yU, axis=1) / np.sum(x**2, axis=1)
-        # TODO: generalize this when using on data to apply T2P cuts.
+
+        stdQ = np.sqrt(np.sum((yQ - coeffsQ[:, np.newaxis] * x)**2, axis=1) / (x.shape[1] - 1))
+        stdU = np.sqrt(np.sum((yU - coeffsU[:, np.newaxis] * x)**2, axis=1) / (x.shape[1] - 1))
+
         errorsQ = np.zeros_like(coeffsQ)
         errorsU = np.zeros_like(coeffsU)
-        redchi2sQ = np.zeros_like(coeffsQ)
-        redchi2sU = np.zeros_like(coeffsU)
+
+        redchi2sQ = np.sum((yQ - coeffsQ[:, np.newaxis] * x) ** 2 / stdQ[:, np.newaxis] ** 2, axis=1) / (x.shape[1] - 1)
+        redchi2sU = np.sum((yU - coeffsU[:, np.newaxis] * x) ** 2 / stdU[:, np.newaxis] ** 2, axis=1) / (x.shape[1] - 1)
     else:
         coeffsQ = np.zeros(aman.dets.count)
         errorsQ = np.zeros(aman.dets.count)
@@ -424,13 +428,13 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
                 errorsU[i] = np.nan
                 redchi2sU[i] = np.nan
 
-        out_aman = core.AxisManager(aman.dets, aman.samps)
-        out_aman.wrap('coeffsQ', coeffsQ, [(0, 'dets')])
-        out_aman.wrap('errorsQ', errorsQ, [(0, 'dets')])
-        out_aman.wrap('redchi2sQ', redchi2sQ, [(0, 'dets')])
-        out_aman.wrap('coeffsU', coeffsU, [(0, 'dets')])
-        out_aman.wrap('errorsU', errorsU, [(0, 'dets')])
-        out_aman.wrap('redchi2sU', redchi2sU, [(0, 'dets')])
+    out_aman = core.AxisManager(aman.dets, aman.samps)
+    out_aman.wrap('coeffsQ', coeffsQ, [(0, 'dets')])
+    out_aman.wrap('errorsQ', errorsQ, [(0, 'dets')])
+    out_aman.wrap('redchi2sQ', redchi2sQ, [(0, 'dets')])
+    out_aman.wrap('coeffsU', coeffsU, [(0, 'dets')])
+    out_aman.wrap('errorsU', errorsU, [(0, 'dets')])
+    out_aman.wrap('redchi2sU', redchi2sU, [(0, 'dets')])
 
     if subtract_sig:
         subtract_t2p(aman, out_aman)
