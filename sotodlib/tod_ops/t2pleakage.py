@@ -368,8 +368,8 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
         stdQ = np.sqrt(np.sum((yQ - coeffsQ[:, np.newaxis] * x)**2, axis=1) / (x.shape[1] - 1))
         stdU = np.sqrt(np.sum((yU - coeffsU[:, np.newaxis] * x)**2, axis=1) / (x.shape[1] - 1))
 
-        errorsQ = np.zeros_like(coeffsQ)
-        errorsU = np.zeros_like(coeffsU)
+        errorsQ = stdQ / np.sqrt(np.sum(x**2, axis=1))
+        errorsU = stdU / np.sqrt(np.sum(x**2, axis=1))
 
         redchi2sQ = np.sum((yQ - coeffsQ[:, np.newaxis] * x) ** 2 / stdQ[:, np.newaxis] ** 2, axis=1) / (x.shape[1] - 1)
         redchi2sU = np.sum((yU - coeffsU[:, np.newaxis] * x) ** 2 / stdU[:, np.newaxis] ** 2, axis=1) / (x.shape[1] - 1)
