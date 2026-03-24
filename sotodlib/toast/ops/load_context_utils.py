@@ -578,9 +578,11 @@ def distribute_detector_data(
                                 nan_mask = np.isnan(sdata_2d[idet])
                                 if np.count_nonzero(nan_mask) > 0:
                                     det_flags[idet] = 1
-                                obs.detdata[field][idet + recv_dets[0], :] = (
-                                    0.5 + rescale_to_daq * sdata_2d[idet]
-                                ).astype(np.int32)
+                                np.rint(
+                                    rescale_to_daq * sdata_2d[idet],
+                                    out=obs.detdata[field][idet + recv_dets[0], :],
+                                    casting="unsafe",
+                                )
                             else:
                                 obs.detdata[field][idet + recv_dets[0], :] = sdata_2d[
                                     idet
@@ -634,9 +636,11 @@ def distribute_detector_data(
                         nan_mask = np.isnan(recv_2d[idet])
                         if np.count_nonzero(nan_mask) > 0:
                             det_flags[idet] = 1
-                        obs.detdata[field][idet + recv_dets[0], :] = (
-                            0.5 + rescale_to_daq * recv_2d[idet]
-                        ).astype(np.int32)
+                        np.rint(
+                            rescale_to_daq * recv_2d[idet],
+                            out=obs.detdata[field][idet + recv_dets[0], :],
+                            casting="unsafe",
+                        )
                     else:
                         obs.detdata[field][idet + recv_dets[0], :] = recv_2d[idet]
             # Update per-detector flags
