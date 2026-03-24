@@ -2591,7 +2591,8 @@ class SubtractT2P(_Preprocess):
             if self.process_cfgs.get("fit_in_freq"):
                 t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs_in_freq(
                     data_aman,
-                    merge_stats=False
+                    merge_stats=False,
+                    ML_fit=True
                 )
             else:
                 t2p_aman = tod_ops.t2pleakage.get_t2p_coeffs(
