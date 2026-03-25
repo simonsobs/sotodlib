@@ -141,6 +141,7 @@ class FocalPlane:
     id_strs: NDArray[np.str_]  # (ndet,)
     avg_fp: NDArray[np.floating]  # (ndim, ndet)
     weights: NDArray[np.floating]  # (ndet,)
+    det_boresight: NDArray[np.floating] # (ndim, ndet)
     transformed: NDArray[np.floating]  # (ndet, ndim)
     center: NDArray[np.floating]  # (1, ndim)
     center_transformed: NDArray[np.floating]  # (1, ndim)
@@ -219,6 +220,7 @@ class FocalPlane:
         tot_weight = np.zeros((len(template.det_ids), 2))
         avg_fp = np.full_like(template.fp, np.nan)
         weight = np.zeros((len(template.det_ids), 2))
+        det_boresight = np.zeros((len(template.det_ids), 3)) + np.nan # az, el, roll
         transformed = template.fp.copy()
         center = template.center.copy()
         center_transformed = template.center.copy()
@@ -232,6 +234,7 @@ class FocalPlane:
             template.id_strs,
             avg_fp,
             weight,
+            det_boresight,
             transformed,
             center,
             center_transformed,
@@ -260,8 +263,17 @@ class FocalPlane:
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
         r2 = np.nan + np.zeros_like(eta)
+        az = np.nan + np.zeros_like(eta)
+        el = np.nan + np.zeros_like(eta)
+        roll = np.nan + np.zeros_like(eta)
         if "R2" in aman.pointing:
             r2 = aman.pointing.R2[msk][srt][mapping]
+        if "az" in aman.pointing:
+            az = aman.pointing.az[msk][srt][mapping]
+        if "el" in aman.pointing:
+            el = aman.pointing.el[msk][srt][mapping]
+        if "roll" in aman.pointing:
+            roll = aman.pointing.roll[msk][srt][mapping]
         if "polarization" in aman:
             # name of field just a placeholder for now
             gamma = aman.polarization.polang[msk][srt][mapping]
@@ -270,14 +282,16 @@ class FocalPlane:
         else:
             gamma = np.full(len(xi), np.nan)
         fp = np.column_stack((xi, eta, gamma))
-        return fp, r2, template_msk
+        det_boresight = np.column_stack((az, el, roll))
+        return fp, r2, det_boresight, template_msk
 
-    def add_fp(self, i, fp, weights, template_msk):
-        if self.full_fp is None or self.tot_weight is None:
+    def add_fp(self, i, fp, weights, det_boresight, template_msk):
+        if self.full_fp is None or self.tot_weight is None or self.det_boresight is None:
             raise ValueError("full_fp or tot_weight not initialized")
         self.full_fp[template_msk, :, i] = fp * weights[:, 0][..., None]
         weights = np.nan_to_num(weights)
         self.tot_weight[template_msk] += weights
+        self.det_boresight[template_msk, :] = det_boresight
 
     def save(self, f, db_info, group):
         logger.info("Saving %s", self.stream_id)
@@ -323,6 +337,9 @@ class FocalPlane:
             ("gamma_m", np.float32),
             ("weights", np.float32),
             ("r2", np.float32),
+            ("az", np.float32),
+            ("el", np.float32),
+            ("roll", np.float32),
             ("n_point", np.int8),
             ("n_gamma", np.int8),
         ]
@@ -333,6 +350,7 @@ class FocalPlane:
                 *(self.transformed.T),
                 *(self.avg_fp.T),
                 *(self.weights.T),
+                *(self.det_boresight.T),
                 self.n_point,
                 self.n_gamma,
             ),
@@ -376,6 +394,14 @@ class FocalPlane:
                 np.array(fp_full["xi_m"]),
                 np.array(fp_full["eta_m"]),
                 np.array(fp_full["gamma_m"]),
+            )
+        )
+
+        det_boresight = np.column_stack(
+            (
+                np.array(fp_full["az"]),
+                np.array(fp_full["el"]),
+                np.array(fp_full["roll"]),
             )
         )
         # For backwards compatibility
@@ -424,6 +450,7 @@ class FocalPlane:
             np.array(id_strs),
             avg_fp,
             np.array(weights),
+            det_boresight,
             transformed,
             center,
             center_transformed,

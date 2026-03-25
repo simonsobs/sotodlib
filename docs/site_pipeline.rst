@@ -242,9 +242,10 @@ The Step 2 TOD-based analysis scripts will use the map-based results as a starti
 
  1.  Fitted xi-eta focal plane position results saved as ResultSet in ``/path/to/results/tod_based_results``
  as specified in config file for Step-2. Script will append 'force_zero_roll' onto the specified results_dir
- if True in config file. Load ResultSet with keyword 'focal_plane'
+ if True in config file. Load ResultSet with keyword 'focal_plane'.
+ The median boresight values from small time range the source was visible to each detector is included.
 
-  * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, xi_err, eta_err, R2, redchi2], N rows>``
+  * Contents: ``ResultSet<[dets:readout_id, xi, eta, gamma, xi_err, eta_err, R2, redchi2, az, el, roll], N rows>``
  
 Configuration Files
 ```````````````````
@@ -762,6 +763,10 @@ The ``focal_plane_full`` dataset contains nine columns:
 - ``eta_m``: The measured eta in radians
 - ``gamma_m``: The measured gamma in radians.
 - ``weights``: The average weights of the measurements for this det.
+- ``r2``: The fit weight passed in from the get_brightsrc_pointing dataset
+- ``az``: The median Az value in radians from source-detector crossing
+- ``el``: The median El value in radians from source-detector crossing
+- ``roll``: The median Roll value in radians from source-detector crossing
 - ``n_point``: The number of pointing fits used for the det.
 - ``n_gamma``: The number of gamma fits used for this det.
 
@@ -802,7 +807,7 @@ always be ``(1, 1, 1)`` and ``shear`` will be ``0``.
 ``finalize_focal_plane`` will also output a ``ManifestDb`` as a file called ``db.sqlite``
 in the output directory.
 By default this will be indexed by ``stream_id`` and ``obs:timestamp`` and will point to the ``focal_plane`` dataset.
-If you are running in ``per_obs`` mode then it wirbe indexed by ``obs_id`` and will point
+If you are running in ``per_obs`` mode then it will be indexed by ``obs_id`` and will point
 to results associated with data observation.
 Be warned that in this case there will only be entries for observations with pointing fits,
 so design your context accordingly.
