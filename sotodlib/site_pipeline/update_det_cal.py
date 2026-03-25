@@ -77,9 +77,15 @@ class DetCalCfg:
     raise_exceptions: bool
         If Exceptions should be raised in the get_cal_resset function.
         Defaults to False.
+    fit_tau: bool
+        If True, re-fit the biasstep tau. Defaults to False.
     apply_cal_correction: bool
         If True, apply the RP calibration correction, and use corrected results
         for Rtes, Si, Pj, and loopgain when successful. Defaults to True.
+    hwpss_subtraction: bool
+        If True, reanalyze biasstep with hwpss subtraction. Defaults to False.
+    metadata_list: str or List of str
+        List of metadata labels to load. Defaults to 'all'.
     index_path: str
         Path to the index file to use for the det_cal database. Defaults to
         "det_cal.sqlite".
@@ -123,6 +129,7 @@ class DetCalCfg:
         context_path: str,
         *,
         raise_exceptions: bool = False,
+        fit_tau: bool = False,
         apply_cal_correction: bool = True,
         hwpss_subtraction: bool = False,
         metadata_list: Union[str, List[str]] = 'all',
@@ -144,6 +151,7 @@ class DetCalCfg:
         self.context_path = os.path.expandvars(context_path)
         self.metadata_list = metadata_list
         self.raise_exceptions = raise_exceptions
+        self.fit_tau = fit_tau
         self.apply_cal_correction = apply_cal_correction
         self.hwpss_subtraction = hwpss_subtraction
         self.cache_failed_obsids = cache_failed_obsids
@@ -586,6 +594,10 @@ def get_cal_resset(cfg: DetCalCfg, obs_info: ObsInfo,
                     # This will edit IVA dicts in place
                     logger.debug("Recomputing IV analysis for %s", obs_id)
                     tpc.recompute_ivpars(iva, cfg.param_correction_config)
+
+        if cfg.fit_tau:
+            for dset, bsa in bsas.items():
+                bsa._fit_tau_effs()
 
         if cfg.hwpss_subtraction:
             # Reanalyze biasstep with hwpss subtraction

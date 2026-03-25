@@ -14,6 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
+from sotodlib.core.metadata.manifest import MultiDbBatchManager
 from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
@@ -189,7 +190,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
-          raise_error: bool = False):
+          raise_error: bool = False,
+          pb_path: Optional[str] = None):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
@@ -375,8 +377,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     logger.info(f'Run list created with {len(run_list)} obsid groups')
 
     # ensure dbs exist up front to prevent race conditions
-    pp_util.get_preprocess_db(configs_init, group_by, logger)
-    pp_util.get_preprocess_db(configs_proc, group_by, logger)
+    db_init = pp_util.get_preprocess_db(configs_init, group_by, logger)
+    db_proc = pp_util.get_preprocess_db(configs_proc, group_by, logger)
 
     futures = []
     futures_dict = {}
@@ -401,56 +403,64 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
 
     total = len(futures)
 
-    pb_name = f"pb_{str(int(time.time()))}.txt"
+    batch_size_init = configs_init['archive'].get('batch_size', 1)
+    batch_size_proc = configs_proc['archive'].get('batch_size', 1)
+
+    pb_name = os.path.join(pb_path or '', f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
-        for future in tqdm(as_completed_callable(futures), total=total,
-                               desc="multilayer_preprocess_tod", file=f,
-                               miniters=max(1, total // 100)):
-            obs_id, group = futures_dict[future]
-            out_meta = (obs_id, group)
-            try:
-                out_dict_init, out_dict_proc, errors = future.result()
-                obs_errors[obs_id].append({'group': group, 'error': errors[0]})
-                logger.info(f"{obs_id}: {group} extracted successfully")
-            except Exception as e:
-                errmsg, tb = PreprocessErrors.get_errors(e)
-                logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
-                obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
-                out_dict_init = None
-                out_dict_proc = None
-                errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
+        with MultiDbBatchManager(
+            [db_init, db_proc], batch_size=[batch_size_init, batch_size_proc], logger=logger
+        ) as (db_mgr_init, db_mgr_proc):
+            for future in tqdm(as_completed_callable(futures), total=total,
+                                desc="multilayer_preprocess_tod", file=f,
+                                miniters=max(1, total // 100)):
+                obs_id, group = futures_dict[future]
+                out_meta = (obs_id, group)
+                try:
+                    out_dict_init, out_dict_proc, errors = future.result()
+                    obs_errors[obs_id].append({'group': group, 'error': errors[0]})
+                    logger.info(f"{obs_id}: {group} extracted successfully")
+                except Exception as e:
+                    errmsg, tb = PreprocessErrors.get_errors(e)
+                    logger.error(f"Executor Future Result Error for {obs_id}: {group}:\n{errmsg}\n{tb}")
+                    obs_errors[obs_id].append({'group': group, 'error': PreprocessErrors.ExecutorFutureError})
+                    out_dict_init = None
+                    out_dict_proc = None
+                    errors = (PreprocessErrors.ExecutorFutureError, errmsg, tb)
 
-            futures.remove(future)
+                futures.remove(future)
 
-            # only run if first layer was run
-            if out_dict_init is not None:
-                logger.info(f"Adding future result to init db for {obs_id}: {group}")
-                pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
-                                      configs_init, logger, overwrite)
-            logger.info(f"Adding future result to proc db for {obs_id}: {group}")
-            pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
-                                  configs_proc, logger, overwrite)
+                # only run if first layer was run
+                if out_dict_init is not None:
+                    logger.info(f"Adding future result to init db for {obs_id}: {group}")
+                    pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
+                                        configs_init, logger, overwrite,
+                                        db_manager=db_mgr_init)
+                logger.info(f"Adding future result to proc db for {obs_id}: {group}")
+                pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
+                                    configs_proc, logger, overwrite,
+                                    db_manager=db_mgr_proc)
 
-            # update jobdb
-            if jobdb_path is not None:
-                tags = {}
-                tags["obs:obs_id"] = obs_id
-                for gb, g in zip(group_by, group):
-                    tags['dets:' + gb] = g
-                jobs = jdb.get_jobs(jstate=JState.open, tags=tags)
+                # update jobdb
+                if jobdb_path is not None:
+                    tags = {}
+                    tags["obs:obs_id"] = obs_id
+                    for gb, g in zip(group_by, group):
+                        tags['dets:' + gb] = g
+                    jobs = jdb.get_jobs(jstate=JState.open, tags=tags)
 
-                for job in jobs:
-                    # init layer state will be JState.done if already run
-                    if job.jstate == JState.open:
-                        with jdb.locked(job) as j:
-                            j.mark_visited()
-                            if errors[0] is not None:
-                                j.jstate = JState.failed
-                                for _t in j._tags:
-                                    if _t.key == "error":
-                                        _t.value = errors[0]
-                            else:
-                                j.jstate = JState.done
+                    for job in jobs:
+                        # init layer state will be JState.done if already run
+                        if job.jstate == JState.open:
+                            with jdb.locked(job) as j:
+                                j.mark_visited()
+                                if errors[0] is not None:
+                                    j.jstate = JState.failed
+                                    for _t in j._tags:
+                                        if _t.key == "error":
+                                            _t.value = errors[0]
+                                else:
+                                    j.jstate = JState.done
     if raise_error:
         n_obs_fail = 0
         n_groups_fail = 0
@@ -543,12 +553,18 @@ def get_parser(parser=None):
         type=bool,
         default=False
     )
+    parser.add_argument(
+        '--pb-path',
+        help="Path to where to save progress bar.",
+        type=str,
+        default=None
+    )
     return parser
 
 
 def main(configs_init: str,
          configs_proc: str,
-         query: Optional[str] = None,
+         query: str = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
@@ -560,7 +576,8 @@ def main(configs_init: str,
          compress: bool = False,
          nproc: int = 4,
          run_from_jobdb: bool = False,
-         raise_error: bool = False):
+         raise_error: bool = False,
+         pb_path: Optional[str] = None):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -580,7 +597,8 @@ def main(configs_init: str,
               nproc=nproc,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
-              raise_error=raise_error)
+              raise_error=raise_error,
+              pb_path=pb_path)
 
 
 if __name__ == '__main__':

@@ -355,6 +355,7 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
+
     # planar is now [ndet,nsamp,{ira,idec}] in intermediate
     # coordinates in radians. These will be 0 at the
     # reference point, and span at most [-pi,pi] in ira
@@ -404,13 +405,8 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     # or add a special case. NB! This case *will* trigger regularly
     # due to wrapping if recentering is turned off.
     shape = (p2-p1+1)[::-1]
-
-    if recenter:
-        # Second part of recentering. Modify crval[0]
-        x_mid  = shape[-1]//2+1
-        ra_mid = w.wcs.crval[0] + (x_mid-w.wcs.crpix[0])*w.wcs.cdelt[0]
-        w.wcs.crpix[0] = x_mid
-        w.wcs.crval[0] = ra_mid
+    # Make sure wcs crval follows so3g pointing matrix assumptions
+    shape, w = normalize_geometry(shape, w)
 
     return (shape, w)
 
@@ -796,3 +792,22 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     sight.Q = sight.Q * ~deflq
     return sight
 
+def normalize_geometry(shape, wcs):
+    """Analyze (shape, wcs) and return a pixel-compatible (shape, wcs)
+    that positions the reference pixel in a way that works with so3g projection
+    routines. Only cylindrical projections are affected.
+    
+    """
+    # Can't freely change wcs for non-separable geometries
+    # (so non-cylindrical ones), as this would change the geometry
+    # in an incompatible way
+    if not wcsutils.is_separable(wcs): return shape, wcs
+    # The pointing matrix assumes that crval ra is in [-180,180],
+    # and that all points are within 180° of this
+    wcs    = wcs.deepcopy()
+    x_mid  = shape[-1]/2+1
+    ra_mid = wcs.wcs.crval[0] + (x_mid-wcs.wcs.crpix[0])*wcs.wcs.cdelt[0]
+    ra_mid = utils.rewind(ra_mid, ref=0, period=360)
+    wcs.wcs.crpix[0] = x_mid
+    wcs.wcs.crval[0] = ra_mid
+    return shape, wcs

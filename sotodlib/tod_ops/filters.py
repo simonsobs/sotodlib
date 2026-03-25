@@ -2,7 +2,6 @@ import numpy as np
 import pyfftw
 import inspect
 import scipy.signal as signal
-from operator import attrgetter
 
 import logging
 
@@ -350,6 +349,22 @@ def gain(freqs, tod, gain=1.):
     return gain * np.ones(len(freqs))
 
 @fft_filter
+def timeshift(freqs, tod, dt=0, invert=False):
+    """Filter that shifts the signal in time.
+
+    Args:
+        dt: Amount of time shift to apply in second. Positive value will
+            cause the signal to be moved to later samples of the array.
+        invert (bool): If true, returns the inverse transfer function,
+            to deconvolve the time shift.
+
+    """
+    if invert:
+        return np.exp(2j * np.pi * freqs * dt)
+    else:
+        return np.exp(-2j * np.pi * freqs * dt)
+
+@fft_filter
 def low_pass_butter4(freqs, tod, fc):
     """4th-order low-pass filter with f3db at fc (Hz).
 
@@ -403,9 +418,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
 
     Args:
 
-      timeconst: Array of time constant values (one per detector).
-        Alternately, a string indicating what member of tod to use for
-        the time constants array.  Defaults to 'timeconst'.
+      timeconst: Array of time constant values (one per detector),
+        or a scalar value, or a string indicating what field of tod
+        to use for the time constants array. Defaults to 'timeconst'.
       invert (bool): If true, returns the inverse transfer function,
         to deconvolve the time constants.
 
@@ -419,9 +434,9 @@ def timeconst_filter(target, freqs, tod, timeconst=None, invert=False):
     if timeconst is None:
         timeconst = 'timeconst'
     if isinstance(timeconst, str):
-        # attrgetter used to retrieve a field multiple layers deep.
-        _f = attrgetter(timeconst)
-        timeconst = _f(tod)
+        timeconst = tod[timeconst]
+    if np.isscalar(timeconst):
+        timeconst = np.full(tod.dets.count, timeconst)
 
     if target is None:
         filt = 1 + 2.0j*np.pi*timeconst[:,None]*freqs[None,:]
