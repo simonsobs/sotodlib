@@ -1976,10 +1976,14 @@ class HWPAngleModel(_Preprocess):
         if (not 'hwp_angle' in aman._fields) and ('hwp_angle' in proc_aman._fields):
             aman.wrap('hwp_angle', proc_aman['hwp_angle']['hwp_angle'],
                       [(0, 'samps')])
+        else:
+            hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+
         return aman, proc_aman
 
     def calc_and_save(self, aman, proc_aman):
-        hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
+        if (not 'hwp_angle' in aman._fields):
+            hwp_angle_model.apply_hwp_angle_model(aman, **self.calc_cfgs)
         hwp_angle_aman = core.AxisManager(aman.samps)
         hwp_angle_aman.wrap('hwp_angle', aman.hwp_angle, [(0, 'samps')])
         self.save(proc_aman, hwp_angle_aman)
