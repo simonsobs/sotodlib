@@ -663,7 +663,7 @@ def main():
             plot_dir = os.path.join(plot_dir_base, str(config["start_time"]))
         os.makedirs(plot_dir, exist_ok=True)
         logger.info("Working on batch containing: %s", str(obs_ids))
-        
+
         # Setup db and Receiver
         db, base, group = _create_db(
             dbpath,

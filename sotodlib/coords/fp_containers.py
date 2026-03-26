@@ -263,9 +263,9 @@ class FocalPlane:
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
         r2 = np.nan + np.zeros_like(eta)
-        az = np.nan + np.zeros_like(eta)
-        el = np.nan + np.zeros_like(eta)
-        roll = np.nan + np.zeros_like(eta)
+        az = np.deg2rad(aman.obs_info.az_center) * np.ones_like(eta)
+        el = np.deg2rad(aman.obs_info.el_center) * np.ones_like(eta)
+        roll = np.deg2rad(aman.obs_info.roll_center) * np.ones_like(eta)
         if "R2" in aman.pointing:
             r2 = aman.pointing.R2[msk][srt][mapping]
         if "az" in aman.pointing:
