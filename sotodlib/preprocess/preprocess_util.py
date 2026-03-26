@@ -1091,6 +1091,19 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             except OSError as e:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
+            except Error as e:
+                err_str = str(e)
+
+                if "destination object already exists" in err_str:
+                    # remove temp file it was copied but not deleted
+                    os.remove(outputs_grp['temp_file'])
+                else:
+                    errmsg = f"{type(e).__name__}: {e}"
+                    tb = ''.join(traceback.format_tb(e.__traceback__))
+                    logger.error(
+                        f"save_group_and_cleanup failed for {outputs_grp['temp_file']}:\n{errmsg}\n{tb}"
+                    )
+                    raise
     return errors
 
 
