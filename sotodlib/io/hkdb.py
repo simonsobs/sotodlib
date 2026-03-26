@@ -275,7 +275,8 @@ def update_file_index(hkcfg: HkConfig, session=None, subdirs=None,
 def get_frames_from_file(
     hkcfg: HkConfig,
     file: HkFile,
-    return_on_fail=True
+    return_on_fail=True,
+    last_known_frame_offset: int=None,
 ) -> List[HkFrame]:
     """
     Returns HkFile and HkFrame objects corresponding to a given hk file.
@@ -288,6 +289,9 @@ def get_frames_from_file(
         If True, if there is a runtime error while reading the g3 file (usually
         caused by a forced shutdown), the function will still return parsed
         frames.
+    last_known_frame_offset : int
+        If provided, then frames at offsets up to and including the one at
+        this offset will be ignored and not returned.
 
     Returns
     ---------
@@ -299,10 +303,15 @@ def get_frames_from_file(
         path = str(file.path)
     else:
         path = os.path.join(hkcfg.hk_root, str(file.path))
-    reader = so3g.G3IndexedReader(path)
+    reader = spt3g_core.G3Reader(path)
+
+    if last_known_frame_offset is None:
+        last_known_frame_offset = -1
+    else:
+        reader.seek(last_known_frame_offset)
 
     while True:
-        byte_offset = reader.Tell()
+        byte_offset = reader.tell()
         try:
             frame = reader.Process(None)
         except RuntimeError:
@@ -313,6 +322,8 @@ def get_frames_from_file(
                 raise
         if not frame:
             break
+        elif byte_offset <= last_known_frame_offset:
+            continue
         else:
             frame = frame[0]
 
@@ -374,6 +385,42 @@ def update_frame_index(hkcfg: HkConfig, session=None):
             report['new_files_failed'] += 1
 
     return report
+
+
+def update_file_records(cfg: Union[HkConfig, str],
+                        existing_file: HkFile,
+                        reset=False):
+    """For an already indexed file, check for any new frames, incorporate
+    them into the HkFrame table, and update the timestamps, size and
+    mod_time of the File entry.
+
+    If reset=True, then existing HkFrame for the file are dropped and
+    the file is fully rescanned.
+
+    """
+    if isinstance(cfg, str):
+        cfg = HkConfig.from_yaml(cfg)
+    hkdb = HkDb(cfg)
+    with hkdb.Session.begin() as session:
+        file = session.query(HkFile).filter(HkFile.id == existing_file.id).one_or_none()
+        if reset:
+            session.query(HkFrame).filter(HkFrame.id == file.id).delete(synchronize_session=False)
+            last_known = None
+            file.start_time = 1 << 32
+            file.end_time = 0
+        else:
+            last_known = session.query(db.func.max(HkFrame.byte_offset)) \
+                                .filter(HkFrame.file_id == file.id).scalar()
+        new_frames = get_frames_from_file(cfg, file, last_known_frame_offset=last_known)
+        if len(new_frames) > 0:
+            file.start_time = min(file.start_time, *[f.start_time for f in new_frames])
+            file.end_time = max(file.end_time, *[f.end_time for f in new_frames])
+        full_path = os.path.join(cfg.hk_root, str(file.path))
+        file.size = os.path.getsize(full_path)
+        file.mod_time = os.path.getmtime(full_path)
+        session.add_all(new_frames)
+        session.commit()
+    return len(new_frames)
 
 
 def update_index_all(cfg: Union[HkConfig, str], subdirs=None,
@@ -641,9 +688,9 @@ def load_hk(load_spec: Union[LoadSpec, dict], show_pb=False,
     pb = tqdm(total=nframes, disable=(not show_pb))
     for path in sorted(list(file_spec.keys())):
         offsets = file_spec[path]
-        reader = so3g.G3IndexedReader(path)
+        reader = spt3g_core.G3Reader(path)
         for offset in sorted(offsets):
-            reader.Seek(offset)
+            reader.seek(offset)
             frame = reader.Process(None)[0]
             addr = frame['address']
             _, agent, _, feed = addr.split('.')
