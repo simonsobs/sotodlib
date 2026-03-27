@@ -3,6 +3,7 @@
 
 import os
 import pickle
+import time
 
 from astropy import constants
 from astropy import units as u
@@ -95,7 +96,7 @@ def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
                 return None
             else:
                 log.warning(f"EOF at {fname}, waiting for {wait_time} seconds")
-                sleep(wait_time)
+                time.sleep(wait_time)
                 continue
         break  # success
 
