@@ -3,6 +3,7 @@
 
 import os
 import pickle
+import time
 
 from astropy import constants
 from astropy import units as u
@@ -89,13 +90,13 @@ def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
         try:
             with open(fname, "rb") as f:
                 payload = pickle.load(f)
-        except EOFError:
+        except (EOFError, pickle.UnpicklingError):
             if n_try == n_try_max - 1:
                 log.warning(f"EOF at {fname}, nothing loaded")
                 return None
             else:
                 log.warning(f"EOF at {fname}, waiting for {wait_time} seconds")
-                sleep(wait_time)
+                time.sleep(wait_time)
                 continue
         break  # success
 
