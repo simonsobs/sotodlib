@@ -20,9 +20,9 @@ CRVAL = [34.0*DEG, -20.9*DEG]
 TOL_RAD = .00001 * DEG
 
 if hasattr(so3g.proj.quat, "quat"):
-    legacy_spt3g = True
+    g3quat = so3g.proj.quat.quat
 else:
-    legacy_spt3g = False
+    g3quat = so3g.proj.quat.Quat
 
 
 def get_sightline():
@@ -163,10 +163,7 @@ class CoordsUtilsTest(unittest.TestCase):
         qa = coords.ScalarLastQuat(test_array[0])
         self.assertIsInstance(qa, np.ndarray)
         q3 = qa.to_g3()
-        if legacy_spt3g:
-            self.assertIsInstance(q3, so3g.proj.quat.quat)
-        else:
-            self.assertIsInstance(q3, so3g.proj.quat.Quat)
+        self.assertIsInstance(q3, g3quat)
         self.assertEqual(q3.a, 1)
         qb = coords.ScalarLastQuat(q3)
         np.testing.assert_array_equal(qa, qb)

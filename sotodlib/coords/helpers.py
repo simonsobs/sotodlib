@@ -8,11 +8,10 @@ import re
 
 DEG = np.pi/180
 
-
 if hasattr(so3g.proj.quat, "quat"):
-    legacy_spt3g = True
+    g3quat = so3g.proj.quat.quat
 else:
-    legacy_spt3g = False
+    g3quat = so3g.proj.quat.Quat
 
 
 def _get_csl(sight):
@@ -716,9 +715,7 @@ class ScalarLastQuat(np.ndarray):
             obj = np.empty(arr.shape)
             obj[:,:3] = arr[:,1:]
             obj[:,3] = arr[:,0]
-        elif legacy_spt3g and isinstance(arr, so3g.proj.quat.quat):
-            obj = np.array((arr.b, arr.c, arr.d, arr.a))
-        elif not legacy_spt3g and isinstance(arr, so3g.proj.quat.Quat):
+        elif isinstance(arr, g3quat):
             obj = np.array((arr.b, arr.c, arr.d, arr.a))
         else:
             obj = np.asarray(arr)
@@ -734,10 +731,7 @@ class ScalarLastQuat(np.ndarray):
             raise ValueError("Last axis must have 4 elements.")
         if self.ndim == 1:
             b, c, d, a = self[:].astype(float)
-            if legacy_spt3g:
-                return so3g.proj.quat.quat(a, b, c, d)
-            else:
-                return so3g.proj.quat.Quat(a, b, c, d)
+            return g3quat(a, b, c, d)
         if self.ndim == 2:
             temp = np.zeros(self.shape, float)
             temp[..., 0] = self[..., 3]
