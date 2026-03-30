@@ -4,6 +4,7 @@
 import numpy as np
 import so3g
 from pixell import fft, utils, bunch
+import warnings
 
 from .utils import *
 
@@ -117,7 +118,7 @@ class NmatUncorr(Nmat):
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges="act_default", nbin=100, nmin=10, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20], downweight=[], 
                 window=2, nwin=None, verbose=False, bins=None, D=None, V=None, iD=None, iV=None, s=None, ivar=None, bmin_eigvec=1000,
-                skip_mean=True, mp_significance=None, wnoise_band=None, max_noise_modes=None):
+                skip_mean=True, mp_significance=None, wnoise_band=None, max_noise_modes=None, detrend_order=None):
         if bin_edges == "act_default":
             bin_edges = np.array([
                 0.16, 0.25, 0.35, 0.45, 0.55, 0.70, 0.85, 1.00,
@@ -159,10 +160,17 @@ class NmatDetvecs(Nmat):
         self.mp_significance = mp_significance
         self.wnoise_band = wnoise_band # Expected format: [fmin, fmax]
         self.max_noise_modes = max_noise_modes
+        if detrend_order is not None and detrend_order > 2:
+            warnings.warn(f"detrend_order={detrend_order} is not supported. Defaulting to 2 (parabola).")
+            self.detrend_order = 2
+        else:
+            self.detrend_order = detrend_order
         self.D, self.V, self.iD, self.iV, self.s, self.ivar = D, V, iD, iV, s, ivar
         self.ready      = all([a is not None for a in [D, V, iD, iV, s, ivar]])
 
     def build(self, tod, srate, **kwargs):
+        # Detrend the data before windowing & FFT to prevent spectral leakage
+        self.detrend_inplace(tod)
         # Apply window before measuring noise model
         nwin  = utils.nint(self.window*srate)
         apply_window(tod, nwin)
@@ -277,12 +285,18 @@ class NmatDetvecs(Nmat):
 
     def apply(self, tod, inplace=True, slow=False):
         self.check_ready()
-        if not inplace: tod = np.array(tod)
+        if not inplace: tod = np.array(tod)        
+        # Detrending needs to be part of the operations to ensure:
+        # 1. We are properly marginalizing over the data trends to not bias the sky signal estimate
+        # 2. Trends in the current sky signal estimate are not causing spectral leakage
+        # We also need to apply the operations symmetrically to ensure the system solved through CG is strictly symmetric.
+        self.detrend_inplace(tod)
         apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
         self.apply_fourier(ftod, tod.shape[1], slow=slow)
         fft.irfft(ftod, tod)
         apply_window(tod, self.nwin)
+        self.detrend_inplace(tod)
         return tod
 
     def apply_fourier(self, ftod, nsamp, slow=False):
@@ -300,6 +314,51 @@ class NmatDetvecs(Nmat):
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
 
+    def _get_detrend_basis(self, n_samps, dtype):
+        """Lazily initialize and cache the orthogonal polynomials based on detrend_order."""
+        if not hasattr(self, '_detrend_cache') or self._detrend_cache[0] != n_samps:
+            v1, v1_norm, v2, v2_norm = None, None, None, None
+            # Only compute slope basis if order >= 1
+            if self.detrend_order is not None and self.detrend_order >= 1:
+                v1 = np.linspace(-0.5, 0.5, n_samps, dtype=dtype)
+                v1_norm = np.dot(v1, v1)
+            # Only compute parabola basis if order >= 2
+            if self.detrend_order is not None and self.detrend_order >= 2:
+                x2 = v1 ** 2
+                v2 = x2 - np.mean(x2)
+                v2_norm = np.dot(v2, v2)
+            self._detrend_cache = (n_samps, v1, v1_norm, v2, v2_norm)
+        return self._detrend_cache[1:]
+
+    def detrend_inplace(self, tod):
+        """Symmetric, in-place projection up to detrend_order."""
+        # Skip entirely if requested
+        if self.detrend_order is None or self.detrend_order < 0:
+            return tod
+        n_dets, n_samps = tod.shape
+        # 0th Order (Mean). We do this first to center the data, 
+        # protecting the float32 precision of the subsequent dot products
+        means = np.mean(tod, axis=-1, keepdims=True)
+        tod -= means 
+        if self.detrend_order == 0:
+            return tod
+        # Get cached basis vectors
+        v1, v1_norm, v2, v2_norm = self._get_detrend_basis(n_samps, tod.dtype)
+        # 1st Order (Slope)
+        if self.detrend_order == 1:
+            slopes = np.dot(tod, v1) / v1_norm
+            # This is not vectorized but saves memory & cache locality
+            for i in range(n_dets):
+                tod[i] -= slopes[i] * v1
+            return tod
+        # 2nd Order (Parabola)
+        if self.detrend_order == 2:
+            slopes = np.dot(tod, v1) / v1_norm
+            paras  = np.dot(tod, v2) / v2_norm
+            for i in range(n_dets):
+                tod[i] -= (slopes[i] * v1 + paras[i] * v2)
+            return tod
+            
     def white(self, tod, inplace=True):
         self.check_ready()
         if not inplace: tod = np.array(tod)
@@ -312,19 +371,34 @@ class NmatDetvecs(Nmat):
         self.check_ready()
         data = bunch.Bunch(type="NmatDetvecs")
         for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
-                "bins", "D", "V", "iD", "iV", "s", "ivar"]:
-            data[field] = getattr(self, field)
+                "bins", "D", "V", "iD", "iV", "s", "ivar", "mode_bins", "verbose", "bmin_eigvec",
+                "skip_mean", "mp_significance", "wnoise_band", "max_noise_modes", "detrend_order"]:
+            val = getattr(self, field)
+            if val is not None:
+                data[field] = val
         try:
             bunch.write(fname, data)
         except Exception as e:
             msg = f"Failed to write {fname}: {e}"
             raise RuntimeError(msg)
 
-    @staticmethod
-    def from_bunch(data):
-        return NmatDetvecs(bin_edges=data.bin_edges, eig_lim=data.eig_lim, single_lim=data.single_lim,
-                window=data.window, nwin=data.nwin, downweight=data.downweight,
-                bins=data.bins, D=data.D, V=data.V, iD=data.iD, iV=data.iV, s=data.s, ivar=data.ivar)
+@staticmethod
+def from_bunch(data):
+    return NmatDetvecs(
+        bin_edges   = getattr(data, "bin_edges", None),
+        eig_lim     = getattr(data, "eig_lim", None),
+        single_lim  = getattr(data, "single_lim", None),
+        window      = getattr(data, "window", None),
+        nwin        = getattr(data, "nwin", None),
+        downweight  = getattr(data, "downweight", None),
+        bins        = getattr(data, "bins", None),
+        D           = getattr(data, "D", None),
+        V           = getattr(data, "V", None),
+        iD          = getattr(data, "iD", None),
+        iV          = getattr(data, "iV", None),
+        s           = getattr(data, "s", None),
+        ivar        = getattr(data, "ivar", None),
+    )
 
 # Combination of NmatDetvecs and NmatUncorr. The first handles the correlations while the
 # latter handles the variance
