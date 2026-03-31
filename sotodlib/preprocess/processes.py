@@ -2609,8 +2609,10 @@ class SubtractT2P(_Preprocess):
                 T_signal=data_aman.dsT
             )
         else:
+            pcfg = copy.deepcopy(self.process_cfgs)
+            pcfg.pop("fit_in_freq", None)
             tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
-                                            **self.process_cfgs)
+                                            **pcfg)
         return aman, proc_aman
 
 class SplitFlags(_Preprocess):
