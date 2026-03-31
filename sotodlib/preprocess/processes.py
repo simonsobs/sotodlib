@@ -1373,8 +1373,8 @@ class AzSS(_Preprocess):
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
-        if 'bad_dets' in meta[self.azss_stats_name]:
-            keep = ~meta[self.azss_stats_name]['bad_dets']
+        if 'bad_dets' in meta[self.save_name]:
+            keep = ~meta[self.save_name]['bad_dets']
         else:
             keep = np.ones(aman.dets.count, dtype=bool)
         
