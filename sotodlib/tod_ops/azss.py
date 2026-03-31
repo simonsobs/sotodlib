@@ -365,18 +365,22 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
         model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=azrange)
 
     if method == 'interpolate':
+        model = np.zeros((aman.dets.count, aman.samps.count))
         if 'bad_dets' in azss_stats:
-            model = np.zeros((aman.dets.count, aman.samps.count))
             valid_dets = ~azss_stats['bad_dets']
-            if sum(valid_dets) != 0:
-                mask = ~np.any(np.isnan(azss_stats.binned_signal[valid_dets, :]), axis=0)
-                f_template = interp1d(azss_stats.binned_az[mask], azss_stats.binned_signal[:, mask][valid_dets, :], fill_value='extrapolate')
-                model[valid_dets, :] = f_template(az)
         else:
-            # mask az bins that has no data
-            mask = ~np.any(np.isnan(azss_stats.binned_signal), axis=0)
-            f_template = interp1d(azss_stats.binned_az[mask], azss_stats.binned_signal[:, mask], fill_value='extrapolate')
-            model = f_template(az)
+            valid_dets = np.ones(aman.dets.count, dtype=bool)
+
+        mask = ~np.isnan(azss_stats.binned_signal[valid_dets, :])
+        is_uniform = np.all(mask == mask[0, :])
+        if is_uniform:
+            m = mask[0, :]
+            f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[:, m][valid_dets, :], fill_value='extrapolate')
+            model[valid_dets, :] = f_template(az)
+        else:
+            for i, (m, binned_signal) in enumerate(zip(mask, azss_stats.binned_signal[valid_dets, :])):
+                f_template = interp1d(azss_stats.binned_az[m], binned_signal[m], fill_value='extrapolate')
+                model[valid_dets, :][i] = f_template(az)
 
     if np.any(~np.isfinite(model)):
         logger.warning('azss model has nan. set zero to nan but this may make glitch')
