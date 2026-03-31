@@ -261,6 +261,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         - azss_stats: core.AxisManager
             - azss statistics including: azumith bin centers, bin counts, binned signal, std of each detector-az bin, std of each detector.
             - If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
+            - If ``return_det_mask=True`` then also includes: bad_dets, coverages.
         - model_sig_tod: numpy.array
             - azss model as a function of time either from fits or interpolation depending on ``method`` argument.
     """
@@ -353,8 +354,6 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
     -------
     model: array-like
         AZSS model for each detector
-    good_dets_mask: array-like (optional)
-        Boolean mask of detectors with sufficient coverage (if return_det_mask=True)
     """
     if az is None:
         az = aman.boresight.az
