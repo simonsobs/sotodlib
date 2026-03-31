@@ -10,6 +10,7 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer, Timer
 from toast.traits import Bool, Int, Unicode, trait_docs
 from toast.utils import Environment, Logger, unit_conversion
+from toast.mpi import MPI #added this import- Tran
 
 from .mumux_crosstalk_util import detmap_available, pos_to_chi
 
@@ -205,7 +206,18 @@ class SimMuMUXCrosstalk(Operator):
             )
             #import pdb
             #pdb.set_trace()
-            median_signal = np.median(signal[row][good])
+            ## Calculate a global median 
+            local_good = signal[row][good]
+            if obs.comm.comm_group is not None:
+                all_good = obs.comm.comm_group.gather(local_good, root=0)
+                if obs.comm.group_rank == 0:
+                    median_signal = np.median(np.concatenate(all_good))
+                else:
+                    median_signal = None
+                median_signal = obs.comm.comm_group.bcast(median_signal, root=0)
+            else:
+                median_signal = np.median(local_good)
+            ##
             P_opt = P_OPT[band] * 1e-12  # W
             P_atm_ref = P_ATM[band] * 1e-12  # W
             efficiency = ETA_ATM[band]
@@ -327,6 +339,7 @@ class SimMuMUXCrosstalk(Operator):
                 )
                 # Propagate flags
                 obs.detdata[self.det_flags][det] |= temp_obs.detdata[self.det_flags][det]
+
 
             # Free data copy
             temp_obs.clear()
