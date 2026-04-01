@@ -150,7 +150,7 @@ class Era:
         )
 
     def __setattr__(self, name, value):
-        if name == "covers" or name == "strict":
+        if name == "epochs" or name == "strict":
             self.__post_init__()
         return super().__setattr__(name, value)
 
