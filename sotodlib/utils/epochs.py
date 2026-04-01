@@ -1,7 +1,7 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import accumulate
-from operator import add, mul
+from operator import add, mul, or_
 from typing import Any, Self
 
 import yaml
@@ -143,7 +143,7 @@ class Era:
 
     def __post_init__(self):
         self._internal = accumulate(
-            [e._internal for e in self.epochs], mul if self.strict else add
+            [e._internal for e in self.epochs], add if self.strict else or_
         )
 
     def __setattr__(self, name, value):
