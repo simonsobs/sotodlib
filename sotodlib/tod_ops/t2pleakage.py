@@ -357,6 +357,7 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
     U_fs = rfft(aman[U_sig_name], axis=1)
 
     fit_mask = (fit_freq_range[0] < freqs) & (freqs < fit_freq_range[1])
+    wn_mask = (wn_freq_range[0] < freqs) & (freqs < wn_freq_range[1])
 
     if ML_fit:
         x = np.real(I_fs[:, fit_mask])
@@ -365,14 +366,21 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
         coeffsQ = np.sum(x * yQ, axis=1) / np.sum(x**2, axis=1)
         coeffsU = np.sum(x * yU, axis=1) / np.sum(x**2, axis=1)
 
-        stdQ = np.sqrt(np.sum((yQ - coeffsQ[:, np.newaxis] * x)**2, axis=1) / (x.shape[1] - 1))
-        stdU = np.sqrt(np.sum((yU - coeffsU[:, np.newaxis] * x)**2, axis=1) / (x.shape[1] - 1))
+        stdQ = np.nanmean(np.abs(Q_fs[:, wn_mask]), axis=1)
+        stdU = np.nanmean(np.abs(U_fs[:, wn_mask]), axis=1)
 
         errorsQ = stdQ / np.sqrt(np.sum(x**2, axis=1))
         errorsU = stdU / np.sqrt(np.sum(x**2, axis=1))
 
-        redchi2sQ = np.sum((yQ - coeffsQ[:, np.newaxis] * x) ** 2 / stdQ[:, np.newaxis] ** 2, axis=1) / (x.shape[1] - 1)
-        redchi2sU = np.sum((yU - coeffsU[:, np.newaxis] * x) ** 2 / stdU[:, np.newaxis] ** 2, axis=1) / (x.shape[1] - 1)
+        redchi2sQ = np.sum(
+            (yQ - coeffsQ[:, np.newaxis] * x) ** 2 / stdQ[:, np.newaxis] ** 2,
+            axis=1
+        ) / (x.shape[1] - 1)
+        redchi2sU = np.sum(
+            (yU - coeffsU[:, np.newaxis] * x) ** 2 / stdU[:, np.newaxis] ** 2,
+            axis=1
+        ) / (x.shape[1] - 1)
+
     else:
         coeffsQ = np.zeros(aman.dets.count)
         errorsQ = np.zeros(aman.dets.count)
@@ -380,9 +388,6 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
         coeffsU = np.zeros(aman.dets.count)
         errorsU = np.zeros(aman.dets.count)
         redchi2sU = np.zeros(aman.dets.count)
-
-
-        wn_mask = (wn_freq_range[0] < freqs) & (freqs < wn_freq_range[1])
 
         def leakage_model(B, x):
             return B[0] * x
