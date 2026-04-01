@@ -2,7 +2,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import accumulate
 from operator import add, mul, or_
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import yaml
 from deepdiff import DeepDiff
@@ -126,7 +126,9 @@ class Epoch:
     _internal: Interval = field(init=False)
 
     def __post_init__(self):
-        self._internal = accumulate(self.covers, mul if self.strict else add)
+        self._internal = cast(
+            Interval, accumulate(self.covers, mul if self.strict else add)
+        )
 
     def __setattr__(self, name, value):
         if name == "covers" or name == "strict":
@@ -142,8 +144,9 @@ class Era:
     _internal: Interval = field(init=False)
 
     def __post_init__(self):
-        self._internal = accumulate(
-            [e._internal for e in self.epochs], add if self.strict else or_
+        self._internal = cast(
+            Interval,
+            accumulate([e._internal for e in self.epochs], add if self.strict else or_),
         )
 
     def __setattr__(self, name, value):
