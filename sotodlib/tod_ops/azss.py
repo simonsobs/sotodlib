@@ -369,6 +369,9 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
             valid_dets = ~azss_stats['bad_dets']
         else:
             valid_dets = np.ones(aman.dets.count, dtype=bool)
+        if sum(valid_dets) == 0:
+            logger.info('All the detectors have low az coverage and cannot make model')
+            return model
 
         mask = ~np.isnan(azss_stats.binned_signal[valid_dets, :])
         is_uniform = np.all(mask == mask[0, :])
