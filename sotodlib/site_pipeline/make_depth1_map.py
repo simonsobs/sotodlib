@@ -101,6 +101,10 @@ def get_parser(parser=None):
         type=float,
         help='Minimum duration of obs to be included, in seconds. Default is 5 minutes'
     )
+    parser.add_argument("--pretend-now-is",
+        type=str,
+        help='Change current time for running with update-delay',
+    )
     return parser
 
 
@@ -290,8 +294,14 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
 
     if (args['update_delay'] is not None):
         # this is only to be used for running automatic maps on prefect
-        min_ctime = int(time.time()) - args['update_delay']*86400
-        args['query'] += f" and timestamp>={min_ctime}"
+        if args['pretend_now_is'] is not None:
+            date_format = "%Y-%m-%d %H:%M:%S"
+            dt_obj = time.strptime(args['pretend_now_is'], date_format)
+            min_ctime = int(dt_obj.timestamp()) - args['update_delay']*86400
+            args['query'] += f" and timestamp>={min_ctime} and timestamp<={int(dt_obj.timestamp())} "
+        else:
+            min_ctime = int(time.time()) - args['update_delay']*86400
+            args['query'] += f" and timestamp>={min_ctime}"
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
         context,

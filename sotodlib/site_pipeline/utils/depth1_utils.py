@@ -47,6 +47,7 @@ DEPTH1MAPMAKER_DEFAULTS = {
     "min_dets": 50,
     "update_delay": None,
     "min_dur": 300,
+    "pretend_now_is": None,
 }
 
 SENS_LIMITS = {
