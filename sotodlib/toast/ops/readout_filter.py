@@ -27,6 +27,33 @@ class ReadoutFilter(Operator):
         defaults.det_data, help="Observation detdata key for the timestream data"
     )
 
+    det_mask = Int(
+        defaults.det_mask_invalid,
+        help="Bit mask value for per-detector flagging",
+    )
+
+    shared_flags = Unicode(
+        defaults.shared_flags,
+        allow_none=True,
+        help="Observation shared key for telescope flags to use",
+    )
+
+    shared_flag_mask = Int(
+        defaults.shared_mask_invalid,
+        help="Bit mask value for optional shared flagging",
+    )
+
+    det_flags = Unicode(
+        defaults.det_flags,
+        allow_none=True,
+        help="Observation detdata key for flags to use",
+    )
+
+    det_flag_mask = Int(
+        defaults.det_mask_invalid,
+        help="Bit mask value for detector sample flagging",
+    )
+
     iir_params = Unicode(
         "iir_params", help="Observation key for readout filter parameters"
     )
@@ -63,7 +90,7 @@ class ReadoutFilter(Operator):
             freq = np.fft.rfftfreq(n_fft, d=1.0 / rate)
 
             # Get valid local detectors
-            local_dets = ob.select_local_detectors()
+            local_dets = ob.select_local_detectors(detectors, flagmask=self.det_mask)
             local_set_dets = set(local_dets)
 
             # Get the rows of the focalplane table containing these dets
@@ -90,14 +117,18 @@ class ReadoutFilter(Operator):
                         if y == wf
                     ]
                     signal = ob.detdata[self.det_data][wafer_dets, :]
-                    self._filter_detectors(rate, freq, signal, ob[wf])
+                    flags, mask = self._get_flags(ob, wafer_dets)
+                    self._filter_detectors(rate, freq, signal, ob[wf], flags, mask)
             else:
                 # We are filtering all detectors at once
                 signal = ob.detdata[self.det_data][local_dets, :]
-                self._filter_detectors(rate, freq, signal, ob[self.iir_params])
+                flags, mask = self._get_flags(ob, local_dets)
+                self._filter_detectors(
+                    rate, freq, signal, ob[self.iir_params], flags, mask
+                )
 
     @function_timer
-    def _filter_detectors(self, rate, freq, det_array, iir_props):
+    def _filter_detectors(self, rate, freq, det_array, iir_props, flags, mask):
         # Get the common filter kernel for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
 
@@ -105,6 +136,8 @@ class ReadoutFilter(Operator):
         convolve(
             det_array,
             rate,
+            flags=flags,
+            flag_mask=mask,
             kernel_freq=freq,
             kernels=iir_filter,
             kernel_func=None,
@@ -112,6 +145,25 @@ class ReadoutFilter(Operator):
             algorithm="numpy",
             debug=self.debug_root,
         )
+
+    def _get_flags(self, obs, fdets):
+        """Helper function to get flags and mask to pass to convolution."""
+        if self.det_flags is None:
+            flags = None
+            flag_mask = None
+        else:
+            flags = obs.detdata[self.det_flags][fdets, :]
+            if self.shared_flags is not None:
+                # These shared flags will effectively be propagated to
+                # detector flags by this operator
+                shflg = self.det_flag_mask * np.array(
+                    obs.shared[self.shared_flags].data & self.shared_flag_mask,
+                    dtype=np.uint8,
+                )
+                for detflag in flags:
+                    detflag |= shflg
+            flag_mask = self.det_flag_mask
+        return flags, flag_mask
 
     def _finalize(self, data, **kwargs):
         return
