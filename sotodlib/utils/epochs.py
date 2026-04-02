@@ -1,11 +1,15 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import accumulate
-from operator import add, mul, or_
+from operator import add, and_, mul, or_
 from typing import Any, Self, cast
 
 import yaml
 from deepdiff import DeepDiff
+
+# TODO: Add check for a specific piece of data -> existance and strictness
+# TODO: Add method to search via tags
+# TODO: Make Invtervals aware of what Epochs they are members of and make Epochs aware of what Eras they are members of
 
 
 @dataclass
@@ -18,11 +22,14 @@ class Interval:
     Two `Interval` instances can be combined with the following operators,
     all operators are functionally addition but with differing checks:
 
-    * `|`: naive addition, combines `tags` and `data` and simply returns the most inclusive time range
-    * `+`: same as `|` but will error if time ranges are not overlapping
-    * `&`: same as  `|` but will error if `tags` or `data` are not the same
-    * `*`: same as `+` but will error if `data` is not the same
-    * `@`: same as `*` but will error if `tags` is not the same
+    * `|`: Allow gaps between intervals, but data and tags can differ
+    * `&`: Intervals must be overlapping, but data and tags can differ
+    * `*`: Allow gaps between intervals, data must be the same but tags can differ
+    * `+`: Invervals must be overlapping, data must be the same but tags can differ
+    * `/`: Allow gaps between intervals, data can differ but tags must be the same
+    * `-`: Invervals must be overlapping, data can differ but tags must be the same
+    * `**`: Allow gaps between invervals, data and tags must be the same
+    * `@`: Allow gaps between intervals, data and tags must be the same
 
     In cases where `data` is not the same but the `Invervals` are combined,
     the new `data` will keep values from the right hand `Inverval` for overlapping keys.
@@ -56,9 +63,9 @@ class Interval:
         self: Self,
         tocombine: Self,
         in_place: bool = True,
-        time_check: bool = False,
-        tag_check: bool = False,
-        data_check: bool = False,
+        allow_gap: bool = False,
+        same_data: bool = False,
+        same_tag: bool = False,
     ) -> Self:
         if not isinstance(tocombine, Interval):
             raise TypeError(
@@ -67,21 +74,23 @@ class Interval:
         combined = self
         if in_place:
             combined = deepcopy(self)
-        if time_check and (self.start > tocombine.stop or self.stop < tocombine.start):
+        if not allow_gap and (
+            self.start > tocombine.stop or self.stop < tocombine.start
+        ):
             raise ValueError(
-                "Can't combine without overlapping time ranges with time_check=True"
+                "Can't combine without overlapping time ranges with allow_gap=False"
             )
         combined.start = min(self.start, tocombine.start)
         combined.stop = max(self.stop, tocombine.stop)
 
-        if tag_check and self.tags != tocombine.tags:
-            raise ValueError("Can't combine without identical tags with tag_check=True")
+        if not same_tag and self.tags != tocombine.tags:
+            raise ValueError("Can't combine without identical tags with same_tag=False")
         combined.tags = self.tags.union(tocombine.tags)
 
         diff = DeepDiff(self.data, self.data)
-        if data_check and len(diff) != 0:
+        if not same_data and len(diff) != 0:
             raise ValueError(
-                "Can't combine without identical data with data_check=True"
+                "Can't combine without identical data with same_data=False"
             )
         combined.data.update(tocombine.data)
 
@@ -93,23 +102,41 @@ class Interval:
     def __ior__(self, tocombine) -> Self:
         return self.combine(tocombine, True, False, False, False)
 
-    def __add__(self, tocombine) -> Self:
+    def __and__(self, tocombine) -> Self:
         return self.combine(tocombine, False, True, False, False)
 
-    def __iadd__(self, tocombine) -> Self:
+    def __iand__(self, tocombine) -> Self:
         return self.combine(tocombine, True, True, False, False)
 
-    def __and__(self, tocombine) -> Self:
-        return self.combine(tocombine, False, False, True, True)
-
-    def __iand__(self, tocombine) -> Self:
-        return self.combine(tocombine, True, False, True, True)
-
     def __mul__(self, tocombine) -> Self:
-        return self.combine(tocombine, False, True, False, True)
+        return self.combine(tocombine, False, False, True, False)
 
     def __imul__(self, tocombine) -> Self:
+        return self.combine(tocombine, True, False, True, False)
+
+    def __add__(self, tocombine) -> Self:
+        return self.combine(tocombine, False, True, True, False)
+
+    def __iadd__(self, tocombine) -> Self:
+        return self.combine(tocombine, True, True, True, False)
+
+    def __div__(self, tocombine) -> Self:
+        return self.combine(tocombine, False, False, False, True)
+
+    def __idiv__(self, tocombine) -> Self:
+        return self.combine(tocombine, True, False, False, True)
+
+    def __sub__(self, tocombine) -> Self:
+        return self.combine(tocombine, False, True, False, True)
+
+    def __isub__(self, tocombine) -> Self:
         return self.combine(tocombine, True, True, False, True)
+
+    def __pow__(self, tocombine) -> Self:
+        return self.combine(tocombine, False, False, False, True)
+
+    def __ipow__(self, tocombine) -> Self:
+        return self.combine(tocombine, True, False, False, True)
 
     def __matmul__(self, tocombine) -> Self:
         return self.combine(tocombine, False, True, True, True)
@@ -120,6 +147,21 @@ class Interval:
 
 @dataclass
 class Epoch:
+    """
+    Dataclass for storing a collection of `Invervals`s.
+    `Inverval`s must be overlapping.
+
+    Attributes
+    ----------
+    name : str
+        Name for this epoch.
+    covers: tuple[Interval]
+        Collections of overlapping `Invervals` that make up an `Epoch`.
+    strict : bool
+        If `True` than in addition to being overlapping the `Intervals` must
+        also contain the same data.
+    """
+
     name: str
     covers: tuple[Interval]
     strict: bool
@@ -127,7 +169,7 @@ class Epoch:
 
     def __post_init__(self):
         self._internal = cast(
-            Interval, accumulate(self.covers, mul if self.strict else add)
+            Interval, accumulate(self.covers, mul if self.strict else or_)
         )
 
     def __setattr__(self, name, value):
@@ -138,6 +180,21 @@ class Epoch:
 
 @dataclass
 class Era:
+    """
+    Dataclass for storing a collection of `Epoch`s.
+    `Epoch`s must be non-overlapping but can have gaps in time between them.
+
+    Attributes
+    ----------
+    name : str
+        Name for this era.
+    epochs : tuple[Epoch]
+        Collections of non-overlapping `Epochs` that make up an `Era`.
+    strict : bool
+        If `True` than in addition to being non-overlapping the `Epochs` must
+        also contain the same data.
+    """
+
     name: str
     epochs: tuple[Epoch]
     strict: bool
@@ -146,7 +203,9 @@ class Era:
     def __post_init__(self):
         self._internal = cast(
             Interval,
-            accumulate([e._internal for e in self.epochs], add if self.strict else or_),
+            accumulate(
+                [e._internal for e in self.epochs], add if self.strict else and_
+            ),
         )
 
     def __setattr__(self, name, value):
@@ -198,7 +257,8 @@ class Calendar:
 
         # Load epochs
         for ename, era in eras.items():
-            strict = era.get("strict", True)
+            strict_era = era.get("strict_era", False)
+            strict_epoch = era.get("strict_epochs", True)
             epochs = []
             for name, ec in era.items():
                 covers = []
@@ -213,7 +273,7 @@ class Calendar:
                         )
                     )
                     covers += [ival[slc]]
-                epochs[name] = Epoch(name, tuple(covers), strict)
-            eras[ename] = Era(ename, tuple(epochs), strict)
+                epochs[name] = Epoch(name, tuple(covers), strict_epoch)
+            eras[ename] = Era(ename, tuple(epochs), strict_era)
 
         return Calendar(interval_dict, eras, data)
