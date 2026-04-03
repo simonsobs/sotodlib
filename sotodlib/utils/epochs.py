@@ -1,15 +1,15 @@
+import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import accumulate
 from operator import add, and_, mul, or_
-from typing import Any, Self, cast
+from typing import Any, Optional, Self, cast
 
 import yaml
 from deepdiff import DeepDiff
 
 # TODO: Add check for a specific piece of data -> existance and strictness
 # TODO: Add method to search via tags
-# TODO: Make Invtervals aware of what Epochs they are members of and make Epochs aware of what Eras they are members of
 
 
 @dataclass
@@ -41,6 +41,9 @@ class Interval:
     tags: set[str]
     data: dict[str, Any]
 
+    def __repr__(self) -> str:
+        return f"{self.name}[{self.start}:{self.stop}]"
+
     def __getitem__(self: Self, val) -> Self:
         to_ret = deepcopy(self)
         if not isinstance(val, slice):
@@ -58,6 +61,14 @@ class Interval:
                 )
             to_ret.stop = val.stop
         return to_ret
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, Interval):
+            return False
+        diff = DeepDiff(self.data, other.data)
+        return bool(
+            (str(self) == str(other)) * (self.tags == other.tags) * (len(diff) == 0)
+        )
 
     def combine(
         self: Self,
@@ -87,12 +98,14 @@ class Interval:
             raise ValueError("Can't combine without identical tags with same_tag=False")
         combined.tags = self.tags.union(tocombine.tags)
 
-        diff = DeepDiff(self.data, self.data)
+        diff = DeepDiff(self.data, tocombine.data)
         if not same_data and len(diff) != 0:
             raise ValueError(
                 "Can't combine without identical data with same_data=False"
             )
         combined.data.update(tocombine.data)
+
+        combined.name = self.name + "+" + tocombine.name
 
         return combined
 
@@ -155,6 +168,8 @@ class Epoch:
     ----------
     name : str
         Name for this epoch.
+    era_name : str
+        Name of the era that this epoch belongs to.
     covers: tuple[Interval]
         Collections of overlapping `Invervals` that make up an `Epoch`.
     strict : bool
@@ -163,7 +178,8 @@ class Epoch:
     """
 
     name: str
-    covers: tuple[Interval]
+    era_name: str
+    covers: tuple[Interval, ...]
     strict: bool
     _internal: Interval = field(init=False)
 
@@ -172,10 +188,24 @@ class Epoch:
             Interval, accumulate(self.covers, mul if self.strict else or_)
         )
 
+    def __repr__(self) -> str:
+        return (
+            self.name
+            + "("
+            + ",".join([str(ival) for ival in self.covers])
+            + ")"
+            + ("*" * self.strict)
+        )
+
     def __setattr__(self, name, value):
         if name == "covers" or name == "strict":
             self.__post_init__()
         return super().__setattr__(name, value)
+
+    def __eq__(self, other):
+        if not isinstance(other, Epoch):
+            return False
+        return str(self) == str(other)
 
 
 @dataclass
@@ -196,7 +226,7 @@ class Era:
     """
 
     name: str
-    epochs: tuple[Epoch]
+    epochs: tuple[Epoch, ...]
     strict: bool
     _internal: Interval = field(init=False)
 
@@ -216,12 +246,162 @@ class Era:
 
 @dataclass
 class Calendar:
+    """
+    Class to manage intervals, epochs, and eras in a unified way.
+    It is reccomended to modify relationships between these using this class,
+    the `Calender` is not aware of direct modifications.
+    """
+
     intervals: dict[str, Interval]
+    epochs: dict[str, Epoch]
     eras: dict[str, Era]
     data: dict[str, dict[str, Any]]
+    orphan_epochs: list[Epoch]
+
+    def change_strictness(
+        self, strictness: bool, era: str, epoch: Optional[str] = None
+    ):
+        """
+        Change the strictness for an `Era` or an `Epoch`.
+
+        Parameters
+        ----------
+        strictness : bool
+            The new strictness.
+        era : str
+            The name of the era to modify.
+        epoch : Optional, default: None
+            The name of epoch to modify.
+            To modify and era set `epoch` to `None`.
+        """
+        if epoch is None:
+            self.eras[era].strict = strictness
+        else:
+            self.epochs[f"{era}.{epoch}"].strict = strictness
+
+    def add_epoch(self, era: str, epoch: Epoch):
+        """
+        Add an `Epoch` to an `Era`.
+        If the `Epoch` is in the orphans list it will be removed.
+
+        Parameters
+        ----------
+        era : str
+            The name of the era to modify.
+        epoch : Epoch
+            The new epoch to add.
+        """
+        epoch.era_name = era
+        epoch_list = list(self.eras[era].epochs) + [epoch]
+        self.eras[era].epochs = tuple(epoch_list)
+        self.epochs[f"{era}.{epoch.name}"]
+        self.epoch_orphans = [e for e in self.epoch_orphans if e != epoch]
+
+    def del_epoch(self, era: str, epoch: str):
+        """
+        Delete an `Epoch` from an `Era`.
+        This will add it to the orphans list
+
+        Parameters
+        ----------
+        era : str
+            The name of the era to modify.
+        epoch : str
+            The name of the epoch to remove.
+        """
+        to_remove = self.epochs[f"{era}.{epoch}"]
+        self.epoch_orphans += [to_remove]
+        self.eras[era].epochs = tuple(
+            e for e in self.eras[era].epochs if e != to_remove
+        )
+        del self.epochs[f"{era}.{epoch}"]
+
+    def add_interval(self, era: str, epoch: str, interval: Interval):
+        """
+        Add an `Inverval` to an `Epoch`.
+
+        Parameters
+        ----------
+        era : str
+            The name of the era to modify.
+        epoch : Epoch
+            The name of epoch to modify,
+        interval : Interval
+            The interval to add.
+        """
+        self.epochs[f"{era}.{epoch}"].covers = tuple(
+            list(self.epochs[f"{era}.{epoch}"].covers) + [interval]
+        )
+        self.intervals[str(interval)] = interval
+
+    def del_interval(self, era: str, epoch: str, interval: str):
+        """
+        Delete an `Inverval` from an `Epoch`.
+
+        Parameters
+        ----------
+        era : str
+            The name of the era to modify.
+        epoch : Epoch
+            The name of epoch to modify,
+        interval : str
+            The name of interval (with its slice) to delete.
+        """
+        self.epochs[f"{era}.{epoch}"].covers = tuple(
+            i
+            for i in self.epochs[f"{era}.{epoch}"].covers
+            if i != self.intervals[interval]
+        )
+
+    def find_slices(self, interval_name: str) -> list[Interval]:
+        """
+        Find all slices for an interval.
+
+        Parameters
+        ----------
+        interval_name : str
+            The name of the interval to find slices for.
+
+        Returns
+        -------
+        slices : list[Interval]
+            List of slices with the correct name.
+        """
+        ikeys = list(self.intervals.keys())
+        r = re.compile(f"{interval_name}\\[.*:.*\\]")
+        ikeys = filter(r.match, ikeys)
+        slices = [self.intervals[ikey] for ikey in ikeys]
+
+        return slices
+
+    def get_membership(self, interval: str) -> list[tuple[Era, Epoch]]:
+        """
+        Get the `Epochs` than an interval belongs to.
+        This does not search oprhaned `Epoch`s.
+
+        Parameters
+        ----------
+        interval : str
+            The name of the interval (with its slice) to search for.
+
+        Returns
+        -------
+        membership : list[tuple[Era, Epoch]]
+            A list a tuples where each element is an `(Era, Epoch)` pair
+            where the `Epoch` contains the interval.
+        """
+        ival = self.intervals[interval]
+        membership = []
+        for era in self.eras.values():
+            for epoch in era.epochs:
+                for i in epoch.covers:
+                    if i == ival:
+                        membership += [(era, epoch)]
+                        break
+        return membership
 
     @classmethod
-    def load(cls, fpath: str):
+    def load(cls, fpath: str) -> Self:
         with open(fpath, "r") as f:
             cfg = yaml.safe_load(f)
         if "intervals" not in cfg:
@@ -247,15 +427,17 @@ class Calendar:
                 if len(val) != 2:
                     raise ValueError("Data must have format X.Y")
                 interval_data[key] = data[val[0]][val[1]]
-            interval_dict[name] = Interval(
+            ival = Interval(
                 name,
                 interval.get("start", 0),
                 interval.get("stop", 20000000000),
                 interval.get("tags", []),
                 interval_data,
             )
+            interval_dict[str(ival)] = ival
 
         # Load epochs
+        epoch_dict = {}
         for ename, era in eras.items():
             strict_era = era.get("strict_era", False)
             strict_epoch = era.get("strict_epochs", True)
@@ -266,6 +448,7 @@ class Calendar:
                     iname, slstr = cname.split("[")
                     slstr = slstr[:-1]
                     ival = intervals[iname]
+                    interval_dict[str(ival)] = ival
                     slc = slice(
                         *map(
                             lambda x: float(x.strip()) if x.strip() else None,
@@ -273,7 +456,9 @@ class Calendar:
                         )
                     )
                     covers += [ival[slc]]
-                epochs[name] = Epoch(name, tuple(covers), strict_epoch)
+                epoch = Epoch(name, ename, tuple(covers), strict_epoch)
+                epochs += [epoch]
+                epoch_dict[f"{ename}.{name}"] = epoch
             eras[ename] = Era(ename, tuple(epochs), strict_era)
 
-        return Calendar(interval_dict, eras, data)
+        return cls(interval_dict, epoch_dict, eras, data, [])
