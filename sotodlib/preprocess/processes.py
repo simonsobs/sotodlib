@@ -1369,15 +1369,17 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         return aman, proc_aman
-    
+
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
-        if 'bad_dets' in meta[self.save_name]:
-            keep = ~meta[self.save_name]['bad_dets']
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if 'bad_dets' in proc_aman[self.save_name]:
+            keep = ~proc_aman[self.save_name]['bad_dets']
         else:
-            keep = np.ones(aman.dets.count, dtype=bool)
-        
+            keep = np.ones(meta.dets.count, dtype=bool)
+
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
