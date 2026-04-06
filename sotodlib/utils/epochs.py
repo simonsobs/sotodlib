@@ -8,9 +8,6 @@ from typing import Any, Literal, Optional, Self, cast, overload
 import yaml
 from deepdiff import DeepDiff
 
-# TODO: Add method to search via tags
-
-
 @dataclass
 class Interval:
     """
@@ -301,6 +298,51 @@ class Calendar:
     eras: dict[str, Era]
     data: dict[str, dict[str, Any]]
     orphan_epochs: list[Epoch]
+
+    @overload
+    def find_tagged(self, tag: str, search_in: Literal["eras"]) -> list[Era]:
+        ...
+
+    @overload
+    def find_tagged(self, tag: str, search_in: Literal["epochs"]) -> list[Epoch]:
+        ...
+
+    @overload
+    def find_tagged(
+        self, tag: str, search_in: Literal["intervals"]
+    ) -> list[Interval]:
+        ...
+
+    def find_tagged(
+        self, tag: str, search_in: Literal["intervals", "epochs", "eras"]
+    ) -> list:
+        """
+        Return all objects containing a specific tag.
+        The `search_in` parameter specifies which type of object to search for.
+
+        Parameters
+        ----------
+        tag : str
+            The tag to search for.
+        search_in : Literal["intervals", "eras", "epochs"]
+            What type of objects to search for.
+            Note that orphaned epochs will not be searched.
+
+        Returns
+        ------
+        found : list
+            A list of obects of type `search_in` containing this tag.
+        """
+        if search_in == "intervals":
+            return [ival for ival in self.intervals.values() if field in ival.tags]
+        elif search_in == "epochs":
+            return [
+                epoch for epoch in self.epochs.values() if field in epoch._internal.tags
+            ]
+        elif search_in == "eras":
+            return [era for era in self.eras.values() if field in era._internal.tags]
+        else:
+            raise ValueError(f"Invalid search_in: {search_in}")
 
     @overload
     def find_data_field(self, field: str, search_in: Literal["eras"]) -> list[Era]:
