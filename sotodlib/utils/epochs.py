@@ -3,12 +3,11 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import accumulate
 from operator import add, and_, mul, or_
-from typing import Any, Optional, Self, cast
+from typing import Any, Literal, Optional, Self, cast, overload
 
 import yaml
 from deepdiff import DeepDiff
 
-# TODO: Add check for a specific piece of data -> existance and strictness
 # TODO: Add method to search via tags
 
 
@@ -22,12 +21,12 @@ class Interval:
     Two `Interval` instances can be combined with the following operators,
     all operators are functionally addition but with differing checks:
 
-    * `|`: Allow gaps between intervals, but data and tags can differ
-    * `&`: Intervals must be overlapping, but data and tags can differ
-    * `*`: Allow gaps between intervals, data must be the same but tags can differ
-    * `+`: Invervals must be overlapping, data must be the same but tags can differ
-    * `/`: Allow gaps between intervals, data can differ but tags must be the same
-    * `-`: Invervals must be overlapping, data can differ but tags must be the same
+    * `|`: Intervals must be overlapping, but data and tags can differ
+    * `&`: Allow gaps between intervals, but data and tags can differ
+    * `*`: Invervals must be overlapping, data must be the same but tags can differ
+    * `+`: Allow gaps between intervals, data must be the same but tags can differ
+    * `/`: Invervals must be overlapping, data can differ but tags must be the same
+    * `-`: Allow gaps between intervals, data can differ but tags must be the same
     * `**`: Allow gaps between invervals, data and tags must be the same
     * `@`: Allow gaps between intervals, data and tags must be the same
 
@@ -207,6 +206,33 @@ class Epoch:
             return False
         return str(self) == str(other)
 
+    def check_data(self, field: str, strict: bool = True) -> bool:
+        """
+        Check that all `Interval`s in this `Epoch` contain a certain data field.
+        Optinally check that they also contain the same value for the field.
+
+        Parameters
+        ----------
+        field : str
+            The name of the data field to check for.
+        strict : str
+            If True then all `Inverval`s within the `Epoch` must share the same
+            value for the data field. If `False` they simply need to exist.
+
+        """
+        if field not in self._internal.data:
+            return False
+        if strict:
+            tester = self if self.strict else deepcopy(self)
+            try:
+                tester.strict = True
+            except ValueError:
+                return False
+            return True
+        return cast(
+            bool, accumulate([field in ival.data for ival in self.covers], and_)
+        )
+
 
 @dataclass
 class Era:
@@ -243,6 +269,24 @@ class Era:
             self.__post_init__()
         return super().__setattr__(name, value)
 
+    def check_data(self, field: str, strict: bool = True) -> bool:
+        """
+        Check that all `Epoch`s in this `Era` contain a certain data field.
+        Optinally check that all of their `Invervals` also contain the same value for the field.
+
+        Parameters
+        ----------
+        field : str
+            The name of the data field to check for.
+        strict : str
+            If True then all `Inverval`s within each `Epoch` must share the same
+            value for the data field. If `False` they simply need to exist.
+
+        """
+        return cast(
+            bool, accumulate([e.check_data(field, strict) for e in self.epochs], and_)
+        )
+
 
 @dataclass
 class Calendar:
@@ -258,6 +302,52 @@ class Calendar:
     data: dict[str, dict[str, Any]]
     orphan_epochs: list[Epoch]
 
+    @overload
+    def find_data_field(self, field: str, search_in: Literal["eras"]) -> list[Era]:
+        ...
+
+    @overload
+    def find_data_field(self, field: str, search_in: Literal["epochs"]) -> list[Epoch]:
+        ...
+
+    @overload
+    def find_data_field(
+        self, field: str, search_in: Literal["intervals"]
+    ) -> list[Interval]:
+        ...
+
+    def find_data_field(
+        self, field: str, search_in: Literal["intervals", "epochs", "eras"]
+    ) -> list:
+        """
+        Return all objects containing a specific data field.
+        The `search_in` parameter specifies which type of object to search for.
+        To check that a specific `Era` has a field in all of it's epochs use `Era.check_data`.
+
+        Parameters
+        ----------
+        field : str
+            The name of the field to check
+        search_in : Literal["intervals", "eras", "epochs"]
+            What type of objects to search for.
+            Note that orphaned epochs will not be searched.
+
+        Returns
+        ------
+        found : list
+            A list of obects of type `search_in` containing this data field.
+        """
+        if search_in == "intervals":
+            return [ival for ival in self.intervals.values() if field in ival.data]
+        elif search_in == "epochs":
+            return [
+                epoch for epoch in self.epochs.values() if field in epoch._internal.data
+            ]
+        elif search_in == "eras":
+            return [era for era in self.eras.values() if field in era._internal.data]
+        else:
+            raise ValueError(f"Invalid search_in: {search_in}")
+
     def change_strictness(
         self, strictness: bool, era: str, epoch: Optional[str] = None
     ):
@@ -272,7 +362,8 @@ class Calendar:
             The name of the era to modify.
         epoch : Optional, default: None
             The name of epoch to modify.
-            To modify and era set `epoch` to `None`.
+            To modify only the era set `epoch` to `None`.
+            To modify all `Epoch`s in an era set to `all`.
         """
         if epoch is None:
             self.eras[era].strict = strictness
