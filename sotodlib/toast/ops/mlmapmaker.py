@@ -392,11 +392,8 @@ class MLMapmaker(Operator):
         return
 
     @function_timer
-    def _wrap_obs(self, ob, dets, passinfo, comm):
+    def _wrap_obs(self, ob, dets, passinfo):
         """ Prepare data for the mapmaker """
-        log = Logger.get()
-        timer = Timer()
-        timer.start()
 
         # Get the focalplane for this observation
         fp = ob.telescope.focalplane
@@ -489,11 +486,6 @@ class MLMapmaker(Operator):
         # >>> tod.boresight
         # AxisManager(az[samps], el[samps], roll[samps], samps:OffsetAxis(372680))
 
-        log.info_rank(
-            f"MLMapmaker wrapped observations in",
-            comm=comm,
-            timer=timer,
-        )
         return axobs
 
     @function_timer
@@ -761,7 +753,7 @@ class MLMapmaker(Operator):
                 nmat, nmat_file = self._load_noise_model(ob, npass, ipass, gcomm)
 
                 # wrap_obs finishes in line 250 of make_ml_map.py, at the downsampling
-                axobs = self._wrap_obs(ob, dets, passinfo, comm)
+                axobs = self._wrap_obs(ob, dets, passinfo)
 
                 if ipass > 0:
                     # Evaluate the final model of the previous pass' mapmaker
@@ -787,6 +779,11 @@ class MLMapmaker(Operator):
 
             if comm is not None:
                 comm.barrier()
+            log.info_rank(
+                f"MLMapmaker wrapped observations in",
+                comm=comm,
+                timer=timer,
+            )
 
             # _init_mapmaker covers lines 293-303 of make_ml_map.py
             x0 = self._init_mapmaker(
