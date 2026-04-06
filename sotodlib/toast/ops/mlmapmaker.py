@@ -637,10 +637,8 @@ class MLMapmaker(Operator):
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
         log = Logger.get()
-        timer = Timer()
         comm = data.comm.comm_world
         gcomm = data.comm.comm_group
-        timer.start()
 
         if self.write_div == 'all':
             self.write_div = self.comps
@@ -714,6 +712,8 @@ class MLMapmaker(Operator):
 
         for ipass, passinfo in enumerate(passes):
             # The multipass mapmaking loop
+            timer = Timer()
+            timer.start()
             log.info_rank(
                 f"Starting pass {ipass + 1}/{npass}, maxit={passinfo.maxiter} "
                 f"down={passinfo.downsample}, interp={passinfo.interpol}",
@@ -780,7 +780,7 @@ class MLMapmaker(Operator):
             if comm is not None:
                 comm.barrier()
             log.info_rank(
-                f"MLMapmaker wrapped observations in",
+                f"MLMapmaker wrapped observations and built noise models in",
                 comm=comm,
                 timer=timer,
             )
