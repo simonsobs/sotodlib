@@ -43,47 +43,20 @@ def get_parser(parser=None):
     parser.add_argument("--cut-type",        type=str, default="full")
     return parser
 
-sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
-
-def measure_rms(tod, dt=1, bsize=32, nblock=10):
-    tod = tod[:,:tod.shape[1]//bsize*bsize]
-    tod = tod.reshape(tod.shape[0],-1,bsize)
-    bstep = max(1,tod.shape[1]//nblock)
-    tod = tod[:,::bstep,:][:,:nblock,:]
-    rms = np.median(np.std(tod,-1),-1)
-    # to µK√s units
-    rms *= dt**0.5
-    return rms
-
-def sensitivity_cut(rms_uKrts, sens_lim, med_tol=0.2, max_lim=100):
-    # First reject detectors with unreasonably low noise
-    good     = rms_uKrts >= sens_lim
-    # Also reject far too noisy detectors
-    good    &= rms_uKrts <  sens_lim*max_lim
-    # Then reject outliers
-    if np.sum(good) == 0: return good
-    ref      = np.median(rms_uKrts[good])
-    good    &= rms_uKrts > ref*med_tol
-    good    &= rms_uKrts < ref/med_tol
-    return good
-
 def main(**args):
-    import numpy as np, sys, time, warnings, os, so3g
-    from sotodlib.core import Context, AxisManager, IndexAxis
-    from sotodlib import tod_ops, mapmaking, core
-    from sotodlib.tod_ops import filters
-    from sotodlib.coords import pointing_model, sidelobes
+    import sys, time, warnings, os, so3g, yaml
+
+    from sotodlib import mapmaking, core
+    from sotodlib.coords import sidelobes
     from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
-    from sotodlib.core import metadata
+    from sotodlib.site_pipeline.utils import depth1_utils as d1u
+    from sotodlib.site_pipeline.utils.config import _get_config
+
     from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
-    import yaml
 
-    LoaderError = metadata.loader.LoaderError
-
-    #try: import moby2.analysis.socompat
-    #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
-    class DataMissing(Exception): pass
+    LoaderError = d1u.LoaderError
+    DataMissing = d1u.DataMissing
 
     warnings.simplefilter('ignore')
     args    = bunch.Bunch(**args)
@@ -118,7 +91,7 @@ def main(**args):
         recenter = mapmaking.parse_recentering(args.center_at)
 
     with bench.mark('context'):
-        context = Context(args.context)
+        context = core.Context(args.context)
 
     ots = args.ots.split(",") if args.ots else None
     wafers  = args.wafers.split(",") if args.wafers else None
@@ -151,7 +124,7 @@ def main(**args):
 
     # set up the preprocessing
     try:
-        preproc = yaml.safe_load(open(args.preprocess_config, 'r'))
+        preproc = _get_config(args.preprocess_config)
     except:
         if comm.rank==0:
             L.info(f"{args.preprocess_config} is not a valid config")
@@ -297,11 +270,11 @@ def main(**args):
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
                     # measure rms
-                    rms = measure_rms(obs.signal, dt=1/srate)
+                    rms = d1u.measure_rms(obs.signal, dt=1/srate)
                     if args.unit=='K':
-                        good    = sensitivity_cut(rms*1e6, sens_limits[band])
+                        good    = d1u.sensitivity_cut(rms*1e6, d1u.SENS_LIMITS[band])
                     elif args.unit == 'uK':
-                        good    = sensitivity_cut(rms, sens_limits[band])
+                        good    = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
                     #nrms    = np.sum(good)
                     # Cut detectors with too big a fraction of samples cut,
                     # or cuts occuring too often.
@@ -317,18 +290,12 @@ def main(**args):
                     #good   = dev.get(good) # cuts, dets, fplane etc. need this on the cpu
                     #cuts   = cuts  [good]
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
-                        L.debug("Skipped %s (more than 50pc of detectors cut by sens)" % (sub_id))
+                        L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
                         to_skip += [sub_id]
                         continue
                     else:
                         obs.restrict("dets", good)
-                    # Apply pointing model
-                    #pointing_model.apply_pointing_model(obs)
-                    # Calibrate to pW
-                    #obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
-                    # Calibrate to K_cmb
-                    #obs.signal = np.multiply(obs.signal.T, obs.abscal.abscal_cmb).T
                     # Disqualify overly cut detectors
                     good_dets = mapmaking.find_usable_detectors(obs, args.maxcut)
                     obs.restrict("dets", good_dets)
@@ -337,32 +304,6 @@ def main(**args):
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
                         continue
-                    # Gapfill glitches. This function name isn't the clearest
-                    #tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
-                    # Gain calibration
-                    #gain  = 1
-                    #for gtype in ["relcal","abscal"]:
-                    #    gain *= obs[gtype][:,None]
-                    #obs.signal *= gain
-                    # Fourier-space calibration
-                    #fsig  = fft.rfft(obs.signal)
-                    #freq  = fft.rfftfreq(obs.samps.count, 1/srate)
-                    # iir and timeconstant will be applied in the preprocessing eventually
-                    # iir filter
-                    #iir_filter  = filters.iir_filter()(freq, obs)
-                    #fsig       /= iir_filter
-                    #gain       /= iir_filter[0].real # keep track of total gain for our record
-                    #fsig       /= filters.timeconst_filter(timeconst = obs.det_cal.tau_eff)(freq, obs)
-                    #fft.irfft(fsig, obs.signal, normalize=True)
-                    #del fsig
-
-                    # Apply pointing correction.
-                    #obs.focal_plane.xi    += obs.boresight_offset.xi
-                    #obs.focal_plane.eta   += obs.boresight_offset.eta
-                    #obs.focal_plane.gamma += obs.boresight_offset.gamma
-                    #obs.focal_plane.xi    += obs.boresight_offset.dx
-                    #obs.focal_plane.eta   += obs.boresight_offset.dy
-                    #obs.focal_plane.gamma += obs.boresight_offset.gamma
 
                 # Injecting at this point makes us insensitive to any bias introduced
                 # in the earlier steps (mainly from gapfilling). The alternative is
@@ -422,14 +363,6 @@ def main(**args):
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
             sys.exit(1)
-           
-        #if np.any(nkept_all == 0):
-        #    if nkept == 0:
-        #        L.info("No tods assigned to this process. Pruning")
-        #    comm = mapmaking.prune_mpi(comm, np.where(nkept_all > 0)[0])
-        #    for signal in mapmaker.signals:
-        #        if hasattr(signal, "comm"):
-        #            signal.comm = comm
 
         L.info("Done building")
 
