@@ -35,6 +35,7 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--iunit",     type=str, default="uK", help="Unit of the raw tod")
     parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
     parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
@@ -43,7 +44,8 @@ def get_parser(parser=None):
     parser.add_argument("--cut-type",        type=str, default="full")
     return parser
 
-sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750}
+sens_limits = {"f030":120, "f040":80, "f090":100, "f150":140, "f220":300, "f280":750} # uK rts
+unit_defs   = {"nK":1e-9, "uK":1e-6, "mK":1e-3, "K":1.0, "kK":1e3, "MK": 1e6, "GK":1e9}
 
 def measure_rms(tod, dt=1, bsize=32, nblock=10):
     tod = tod[:,:tod.shape[1]//bsize*bsize]
@@ -279,6 +281,11 @@ def main(**args):
                 utils.deslope(obs.signal, w=5, inplace=True)
                 obs.signal = obs.signal.astype(dtype_tod)
 
+                # Convert to our target unit. But I think having the mapmaker worry about the
+                # units overcomplicates. I would prefer to add details like this to the fits files
+                # in a later step
+                obs.signal *= unit_defs[args.iunit]/unit_defs[args.unit]
+
                 if "flags" not in obs:
                     obs.wrap("flags", core.AxisManager(obs.dets, obs.samps))
 
@@ -290,12 +297,10 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
-                    # measure rms
-                    rms = measure_rms(obs.signal, dt=1/srate)
-                    if args.unit=='K':
-                        good    = sensitivity_cut(rms*1e6, sens_limits[band])
-                    elif args.unit == 'uK':
-                        good    = sensitivity_cut(rms, sens_limits[band])
+                    # measure rms, and convert to µKrts for comparison with sens_limits
+                    rms  = measure_rms(obs.signal, dt=1/srate)
+                    rms *= unit_defs[args.unit]/unit_defs["uK"]
+                    good = sensitivity_cut(rms, sens_limits[band])
                     #nrms    = np.sum(good)
                     # Cut detectors with too big a fraction of samples cut,
                     # or cuts occuring too often.
