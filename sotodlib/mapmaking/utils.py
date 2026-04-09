@@ -505,7 +505,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
                 try:
                     planet = coords.planets.SlowSource.for_named_source(
                         name, ctime)
-                    ra0, dec0 = planet.pos(tod.timestamps.mean())
+                    ra0, dec0 = planet.pos(np.mean(ctime))
                 except:
                     obj = getattr(ephem, name)()
                     djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020

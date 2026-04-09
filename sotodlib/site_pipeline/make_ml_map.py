@@ -44,16 +44,15 @@ def get_parser(parser=None):
     return parser
 
 def main(**args):
-    import sys, time, warnings, os, so3g, yaml
+    import sys, time, warnings, os, so3g
 
     from sotodlib import mapmaking, core
     from sotodlib.coords import sidelobes
-    from sotodlib.mapmaking import log
     from sotodlib.preprocess import preprocess_util as pp_util
     from sotodlib.site_pipeline.utils import depth1_utils as d1u
     from sotodlib.site_pipeline.utils.config import _get_config
 
-    from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
+    from pixell import enmap, utils, bunch, wcsutils, mpi, bench
 
     LoaderError = d1u.LoaderError
     DataMissing = d1u.DataMissing
@@ -113,7 +112,7 @@ def main(**args):
 
     # Define our task distribution
     obsinfo = mapmaking.get_obsinfo_subids(sub_ids, context)
-    owner   = mapmaking.distribute_tods_ra(obsinfo, comm.size) # assumes site=so
+    owner   = mapmaking.distribute_tods_ra(obsinfo, comm.size, site=SITE)
     myinds  = np.where(owner==comm.rank)[0]
 
     if args.inject:
@@ -191,11 +190,6 @@ def main(**args):
         nkept = 0
         to_skip_all = comm.allreduce(to_skip)
 
-        # TODO: Fix the task distribution. The current one doesn't care which mpi
-        # task gets which tods, which sabotages the pixel-saving effects of tiled maps!
-        # To be able to distribute the tods sensibly, we need a rough estimate of where
-        # on the sky each tod is. We should be able to get this using the central
-        # ctime, az and el for each tod.
         for ind in myinds:
             # Detsets correspond to separate files, so treat them as separate TODs.
             sub_id = sub_ids[ind]
@@ -358,8 +352,9 @@ def main(**args):
                 L.debug("Datacount: %s full" % (sub_id))
                 continue
 
-        nkept_all = np.array(comm.allgather(nkept))
-        if np.sum(nkept_all) == 0:
+        nkept_all = np.array([0],dtype='i')
+        comm.Allreduce(np.array([nkept],dtype='i'), nkept_all, op=mpi.SUM)
+        if nkept_all[0] == 0:
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
             sys.exit(1)
