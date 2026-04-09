@@ -674,6 +674,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
     axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
     res    = core.AxisManager(core.OffsetAxis("samps", onsamp), *axes)
     for key, axes in obs._assignments.items():
+        assigns = [(i,x) for i,x in enumerate(axes)]
         # Stuff without sample axes
         if "samps" not in axes:
             res.wrap(*get_wrappable(obs, key))
@@ -684,9 +685,9 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
         # TODO: This is a pretty naive way of handling flags, could lead to wierdness
         # Again not an issue if this is done after preprocess
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
-            res.wrap(key, downsample_cut(obs[key], down))
+            res.wrap(key, downsample_cut(obs[key], down), assigns)
         elif isinstance(obs[key], so3g.RangesInt32):
-            res.wrap(key, downsample_ranges(obs[key], down))
+            res.wrap(key, downsample_ranges(obs[key], down), assigns)
         elif issparse(obs[key]) and isinstance(obs[key], sparray):
             if sparse_handling == "skip":
                 continue
@@ -695,14 +696,14 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
                 dat = np.moveaxis(obs[key].toarray(), ax_idx, -1)
                 # Resample and return to original order
                 dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
-                res.wrap(key, obs[key].__class__(dat), [(i, ax) for i, ax in enumerate(axes)])
+                res.wrap(key, obs[key].__class__(dat), assigns)
         elif key in fft_resample:
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
             dat = np.moveaxis(obs[key], ax_idx, -1)
             # Resample and return to original order
             dat = np.moveaxis(resample.resample_fft_simple(dat, onsamp), -1, ax_idx)
-            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+            res.wrap(key, dat, assigns)
         # Some naive slicing for everything else
         elif isinstance(obs[key], np.ndarray):
             # Make the axis that is samps the last one
@@ -710,7 +711,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
             dat = np.moveaxis(obs[key], ax_idx, -1)
             # Resample and return to original order
             dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
-            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+            res.wrap(key, dat, assigns)
         else:
             logger.warning("Skipping field %s, unhandled type %s", key, type(obs[key]))
             continue
