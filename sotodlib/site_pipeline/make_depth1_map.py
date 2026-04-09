@@ -103,7 +103,7 @@ def get_parser(parser=None):
     )
     parser.add_argument("--pretend-now-is",
         type=str,
-        help='Change current time for running with update-delay',
+        help='Change current time for running with update-delay. In format %Y-%m-%d %H:%M:%S',
     )
     return parser
 
@@ -297,8 +297,8 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
         if args['pretend_now_is'] is not None:
             date_format = "%Y-%m-%d %H:%M:%S"
             dt_obj = time.strptime(args['pretend_now_is'], date_format)
-            min_ctime = int(dt_obj.timestamp()) - args['update_delay']*86400
-            args['query'] += f" and timestamp>={min_ctime} and timestamp<={int(dt_obj.timestamp())} "
+            min_ctime = int(time.mktime(dt_obj)) - args['update_delay']*86400
+            args['query'] += f" and timestamp>={min_ctime} and timestamp<={int(time.mktime(dt_obj))} "
         else:
             min_ctime = int(time.time()) - args['update_delay']*86400
             args['query'] += f" and timestamp>={min_ctime}"
