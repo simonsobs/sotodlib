@@ -366,8 +366,8 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
         coeffsQ = np.sum(x * yQ, axis=1) / np.sum(x**2, axis=1)
         coeffsU = np.sum(x * yU, axis=1) / np.sum(x**2, axis=1)
 
-        stdQ = np.nanmean(np.abs(Q_fs[:, wn_mask]), axis=1)
-        stdU = np.nanmean(np.abs(U_fs[:, wn_mask]), axis=1)
+        stdQ = np.std(Q_fs[:, wn_mask] - coeffsQ[:, np.newaxis] * I_fs[:, wn_mask], axis=1)
+        stdU = np.std(U_fs[:, wn_mask] - coeffsU[:, np.newaxis] * I_fs[:, wn_mask], axis=1)
 
         errorsQ = stdQ / np.sqrt(np.sum(x**2, axis=1))
         errorsU = stdU / np.sqrt(np.sum(x**2, axis=1))
