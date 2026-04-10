@@ -390,7 +390,8 @@ def create_mapmaker_config(
 ) -> dict:
 
     config = dict(defaults)
-
+    # Merge flags from config file and defaults with any passed through CLI
+    config.update({k: v for k, v in args.items() if v is not None})
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
         config_from_file = _get_config(config_file)
@@ -398,9 +399,7 @@ def create_mapmaker_config(
     else:
         print("No config file provided, assuming default values")
 
-    # Merge flags from config file and defaults with any passed through CLI
-    config.update({k: v for k, v in args.items() if v is not None})
-
+    
     # Certain fields are required. Check if they are all supplied here
     required_fields = ["area", "context"]
     for req in required_fields:
