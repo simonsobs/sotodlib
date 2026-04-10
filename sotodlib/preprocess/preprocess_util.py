@@ -89,10 +89,10 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
     Arguments
     ---------
 
-    jdb : JobDB
-        The preprocessing jobdb class.
+    jdb : JobManager
+        The preprocessing jobdb.
     jclass : str
-        The job name.
+        The jobdb class name.
     db : ManifestDb or None
         Preprocessing database.
     run_list : list
@@ -149,7 +149,9 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 with jdb.locked(job) as j:
                     if overwrite == True:
                         j.jstate = "open"
-                        j.tags["error"] = None
+                        for _t in j._tags:
+                            if _t.key == "error":
+                                _t.value = None
             else:
                 if job.jstate == JState.done:
                     done += 1
@@ -164,6 +166,35 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
 
     return run_list
 
+
+def reopen_failed_preproc_jobs(jdb, jclass, error=None):
+    """Helper function to re-open jobs that failed with particular errors
+    so that they can be re-run with the run_from_jobdb argument.
+
+    Arguments
+    ---------
+
+    jdb : JobManager or str
+        The preprocessing jobdb or a path to an existing jobdb file.
+    jclass : str
+        The jobdb class name.
+    error : str or None
+        The PreprocessError name to re-open. If None, re-open all failed jobs.
+    """
+    if isinstance(jdb, str):
+        if not os.path.isfile(jdb):
+            return
+        jdb = JobManager(sqlite_file=jdb)
+
+    failed_jobs = jdb.get_jobs(jclass=jclass, jstate=JState.failed)
+
+    for job in failed_jobs:
+        if job.tags['error'] == error or error is None:
+            with jdb.locked(job) as j:
+                j.jstate=JState.open
+                for _t in j._tags:
+                    if _t.key == "error":
+                        _t.value = None
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -562,7 +593,8 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                                    dets=None, meta=None, no_signal=None,
                                    logger=None, init_only=False,
-                                   ignore_cfg_check=False):
+                                   ignore_cfg_check=False,
+                                   stop_for_sims=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database and runs the processing section of
     the pipeline for each.
@@ -596,6 +628,11 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
+    stop_for_sims: bool
+        Optinal. If True, will stop before each step of the pipeline
+        with the flag `use_data_aman` set to True. The intended use is
+        to prepare all necessary data products that cannot be stored in
+        the preprocessing database, to process simulations.
 
     Returns
     -------
@@ -613,6 +650,21 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
     configs_proc, context_proc = get_preprocess_context(configs_proc)
     meta_proc = context_proc.get_meta(obs_id, dets=dets, meta=meta)
 
+    # Count number of stops
+    if stop_for_sims:
+        num_stops = 0
+        for process in configs_init["process_pipe"]:
+            if process.get("use_data_aman", False):
+                num_stops += 1
+        for process in configs_proc["process_pipe"]:
+            if process.get("use_data_aman", False):
+                num_stops += 1
+        logger.warning(
+            "Currently running with `stop_for_sims=True`. "
+            f"It will generate {num_stops} additional copies "
+            "of the data AxisManager with a higher memory usage."
+        )
+
     group_by_init = np.atleast_1d(configs_init['subobs'].get('use', 'detset'))
     group_by_proc = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
 
@@ -624,7 +676,9 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         return None
     else:
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
-        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+
+        if not ignore_cfg_check:
+            aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
         if (
             ignore_cfg_check or
@@ -666,27 +720,97 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
 
             aman = context_init.get_obs(meta_init, no_signal=no_signal)
             logger.info("Running initial pipeline")
-            pipe_init.run(aman, aman.preprocess, select=False)
-            if init_only:
-                return aman
+            if stop_for_sims:
+                out_amans_init = run_pipeline_stepgroups(
+                    pipe_init,
+                    aman,
+                    run_last_step=not(init_only)
+                )
+                if init_only:
+                    return out_amans_init
+            else:
+                pipe_init.run(aman, aman.preprocess, select=False)
+                if init_only:
+                    return aman
 
             logger.info("Running dependent pipeline")
 
+            if stop_for_sims:
+                aman = out_amans_init[(len(pipe_init), 'last')]
+            proc_aman = context_proc.get_meta(obs_id, meta=aman)
+
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
-            aman.preprocess.merge(meta_proc.preprocess)
-            pipe_proc.run(aman, aman.preprocess, select=False)
-
-            return aman
+            aman.preprocess.merge(proc_aman.preprocess)
+            if stop_for_sims:
+                out_amans = run_pipeline_stepgroups(
+                    pipe_proc,
+                    out_amans_init[(len(pipe_init), 'last')],
+                )
+                out_amans.update({
+                    (step, name): out_amans_init[(step, name)]
+                    for (step, name) in out_amans_init
+                    if name != 'last'
+                })
+                return out_amans
+            else:
+                pipe_proc.run(aman, aman.preprocess, select=False)
+                return aman
         else:
             raise ValueError('Dependency check between configs failed.')
+
+
+def run_pipeline_stepgroups(pipe, aman, run_last_step=False):
+    """
+    Run a Pipeline object, grouping steps based on
+    the flag `use_data_aman` in the configuration
+    file.
+    Arguments
+    ----------
+    pipe : Pipeline
+        Pipeline object to run.
+    aman : AxisManager
+        AxisManager to process.
+    run_last_step : bool
+        If True, will create a dict item containing the
+        AxisManager after run the full pipeline.
+    """
+    batch_idx = [
+        (step, process.name)
+        for step, process in enumerate(pipe)
+        if process.use_data_aman
+    ]
+    if batch_idx or run_last_step:
+        batch_idx = [(0, pipe[0].name)] + batch_idx
+        if run_last_step:
+            batch_idx += [(len(pipe), 'last')]
+        pipes = {}
+        for idx in range(len(batch_idx)-1):
+            start, start_name = batch_idx[idx]
+            end, end_name = batch_idx[idx+1]
+            # If asked to stop at the first process
+            # one needs to save the current state of
+            # the AxisManager
+            if end == 0:
+                pipes[end, end_name] = None
+            else:
+                pipes[end, end_name] = pipe[start:end]
+        out_amans = {}
+        loc_aman = aman.copy()
+        for (step, name), pipe in pipes.items():
+            if pipe is not None:
+                pipe.run(loc_aman, aman.preprocess, select=False)
+            out_amans[step, name] = loc_aman.copy()
+        return out_amans
+    else:
+        return {}
 
 
 def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
-                                       t2ptemplate_aman=None,
-                                       ignore_cfg_check=False):
+                                       ignore_cfg_check=False,
+                                       data_amans=None):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -718,13 +842,15 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         Optional. Logger object or None will generate a new one.
     init_only : bool
         Optional. Whether or not to run the dependent pipeline.
-    t2ptemplate_aman : AxisManager
-        Optional. AxisManager to use as a template for t2p leakage
-        deprojection.
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
-
+    data_amans: dict (Optional)
+        A dictionary of AxisManagers with keys (step, process.name)
+        filled with AxisManager processed up to step-1. This is used
+        to pre-load all data AxisManager which could be required when
+        processing simulations (e.g. to provide a T2P template)
+ 
     Returns
     -------
     aman : core.AxisManager or None
@@ -751,13 +877,14 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         return None
     else:
         pipe_init = Pipeline(configs_init["process_pipe"], logger=logger)
-        aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
 
-        if (
-            ignore_cfg_check or
-            check_cfg_match(aman_cfgs_ref, meta_proc.preprocess['pcfg_ref'],
-                            logger=logger)
-        ):
+        if not ignore_cfg_check:
+            aman_cfgs_ref = get_pcfg_check_aman(pipe_init)
+
+        if ignore_cfg_check or check_cfg_match(
+            aman_cfgs_ref,
+            meta_proc.preprocess['pcfg_ref'],
+            logger=logger):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
             logger.info("Restricting detectors on all init pipeline processes")
@@ -792,7 +919,16 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             meta_init.restrict('dets', meta_proc.dets.vals)
 
             aman = context_init.get_obs(meta_proc, no_signal=True)
+
+            # One needs to correct HWP model and gamma
+            # before loading in the simulated map
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
+            if "wiregrid_cal" in aman.det_info:
+                logger.info(f"gamma from wiregrid_cal")
+                aman.move(
+                    name="det_info.wiregrid_cal.gamma",
+                    new_name="focal_plane.gamma"
+                )
             aman.move("signal", None)
 
             logger.info("Reading in simulated map")
@@ -804,27 +940,12 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             if init_only:
                 return aman
 
-            if t2ptemplate_aman is not None:
-                # Replace Q,U with simulated timestreams
-                t2ptemplate_aman.wrap("demodQ", aman.demodQ, [(0, 'dets'), (1, 'samps')], overwrite=True)
-                t2ptemplate_aman.wrap("demodU", aman.demodU, [(0, 'dets'), (1, 'samps')], overwrite=True)
-
-                t2p_aman = t2pleakage.get_t2p_coeffs(
-                    t2ptemplate_aman,
-                    merge_stats=False
-                )
-                t2pleakage.subtract_t2p(
-                    aman,
-                    t2p_aman,
-                    T_signal=t2ptemplate_aman.dsT
-                )
-
             logger.info("Running dependent pipeline")
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
             if 'valid_data' in aman.preprocess:
                 aman.preprocess.move('valid_data', None)
             aman.preprocess.merge(proc_aman.preprocess)
-            pipe_proc.run(aman, aman.preprocess, sim=True)
+            pipe_proc.run(aman, aman.preprocess, sim=True, data_amans=data_amans)
 
             return aman
         else:
@@ -1053,6 +1174,19 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             except OSError as e:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
+            except Error as e:
+                err_str = str(e)
+
+                if "destination object already exists" in err_str:
+                    # remove temp file it was copied but not deleted
+                    os.remove(outputs_grp['temp_file'])
+                else:
+                    errmsg = f"{type(e).__name__}: {e}"
+                    tb = ''.join(traceback.format_tb(e.__traceback__))
+                    logger.error(
+                        f"save_group_and_cleanup failed for {outputs_grp['temp_file']}:\n{errmsg}\n{tb}"
+                    )
+                    raise
     return errors
 
 
@@ -1536,6 +1670,8 @@ def get_pcfg_check_aman(pipe):
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], core.AxisManager())
                     for itm in memb[1].items():
                         pcfg_ref[f'{i}_{pp.name}'][memb[0]].wrap(itm[0], str(itm[1]))
+                elif not np.isscalar(memb[1]):
+                    pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], str(memb[1]))
                 else:
                     pcfg_ref[f'{i}_{pp.name}'].wrap(memb[0], memb[1])
     return pcfg_ref

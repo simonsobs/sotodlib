@@ -8,6 +8,11 @@ import re
 
 DEG = np.pi/180
 
+if hasattr(so3g.proj.quat, "quat"):
+    g3quat = so3g.proj.quat.quat
+else:
+    g3quat = so3g.proj.quat.Quat
+
 
 def _get_csl(sight):
     """Return the CelestialSightLine equivalent of sight.  If sight is
@@ -355,6 +360,7 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
         # Works whether rot is a quat or a vector of them.
         asm.Q = rot * asm.Q
     proj.get_planar(asm, output=planar)
+
     # planar is now [ndet,nsamp,{ira,idec}] in intermediate
     # coordinates in radians. These will be 0 at the
     # reference point, and span at most [-pi,pi] in ira
@@ -404,13 +410,8 @@ def get_footprint(tod, wcs_kernel, dets=None, timestamps=None, boresight=None,
     # or add a special case. NB! This case *will* trigger regularly
     # due to wrapping if recentering is turned off.
     shape = (p2-p1+1)[::-1]
-
-    if recenter:
-        # Second part of recentering. Modify crval[0]
-        x_mid  = shape[-1]//2+1
-        ra_mid = w.wcs.crval[0] + (x_mid-w.wcs.crpix[0])*w.wcs.cdelt[0]
-        w.wcs.crpix[0] = x_mid
-        w.wcs.crval[0] = ra_mid
+    # Make sure wcs crval follows so3g pointing matrix assumptions
+    shape, w = normalize_geometry(shape, w)
 
     return (shape, w)
 
@@ -714,7 +715,7 @@ class ScalarLastQuat(np.ndarray):
             obj = np.empty(arr.shape)
             obj[:,:3] = arr[:,1:]
             obj[:,3] = arr[:,0]
-        elif isinstance(arr, so3g.proj.quat.quat):
+        elif isinstance(arr, g3quat):
             obj = np.array((arr.b, arr.c, arr.d, arr.a))
         else:
             obj = np.asarray(arr)
@@ -730,7 +731,7 @@ class ScalarLastQuat(np.ndarray):
             raise ValueError("Last axis must have 4 elements.")
         if self.ndim == 1:
             b, c, d, a = self[:].astype(float)
-            return so3g.proj.quat.quat(a, b, c, d)
+            return g3quat(a, b, c, d)
         if self.ndim == 2:
             temp = np.zeros(self.shape, float)
             temp[..., 0] = self[..., 3]
@@ -741,9 +742,9 @@ class ScalarLastQuat(np.ndarray):
 def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     """
     Constructs a deflected CelestialSightLine using HWP-synchronous
-    pointing correction using combined wobble metadata that contains 
+    pointing correction using combined wobble metadata that contains
     both amp and phase fields.
-    
+
     This function will raise ValueError unless all detectors belong to a single
     wafer and frequency band. It extracts the corresponding deflection amplitude
     and phase from the metadata, computes the wobble correction quaternion, and
@@ -752,7 +753,7 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     Parameters
     ----------
     aman : AxisManager
-        AxisManager for the observation, must include hwp_angle, timestamps, 
+        AxisManager for the observation, must include hwp_angle, timestamps,
         and boresight.az/el, as well as det_info with wafer and band info.
 
     wobble_meta : AxisManager
@@ -796,3 +797,22 @@ def get_deflected_sightline(aman, wobble_meta, site='so', weather='typical'):
     sight.Q = sight.Q * ~deflq
     return sight
 
+def normalize_geometry(shape, wcs):
+    """Analyze (shape, wcs) and return a pixel-compatible (shape, wcs)
+    that positions the reference pixel in a way that works with so3g projection
+    routines. Only cylindrical projections are affected.
+
+    """
+    # Can't freely change wcs for non-separable geometries
+    # (so non-cylindrical ones), as this would change the geometry
+    # in an incompatible way
+    if not wcsutils.is_separable(wcs): return shape, wcs
+    # The pointing matrix assumes that crval ra is in [-180,180],
+    # and that all points are within 180° of this
+    wcs    = wcs.deepcopy()
+    x_mid  = shape[-1]/2+1
+    ra_mid = wcs.wcs.crval[0] + (x_mid-wcs.wcs.crpix[0])*wcs.wcs.cdelt[0]
+    ra_mid = utils.rewind(ra_mid, ref=0, period=360)
+    wcs.wcs.crpix[0] = x_mid
+    wcs.wcs.crval[0] = ra_mid
+    return shape, wcs

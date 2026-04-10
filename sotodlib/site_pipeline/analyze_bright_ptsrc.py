@@ -4,7 +4,13 @@ import so3g
 from so3g.proj import coords, quat
 import sotodlib.coords.planets as planets
 from sotodlib import core
-from sotodlib.toast.ops import sim_sso
+
+# No need for site_pipeline to be a toast API canary here...
+try:
+    from sotodlib.toast.ops import sim_sso
+except ImportError:
+    sim_sso = None
+
 from sotodlib.core import metadata
 from sotodlib.io.metadata import write_dataset, read_dataset
 from sotodlib.tod_ops.filters import high_pass_sine2, low_pass_sine2, fourier_filter
