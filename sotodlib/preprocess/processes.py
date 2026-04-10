@@ -1945,7 +1945,6 @@ class SourceFlags(_Preprocess):
 
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep_all])
-            source_flags.restrict("dets", source_flags.dets.vals[keep_all])
             return meta
         else:
             return keep_all
