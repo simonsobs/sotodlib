@@ -2,6 +2,7 @@
 import numpy as np
 from numpy.polynomial import legendre as L
 from scipy.interpolate import interp1d
+from so3g.proj import RangesMatrix
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters, pca
 import logging
@@ -512,9 +513,21 @@ def subtract_azss_template(
     else:
         scan_flags = scan_flags.mask()
 
-    mask = ~np.any(np.isnan(azss.binned_signal), axis=0)
-
     if pca_modes is not None:
+        mask = ~np.isnan(azss.binned_signal)
+        binned_signal = azss.binned_signal.copy()
+        if not np.all(mask == mask[0, :]):
+            # get reasonable gapfill to make mask common between detectors
+            flags_mask = np.isnan(azss.binned_signal)
+            flags_mask[:, np.all(flags_mask, axis=0)] = False
+            flags = RangesMatrix.from_mask(flags_mask)
+            gaps = tod_ops.get_gap_fill(aman, signal=binned_signal, flags=flags)
+            gaps.swap(aman, signal=binned_signal)
+
+            mask = ~np.isnan(binned_signal)
+            assert np.all(mask == mask[0, :])
+        mask = mask[0, :]
+
         # make pca model
         template = np.full((azss.dets.count, azss.bin_az_samps.count), np.nan)
         if aman.dets.count < pca_modes:
@@ -526,13 +539,15 @@ def subtract_azss_template(
 
     else:
         # make commom mode template
-        weighted_azss = np.sum(azss.binned_signal * azss.binned_signal_sigma**-2, axis=0)
-        weight = np.sum(azss.binned_signal_sigma**-2, axis=0)
+        # take nansum in case az coverage are not common between detectors
+        weighted_azss = np.nansum(azss.binned_signal * azss.binned_signal_sigma**-2, axis=0)
+        weight = np.nansum(azss.binned_signal_sigma**-2, axis=0)
         template = weighted_azss / weight
+        mask = ~np.isnan(template)  # mask for interpolation
 
         # Least square fit the amplitude of azss per each detector
-        coefs = np.sum(template[np.newaxis, mask] * azss.binned_signal[:, mask] * azss.binned_signal_sigma[:, mask]**-2, axis=1)
-        coefs /= np.sum(template[np.newaxis, mask]**2 * azss.binned_signal_sigma[:, mask]**-2, axis=1)
+        coefs = np.nansum(template[np.newaxis, :] * azss.binned_signal * azss.binned_signal_sigma**-2, axis=1)
+        coefs /= np.nansum(template[np.newaxis, :]**2 * azss.binned_signal_sigma**-2, axis=1)
         template = coefs[:, np.newaxis] * template[np.newaxis, :]
 
     if method == 'interpolate':
