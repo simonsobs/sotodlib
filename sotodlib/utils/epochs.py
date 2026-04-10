@@ -1,12 +1,13 @@
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field
-from itertools import accumulate
+from functools import reduce
 from operator import add, and_, mul, or_
 from typing import Any, Literal, Optional, Self, cast, overload
 
 import yaml
 from deepdiff import DeepDiff
+
 
 @dataclass
 class Interval:
@@ -181,7 +182,7 @@ class Epoch:
 
     def __post_init__(self):
         self._internal = cast(
-            Interval, accumulate(self.covers, mul if self.strict else or_)
+            Interval, reduce(mul if self.strict else or_, self.covers)
         )
 
     def __repr__(self) -> str:
@@ -226,9 +227,7 @@ class Epoch:
             except ValueError:
                 return False
             return True
-        return cast(
-            bool, accumulate([field in ival.data for ival in self.covers], and_)
-        )
+        return cast(bool, reduce(and_, [field in ival.data for ival in self.covers]))
 
 
 @dataclass
@@ -256,9 +255,7 @@ class Era:
     def __post_init__(self):
         self._internal = cast(
             Interval,
-            accumulate(
-                [e._internal for e in self.epochs], add if self.strict else and_
-            ),
+            reduce(add if self.strict else and_, [e._internal for e in self.epochs]),
         )
 
     def __setattr__(self, name, value):
@@ -281,7 +278,7 @@ class Era:
 
         """
         return cast(
-            bool, accumulate([e.check_data(field, strict) for e in self.epochs], and_)
+            bool, reduce(and_, [e.check_data(field, strict) for e in self.epochs])
         )
 
 
@@ -308,9 +305,7 @@ class Calendar:
         ...
 
     @overload
-    def find_tagged(
-        self, tag: str, search_in: Literal["intervals"]
-    ) -> list[Interval]:
+    def find_tagged(self, tag: str, search_in: Literal["intervals"]) -> list[Interval]:
         ...
 
     def find_tagged(
