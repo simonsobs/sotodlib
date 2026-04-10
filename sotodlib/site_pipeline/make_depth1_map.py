@@ -154,7 +154,7 @@ def make_depth1_map(
         # which is pointless, but shouldn't cost that much time
         # obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "band":band})
         try:
-            obs = pp_util.load_and_preprocess(
+            obs, _ = pp_util.load_and_preprocess(
                 obs_id,
                 preproc,
                 dets={"wafer_slot": detset, "wafer.bandpass": band},
