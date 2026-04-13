@@ -389,15 +389,17 @@ def calibrate_obs(
 
 
 def create_mapmaker_config(
-    defaults: dict = DEPTH1MAPMAKER_DEFAULTS, config_file: Optional[str] = None, **args
+    defaults: dict = DEPTH1MAPMAKER_DEFAULTS, config_file: Optional[str] = None, args: dict = dict()
 ) -> dict:
 
     config = dict(defaults)
-    # Merge flags from config file and defaults with any passed through CLI
+    
+    # Apply CLI args on top of defaults
     config.update({k: v for k, v in args.items() if v is not None})
-    # Update the default dict with values provided from a config.yaml file
+    # Config file takes highest priority, overriding both defaults and CLI args
     if config_file is not None:
         config_from_file = _get_config(config_file)
+        print(config_from_file)
         config.update({k: v for k, v in config_from_file.items() if v is not None})
     else:
         print("No config file provided, assuming default values")
@@ -410,7 +412,9 @@ def create_mapmaker_config(
             raise KeyError(
                 f"{req} is a required argument. Please supply it in a config file or via the command line"
             )
-
+    print("Using the following configuration for depth-1 mapmaking:")
+    for key, value in config.items():
+        print(f"  {key}: {value}")
     return config
 
 
