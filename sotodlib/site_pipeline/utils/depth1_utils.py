@@ -15,7 +15,7 @@ from sotodlib.site_pipeline.utils.config import _get_config
 from sotodlib.tod_ops import detrend_tod
 
 DEPTH1MAPMAKER_DEFAULTS = {
-    "query": "type == 'obs' and subtype == 'cmb'",
+    "query": "1",
     "odir": "./outputs",
     "comps": "T",
     "ntod": None,
@@ -45,9 +45,6 @@ DEPTH1MAPMAKER_DEFAULTS = {
     "mapcat_database_name": "mapcat.db",
     "mapcat_depth_one_parent": "./",
     "min_dets": 50,
-    "update_delay": None,
-    "min_dur": 300,
-    "pretend_now_is": None,
 }
 
 SENS_LIMITS = {
@@ -393,7 +390,8 @@ def create_mapmaker_config(
 ) -> dict:
 
     config = dict(defaults)
-
+    # Merge flags from config file and defaults with any passed through CLI
+    config.update({k: v for k, v in args.items() if v is not None})
     # Update the default dict with values provided from a config.yaml file
     if config_file is not None:
         config_from_file = _get_config(config_file)
@@ -401,9 +399,7 @@ def create_mapmaker_config(
     else:
         print("No config file provided, assuming default values")
 
-    # Merge flags from config file and defaults with any passed through CLI
-    config.update({k: v for k, v in args.items() if v is not None})
-
+    
     # Certain fields are required. Check if they are all supplied here
     required_fields = ["area", "context"]
     for req in required_fields:
