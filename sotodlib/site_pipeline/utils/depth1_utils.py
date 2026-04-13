@@ -15,7 +15,7 @@ from sotodlib.site_pipeline.utils.config import _get_config
 from sotodlib.tod_ops import detrend_tod
 
 DEPTH1MAPMAKER_DEFAULTS = {
-    "query": "1",
+    "query": "type == 'obs' and subtype == 'cmb'",
     "odir": "./outputs",
     "comps": "T",
     "ntod": None,
@@ -45,6 +45,9 @@ DEPTH1MAPMAKER_DEFAULTS = {
     "mapcat_database_name": "mapcat.db",
     "mapcat_depth_one_parent": "./",
     "min_dets": 50,
+    "update_delay": None,
+    "min_dur": 300,
+    "pretend_now_is": None,
 }
 
 SENS_LIMITS = {
