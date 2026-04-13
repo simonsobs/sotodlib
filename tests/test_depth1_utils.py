@@ -17,7 +17,7 @@ class TestCreateMapmakerConfig(unittest.TestCase):
             create_mapmaker_config()
 
     def test_defaults(self):
-        config = create_mapmaker_config(area="a", context="c")
+        config = create_mapmaker_config(args={"area": "a", "context": "c"})
         for key, value in DEPTH1MAPMAKER_DEFAULTS.items():
             self.assertIn(key, config)
             self.assertEqual(config[key], value)
@@ -79,7 +79,7 @@ class TestCreateMapmakerConfig(unittest.TestCase):
             yaml.dump(file_config, f)
             fname = f.name
         try:
-            config = create_mapmaker_config(config_file=fname, preprocess_config="file2.yaml")
+            config = create_mapmaker_config(config_file=fname, args={"preprocess_config": "file2.yaml"})
             for key, value in file_config.items():
                 self.assertIn(key, config)
                 self.assertEqual(config[key], value)
@@ -113,10 +113,14 @@ class TestCreateMapmakerConfig(unittest.TestCase):
             yaml.dump(file_config, f)
             fname = f.name
         try:
-            config = create_mapmaker_config(config_file=fname, preprocess_config="file2.yaml")
+            config = create_mapmaker_config(config_file=fname, args={"preprocess_config": "file2.yaml"})
             for key, value in file_config.items():
+                if key == "preprocess_config":
+                    continue
                 self.assertIn(key, config)
                 self.assertEqual(config[key], value)
+            # args override config_file values
+            self.assertEqual(config["preprocess_config"], "file2.yaml")
         finally:
             os.unlink(fname)
 
