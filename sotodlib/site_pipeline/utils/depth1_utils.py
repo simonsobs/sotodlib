@@ -389,7 +389,7 @@ def calibrate_obs(
 
 
 def create_mapmaker_config(
-    defaults: dict = DEPTH1MAPMAKER_DEFAULTS, config_file: Optional[str] = None, **args
+    defaults: dict = DEPTH1MAPMAKER_DEFAULTS, config_file: Optional[str] = None, args: dict = dict()
 ) -> dict:
 
     config = dict(defaults)

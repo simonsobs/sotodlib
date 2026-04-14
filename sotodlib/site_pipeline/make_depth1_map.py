@@ -103,7 +103,7 @@ def get_parser(parser=None):
     )
     parser.add_argument("--pretend-now-is",
         type=str,
-        help='Change current time for running with update-delay. In format %Y-%m-%d %H:%M:%S',
+        help='Change current time for running with update-delay. In format %%Y-%%m-%%d %%H:%%M:%%S',
     )
     return parser
 
