@@ -52,7 +52,7 @@ def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
 
 
 def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
-                      ndets=2, input_coeffs=None):
+                      ndets=3, input_coeffs=None):
     """
     Makes an axis manager with azimuth synchronous signal
     in it, populated via legendre polynomials plus gaussian noise.
@@ -94,16 +94,18 @@ def get_coeff_metric(tod):
     """
     Evaluates fit is working by comparing coefficients in to out.
     """
-    print(tod.input_coeffs[0])
-    print(tod.azss_stats.coeffs[0])
+    print(tod.input_coeffs)
+    print(tod.azss_stats.coeffs)
     outmetric_num = (tod.azss_stats.coeffs - tod.input_coeffs)**2
     outmetric_denom = (tod.input_coeffs)**2
     return np.median(100*(outmetric_num/outmetric_denom))
 
 
 class AzssTest(unittest.TestCase):
-    "Test the Azimuth Synchronous Signal fitting functions"
     def test_fit(self):
+        """
+        Test the Azimuth Synchronous Signal fitting functions
+        """
         max_mode = 10
         tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
         azss_stats, model_sig_tod = azss.get_azss(
@@ -118,6 +120,30 @@ class AzssTest(unittest.TestCase):
         self.assertTrue(ommedian < 5.0)
         self.assertTrue(~np.any(np.isnan(tod.signal)))
         self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
+    def test_fit_with_flags(self):
+        """
+        Test the Azimuth Synchronous Signal fitting functions with flags
+        """
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+
+        mask = np.zeros((tod.dets.count, tod.samps.count), dtype=bool)
+        # one detector has partial az coverage, one detector has zero az coverage
+        mask[0, tod.boresight.az > np.percentile(tod.boresight.az, 95)] = True
+        mask[-1, :] = True
+        flags = RangesMatrix.from_mask(mask)
+
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='fit',
+            max_mode=max_mode,
+            azrange=None,
+            bins=100,
+            flags=flags,
+        )
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal[~mask]) > np.std(tod.signal[~mask] - model_sig_tod[~mask]))
 
     def test_interpolate(self):
         """
@@ -144,7 +170,9 @@ class AzssTest(unittest.TestCase):
         tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
 
         mask = np.zeros((tod.dets.count, tod.samps.count), dtype=bool)
-        mask[-1, :] = True  # one detector has low az coverage
+        # one detector has partial az coverage, one detector has zero az coverage
+        mask[0, tod.boresight.az > np.percentile(tod.boresight.az, 95)] = True
+        mask[-1, :] = True
         flags = RangesMatrix.from_mask(mask)
 
         azss_stats, model_sig_tod = azss.get_azss(

@@ -148,28 +148,75 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
         Model fit for each detector size ndets x n_samps
     """
     bin_width = azss_stats.binned_az[1] - azss_stats.binned_az[0]
-    m = ~np.isnan(azss_stats.binned_signal[0])  # masks bins without counts
-    if np.count_nonzero(m) < max_mode + 1:
-        raise ValueError('Number of valid bins is smaller than mode of Legendre function')
 
-    if fit_range is None:
-        az_min = np.min(azss_stats.binned_az[m]) - bin_width / 2
-        az_max = np.max(azss_stats.binned_az[m]) + bin_width / 2
-    else:
+    model = np.zeros((azss_stats.dets.count, len(az)))
+
+    m = ~np.isnan(azss_stats.binned_signal)
+    # Number of valid bins cannot be smaller than mode of Legendre function
+    valid_dets = np.sum(m, axis=1) >= max_mode + 1
+    if 'bad_dets' in azss_stats:
+        valid_dets = np.logical_and(valid_dets, ~azss_stats['bad_dets'])
+
+    if sum(valid_dets) == 0:
+        logger.info('All the detectors have low az coverage and cannot make model')
+        return model
+
+    mask = ~np.isnan(azss_stats.binned_signal[valid_dets, :])
+    is_uniform = np.all(mask == mask[0, :])
+
+    coeffs = np.zeros((azss_stats.dets.count, max_mode + 1))
+    binned_model = np.full((azss_stats.dets.count, azss_stats.bin_az_samps.count), np.nan)
+    sum_of_squares = np.full(azss_stats.dets.count, np.nan)
+    redchi2s = np.full(azss_stats.dets.count, np.nan)
+    if fit_range is not None:
         az_min, az_max = fit_range[0], fit_range[1]
+        x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
+        x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
+        x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
 
-    x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
-    x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
-    x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
-    if ('coeffs' in azss_stats) and not overwrite:
-        return L.legval(x_legendre, azss_stats.coeffs.T)
+    if is_uniform:
+        m = mask[0, :]
+        if fit_range is None:
+            az_min = np.min(azss_stats.binned_az[m]) - bin_width / 2
+            az_max = np.max(azss_stats.binned_az[m]) + bin_width / 2
+            x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
+            x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
+            x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
 
-    coeffs = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m].T, max_mode)
-    coeffs = coeffs.T
-    binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
-    binned_model = np.where(~m, np.nan, binned_model)
-    sum_of_squares = np.sum(((azss_stats.binned_signal[:, m] - binned_model[:, m])**2), axis=-1)
-    redchi2s = sum_of_squares/azss_stats.uniform_binned_signal_sigma**2 / (len(x_legendre_bin_centers[m]) - max_mode - 1)
+        if ('coeffs' in azss_stats) and not overwrite:
+            return L.legval(x_legendre, azss_stats.coeffs.T)
+
+        coeffs[valid_dets, :] = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m][valid_dets, :].T, max_mode).T
+        assert ~np.any(np.isnan(coeffs))
+        model = L.legval(x_legendre, coeffs.T)
+        binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
+        binned_model = np.where(~m, np.nan, binned_model)
+        sum_of_squares = np.sum(((azss_stats.binned_signal[:, m] - binned_model[:, m])**2), axis=-1)
+        redchi2s = sum_of_squares/azss_stats.uniform_binned_signal_sigma**2 / (len(x_legendre_bin_centers[m]) - max_mode - 1)
+
+    else:
+        for i, m, binned_signal in zip(np.where(valid_dets)[0], mask, azss_stats.binned_signal[valid_dets, :]):
+            if fit_range is None:
+                az_min = np.min(azss_stats.binned_az[m]) - bin_width / 2
+                az_max = np.max(azss_stats.binned_az[m]) + bin_width / 2
+                x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
+                x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
+                x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
+            if ('coeffs' in azss_stats) and not overwrite:
+                model[i, :] = L.legval(x_legendre, azss_stats.coeffs[:, i])
+            else:
+                _coeffs = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m][i, :].T, max_mode)
+                _binned_model = L.legval(x_legendre_bin_centers, _coeffs)
+                _binned_model = np.where(~m, np.nan, _binned_model)
+                _sum_of_squares = np.sum(((azss_stats.binned_signal[:, m][i, :] - _binned_model[m])**2), axis=-1)
+                _redchi2s = _sum_of_squares/azss_stats.uniform_binned_signal_sigma[i]**2 / (len(x_legendre_bin_centers[m]) - max_mode - 1)
+                coeffs[i, :] = _coeffs
+                binned_model[i, :] = _binned_model
+                sum_of_squares[i] = _sum_of_squares
+                redchi2s[i] = _redchi2s
+                model[i, :] = L.legval(x_legendre, _coeffs)
+        if ('coeffs' in azss_stats) and not overwrite:
+            return model
 
     mode_names = np.array([f'legendre{mode}' for mode in range(max_mode + 1)], dtype='<U10')
     modes_axis = core.LabelAxis(name='azss_modes', vals=mode_names)
@@ -179,7 +226,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
     azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'azss_modes')])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
-    return L.legval(x_legendre, coeffs.T)
+    return model
 
 
 def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None, scan_flags=None,
@@ -365,10 +412,10 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
 
     if method == 'interpolate':
         model = np.zeros((aman.dets.count, aman.samps.count))
+
+        valid_dets = np.sum(~np.isnan(azss_stats.binned_signal), axis=1) > 0
         if 'bad_dets' in azss_stats:
-            valid_dets = ~azss_stats['bad_dets']
-        else:
-            valid_dets = np.ones(aman.dets.count, dtype=bool)
+            valid_dets = np.logical_and(valid_dets, ~azss_stats['bad_dets'])
         if sum(valid_dets) == 0:
             logger.info('All the detectors have low az coverage and cannot make model')
             return model
@@ -380,9 +427,9 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
             f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[:, m][valid_dets, :], fill_value='extrapolate')
             model[valid_dets, :] = f_template(az)
         else:
-            for i, (m, binned_signal) in enumerate(zip(mask, azss_stats.binned_signal[valid_dets, :])):
+            for i, m, binned_signal in zip(np.where(valid_dets)[0], mask, azss_stats.binned_signal[valid_dets, :]):
                 f_template = interp1d(azss_stats.binned_az[m], binned_signal[m], fill_value='extrapolate')
-                model[valid_dets, :][i] = f_template(az)
+                model[i, :] = f_template(az)
 
     if np.any(~np.isfinite(model)):
         logger.warning('azss model has nan. set zero to nan but this may make glitch')
