@@ -187,7 +187,6 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
             return L.legval(x_legendre, azss_stats.coeffs.T)
 
         coeffs[valid_dets, :] = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m][valid_dets, :].T, max_mode).T
-        assert ~np.any(np.isnan(coeffs))
         model = L.legval(x_legendre, coeffs.T)
         binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
         binned_model = np.where(~m, np.nan, binned_model)
@@ -203,7 +202,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
                 x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
                 x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
             if ('coeffs' in azss_stats) and not overwrite:
-                model[i, :] = L.legval(x_legendre, azss_stats.coeffs[:, i])
+                model[i, :] = L.legval(x_legendre, azss_stats.coeffs[i, :])
             else:
                 _coeffs = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m][i, :].T, max_mode)
                 _binned_model = L.legval(x_legendre_bin_centers, _coeffs)

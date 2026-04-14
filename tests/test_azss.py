@@ -121,6 +121,9 @@ class AzssTest(unittest.TestCase):
         self.assertTrue(~np.any(np.isnan(tod.signal)))
         self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
 
+        model = azss.fit_azss(tod.boresight.az, azss_stats, max_mode)
+        self.assertTrue(np.all(model_sig_tod == model))
+
     def test_fit_with_flags(self):
         """
         Test the Azimuth Synchronous Signal fitting functions with flags
@@ -144,6 +147,9 @@ class AzssTest(unittest.TestCase):
         )
         self.assertTrue(~np.any(np.isnan(tod.signal)))
         self.assertTrue(np.std(tod.signal[~mask]) > np.std(tod.signal[~mask] - model_sig_tod[~mask]))
+
+        model = azss.fit_azss(tod.boresight.az, azss_stats, max_mode)
+        self.assertTrue(np.all(model_sig_tod == model))
 
     def test_interpolate(self):
         """
