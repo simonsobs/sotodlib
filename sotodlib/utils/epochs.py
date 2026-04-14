@@ -46,13 +46,13 @@ class Interval:
         if not isinstance(val, slice):
             val = slice(val)
         if val.start is not None:
-            if self.start < val.start:
+            if self.start > val.start:
                 raise IndexError(
                     f"Start of slice out of range, interval starts at {self.start} but slice starts at {val.start}!"
                 )
             to_ret.start = val.start
         if val.stop is not None:
-            if self.stop > val.stop:
+            if self.stop < val.stop:
                 raise IndexError(
                     f"End of slice out of range, interval stops at {self.stop} but slice stops at {val.stop}!"
                 )
@@ -91,15 +91,13 @@ class Interval:
         combined.start = min(self.start, tocombine.start)
         combined.stop = max(self.stop, tocombine.stop)
 
-        if not same_tag and self.tags != tocombine.tags:
-            raise ValueError("Can't combine without identical tags with same_tag=False")
+        if same_tag and self.tags != tocombine.tags:
+            raise ValueError("Can't combine without identical tags with same_tag=True")
         combined.tags = self.tags.union(tocombine.tags)
 
         diff = DeepDiff(self.data, tocombine.data)
-        if not same_data and len(diff) != 0:
-            raise ValueError(
-                "Can't combine without identical data with same_data=False"
-            )
+        if same_data and len(diff) != 0:
+            raise ValueError("Can't combine without identical data with same_data=True")
         combined.data.update(tocombine.data)
 
         combined.name = self.name + "+" + tocombine.name
@@ -195,7 +193,7 @@ class Epoch:
         )
 
     def __setattr__(self, name, value):
-        if name == "covers" or name == "strict":
+        if (name == "covers" or name == "strict") and "_internal" in self.__dict__:
             self.__post_init__()
         return super().__setattr__(name, value)
 
@@ -207,7 +205,7 @@ class Epoch:
     def check_data(self, field: str, strict: bool = True) -> bool:
         """
         Check that all `Interval`s in this `Epoch` contain a certain data field.
-        Optinally check that they also contain the same value for the field.
+        Optinally check that they each contain the same value for the field across all intervals.
 
         Parameters
         ----------
@@ -259,7 +257,7 @@ class Era:
         )
 
     def __setattr__(self, name, value):
-        if name == "epochs" or name == "strict":
+        if (name == "epochs" or name == "strict") and "_internal" in self.__dict__:
             self.__post_init__()
         return super().__setattr__(name, value)
 
@@ -329,13 +327,13 @@ class Calendar:
             A list of obects of type `search_in` containing this tag.
         """
         if search_in == "intervals":
-            return [ival for ival in self.intervals.values() if field in ival.tags]
+            return [ival for ival in self.intervals.values() if tag in ival.tags]
         elif search_in == "epochs":
             return [
-                epoch for epoch in self.epochs.values() if field in epoch._internal.tags
+                epoch for epoch in self.epochs.values() if tag in epoch._internal.tags
             ]
         elif search_in == "eras":
-            return [era for era in self.eras.values() if field in era._internal.tags]
+            return [era for era in self.eras.values() if tag in era._internal.tags]
         else:
             raise ValueError(f"Invalid search_in: {search_in}")
 
@@ -539,11 +537,12 @@ class Calendar:
         intervals = cfg["intervals"]
         eras = {}
         data = {}
-        for key, val in cfg:
+        for key, val in cfg.items():
             if key == "intervals":
                 continue
             if key[0] == "_":
                 data[key[1:]] = val
+                continue
             eras[key] = val
 
         # Load intervals
@@ -559,10 +558,11 @@ class Calendar:
                 name,
                 interval.get("start", 0),
                 interval.get("stop", 20000000000),
-                interval.get("tags", []),
+                set(interval.get("tags", [])),
                 interval_data,
             )
             interval_dict[str(ival)] = ival
+            intervals[name] = ival
 
         # Load epochs
         epoch_dict = {}
@@ -571,10 +571,19 @@ class Calendar:
             strict_epoch = era.get("strict_epochs", True)
             epochs = []
             for name, ec in era.items():
+                if name in ["strict_era", "strict_epochs"]:
+                    continue
                 covers = []
                 for cname in ec.get("covers", []):
-                    iname, slstr = cname.split("[")
-                    slstr = slstr[:-1]
+                    csplt = cname.split("[")
+                    if len(csplt) == 1:
+                        iname = cname
+                        slstr = ":"
+                    elif len(csplt) == 2:
+                        iname, slstr = csplt
+                        slstr = slstr[:-1]
+                    else:
+                        raise ValueError(f"Invalid cover string {cname}")
                     ival = intervals[iname]
                     interval_dict[str(ival)] = ival
                     slc = slice(
@@ -584,7 +593,7 @@ class Calendar:
                         )
                     )
                     covers += [ival[slc]]
-                epoch = Epoch(name, ename, tuple(covers), strict_epoch)
+                epoch = Epoch(name, ename, tuple(covers), strict=strict_epoch)
                 epochs += [epoch]
                 epoch_dict[f"{ename}.{name}"] = epoch
             eras[ename] = Era(ename, tuple(epochs), strict_era)
