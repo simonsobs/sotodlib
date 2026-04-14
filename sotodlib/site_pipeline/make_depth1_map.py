@@ -1,5 +1,6 @@
 import os
 import time
+import calendar
 import warnings
 from argparse import ArgumentParser
 
@@ -91,6 +92,19 @@ def get_parser(parser=None):
         "--min-dets",
         type=int,
         help="Minimum number of detectors for an obs (per wafer per freq)",
+    )
+    parser.add_argument(
+        "--update-delay",
+        type=float,
+        help="For automatic mapmaking, how many days back to map",
+    )
+    parser.add_argument("--min-dur",
+        type=float,
+        help='Minimum duration of obs to be included, in seconds. Default is 5 minutes'
+    )
+    parser.add_argument("--pretend-now-is",
+        type=str,
+        help='Change current time for running with update-delay. Time in UTC and format %%Y-%%m-%%d %%H:%%M:%%S.',
     )
     return parser
 
@@ -275,6 +289,20 @@ def main(config_file, defaults=d1u.DEPTH1MAPMAKER_DEFAULTS, **args):
         )
     else:
         raise ValueError(f"Unrecognized noise model '{args['nmat']}'")
+
+    if not os.path.isfile(args['query']):
+        args['query'] += f" and duration>{args['min_dur']}"
+
+    if (args['update_delay'] is not None):
+        # this is only to be used for running automatic maps on prefect
+        if args['pretend_now_is'] is not None:
+            date_format = "%Y-%m-%d %H:%M:%S"
+            dt_obj = time.strptime(args['pretend_now_is'], date_format)
+            min_ctime = int(calendar.timegm(dt_obj)) - args['update_delay']*86400
+            args['query'] += f" and timestamp>={min_ctime} and timestamp<={int(calendar.timegm(dt_obj))} "
+        else:
+            min_ctime = int(time.time()) - args['update_delay']*86400
+            args['query'] += f" and timestamp>={min_ctime}"
 
     obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(
         context,
