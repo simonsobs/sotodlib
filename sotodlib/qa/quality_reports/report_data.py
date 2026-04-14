@@ -155,7 +155,7 @@ def get_apex_data(cfg: ReportDataConfig):
 
     request = requests.post(APEX_DATA_URL, data={
             'wdbo': 'csv/download',
-            'max_rows_returned': 79400,
+            'max_rows_returned': 999999,
             'start_date': cfg.start_time.strftime('%Y-%m-%dT%H:%M:%S') + '..' \
                 + cfg.stop_time.strftime('%Y-%m-%dT%H:%M:%S'),
             'tab_pwv': 'on',
