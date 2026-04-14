@@ -13,6 +13,7 @@ import numpy as np
 import sys
 from influxdb import InfluxDBClient
 from collections import defaultdict
+import traceback
 
 from sotodlib.io import hkdb
 from sotodlib.io.hkdb import HkConfig
@@ -176,7 +177,10 @@ def get_apex_data(cfg: ReportDataConfig):
         return None
 
     def date_converter(d):
-        naive_dt = dt.datetime.fromisoformat(d)
+        if isinstance(d, bytes):
+            naive_dt = dt.datetime.fromisoformat(d.decode('utf-8'))
+        else:
+            naive_dt = dt.datetime.fromisoformat(d)
         return naive_dt.replace(tzinfo=dt.timezone.utc)
 
     data = np.genfromtxt(
@@ -252,7 +256,9 @@ def get_and_merge_apex_pwv(cfg: ReportDataConfig, result=None):
     try:
         result_apex = get_apex_data(cfg)
     except Exception as e:
-        logger.error(f"get_apex_data failed with {e}")
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+        logger.error(f"get_apex_data failed with {errmsg}\n{tb}")
         result_apex = None
 
     if result_apex is not None:
