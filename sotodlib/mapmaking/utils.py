@@ -782,28 +782,27 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
     such that each category is as compact in RA as possible, and each
     category has as similar size as possible. Assumes that all obs
     are at the same site."""
-    if len(obsinfo) <= nsplit:
-        return np.arange(nsplit)[:len(obsinfo)]
-    # Get a reprsentative RA per entry
-    az    = obsinfo["az_center"] * putils.degree
-    el    = obsinfo["el_center"] * putils.degree
-    ctime = (obsinfo["start_time"] + obsinfo["stop_time"])/2
-    ra    = so3g.proj.CelestialSightLine.az_el(ctime, az, el, site=site, weather=weather).coords()[:,0]
-    # Put everything on the same copy of the sky
-    ra    = putils.rewind_compact(ra)
-    # Partition sorted ras equally by weight. Would ideally include
-    # ndet too, but the effective ndet depends on the cuts etc.
-    order = np.argsort(ra)
-    weight= obsinfo["n_samples"][order]
-    cum   = putils.cumsum(weight)
-    wtot  = cum[-1]+weight[-1] # = np.sum(weight)
-    owner = np.zeros(len(obsinfo),int)
-    owner[order] = putils.floor(cum*nsplit/wtot)
-    # Make sure none ended up empty. If they did, fall back to unweighted,
-    # which will always succeed
-    if np.any(np.bincount(owner, minlength=nsplit) == 0):
-        owner[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
-    return owner
+    owners = np.arange(nsplit,dtype=int)[:len(obsinfo)]
+    if len(obsinfo) > nsplit:
+        # Get a reprsentative RA per entry
+        az    = obsinfo["az_center"] * putils.degree
+        el    = obsinfo["el_center"] * putils.degree
+        ctime = (obsinfo["start_time"] + obsinfo["stop_time"])/2
+        ra    = so3g.proj.CelestialSightLine.az_el(ctime, az, el, site=site, weather=weather).coords()[:,0]
+        # Put everything on the same copy of the sky
+        ra    = putils.rewind_compact(ra)
+        # Partition sorted ras equally by weight. Would ideally include
+        # ndet too, but the effective ndet depends on the cuts etc.
+        order = np.argsort(ra)
+        weight= obsinfo["n_samples"][order]
+        cum   = putils.cumsum(weight)
+        wtot  = cum[-1]+weight[-1] # = np.sum(weight)
+        owners[order] = putils.floor(cum*nsplit/wtot)
+        # Make sure none ended up empty. If they did, fall back to unweighted,
+        # which will always succeed
+        if np.any(np.bincount(owners, minlength=nsplit) == 0):
+            owners[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
+    return owners
 
 Base = declarative_base()
 
