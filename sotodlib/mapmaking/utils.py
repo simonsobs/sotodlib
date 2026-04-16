@@ -886,27 +886,3 @@ def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
             session.commit()
         except exc.IntegrityError:
             session.rollback()
-
-
-def prune_mpi(comm, ranks_to_keep):
-    """
-    Prune unneeded MPI procs.
-
-    Arguments:
-
-        comm: The MPI communicator currently in use.
-
-        ranks_to_keep: List of current ranks to keep in the new communicator.
-
-    Returns:
-
-        comm: Modified communicator with only the processes we want to keep.
-    """
-    group = comm.Get_group()
-    new_group = group.Incl(ranks_to_keep)
-    new_comm = comm.Create(new_group)
-    if comm.rank not in ranks_to_keep:
-        sys.exit(0)
-    comm = new_comm
-
-    return comm

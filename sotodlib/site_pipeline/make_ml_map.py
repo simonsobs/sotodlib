@@ -62,7 +62,6 @@ def main(**args):
     SITE    = args.site.lower()
     verbose = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
-    comm_size = comm.size
     shape, wcs = enmap.read_map_geometry(args.area)
 
     if args.downgrade > 1:
@@ -72,8 +71,6 @@ def main(**args):
     # we risk adding information in MPI due to reconstruction, and that
     # can cause is_compatible failures.
     wcs = wcsutils.WCS(wcs.to_header())
-    # Set shape to None to allow map to fit these TODs exactly.
-    #shape = None
 
     comps = args.comps
     ncomp = len(comps)
@@ -220,19 +217,17 @@ def main(**args):
                     to_skip += [sub_id]
                     continue
                 # Check nans
-                mask = np.logical_not(np.isfinite(obs.signal))
-                if mask.sum() > 0:
-                    L.debug("Skipped %s (a nan in signal)" % (sub_id))
+                if not np.all(np.isfinite(obs.signal)):
+                    L.debug("Skipped %s (there is a nan in signal)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
                     to_skip += [sub_id]
                     continue
                 # Check all 0s
-                zero_dets = np.sum(obs.signal, axis=1)
-                mask = zero_dets == 0.0
-                if mask.any():
+                zero_dets = np.sum(obs.signal, axis=1) # sum the signal across the samples
+                if np.any(zero_dets == 0.0):
                     L.debug("%s has all 0s in at least 1 detector" % (sub_id))
-                    obs.restrict('dets', obs.dets.vals[np.logical_not(mask)])
-                # Cut non-optical dets
+                    obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
+                # Cut non-optical dets, this will be redundant if the preprocessing already cut them
                 obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
@@ -242,9 +237,6 @@ def main(**args):
                 # Add site and weather, since they're not in obs yet
                 obs.wrap("weather", np.full(1, "typical"))
                 obs.wrap("site",    np.full(1, SITE))
-
-                # Prepare our data. FFT-truncate for faster fft ops
-                #obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
 
                 # Desolope to make it periodic. This should be done *before*
                 # dropping to single precision, to avoid unnecessary loss of precision due
@@ -269,20 +261,6 @@ def main(**args):
                         good    = d1u.sensitivity_cut(rms*1e6, d1u.SENS_LIMITS[band])
                     elif args.unit == 'uK':
                         good    = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
-                    #nrms    = np.sum(good)
-                    # Cut detectors with too big a fraction of samples cut,
-                    # or cuts occuring too often.
-                    #cuts = obs.flags.glitch_flags.mask()
-                    #cutfrac = cuts.sum()/np.prod(cuts.shape)
-                    #cutdens = (cuts.bins[:,1]-cuts.bins[:,0])/cuts.nsamp
-                    #good   &= np.array((cutfrac < 0.1))
-                    #ndens   = dev.np.sum(good)
-                    # Cut all detectors if too large a fraction is cut
-                    #good   &= dev.np.sum(good)/meta.ndet_full > 0.25
-                    #nfinal  = dev.np.sum(good)
-                    #signal = dev.np.ascontiguousarray(signal[good]) # 600 ms!
-                    #good   = dev.get(good) # cuts, dets, fplane etc. need this on the cpu
-                    #cuts   = cuts  [good]
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
                         L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
