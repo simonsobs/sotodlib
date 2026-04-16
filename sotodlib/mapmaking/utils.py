@@ -595,7 +595,7 @@ def rangemat_sum(rangemat):
 
 def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags", to_null : str = "flags.expected_flags"):
     flag = obs[glitch_flags]
-    if to_null != "" and to_null in obs._fields:
+    if to_null and to_null in obs: 
         flag = flag*~obs[to_null]
     ncut  = rangemat_sum(flag)
     good  = ncut < obs.samps.count * maxcut

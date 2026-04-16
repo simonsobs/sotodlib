@@ -185,7 +185,6 @@ def main(**args):
         sidelobe_cutters = {}
 
         nkept = 0
-        to_skip_all = comm.allreduce(to_skip)
 
         for ind in myinds:
             # Detsets correspond to separate files, so treat them as separate TODs.
@@ -193,7 +192,7 @@ def main(**args):
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
-            if sub_id in to_skip_all:
+            if sub_id in to_skip:
                 L.debug("Skipped %s (Cut in previous pass)" % (sub_id))
                 continue
 
