@@ -1,4 +1,5 @@
 import numpy as np
+import sys
 
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
@@ -43,8 +44,14 @@ def get_parser(parser=None):
     parser.add_argument("--cut-type",        type=str, default="full")
     return parser
 
+def exit(comm, code):
+    if comm is not None: # This check might need an expansion
+        comm.Abort(code)
+    else:
+        sys.exit(code)
+
 def main(**args):
-    import sys, time, warnings, os, so3g
+    import time, warnings, os, so3g
 
     from sotodlib import mapmaking, core
     from sotodlib.coords import sidelobes
@@ -104,7 +111,7 @@ def main(**args):
     if len(sub_ids) == 0:
         if comm.rank == 0:
             print("No tods found!")
-        sys.exit(1)
+        exit(comm, 1)
     L.info("Found %d tods" % (len(sub_ids)))
 
     # Define our task distribution
@@ -124,7 +131,7 @@ def main(**args):
     except:
         if comm.rank==0:
             L.info(f"{args.preprocess_config} is not a valid config")
-        sys.exit(1)
+        exit(comm, 1)
 
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
     to_skip = []
@@ -334,7 +341,7 @@ def main(**args):
         if nkept_all[0] == 0:
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
-            sys.exit(1)
+            exit(1)
 
         L.info("Done building")
 

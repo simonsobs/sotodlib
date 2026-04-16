@@ -330,10 +330,10 @@ def get_obsinfo_subids(subids, context):
     subids are often read in directly from a file, we can't rely
     on that. This function is a bit inefficient, since it starts
     from the full obsdb and then looks up the subids from it"""
-    obsinfo = context.obsdb.query("1")
     obsids  = split_subids(subids)[0]
-    inds    = putils.find(obsinfo["obs_id"], obsids)
-    return obsinfo.subset(rows=inds)
+    ids_str = ",".join(f"'{subid}'" for subid in obsids)                                       
+    rs = context.obsdb.query("obs_id IN (%s)" % ids_str)
+    return rs
 
 def expand_ids(obs_ids, context=None, bands=None):
     """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
