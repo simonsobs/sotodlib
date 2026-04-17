@@ -25,6 +25,14 @@ if len(logger.handlers) == 0:
 logger.setLevel(logging.INFO)
 
 
+def get_detset_time(detset: str) -> float:
+    """
+    Gets timestamp associated with a detset. Will parse this from the detset
+    name, assuming it is of the form <stream_id>_<time>_tune.
+    """
+    return float(detset.split('_')[-2])
+
+
 @dataclass
 class UpdateDetMatchesConfig:
     """
@@ -56,6 +64,9 @@ class UpdateDetMatchesConfig:
         Name of the metadata entry in the context that contains detset info.
     detcal_meta_name: str
         Name of the metadata entry in the context that contains det_cal info.
+    ufms: Optional[List[str]]
+        List of ufm names to run update_det_match on.  Will run on all ufms
+        for which detsets exist if None.
     show_pb: bool
         Will show progress bar when scanning freq-offset.
     apply_solution_pointing: bool
@@ -95,12 +106,15 @@ class UpdateDetMatchesConfig:
     match_pars: Optional[Dict] = None
     detset_meta_name : str = 'smurf'
     detcal_meta_name: str = 'det_cal'
+    ufms: Optional[List[str]] = None
     show_pb: bool = False
     apply_solution_pointing: bool = True
     write_relpath: bool = True
     solution_type: str = 'kaiwen_handmade'
     resonator_set_dir: Optional[str] = None
     time_before_cache_failure: float = float(3600 * 24 * 7)
+    start_time: int = 0
+    stop_time: int = 2**32
 
     def __post_init__(self):
         if self.site_pipeline_root is None:
@@ -129,6 +143,9 @@ class UpdateDetMatchesConfig:
         if self.solution_type == 'resonator_set':
             if self.resonator_set_dir is None:
                 raise ValueError("Must specify resonator_set_dir for solution_type='resonator_set'")
+
+        if self.ufms is not None:
+            self.ufms = [u.lower() for u in self.ufms]
 
 
 class Runner:
@@ -169,6 +186,11 @@ class Runner:
 
     def get_remaining_detsets(self) -> List[str]:
         detsets_all = set(self.detset_db.get_entries(['dataset'])['dataset'])
+        if self.cfg.ufms:
+            detsets_all = set([d for d in detsets_all if '_'.join(d.split('_')[:2]) in self.cfg.ufms])
+        ts = [get_detset_time(d) for d in detsets_all]
+        detsets_all = set([d for t, d in zip(ts, detsets_all) if t > self.cfg.start_time and t < self.cfg.stop_time])
+
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)
@@ -195,13 +217,6 @@ def load_solution_set(runner: Runner, stream_id: str, wafer_slot=None):
         rs = det_match.ResSet.from_array(rs_arr)
         rs.name = 'sol'
         return rs
-
-def get_detset_time(detset: str) -> float:
-    """
-    Gets timestamp associated with a detset. Will parse this from the detset
-    name, assuming it is of the form <stream_id>_<time>_tune.
-    """
-    return float(detset.split('_')[-2])
 
 def add_to_failed_cache(cache_file, detset, msg, cfg: UpdateDetMatchesConfig):
     if time.time() - get_detset_time(detset) < cfg.time_before_cache_failure:
@@ -287,7 +302,11 @@ def run_match(runner: Runner, detset: str) -> bool:
     finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(runner.match_dir)])
     new_detsets = []
     for detset in np.unique(aman.det_info.detset):
-        if detset not in finished_detsets:
+        if (
+            detset not in finished_detsets and
+            get_detset_time(detset) > runner.cfg.start_time and
+            get_detset_time(detset) < runner.cfg.stop_time
+        ):
             new_detsets.append(detset)
 
     logger.info(f"Loaded obs_id {obs_id}. Running matches for detsets:")
@@ -435,6 +454,7 @@ def main(config_file: str, all: bool=False):
     if all:
         update_manifests_all(runner)
         for detset in remaining_detsets:
+            logger.info(f"running: {detset}")
             run_match(runner, detset)
             update_manifests_all(runner)
     else:
