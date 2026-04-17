@@ -1174,7 +1174,7 @@ def expand_smurfgaps_flags(aman, buffer=200, name='smurfgaps', merge=True):
     if buffer:
         smurfgaps = smurfgaps.buffer(buffer)
     if merge:
-        aman.flags.wrap('smurfgaps', smurfgaps, [(0, 'dets'), (1, 'samps')])
+        aman.flags.wrap(name, smurfgaps, [(0, 'dets'), (1, 'samps')])
     return smurfgaps
 
 def get_good_distribution_flags(aman, param_name='wn_signal',

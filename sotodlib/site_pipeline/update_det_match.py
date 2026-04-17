@@ -190,7 +190,6 @@ class Runner:
             detsets_all = set([d for d in detsets_all if '_'.join(d.split('_')[:2]) in self.cfg.ufms])
         ts = [get_detset_time(d) for d in detsets_all]
         detsets_all = set([d for t, d in zip(ts, detsets_all) if t > self.cfg.start_time and t < self.cfg.stop_time])
-
         failed_detsets = set(get_failed_detsets(self.failed_detset_cache_path))
         finished_detsets = set([os.path.splitext(f)[0] for f in os.listdir(self.match_dir)])
         remaining_detsets = list(detsets_all - failed_detsets - finished_detsets)

@@ -304,6 +304,7 @@ def get_t2p_coeffs(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demo
 def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_name='demodU',
                            fs=None, fit_freq_range=(0.01, 0.1), wn_freq_range=(0.2, 1.9),
                            subtract_sig=False, merge_stats=True, t2p_stats_name='t2p_stats',
+                           ML_fit=False
                           ):
     """
     Compute the leakage coefficients from temperature (T) to polarization (Q and U) in Fourier
@@ -333,6 +334,13 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
         Whether to merge the calculated statistics back into `aman`. Default is True.
     t2p_stats_name : str
         Name under which to wrap the output AxisManager containing statistics. Default is 't2p_stats'.
+    ML_fit : bool
+        Whether to use the ML solution (analytic) to fit for coefficients. Default is False,
+        which uses ODR to perform a linear fit.
+        We are assuming a linear model: y_i = b * x_i + eps_i, where eps_i is white noise.
+        The log likelihood for this model is: log L(b) = - (1 / (2*sigma^2)) * sum_i (y_i - b*x_i)^2  + const
+        For which the maximum likelihood estimator for b is: b_hat = sum_i (x_i * y_i) / sum_i (x_i^2)
+        This is equivalent to Ordinary Least Square (OLS) regression with no intercept.
 
     Returns
     -------
@@ -347,64 +355,87 @@ def get_t2p_coeffs_in_freq(aman, T_sig_name='dsT', Q_sig_name='demodQ', U_sig_na
     I_fs = rfft(aman[T_sig_name], axis=1)
     Q_fs = rfft(aman[Q_sig_name], axis=1)
     U_fs = rfft(aman[U_sig_name], axis=1)
-    
-    coeffsQ = np.zeros(aman.dets.count)
-    errorsQ = np.zeros(aman.dets.count)
-    redchi2sQ = np.zeros(aman.dets.count)
-    coeffsU = np.zeros(aman.dets.count)
-    errorsU = np.zeros(aman.dets.count)
-    redchi2sU = np.zeros(aman.dets.count)
 
     fit_mask = (fit_freq_range[0] < freqs) & (freqs < fit_freq_range[1])
     wn_mask = (wn_freq_range[0] < freqs) & (freqs < wn_freq_range[1])
 
-    def leakage_model(B, x):
-        return B[0] * x
+    if ML_fit:
+        x = np.real(I_fs[:, fit_mask])
+        yQ = np.real(Q_fs[:, fit_mask])
+        yU = np.real(U_fs[:, fit_mask])
+        coeffsQ = np.sum(x * yQ, axis=1) / np.sum(x**2, axis=1)
+        coeffsU = np.sum(x * yU, axis=1) / np.sum(x**2, axis=1)
 
-    model = Model(leakage_model)
+        stdQ = np.std(Q_fs[:, wn_mask] - coeffsQ[:, np.newaxis] * I_fs[:, wn_mask], axis=1)
+        stdU = np.std(U_fs[:, wn_mask] - coeffsU[:, np.newaxis] * I_fs[:, wn_mask], axis=1)
 
-    for i in range(aman.dets.count):
-        # fit Q
-        Q_wnl = np.nanmean(np.abs(Q_fs[i][wn_mask]))
-        x = np.real(I_fs[i])[fit_mask]
-        y = np.real(Q_fs[i])[fit_mask]
-        sx = Q_wnl / np.sqrt(2) * np.ones_like(x)
-        sy = Q_wnl * np.ones_like(y)
-        try:
-            data = RealData(x=x, 
-                            y=y, 
-                            sx=sx, 
-                            sy=sy)
-            odr = ODR(data, model, beta0=[1e-3])
-            output = odr.run()
-            coeffsQ[i] = output.beta[0]
-            errorsQ[i] = output.sd_beta[0]
-            redchi2sQ[i] = output.sum_square / (len(x) - 2)
-        except:
-            coeffsQ[i] = np.nan
-            errorsQ[i] = np.nan
-            redchi2sQ[i] = np.nan
+        errorsQ = stdQ / np.sqrt(np.sum(x**2, axis=1))
+        errorsU = stdU / np.sqrt(np.sum(x**2, axis=1))
 
-        #fit U
-        U_wnl = np.nanmean(np.abs(U_fs[i][wn_mask]))
-        x = np.real(I_fs[i])[fit_mask]
-        y = np.real(U_fs[i])[fit_mask]
-        sx = U_wnl / np.sqrt(2) * np.ones_like(x)
-        sy = U_wnl * np.ones_like(y)
-        try:
-            data = RealData(x=x, 
-                            y=y, 
-                            sx=sx, 
-                            sy=sy)
-            odr = ODR(data, model, beta0=[1e-3])
-            output = odr.run()
-            coeffsU[i] = output.beta[0]
-            errorsU[i] = output.sd_beta[0]
-            redchi2sU[i] = output.sum_square / (len(x) - 2)
-        except:
-            coeffsU[i] = np.nan
-            errorsU[i] = np.nan
-            redchi2sU[i] = np.nan
+        redchi2sQ = np.sum(
+            (yQ - coeffsQ[:, np.newaxis] * x) ** 2 / stdQ[:, np.newaxis] ** 2,
+            axis=1
+        ) / (x.shape[1] - 1)
+        redchi2sU = np.sum(
+            (yU - coeffsU[:, np.newaxis] * x) ** 2 / stdU[:, np.newaxis] ** 2,
+            axis=1
+        ) / (x.shape[1] - 1)
+
+    else:
+        coeffsQ = np.zeros(aman.dets.count)
+        errorsQ = np.zeros(aman.dets.count)
+        redchi2sQ = np.zeros(aman.dets.count)
+        coeffsU = np.zeros(aman.dets.count)
+        errorsU = np.zeros(aman.dets.count)
+        redchi2sU = np.zeros(aman.dets.count)
+
+        def leakage_model(B, x):
+            return B[0] * x
+
+        model = Model(leakage_model)
+
+        for i in range(aman.dets.count):
+            # fit Q
+            Q_wnl = np.nanmean(np.abs(Q_fs[i][wn_mask]))
+            x = np.real(I_fs[i])[fit_mask]
+            y = np.real(Q_fs[i])[fit_mask]
+            sx = Q_wnl / np.sqrt(2) * np.ones_like(x)
+            sy = Q_wnl * np.ones_like(y)
+            try:
+                data = RealData(x=x, 
+                                y=y, 
+                                sx=sx, 
+                                sy=sy)
+                odr = ODR(data, model, beta0=[1e-3])
+                output = odr.run()
+                coeffsQ[i] = output.beta[0]
+                errorsQ[i] = output.sd_beta[0]
+                redchi2sQ[i] = output.sum_square / (len(x) - 2)
+            except:
+                coeffsQ[i] = np.nan
+                errorsQ[i] = np.nan
+                redchi2sQ[i] = np.nan
+
+            #fit U
+            U_wnl = np.nanmean(np.abs(U_fs[i][wn_mask]))
+            x = np.real(I_fs[i])[fit_mask]
+            y = np.real(U_fs[i])[fit_mask]
+            sx = U_wnl / np.sqrt(2) * np.ones_like(x)
+            sy = U_wnl * np.ones_like(y)
+            try:
+                data = RealData(x=x, 
+                                y=y, 
+                                sx=sx, 
+                                sy=sy)
+                odr = ODR(data, model, beta0=[1e-3])
+                output = odr.run()
+                coeffsU[i] = output.beta[0]
+                errorsU[i] = output.sd_beta[0]
+                redchi2sU[i] = output.sum_square / (len(x) - 2)
+            except:
+                coeffsU[i] = np.nan
+                errorsU[i] = np.nan
+                redchi2sU[i] = np.nan
 
     out_aman = core.AxisManager(aman.dets, aman.samps)
     out_aman.wrap('coeffsQ', coeffsQ, [(0, 'dets')])
