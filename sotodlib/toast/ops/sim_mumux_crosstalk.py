@@ -297,11 +297,10 @@ class SimMuMUXCrosstalk(Operator):
                         crosstalk += chi * np.sin(
                             source_squid_phase - target_squid_phase
                         )
-                    #else:
-                    #    # Otherwise flag
-                    #    print('Flagging!')
-                    #    temp_obs.detdata[self.det_flags][det_source] |= self.det_flag_mask
-                    #    temp_obs.detdata[self.det_flags][det_target] |= self.det_flag_mask
+                    else:
+                        # Otherwise flag
+                        temp_obs.detdata[self.det_flags][det_source] |= self.det_flag_mask
+                        temp_obs.detdata[self.det_flags][det_target] |= self.det_flag_mask
 
                 # Translate crosstalk into temperature units and scale to
                 # match input data
