@@ -330,10 +330,10 @@ def get_obsinfo_subids(subids, context):
     subids are often read in directly from a file, we can't rely
     on that. This function is a bit inefficient, since it starts
     from the full obsdb and then looks up the subids from it"""
-    obsinfo = context.obsdb.query("1")
     obsids  = split_subids(subids)[0]
-    inds    = putils.find(obsinfo["obs_id"], obsids)
-    return obsinfo.subset(rows=inds)
+    ids_str = ",".join(f"'{subid}'" for subid in obsids)                                       
+    rs = context.obsdb.query("obs_id IN (%s)" % ids_str)
+    return rs
 
 def expand_ids(obs_ids, context=None, bands=None):
     """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
@@ -505,7 +505,7 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
                 try:
                     planet = coords.planets.SlowSource.for_named_source(
                         name, ctime)
-                    ra0, dec0 = planet.pos(tod.timestamps.mean())
+                    ra0, dec0 = planet.pos(np.mean(ctime))
                 except:
                     obj = getattr(ephem, name)()
                     djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
@@ -595,7 +595,7 @@ def rangemat_sum(rangemat):
 
 def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags", to_null : str = "flags.expected_flags"):
     flag = obs[glitch_flags]
-    if to_null != "" and to_null in obs._fields:
+    if to_null and to_null in obs: 
         flag = flag*~obs[to_null]
     ncut  = rangemat_sum(flag)
     good  = ncut < obs.samps.count * maxcut
@@ -674,6 +674,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
     axes   = [obs[axname] for axname in obs._axes if axname != "samps"]
     res    = core.AxisManager(core.OffsetAxis("samps", onsamp), *axes)
     for key, axes in obs._assignments.items():
+        assigns = [(i,x) for i,x in enumerate(axes)]
         # Stuff without sample axes
         if "samps" not in axes:
             res.wrap(*get_wrappable(obs, key))
@@ -684,9 +685,9 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
         # TODO: This is a pretty naive way of handling flags, could lead to wierdness
         # Again not an issue if this is done after preprocess
         elif isinstance(obs[key], so3g.proj.ranges.RangesMatrix):
-            res.wrap(key, downsample_cut(obs[key], down))
+            res.wrap(key, downsample_cut(obs[key], down), assigns)
         elif isinstance(obs[key], so3g.RangesInt32):
-            res.wrap(key, downsample_ranges(obs[key], down))
+            res.wrap(key, downsample_ranges(obs[key], down), assigns)
         elif issparse(obs[key]) and isinstance(obs[key], sparray):
             if sparse_handling == "skip":
                 continue
@@ -695,14 +696,14 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
                 dat = np.moveaxis(obs[key].toarray(), ax_idx, -1)
                 # Resample and return to original order
                 dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
-                res.wrap(key, obs[key].__class__(dat), [(i, ax) for i, ax in enumerate(axes)])
+                res.wrap(key, obs[key].__class__(dat), assigns)
         elif key in fft_resample:
             # Make the axis that is samps the last one
             ax_idx = np.where(np.array(axes) == "samps")[0]
             dat = np.moveaxis(obs[key], ax_idx, -1)
             # Resample and return to original order
             dat = np.moveaxis(resample.resample_fft_simple(dat, onsamp), -1, ax_idx)
-            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+            res.wrap(key, dat, assigns)
         # Some naive slicing for everything else
         elif isinstance(obs[key], np.ndarray):
             # Make the axis that is samps the last one
@@ -710,7 +711,7 @@ def downsample_obs(obs, down, skip_signal=False, fft_resample=["signal"], sparse
             dat = np.moveaxis(obs[key], ax_idx, -1)
             # Resample and return to original order
             dat = np.moveaxis(dat[..., ::down][..., :onsamp], -1, ax_idx)
-            res.wrap(key, dat, [(i, ax) for i, ax in enumerate(axes)])
+            res.wrap(key, dat, assigns)
         else:
             logger.warning("Skipping field %s, unhandled type %s", key, type(obs[key]))
             continue
@@ -781,28 +782,27 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
     such that each category is as compact in RA as possible, and each
     category has as similar size as possible. Assumes that all obs
     are at the same site."""
-    if len(obsinfo) <= nsplit:
-        return np.arange(nsplit)[:len(obsinfo)]
-    # Get a reprsentative RA per entry
-    az    = obsinfo["az_center"] * putils.degree
-    el    = obsinfo["el_center"] * putils.degree
-    ctime = (obsinfo["start_time"] + obsinfo["stop_time"])/2
-    ra    = so3g.proj.CelestialSightLine.az_el(ctime, az, el, site=site, weather=weather).coords()[:,0]
-    # Put everything on the same copy of the sky
-    ra    = putils.rewind_compact(ra)
-    # Partition sorted ras equally by weight. Would ideally include
-    # ndet too, but the effective ndet depends on the cuts etc.
-    order = np.argsort(ra)
-    weight= obsinfo["n_samples"][order]
-    cum   = putils.cumsum(weight)
-    wtot  = cum[-1]+weight[-1] # = np.sum(weight)
-    owner = np.zeros(len(obsinfo),int)
-    owner[order] = putils.floor(cum*nsplit/wtot)
-    # Make sure none ended up empty. If they did, fall back to unweighted,
-    # which will always succeed
-    if np.any(np.bincount(owner, minlength=nsplit) == 0):
-        owner[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
-    return owner
+    owners = np.arange(nsplit,dtype=int)[:len(obsinfo)]
+    if len(obsinfo) > nsplit:
+        # Get a reprsentative RA per entry
+        az    = obsinfo["az_center"] * putils.degree
+        el    = obsinfo["el_center"] * putils.degree
+        ctime = (obsinfo["start_time"] + obsinfo["stop_time"])/2
+        ra    = so3g.proj.CelestialSightLine.az_el(ctime, az, el, site=site, weather=weather).coords()[:,0]
+        # Put everything on the same copy of the sky
+        ra    = putils.rewind_compact(ra)
+        # Partition sorted ras equally by weight. Would ideally include
+        # ndet too, but the effective ndet depends on the cuts etc.
+        order = np.argsort(ra)
+        weight= obsinfo["n_samples"][order]
+        cum   = putils.cumsum(weight)
+        wtot  = cum[-1]+weight[-1] # = np.sum(weight)
+        owners[order] = putils.floor(cum*nsplit/wtot)
+        # Make sure none ended up empty. If they did, fall back to unweighted,
+        # which will always succeed
+        if np.any(np.bincount(owners, minlength=nsplit) == 0):
+            owners[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
+    return owners
 
 Base = declarative_base()
 
@@ -885,27 +885,3 @@ def atomic_db_aux(atomic_db, info: list[AtomicInfo]):
             session.commit()
         except exc.IntegrityError:
             session.rollback()
-
-
-def prune_mpi(comm, ranks_to_keep):
-    """
-    Prune unneeded MPI procs.
-
-    Arguments:
-
-        comm: The MPI communicator currently in use.
-
-        ranks_to_keep: List of current ranks to keep in the new communicator.
-
-    Returns:
-
-        comm: Modified communicator with only the processes we want to keep.
-    """
-    group = comm.Get_group()
-    new_group = group.Incl(ranks_to_keep)
-    new_comm = comm.Create(new_group)
-    if comm.rank not in ranks_to_keep:
-        sys.exit(0)
-    comm = new_comm
-
-    return comm
