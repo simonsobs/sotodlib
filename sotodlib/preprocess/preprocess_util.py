@@ -89,10 +89,10 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
     Arguments
     ---------
 
-    jdb : JobDB
-        The preprocessing jobdb class.
+    jdb : JobManager
+        The preprocessing jobdb.
     jclass : str
-        The job name.
+        The jobdb class name.
     db : ManifestDb or None
         Preprocessing database.
     run_list : list
@@ -149,7 +149,9 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
                 with jdb.locked(job) as j:
                     if overwrite == True:
                         j.jstate = "open"
-                        j.tags["error"] = None
+                        for _t in j._tags:
+                            if _t.key == "error":
+                                _t.value = None
             else:
                 if job.jstate == JState.done:
                     done += 1
@@ -164,6 +166,35 @@ def filter_preproc_runlist_by_jobdb(jdb, jclass, db, run_list, group_by,
 
     return run_list
 
+
+def reopen_failed_preproc_jobs(jdb, jclass, error=None):
+    """Helper function to re-open jobs that failed with particular errors
+    so that they can be re-run with the run_from_jobdb argument.
+
+    Arguments
+    ---------
+
+    jdb : JobManager or str
+        The preprocessing jobdb or a path to an existing jobdb file.
+    jclass : str
+        The jobdb class name.
+    error : str or None
+        The PreprocessError name to re-open. If None, re-open all failed jobs.
+    """
+    if isinstance(jdb, str):
+        if not os.path.isfile(jdb):
+            return
+        jdb = JobManager(sqlite_file=jdb)
+
+    failed_jobs = jdb.get_jobs(jclass=jclass, jstate=JState.failed)
+
+    for job in failed_jobs:
+        if job.tags['error'] == error or error is None:
+            with jdb.locked(job) as j:
+                j.jstate=JState.open
+                for _t in j._tags:
+                    if _t.key == "error":
+                        _t.value = None
 
 class ArchivePolicy:
     """Storage policy assistance.  Helps to determine the HDF5
@@ -485,7 +516,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None, logger=None):
+                        no_signal=None, logger=None, return_full_aman=False):
     """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -512,12 +543,19 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     logger : PythonLogger
         Optional. Logger object.  If None, a new logger
         is created.
+    return_full_aman : bool
+        Optional. Return unrestricted axis manager alongside restricted aman
+        if True, otherwise return None.
 
     Returns
     -------
     aman : core.AxisManager or None
         Loaded and restricted axis manager with preprocessing metadata. Returns
         ``None`` if all detectors cut.
+    full_aman : core.AxisManager or None
+        Unrestricted preprocessing axis manager.  Used when running multilayer
+        pipeline to ensure saved detector axis has the full size when saving
+        metadata.
     """
 
     if logger is None:
@@ -525,6 +563,12 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
 
     configs, context = get_preprocess_context(configs, context)
     meta = context.get_meta(obs_id, dets=dets, meta=meta)
+
+    if return_full_aman:
+        full_aman = meta.preprocess.copy()
+    else:
+        full_aman = None
+
     if (
         'valid_data' in meta.preprocess and
         isinstance(meta.preprocess.valid_data, core.AxisManager)
@@ -542,8 +586,8 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
         aman = context.get_obs(meta, no_signal=no_signal)
-        pipe.run(aman, aman.preprocess)
-        return aman
+        pipe.run(aman, aman.preprocess, select=False)
+        return aman, full_aman
 
 
 def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
@@ -643,6 +687,21 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         ):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
+            logger.info("Restricting detectors on all init pipeline processes")
+            if (
+                'valid_data' in meta_init.preprocess and
+                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
+            else:
+              keep_all = np.ones(meta_init.dets.count,dtype=bool)
+              for process in pipe_init[:]:
+                  keep = process.select(meta_init, in_place=False)
+                  if isinstance(keep, np.ndarray):
+                      keep_all &= keep
+            meta_init.restrict("dets", meta_init.dets.vals[keep_all])
+            meta_proc.restrict("dets", meta_init.dets.vals)
+
             logger.info("Restricting detectors on all proc pipeline processes")
             if (
                 'valid_data' in meta_proc.preprocess and
@@ -655,6 +714,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                     keep = process.select(meta_proc, in_place=False)
                     if isinstance(keep, np.ndarray):
                         keep_all &= keep
+
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
 
@@ -674,6 +734,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                     return aman
 
             logger.info("Running dependent pipeline")
+
             if stop_for_sims:
                 aman = out_amans_init[(len(pipe_init), 'last')]
             proc_aman = context_proc.get_meta(obs_id, meta=aman)
@@ -692,7 +753,6 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
                     if name != 'last'
                 })
                 return out_amans
-
             else:
                 pipe_proc.run(aman, aman.preprocess, select=False)
                 return aman
@@ -790,7 +850,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         filled with AxisManager processed up to step-1. This is used
         to pre-load all data AxisManager which could be required when
         processing simulations (e.g. to provide a T2P template)
-
+ 
     Returns
     -------
     aman : core.AxisManager or None
@@ -827,14 +887,37 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             logger=logger):
             pipe_proc = Pipeline(configs_proc["process_pipe"], logger=logger)
 
+            logger.info("Restricting detectors on all init pipeline processes")
+            if (
+                'valid_data' in meta_init.preprocess and
+                isinstance(meta_init.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_init.preprocess.valid_data.valid_data)
+            else:
+              keep_all = np.ones(meta_init.dets.count,dtype=bool)
+              for process in pipe_init[:]:
+                  keep = process.select(meta_init, in_place=False)
+                  if isinstance(keep, np.ndarray):
+                      keep_all &= keep
+            meta_init.restrict("dets", meta_init.dets.vals[keep_all])
+            meta_proc.restrict("dets", meta_init.dets.vals)
+
             logger.info("Restricting detectors on all proc pipeline processes")
-            keep_all = np.ones(meta_proc.dets.count, dtype=bool)
-            for process in pipe_proc[:]:
-                keep = process.select(meta_proc, in_place=False)
-                if isinstance(keep, np.ndarray):
-                    keep_all &= keep
+            if (
+                'valid_data' in meta_proc.preprocess and
+                isinstance(meta_proc.preprocess.valid_data, core.AxisManager)
+               ):
+                keep_all = has_any_cuts(meta_proc.preprocess.valid_data.valid_data)
+            else:
+                keep_all = np.ones(meta_proc.dets.count, dtype=bool)
+                for process in pipe_proc[:]:
+                    keep = process.select(meta_proc, in_place=False)
+                    if isinstance(keep, np.ndarray):
+                        keep_all &= keep
+
             meta_proc.restrict("dets", meta_proc.dets.vals[keep_all])
             meta_init.restrict('dets', meta_proc.dets.vals)
+
             aman = context_init.get_obs(meta_proc, no_signal=True)
 
             # One needs to correct HWP model and gamma
@@ -1296,9 +1379,14 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         if db_init_exist and not db_proc_exist:
             out_dict_init = None
             try:
+                # need unrestricted proc aman for second layer
+                if configs_proc is not None:
+                    return_full_aman = True
+                else:
+                    return_full_aman = False
                 logger.info(f"Loading and applying preprocessing for initial layer db on {obs_id}:{group}")
-                aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
-                                           logger=logger)
+                aman, proc_aman = load_and_preprocess(obs_id=obs_id, dets=dets, configs=configs_init,
+                                                      logger=logger, return_full_aman=return_full_aman)
             except Exception as e:
                 errmsg, tb = PreprocessErrors.get_errors(e)
                 logger.error(f"Initial layer Pipeline Load Error for {obs_id}: {group}\n{errmsg}\n{tb}")
@@ -1403,7 +1491,7 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
 
             pipe_proc = Pipeline(configs_proc["process_pipe"],
                                  plot_dir=configs_proc["plot_dir"], logger=logger)
-            proc_aman, success = pipe_proc.run(aman)
+            proc_aman, success = pipe_proc.run(aman, full_aman=proc_aman)
             pipe_init = Pipeline(configs_init["process_pipe"],
                                  plot_dir=configs_init["plot_dir"],
                                  logger=logger)
