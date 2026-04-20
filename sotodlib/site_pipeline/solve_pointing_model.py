@@ -7,8 +7,7 @@ import yaml
 import logging
 import numpy as np
 import so3g.proj.quat as quat
-import pdb
-# import lmfit
+
 import lmfit
 from lmfit import minimize, Parameters, fit_report
 import time
@@ -33,10 +32,15 @@ plt.rcParams["axes.grid"] = True
 plt.rcParams["grid.alpha"] = 0.5
 
 
-def load_nom_ufm_centers(config):
-    # Load Nominal UFM Center Locations from centered focal_plane
+def load_per_obs_data(config, t0, tf):
+    # Load per-observation UFM center data points and weights
+    platform = config.get("platform")
     ffp_path = config.get("ffp_path")
     ufms = config.get("ufms")
+    per_obs_fps = config.get("per_obs_fps")
+    skip_tags = config.get("skip_tags", [])
+
+    # Load nominal template data for UFM Center locations.
     nom_ufm_centers = np.zeros([7, 3]) * np.nan
     rx = fpc.Receiver.load_file(ffp_path)
     OT = rx["0"].optics_tubes[0]
@@ -45,24 +49,15 @@ def load_nom_ufm_centers(config):
             index = ufms.index(OT.focal_planes[ufm].stream_id)
         except:
             temp_ufms = config.get("temp_ufms")
-            index = temp_ufms.index(OT.focal_planes[ufm].stream_id) 
+            index = temp_ufms.index(OT.focal_planes[ufm].stream_id)
         nom_ufm_centers[index, :3] = OT.focal_planes[ufm].center
 
-    return nom_ufm_centers
-
-def load_per_obs_data(config, t0, tf):
-    # Load per-observation UFM center data points and weights
     # The per obs .h5 file a dict with obs_id for keys
-    per_obs_fps = config.get("per_obs_fps")
-    ufms = config.get("ufms")
-    skip_tags = config.get("skip_tags", [])
     rxs = fpc.Receiver.load_file(per_obs_fps)
-
     filelist = [obs for obs in rxs.keys() if all(skip not in obs for skip in skip_tags)]
     filelist = [obs for obs in filelist if int(obs.split("_")[1]) > t0 and int(obs.split("_")[1]) < tf]
     if config.get("use_these_files") is not None:
         filelist = [filelist[i] for i in config.get("use_these_files")]
-        
     obs_ufm_centers = np.zeros([len(filelist), 7, 3]) * np.nan
     weights_ufm = np.zeros([len(filelist), 7])
     obs_index = []
@@ -76,19 +71,35 @@ def load_per_obs_data(config, t0, tf):
             weights_ufm[i, index] = np.nansum(this_OT.focal_planes[u].weights)
             ot_list.append(this_OT.name)
             obs_index.append(i)
-           
+
     weights_ufm = weights_ufm / 1720.0
     weights_ufm[weights_ufm < config.get("weight_cutoff")] = 0.0
     initial_weights_mask = np.where(weights_ufm == 0)
     obs_ufm_centers[initial_weights_mask] = np.nan
     obs_index = np.array(obs_index)
     ot_list = np.array(ot_list)
-    #obs_index[initial_weights_mask] = np.nan
 
-    return filelist, obs_ufm_centers, weights_ufm, obs_index, ot_list
+    # Load Boresight information
+    ctx = core.Context(config["context"]["path"])
+    obs_info = [ctx.obsdb.get(obsid) for obsid in filelist]
+    az_c = np.array([obs["az_center"] for obs in obs_info])
+    el_c = np.array([obs["el_center"] for obs in obs_info])
+    roll_c = np.array([obs["roll_center"] for obs in obs_info])
 
-def load_nom_focal_plane_full(config, ufm):
+    ancil = core.AxisManager(core.IndexAxis("samps"))
+    ancil.wrap("az_enc", np.repeat(az_c, 7), [(0, "samps")])
+    ancil.wrap("el_enc", np.repeat(el_c, 7), [(0, "samps")])
+    ancil.wrap("roll_enc", np.repeat(el_c, 7), [(0, "samps")])
+    if "lat" in platform:
+        ancil.wrap("corotator_enc", np.repeat((el_c - 60. - roll_c), 7), [(0, "samps")])
+    if "sat" in platform:
+        ancil.wrap("boresight_enc", np.repeat(-1 * roll_c, 7), [(0, "samps")])
+
+    return filelist, obs_ufm_centers, weights_ufm, nom_ufm_centers, obs_index, ot_list, ancil, roll_c
+
+def load_nom_focal_plane_full(config, t0, ufm):
     which_template = config.get("use_as_template", "ffp")
+    t0 = str(t0)
     if which_template == "nominal":
         ffp_path = config.get("nominal")
         with h5py.File(ffp_path, "r") as template_fp:
@@ -101,7 +112,7 @@ def load_nom_focal_plane_full(config, ufm):
     elif which_template == "ffp":
         ffp_path = config.get("ffp_path")
         with h5py.File(ffp_path, "r") as template_fp:
-            OT = template_fp["0/st1"]
+            OT = template_fp[t0]["st1"]
             fpf = np.array(OT[ufm]["focal_plane_full"][:])
             # Extracting specific columns using structured arrays
             det_ids = fpf[
@@ -113,8 +124,9 @@ def load_nom_focal_plane_full(config, ufm):
             nom_det_array = np.stack((xi, eta, gamma), axis=1)
 
     return det_ids, nom_det_array
+
     
-def create_size_mask(obs_index):
+def _create_size_mask(obs_index):
     #create comparably sized datasets of all obs.
     unique, counts = np.unique(obs_index, return_counts=True)
     min_count = min(counts)
@@ -124,8 +136,9 @@ def create_size_mask(obs_index):
         selected_indices = np.random.choice(indices, min_count, replace=False)
         limiting_mask[selected_indices] = True
     return limiting_mask
+
     
-def create_culling_mask(obs_index, cull_dets):
+def _create_culling_mask(obs_index, cull_dets):
     # Remove a random fraction 1/cull_dets of each dataset 
     unique, counts = np.unique(obs_index, return_counts=True)
     #min_count = min(counts)
@@ -135,12 +148,15 @@ def create_culling_mask(obs_index, cull_dets):
         selected_indices = np.random.choice(indices, (cull_dets - 1)* count // cull_dets, replace=False)
         culling_mask[selected_indices] = True
     return culling_mask 
+
     
-    
-def load_per_detector_data(config, t0, tf, no_downsample_set=False, return_all_dets=False):
+def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=False):
     per_obs_fps = config.get("per_obs_fps")
     skip_tags = config.get("skip_tags", [])
     rxs = fpc.Receiver.load_file(per_obs_fps)
+    which_data = config.get("use_as_data")
+    which_weights = config.get("use_as_weights", None)
+    ctx = core.Context(config["context"]["path"])
 
     if return_all_dets:
         band = None
@@ -164,132 +180,145 @@ def load_per_detector_data(config, t0, tf, no_downsample_set=False, return_all_d
         if config.get("use_these_files") is not None:
             filelist = [filelist[i] for i in config.get("use_these_files")]
 
-    weights_dets, obs_dets_fits, stream_id_list, ot_list, obs_index = [], [], [], [], []
-    #which_ufm = config.get("which_ufm", None)
-    which_data = config.get("use_as_data")
-    which_weights = config.get("use_as_weights", None)
-    
+    obs_dets_fits, det_boresight, weights_dets, stream_id_list, ot_list, obs_index = [], [], [], [], [], []
     for i, ffp in enumerate(filelist):
+        obs_info = ctx.obsdb.get(ffp)
         this_OT = rxs[ffp].optics_tubes[0]
         for ufm in this_OT.focal_planes:
             if which_ufm is not None and ufm.stream_id not in which_ufm:
                 continue
             stream_id_list.append(ufm.stream_id)
             weights = ufm.weights[:, 1] if which_weights == "r2" else ufm.weights[:, 0]
-            data = ufm.avg_fp if which_data == "raw" else ufm.transformed
             weights_dets.append(weights)
+            data = ufm.avg_fp if which_data == "raw" else ufm.transformed
             obs_dets_fits.append(data)
             obs_index.append(np.repeat(i, len(ufm.weights)))
             ot_list.append([this_OT.name] * len(data))
+            try:
+                det_pointing = np.rad2deg(ufm.det_boresight)
+                #det_boresight.append(ufm.det_boresight)
+            except:
+                # ufm.det_boresight not found, filling with average boresight values.
+                az_c = np.ones(np.shape(data)[0]) * obs_info["az_center"]
+                el_c = np.ones(np.shape(data)[0]) * obs_info["el_center"]
+                roll_c = np.ones(np.shape(data)[0]) * obs_info["roll_center"]
+                det_pointing = np.column_stack([az_c, el_c, roll_c])
+            det_pointing[:,2] = np.ones(np.shape(data)[0]) * obs_info["roll_center"]
+            det_boresight.append(det_pointing)
             
-    nom_data = [load_nom_focal_plane_full(config, s) for s in stream_id_list]
+    nom_data = [load_nom_focal_plane_full(config, t0, s) for s in stream_id_list]
     all_det_ids, all_nom_det_array = map(np.concatenate, zip(*nom_data))
     weights_dets = np.concatenate(weights_dets)
     obs_dets_fits = np.concatenate(obs_dets_fits, axis=0)
+    det_boresight = np.concatenate(det_boresight, axis=0)
     obs_index = np.concatenate(obs_index)
     ot_list = np.concatenate(ot_list)
+
+    #Order: [data fits, detector boresight, weights, nominal, ids, index]
+    data_group = [obs_dets_fits, det_boresight, weights_dets, all_nom_det_array, all_det_ids, obs_index, ot_list]
 
     weights_dets[weights_dets < config.get("weight_cutoff")] = 0.0
     obs_dets_fits[np.where(weights_dets == 0)] = np.nan
     mask = ~np.isnan(weights_dets)  
-    
-    if no_downsample_set:
-        #plotting use-case to compare subset fits with the entire dataset.
-        return (
-            filelist,
-            obs_dets_fits[mask],
-            weights_dets[mask],
-            all_nom_det_array[mask],
-            all_det_ids[mask],
-            obs_index[mask],
-            ot_list[mask],
-        )
-
-    else:
+    if not no_downsample:
         # Reduce detector counts for computation
         if band is not None:
             mask &= np.array([band in det for det in all_det_ids])
-        #apply weights and band mask
-        obs_dets_fits = obs_dets_fits[mask]
-        weights_dets = weights_dets[mask]
-        all_nom_det_array = all_nom_det_array[mask]
-        all_det_ids = all_det_ids[mask]
-        obs_index = obs_index[mask]
-        ot_list = ot_list[mask]
+        data_group = [arr[mask] for arr in data_group]
+
         if even_obs_size:
-            mask = create_size_mask(obs_index)
-            obs_dets_fits = obs_dets_fits[mask]
-            weights_dets = weights_dets[mask]
-            all_nom_det_array = all_nom_det_array[mask]
-            all_det_ids = all_det_ids[mask]
-            obs_index = obs_index[mask]
-            ot_list = ot_list[mask]
+            m = _create_size_mask(data_group[-1])
+            data_group = [arr[m] for arr in data_group]
+
         if cull_dets is not None:
             for _ in range(2 if cull_twice else 1):
-                mask = create_culling_mask(obs_index, cull_dets)
-                obs_dets_fits = obs_dets_fits[mask]
-                weights_dets = weights_dets[mask]
-                all_nom_det_array = all_nom_det_array[mask]
-                all_det_ids = all_det_ids[mask]
-                obs_index = obs_index[mask]
-                ot_list = ot_list[mask]
-        return (
-            filelist, 
+                m = _create_culling_mask(data_group[-1], cull_dets)
+                data_group = [arr[m] for arr in data_group]
+    else:
+        # Only apply weights mask, (Used for plotting)
+        data_group = [arr[mask] for arr in data_group]
+
+    return (filelist, *data_group)
+
+
+def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_all_dets=False):
+    aman = core.AxisManager(core.IndexAxis("samps"))
+    obs_info = core.AxisManager()
+    obs_info.wrap("platform", config.get("platform"))
+
+    if not per_det:
+        (
+            filelist,
+            obs_ufm_centers,
+            weights_ufm,
+            nom_fm_centers,
+            obs_index,
+            ot_list,
+            ancil,
+            roll_c,
+        ) = load_per_obs_data(config, t0, tf)
+        obs_info.wrap("obs_ids", np.array(filelist))
+        aman.wrap("obs_info", obs_info)
+        aman.wrap("ancil", ancil)
+        aman.wrap("roll_c", np.repeat(roll_c, 7), [(0, "samps")])
+        aman.wrap(
+                "nominal_xieta_locs",
+                np.repeat([nom_ufm_centers], len(filelist), axis=0)
+                .reshape(len(filelist) * 7, 3)
+                .T,
+                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"])),
+                (1, "samps")],
+            )
+        aman.wrap(
+                "measured_xieta_data",
+                obs_ufm_centers.reshape(len(filelist) * 7, 3).T,
+                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"])),
+                (1, "samps")],
+            )
+        aman.wrap("weights", weights_ufm.reshape(-1), [(0, "samps")])
+        aman.wrap("obs_index", obs_index)
+
+        return aman
+
+    else:
+        (
+            filelist,
             obs_dets_fits,
+            det_boresight,
             weights_dets,
             all_nom_det_array,
             all_det_ids,
             obs_index,
             ot_list,
+        ) = load_per_detector_data(config, t0, tf, no_downsample, return_all_dets)
+        ancil = core.AxisManager(core.IndexAxis("samps"))
+        ancil.wrap("az_enc", det_boresight[:,0], [(0, "samps")])
+        ancil.wrap("el_enc", det_boresight[:,1], [(0, "samps")])
+        ancil.wrap("roll_c", det_boresight[:,2], [(0, "samps")])
+        if "lat" in obs_info.platform:
+            ancil.wrap("corotator_enc", ancil.el_enc - 60. - ancil.roll_c, [(0, "samps")])
+        elif "sat" in obs_info.platform:
+            ancil.wrap("boresight_enc", -1 * det_boresight[:,2], [(0, "samps")])
+        obs_info.wrap("obs_ids", np.array(filelist))
+        aman.wrap("obs_info", obs_info)
+        aman.wrap("ancil", ancil)
+        aman.wrap("roll_c", det_boresight[:,2], [(0, "samps")])
+        aman.wrap(
+            "nominal_xieta_locs", all_nom_det_array.T,
+            [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"])),
+            (1, "samps")],
         )
+        aman.wrap(
+            "measured_xieta_data", obs_dets_fits.T,
+            [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"])),
+            (1, "samps")],
+        )
+        aman.wrap("weights", weights_dets, [(0, "samps")])
+        aman.wrap("det_ids", all_det_ids,  [(0, "samps")])
+        aman.wrap("obs_index", obs_index, [(0, "samps")])
+        aman.wrap("ot_list", ot_list, [(0, "samps")])
 
-def load_obs_boresight(config, filelist):
-    # Load boresight elevation information from each observation
-    # Put into an axis manager
-    pm_version = config.get("pm_version")
-    ctx = core.Context(config["context"]["path"])
-    obs_info = [ctx.obsdb.get(obsid) for obsid in filelist]
-    az_c = np.array([obs["az_center"] for obs in obs_info])
-    el_c = np.array([obs["el_center"] for obs in obs_info])
-    roll_c = np.array([obs["roll_center"] for obs in obs_info])
-    #az_c = np.round(np.array(az_c), 4)
-    #el_c = np.round(np.array(el_c), 4)
-    #roll_c = np.round(np.array(roll_c), 4)
-    #roll_c[np.where(roll_c == 0)[0]] = 0  # rounding gives negative 0 sometimes.
-
-    ancil = core.AxisManager(core.IndexAxis("samps"))
-    ancil.wrap("az_enc", np.repeat(az_c, 7), [(0, "samps")])
-    ancil.wrap("el_enc", np.repeat(el_c, 7), [(0, "samps")])
-    if "lat" in pm_version:
-        ancil.wrap("corotator_enc", np.repeat((el_c - 60. - roll_c), 7), [(0, "samps")])
-    if "sat" in pm_version:   
-        ancil.wrap("boresight_enc", np.repeat(-1 * roll_c, 7), [(0, "samps")])
-    return ancil, roll_c
-
-
-def load_obs_boresight_per_detector(config, filelist, obs_ind):
-    # Load boresight elevation information from each observation
-    # Put into an axis manager
-    platform = config.get("platform")
-    ctx = core.Context(config["context"]["path"])
-    obs_info = [ctx.obsdb.get(obsid) for obsid in filelist]
-    az_c = np.array([obs["az_center"] for obs in obs_info])
-    el_c = np.array([obs["el_center"] for obs in obs_info])
-    roll_c = np.array([obs["roll_center"] for obs in obs_info])
-
-    ancil = core.AxisManager(core.IndexAxis("samps"))
-    if platform == 'lat':
-        roll_c = np.array([roll_c[i] for i in obs_ind])       
-        ancil.wrap("az_enc", np.array([az_c[i] for i in obs_ind]), [(0, "samps")])
-        ancil.wrap("el_enc", np.array([el_c[i] for i in obs_ind]), [(0, "samps")])
-        ancil.wrap("corotator_enc", ancil.el_enc - 60. - roll_c, [(0, "samps")])  
-    else:   
-        roll_c = np.array([roll_c[i] for i in obs_ind])
-        ancil.wrap("az_enc", np.array([az_c[i] for i in obs_ind]), [(0, "samps")])
-        ancil.wrap("el_enc", np.array([el_c[i] for i in obs_ind]), [(0, "samps")])
-        ancil.wrap("boresight_enc", -1 * roll_c, [(0, "samps")])
-
-    return ancil, roll_c
+        return aman
 
 
 def _init_fit_params(config, epochs):
@@ -372,6 +401,39 @@ def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
         eta_mod[msk] *= ot_pars[4]
     return xi_mod, eta_mod
 
+#test Elle Apr 10
+def objective_model_func_lmfit(
+    params, pm_version, solver_aman, xieta_model, weights=True
+):
+    if xieta_model == "measured":
+        xi_mod, eta_mod = model_measured_xieta(params, pm_version, solver_aman)
+        xi_ref, eta_ref, _ = solver_aman.measured_xieta_data
+    elif xieta_model == "template":
+        xi_mod, eta_mod = model_template_xieta(params, pm_version, solver_aman)
+        xi_ref, eta_ref, _ = solver_aman.nominal_xieta_locs
+
+    xi_mod, eta_mod = _apply_ot_float(xi_mod, eta_mod, solver_aman, params)
+
+    dist = np.sqrt((xi_ref - xi_mod) ** 2 + (eta_ref - eta_mod) ** 2)
+    if weights:
+        return dist * np.sqrt(solver_aman.weights)
+    else:
+        return dist
+    #weights_array = solver_aman.weights if weights else np.ones(len(dist))
+    #return chi_sq(weights_array, dist)
+
+def objective_model_func_lmfit_joint(
+    params, pm_version, epochs, xieta_model, weights=True
+):
+    params = params.valuesdict()
+    all_residuals=[]
+    for epoch in epochs:
+        epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
+        res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
+        all_residuals.append(res)
+    return np.concatenate(all_residuals)
+
+"""
 def objective_model_func_lmfit(
     params, pm_version, solver_aman, xieta_model, weights=True
 ):
@@ -405,6 +467,7 @@ def chi_sq(weights, dist):
     #chi2 = dist.T @ N @ dist
     chi2 = np.nansum(dist ** 2 * weights)
     return chi2
+"""
 
 def model_template_xieta(params, pm_version, aman):
     """
@@ -419,6 +482,7 @@ def model_template_xieta(params, pm_version, aman):
     params["version"] = pm_version
     if "sat" in pm_version:
         az, el, roll = pm._get_sat_enc_radians(aman.ancil)
+
         q_nomodel = quat.rotation_lonlat(-az, el, 0)
     if "lat" in pm_version:
         az, el, roll = pm._get_lat_enc_radians(aman.ancil)
@@ -494,51 +558,35 @@ def _round_params(param_dict, decimal):
     return P
 
 
+def get_full_correlation_matrix(lmfit_result, epoch_params):
+    """Returns a square matrix for ALL parameters, including fixed ones."""
+    #param_names = list(lmfit_result.params.keys())
+    param_names = epoch_params.tolist()
+    full_corr_mat = np.eye(len(param_names))
+    for i, n1 in enumerate(param_names):
+        p1 = lmfit_result.params[n1]
+        if p1.vary and p1.correl:
+            for j, n2 in enumerate(param_names):
+                if i != j and n2 in p1.correl:
+                    full_corr_mat[i, j] = p1.correl[n2]
+    return full_corr_mat, param_names
+
+    
 def analyze_PM_with_all_dets(config, t0, tf, params):
-    platform = config.get("platform")
-    
-    (filelist, obs_dets_fits,
-     weights_dets, all_nom_det_array,
-     all_det_ids, obs_index, ot_list
-    ) = load_per_detector_data(config, t0, tf, return_all_dets=True)
-    
-    ancil, roll_c = load_obs_boresight_per_detector(config, filelist, obs_index)
+    full_aman = build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_all_dets=True)
     ufm_list = [ufm.split("_")[1] for ufm in config.get('ufms')]
-    
-    obs_info = core.AxisManager()
-    obs_info.wrap("obs_ids", np.array(filelist))  
-    full_aman = core.AxisManager(core.IndexAxis("samps"))
-    full_aman.wrap("obs_info", obs_info)
-    full_aman.wrap("ancil", ancil)
-    full_aman.wrap(
-        "nominal_xieta_locs", all_nom_det_array.T,
-        [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-        [(1, "samps")],
-    )
-    full_aman.wrap(
-    "measured_xieta_data", obs_dets_fits.T,
-        [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-        [(1, "samps")],
-    )
-    full_aman.wrap("weights", weights_dets, [(0, "samps")])
-    full_aman.wrap("obs_index", obs_index)
-    full_aman.wrap("ot_list", ot_list)
-    full_aman.wrap("roll_c", roll_c, [(0, "samps")])
-    full_aman.wrap("det_ids", all_det_ids,  [(0, "samps")])
-    full_aman.wrap("radial", 
-                   np.sqrt(full_aman.nominal_xieta_locs[0]**2 + 
-                           full_aman.nominal_xieta_locs[1]**2)/DEG,
-                   [(0, "samps")])
-    full_aman.wrap("det_ufm", 
-                   np.array([detid.decode('utf-8').split('_')[0].lower() for detid in full_aman.det_ids])
-                   , [(0, "samps")])
+    xi_nom, eta_nom = full_aman.nominal_xieta_locs[0], full_aman.nominal_xieta_locs[1]
+    full_aman.wrap("radial", np.sqrt(xi_nom ** 2 + eta_nom ** 2) / DEG, [(0, "samps")])
+    #np.sqrt(full_aman.nominal_xieta_locs[0]**2 + full_aman.nominal_xieta_locs[1]**2)/DEG,
+    det_ufms = np.array([d.decode('utf-8').split('_')[0].lower() for d in full_aman.det_ids])
+    full_aman.wrap("det_ufm", det_ufms, [(0, "samps")])
     full_aman.wrap("det_wafer", 
-                   np.array([ufm_list.index(d) for d in full_aman.det_ufm]), 
+                   np.array([ufm_list.index(d) for d in det_ufms]),
                    [(0, "samps")])
-    # Apply model to data.   
+    # Apply model to data.
     xieta_model = config.get("xieta_model", "measured")
     (full_modeled, full_residuals, rms, _ 
-    ) = apply_model_params(xieta_model,
+    ) = apply_model_params(xieta_model, #"template",
                            params,
                            config.get("pm_version"),
                            full_aman)
@@ -546,137 +594,74 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
     if xieta_model == "measured":
         to_comp = "measured_xieta_data"
     full_aman.wrap("full_modeled", np.array(full_modeled),
-                   [(0, core.LabelAxis("xieta", ["xi", "eta"]))],
-                   [(1, "samps")])
+                   [(0, core.LabelAxis("xieta", ["xi", "eta"])),(1, "samps")])
     full_aman.wrap("fit_residuals", full_residuals, [(0, "samps")])
-    
+
     # Just for compatibility
     modelfit_aman = core.AxisManager()
     modelfit_aman.wrap("xi", full_modeled[0], overwrite=True)
     modelfit_aman.wrap("eta", full_modeled[1], overwrite=True)
     full_aman.wrap("modeled_fits", modelfit_aman, overwrite=True)
-    del(full_modeled)
-    del(full_residuals)
-        
-    (obs_az, obs_el, obs_roll, obs_resid, 
-    obs_dxi, obs_deta, obs_std_xi, obs_std_eta
-    ) = [], [], [], [], [], [], [], []
-    (all_ufm_az, all_ufm_el, all_ufm_roll, all_ufm_resid, 
-    all_ufm_dxi, all_ufm_deta, all_ufm_std_xi,
-    all_ufm_std_eta, all_ufm_wafer_num
-    ) = [], [], [], [], [], [], [], [], []
-    for ob in np.unique(full_aman.obs_index):
-        inds = np.where(full_aman.obs_index == ob)[0] 
-        obs_az.append(np.nanmedian(full_aman.ancil.az_enc[inds]))
-        obs_el.append(np.nanmedian(full_aman.ancil.el_enc[inds]))
-        obs_roll.append(np.nanmedian(full_aman.roll_c[inds]))
-        obs_resid.append(np.nanmean(full_aman.fit_residuals[inds]))
-        obs_dxi.append(np.nanmean((full_aman.full_modeled[0] -
-                                   full_aman[to_comp][0])[inds]/DEG*60))
-        obs_deta.append(np.nanmean((full_aman.full_modeled[1] -
-                                    full_aman[to_comp][1])[inds]/DEG*60))
-        obs_std_xi.append(np.nanstd((full_aman.full_modeled[0] -
-                                     full_aman[to_comp][0])[inds]/DEG*60))
-        obs_std_eta.append(np.nanstd((full_aman.full_modeled[1] -
-                                     full_aman[to_comp][1])[inds]/DEG*60))     
-        (ufm_az, ufm_el, ufm_roll, ufm_resid, 
-         ufm_dxi, ufm_deta, ufm_std_xi,
-         ufm_std_eta, ufm_wafer_num
-        )= [], [], [], [], [], [], [], [], []
+
+    dxi_all = (full_aman.full_modeled[0] - xi_nom) / DEG * 60 #modeled - nominal
+    deta_all = (full_aman.full_modeled[1] - eta_nom) / DEG * 60
+    full_aman.wrap("dxi", dxi_all, [(0, "samps")])
+    full_aman.wrap("deta", deta_all, [(0, "samps")])
+
+    stats_map = {
+        'az' : full_aman.ancil.az_enc, 'el' : full_aman.ancil.el_enc,
+        'roll' : full_aman.roll_c, 'resid' : full_aman.fit_residuals,
+        'dxi': full_aman.dxi, 'deta': full_aman.deta, 'cr': getattr(full_aman.ancil, 'corotator_enc', None)
+    }
+    per_obs = {k: [] for k in stats_map if stats_map[k] is not None}
+    per_obs.update({'std_xi': [], 'std_eta': []})
+    per_ufm = {k: [] for k in stats_map if stats_map[k] is not None}
+    per_ufm.update({'std_xi': [], 'std_eta': [], 'wafer_num': []})
+    unique_obs_ids = np.unique(full_aman.obs_index)
+    for ob in unique_obs_ids:
+        o_mask = (full_aman.obs_index == ob)
+        for k, vals in stats_map.items():
+            if vals is not None:
+                per_obs[k].append(np.nanmedian(vals[o_mask]) if k in ['az', 'el', 'roll', 'cr'] else np.nanmean(vals[o_mask]))
+        per_obs['std_xi'].append(np.nanstd(dxi_all[o_mask]))
+        per_obs['std_eta'].append(np.nanstd(deta_all[o_mask]))
+        #Calculate per ufm stats for this obs
+        ufm_row = {k: [] for k in per_ufm}
         for ufm in ufm_list:
-            ufm_inds = np.where(full_aman.det_ufm[inds] == ufm)[0]    
-            ufm_az.append(np.nanmedian(full_aman.ancil.az_enc[inds][ufm_inds]))
-            ufm_el.append(np.nanmedian(full_aman.ancil.el_enc[inds][ufm_inds]))
-            ufm_roll.append(np.nanmedian(full_aman.roll_c[inds][ufm_inds]))
-            ufm_resid.append(np.nanmean(full_aman.fit_residuals[inds][ufm_inds]))
-            ufm_dxi.append(np.nanmean((full_aman.full_modeled[0] - 
-                                       full_aman[to_comp][0])[inds][ufm_inds]/DEG*60))
-            ufm_deta.append(np.nanmean(
-                (full_aman.full_modeled[1] -
-                full_aman[to_comp][1])[inds][ufm_inds]/DEG*60))
-            ufm_std_xi.append(np.nanstd(
-                (full_aman.full_modeled[0] -
-                 full_aman[to_comp][0])[inds][ufm_inds]/DEG*60))
-            ufm_std_eta.append(np.nanstd(
-                (full_aman.full_modeled[1] -
-                 full_aman[to_comp][1])[inds][ufm_inds]/DEG*60))
-            ufm_wafer_num.append(np.nanmedian(full_aman.det_wafer[inds][ufm_inds]))           
-        all_ufm_az.append(ufm_az)
-        all_ufm_el.append(ufm_el)
-        all_ufm_roll.append(ufm_roll)
-        all_ufm_resid.append(ufm_resid)  
-        all_ufm_deta.append(ufm_deta)
-        all_ufm_dxi.append(ufm_dxi)
-        all_ufm_std_xi.append(ufm_std_xi)
-        all_ufm_std_eta.append(ufm_std_eta)
-        all_ufm_wafer_num.append(ufm_wafer_num)
-            
+            u_mask = o_mask & (full_aman.det_ufm == ufm)
+            for k, vals in stats_map.items():
+                if vals is not None:
+                    ufm_row[k].append(np.nanmedian(vals[u_mask]) if k in ['az', 'el', 'roll', 'cr'] else np.nanmean(vals[u_mask]))
+            ufm_row['std_xi'].append(np.nanstd(dxi_all[u_mask]))
+            ufm_row['std_eta'].append(np.nanstd(deta_all[u_mask]))
+            ufm_row['wafer_num'].append(np.nanmedian(full_aman.det_wafer[u_mask]))
+
+        for k in per_ufm:
+            per_ufm[k].append(ufm_row[k])
+
     per_ufm_stats = core.AxisManager()
     per_obs_stats = core.AxisManager()
-    per_obs_stats.wrap("el", np.array(obs_el))
-    per_obs_stats.wrap("roll", np.array(obs_roll))
-    per_obs_stats.wrap("az", np.array(obs_az))
-    per_obs_stats.wrap("resid", np.array(obs_resid))
-    per_obs_stats.wrap("dxi", np.array(obs_dxi))
-    per_obs_stats.wrap("deta", np.array(obs_deta))
-    per_obs_stats.wrap("std_xi", np.array(obs_std_xi))
-    per_obs_stats.wrap("std_eta", np.array(obs_std_eta))
-    per_ufm_stats.wrap("az", np.array(all_ufm_az))
-    per_ufm_stats.wrap("el", np.array(all_ufm_el))
-    per_ufm_stats.wrap("roll", np.array(all_ufm_roll))
-    per_ufm_stats.wrap("resid", np.array(all_ufm_resid))
-    per_ufm_stats.wrap("dxi", np.array(all_ufm_dxi))
-    per_ufm_stats.wrap("deta", np.array(all_ufm_deta))
-    per_ufm_stats.wrap("std_xi", np.array(all_ufm_std_xi))
-    per_ufm_stats.wrap("std_eta", np.array(all_ufm_std_eta))
-    per_ufm_stats.wrap("wafer_num", np.array(all_ufm_wafer_num))
-        
-    if platform == "lat":
-        obs_cr = []
-        all_ufm_cr = []
-        for ob in np.unique(full_aman.obs_index):
-            inds = np.where(full_aman.obs_index == ob)[0]
-            obs_cr.append(np.nanmedian(full_aman.ancil.corotator_enc[inds]))
-            ufm_cr = []
-            for ufm in ufm_list:
-                ufm_inds = np.where(full_aman.det_ufm[inds] == ufm)[0]    
-                ufm_cr.append(np.nanmedian(full_aman.ancil.corotator_enc[inds][ufm_inds]))
-            all_ufm_cr.append(ufm_cr)
-        per_obs_stats.wrap("cr", np.array(obs_cr))
-        per_ufm_stats.wrap("cr", np.array(all_ufm_cr))
-        
-    full_aman.wrap("dxi",
-                   (full_aman.full_modeled[0] - 
-                    full_aman[to_comp][0])/DEG*60,
-                   [(0, "samps")])
-    full_aman.wrap("deta",
-                   (full_aman.full_modeled[1] - 
-                    full_aman[to_comp][1])/DEG*60,
-                   [(0, "samps")])
+    for k, vals in per_obs.items():
+        per_obs_stats.wrap(k, np.array(vals))
+    for k, vals in per_ufm.items():
+        per_ufm_stats.wrap(k, np.array(vals))
+
+    #Add obsids and RMS stats
     obsids=np.array([int(D.split('_')[1]) for D in full_aman.obs_info.obs_ids])
     per_obs_stats.wrap("obsids", obsids)
     per_ufm_stats.wrap("obsids",
                        np.repeat(obsids,
                                  np.shape(per_ufm_stats["dxi"])[1])
                       )
-    full_aman.wrap("obsids", obsids[full_aman.obs_index])
+    full_aman.wrap("obsids", obsids[full_aman.obs_index], [(0, "samps")])
         
     #Calculate RMSs
-    per_obs_stats.wrap("rms",
-                       np.sqrt(np.nanmean(per_obs_stats["dxi"]**2 +                                                 
-                                          per_obs_stats["deta"]**2))
-                      )
-    per_ufm_stats.wrap("rms",
-                       np.sqrt(np.nanmean(per_ufm_stats["dxi"]**2 + 
-                                          per_ufm_stats["deta"]**2))
-                      )
-    full_aman.wrap("rms",
-                   np.sqrt(np.nanmean(full_aman["dxi"]**2 + 
-                                      full_aman["deta"]**2))
-                  )
+    for aman in [per_obs_stats, per_ufm_stats, full_aman]:
+        aman.wrap("rms", np.sqrt(np.nanmean(aman['dxi'] ** 2 + aman['deta'] ** 2)))
+
     full_aman.wrap("per_ufm_stats", per_ufm_stats)
     full_aman.wrap("per_obs_stats", per_obs_stats)
-    
+
     return full_aman
 
 def _create_db(filename, save_dir):
@@ -764,7 +749,7 @@ def main(config_path: str):
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
                 
             test_params, epochs = _init_fit_params(config, epochs)
-            logger.info("Using these paramters to test pointing: ")
+            logger.info("Using these parameters to test pointing: ")
             for p in test_params:
                 logger.info(f"{p}: {test_params[p].value}")
             #logger.info(test_params)
@@ -776,6 +761,8 @@ def main(config_path: str):
             plotter = ModelFitsPlotter(solver_aman=full_aman,
                                        config=config,
                                        save_dir=save_dir,
+                                       t0=t0,
+                                       tf=tf,
                                        iteration_tag=f"_{epoch["name"]}",
                                        save_figure=True,
                                        plotlims=plotlims)
@@ -784,6 +771,7 @@ def main(config_path: str):
             plotter.plot_full_histogram()
             plotter.plot_full_unmodeled_residuals()
         logger.info("done")
+        return
         
     logger.info(
         "Pointing model will try to replicate (model) the %s data.", xieta_model
@@ -805,73 +793,18 @@ def main(config_path: str):
         which_data = config.get("use_as_data")
         use_weights = config.get("use_weights", True)
 
-        #Make axis manager with full detector set.
-        # Keep wafer/band/obs cuts but do not further downsample.
+
         for epoch in epochs:
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
-            fitcheck_aman = core.AxisManager(core.IndexAxis("samps"))
-            (
-                filelist,
-                obs_dets_fits,
-                weights_dets,
-                all_nom_det_array,
-                all_det_ids,
-                obs_index,
-                ot_list,
-            ) = load_per_detector_data(config, t0, tf, no_downsample_set=True)
-            ancil, roll_c = load_obs_boresight_per_detector(config, filelist, obs_index)
-            
-            fitcheck_aman.wrap("ancil", ancil)
-            fitcheck_aman.wrap(
-                "nominal_xieta_locs", all_nom_det_array.T,
-                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-                [(1, "samps")],
-            )
-            fitcheck_aman.wrap(
-                "measured_xieta_data", obs_dets_fits.T,
-                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-                [(1, "samps")],
-            )
-            fitcheck_aman.wrap("weights", weights_dets, [(0, "samps")])
-            fitcheck_aman.wrap("obs_index", obs_index, [(0, "samps")])
-            fitcheck_aman.wrap("ot_list", ot_list, [(0, "samps")])
-            logger.info("Loaded %s fit check data points", len(weights_dets))
+            # Make axis manager with full detector set.
+            # Keep wafer/band/obs cuts but do not further downsample.
+            fitcheck_aman = build_data_aman(config, t0, tf, per_det = True, no_downsample=True)
+            logger.info("Loaded %s fit check data points", len(fitcheck_aman.weights))
 
             #Now make axis manager that has down sampled data for computation
-            solver_aman = core.AxisManager(core.IndexAxis("samps"))
-            (
-                filelist,
-                obs_dets_fits,
-                weights_dets,
-                all_nom_det_array,
-                all_det_ids,
-                obs_index,
-                ot_list,
-            ) = load_per_detector_data(config, t0, tf)
-            logger.info("Loaded %s data points", len(weights_dets))
-            ancil, roll_c = load_obs_boresight_per_detector(config, filelist, obs_index)
+            solver_aman = build_data_aman(config, t0, tf, per_det = True, no_downsample=False)
+            logger.info("Loaded %s data points", len(solver_aman.weights))
 
-            # Build Axis Managers        
-            solver_aman.wrap("ancil", ancil)
-            obs_info = core.AxisManager()
-            obs_info.wrap("obs_ids", np.array(filelist))
-            solver_aman.wrap("obs_info", obs_info)
-            solver_aman.wrap("roll_c", roll_c, [(0, "samps")])
-            solver_aman.wrap(
-                "nominal_xieta_locs",
-                all_nom_det_array.T,
-                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-                [(1, "samps")],
-            )
-            solver_aman.wrap(
-                "measured_xieta_data",
-                obs_dets_fits.T,
-                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-                [(1, "samps")],
-            )
-            solver_aman.wrap("weights", weights_dets, [(0, "samps")])
-            solver_aman.wrap("obs_index", obs_index)
-            solver_aman.wrap("ot_list", ot_list)
             epoch["solver_aman"] = solver_aman
             epoch["fitcheck_aman"] = fitcheck_aman 
             logger.info("Built axis manager for epoch %s", epoch["name"])
@@ -880,46 +813,13 @@ def main(config_path: str):
     elif fit_type == "ufm_center":
         use_weights = config.get("use_weights", True)
         # Load in focal_plane and boresight data
-        nom_ufm_centers = load_nom_ufm_centers(config)
-        logger.info("Loaded nominal UFM centers from %s: ", config.get("ffp_path"))
-        logger.info(nom_ufm_centers)
-
         for epoch in epochs:
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
-            filelist, obs_ufm_centers, weights_ufm, obs_index, ot_list = load_per_obs_data(config, t0, tf)
+            solver_aman = build_data_aman(config, t0, tf, per_det=False)
             logger.info("Loaded per-obs FFP data from %s: ", config.get("per_obs_fps"))
             logger.info("Including data from these obs:")
-            logger.info(filelist)
+            logger.info(solver_aman.obs_info.obs_ids)
 
-            ancil, roll_c = load_obs_boresight(config, filelist)
-            logger.info("Loaded boresight data from obs ids.")
-
-            # Build Axis Managers
-            obs_info = core.AxisManager()
-            obs_info.wrap("obs_ids", np.array(filelist))
-
-            solver_aman = core.AxisManager(core.IndexAxis("samps"))
-            solver_aman.wrap("ancil", ancil)
-            solver_aman.wrap("obs_info", obs_info)
-            solver_aman.wrap("roll_c", np.repeat(roll_c, 7), [(0, "samps")])
-            solver_aman.wrap(
-                "nominal_xieta_locs",
-                np.repeat([nom_ufm_centers], len(filelist), axis=0)
-                .reshape(len(filelist) * 7, 3)
-                .T,
-                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-                [(1, "samps")],
-            )
-            solver_aman.wrap(
-                "measured_xieta_data",
-                obs_ufm_centers.reshape(len(filelist) * 7, 3).T,
-                [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"]))],
-                [(1, "samps")],
-            )
-            solver_aman.wrap("weights", weights_ufm.reshape(-1), [(0, "samps")])
-            solver_aman.wrap("obs_index", obs_index)
-            solver_aman.wrap("ot_list", ot_list)
-            # Make weights/data cuts
             epoch["solver_aman"] = solver_aman
             logger.info("Built axis manager for epoch %s", epoch["name"])
 
@@ -953,7 +853,6 @@ def main(config_path: str):
 
     # save pointing model parameters to axis manager
     for epoch in epochs:
-        logger.info("Calculating RMS and cutoff for %s", epoch["name"])
         par_mapping = {par:par.split(f"_{epoch['name']}")[0] for par in epoch["params"]}
         param_aman = core.AxisManager()
         for k in list(par_mapping.keys()):
@@ -961,17 +860,33 @@ def main(config_path: str):
         param_aman.wrap("version", pm_version)
         epoch["solver_aman"].wrap("pointing_model", param_aman)
 
-        # save errors to axis manager
-        error_aman = core.AxisManager()
+        #Save Fit report statistics
+        model_fit_stats_aman = core.AxisManager()
+        stderr_aman = core.AxisManager()
         for k in list(model_solved_params.params.values()):
             if k.name in epoch["params"]:
-                error_aman.wrap(par_mapping[k.name], k.stderr)
-        epoch["solver_aman"].wrap("pointing_model_errors", error_aman)
+                stderr_aman.wrap(par_mapping[k.name], k.stderr)
+        model_fit_stats_aman.wrap('stderr', stderr_aman)
 
-        # parameter_fit_stats = build_param_fit_stat_aman(model_solved_params)
-        # solver_aman.wrap("parameter_fit_stats", parameter_fit_stats)
+        fitreport_aman = core.AxisManager()
+        fitreport_aman.wrap('chisq', model_solved_params.chisqr)
+        fitreport_aman.wrap('redchi', model_solved_params.redchi)
+        fitreport_aman.wrap('success', int(model_solved_params.success)) # 1 for True, 0 for False
+        fitreport_aman.wrap('nfev', model_solved_params.nfev)           # Num function evaluations
+        fitreport_aman.wrap('message',
+                            str(model_solved_params.message))
+        model_fit_stats_aman.wrap('fit_report', fitreport_aman)
+
+        if config.get("fit_method", "nelder") == "leastsq":
+            mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
+            corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
+            corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
+            corrmtx_aman.wrap('param_names', np.array(param_names), [(0, 'params')])
+            model_fit_stats_aman.wrap('correlation_matrix', corrmtx_aman)
+        epoch["solver_aman"].wrap('model_fit_statistics', model_fit_stats_aman)
 
         # Model template and measured points using parameters found above
+        logger.info("Calculating RMS and cutoff for %s", epoch["name"])
         modeled_fits, fit_residuals_i1, rms_i1, model_reference = apply_model_params(xieta_model, epoch["solver_aman"].pointing_model, pm_version, epoch["solver_aman"])
         logger.info("RMS on fit: %f arcmin", rms_i1)
 
@@ -997,6 +912,8 @@ def main(config_path: str):
             plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                        config=config,
                                        save_dir=save_dir,
+                                       t0=t0,
+                                       tf=tf,
                                        iteration_tag=f"_{epoch['name']}_i1",
                                        save_figure=True,
                                        plotlims=plotlims)
@@ -1013,7 +930,7 @@ def main(config_path: str):
                 plotter.plot_residuals_histograms()
                 plotter.plot_dets_in_these_obs()
 
-    tot_bad = 0
+    tot_bad=0
     if iterate_cutoff is not None:
         logger.info("Iterating parameter solution")
         logger.info(f"Using {iterate_cutoff} as cutoff")
@@ -1050,7 +967,7 @@ def main(config_path: str):
                 # Print RMS of initial fits without outlying data points before
                 # zero-ing the weights.
                 good_fit_inds = np.where(fit_residuals_i1 < cutoff)[0]
-                _, _, masked_rms, _ = apply_model_params(xieta_model,
+                _, _, masked_rms, _ = apply_model_params(xieta_model, 
                                                         epoch["solver_aman"].pointing_model, 
                                                         pm_version, 
                                                         epoch["solver_aman"],
@@ -1059,17 +976,18 @@ def main(config_path: str):
                 logger.info("RMS on initial fit without outliers: %f arcmin", masked_rms)
                 epoch["solver_aman"].weights[bad_fit_inds] = 0.0
             epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
-
+            
         if tot_bad == 0:
             logger.info("No bad points found so not running second fit!")
+
     if tot_bad > 0:
         model_solved_params = minimize(
             objective_model_func_lmfit_joint,
-            model_solved_params,
-            method=config.get("fit_method", "nelder"),
+            fit_params,
+            method=config.get("fit_method", "leastsq"),
             nan_policy="omit",
             args=(pm_version, epochs, xieta_model, use_weights),
-            **config.get("fit_options", {}),
+            **config.get("fit_options", {})
         )
 
         test_params = _round_params(model_solved_params.params.valuesdict(), 8)
@@ -1084,7 +1002,6 @@ def main(config_path: str):
 
         # save pointing model parameters to axis manager
         for epoch in epochs:
-            logger.info("Calculating RMS for %s", epoch["name"])
             par_mapping = {par:par.split(f"_{epoch['name']}")[0] for par in epoch["params"]}
             epoch["solver_aman"].move("pointing_model", "pointing_model_i1")
             param_aman = core.AxisManager()
@@ -1094,17 +1011,33 @@ def main(config_path: str):
             epoch["solver_aman"].wrap("pointing_model", param_aman)
 
             # save errors to axis manager
-            epoch["solver_aman"].move("pointing_model_errors", "pointing_model_errors_i1")
-            error_aman = core.AxisManager()
+            epoch["solver_aman"].move("model_fit_statistics", "model_fit_statistics_i1")
+            model_fit_stats_aman = core.AxisManager()
+            stderr_aman = core.AxisManager()
             for k in list(model_solved_params.params.values()):
                 if k.name in epoch["params"]:
-                    error_aman.wrap(par_mapping[k.name], k.stderr)
-            epoch["solver_aman"].wrap("pointing_model_errors", error_aman)
+                    stderr_aman.wrap(par_mapping[k.name], k.stderr)
+            model_fit_stats_aman.wrap('stderr', stderr_aman)
+        
+            fitreport_aman = core.AxisManager()
+            fitreport_aman.wrap('chisq', model_solved_params.chisqr)
+            fitreport_aman.wrap('redchi', model_solved_params.redchi)
+            fitreport_aman.wrap('success', int(model_solved_params.success)) # 1 for True, 0 for False
+            fitreport_aman.wrap('nfev', model_solved_params.nfev)           # Num function evaluations
+            fitreport_aman.wrap('message', str(model_solved_params.message))
+            model_fit_stats_aman.wrap('fit_report', fitreport_aman)
+
+            if config.get("fit_method", "nelder") == "leastsq":
+                mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
+                corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
+                corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
+                corrmtx_aman.wrap('param_names', np.array(param_names), [(0, 'params')])
+                model_fit_stats_aman.wrap('correlation_matrix', corrmtx_aman)
             
-            # parameter_fit_stats = build_param_fit_stat_aman(model_solved_params)
-            # epoch["solver_aman"].wrap("parameter_fit_stats", parameter_fit_stats, overwrite=True)
+            epoch["solver_aman"].wrap('model_fit_statistics', model_fit_stats_aman)
 
             # Recalculate best-fit modeled points
+            logger.info("Calculating RMS for %s", epoch["name"])
             modeled_fits, fit_residuals_i2, rms_i2, model_reference = apply_model_params(xieta_model,
                                                               epoch["solver_aman"].pointing_model,
                                                               pm_version,
@@ -1135,6 +1068,8 @@ def main(config_path: str):
                 plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                            config=config,
                                            save_dir=save_dir,
+                                           t0=t0,
+                                           tf=tf,
                                            iteration_tag=tag,
                                            save_figure=True,
                                            plotlims=plotlims)
@@ -1156,6 +1091,8 @@ def main(config_path: str):
                 plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                            config=config,
                                            save_dir=save_dir,
+                                           t0=t0,
+                                           tf=tf,
                                            iteration_tag=f"_{epoch["name"]}",
                                            save_figure=True,
                                            plotlims=plotlims)
@@ -1180,8 +1117,6 @@ def main(config_path: str):
                         solver_aman.pointing_model.move(par, None)
                 solver_aman.wrap("ot_float_aman", ot_float_aman)
             epoch["solver_aman"] = solver_aman
-
-
             epoch["solver_aman"].save(h5_filename, group=epoch["name"], overwrite=True)
             db.add_entry(
                 {"obs:timestamp": (epoch["begin_timerange"], epoch["end_timerange"]), "dataset": f"{epoch['name']}/pointing_model"},
@@ -1200,8 +1135,8 @@ def main(config_path: str):
             else:
                 test_params = epoch["solver_aman"].pointing_model  
                 if "ot_float_aman" in epoch["solver_aman"]._assignments:
-                    test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
-            
+                    test_params = test_params.merge(epoch["solver_aman"].o
+t_float_aman)
             full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
             logger.info(f"for this epoch: {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
@@ -1210,9 +1145,12 @@ def main(config_path: str):
             plotter = ModelFitsPlotter(solver_aman=full_aman,
                                        config=config,
                                        save_dir=save_dir,
+                                       t0 = t0,
+                                       tf = tf,
                                        iteration_tag=f"_{epoch["name"]}",
                                        save_figure=True,
-                                       plotlims=plotlims)
+                                       plotlims=plotlims,
+                                      )
             plotter.plot_full_residuals_across_focalplane()
             plotter.plot_full_deltas_across_focalplane()
             plotter.plot_full_histogram()
@@ -1227,7 +1165,7 @@ def main(config_path: str):
 ####################
 
 class ModelFitsPlotter:
-    def __init__(self, solver_aman, config, save_dir, iteration_tag="", save_figure=True, plotlims=None):
+    def __init__(self, solver_aman, config, save_dir, t0, tf, iteration_tag="", save_figure=True, plotlims=None):
 
         self.aman = solver_aman
         self.config = config
@@ -1240,7 +1178,8 @@ class ModelFitsPlotter:
         plot_dir = os.path.join(save_dir, "plots")
         os.makedirs(plot_dir, exist_ok=True)
         self.plot_dir = plot_dir
-
+        self.t0 = t0
+        self.tf = tf
         self.platform = config.get("platform")
         self.pm_version = config.get("pm_version")
         self.ufms = config.get("ufms")
@@ -1264,7 +1203,7 @@ class ModelFitsPlotter:
         full_dxi_av = np.nanmean(self.aman.dxi)
         full_deta_av = np.nanmean(self.aman.deta)
         if "sat" in platform:
-            elmin, elmax = 45, 65
+            elmin, elmax = 40, 65
             rollmin, rollmax = -45, 45
             azmin, azmax = 0, 360
             if platform=="satp2":
@@ -1365,6 +1304,7 @@ class ModelFitsPlotter:
             plt.savefig(f"{plot_dir}/{platform}_full_2D_Residuals_Az{tag}.png", dpi=350)
         plt.close()
    
+            
     def plot_full_residuals_across_focalplane(self):
         platform = self.platform
         plot_dir = self.plot_dir
@@ -1419,7 +1359,7 @@ class ModelFitsPlotter:
             plt.xlim(-.31, .31);plt.ylim(-.31, .31)
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_full_FocalPlane_colored_FitDeltas{tag}.png", dpi=350)
-
+            
     def plot_full_histogram(self):
         platform = self.platform
         plotlims = self.plotlims
@@ -1431,6 +1371,7 @@ class ModelFitsPlotter:
         ufm_rms = self.aman.per_ufm_stats.rms
         obs_rms = self.aman.per_obs_stats.rms
         fit_residuals = self.aman.fit_residuals
+        #median = np.nanmedian(fit_residuals)
         
         plt.figure()
         plt.hist(fit_residuals, bins=50, range=(0, plotlims))
@@ -1440,12 +1381,16 @@ class ModelFitsPlotter:
                     label = f'Obs RMS {obs_rms:.2f} arcmin')
         plt.axvline(ufm_rms, 0, 1, color='m',
                     label=f'UFM RMS {ufm_rms:.2f} arcmin')
+        #plt.axvline(median, 0, 1, color='r', linestyle=':',
+        #            label='median arcmin')
+        #plt.axvline(median+np.nanmedian(np.abs(fit_residuals- median))*1.4826,
+        #            0, 1, color = 'y', linestyle=':')
         plt.legend(fontsize='medium')
         plt.title(platform + ' 1D residuals')
         plt.xlabel('arcmin')
             
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png", dpi=350)     
+            plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png", dpi=350) 
             
     def plot_dets_in_these_obs(self):  
         platform = self.platform
@@ -1458,7 +1403,7 @@ class ModelFitsPlotter:
         if platform == 'lat':
             elmin=10; elmax=90
         else:
-            elmin=45; elmax=65
+            elmin=40; elmax=65
         
         plt.figure()
         fig, ax = plt.subplots(2,2,figsize=(11,10))
@@ -1504,7 +1449,7 @@ class ModelFitsPlotter:
             ufm_list = self.ufms
         plotmask = np.where(weights)
         nom_array = np.concatenate(
-            [load_nom_focal_plane_full(self.config, ufm)[1] for ufm in ufm_list],
+            [load_nom_focal_plane_full(self.config, self.t0, ufm)[1] for ufm in ufm_list],
             axis=0,
         )
         rms = np.round(fit_rms, 4)
@@ -1803,30 +1748,40 @@ class ModelFitsPlotter:
             pm_version,
             self.aman
         )
+
+        fig, ax = plt.subplots(2, 1, figsize=(8,5))
+        ax[0].hist(xi_unmod / ARCMIN - nominal_xieta_locs[0] / ARCMIN,
+                   range=(-1 * plotlims, plotlims), bins = 30)
+        ax[1].hist(eta_unmod / ARCMIN - nominal_xieta_locs[1] / ARCMIN,
+                   range=(-1 * plotlims, plotlims), bins = 30)
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_xi_and_eta_residuals_hist.png", dpi=350)
+            plt.close()
+
         #plot with weights as colorbar
         fig, ax = plt.subplots(figsize=(9, 6))
         ax.plot(0, 0, "kx", label="Nominal Center")
         im = ax.scatter(
             xi_unmod / ARCMIN - nominal_xieta_locs[0] / ARCMIN,
             eta_unmod / ARCMIN - nominal_xieta_locs[1] / ARCMIN,
-            c=weights,
+            c=ancil.az_enc,
             s=scale_weights * 5,
             edgecolor="gray",
             lw=0.3,
             marker="o",
             alpha=0.2,
             cmap="viridis",
-            vmin=self.config.get("weight_cutoff"),
-            vmax=1
+            vmin=0,
+            vmax=360
         )
         ax.set_xlim(-1 * plotlims, plotlims)
         ax.set_ylim(-1 * plotlims, plotlims)
         ax.set_aspect('equal', adjustable='box')
-        ax.set_title(f"Unmodeled fits, by fit weight")
+        ax.set_title(f"Unmodeled fits, by azimuth")
         cb = plt.colorbar(im, fraction=0.046, pad=0.04)
         plt.tight_layout()
         if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_weights{tag}.png", dpi=350)
+            plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_azimuth{tag}.png", dpi=350)
             plt.close()   
         fig, ax = plt.subplots(figsize=(9, 6))
         ax.plot(0, 0, "kx", label="Nominal Center")
