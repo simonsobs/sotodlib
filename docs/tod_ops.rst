@@ -232,3 +232,36 @@ Module containing functions for FFTs and related operations.
 
 .. automodule:: sotodlib.tod_ops.fft_ops
    :members:
+
+tod_ops.glitch_ml
+=================
+
+ML-based glitch classification pipeline: snippet extraction, summary
+statistics, and random-forest classification of glitch events into
+physical categories (point sources, cosmic rays, electronic glitches,
+etc.).
+
+The typical workflow is:
+
+1. Detect glitches and extract snippets with
+   :func:`~sotodlib.tod_ops.glitch_ml.get_snippets`.
+2. Compute summary statistics with
+   :func:`~sotodlib.tod_ops.glitch_ml.compute_summary_stats`.
+3. Classify the snippets using a trained forest via
+   :func:`~sotodlib.tod_ops.glitch_ml.classify_snippets`
+   (or train your own with :func:`~sotodlib.tod_ops.glitch_ml.train_forest`).
+
+The module can also be used through the preprocessing pipeline via the
+``classify_glitches`` step
+(see :class:`sotodlib.preprocess.processes.GlitchClassification`).
+
+New summary statistics can be added by subclassing
+:class:`~sotodlib.tod_ops.glitch_ml.GlitchStat` and decorating with
+:func:`~sotodlib.tod_ops.glitch_ml.register_stat`.  The
+:attr:`~sotodlib.tod_ops.glitch_ml.GlitchStat.requires` attribute declares
+which inputs each statistic needs; callers pass only the relevant data
+automatically.
+
+.. automodule:: sotodlib.tod_ops.glitch_ml
+   :members:
+   :undoc-members:
