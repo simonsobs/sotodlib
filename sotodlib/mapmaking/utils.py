@@ -156,10 +156,13 @@ def measure_cov(d, nmax=10000):
 def project_out(d, modes): return d-modes.T.dot(modes.dot(d))
 
 def project_out_from_matrix(A, V):
-    # Used Woodbury to project out the given vectors from the covmat A
+    """This is the equivalent of deprojecting V in a timestream,
+    and then measuring the covariance of the resulting timestream.
+    It will therefore always be positive definite."""
     if V.size == 0: return A
-    Q = A.dot(V)
-    return A - Q.dot(np.linalg.solve(np.conj(V.T).dot(Q), np.conj(Q.T)))
+    AV = A.dot(V)
+    # q = a-VV'a, Q = <qq'> = A + VV'AV'V - AVV' - VV'A
+    return A + V.dot(V.T.dot(AV)).dot(V.T) - AV.dot(V.T) - V.dot(AV.T)
 
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
 

@@ -202,6 +202,7 @@ def main(**args):
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
         elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window)
         elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
+        elif args.nmat == "debug":  noise_model = mapmaking.NmatDebug()
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod, cut_type=args.cut_type)
