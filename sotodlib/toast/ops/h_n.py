@@ -100,7 +100,7 @@ class Hn(Operator):
     )
 
     file_format = Unicode(
-        "npy", help="File format for output maps: 'npy', 'fits', or 'hdf5'"
+        "fits", help="File format for output maps: 'npy', 'fits', or 'hdf5'"
     )
 
     nmin = Int(0, help="Minimum `n` to evaluate.")
@@ -187,15 +187,6 @@ class Hn(Operator):
         # Healpix PixelDistribution should have the nest information.
         nest = dist.nest
 
-        # Unit string to write
-        # if pixel_data.units == u.K:
-        #     funits = "K"
-        # elif pixel_data.units == u.mK:
-        #     funits = "mK"
-        # elif pixel_data.units == u.uK:
-        #     funits = "uK"
-        # else:
-        #     funits = str(pixel_data.units)
 
         fdata, fview = collect_healpix_submaps(pixel_data, comm_bytes=comm_bytes)
 
@@ -211,20 +202,7 @@ class Hn(Operator):
             if report_memory:
                 mem = memreport(msg="(root node)", silent=True)
                 log.info(f"About to write {path}:  {mem}")
-            # extra = [(f"TUNIT{x}", f"{funits}") for x in range(self.n_value)]
-            # hp.write_map(
-            #     path,
-            #     fview,
-            #     dtype=dtype,
-            #     fits_IDL=False,
-            #     nest=nest,
-            #     extra_header=extra,
-            # )
-            # if not os.path.isfile(path):
-            #     mode = "w+"
-            # else:
-            #     # print("N value", n, "path", path, flush=True)
-            #     mode = "r+"
+
             # Create a memmap array to write the data
             file_memmap = np.memmap(
                 path,
@@ -289,19 +267,6 @@ class Hn(Operator):
                     focalplane = obs.telescope.focalplane
                     focalplane.detector_data
                     psi -= np.deg2rad(focalplane[det]["pol_ang"].value) # Removing the polarization angle
-                    # psi -= focalplane[det]["pol_angle"].value # Removing the polarization angle
-                    number_step = max(1, psi.shape[0] // 20)
-                    # print("########TEST PRINT: Det", det, 
-                    #       "pol_ang (deg)", focalplane[det]["pol_ang"].value, focalplane[det]["pol_ang"].value % 180., 
-                    #       "pol_angle (deg)", np.rad2deg(focalplane[det]["pol_angle"].value), flush=True)
-                    # print("psi (deg) -- shape", np.rad2deg(psi % (2*np.pi)).shape, 
-                    #       '-- max', np.max(psi % (2*np.pi))*180./np.pi,
-                    #       '-- min', np.min(psi % (2*np.pi))*180./np.pi,
-                    #       '-- mean', np.mean(psi % (2*np.pi))*180./np.pi,
-                    #       '-- std', np.std(psi % (2*np.pi))*180./np.pi,
-                    #       '-- sample (one every 1000)',
-                    #       (psi[::number_step] % (2*np.pi))*180./np.pi, flush=True
-                    # ) #np.rad2deg(psi))
 
                 cos_n_new = np.cos(psi)
                 sin_n_new = np.sin(psi)
@@ -389,10 +354,8 @@ class Hn(Operator):
                     use_alltoallv=(self.sync_type == "alltoallv"),
                 )
 
-            # fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
-            # fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.hdf5")
+            
             fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}."+self.file_format)
-            # fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
             if '.fits' in fname or '.hdf5' in fname:
                 data[self.h_n_map].write(fname)
             else:
