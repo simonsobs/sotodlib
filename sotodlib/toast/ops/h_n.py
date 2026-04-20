@@ -3,10 +3,12 @@
 
 import os
 
+from astropy import units as u
 import traitlets
 import numpy as np
+import healpy as hp
 
-from toast.utils import Logger
+from toast.utils import Logger, memreport
 from toast.mpi import MPI
 import toast.qarray as qa
 from toast.traits import trait_docs, Int, Unicode, Bool, Float, Instance
@@ -16,6 +18,7 @@ from toast.observation import default_values as defaults
 from toast.ops import (
     Operator, BuildPixelDistribution, BuildInverseCovariance, BuildNoiseWeighted
 )
+from toast.pixels_io_healpix import collect_healpix_submaps
 
 
 @trait_docs
@@ -71,7 +74,7 @@ class Hn(Operator):
 
     noise_model = Unicode(
         "noise_model",
-        allow_none=True,
+        allow_None=True,
         help="Observation key containing the noise model",
     )
 
@@ -92,7 +95,15 @@ class Hn(Operator):
         help="If True, include the polarization angle in the angle used to compute h_n",
     )
 
-    nmin = Int(1, help="Minimum `n` to evaluate.")
+    use_single_precision = Bool(
+        False, help="If True, write output maps in single precision"
+    )
+
+    file_format = Unicode(
+        "npy", help="File format for output maps: 'npy', 'fits', or 'hdf5'"
+    )
+
+    nmin = Int(0, help="Minimum `n` to evaluate.")
     nmax = Int(4, help="Maximum `n` to evaluate.")
 
     cos_1_name = "cos_1"
@@ -106,7 +117,7 @@ class Hn(Operator):
     @traitlets.validate("nmin")
     def _check_min(self, proposal):
         nmin = proposal["value"]
-        if nmin < 1:
+        if nmin < 0:
             raise traitlets.TraitError("Nmin should be greater than 0")
         return nmin
 
@@ -116,6 +127,13 @@ class Hn(Operator):
         if nmax < 1:
             raise traitlets.TraitError("Nmax should be greater than 0")
         return nmax
+    
+    @traitlets.validate("file_format")
+    def _check_file_format(self, proposal):
+        file_format = proposal["value"]
+        if file_format not in ("npy", "fits", "hdf5"):
+            raise traitlets.TraitError("File format should be 'npy', 'fits', or 'hdf5'")
+        return file_format
 
     @traitlets.validate("pixel_pointing")
     def _check_pixel_pointing(self, proposal):
@@ -136,6 +154,93 @@ class Hn(Operator):
         super().__init__(**kwargs)
         return
 
+    def _write_h_n_map_npy(
+        self,
+        pixel_data,
+        path,
+        comm_bytes=10000000,
+        report_memory=False,
+        single_precision=False,
+    ):
+        """Write distributed PixelData to a numpy NPY file.
+
+        Args:
+            path (str): The path to the output file (NPY).
+            comm_bytes (int): The approximate message size to use.
+            report_memory (bool): Report the amount of available memory on
+                the root node just before writing out the map.
+            single_precision (bool): If True, write floats and integers in single
+                precision.
+
+        Returns:
+            None
+
+        """
+        log = Logger.get()
+
+        # The distribution
+        dist = pixel_data.distribution
+        rank = 0
+        if dist.comm is not None:
+            rank = dist.comm.rank
+
+        # Healpix PixelDistribution should have the nest information.
+        nest = dist.nest
+
+        # Unit string to write
+        # if pixel_data.units == u.K:
+        #     funits = "K"
+        # elif pixel_data.units == u.mK:
+        #     funits = "mK"
+        # elif pixel_data.units == u.uK:
+        #     funits = "uK"
+        # else:
+        #     funits = str(pixel_data.units)
+
+        fdata, fview = collect_healpix_submaps(pixel_data, comm_bytes=comm_bytes)
+
+        if rank == 0:
+            if os.path.isfile(path):
+                os.remove(path)
+            dtype = pixel_data.dtype
+            if single_precision:
+                if dtype == np.dtype(np.float64):
+                    dtype = np.float32
+                elif dtype == np.dtype(np.int64):
+                    dtype = np.int32
+            if report_memory:
+                mem = memreport(msg="(root node)", silent=True)
+                log.info(f"About to write {path}:  {mem}")
+            # extra = [(f"TUNIT{x}", f"{funits}") for x in range(self.n_value)]
+            # hp.write_map(
+            #     path,
+            #     fview,
+            #     dtype=dtype,
+            #     fits_IDL=False,
+            #     nest=nest,
+            #     extra_header=extra,
+            # )
+            # if not os.path.isfile(path):
+            #     mode = "w+"
+            # else:
+            #     # print("N value", n, "path", path, flush=True)
+            #     mode = "r+"
+            # Create a memmap array to write the data
+            file_memmap = np.memmap(
+                path,
+                mode="w+",
+                shape=(fview[0].shape[0]),
+                dtype=dtype,
+            )
+            file_memmap[:] = hp.reorder(fview[:], n2r=nest)
+            file_memmap.flush()
+
+            del fview
+            # for col in range(self.n_value):
+            fdata[0].clear()
+            del fdata
+
+
     @function_timer
     def _get_h_n(self, data, n, det):
         """ Compute and store the next order of h_n
@@ -148,7 +253,8 @@ class Hn(Operator):
                 hwpang = obs.shared[self.hwp_angle]
             else:
                 hwpang = None
-            if n == 1:
+
+            if n == self.nmin:
                 for name in [
                     self.cos_1_name,
                     self.sin_1_name,
@@ -156,8 +262,22 @@ class Hn(Operator):
                     self.cos_n_name,
                     self.sin_n_name,
                 ]:
-                    obs.detdata.ensure(name, detectors=[det])
-                
+                    psd_units = obs[self.noise_model].psd(det).unit
+                    rate_units = obs[self.noise_model].rate(det).unit
+                    tod_units = (psd_units * rate_units) ** 0.5
+                    obs.detdata.ensure(name, detectors=[det], create_units=tod_units)
+
+            if n == 0:
+                # Compute detector quaternions
+                obs_data = data.select(obs_uid=obs.uid)
+                self.pixel_pointing.detector_pointing.apply(obs_data, detectors=[det])
+
+                cos_n_new = 1 #np.cos(psi)
+                sin_n_new = 0 #np.sin(psi)
+                obs.detdata[self.cos_1_name][det] = cos_n_new * u.K
+                obs.detdata[self.sin_1_name][det] = sin_n_new * u.K
+                obs.detdata[self.hweight_name][det] = 1
+            elif n == 1:
                 # Compute detector quaternions
                 obs_data = data.select(obs_uid=obs.uid)
                 self.pixel_pointing.detector_pointing.apply(obs_data, detectors=[det])
@@ -168,11 +288,25 @@ class Hn(Operator):
                     # to GPU -- taken from derivatives_and_beams toast3 branch 
                     focalplane = obs.telescope.focalplane
                     focalplane.detector_data
-                    psi -= focalplane[det]["pol_angle"].value # Removing the polarization angle
+                    psi -= np.deg2rad(focalplane[det]["pol_ang"].value) # Removing the polarization angle
+                    # psi -= focalplane[det]["pol_angle"].value # Removing the polarization angle
+                    number_step = max(1, psi.shape[0] // 20)
+                    # print("########TEST PRINT: Det", det, 
+                    #       "pol_ang (deg)", focalplane[det]["pol_ang"].value, focalplane[det]["pol_ang"].value % 180., 
+                    #       "pol_angle (deg)", np.rad2deg(focalplane[det]["pol_angle"].value), flush=True)
+                    # print("psi (deg) -- shape", np.rad2deg(psi % (2*np.pi)).shape, 
+                    #       '-- max', np.max(psi % (2*np.pi))*180./np.pi,
+                    #       '-- min', np.min(psi % (2*np.pi))*180./np.pi,
+                    #       '-- mean', np.mean(psi % (2*np.pi))*180./np.pi,
+                    #       '-- std', np.std(psi % (2*np.pi))*180./np.pi,
+                    #       '-- sample (one every 1000)',
+                    #       (psi[::number_step] % (2*np.pi))*180./np.pi, flush=True
+                    # ) #np.rad2deg(psi))
+
                 cos_n_new = np.cos(psi)
                 sin_n_new = np.sin(psi)
-                obs.detdata[self.cos_1_name][det] = cos_n_new
-                obs.detdata[self.sin_1_name][det] = sin_n_new
+                obs.detdata[self.cos_1_name][det] = cos_n_new * u.K
+                obs.detdata[self.sin_1_name][det] = sin_n_new * u.K
                 obs.detdata[self.hweight_name][det] = 1
             else:
                 # Use the angle sum identities to evaluate the
@@ -181,8 +315,8 @@ class Hn(Operator):
                 sin_1 = obs.detdata[self.sin_1_name][det]
                 cos_n_old = obs.detdata[self.cos_n_name][det].copy()
                 sin_n_old = obs.detdata[self.sin_n_name][det].copy()
-                cos_n_new = cos_n_old * cos_1 - sin_n_old * sin_1
-                sin_n_new = sin_n_old * cos_1 + cos_n_old * sin_1
+                cos_n_new = cos_n_old * cos_1 * u.K - sin_n_old * sin_1 * u.K
+                sin_n_new = sin_n_old * cos_1 * u.K + cos_n_old * sin_1 * u.K
             obs.detdata[self.cos_n_name][det] = cos_n_new
             obs.detdata[self.sin_n_name][det] = sin_n_new
         return
@@ -190,7 +324,10 @@ class Hn(Operator):
     @function_timer
     def _get_covariance(self, data, det):
         self.pixel_pointing.apply(data, detectors=[det])
-
+        if self.covariance in data:
+            data[self.covariance].reset()
+            inv_cov_units = (1.0 / defaults.det_data_units**2)
+            data[self.covariance].update_units(inv_cov_units)
         BuildInverseCovariance(
             pixel_dist=self.pixel_dist,
             inverse_covariance=self.covariance,
@@ -223,6 +360,12 @@ class Hn(Operator):
         log = Logger.get()
 
         for name, det_data in ("cos", self.cos_n_name), ("sin", self.sin_n_name):
+
+            if self.h_n_map in data:
+                data[self.h_n_map].reset()
+                h_n_map_units = (1.0 / defaults.det_data_units)
+                data[self.h_n_map].update_units(h_n_map_units)
+
             build_zmap = BuildNoiseWeighted(
                 pixel_dist=self.pixel_dist,
                 zmap=self.h_n_map,
@@ -239,17 +382,26 @@ class Hn(Operator):
             )
             build_zmap.apply(data, detectors=[det])
 
-            covariance_apply(
-                data[self.covariance],
-                data[self.h_n_map],
-                use_alltoallv=(self.sync_type == "alltoallv"),
-            )
+            if n != 0:
+                covariance_apply(
+                    data[self.covariance],
+                    data[self.h_n_map],
+                    use_alltoallv=(self.sync_type == "alltoallv"),
+                )
 
-            fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
-            data[self.h_n_map].write(fname)
+            # fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
+            # fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.hdf5")
+            fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}."+self.file_format)
+            # fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}.fits")
+            if '.fits' in fname or '.hdf5' in fname:
+                data[self.h_n_map].write(fname)
+            else:
+                self._write_h_n_map_npy(
+                    data[self.h_n_map],
+                    fname,
+                    single_precision=self.use_single_precision,
+                )
             log.info_rank(f"Wrote h_n map to {fname}", comm=data.comm.comm_world)
-
-        return
 
     @function_timer
     def _get_detectors(self, data):
@@ -295,8 +447,9 @@ class Hn(Operator):
 
         detectors = self._get_detectors(data)
 
+        n_min = 1 if self.nmin > 1 else self.nmin
         for det in detectors:
-            for n in range(1, self.nmax + 1):
+            for n in range(n_min, self.nmax + 1):
                 self._get_h_n(data, n, det)
                 self._get_covariance(data, det)
                 self._save_h_n(data, n, det)

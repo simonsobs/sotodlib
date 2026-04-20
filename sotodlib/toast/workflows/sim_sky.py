@@ -63,7 +63,14 @@ def setup_simulate_sky_map_signal(operators):
             enabled=False,
         )
     )
-
+    operators.append(
+        toast.ops.DerivativesWeights(
+            name="derivatives_weights",
+            mode="d2I",
+            weights="weights_scan_map",
+            enabled=False,
+        )
+    )
 
 @workflow_timer
 def simulate_sky_map_signal(job, otherargs, runargs, data):
@@ -130,8 +137,15 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
                 scan_op.pixel_dist = job_ops.binner_final.pixel_dist
                 scan_op.pixel_pointing = job.pixels_final
             if job_ops.scan_map_weights.enabled:
+                log.info_rank("Scanning with scan_map_weights", data.comm.comm_world)
                 job_ops.scan_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
                 scan_op.stokes_weights = job_ops.scan_map_weights
+            elif job_ops.derivatives_weights.enabled:
+                log.info_rank("Scanning assuming derivative map rules", data.comm.comm_world)
+                job_ops.scan_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
+                job_ops.derivatives_weights.detector_pointing = job_ops.det_pointing_radec_sim
+                # job_ops.scan_map.stokes_weights = job_ops.derivatives_weights
+                scan_op.stokes_weights = job_ops.derivatives_weights
             else:
                 scan_op.stokes_weights = job_ops.weights_radec
             scan_op.save_pointing |= otherargs.full_pointing
@@ -162,8 +176,14 @@ def simulate_sky_map_signal(job, otherargs, runargs, data):
                 scan_op.pixel_dist = job_ops.binner_final.pixel_dist
                 scan_op.pixel_pointing = job.pixels_final
             if job_ops.scan_wcs_map_weights.enabled:
+                log.info_rank("Scanning with scan_map_weights", data.comm.comm_world)
                 job_ops.scan_wcs_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
                 scan_op.stokes_weights = job_ops.scan_wcs_map_weights
+            elif job_ops.derivatives_weights.enabled:
+                    log.info_rank("Scanning assuming derivative map rules", data.comm.comm_world)
+                    job_ops.scan_wcs_map_weights.detector_pointing = job_ops.det_pointing_radec_sim
+                    job_ops.derivatives_weights.detector_pointing = job_ops.det_pointing_radec_sim
+                    scan_op.stokes_weights = job_ops.derivatives_weights
             else:
                 scan_op.stokes_weights = job_ops.weights_radec
             if hasattr(scan_op, "save_pointing"):

@@ -134,6 +134,7 @@ class SOFocalplane(Focalplane):
         wafer_slots (str):  Comma separated string of wafers to use.
         tube_slots (str):  Comma separated string of tubes to use.
         thinfp (int):  The factor by which to reduce the number of detectors.
+        extra_prop_file (str, optional): name of file with extra properties for the detectors
         creation_time (float):  Optional timestamp to use when building readout_id.
         comm (MPI.Comm):  Optional MPI communicator.
         apply_net_corr (bool):  Degrade NETs according to the correlation factors.
@@ -154,6 +155,7 @@ class SOFocalplane(Focalplane):
         wafer_slots=None,
         tube_slots=None,
         thinfp=None,
+        extra_prop_file=None,
         creation_time=None,
         comm=None,
         apply_net_corr=True,
@@ -191,6 +193,7 @@ class SOFocalplane(Focalplane):
                             tele_name,
                             det_info=(det_info_file, det_info_version),
                             no_darks=det_info_file is not None,
+                            extra_prop_file=extra_prop_file,
                         )
                     else:
                         raise RuntimeError(
@@ -320,6 +323,9 @@ class SOFocalplane(Focalplane):
             [],
         )
 
+        if extra_prop_file:
+            (cal, dx, dy, dsigma, dp, dc) = ([], [], [], [], [], [])
+
         for det_name, det_data in hw.data["detectors"].items():
             readout_id.append(
                 build_readout_id(
@@ -391,6 +397,13 @@ class SOFocalplane(Focalplane):
             upper = get_par_float(det_data, "high", band_data["high"]) * u.GHz
             bandcenters.append(0.5 * (lower + upper))
             bandwidths.append(upper - lower)
+            if extra_prop_file:
+                cal.append(det_data.get("cal", 1.0))
+                dx.append(det_data.get("dx", 0.0))
+                dy.append(det_data.get("dy", 0.0))
+                dsigma.append(det_data.get("dsigma", 0.0))
+                dp.append(det_data.get("dp", 0.0))
+                dc.append(det_data.get("dc", 0.0))
 
         meta["platescale"] = (
             hw.data["telescopes"][meta["telescope"]]["platescale"] * u.deg / u.mm
@@ -469,6 +482,9 @@ class SOFocalplane(Focalplane):
             ],
             meta=meta,
         )
+        if extra_prop_file:
+            detdata.add_columns([cal, dx, dy, dsigma, dp, dc], 
+                                names=["cal", "dx", "dy", "dsigma", "dp", "dc"])
 
         super().__init__(
             detector_data=detdata,
@@ -528,6 +544,7 @@ def simulated_telescope(
     wafer_slots=None,
     tube_slots=None,
     thinfp=None,
+    extra_prop_file=None,
     weather=None,
     comm=None,
 ):
@@ -547,6 +564,7 @@ def simulated_telescope(
         wafer_slots=wafer_slots,
         tube_slots=tube_slots,
         thinfp=thinfp,
+        extra_prop_file=extra_prop_file,
         comm=comm,
     )
     site = SOSite(obs_time=obs_time, weather=weather)
