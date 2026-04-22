@@ -6,7 +6,7 @@ DetMatch
 The ``sotodlib.coords.det_match`` module allows us to map resonators from one
 source to another, using information such as resonator frequency, bias-line
 assignments, and pointing information. This is particularly useful to create
-a map from resonators in a SMuRF tune-file, to real detectors from either a
+a map from resonators in a SMuRF tune-file to real detectors from either a
 design-file, or a handmade solutions file based on a separate tune-file.
 
 This works by translating the detector matching problem into an instance
@@ -94,12 +94,21 @@ Det Match Solutions
 `````````````````````````
 
 The ``det_match_solutions`` script can be used to generate "handmade" detector match
-solutions sets for all wafers from a tune file and pointing information to
-the design wafer information.  It is performs multiple matches iteratively
-while correcting for frequency and pointing offsets between them.  The major steps are:
+solutions sets for all wafers.  A solution set is defined as a mapping from a tune file
+with the addition of pointing information from fits to a point source in that observation to
+the design wafer information (i.e. matching tune readout IDs to design detector IDs with
+xi and eta constraints).  Solutions are useful due to the potentially alrge frequency shifts
+between the tunesets and design frequencies.It is performs multiple matches
+sequentially while correcting for frequency and pointing offsets between them.
+
+The major steps in this script are:
 
 - Load pointing xi and eta information from fits to observations of point sources.
-  These should be written to an ``hdf5`` file under a group named ``focal_plane``.
+  These are derived by fitting TODs or maps of observations targeting point
+  sources (planets or the Moon) and are stored as a structured array in an
+  ``hdf5`` file under a group named ``focal_plane`` and should include entries
+  for all det_ids from the matching tune (NaNs are allowed). It should also include
+  an estimate of the coefficient of determination, R\ :sup:`2` for excluding bad fits.
   Multiple pointing files may be input in which case they will a match will be
   performed and the median xi and eta values will be used from all matched resonators.
 - Do the first match for the wafer using pointing, frequency, and bias line information.
