@@ -441,7 +441,7 @@ def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('config', type=str, help='path to config file')
     parser.add_argument('--run-all', action='store_true', help='run all detsets')
-    parser.add_arguments('--solutions-mode', action='store_true',
+    parser.add_argument('--solutions-mode', action='store_true',
                          help='create a det_match solution set')
     return parser
 
