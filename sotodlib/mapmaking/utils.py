@@ -782,8 +782,9 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
     such that each category is as compact in RA as possible, and each
     category has as similar size as possible. Assumes that all obs
     are at the same site."""
-    owners = np.arange(nsplit,dtype=int)[:len(obsinfo)]
-    if len(obsinfo) > nsplit:
+    if len(obsinfo) <= nsplit:
+        return np.arange(nsplit)[:len(obsinfo)]
+    else:
         # Get a reprsentative RA per entry
         az    = obsinfo["az_center"] * putils.degree
         el    = obsinfo["el_center"] * putils.degree
@@ -797,12 +798,13 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
         weight= obsinfo["n_samples"][order]
         cum   = putils.cumsum(weight)
         wtot  = cum[-1]+weight[-1] # = np.sum(weight)
+        owners = np.zeros(len(obsinfo),int)
         owners[order] = putils.floor(cum*nsplit/wtot)
         # Make sure none ended up empty. If they did, fall back to unweighted,
         # which will always succeed
         if np.any(np.bincount(owners, minlength=nsplit) == 0):
             owners[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
-    return owners
+        return owners
 
 Base = declarative_base()
 
