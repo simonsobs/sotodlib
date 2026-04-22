@@ -401,9 +401,9 @@ def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
         eta_mod[msk] *= ot_pars[4]
     return xi_mod, eta_mod
 
-#test Elle Apr 10
+
 def objective_model_func_lmfit(
-    params, pm_version, solver_aman, xieta_model, weights=True
+    params, pm_version, solver_aman, xieta_model, fit_method, weights=True
 ):
     if xieta_model == "measured":
         xi_mod, eta_mod = model_measured_xieta(params, pm_version, solver_aman)
@@ -415,59 +415,31 @@ def objective_model_func_lmfit(
     xi_mod, eta_mod = _apply_ot_float(xi_mod, eta_mod, solver_aman, params)
 
     dist = np.sqrt((xi_ref - xi_mod) ** 2 + (eta_ref - eta_mod) ** 2)
-    if weights:
-        return dist * np.sqrt(solver_aman.weights)
-    else:
-        return dist
-    #weights_array = solver_aman.weights if weights else np.ones(len(dist))
-    #return chi_sq(weights_array, dist)
-
-def objective_model_func_lmfit_joint(
-    params, pm_version, epochs, xieta_model, weights=True
-):
-    params = params.valuesdict()
-    all_residuals=[]
-    for epoch in epochs:
-        epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
-        res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
-        all_residuals.append(res)
-    return np.concatenate(all_residuals)
-
-"""
-def objective_model_func_lmfit(
-    params, pm_version, solver_aman, xieta_model, weights=True
-):
-    if xieta_model == "measured":
-        xi_mod, eta_mod = model_measured_xieta(params, pm_version, solver_aman)
-        xi_ref, eta_ref, _ = solver_aman.measured_xieta_data
-    elif xieta_model == "template":
-        xi_mod, eta_mod = model_template_xieta(params, pm_version, solver_aman)
-        xi_ref, eta_ref, _ = solver_aman.nominal_xieta_locs
-
-    xi_mod, eta_mod = _apply_ot_float(xi_mod, eta_mod, solver_aman, params)
-
-    dist = np.sqrt((xi_ref - xi_mod) ** 2 + (eta_ref - eta_mod) ** 2)
-    #print(np.nansum(dist))
     weights_array = solver_aman.weights if weights else np.ones(len(dist))
-    return chi_sq(weights_array, dist)
+
+    return (dist * np.sqrt(weights_array))
+
 
 def objective_model_func_lmfit_joint(
-    params, pm_version, epochs, xieta_model, weights=True
-):
+    params, pm_version, epochs, xieta_model, fit_method, weights=True):
     params = params.valuesdict()
-    chisq = 0
-    t1 = time.time()
-    for epoch in epochs:
-        chisq += objective_model_func_lmfit({par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}, pm_version, epoch["solver_aman"], xieta_model, weights)
-    return chisq
-
-
-def chi_sq(weights, dist):
-    #N = np.identity(len(dist)) * weights
-    #chi2 = dist.T @ N @ dist
-    chi2 = np.nansum(dist ** 2 * weights)
-    return chi2
-"""
+    if fit_method == "leastsq" or fit_method == "least_squares":
+        all_residuals=[]
+        for epoch in epochs:
+            epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
+            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, fit_method, weights)
+            all_residuals.append(res)
+        return np.concatenate(all_residuals)
+        
+    else: 
+        chisq = 0 
+        for epoch in epochs:
+            epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
+            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, fit_method, weights)
+            chisq += np.nansum(res**2)
+            
+        return chisq
+    
 
 def model_template_xieta(params, pm_version, aman):
     """
@@ -586,11 +558,12 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
     # Apply model to data.
     xieta_model = config.get("xieta_model", "measured")
     (full_modeled, full_residuals, rms, _ 
-    ) = apply_model_params(xieta_model, #"template",
+    ) = apply_model_params(xieta_model,
                            params,
                            config.get("pm_version"),
                            full_aman)
-    to_comp = "nominal_xieta_locs"
+    if xieta_model == "template":
+        to_comp = "nominal_xieta_locs"
     if xieta_model == "measured":
         to_comp = "measured_xieta_data"
     full_aman.wrap("full_modeled", np.array(full_modeled),
@@ -603,8 +576,9 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
     modelfit_aman.wrap("eta", full_modeled[1], overwrite=True)
     full_aman.wrap("modeled_fits", modelfit_aman, overwrite=True)
 
-    dxi_all = (full_aman.full_modeled[0] - xi_nom) / DEG * 60 #modeled - nominal
-    deta_all = (full_aman.full_modeled[1] - eta_nom) / DEG * 60
+    dxi_all = (full_aman.full_modeled[0] - full_aman[to_comp][0]) / DEG * 60 
+    deta_all = (full_aman.full_modeled[1] - full_aman[to_comp][1]) / DEG * 60
+
     full_aman.wrap("dxi", dxi_all, [(0, "samps")])
     full_aman.wrap("deta", deta_all, [(0, "samps")])
 
@@ -693,6 +667,7 @@ def main(config_path: str):
     pm_version = config.get("pm_version")  # e.g. sat_v1
     sv_tag = config.get("solution_version_tag")  # e.g. YYMMDDr#
     xieta_model = config.get("xieta_model", "measured")
+    fit_method = config.get("fit_method", "leastsq")
     xe_tag = f"{xieta_model}_xieta"
     iterate_cutoff = config.get("iterate_cutoff", None)
     plotlims = config.get("plotlims", 20)
@@ -833,12 +808,13 @@ def main(config_path: str):
 
     # Solve for Model Parameters
     # use chosen xieta_model to solve for parameters
+    breakpoint()
     model_solved_params = minimize(
         objective_model_func_lmfit_joint,
         fit_params,
-        method=config.get("fit_method", "nelder"),
+        method=fit_method,
         nan_policy="omit",
-        args=(pm_version, epochs, xieta_model, use_weights),
+        args=(pm_version, epochs, xieta_model, fit_method, use_weights),
         **config.get("fit_options", {}),
     )
     logger.info("Ran 1st Minimization")
@@ -877,12 +853,12 @@ def main(config_path: str):
                             str(model_solved_params.message))
         model_fit_stats_aman.wrap('fit_report', fitreport_aman)
 
-        if config.get("fit_method", "nelder") == "leastsq":
-            mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
-            corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
-            corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
-            corrmtx_aman.wrap('param_names', np.array(param_names), [(0, 'params')])
-            model_fit_stats_aman.wrap('correlation_matrix', corrmtx_aman)
+        #if config.get("fit_method", "leastsq") == "leastsq":
+        mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
+        corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
+        corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
+        corrmtx_aman.wrap('param_names', np.array(param_names), [(0, 'params')])
+        model_fit_stats_aman.wrap('correlation_matrix', corrmtx_aman)
         epoch["solver_aman"].wrap('model_fit_statistics', model_fit_stats_aman)
 
         # Model template and measured points using parameters found above
@@ -923,12 +899,14 @@ def main(config_path: str):
                 plotter.plot_residuals_vs_ancil()
                 plotter.plot_xieta_cross_residuals()
                 plotter.plot_xieta_residuals()
+                plotter.plot_fit_correlation_matrix()
             else:
                 plotter.plot_modeled_fits()
                 plotter.plot_template_space_fits_per_detector()
                 plotter.plot_residuals_vs_ancil()
                 plotter.plot_residuals_histograms()
                 plotter.plot_dets_in_these_obs()
+                plotter.plot_fit_correlation_matrix()
 
     tot_bad=0
     if iterate_cutoff is not None:
@@ -968,7 +946,7 @@ def main(config_path: str):
                 # zero-ing the weights.
                 good_fit_inds = np.where(fit_residuals_i1 < cutoff)[0]
                 _, _, masked_rms, _ = apply_model_params(xieta_model, 
-                                                        epoch["solver_aman"].pointing_model, 
+                                                        epoch["solver_aman"].pointing_model,
                                                         pm_version, 
                                                         epoch["solver_aman"],
                                                         use_inds=good_fit_inds)
@@ -979,14 +957,13 @@ def main(config_path: str):
             
         if tot_bad == 0:
             logger.info("No bad points found so not running second fit!")
-
     if tot_bad > 0:
         model_solved_params = minimize(
             objective_model_func_lmfit_joint,
             fit_params,
-            method=config.get("fit_method", "leastsq"),
+            method=fit_method,
             nan_policy="omit",
-            args=(pm_version, epochs, xieta_model, use_weights),
+            args=(pm_version, epochs, xieta_model, fit_method, use_weights),
             **config.get("fit_options", {})
         )
 
@@ -1027,12 +1004,12 @@ def main(config_path: str):
             fitreport_aman.wrap('message', str(model_solved_params.message))
             model_fit_stats_aman.wrap('fit_report', fitreport_aman)
 
-            if config.get("fit_method", "nelder") == "leastsq":
-                mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
-                corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
-                corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
-                corrmtx_aman.wrap('param_names', np.array(param_names), [(0, 'params')])
-                model_fit_stats_aman.wrap('correlation_matrix', corrmtx_aman)
+            #if config.get("fit_method", "leastsq") == "leastsq":
+            mat, param_names = get_full_correlation_matrix(model_solved_params, epoch["params"])
+            corrmtx_aman = core.AxisManager(core.LabelAxis('params', param_names))
+            corrmtx_aman.wrap('matrix', mat, [(0, 'params'), (1, 'params')])
+            corrmtx_aman.wrap('param_names', np.array(param_names), [(0, 'params')])
+            model_fit_stats_aman.wrap('correlation_matrix', corrmtx_aman)
             
             epoch["solver_aman"].wrap('model_fit_statistics', model_fit_stats_aman)
 
@@ -1080,11 +1057,13 @@ def main(config_path: str):
                     plotter.plot_template_space_fits_per_wafer()
                     plotter.plot_xieta_cross_residuals()
                     plotter.plot_xieta_residuals()
+                    plotter.plot_fit_correlation_matrix()
                 else:
                     plotter.plot_modeled_fits()
                     plotter.plot_template_space_fits_per_detector()
                     plotter.plot_residuals_histograms()
                     plotter.plot_dets_in_these_obs()
+                    plotter.plot_fit_correlation_matrix()
     else:
         if config.get("make_plots"):
             for epoch in epochs:
@@ -1107,7 +1086,7 @@ def main(config_path: str):
         for epoch in epochs:
             solver_aman = epoch["solver_aman"]
             # Remove OT float parameters
-            if config["float_ots"]:
+            if config.get("float_ots", False):
                 ot_float_aman = core.AxisManager()
                 for ot in np.unique(solver_aman.ot_list):
                     for par in [f"{n}_{ot}" for n in ["xioff", "etaoff", "rot", "xiscale", "etascale"]]:
@@ -1135,8 +1114,7 @@ def main(config_path: str):
             else:
                 test_params = epoch["solver_aman"].pointing_model  
                 if "ot_float_aman" in epoch["solver_aman"]._assignments:
-                    test_params = test_params.merge(epoch["solver_aman"].o
-t_float_aman)
+                    test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
             full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
             logger.info(f"for this epoch: {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
@@ -1749,15 +1727,6 @@ class ModelFitsPlotter:
             self.aman
         )
 
-        fig, ax = plt.subplots(2, 1, figsize=(8,5))
-        ax[0].hist(xi_unmod / ARCMIN - nominal_xieta_locs[0] / ARCMIN,
-                   range=(-1 * plotlims, plotlims), bins = 30)
-        ax[1].hist(eta_unmod / ARCMIN - nominal_xieta_locs[1] / ARCMIN,
-                   range=(-1 * plotlims, plotlims), bins = 30)
-        if self.save_figure:
-            plt.savefig(f"{plot_dir}/{platform}_xi_and_eta_residuals_hist.png", dpi=350)
-            plt.close()
-
         #plot with weights as colorbar
         fig, ax = plt.subplots(figsize=(9, 6))
         ax.plot(0, 0, "kx", label="Nominal Center")
@@ -1858,7 +1827,6 @@ class ModelFitsPlotter:
             if self.save_figure:
                 plt.savefig(f"{plot_dir}/{platform}_unmodeled_fits_WS_corotator{tag}.png", dpi=350)
                 plt.close()
-    
     
     def plot_residuals_vs_ancil(self):
         platform = self.platform
@@ -2226,7 +2194,39 @@ class ModelFitsPlotter:
             plt.savefig(f"{plot_dir}/{platform}_xieta_cross_residuals{tag}.png", dpi=350)
             plt.close()
 
-   
+    def plot_fit_correlation_matrix(self):
+        platform = self.platform
+        plot_dir = self.plot_dir
+        tag = self.tag
+        CM = self.aman.model_fit_statistics.correlation_matrix.matrix
+        names = self.aman.model_fit_statistics.correlation_matrix.param_names
+        n_param = len(names)
+        mask = np.triu_indices(n_param, k=1)
+        CM_plot = CM.copy()
+        CM_plot[mask] = np.nan    
+
+        fig, ax = plt.subplots(figsize=(9, 8))
+        im = ax.imshow(CM_plot,cmap='RdBu_r', vmin=-1, vmax=1)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Correlation Coefficient', rotation=270, labelpad=15)
+        ax.set_xticks(np.arange(n_param))
+        ax.set_yticks(np.arange(n_param))
+        ax.set_xticklabels(names)
+        ax.set_yticklabels(names)        
+
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+        for i in range(n_param):
+            for j in range(n_param):
+              if i>=j:
+                val = CM_plot[i, j]
+                color = "white" if abs(val) > 0.5 else "black"
+                ax.text(j, i, f"{val:.2f}", ha="center", va="center", color=color)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.grid(False) # Grid usually looks messy on masked heatmaps
+        if self.save_figure:
+            plt.savefig(f"{plot_dir}/{platform}_correlation_matrix{tag}.png", dpi=350)
+            plt.close()        
 ############
 
 if __name__ == "__main__":
