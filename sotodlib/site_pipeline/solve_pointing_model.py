@@ -421,7 +421,8 @@ def objective_model_func_lmfit(
 
 
 def objective_model_func_lmfit_joint(
-    params, pm_version, epochs, xieta_model, fit_method, weights=True):
+    params, pm_version, epochs, xieta_model, fit_method, weights=True
+):
     params = params.valuesdict()
     if fit_method == "leastsq" or fit_method == "least_squares":
         all_residuals=[]
@@ -808,7 +809,6 @@ def main(config_path: str):
 
     # Solve for Model Parameters
     # use chosen xieta_model to solve for parameters
-    breakpoint()
     model_solved_params = minimize(
         objective_model_func_lmfit_joint,
         fit_params,
