@@ -437,9 +437,10 @@ def update_manifests_all(runner):
         logger.info(f"Adding {ds} to manifests")
         update_manifests(runner, ds)
 
-def make_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('config', type=str, help='path to config file')
+def get_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser()
+    parser.add_argument('config_file', type=str, help='path to config file')
     parser.add_argument('--run-all', action='store_true', help='run all detsets')
     parser.add_argument('--solutions-mode', action='store_true',
                          help='create a det_match solution set')
@@ -486,6 +487,6 @@ def main(config_file: str, run_all: bool=False, solutions_mode: bool=False):
                     break
 
 if __name__ == '__main__':
-    parser = make_parser()
+    parser = get_parser()
     args = parser.parse_args()
-    main(args.config, run_all=args.run_all, solutions_mode=args.solutions_mode)
+    main(args.config_file, run_all=args.run_all, solutions_mode=args.solutions_mode)

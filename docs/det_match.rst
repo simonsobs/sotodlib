@@ -93,19 +93,18 @@ lenient with the frequency penalty:
 Det Match Solutions
 `````````````````````````
 
-The ``det_match_solutions`` script can be used to generate "handmade" det_match
+The ``det_match_solutions`` script can be used to generate "handmade" detector match
 solutions sets for all wafers from a tune file and pointing information to
 the design wafer information.  It is performs multiple matches iteratively
 while correcting for frequency and pointing offsets between them.  The major steps are:
 
-- Load pointing xi/eta information from fits to observations of point sources.
-These should be written to an h5 file under a group named ``focal_plane``.
-Multiple pointing files may be input in which case they will a match will be
-performed and the median xi/eta values will be used from all matched resonators.
-- Do the first match for the wafer using pointing, frequency, and bias line
-information.
-- Subtract the median xi/eta offset from matched detectors.  Also remove frequency
-offsets through box median interpolation.
+- Load pointing xi and eta information from fits to observations of point sources.
+  These should be written to an ``hdf5`` file under a group named ``focal_plane``.
+  Multiple pointing files may be input in which case they will a match will be
+  performed and the median xi and eta values will be used from all matched resonators.
+- Do the first match for the wafer using pointing, frequency, and bias line information.
+- Subtract the median xi and eta offset from matched detectors.  Also remove frequency
+  offsets through box median interpolation.
 - Run a second match after offset correction.
 - Perform a grid based pointing offset given a selection radius in the config file.
 - Run the third match after second pointing offset correction.
