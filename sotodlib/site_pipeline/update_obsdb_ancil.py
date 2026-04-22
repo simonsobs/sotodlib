@@ -245,7 +245,7 @@ def main(
         redo : Optional[bool]=None,
         compare : Optional[bool]=None,
         job_name : Optional[str]=None,
-        _chain_count: Optional[int]=0,
+        chain_count: Optional[int]=0,
 ):
     """Entry point for CLI or job runner.  Some parameters are only
     used by some commands.
@@ -258,7 +258,7 @@ def main(
         logger.handlers[0].setLevel(logging.DEBUG)
 
     # Try to prevent job loops...
-    assert _chain_count < 16
+    assert chain_count < 16
 
     if time_range is None:
         if lookback_days is not None:
@@ -342,7 +342,7 @@ def main(
             carry_fail = step_cfg.pop('carry_fail', False)
             soldier_on = ignore_fail or carry_fail
             try:
-                main(**step_cfg, _chain_count=_chain_count+1)
+                main(**step_cfg, chain_count=chain_count+1)
             except Exception as e:
                 logger.error(f"Error on step {step}")
                 if soldier_on:
