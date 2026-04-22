@@ -24,7 +24,7 @@ def get_parser(parser=None):
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet",   action="count", default=0)
     parser.add_argument("-@", "--center-at", type=str, default=None)
-    parser.add_argument("-w", "--window",  type=float, default=0.0)
+    parser.add_argument("-w", "--window",  type=float, default=2.0)
     parser.add_argument("-i", "--inject",  type=str,   default=None, help="Path to map to inject. Equatorial coordinates")
     parser.add_argument(      "--nocal",   action="store_true", help="Disable calibration. Useful for sims")
     parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats")
