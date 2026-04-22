@@ -11,6 +11,7 @@ import argparse
 import time
 
 from sotodlib.coords import det_match, optics
+from sotodlib.coords.det_match_solutions import SolutionsCfg, solve_all
 from sotodlib import core
 from sotodlib.core.metadata import ManifestDb
 from sotodlib.io.metadata import write_dataset
@@ -439,31 +440,52 @@ def update_manifests_all(runner):
 def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('config', type=str, help='path to config file')
-    parser.add_argument('--all', action='store_true', help='run all detsets')
+    parser.add_argument('--run-all', action='store_true', help='run all detsets')
+    parser.add_arguments('--solutions-mode', action='store_true',
+                         help='create a det_match solution set')
     return parser
 
-def main(config_file: str, all: bool=False):
-    with open(config_file, 'r') as f:
-        cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+def main(config_file: str, run_all: bool=False, solutions_mode: bool=False):
+    """
+    Site-pipeline script to peform detector matching of tunesets to a solution
+    set.
 
-    runner = Runner(cfg)
-
-    remaining_detsets = runner.get_remaining_detsets()
-    logger.info(f"{len(remaining_detsets)} detsets to match")
-    if all:
-        update_manifests_all(runner)
-        for detset in remaining_detsets:
-            logger.info(f"running: {detset}")
-            run_match(runner, detset)
-            update_manifests_all(runner)
+    ------
+    config_file: str
+        Yaml configuration file for tuneset matching (or solution set matching
+        if solutions_mode is True).
+    run_all: bool
+        Run all detsets if True, otherwise exit after first successful match.
+    solutions_mode: bool
+        Create a det_match solution instead of matching a solution to a tuneset.
+        Requires a solutions configuration file.
+    """
+    if solutions_mode:
+        with open(config_file, "r") as f:
+            cfg = SolutionsCfg(**yaml.safe_load(f))
+        solve_all(cfg)
     else:
-        for detset in remaining_detsets:
-            success = run_match(runner, detset)
+        with open(config_file, 'r') as f:
+            cfg = UpdateDetMatchesConfig(**yaml.safe_load(f))
+
+        runner = Runner(cfg)
+
+        remaining_detsets = runner.get_remaining_detsets()
+        logger.info(f"{len(remaining_detsets)} detsets to match")
+        if run_all:
             update_manifests_all(runner)
-            if success:
-                break
+            for detset in remaining_detsets:
+                logger.info(f"running: {detset}")
+                run_match(runner, detset)
+                update_manifests_all(runner)
+        else:
+            for detset in remaining_detsets:
+                success = run_match(runner, detset)
+                update_manifests_all(runner)
+                if success:
+                    break
 
 if __name__ == '__main__':
     parser = make_parser()
     args = parser.parse_args()
-    main(args.config, all=args.all)
+    main(args.config, run_all=args.run_all, solutions_mode=args.solutions_mode)

@@ -12,9 +12,6 @@ from tqdm.auto import tqdm, trange
 from copy import deepcopy
 
 import h5py
-
-from importlib import reload
-import yaml
 import sys
 
 
@@ -26,11 +23,29 @@ class SolutionsCfg:
     ctx_path: str
         Path to context file to use to pull tod metadata.
     pointing_results_dir: str
-        Results to directory that contains pointing resutls from Tomoki's
-        workflow. Files in directory should look like:
+        Results to directory that contains pointing results.  Files in
+        directory should look like:
         ```
         focal_plane_<obs_id>_<wafer_slot>.hdf
         ```
+    results_dir: str
+        Directory where results should be stored.
+    wafer_info_path: str
+        Path to the wafer_info h5 file.
+    tel_type: str
+        Tel type for the optics model. Either "SAT" or "LAT"
+    base_obs_id: str
+        Obs_id to use as a base for matching when merging multiple pointing
+        obs_ids for a wafer.  Will default to the pointing obs_id with the
+        greatest number of detectors above the min_R2 threshold.
+    zemax_path: str
+        If running for a "LAT" tel_type, the path to the zemax file must be specified.
+    apply_roll: bool
+        Whether or not to apply the obs_id roll angle.  Some pointing sets
+        may already be corrected for roll angle.
+    pointing_field: str
+        Name of sub axis manager in pointing tune axis maanger containng the
+        pointing information.
     site_pipeline_cfg_dir: str
         Path to site-pipeline-config dir. Defaults to the env var
         ``$SITE_PIPELINE_CONFIG_DIR``.
@@ -39,23 +54,37 @@ class SolutionsCfg:
         analysis.
     min_r2: float
         Minimum R-squared for det pointing to be considered.
+    sel_rad: float
+        Selection radius for grid-based interpolation pointing offset subtraction.
     unassigned_slots: int:
         Number of additional "unassigned" node to use per-side
-    wafer_info_path: str
-        Path to the wafer_info h5 file.
     wafer_map_path: str
         Path to the wafer map file. Defaults to ``<site-pipeline-config>/shared/detmatpping/wafer_map.yaml``.
+    match_pars: dict
+        Dictionary of match parameters to use for pointing obs_id merging and
+        each match iteration.  Should have the form::
+
+        match_pars:
+            pointing:
+                freq_width: 0.4
+                dist_width: 2.0
+            match0:
+                freq_width: 200
+                dist_width: 0.4
+            match1:
+                freq_width: 50
+                dist_width: 0.8
+            match2:
+                freq_width: 5
+                dist_width: 0.1
+
     Initial pointing offset: Tuple[float, float]
         Estimated pointing offset for the boresight. This should be
         (xi_offset, eta_offset) where both are in radians.
-    results_dir: str
-        Directory where results should be stored.
+    ufm_to_fp_path: str
+        Path to file that maps wafer_slot to position on focal plane.
     freq_correct_by_muxband: bool
         If true, apply the same freq offset correction to all resonators in a mux-band.
-    tel_type: str
-        Tel type for the optics model. Either "SAT" or "LAT"
-    zemax_path: str
-        If running for a "LAT" tel_type, the path to the zemax file must be specified.
     """
 
     ctx_path: str
@@ -67,21 +96,23 @@ class SolutionsCfg:
     zemax_path: Optional[str] = None
     apply_roll: bool = True
 
-    ctx: Context = field(init=False)
     pointing_field: str = "tod_pointing"
     site_pipeline_cfg_dir: str = "$SITE_PIPELINE_CONFIG_DIR"
     finite_xi_thresh: int = (
         500  # Min number of dets with finite xi to consider a pointing input
     )
     min_r2: float = 0.9
+    sel_rad: float = 2.0
     unassigned_slots: int = 1200
     wafer_map_path: Optional[str] = None
-    wafer_map: Dict[str, dict] = field(init=False)
     match_pars: Dict[str, dict] = field(default_factory=lambda: defaultdict(dict))
 
     initial_pointing_offset: Tuple[float, float] = (0, 0)
     ufm_to_fp_path: Optional[str] = None
     freq_correct_by_muxband: bool = True
+
+    ctx: Context = field(init=False)
+    wafer_map: Dict[str, dict] = field(init=False)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SolutionsCfg":
@@ -444,6 +475,7 @@ def match_wafer(
             else:
                 r.res_freq += foffset_south(r.res_freq)
 
+    # Second match
     match.match_pars = dm.MatchParams(
         freq_width=cfg.match_pars["match1"]["freq_width"],
         dist_width=np.deg2rad(cfg.match_pars["match1"]["dist_width"]),
@@ -453,13 +485,14 @@ def match_wafer(
     )
     match._match()
 
-    dxi_interp, deta_interp = get_pt_offset_interp(match, sel_rad=np.deg2rad(2))
+    dxi_interp, deta_interp = get_pt_offset_interp(match, sel_rad=np.deg2rad(cfg.sel_rad))
     for r in match.src:
         if np.isnan(r.xi):
             continue
         r.xi -= dxi_interp((r.xi, r.eta)).item()
         r.eta -= deta_interp((r.xi, r.eta)).item()
 
+    # Third match
     match.match_pars.freq_width = cfg.match_pars["match2"]["freq_width"]
     match.match_pars.dist_width = np.deg2rad(cfg.match_pars["match2"]["dist_width"])
 
