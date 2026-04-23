@@ -59,6 +59,7 @@ from . import (
     update_obsdb_ancil,
     make_coadd_atomic_map,
     make_cosamp_hk,
+    update_det_match,
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -81,7 +82,8 @@ ELEMENTS = {
     'update-obsdb': update_obsdb,
     'update-obsdb-ancil': update_obsdb_ancil,
     'make-cosamp-hk': make_cosamp_hk,
-    'make-coadd-atomic-map': make_coadd_atomic_map
+    'make-coadd-atomic-map': make_coadd_atomic_map,
+    'update-det-match': update_det_match,
 }
 
 CLI_NAME = 'so-site-pipeline'
