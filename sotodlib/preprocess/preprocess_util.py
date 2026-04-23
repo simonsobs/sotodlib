@@ -275,14 +275,14 @@ def init_logger(name, announce='', verbosity=2):
 
     logger = logging.getLogger(name)
 
-    if verbosity == 0:
-        level = logging.ERROR
-    elif verbosity == 1:
+    if verbosity == 1:
         level = logging.WARNING
     elif verbosity == 2:
         level = logging.INFO
     elif verbosity == 3:
         level = logging.DEBUG
+    else:
+        level = logging.ERROR
 
     # add handler only if it doesn't exist
     if len(logger.handlers) == 0:
