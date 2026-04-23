@@ -1832,7 +1832,7 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-    
+
     def __init__(self, step_cfgs):
         self.source_flags_name = step_cfgs.get('source_flags_name', 'source_flags')
         self.save_name = self.source_flags_name
@@ -1882,7 +1882,7 @@ class SourceFlags(_Preprocess):
                     source_aman.wrap(source + '_inv',
                                     RangesMatrix.ones([aman.dets.count, aman.samps.count]),
                                     [(0, 'dets'), (1, 'samps')])
-                  
+
         self.save(proc_aman, source_aman)
 
         return aman, proc_aman
@@ -2103,7 +2103,8 @@ class FourierFilter(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
-        return aman, proc_aman  
+        return aman, proc_aman
+
 
 class DetcalNanCuts(_Preprocess):
     """
@@ -2696,10 +2697,10 @@ class UnionFlags(_Preprocess):
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
         return aman, proc_aman
-            
+
 class CombineFlags(_Preprocess):
     """Do the combination of relevant flags for mapping
-    
+
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
