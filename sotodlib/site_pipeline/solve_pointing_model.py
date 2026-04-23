@@ -1863,6 +1863,8 @@ class ModelFitsPlotter:
             xi_ref, eta_ref, _ = measured_xieta_data
         elif xieta_model == "template":
             xi_ref, eta_ref, _ = nominal_xieta_locs
+        else:
+            raise ValueError("xieta_model must be measured or template")
     
         if "sat" in platform:
             third_enc = ancil.boresight_enc.copy()
@@ -1870,9 +1872,11 @@ class ModelFitsPlotter:
         elif "lat" in platform:
             third_enc = ancil.corotator_enc.copy()
             third_enc_name = "Corotator"        
+        else:
+            raise ValueError("Platform must be sat or lat")
         fig, ax = plt.subplots(2, 3, figsize=(8, 6), sharex="col", sharey="row")
         plt.setp(ax[0, 1].get_yticklabels(), visible=False)
-        plt.suptitle(r"$\delta \xi$, $\delta \eta$" + f" vs Az, El, {third_enc_name}")
+        plt.suptitle(r"$\delta \xi$, $\delta \eta$" + f" vs Az, El, {third_enc_name} ({tag.split('_')[1]})")
         for k in range(6):
             i = k // 3
             j = k % 3
@@ -1882,12 +1886,16 @@ class ModelFitsPlotter:
             elif i == 1:
                 model = eta_model_fit
                 ref = eta_ref
+            else:
+                raise ValueError("Trying to plot an axis that doesn't exist?")
             if j == 0:
                 x = ancil.az_enc % 360
             elif j == 1:
                 x = ancil.el_enc
             elif j == 2:
                 x = third_enc
+            else:
+                raise ValueError("Trying to plot an encoder that doesn't exist?")
             ax[i, j].scatter(
                 x[plotmask],
                 (model - ref)[plotmask] / ARCMIN,
@@ -1905,12 +1913,12 @@ class ModelFitsPlotter:
                 w=scale_weights[plotmask],
             )
             xrange = np.arange(np.nanmin(x), np.nanmax(x))
-            ax[i, j].plot(
+            ax[i, j].errorbar(
                 xrange,
                 mxb[0] * xrange + mxb[1],
-                "r",
+                color="r",
                 lw=1,
-                label=f"Slope {np.round(mxb[0],4)}\n [arcmin/deg]",
+                label=f"Slope {np.round(mxb[0],4)} \n [arcmin/deg]",
             )
             ax[i, j].legend(fontsize="small")
         ax[0, 0].set_ylabel("dXi [arcmin]")
