@@ -567,6 +567,7 @@ def analyze_PM_with_all_dets(config, t0, tf, params):
         to_comp = "nominal_xieta_locs"
     if xieta_model == "measured":
         to_comp = "measured_xieta_data"
+    full_aman.wrap("to_compare", to_comp)
     full_aman.wrap("full_modeled", np.array(full_modeled),
                    [(0, core.LabelAxis("xieta", ["xi", "eta"])),(1, "samps")])
     full_aman.wrap("fit_residuals", full_residuals, [(0, "samps")])
@@ -865,6 +866,7 @@ def main(config_path: str):
         logger.info("Calculating RMS and cutoff for %s", epoch["name"])
         modeled_fits, fit_residuals_i1, rms_i1, model_reference = apply_model_params(xieta_model, epoch["solver_aman"].pointing_model, pm_version, epoch["solver_aman"])
         logger.info("RMS on fit: %f arcmin", rms_i1)
+        logger.info("Mean & Median resid %f, %f arcmin" %(np.nanmean(fit_residuals_i1), np.nanmedian(fit_residuals_i1)))
 
         # Save fit results to the axis manager
         modelfit_aman = core.AxisManager()
@@ -877,6 +879,7 @@ def main(config_path: str):
         if fit_type == "detector":
             _, fit_residuals_full, rms_full, _ = apply_model_params(xieta_model, epoch["solver_aman"].pointing_model, pm_version, epoch["fitcheck_aman"])
             logger.info("RMS on FULL detector set: %f arcmin", rms_full)
+            logger.info("Mean & Median resid %f, %f arcmin" %(np.nanmean(fit_residuals_full), np.nanmedian(fit_residuals_full)))
             epoch["solver_aman"].wrap("fit_residuals_full", fit_residuals_full, overwrite=True)
             epoch["solver_aman"].wrap("fit_rms_full", rms_full, overwrite=True)
             epoch["solver_aman"].wrap("obs_index_full", epoch["fitcheck_aman"].obs_index)
@@ -912,6 +915,11 @@ def main(config_path: str):
     if iterate_cutoff is not None:
         logger.info("Iterating parameter solution")
         logger.info(f"Using {iterate_cutoff} as cutoff")
+
+        second_fit_method = config.get("second_fit_method", None)
+        if second_fit_method is None:
+            second_fit_method = config.get("fit_method")
+
         for epoch in epochs:
             logger.info("Appylying cutoff to %s", epoch["name"])
             fit_residuals_i1 = epoch["solver_aman"].fit_residuals
@@ -945,13 +953,14 @@ def main(config_path: str):
                 # Print RMS of initial fits without outlying data points before
                 # zero-ing the weights.
                 good_fit_inds = np.where(fit_residuals_i1 < cutoff)[0]
-                _, _, masked_rms, _ = apply_model_params(xieta_model, 
+                _, masked_residuals, masked_rms, _ = apply_model_params(xieta_model, 
                                                         epoch["solver_aman"].pointing_model,
                                                         pm_version, 
                                                         epoch["solver_aman"],
                                                         use_inds=good_fit_inds)
                 
                 logger.info("RMS on initial fit without outliers: %f arcmin", masked_rms)
+                logger.info("Mean & Median masked resid %f, %f arcmin" %(np.nanmean(fit_residuals_i1), np.nanmedian(fit_residuals_i1)))
                 epoch["solver_aman"].weights[bad_fit_inds] = 0.0
             epoch["solver_aman"].wrap('bad_fit_inds', bad_fit_inds)
             
@@ -960,8 +969,8 @@ def main(config_path: str):
     if tot_bad > 0:
         model_solved_params = minimize(
             objective_model_func_lmfit_joint,
-            fit_params,
-            method=fit_method,
+            model_solved_params.params, #Output from first fit as starting parameters
+            method=second_fit_method,
             nan_policy="omit",
             args=(pm_version, epochs, xieta_model, fit_method, use_weights),
             **config.get("fit_options", {})
@@ -1109,12 +1118,13 @@ def main(config_path: str):
             #Fill up axis manager with ALL the data (only cuts from culling and time stamps remain)
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
             
-            if "pointing_model_i1" in solver_aman:
-                test_params = epoch["solver_aman"].pointing_model_i1
-            else:
-                test_params = epoch["solver_aman"].pointing_model  
-                if "ot_float_aman" in epoch["solver_aman"]._assignments:
-                    test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
+            #if "pointing_model_i1" in solver_aman:
+            #    test_params = epoch["solver_aman"].pointing_model_i1
+            #else:
+            test_params = epoch["solver_aman"].pointing_model
+            if "ot_float_aman" in epoch["solver_aman"]._assignments:
+                test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
+            #
             full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
             logger.info(f"for this epoch: {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
@@ -1174,7 +1184,7 @@ class ModelFitsPlotter:
 
         ancil = self.aman.ancil
         modeled = self.aman.full_modeled
-        nominal_xieta_locs = self.aman.nominal_xieta_locs
+        compare_pts = self.aman[self.aman.to_compare]
         per_ufm_stats = self.aman.per_ufm_stats
         per_obs_stats = self.aman.per_obs_stats
         roll_c = self.aman.roll_c
@@ -1195,8 +1205,8 @@ class ModelFitsPlotter:
             azmin, azmax = 0, 360
             
         plt.figure(figsize=(7,5))
-        plt.scatter((modeled[0] - nominal_xieta_locs[0])/DEG*60,
-                    (modeled[1] - nominal_xieta_locs[1])/DEG*60,
+        plt.scatter((modeled[0] - compare_pts[0])/DEG*60,
+                    (modeled[1] - compare_pts[1])/DEG*60,
                     c=roll_c, s=2.7,
                     alpha=0.15, marker='.', cmap='jet',
                     vmin=rollmin, vmax=rollmax)
@@ -1225,8 +1235,8 @@ class ModelFitsPlotter:
             
 
         plt.figure(figsize=(7,5))
-        plt.scatter((modeled[0] - nominal_xieta_locs[0])/DEG*60,
-                    (modeled[1] - nominal_xieta_locs[1])/DEG*60,
+        plt.scatter((modeled[0] - compare_pts[0])/DEG*60,
+                    (modeled[1] - compare_pts[1])/DEG*60,
                     c=ancil.el_enc, s=2.7,
                     alpha=0.15, marker='.', cmap='jet',
                     vmin=elmin, vmax=elmax)
@@ -1254,8 +1264,8 @@ class ModelFitsPlotter:
         plt.close()
 
         plt.figure(figsize=(7,5))
-        plt.scatter((modeled[0] - nominal_xieta_locs[0])/DEG*60,
-                    (modeled[1] - nominal_xieta_locs[1])/DEG*60,
+        plt.scatter((modeled[0] - compare_pts[0])/DEG*60,
+                    (modeled[1] - compare_pts[1])/DEG*60,
                     c=ancil.az_enc%360, s=2.7,
                     alpha=0.15, marker='.', cmap='jet',
                     vmin=azmin, vmax=azmax)
@@ -1317,10 +1327,11 @@ class ModelFitsPlotter:
         tag = self.tag
         append = self.append_string
         ancil = self.aman.ancil
+        compare_pts = self.aman[self.aman.to_compare]
         
         xi, eta, _ = self.aman.nominal_xieta_locs
-        dxi = self.aman.modeled_fits.xi - self.aman.nominal_xieta_locs[0]
-        deta = self.aman.modeled_fits.eta - self.aman.nominal_xieta_locs[1]
+        dxi = self.aman.modeled_fits.xi - compare_pts[0]
+        deta = self.aman.modeled_fits.eta - compare_pts[1]
         roll_c = self.aman.roll_c
 
         fig, ax = plt.subplots()
@@ -1359,6 +1370,8 @@ class ModelFitsPlotter:
                     label = f'Obs RMS {obs_rms:.2f} arcmin')
         plt.axvline(ufm_rms, 0, 1, color='m',
                     label=f'UFM RMS {ufm_rms:.2f} arcmin')
+        plt.axvline(np.nanmedian(fit_residuals), 0, 1, color='k', linestyle=':',
+                    label=f'Median {np.nanmedian(fit_residuals):.2f} arcmin')
         #plt.axvline(median, 0, 1, color='r', linestyle=':',
         #            label='median arcmin')
         #plt.axvline(median+np.nanmedian(np.abs(fit_residuals- median))*1.4826,
@@ -2071,6 +2084,10 @@ class ModelFitsPlotter:
                     label=f'Weighted RMSE (all): {fit_rms_full:.3f} arcmin')
         plt.axvline(fit_rms, color='C1',
                     label=f'Weighted RMSE (set): {fit_rms:.3f} arcmin')
+        plt.axvline(np.nanmedian(fit_residuals_full), color='C0', linestyle=':',
+                    label=f'Median (all): {np.nanmedian(fit_residuals_full):.3f} arcmin')
+        plt.axvline(np.nanmedian(fit_residuals), color='C1', linestyle=':',
+                    label=f'Median (set): {np.nanmedian(fit_residuals):.3f} arcmin')
         plt.xlabel('Fit Residuals (arcmin)')
         plt.ylabel('# Detectors')
         plt.title(append)
