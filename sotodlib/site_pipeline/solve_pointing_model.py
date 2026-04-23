@@ -139,6 +139,8 @@ def _create_size_mask(obs_index):
 
     
 def _create_culling_mask(obs_index, cull_dets):
+    if cull_dets <= 1:
+        return np.ones_like(obs_index, dtype=bool)
     # Remove a random fraction 1/cull_dets of each dataset 
     unique, counts = np.unique(obs_index, return_counts=True)
     #min_count = min(counts)
@@ -392,8 +394,8 @@ def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
         theta = ot_pars[2]
         R = np.array([[np.cos(theta), -np.sin(theta)],
               [np.sin(theta), np.cos(theta)]])
-        xi_cent = np.mean(xi_mod[msk])
-        eta_cent = np.mean(eta_mod[msk])
+        xi_cent = np.nanmean(xi_mod[msk])
+        eta_cent = np.nanmean(eta_mod[msk])
         xi_mod[msk], eta_mod[msk] = R@np.vstack((xi_mod[msk] - xi_cent, eta_mod[msk] - eta_cent))
         xi_mod[msk] += xi_cent
         eta_mod[msk] += eta_cent
@@ -403,7 +405,7 @@ def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
 
 
 def objective_model_func_lmfit(
-    params, pm_version, solver_aman, xieta_model, fit_method, weights=True
+    params, pm_version, solver_aman, xieta_model, weights=True
 ):
     if xieta_model == "measured":
         xi_mod, eta_mod = model_measured_xieta(params, pm_version, solver_aman)
@@ -411,6 +413,8 @@ def objective_model_func_lmfit(
     elif xieta_model == "template":
         xi_mod, eta_mod = model_template_xieta(params, pm_version, solver_aman)
         xi_ref, eta_ref, _ = solver_aman.nominal_xieta_locs
+    else:
+        raise ValueError("xieta_model must be measured or template")
 
     xi_mod, eta_mod = _apply_ot_float(xi_mod, eta_mod, solver_aman, params)
 
@@ -428,7 +432,7 @@ def objective_model_func_lmfit_joint(
         all_residuals=[]
         for epoch in epochs:
             epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
-            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, fit_method, weights)
+            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
             all_residuals.append(res)
         return np.concatenate(all_residuals)
         
@@ -436,7 +440,7 @@ def objective_model_func_lmfit_joint(
         chisq = 0 
         for epoch in epochs:
             epoch_params = {par.split(f"_{epoch['name']}")[0]:params[par] for par in epoch["params"]}
-            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, fit_method, weights)
+            res = objective_model_func_lmfit(epoch_params, pm_version, epoch["solver_aman"], xieta_model, weights)
             chisq += np.nansum(res**2)
             
         return chisq
@@ -482,9 +486,11 @@ def model_measured_xieta(params, pm_version, aman):
     if "sat" in pm_version:
         az, el, roll = pm._get_sat_enc_radians(aman.ancil)
         q_nomodel = quat.rotation_lonlat(-az, el, 0) 
-    if "lat" in pm_version:
+    elif "lat" in pm_version:
         az, el, roll = pm._get_lat_enc_radians(aman.ancil)
         q_nomodel = quat.rotation_lonlat(-az, el, roll)
+    else:
+        raise ValueError("Pointing model must be for sat or lat!")
 
     boresight = pm.apply_pointing_model(aman, pointing_model=params, wrap=False)
     az1, el1, roll1 = boresight.az, boresight.el, boresight.roll
@@ -798,6 +804,8 @@ def main(config_path: str):
 
             epoch["solver_aman"] = solver_aman
             logger.info("Built axis manager for epoch %s", epoch["name"])
+    else:
+        raise ValueError("fit_type must be detector or ufm_center")
 
     ################################
     # END of SPLIT: Now fit the parameters
@@ -885,6 +893,7 @@ def main(config_path: str):
         logger.info(f"2 stdev away from residual Median: {cutoff:.2f} arcmin")
 
         if config.get("make_plots"): 
+            t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
             plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                        config=config,
                                        save_dir=save_dir,
@@ -1042,6 +1051,7 @@ def main(config_path: str):
                 
             if config.get("make_plots"):
                 tag = f"_{epoch['name']}_i2"
+                t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
                 plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                            config=config,
                                            save_dir=save_dir,
@@ -1067,6 +1077,7 @@ def main(config_path: str):
     else:
         if config.get("make_plots"):
             for epoch in epochs:
+                t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
                 plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                            config=config,
                                            save_dir=save_dir,
@@ -1109,7 +1120,7 @@ def main(config_path: str):
             #Fill up axis manager with ALL the data (only cuts from culling and time stamps remain)
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
             
-            if "pointing_model_i1" in solver_aman:
+            if "pointing_model_i1" in epoch["solver_aman"]:
                 test_params = epoch["solver_aman"].pointing_model_i1
             else:
                 test_params = epoch["solver_aman"].pointing_model  
@@ -1324,7 +1335,7 @@ class ModelFitsPlotter:
         roll_c = self.aman.roll_c
 
         fig, ax = plt.subplots()
-        im = ax.quiver(xi, eta, dxi, deta, roll_c, angles='xy', scale=np.deg2rad(24), scale_units='xy', alpha=.8)
+        im = ax.quiver(xi, eta, dxi, deta, roll_c, angles='xy', scale=1/34.4, scale_units='xy', alpha=.2)
         sm = cm.ScalarMappable(cmap=im.cmap, norm=im.norm)
         sm.set_array([])
         plt.colorbar(sm, ax=ax, label='Roll')
