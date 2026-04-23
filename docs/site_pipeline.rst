@@ -620,6 +620,15 @@ Submit the job submission file with the following commands:
  * ``sbatch submit_moon_job_script.sh <platform> <obs_id> 0 tod``
 
 
+get_brightsrc_pointing_part2
+----------------------------
+See Part 1 for description
+
+.. argparse::
+   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
+   :func: get_parser
+
+
 make_read_det_match
 -------------------
 This script generates the readout ID to detector ID mapping required to
@@ -689,15 +698,6 @@ entries mater.
         - db: "/path/to/det_info/wafer/det_info_manifest.db"
           det_info: true
           multi: true
-
-
-get_brightsrc_pointing_part2
-----------------------------
-See Part 1 for description
-
-.. argparse::
-   :module: sotodlib.site_pipeline.get_brightsrc_pointing_part2
-   :func: get_parser
 
 
 update_det_match
