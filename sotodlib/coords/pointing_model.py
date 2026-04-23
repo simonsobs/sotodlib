@@ -116,6 +116,9 @@ def apply_pointing_model_sat(vers, params, tod, ancil):
         az1, el1, roll1 = model_sat_v1(params, az, el, roll)
         return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
 
+    elif vers == 'sat_v2':
+        az1, el1, roll1 = model_sat_v2(params, az, el, roll)
+        return _new_boresight(ancil.samps, az=az1, el=el1, roll=roll1)
     else:
         raise ValueError(f'Unimplemented pointing model "{vers}"')
 
@@ -350,6 +353,99 @@ def model_sat_v1(params, az, el, roll):
 
     return new_az, el, roll
 
+def model_sat_v2(params, az, el, roll):
+    """Applies pointing model to (az, el, roll).
+
+    Args:
+      params: AxisManager (or dict) of pointing parameters.
+      az, el, roll: naive horizon coordinates, in radians, of the
+        boresight.
+
+    The implemented model parameters are:
+
+      - fp_rot_{xi,eta}0: within the focal plane (i.e. relative to the
+        corrected boresight), the center of rotation of the boresight.
+        Radians.
+      - fp_offset_{xi,eta}0: Offset of focal plane's rotational center
+        relative to position in focal plane that lies along the optical axis.
+        Corrects for "collimation error".
+      - enc_offset_{az,el,boresight}: Encoder offsets, in Radians.
+        Sign convention: True = Encoder + Offset
+      - base_tilt_{cos,sin}: Base tilt coefficients, in radians.
+      - harmonic_el_{cos,sin}: 1st order elevation correction, Rad  (HECA2, HESA2)
+      - harmonic_2az_{cos,sin}: 2nd order azimuth correction, Rad  (HACA2, HASA2)
+      - harmonic_2el_{cos,sin}: 2nd order elevation correction, Rad  (HECA2, HESA2)
+      - acec, aces: Az Centering Error params, TPoint, in Radians
+      - npae: Az/El non perpindicularity (radians)
+      - el_sag_pivot: Default set to pi/3 radians
+      - el_sag: modeled as 1/sin(el) (radians)
+    """
+    _p = dict(param_defaults['sat_v2'])
+    if isinstance(params, dict):
+        _p.update(params)
+    else:
+        _p.update({k: params[k] for k in params._fields.keys()})
+    params, _p = _p, None
+
+    for k, v in params.items():
+        if k == 'version':
+            continue
+        if k not in param_defaults['sat_v2'] and v != 0.:
+            raise ValueError(f'Handling of model param "{k}" is not implemented.')
+
+    az_orig = az.copy()
+
+    # Construct offsetted encoders.
+    az = az + params['enc_offset_az']
+    el = el + params['enc_offset_el']
+    roll = roll - params['enc_offset_boresight']
+
+    #Calculate elevation Sag
+    el_sag_pivot = 60 * DEG
+    sag = params['el_sag'] * (1/np.sin(el) - 1/np.sin(el_sag_pivot))
+
+    # Periodic azimuth corrections
+    dAz_wobble = (params['acec'] * np.cos(az)
+                - params['aces'] * np.sin(az)
+                )
+    dAz_wobble_2 = (params['harmonic_2az_cos'] * np.cos(2 * az)
+                  + params['harmonic_2az_sin'] * np.sin(2 * az)
+                  )
+    npae_pivot = 60 * DEG
+    dAz_npae = params['npae'] * (np.tan(el) - np.tan(npae_pivot))
+
+    #Apply Elevation wobble
+    dEl_wobble = (params['harmonic_el_cos'] * np.cos(az)
+                + params['harmonic_el_sin'] * np.sin(az)
+                )
+    dEl_wobble_2 = (params['harmonic_2el_cos'] * np.cos(2 * az)
+                  + params['harmonic_2el_sin'] * np.sin(2 * az)
+                  )
+
+    az += dAz_wobble + dAz_wobble_2 + dAz_npae
+    el += dEl_wobble + dEl_wobble_2 + sag
+
+    # Rotation that tilts the base (referred to vals after enc correction).
+    base_tilt = get_base_tilt_q(params['base_tilt_cos'], params['base_tilt_sin'])
+
+    # Rotation that takes a vector in array-centered focal plane coords
+    # to a vector in boresight-rotation-centered focal plane coords.
+    q_fp_rot = ~quat.rotation_xieta(params['fp_rot_xi0'], params['fp_rot_eta0'])
+
+    # Rotation that moves the center of the focal plane to fp_offset_(xi, eta)0.
+    q_fp_offset = quat.rotation_xieta(params['fp_offset_xi0'], params['fp_offset_eta0'])
+
+    # Horizon coordinates.
+    q_hs = (base_tilt * quat.rotation_lonlat(-az, el)
+            * q_fp_offset * ~q_fp_rot * quat.euler(2, roll) * q_fp_rot)
+
+    neg_az, el, roll = quat.decompose_lonlat(q_hs)
+
+    # Make corrected az as close as possible to the input az.
+    change = ((-neg_az - az_orig) + np.pi) % (2 * np.pi) - np.pi
+    new_az = az_orig + change
+
+    return new_az, el, roll
 
 # Support functions
 param_defaults={
@@ -402,6 +498,27 @@ param_defaults={
         'harmonic_2az_cos': 0.,
         'acec': 0.,
         'aces': 0.,
+    },
+    'sat_v2' : {
+        'enc_offset_az': 0.,
+        'enc_offset_el': 0.,
+        'enc_offset_boresight': 0.,
+        'fp_offset_xi0': 0.,
+        'fp_offset_eta0': 0.,
+        'fp_rot_xi0': 0.,
+        'fp_rot_eta0': 0.,
+        'base_tilt_cos': 0.,
+        'base_tilt_sin': 0.,
+        'harmonic_el_sin': 0.,  #dE = HESA * np.sin(A)
+        'harmonic_el_cos': 0.,  #dE = HECA * np.cos(A)
+        'harmonic_2el_sin': 0., #dE = HESA2 * np.sin(2A)
+        'harmonic_2el_cos': 0., #dE = HECA2 * np.cos(2A)
+        'harmonic_2az_sin': 0., #dA = HASA2 * np.sin(2A)
+        'harmonic_2az_cos': 0.,  #dA = HACA2 * np.cos(2A)
+        'acec': 0., #same as HACA
+        'aces': 0., #same as HASA
+        'npae': 0.,
+        'el_sag': 0.,
     }
 }
 
