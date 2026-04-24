@@ -24,7 +24,7 @@ def get_parser(parser=None):
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet",   action="count", default=0)
     parser.add_argument("-@", "--center-at", type=str, default=None)
-    parser.add_argument("-w", "--window",  type=float, default=0.0)
+    parser.add_argument("-w", "--window",  type=float, default=2.0)
     parser.add_argument("-i", "--inject",  type=str,   default=None, help="Path to map to inject. Equatorial coordinates")
     parser.add_argument(      "--nocal",   action="store_true", help="Disable calibration. Useful for sims")
     parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats")
@@ -36,6 +36,7 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--iunit",     type=str, default="K", help="Unit of the raw tod")
     parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
     parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
     parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
@@ -43,6 +44,8 @@ def get_parser(parser=None):
     parser.add_argument("--hits", action="store_true", help="Write hits maps")
     parser.add_argument("--cut-type",        type=str, default="full")
     return parser
+
+unit_defs   = {"nK":1e-9, "uK":1e-6, "mK":1e-3, "K":1.0, "kK":1e3, "MK": 1e6, "GK":1e9}
 
 def exit(comm, code):
     if comm is not None: # This check might need an expansion
@@ -176,6 +179,7 @@ def main(**args):
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
         elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window)
         elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
+        elif args.nmat == "debug":  noise_model = mapmaking.NmatDebug()
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
         signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod, cut_type=args.cut_type)
@@ -250,6 +254,9 @@ def main(**args):
                 utils.deslope(obs.signal, w=5, inplace=True)
                 obs.signal = obs.signal.astype(dtype_tod)
 
+                # Convert to our target unit
+                obs.signal *= unit_defs[args.iunit]/unit_defs[args.unit]
+
                 if "flags" not in obs:
                     obs.wrap("flags", core.AxisManager(obs.dets, obs.samps))
 
@@ -261,12 +268,10 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
-                    # measure rms
-                    rms = d1u.measure_rms(obs.signal, dt=1/srate)
-                    if args.unit=='K':
-                        good    = d1u.sensitivity_cut(rms*1e6, d1u.SENS_LIMITS[band])
-                    elif args.unit == 'uK':
-                        good    = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
+                    # measure rms, and convert to µKrts for comparison with sens_limits
+                    rms  = d1u.measure_rms(obs.signal, dt=1/srate)
+                    rms *= unit_defs[args.unit]/unit_defs["uK"]
+                    good = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
                         L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
