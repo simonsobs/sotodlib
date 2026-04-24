@@ -354,8 +354,10 @@ def _init_fit_params(config, epochs):
         for ipar, par in zip(indep_list, epoch["indep_list"]):
             init_params[ipar] = init_params[par]
     par_count = np.zeros(len(par_list))
+    all_indep_list = []
     for epoch in epochs: 
         indep_list = epoch["indep_list"]
+        all_indep_list += indep_list
         pmsk = np.zeros(len(par_list), bool)
         pmsk[:len(orig_pars)] = True
         pmsk[np.isin(par_list, indep_list)] = False
@@ -365,10 +367,13 @@ def _init_fit_params(config, epochs):
         par_count[pmsk] += 1
         epoch["params"] = par_list[pmsk]
     fixed_params += par_list[par_count == 0].tolist()
+    all_indep_list = np.array(all_indep_list)
 
     # Initialize lmfit Parameter object
     fit_params = Parameters()
     for p in init_params.keys():
+        if p in all_indep_list and np.sum(all_indep_list == p) == len(epochs):
+            continue
         fit_params.add(p, value=init_params[p], vary=True)
     # Turn off various parameters depending on platform
     for fix in fixed_params:
@@ -383,9 +388,12 @@ def _apply_ot_float(xi_mod, eta_mod, solver_aman, params):
     # We are recomputing information that should just be cached here...
     # TODO: Fix that
     ot_float_pars = ["xioff", "etaoff", "rot", "xiscale", "etascale"]
-    ot_float_defaults = np.array([0, 0, 0, 1, 1])
-    for ot in np.unique(solver_aman.ot_list):
-        ot_pars = [params.get(f"{n}_{ot}", d) for n, d in zip(ot_float_pars, ot_float_defaults)]
+    ot_float_defaults = np.array([0., 0., 0., 1., 1.])
+    ot_pars_full = np.array([[params.get(f"{n}_{ot}", d) for n, d in zip(ot_float_pars, ot_float_defaults)] for ot in np.unique(solver_aman.ot_list)])
+    # To avoid the fitter using this to eat up encoder offsets we remove a common mode
+    ot_pars_full[:, :3] -= np.mean(ot_pars_full[:, :3], axis=0)
+    for i, ot in enumerate(np.unique(solver_aman.ot_list)):
+        ot_pars = ot_pars_full[i]
         if np.array_equal(ot_pars, ot_float_defaults):
             continue
         msk = (solver_aman.ot_list == ot)
