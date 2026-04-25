@@ -57,17 +57,16 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
-    
-    if n_proc>1:
-        multiprocessing.set_start_method('spawn')
-        parallel_list = [
-            book for book in unbound_books if book.type == 'oper'
-        ]
-        bind_books_parallel(imprinter.daq_node, parallel_list, n_proc=n_proc)
-
-    unbound_books = imprinter.get_unbound_books()
     print(f"Found {len(unbound_books)} unbound books and "
         f"{len(already_failed_books)} failed books")
+
+    if n_proc>1:
+        multiprocessing.set_start_method('spawn')
+        #parallel_list = [
+        #    book for book in unbound_books if book.type == 'oper'
+        #]
+        bind_books_parallel(imprinter.daq_node, unbound_books, n_proc=n_proc)
+
     for book in unbound_books:
         print(f"Binding book {book.bid}")
         try:
