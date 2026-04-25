@@ -287,7 +287,7 @@ class FocalPlane:
 
     def add_fp(self, i, fp, weights, det_boresight, template_msk):
         if self.full_fp is None or self.tot_weight is None or self.det_boresight is None:
-            raise ValueError("full_fp or tot_weight not initialized")
+            raise ValueError("full_fp or tot_weight or det_boresight not initialized")
         self.full_fp[template_msk, :, i] = fp * weights[:, 0][..., None]
         weights = np.nan_to_num(weights)
         self.tot_weight[template_msk] += weights

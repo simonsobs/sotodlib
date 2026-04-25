@@ -1,4 +1,3 @@
-import pdb
 import numpy as np
 from operator import attrgetter
 import copy
@@ -1370,15 +1369,17 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         return aman, proc_aman
-    
+
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
-        if 'bad_dets' in meta[self.azss_stats_name]:
-            keep = ~meta[self.azss_stats_name]['bad_dets']
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if 'bad_dets' in proc_aman[self.save_name]:
+            keep = ~proc_aman[self.save_name]['bad_dets']
         else:
-            keep = np.ones(aman.dets.count, dtype=bool)
-        
+            keep = np.ones(meta.dets.count, dtype=bool)
+
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
@@ -1833,7 +1834,6 @@ class SourceFlags(_Preprocess):
     .. autofunction:: sotodlib.tod_ops.flags.get_source_flags
     """
     name = "source_flags"
-    
     def __init__(self, step_cfgs):
         self.source_flags_name = step_cfgs.get('source_flags_name', 'source_flags')
         self.save_name = self.source_flags_name
@@ -1883,7 +1883,7 @@ class SourceFlags(_Preprocess):
                     source_aman.wrap(source + '_inv',
                                     RangesMatrix.ones([aman.dets.count, aman.samps.count]),
                                     [(0, 'dets'), (1, 'samps')])
-                  
+
         self.save(proc_aman, source_aman)
 
         return aman, proc_aman
@@ -1945,7 +1945,6 @@ class SourceFlags(_Preprocess):
 
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep_all])
-            source_flags.restrict("dets", source_flags.dets.vals[keep_all])
             return meta
         else:
             return keep_all
@@ -2104,7 +2103,8 @@ class FourierFilter(_Preprocess):
                                     aman.samps.offset + aman.samps.count - trim))
             proc_aman.restrict('samps', (proc_aman.samps.offset + trim,
                                          proc_aman.samps.offset + proc_aman.samps.count - trim))
-        return aman, proc_aman  
+        return aman, proc_aman
+
 
 class DetcalNanCuts(_Preprocess):
     """
@@ -2610,8 +2610,10 @@ class SubtractT2P(_Preprocess):
                 T_signal=data_aman.dsT
             )
         else:
+            pcfg = copy.deepcopy(self.process_cfgs)
+            pcfg.pop("fit_in_freq", None)
             tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
-                                            **self.process_cfgs)
+                                            **pcfg)
         return aman, proc_aman
 
 class SplitFlags(_Preprocess):
@@ -2697,10 +2699,10 @@ class UnionFlags(_Preprocess):
         aman['flags'].wrap(self.process_cfgs['total_flags_label'], total_flags)
 
         return aman, proc_aman
-            
+
 class CombineFlags(_Preprocess):
     """Do the combination of relevant flags for mapping
-    
+
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
