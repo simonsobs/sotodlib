@@ -1,3 +1,4 @@
+import re
 import logging
 import os
 from dataclasses import InitVar, dataclass, field
@@ -792,76 +793,104 @@ def plot_by_gamma(focal_plane, plot_dir):
         )
         plt.close()
 
+def _convert_ids(ids, bp_groups):
+    # Collapse the high and low bandpasses
+    ids = np.array(ids)
+
+    # This should probably just be dict comp
+    rep = {}
+    for group in bp_groups:
+        if len(group) == 0:
+            continue
+        bp_str = "/".join(group)
+        for bp in group:
+            rep[bp] = bp_str
+
+    # https://stackoverflow.com/questions/6116978/how-to-replace-multiple-substrings-of-a-string
+    rep = dict((re.escape(k), v) for k, v in rep.items()) 
+    pattern = re.compile("|".join(rep.keys()))
+    ids = np.array([pattern.sub(lambda m: rep[re.escape(m.group(0))], i) for i in ids])
+
+    return ids
+
 
 def plot_receiver(receiver, plot_dir):
     valid_ids = receiver.valid_ids
-    max_diff = 0
-    for fp in receiver.focal_planes:
-        diff = np.nanpercentile(np.abs(fp.diff), 97)
-        if diff > max_diff:
-            max_diff = diff
+    all_diffs = np.vstack([fp.diff for fp in receiver.focal_planes])
+    max_diff = np.nanpercentile(np.abs(all_diffs), 99)
     max_diff *= 180 * 60 * 60 / np.pi
     xlims, ylims = receiver.lims
+    xlims = np.array(xlims)*1.1
+    ylims = np.array(ylims)*1.1
+    have_gamma = np.prod([fp.have_gamma for fp in receiver.focal_planes])
+    nax = 2 + int(have_gamma)
 
+    bp_groups = [('f030', 'f090', 'f220'), ('f040', 'f150', 'f280')]
+    bp_groups = [tuple(bp for bp in group if np.any(np.strings.find(valid_ids, bp) >= 0)) for group in bp_groups]
+    valid_ids = np.unique(_convert_ids(valid_ids, bp_groups))
+    
     fig, axs_all = plt.subplots(
-        len(valid_ids), 3, sharex="col", sharey="row", constrained_layout=True
+        len(valid_ids), nax, sharex="col", sharey="row", constrained_layout=False, figsize=(50*np.ptp(xlims)*nax, 50*np.ptp(ylims)*len(valid_ids)), gridspec_kw = {'wspace':0, 'hspace':0},
     )
     axs = axs_all.flat
     axs[0].set_title("Xi")
     axs[1].set_title("Eta")
-    axs[2].set_title("Gamma")
+    if have_gamma:
+        axs[2].set_title("Gamma")
     cf = None
     for i in range(len(valid_ids)):
-        for j in range(3):
-            axs[3 * i + j].set_aspect("equal")
-            axs[3 * i + j].set_xlim(xlims)
-            axs[3 * i + j].set_ylim(ylims)
+        for j in range(nax):
+            axs[nax * i + j].set_aspect("equal")
+            axs[nax * i + j].set_xlim(xlims)
+            axs[nax * i + j].set_ylim(ylims)
         for fp in receiver.focal_planes:
             if fp.tot_weight is None:
                 continue
-            msk = (fp.id_strs == valid_ids[i]) * fp.isfinite
+            msk = (_convert_ids(fp.id_strs, bp_groups) == valid_ids[i]) * fp.isfinite
             if np.sum(msk) < 3:
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
-            cf = axs[3 * i + 0].tricontourf(
+            cf = axs[nax * i + 0].scatter(
                 fp.transformed[msk, 0],
                 fp.transformed[msk, 1],
-                diff[msk, 0],
-                levels=20,
+                c = diff[msk, 0],
+                marker=".",
                 vmin=-1 * max_diff,
                 vmax=max_diff,
                 cmap="coolwarm",
+                alpha=.5
             )
-            cf = axs[3 * i + 1].tricontourf(
+            cf = axs[nax * i + 1].scatter(
                 fp.transformed[msk, 0],
                 fp.transformed[msk, 1],
-                diff[msk, 1],
-                levels=20,
+                c = diff[msk, 1],
+                marker=".",
                 vmin=-1 * max_diff,
                 vmax=max_diff,
                 cmap="coolwarm",
+                alpha=.5
             )
             if fp.have_gamma:
-                cf = axs[3 * i + 2].tricontourf(
+                cf = axs[nax * i + 2].scatter(
                     fp.transformed[msk, 0],
                     fp.transformed[msk, 1],
-                    diff[msk, 2],
-                    levels=20,
+                    c = diff[msk, 2],
+                    marker=".",
                     vmin=-1 * max_diff,
                     vmax=max_diff,
                     cmap="coolwarm",
+                    alpha=.5
                 )
-        axs[3 * i + 0].set_ylabel(f"{valid_ids[i]}\nEta (rad)")
+        axs[nax * i + 0].set_ylabel(f"{valid_ids[i]}\nEta (rad)")
     if cf is not None:
         fig.colorbar(cf, ax=axs_all.ravel().tolist(), label="arcsecs")
-    axs[-3].set_xlabel("Xi (rad)")
-    axs[-2].set_xlabel("Xi (rad)")
-    axs[-1].set_xlabel("Xi (rad)")
+    for i in range(nax, 0, -1):
+        axs[-i].set_xlabel("Xi (rad)")
     fig.suptitle("Full Receiver Residuals")
-    fig.set_size_inches(2 * fig.get_size_inches())
+    # fig.set_size_inches(2 * fig.get_size_inches())
     if plot_dir is None:
         plt.show()
     else:
         os.makedirs(plot_dir, exist_ok=True)
-        plt.savefig(os.path.join(plot_dir, f"receiver.png"), bbox_inches="tight")
+        plt.savefig(os.path.join(plot_dir, f"receiver.png"), bbox_inches="tight", dpi=100)
         plt.close()
