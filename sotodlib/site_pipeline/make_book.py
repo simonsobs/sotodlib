@@ -67,6 +67,7 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
         #]
         bind_books_parallel(imprinter.daq_node, unbound_books, n_proc=n_proc)
 
+    """
     for book in unbound_books:
         print(f"Binding book {book.bid}")
         try:
@@ -74,7 +75,7 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
         except Exception as e:
             print(f"Error binding book {book.bid}: {e}")
             print(traceback.format_exc())
-
+    """
 
     print("Retrying failed books")
     failed_books = imprinter.get_failed_books()
