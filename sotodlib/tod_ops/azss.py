@@ -548,3 +548,37 @@ def subtract_azss_template(
     if subtract:
         signal[:, scan_flags] -= model[:, scan_flags]
     return model
+
+def subtract_azss_global_template(aman, template, signal, flags, min_valid_samples=12000,
+                                  subtract_in_place=False):
+    """
+    """
+    if isinstance(template, str):
+        template = aman[template]
+    if isinstance(signal, str):
+        signal = aman.signal
+
+    f_template = interp1d(template.binned_az, template.binned_signal, fill_value='extrapolate')
+    template_samps = f_template(aman.boresight.az)
+
+    m = flags.mask()
+    n_valid = (~m).sum(axis=1)
+    bad_dets = n_valid < min_valid_samples
+    if np.sum(~bad_dets) == 0:
+        logger.warning('No detectors have enough valid samples')
+        return coeffs, bad_dets
+
+    valid = ~m[~bad_dets]
+    signal_fit = signal[~bad_dets]
+    template_masked = template_samps[np.newaxis, :] * valid
+
+    VtV = (template_masked ** 2).sum(axis=1)
+    Vty = (vects_masked * signal_fit).sum(axis=1)
+
+    coeffs[~bad_dets] = Vty / VtV
+    if subtract_in_place:
+        signal[~bad_dets] -= coeffs[~bad_dets, np.newaxis] * template_masked[np.newaxis,:]
+    return coeffs, bad_dets
+
+
+
