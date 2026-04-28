@@ -318,7 +318,7 @@ def get_subids_query(query, context):
 
 def get_subids_file(fname, context=None):
     with open(fname, "r") as fname:
-        sub_ids = [line.split()[0] for line in fname]
+        sub_ids = [line.split()[0] for line in fname if line.strip() and not line.strip().startswith("#")]
     sub_ids = expand_ids(sub_ids, context=context)
     return sub_ids
 
