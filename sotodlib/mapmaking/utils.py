@@ -1,3 +1,4 @@
+import sys
 import logging
 import os
 from typing import Optional, Any, Union
@@ -155,10 +156,13 @@ def measure_cov(d, nmax=10000):
 def project_out(d, modes): return d-modes.T.dot(modes.dot(d))
 
 def project_out_from_matrix(A, V):
-    # Used Woodbury to project out the given vectors from the covmat A
+    """This is the equivalent of deprojecting V in a timestream,
+    and then measuring the covariance of the resulting timestream.
+    It will therefore always be positive definite."""
     if V.size == 0: return A
-    Q = A.dot(V)
-    return A - Q.dot(np.linalg.solve(np.conj(V.T).dot(Q), np.conj(Q.T)))
+    AV = A.dot(V)
+    # q = a-VV'a, Q = <qq'> = A + VV'AV'V - AVV' - VV'A
+    return A + V.dot(V.T.dot(AV)).dot(V.T) - AV.dot(V.T) - V.dot(AV.T)
 
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
 
@@ -322,6 +326,18 @@ def get_subids_file(fname, context=None):
     sub_ids = expand_ids(sub_ids, context=context)
     return sub_ids
 
+def get_obsinfo_subids(subids, context):
+    """Given a list of subids, return a ResultSet with one entry
+    from the obsdb for each subid. Ideally one would have this
+    from the original query that defined the subids, but since
+    subids are often read in directly from a file, we can't rely
+    on that. This function is a bit inefficient, since it starts
+    from the full obsdb and then looks up the subids from it"""
+    obsids  = split_subids(subids)[0]
+    ids_str = ",".join(f"'{subid}'" for subid in obsids)                                       
+    rs = context.obsdb.query("obs_id IN (%s)" % ids_str)
+    return rs
+
 def expand_ids(obs_ids, context=None, bands=None):
     """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
     into sub_ids and return the resulting list.
@@ -380,7 +396,7 @@ def expand_ids(obs_ids, context=None, bands=None):
                         sub_ids.append("%s:ws%d:%s" % (obs_id, si, band))
     return sub_ids
 
-def filter_subids(subids, wafers=None, bands=None):
+def filter_subids(subids, wafers=None, bands=None, ots=None):
     subids = np.asarray(subids)
     if wafers is not None:
         wafs   = astr_tok(subids,":",1)
@@ -388,6 +404,11 @@ def filter_subids(subids, wafers=None, bands=None):
     if bands is not None:
         bpass  = astr_tok(subids,":",2)
         subids = subids[np.isin(bpass, bands)]
+    if ots is not None:
+        # Somewhat hacky implementation
+        obs_ids = astr_tok(subids, ":",0)
+        has_ot = np.prod([np.char.find(obs_ids, ot) for ot in ots], 0)
+        subids = subids[has_ot >= 0]
     return subids
 
 def astr_cat(*arrs):
@@ -484,10 +505,16 @@ def evaluate_recentering(info, ctime, geom=None, site=None, weather="typical"):
             elif name == "auto":
                 return np.array([0,0]) # would use geom here
             else:
-                obj = getattr(ephem, name)()
-                djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
-                obj.compute(djd)
-                return np.array([obj.a_ra, obj.a_dec])
+                try:
+                    planet = coords.planets.SlowSource.for_named_source(
+                        name, ctime)
+                    ra0, dec0 = planet.pos(np.mean(ctime))
+                except:
+                    obj = getattr(ephem, name)()
+                    djd = ctime/86400 + 40587.0 + 2400000.5 - 2415020
+                    obj.compute(djd)
+                    ra0, dec0 = obj.a_ra, obj.a_dec
+                return np.array([ra0, dec0])
         else:
             return to_cel(name, sys, ctime, site, weather)
     p1 = get_pos(info["from"], ctime, info["from_sys"])
@@ -569,8 +596,11 @@ def rangemat_sum(rangemat):
         res[i] = np.sum(ra[:,1]-ra[:,0])
     return res
 
-def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags"):
-    ncut  = rangemat_sum(obs[glitch_flags])
+def find_usable_detectors(obs, maxcut=0.1, glitch_flags: str = "flags.glitch_flags", to_null : str = "flags.expected_flags"):
+    flag = obs[glitch_flags]
+    if to_null and to_null in obs: 
+        flag = flag*~obs[to_null]
+    ncut  = rangemat_sum(flag)
     good  = ncut < obs.samps.count * maxcut
     return obs.dets.vals[good]
 
@@ -749,6 +779,35 @@ def setup_passes(downsample="1", maxiter="500", interpol="nearest", npass=None):
             entry[key] = tmp[key][min(i,len(tmp[key])-1)]
         passes.append(entry)
     return passes
+
+def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
+    """For each row in obsinfo, assign it to one of nsplit categories
+    such that each category is as compact in RA as possible, and each
+    category has as similar size as possible. Assumes that all obs
+    are at the same site."""
+    if len(obsinfo) <= nsplit:
+        return np.arange(nsplit)[:len(obsinfo)]
+    else:
+        # Get a reprsentative RA per entry
+        az    = obsinfo["az_center"] * putils.degree
+        el    = obsinfo["el_center"] * putils.degree
+        ctime = (obsinfo["start_time"] + obsinfo["stop_time"])/2
+        ra    = so3g.proj.CelestialSightLine.az_el(ctime, az, el, site=site, weather=weather).coords()[:,0]
+        # Put everything on the same copy of the sky
+        ra    = putils.rewind_compact(ra)
+        # Partition sorted ras equally by weight. Would ideally include
+        # ndet too, but the effective ndet depends on the cuts etc.
+        order = np.argsort(ra)
+        weight= obsinfo["n_samples"][order]
+        cum   = putils.cumsum(weight)
+        wtot  = cum[-1]+weight[-1] # = np.sum(weight)
+        owners = np.zeros(len(obsinfo),int)
+        owners[order] = putils.floor(cum*nsplit/wtot)
+        # Make sure none ended up empty. If they did, fall back to unweighted,
+        # which will always succeed
+        if np.any(np.bincount(owners, minlength=nsplit) == 0):
+            owners[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
+        return owners
 
 Base = declarative_base()
 

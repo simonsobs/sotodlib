@@ -1,3 +1,6 @@
+import numpy as np
+import sys
+
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
     import argparse
@@ -6,9 +9,11 @@ def get_parser(parser=None):
     parser.add_argument("query")
     parser.add_argument("area")
     parser.add_argument("odir")
+    parser.add_argument("preprocess_config", help="Preprocess configuration file")
     parser.add_argument("prefix", nargs="?")
     parser.add_argument(      "--comps",   type=str, default="TQU",help="List of components to solve for. T, QU or TQU, but only TQU is consistent with the actual data")
     parser.add_argument("-W", "--wafers",  type=str, default=None, help="Detector wafer subsets to map with. ,-sep")
+    parser.add_argument("-O", "--ots",  type=str, default=None, help="Optics tubes to map with. ,-sep")
     parser.add_argument("-B", "--bands",   type=str, default=None, help="Bandpasses to map. ,-sep")
     parser.add_argument("-C", "--context", type=str, default="/mnt/so1/shared/todsims/pipe-s0001/v4/context.yaml")
     parser.add_argument(      "--tods",    type=str, default=None, help="Arbitrary slice to apply to the list of tods to analyse")
@@ -19,32 +24,48 @@ def get_parser(parser=None):
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet",   action="count", default=0)
     parser.add_argument("-@", "--center-at", type=str, default=None)
-    parser.add_argument("-w", "--window",  type=float, default=0.0)
+    parser.add_argument("-w", "--window",  type=float, default=2.0)
     parser.add_argument("-i", "--inject",  type=str,   default=None, help="Path to map to inject. Equatorial coordinates")
     parser.add_argument(      "--nocal",   action="store_true", help="Disable calibration. Useful for sims")
     parser.add_argument(      "--nmat-dir",  type=str, default="{odir}/nmats")
     parser.add_argument(      "--nmat-mode", type=str, default="build", help="How to build the noise matrix. 'build': Always build from tod. 'cache': Use if available in nmat-dir, otherwise build and save. 'load': Load from nmat-dir, error if missing. 'save': Build from tod and save.")
     parser.add_argument("-d", "--downsample", type=str, default="1",  help="Downsample TOD by this factor. ,-sep")
+    parser.add_argument("-D", "--downgrade", type=int, default=1,  help="Downgrade the input area by this factor")
     parser.add_argument(      "--maxiter",    type=str, default="500",help="Max number of CG steps per pass. ,-sep")
     parser.add_argument(      "--interpol",   type=str, default="nearest", help="Pmat interpol per pass. ,-sep")
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+    parser.add_argument(      "--iunit",     type=str, default="K", help="Unit of the raw tod")
+    parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
+    parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
+    parser.add_argument(      "--sun-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/sun.fits", help="Location of Sun sidelobe mask")
+    parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
+    parser.add_argument("--hits", action="store_true", help="Write hits maps")
+    parser.add_argument("--cut-type",        type=str, default="full")
     return parser
 
-def main(**args):
-    import numpy as np, sys, time, warnings, os, so3g
-    from sotodlib.core import Context, AxisManager, IndexAxis
-    from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-    from sotodlib import tod_ops, mapmaking, core
-    from sotodlib.tod_ops import filters
-    from sotodlib.mapmaking import log
-    from pixell import enmap, utils, fft, bunch, wcsutils, mpi, bench
-    import yaml
+unit_defs   = {"nK":1e-9, "uK":1e-6, "mK":1e-3, "K":1.0, "kK":1e3, "MK": 1e6, "GK":1e9}
 
-    #try: import moby2.analysis.socompat
-    #except ImportError: warnings.warn("Can't import moby2.analysis.socompat. ACT data input probably won't work")
-    class DataMissing(Exception): pass
+def exit(comm, code):
+    if comm is not None: # This check might need an expansion
+        comm.Abort(code)
+    else:
+        sys.exit(code)
+
+def main(**args):
+    import time, warnings, os, so3g
+
+    from sotodlib import mapmaking, core
+    from sotodlib.coords import sidelobes
+    from sotodlib.preprocess import preprocess_util as pp_util
+    from sotodlib.site_pipeline.utils import depth1_utils as d1u
+    from sotodlib.site_pipeline.utils.config import _get_config
+
+    from pixell import enmap, utils, bunch, wcsutils, mpi, bench
+
+    LoaderError = d1u.LoaderError
+    DataMissing = d1u.DataMissing
 
     warnings.simplefilter('ignore')
     args    = bunch.Bunch(**args)
@@ -53,12 +74,13 @@ def main(**args):
     comm    = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args.area)
 
+    if args.downgrade > 1:
+        shape, wcs = enmap.downgrade_geometry(shape, wcs, args.downgrade)
+
     # Reconstruct that wcs in case default fields have changed; otherwise
     # we risk adding information in MPI due to reconstruction, and that
     # can cause is_compatible failures.
     wcs = wcsutils.WCS(wcs.to_header())
-    # Set shape to None to allow map to fit these TODs exactly.
-    #shape = None
 
     comps = args.comps
     ncomp = len(comps)
@@ -75,12 +97,13 @@ def main(**args):
         recenter = mapmaking.parse_recentering(args.center_at)
 
     with bench.mark('context'):
-        context = Context(args.context)
+        context = core.Context(args.context)
 
+    ots = args.ots.split(",") if args.ots else None
     wafers  = args.wafers.split(",") if args.wafers else None
     bands   = args.bands .split(",") if args.bands  else None
     sub_ids = mapmaking.get_subids(args.query, context=context)
-    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands)
+    sub_ids = mapmaking.filter_subids(sub_ids, wafers=wafers, bands=bands, ots=ots)
 
     # restrict tod selection further. E.g. --tods [0], --tods[:1], --tods[::100], --tods[[0,1,5,10]], etc.
     if args.tods:
@@ -91,8 +114,13 @@ def main(**args):
     if len(sub_ids) == 0:
         if comm.rank == 0:
             print("No tods found!")
-        sys.exit(1)
+        exit(comm, 1)
     L.info("Found %d tods" % (len(sub_ids)))
+
+    # Define our task distribution
+    obsinfo = mapmaking.get_obsinfo_subids(sub_ids, context)
+    owner   = mapmaking.distribute_tods_ra(obsinfo, comm.size, site=SITE)
+    myinds  = np.where(owner==comm.rank)[0]
 
     if args.inject:
         map_to_inject = enmap.read_map(args.inject).astype(dtype_map)
@@ -100,7 +128,16 @@ def main(**args):
     if args.srcsamp:
         srcsamp_mask  = enmap.read_map(args.srcsamp)
 
+    # set up the preprocessing
+    try:
+        preproc = _get_config(args.preprocess_config)
+    except:
+        if comm.rank==0:
+            L.info(f"{args.preprocess_config} is not a valid config")
+        exit(comm, 1)
+
     passes = mapmaking.setup_passes(downsample=args.downsample, maxiter=args.maxiter, interpol=args.interpol)
+    to_skip = []
     for ipass, passinfo in enumerate(passes):
         L.info("Starting pass %d/%d maxit %d down %d interp %s" % (ipass+1, len(passes), passinfo.maxiter, passinfo.downsample, passinfo.interpol))
         pass_prefix = prefix + "pass%d_" % (ipass+1)
@@ -142,31 +179,34 @@ def main(**args):
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
         elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window)
         elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
+        elif args.nmat == "debug":  noise_model = mapmaking.NmatDebug()
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
-        signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod)
+        signal_cut = mapmaking.SignalCut(comm, dtype=dtype_tod, cut_type=args.cut_type)
         signal_map = mapmaking.SignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, recenter=recenter, tiled=args.tiled>0, interpol=args.interpol)
         signals    = [signal_cut, signal_map]
         if args.srcsamp:
+            signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, recenter=recenter, dtype=dtype_tod)
             signal_srcsamp = mapmaking.SignalSrcsamp(comm, srcsamp_mask, dtype=dtype_tod)
             # This *must* come after all the other signals due to how it zeros out the
             # affected samples in the tod (inherited from SignalCut). Might have been better
             # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
         mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+        sidelobe_cutters = {}
 
         nkept = 0
-        # TODO: Fix the task distribution. The current one doesn't care which mpi
-        # task gets which tods, which sabotages the pixel-saving effects of tiled maps!
-        # To be able to distribute the tods sensibly, we need a rough estimate of where
-        # on the sky each tod is. We should be able to get this using the central
-        # ctime, az and el for each tod.
-        for ind in range(comm.rank, len(sub_ids), comm.size):
+
+        for ind in myinds:
             # Detsets correspond to separate files, so treat them as separate TODs.
             sub_id = sub_ids[ind]
             obs_id, wafer, band = sub_id.split(":")
             name = sub_id.replace(":", "_")
             L.debug("Processing %s" % sub_id)
+            if sub_id in to_skip:
+                L.debug("Skipped %s (Cut in previous pass)" % (sub_id))
+                continue
+
             try:
                 meta = context.get_meta(sub_id)
                 # Optionally restrict to maximum number of detectors. This is mainly
@@ -179,8 +219,26 @@ def main(**args):
                 if len(my_dets) == 0: raise DataMissing("no dets left")
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
-                    obs = context.get_obs(sub_id, meta=meta)
-
+                    #obs = context.get_obs(sub_id, meta=meta)
+                    obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                if obs.dets.count < 50:
+                    L.debug("Skipped %s (Not enough detectors)" % (sub_id))
+                    L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
+                    continue
+                # Check nans
+                if not np.all(np.isfinite(obs.signal)):
+                    L.debug("Skipped %s (there is a nan in signal)" % (sub_id))
+                    L.debug("Datacount: %s full" % (sub_id))
+                    to_skip += [sub_id]
+                    continue
+                # Check all 0s
+                zero_dets = np.sum(obs.signal, axis=1) # sum the signal across the samples
+                if np.any(zero_dets == 0.0):
+                    L.debug("%s has all 0s in at least 1 detector" % (sub_id))
+                    obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
+                # Cut non-optical dets, this will be redundant if the preprocessing already cut them
+                obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
@@ -190,14 +248,14 @@ def main(**args):
                 obs.wrap("weather", np.full(1, "typical"))
                 obs.wrap("site",    np.full(1, SITE))
 
-                # Prepare our data. FFT-truncate for faster fft ops
-                obs.restrict("samps", [0, fft.fft_len(obs.samps.count)])
-
                 # Desolope to make it periodic. This should be done *before*
                 # dropping to single precision, to avoid unnecessary loss of precision due
                 # to potential high offses in the raw tod.
                 utils.deslope(obs.signal, w=5, inplace=True)
                 obs.signal = obs.signal.astype(dtype_tod)
+
+                # Convert to our target unit
+                obs.signal *= unit_defs[args.iunit]/unit_defs[args.unit]
 
                 if "flags" not in obs:
                     obs.wrap("flags", core.AxisManager(obs.dets, obs.samps))
@@ -210,37 +268,25 @@ def main(**args):
 
                 # Optionally skip all the calibration. Useful for sims.
                 if not args.nocal:
+                    # measure rms, and convert to µKrts for comparison with sens_limits
+                    rms  = d1u.measure_rms(obs.signal, dt=1/srate)
+                    rms *= unit_defs[args.unit]/unit_defs["uK"]
+                    good = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
+                    if np.logical_not(good).sum() / obs.dets.count > 0.5:
+                        L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
+                        L.debug("Datacount: %s full" % (sub_id))
+                        to_skip += [sub_id]
+                        continue
+                    else:
+                        obs.restrict("dets", good)
                     # Disqualify overly cut detectors
-                    good_dets = mapmaking.find_usable_detectors(obs)
+                    good_dets = mapmaking.find_usable_detectors(obs, args.maxcut)
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
+                        to_skip += [sub_id]
                         L.debug("Skipped %s (all dets cut)" % (sub_id))
+                        L.debug("Datacount: %s full" % (sub_id))
                         continue
-                    # Gapfill glitches. This function name isn't the clearest
-                    tod_ops.get_gap_fill(obs, flags=obs.flags.glitch_flags, swap=True)
-                    # Gain calibration
-                    gain  = 1
-                    for gtype in ["relcal","abscal"]:
-                        gain *= obs[gtype][:,None]
-                    obs.signal *= gain
-                    # Fourier-space calibration
-                    fsig  = fft.rfft(obs.signal)
-                    freq  = fft.rfftfreq(obs.samps.count, 1/srate)
-                    # iir filter
-                    iir_filter  = filters.iir_filter()(freq, obs)
-                    fsig       /= iir_filter
-                    gain       /= iir_filter[0].real # keep track of total gain for our record
-                    fsig       /= filters.timeconst_filter(None)(freq, obs)
-                    fft.irfft(fsig, obs.signal, normalize=True)
-                    del fsig
-
-                    # Apply pointing correction.
-                    #obs.focal_plane.xi    += obs.boresight_offset.xi
-                    #obs.focal_plane.eta   += obs.boresight_offset.eta
-                    #obs.focal_plane.gamma += obs.boresight_offset.gamma
-                    obs.focal_plane.xi    += obs.boresight_offset.dx
-                    obs.focal_plane.eta   += obs.boresight_offset.dy
-                    obs.focal_plane.gamma += obs.boresight_offset.gamma
 
                 # Injecting at this point makes us insensitive to any bias introduced
                 # in the earlier steps (mainly from gapfilling). The alternative is
@@ -251,8 +297,16 @@ def main(**args):
                     mapmaking.inject_map(obs, map_to_inject, recenter=recenter, interpol=args.interpol)
                 utils.deslope(obs.signal, w=5, inplace=True)
 
+                # sidelobes cuts
+                if not args.no_sidelobe:
+                    cutss = sidelobes.get_cuts(obs, args, sidelobe_cutters)
+                    for cut in cutss:
+                        obs.flags.glitch_flags += cut
+
                 if passinfo.downsample != 1:
                     obs = mapmaking.downsample_obs(obs, passinfo.downsample)
+                mmask = obs.flags.glitch_flags.mask()
+                L.debug(f"Datacount: {sub_id} added {obs.dets.count} {np.logical_not(mmask).sum()} ")
 
                 # Maybe load precomputed noise model.
                 # FIXME: How to handle multipass here?
@@ -282,15 +336,17 @@ def main(**args):
                     print("Writing noise model %s" % nmat_file)
                     utils.mkdir(nmat_dir)
                     mapmaking.write_nmat(nmat_file, mapmaker.data[-1].nmat)
-            except (DataMissing,IndexError,ValueError) as e:
+            except (DataMissing,IndexError,ValueError,LoaderError,TypeError) as e:
                 L.debug("Skipped %s (%s)" % (sub_id, str(e)))
+                L.debug("Datacount: %s full" % (sub_id))
                 continue
 
-        nkept = comm.allreduce(nkept)
-        if nkept == 0:
+        nkept_all = np.array([0],dtype='i')
+        comm.Allreduce(np.array([nkept],dtype='i'), nkept_all, op=mpi.SUM)
+        if nkept_all[0] == 0:
             if comm.rank == 0:
                 L.info("All tods failed. Giving up")
-            sys.exit(1)
+            exit(1)
 
         L.info("Done building")
 
@@ -302,6 +358,9 @@ def main(**args):
         signal_map.write(prefix, "div", signal_map.div, unit=args.unit+'^-2')
         signal_map.write(prefix, "bin", enmap.map_mul(signal_map.idiv, signal_map.rhs), unit=args.unit)
         L.info("Wrote rhs, div, bin")
+        if args.hits:
+            signal_map.write(prefix, "hits", signal_map.hits, unit='hits')
+            L.info("Wrote hits")
 
         # Set up initial condition
         x0 = None if ipass == 0 else mapmaker.translate(mapmaker_prev, eval_prev.x_zip)
