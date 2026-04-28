@@ -22,7 +22,7 @@ def bind_books_parallel(platform, book_list, n_proc ):
             exe.submit(_bookbinding_helper, platform, bid) for bid in bid_list
         ]
         for future in as_completed(futures):
-            bid, status, message, _  = future.result()
+            bid, status, message, err  = future.result()
             imprint.logger.info(f"Just finished book {bid}")
             book = session.query(Books).filter(Books.bid == bid).one()
             book.status = status
@@ -30,6 +30,7 @@ def bind_books_parallel(platform, book_list, n_proc ):
             session.commit()
             if status == FAILED:
                 failed_list.append( book.bid)
+                print(f"Error binding book {book.bid}: {err}")
     return failed_list
 
 def _bookbinding_helper(platform, bid ):
@@ -57,25 +58,23 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
-    
-    if n_proc>1:
-        multiprocessing.set_start_method('spawn')
-        parallel_list = [
-            book for book in unbound_books if book.type == 'oper'
-        ]
-        bind_books_parallel(imprinter.daq_node, parallel_list, n_proc=n_proc)
-
-    unbound_books = imprinter.get_unbound_books()
     print(f"Found {len(unbound_books)} unbound books and "
         f"{len(already_failed_books)} failed books")
-    for book in unbound_books:
-        print(f"Binding book {book.bid}")
-        try:
-            imprinter.bind_book(book)
-        except Exception as e:
-            print(f"Error binding book {book.bid}: {e}")
-            print(traceback.format_exc())
 
+    if n_proc>1:
+        multiprocessing.set_start_method('spawn')
+        #parallel_list = [
+        #    book for book in unbound_books if book.type == 'oper'
+        #]
+        bind_books_parallel(imprinter.daq_node, unbound_books, n_proc=n_proc)
+    else:
+        for book in unbound_books:
+            print(f"Binding book {book.bid}")
+            try:
+                imprinter.bind_book(book)
+            except Exception as e:
+                print(f"Error binding book {book.bid}: {e}")
+                print(traceback.format_exc())
 
     print("Retrying failed books")
     failed_books = imprinter.get_failed_books()
