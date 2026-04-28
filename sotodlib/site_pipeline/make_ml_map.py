@@ -1,5 +1,8 @@
 import numpy as np
 import sys
+from sotodlib.coords import planets as cp
+from so3g.proj import quat
+from sotodlib import coords
 
 def get_parser(parser=None):
     # a config file to pass all parameters is pending
@@ -24,6 +27,7 @@ def get_parser(parser=None):
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet",   action="count", default=0)
     parser.add_argument("-@", "--center-at", type=str, default=None)
+    parser.add_argument("--source", type=str, help="Map in source centered coordinates using the sotodlib.coords.planets module to produce P")
     parser.add_argument("-w", "--window",  type=float, default=2.0)
     parser.add_argument("-i", "--inject",  type=str,   default=None, help="Path to map to inject. Equatorial coordinates")
     parser.add_argument(      "--nocal",   action="store_true", help="Disable calibration. Useful for sims")
@@ -316,6 +320,17 @@ def main(**args):
                     nmat = mapmaking.read_nmat(nmat_file)
                 else: nmat = None
 
+                # Make a custom P if we need to
+                P = None
+                if args.source is not None:
+                    planet = cp.SlowSource.for_named_source(args.source, obs.timestamps[0])
+                    ra0, dec0 = planet.pos(obs.timestamps.mean())
+                    rot = quat.rotation_lonlat(0, 0) *  ~quat.rotation_lonlat(ra0, dec0)
+                    P = coords.P.for_tod(
+                        obs, comps=comps, threads="domdir", wcs_kernel=wcs, rot=rot, weather=obs.weather, site=obs.site, interpol=args.interpol,
+                    )
+                    P.geom = enmap.Geometry(shape=shape, wcs=wcs)
+
                 # And add it to the mapmaker
                 with bench.mark("add_obs %s" % sub_id):
                     if ipass > 0:
@@ -325,7 +340,7 @@ def main(**args):
                         # Resample this to the current downsampling level
                         signal_estimate = mapmaking.resample.resample_fft_simple(signal_estimate, obs.samps.count)
                     else: signal_estimate = None
-                    mapmaker.add_obs(sub_id, obs, noise_model=nmat, signal_estimate=signal_estimate)
+                    mapmaker.add_obs(sub_id, obs, noise_model=nmat, signal_estimate=signal_estimate, pmap=P)
                     del signal_estimate
                 del obs
                 nkept += 1
