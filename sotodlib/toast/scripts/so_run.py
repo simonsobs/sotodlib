@@ -603,8 +603,6 @@ def main(opts=None, comm=None):
         help="Create one task per wafer-observation",
     )
 
-    # Options for real data
-
     parser.add_argument(
         "--obs_file",
         required=False,
@@ -612,6 +610,8 @@ def main(opts=None, comm=None):
         default=None,
         help="File with observation IDs",
     )
+
+    # Context options
 
     parser.add_argument(
         "--context_file",
@@ -636,6 +636,8 @@ def main(opts=None, comm=None):
         default=None,
         help="Deprecated:  alias for `context_dets_select`",
     )
+
+    # HDF5 options
 
     parser.add_argument(
         "--hdf5_volume",
@@ -685,6 +687,15 @@ def main(opts=None, comm=None):
         type=str,
         default=None,
         help="Synthetic observing schedule",
+    )
+
+    # Detailed debugging of the batch system
+
+    parser.add_argument(
+        "--debug_batch",
+        action="store_true",
+        default=False,
+        help="Enable debug mode in MPIBatch",
     )
 
     # Parse just the args we are using in this wrapper
@@ -747,13 +758,17 @@ def main(opts=None, comm=None):
 
     # Create the batch setup
     n_task = len(tasks)
+    print(f"{n_task} tasks:")
+    for t in tasks:
+        print(f"{t['name']}")
+    print("", flush=True)
     batch = MPIBatch(
         comm,
         worker_size,
         n_task,
         task_fs_root=args.out_root,
         task_fs_names=[x["name"] for x in tasks],
-        debug=False,
+        debug=args.debug_batch,
     )
 
     msg = f"Using {batch.n_worker} workers"
