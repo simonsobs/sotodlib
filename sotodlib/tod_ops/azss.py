@@ -248,7 +248,6 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
             / (m.sum() - max_mode - 1)
         )
     else:
-        x_legendre_bin_centers = None  # set inside the loop
         for i in np.where(valid_dets)[0]:
             m_i = m_2d[i]
             x_samp, x_legendre_bin_centers = _legendre_x(
@@ -467,15 +466,17 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
             logger.warning('All the detectors have low az coverage and cannot make model')
             return model
 
-        mask = ~np.isnan(azss_stats.binned_signal[valid_dets, :])
-        is_uniform = np.all(mask == mask[0, :])
+        m_2d = ~np.isnan(azss_stats.binned_signal)
+        is_uniform = np.array_equal(m_2d[valid_dets].any(axis=0),
+                                    m_2d[valid_dets].all(axis=0))
         if is_uniform:
-            m = mask[0, :]
+            m = m_2d[valid_dets][0]
             f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[:, m][valid_dets, :], fill_value='extrapolate')
             model[valid_dets, :] = f_template(az)
         else:
-            for i, m, binned_signal in zip(np.where(valid_dets)[0], mask, azss_stats.binned_signal[valid_dets, :]):
-                f_template = interp1d(azss_stats.binned_az[m], binned_signal[m], fill_value='extrapolate')
+            for i in np.where(valid_dets)[0]:
+                m = m_2d[i]
+                f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[i][m], fill_value='extrapolate')
                 model[i, :] = f_template(az)
 
     if np.any(~np.isfinite(model)):
