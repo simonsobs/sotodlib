@@ -4,6 +4,7 @@ Also includes tools for computing transforms between point clouds.
 
 LAT code adapted from code provided by Simon Dicker.
 """
+
 import logging
 from functools import lru_cache, partial
 import numpy as np
@@ -46,6 +47,7 @@ LAT_TUBES = {
 SAT_R_FP = (0.0, 29.7580, 59.4574, 89.5745, 120.550, 152.821, 163.986, 181.218)
 SAT_R_SKY = (0.0, 0.0523597, 0.10471958, 0.15707946, 0.20943951, 0.26179764, 0.27925093, 0.30543087)
 # fmt: on
+
 
 def _interp_func(x, y, spline):
     xr = np.atleast_1d(x).ravel()
@@ -119,8 +121,8 @@ def get_gamma(pol_xi, pol_eta):
     xi = pol_xi.reshape((-1, 2))
     eta = pol_eta.reshape((-1, 2))
 
-    q0 = quat.rotation_xieta(xi[:,0], eta[:,0])
-    q1 = quat.rotation_xieta(xi[:,1], eta[:,1])
+    q0 = quat.rotation_xieta(xi[:, 0], eta[:, 0])
+    q1 = quat.rotation_xieta(xi[:, 1], eta[:, 1])
     dq = ~q0 * q1
     d_xi, d_eta, _ = quat.decompose_xieta(dq)
 
@@ -129,9 +131,10 @@ def get_gamma(pol_xi, pol_eta):
 
 
 @lru_cache(maxsize=None)
-def load_ufm_to_fp_config(config_path):
+def load_config(config_path):
     """
-    Load and cache config file with the parameters to transform from UFM to focal_plane coordinates.
+    Load and cache config file with the parameters to transform from UFM to focal_plane coordinates
+    or focal_plane to OT coordinates.
 
     Arguments:
 
@@ -164,7 +167,7 @@ def get_ufm_to_fp_pars(telescope_flavor, wafer_slot, config_path):
 
         transform_pars: Dict of transformation parameters that can be passed to ufm_to_fp.
     """
-    config = load_ufm_to_fp_config(config_path)
+    config = load_config(config_path)
     return config[telescope_flavor][wafer_slot]
 
 
@@ -228,6 +231,86 @@ def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
     return x_fp, y_fp, pol_fp
 
 
+@lru_cache(maxsize=None)
+def get_fp_to_ot_pars(ot, config_path):
+    """
+    Get (and cache) the parameters to transform from focal_plane to OT coordinates
+    for a specific slot of a given telescope's focal plane.
+
+    Arguments:
+
+        ot: The OT(ie. i6, st1, etc).
+
+        config_path: Path to the yaml with the parameters.
+
+    Returns:
+
+        transform_pars: Dict of transformation parameters that can be passed to fp_to_ot.
+    """
+    config = load_config(config_path)
+    return config[ot]
+
+
+def fp_to_ot(aman, x=None, y=None, pol=None, phi=0, dx=0, dy=0):
+    """
+    Transform from coords internal to focal plane to OT coordinates.
+
+    Arguments:
+
+        aman: AxisManager assumed to contain aman.focal_plane.
+              If provided outputs will be wrapped into aman.focal_plane.
+
+        x: X position in focal_plane's internal coordinate system in mm.
+           If provided overrides the value from aman.
+
+        y: Y position in focal_plane's internal coordinate system in mm.
+           If provided overrides the value from aman.
+
+        pol: Polarization angle in focal_plane's internal coordinate system in deg.
+           If provided overrides the value from aman.
+
+        phi: Internal rotation of the focal_plane in degrees.
+
+        dx: X offset in mm.
+
+        dy: Y offset in mm.
+
+    Returns:
+
+        x_fp: X position on focal plane.
+
+        y_fp: Y position on focal plane.
+
+        pol_fp: Pol angle on focal plane.
+    """
+    if x is None:
+        x = aman.focal_plane.x_fp
+    if y is None:
+        y = aman.focal_plane.y_fp
+    if pol is None:
+        pol = aman.focal_plane.pol_fp
+    xy = np.column_stack((x, y, np.zeros_like(x)))
+
+    rot = R.from_euler("z", phi, degrees=True)
+    xy = rot.apply(xy)
+
+    x_ot = xy[:, 0] + dx
+    y_ot = xy[:, 1] + dy
+    pol_ot = pol + phi
+
+    if aman is not None:
+        focal_plane = core.AxisManager(aman.dets)
+        focal_plane.wrap("x_ot", x_ot, [(0, focal_plane.dets)])
+        focal_plane.wrap("y_ot", y_ot, [(0, focal_plane.dets)])
+        focal_plane.wrap("pol_ot", pol_ot, [(0, focal_plane.dets)])
+        if "focal_plane" in aman:
+            aman.focal_plane.merge(focal_plane)
+        else:
+            aman.wrap("focal_plane", focal_plane)
+
+    return x_ot, y_ot, pol_ot
+
+
 def LAT_pix2sky(x, y, sec2el, sec2xel, array2secx, array2secy, rot=0, opt2cryo=30.0):
     """
     Routine to map pixels from arrays to sky.
@@ -238,7 +321,7 @@ def LAT_pix2sky(x, y, sec2el, sec2xel, array2secx, array2secy, rot=0, opt2cryo=3
 
         y: Y position on focal plane (currently zemax coord).
 
-        sec2el: Function that maps positions on secondary to on sky elevation. 
+        sec2el: Function that maps positions on secondary to on sky elevation.
 
         sex2xel: Function that maps positions on secondary to on sky cross-elevation.
 
@@ -423,23 +506,27 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
                If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
-        x = aman.focal_plane.x_fp
+        x = aman.focal_plane.x_ot
     if y is None:
-        y = aman.focal_plane.y_fp
+        y = aman.focal_plane.y_ot
     if pol is None:
-        pol = aman.focal_plane.pol_fp
+        pol = aman.focal_plane.pol_ot
 
     sec2el, sec2xel = LAT_optics(zemax_path)
     array2secx, array2secy = LATR_optics(zemax_path, tube_slot)
 
     el, xel = LAT_pix2sky(x, y, sec2el, sec2xel, array2secx, array2secy, roll)
-    xi, eta, _ = quat.decompose_xieta(quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(-xel, el))
+    xi, eta, _ = quat.decompose_xieta(
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(-xel, el)
+    )
 
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
     pol_el, pol_xel = LAT_pix2sky(
         pol_x, pol_y, sec2el, sec2xel, array2secx, array2secy, roll
     )
-    pol_xi, pol_eta, _ = quat.decompose_xieta(quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(-pol_xel, pol_el))
+    pol_xi, pol_eta, _ = quat.decompose_xieta(
+        quat.euler(1, np.deg2rad(90)) * quat.rotation_lonlat(-pol_xel, pol_el)
+    )
     gamma = get_gamma(pol_xi, pol_eta)
     if np.isscalar(xi):
         gamma = gamma[0]
@@ -519,13 +606,13 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
         mapping_data = (tuple(val) for val in mapping_data)
         fp_to_sky = sat_to_sky(*mapping_data)
 
-    # Get things in polor coords 
-    r_fp = (x**2 + y**2)**.5
+    # Get things in polor coords
+    r_fp = (x**2 + y**2) ** 0.5
     phi_fp = np.arctan2(y, x)
 
     # Now to the sky
     theta_iso = -fp_to_sky(r_fp)
-    phi_iso = np.pi/2 - phi_fp
+    phi_iso = np.pi / 2 - phi_fp
 
     # Flip about the origin for optics (180 deg rotation)
     phi_iso += np.pi
@@ -539,10 +626,10 @@ def SAT_focal_plane(aman, x=None, y=None, pol=None, roll=0, mapping_data=None):
 
     # Lets do gamma as a set of endpoints
     pol_x, pol_y = gen_pol_endpoints(x, y, pol)
-    pol_r = (pol_x**2 + pol_y**2)**.5
+    pol_r = (pol_x**2 + pol_y**2) ** 0.5
     pol_phi = np.arctan2(pol_y, pol_x)
     pol_theta_iso = -fp_to_sky(pol_r)
-    pol_phi_iso = np.pi/2 - pol_phi + np.pi
+    pol_phi_iso = np.pi / 2 - pol_phi + np.pi
     _xi, _eta, _ = quat.decompose_xieta(quat.rotation_iso(pol_theta_iso, pol_phi_iso))
     pol_xi = _xi * np.cos(np.deg2rad(roll)) - _eta * np.sin(np.deg2rad(roll))
     pol_eta = _eta * np.cos(np.deg2rad(roll)) + _xi * np.sin(np.deg2rad(roll))
@@ -574,6 +661,8 @@ def get_focal_plane(
     wafer_slot="ws0",
     config_path=None,
     ufm_to_fp_pars=None,
+    ot_config_path=None,
+    fp_to_ot_pars=None,
     zemax_path=None,
     mapping_data=None,
     return_fp=False,
@@ -608,8 +697,13 @@ def get_focal_plane(
 
         config_path: Path to the ufm_to_fp config file.
 
-        ufm_to_fp_pars: Loaded ufm_to_fp_parsm to focalplane params.
+        ufm_to_fp_pars: Loaded ufm_to_fp_pars to focalplane params.
                         If provided config_path is is ignored.
+
+        ot_config_path: Path to the optics_tubes config file.
+
+        fp_to_ot_pars: Loaded optics_tubes params.
+                        If provided ot_config_path is is ignored.
 
         zemax_path: Path to the data file from Zemax.
                     Only used by the LAT.
@@ -639,6 +733,15 @@ def get_focal_plane(
 
         pol_fp: Pol angle on focal plane.
                 Only returned if return_fp is True.
+
+        x_ot: X position in the OT.
+              Only returned if return_fp is True.
+
+        y_ot: Y position in the OT.
+              Only returned if return_fp is True.
+
+        pol_ot: Pol angle in the OT.
+                Only returned if return_fp is True.
     """
     if aman is not None and "obs_info" in aman:
         if telescope_flavor is None:
@@ -654,19 +757,32 @@ def get_focal_plane(
     if ufm_to_fp_pars is None:
         ufm_to_fp_pars = get_ufm_to_fp_pars(telescope_flavor, wafer_slot, config_path)
     x_fp, y_fp, pol_fp = ufm_to_fp(aman, x=x, y=y, pol=pol, **ufm_to_fp_pars)
+    if fp_to_ot_pars is None:
+        fp_to_ot_pars = get_fp_to_ot_pars(tube_slot, ot_config_path)
+    x_ot, y_ot, pol_ot = fp_to_ot(aman, x=x_fp, y=y_fp, pol=pol_fp, **fp_to_ot_pars)
+    # We dont want to use the shift of the OT when computing on sky locations
+    x_use, y_use, pol_use = fp_to_ot(
+        aman, x=x_fp, y=y_fp, pol=pol_fp, phi=fp_to_ot_pars["phi"]
+    )
     if telescope_flavor == "LAT":
         if zemax_path is None:
             raise ValueError("Must provide zemax_path for LAT")
         xi, eta, gamma = LAT_focal_plane(
-            aman, zemax_path, x=x_fp, y=y_fp, pol=pol_fp, roll=roll, tube_slot=tube_slot
+            aman,
+            zemax_path,
+            x=x_use,
+            y=y_use,
+            pol=pol_use,
+            roll=roll,
+            tube_slot=tube_slot,
         )
     else:
         xi, eta, gamma = SAT_focal_plane(
-            aman, x=x_fp, y=y_fp, pol=pol_fp, roll=roll, mapping_data=mapping_data
+            aman, x=x_use, y=y_use, pol=pol_use, roll=roll, mapping_data=mapping_data
         )
 
     if return_fp:
-        return xi, eta, gamma, x_fp, y_fp, pol_fp
+        return xi, eta, gamma, x_fp, y_fp, pol_fp, x_ot, y_ot, pol_ot
     return xi, eta, gamma
 
 
