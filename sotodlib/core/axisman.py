@@ -877,7 +877,7 @@ class AxisManager:
                         shape.append(s)
 
                 new_v = np.empty(shape, dtype=v.dtype)
-                if isinstance(v.dtype, float):
+                if v.dtype == float:
                     # Fill any float arrays with nans
                     # Non float arrays may have weird
                     # behavior for newly added indexes. 
