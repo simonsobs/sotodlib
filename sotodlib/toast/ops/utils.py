@@ -2,6 +2,7 @@
 # Full license can be found in the top level "LICENSE" file.
 
 import os
+import time
 import pickle
 
 from astropy import constants
@@ -95,7 +96,7 @@ def persistent_pickle_load(fname, n_try_max=6, wait_time=10):
                 return None
             else:
                 log.warning(f"EOF at {fname}, waiting for {wait_time} seconds")
-                sleep(wait_time)
+                time.sleep(wait_time)
                 continue
         break  # success
 
