@@ -706,10 +706,11 @@ def main(opts=None, comm=None):
         log.warning(msg)
         args.context_dets_select = args.dets_select
 
+    # Cleanup any requested states
+    cleanup_states(args)
+
     # If we are printing status, just do that and exit
     if args.status:
-        # Cleanup any running states if needed
-        cleanup_states(args)
         print_status(args)
         return
 
@@ -741,9 +742,6 @@ def main(opts=None, comm=None):
         msg += " or `sim_schedule`"
         raise RuntimeError(msg)
 
-    # Cleanup any running states if needed
-    cleanup_states(args)
-
     if args.worker_size is None:
         if comm is None:
             worker_size = 1
@@ -758,10 +756,6 @@ def main(opts=None, comm=None):
 
     # Create the batch setup
     n_task = len(tasks)
-    print(f"{n_task} tasks:")
-    for t in tasks:
-        print(f"{t['name']}")
-    print("", flush=True)
     batch = MPIBatch(
         comm,
         worker_size,
