@@ -152,9 +152,6 @@ class Cfg:
         wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True,
         compress: bool = True,
-        mapcat_database_name: str = os.environ.get('MAPCAT_DATABASE_NAME', ''),
-        mapcat_database_type: str = os.environ.get('MAPCAT_DATABASE_TYPE', ''),
-        mapcat_atomic_parent: str = os.environ.get('MAPCAT_ATOMIC_PARENT', ''),
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -194,9 +191,6 @@ class Cfg:
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
         self.compress = compress
-        self.mapcat_database_name = mapcat_database_name
-        self.mapcat_database_type = mapcat_database_type
-        self.mapcat_atomic_parent = mapcat_atomic_parent
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -362,9 +356,9 @@ def main(
     if not split_labels:
         split_labels.append('full')
         
-    mapcat_settings = {"database_type": args.mapcat_database_type,
-                       "database_name": args.mapcat_database_name,
-                       "atomic_parent": args.mapcat_atomic_parent,}
+    mapcat_settings = {"database_type": Settings().database_type,
+                       "database_name": Settings().database_name,
+                       "atomic_parent": Settings().atomic_parent,}
 
     # We open the data base for checking if we have maps already,
     # if we do we will not run them again.
