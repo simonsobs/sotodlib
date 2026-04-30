@@ -6,22 +6,25 @@ This module contains the core data I/O and processing tools.
 
 """
 
-from so3g.spt3g import core
+try:
+    from spt3g import core
+except ImportError:
+    from so3g.spt3g import core
 
 
 class DataG3Module(object):
     """
     Base G3Module for processing or conditioning data.
-    
+
     Classes inheriting from DataG3Module only need to override the process() function
-    to build a G3Module that will call process() on every detector in a given 
-    G3TimestreamMap. 
-    
+    to build a G3Module that will call process() on every detector in a given
+    G3TimestreamMap.
+
     Attributes:
         input (str): key of G3TimestreamMap of source data
         output (str or None): key of G3Timestream map of output data.
             if None, input will be overwritten with output
-            
+
     TODO:
         * Add detector masking capabilities so we don't waste CPU time on cut detectors
         * Make an option for input/output to be a list, so processing can be done on multiple timestreams
@@ -34,25 +37,25 @@ class DataG3Module(object):
             self.output = self.input
         else:
             self.output = output
-                
+
     def __call__(self, f):
         if f.type == core.G3FrameType.Scan:
             if self.input not in f.keys() or type(f[self.input]) != core.G3TimestreamMap:
-                raise ValueError("""Frame is a Scan but does not have a G3Timestream map 
+                raise ValueError("""Frame is a Scan but does not have a G3Timestream map
                                  named {}""".format(self.input))
-        
+
             processing = core.G3TimestreamMap()
-            
+
             for k in f[self.input].keys():
                 processing[k] = core.G3Timestream( self.process(f[self.input][k], k) )
-                                    
+
             processing.start = f[self.input].start
-            processing.stop = f[self.input].stop   
+            processing.stop = f[self.input].stop
 
             if self.input == self.output:
                 f.pop(self.input)
             f[self.output] = processing
-           
+
     def process(self, data, det_name):
         """
         Args:
@@ -63,15 +66,15 @@ class DataG3Module(object):
             data (G3Timestream)
         """
         return data
-    
+
     def apply(self, f):
         """
         Applies the G3Module on an individual G3Frame or G3TimestreamMap. Likely
         to be useful when debugging
-        
+
         Args:
             f (G3Frame or G3TimestreamMap)
-            
+
         Returns:
             G3Frame: if f is a G3Frame it returns the frame after the module has been applied
             G3TimestreamMap: if f is a G3TimestreamMap it returns self.output
@@ -89,12 +92,12 @@ class DataG3Module(object):
             self.__call__(frame)
             return frame[self.output]
         raise ValueError('apply requires a G3Frame or a G3TimestreamMap, you gave me {}'.format(type(f)))
-        
+
     @classmethod
     def from_function(cls, function, input='signal', output=None):
         """
         Allows inline creation of DataG3Modules with just a function definition
-        
+
         Example:
             mean_sub = lambda data: data-np.mean(data)
             G3Pipeline.Add(DataG3Module.from_function(mean_sub) )

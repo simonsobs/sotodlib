@@ -434,7 +434,8 @@ class IntensityTemplates(Operator):
 
             if self.order > 1:
                 for key, templates in intensity_templates.items():
-                    for name, template in templates.items:
+                    for name in list(templates.keys()):
+                        template = templates[name]
                         for p in range(2, self.order + 1):
                             templates[f"{name}-order{p}"] = template**p
 

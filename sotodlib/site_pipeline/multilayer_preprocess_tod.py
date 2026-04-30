@@ -14,6 +14,7 @@ from tqdm import tqdm
 from sotodlib.coords import demod as demod_mm
 from sotodlib.hwp import hwp_angle_model
 from sotodlib import core
+from sotodlib.core.metadata.manifest import MultiDbBatchManager
 from sotodlib.site_pipeline.jobdb import JobManager, JState
 from sotodlib.preprocess import _Preprocess, Pipeline, processes
 import sotodlib.preprocess.preprocess_util as pp_util
@@ -104,8 +105,8 @@ def _check_init_jobdb(
 
     Arguments
     ----------
-    jdb : JobDB
-        JobDB instance.
+    jdb : JobManager
+        A preprocesing jobdb.
     init_db : ManifestDb or None
         Init preproc database.
     init_jobs_map : dict
@@ -189,7 +190,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
-          raise_error: bool = False):
+          raise_error: bool = False,
+          pb_path: Optional[str] = None):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
@@ -404,10 +406,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     batch_size_init = configs_init['archive'].get('batch_size', 1)
     batch_size_proc = configs_proc['archive'].get('batch_size', 1)
 
-    pb_name = f"pb_{str(int(time.time()))}.txt"
+    pb_name = os.path.join(pb_path or '', f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
         with MultiDbBatchManager(
-            [db_init, db_proc], batch_sizes=[batch_size_init, batch_size_proc], logger=logger
+            [db_init, db_proc], batch_size=[batch_size_init, batch_size_proc], logger=logger
         ) as (db_mgr_init, db_mgr_proc):
             for future in tqdm(as_completed_callable(futures), total=total,
                                 desc="multilayer_preprocess_tod", file=f,
@@ -472,7 +474,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                         n_groups_fail += 1
 
         if n_groups_fail > 0:
-            raise RuntimeError(f"preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
+            raise RuntimeError(f"multilayer_preprocess_tod ended with {n_obs_fail}/{len(obs_errors)} "
                                f"failed obsids and {n_groups_fail}/{len(run_list)} failed groups")
     logger.info("multilayer_preprocess_tod is done")
 
@@ -551,12 +553,18 @@ def get_parser(parser=None):
         type=bool,
         default=False
     )
+    parser.add_argument(
+        '--pb-path',
+        help="Path to where to save progress bar.",
+        type=str,
+        default=None
+    )
     return parser
 
 
 def main(configs_init: str,
          configs_proc: str,
-         query: Optional[str] = None,
+         query: str = '',
          obs_id: Optional[str] = None,
          overwrite: bool = False,
          min_ctime: Optional[int] = None,
@@ -568,7 +576,8 @@ def main(configs_init: str,
          compress: bool = False,
          nproc: int = 4,
          run_from_jobdb: bool = False,
-         raise_error: bool = False):
+         raise_error: bool = False,
+         pb_path: Optional[str] = None):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -588,7 +597,8 @@ def main(configs_init: str,
               nproc=nproc,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
-              raise_error=raise_error)
+              raise_error=raise_error,
+              pb_path=pb_path)
 
 
 if __name__ == '__main__':

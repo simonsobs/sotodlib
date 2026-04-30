@@ -6,7 +6,7 @@ DetMatch
 The ``sotodlib.coords.det_match`` module allows us to map resonators from one
 source to another, using information such as resonator frequency, bias-line
 assignments, and pointing information. This is particularly useful to create
-a map from resonators in a SMuRF tune-file, to real detectors from either a
+a map from resonators in a SMuRF tune-file to real detectors from either a
 design-file, or a handmade solutions file based on a separate tune-file.
 
 This works by translating the detector matching problem into an instance
@@ -90,10 +90,43 @@ lenient with the frequency penalty:
     )
     match = dm.Match(src, dst, match_params=mpars)
 
+Det Match Solutions
+`````````````````````````
+
+The ``det_match_solutions`` script can be used to generate "handmade" detector match
+solutions sets for all wafers.  A solution set is defined as a mapping from a tune file
+with the addition of pointing information from fits to a point source in that observation to
+the design wafer information (i.e. matching tune readout IDs to design detector IDs with
+xi and eta constraints).  Solutions are useful due to the potentially alrge frequency shifts
+between the tunesets and design frequencies.It is performs multiple matches
+sequentially while correcting for frequency and pointing offsets between them.
+
+The major steps in this script are:
+
+- Load pointing xi and eta information from fits to observations of point sources.
+  These are derived by fitting TODs or maps of observations targeting point
+  sources (planets or the Moon) and are stored as a structured array in an
+  ``hdf5`` file under a group named ``focal_plane`` and should include entries
+  for all det_ids from the matching tune (NaNs are allowed). It should also include
+  an estimate of the coefficient of determination, R\ :sup:`2` for excluding bad fits.
+  Multiple pointing files may be input in which case they will a match will be
+  performed and the median xi and eta values will be used from all matched resonators.
+- Do the first match for the wafer using pointing, frequency, and bias line information.
+- Subtract the median xi and eta offset from matched detectors.  Also remove frequency
+  offsets through box median interpolation.
+- Run a second match after offset correction.
+- Perform a grid based pointing offset given a selection radius in the config file.
+- Run the third match after second pointing offset correction.
+
 
 API
 -------
 .. automodule:: sotodlib.coords.det_match
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: sotodlib.coords.det_match_solutions
    :members:
    :undoc-members:
    :show-inheritance:

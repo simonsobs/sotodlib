@@ -49,7 +49,6 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade wheel
           python3 -m pip install so3g
-          python3 -m pip install pshmem
           python3 -m pip install --pre toast
 
       - name: Install OpenMPI for Tests
@@ -71,7 +70,6 @@ jobs:
           pushd ./tests
           python3 -m pytest -s .
           popd
-
 
       - name: Run MPI Tests
         if: runner.os == 'Linux'

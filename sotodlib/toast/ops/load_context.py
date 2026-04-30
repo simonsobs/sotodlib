@@ -639,6 +639,20 @@ class LoadContext(Operator):
             # Read and communicate data
             self._load_data(ob, have_pointing, preproc_conf)
 
+            # Report number of cut detectors
+            local_cut = np.count_nonzero(
+                [y for x, y in ob.local_detector_flags.items()]
+            )
+            if ob.comm.comm_group is None:
+                all_cut = local_cut
+            else:
+                all_cut = ob.comm.comm_group.gather(local_cut, root=0)
+                if ob.comm.group_rank == 0:
+                    tot_cut = np.sum(all_cut)
+                    msg = f"LoadContext {ob.name} {tot_cut} / "
+                    msg += f"{len(ob.all_detectors)} dets trimmed on read"
+                    log.debug(msg)
+
             # Now that all metadata has been loaded, ensure that all byte strings
             # are converted to unicode arrays.
             ob._internal = replace_byte_arrays(ob._internal)

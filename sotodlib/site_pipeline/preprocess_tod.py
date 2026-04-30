@@ -161,7 +161,8 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           nproc: int = 4,
           compress: bool = False,
           run_from_jobdb: bool = False,
-          raise_error: bool = False):
+          raise_error: bool = False,
+          pb_path: Optional[str] = None):
 
     temp_subdir = "temp"
 
@@ -237,7 +238,12 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
             if db is not None and not overwrite:
                 x = db.inspect({'obs:obs_id': obs_id})
                 if x is not None and len(x) != 0 and len(x) != len(groups):
-                    [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    try:
+                        [groups.remove([a[f'dets:{gb}'] for gb in group_by]) for a in x]
+                    except Exception as e:
+                        logger.error(f"filtering of {groups} for {obs_id} with entry {x} failed with {e}")
+                        raise
+
 
             for group in groups:
                 if 'NC' not in group:
@@ -312,7 +318,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     # batch updates to ManifestDb
     batch_size = configs['archive'].get('batch_size', 1)
 
-    pb_name = f"pb_{str(int(time.time()))}.txt"
+    pb_name = os.path.join(pb_path or '', f"pb_{str(int(time.time()))}.txt")
     with open(pb_name, 'w') as f:
         with DbBatchManager(db, batch_size=batch_size, logger=logger) as db_manager:
             for future in tqdm(as_completed_callable(futures), total=total,
@@ -444,6 +450,12 @@ def get_parser(parser=None):
         type=bool,
         default=False
     )
+    parser.add_argument(
+        '--pb-path',
+        help="Path to where to save progress bar.",
+        type=str,
+        default=None
+    )
     return parser
 
 
@@ -460,7 +472,8 @@ def main(configs: str,
          nproc: int = 4,
          compress: bool = False,
          run_from_jobdb: bool = False,
-         raise_error: bool = False):
+         raise_error: bool = False,
+         pb_path: Optional[str] = None):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -479,7 +492,8 @@ def main(configs: str,
               nproc=nproc,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
-              raise_error=raise_error)
+              raise_error=raise_error,
+              pb_path=pb_path)
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)

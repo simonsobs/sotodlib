@@ -306,7 +306,8 @@ class DarkTemplates(Operator):
             # Optionally add higher order templates
 
             if self.order > 1:
-                for name, template in dark_templates.items:
+                for name in list(dark_templates.keys()):
+                    template = dark_templates[name]
                     for p in range(2, self.order + 1):
                         dark_templates[f"{name}-order{p}"] = template**p
 
