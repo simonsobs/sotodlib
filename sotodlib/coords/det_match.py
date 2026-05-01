@@ -105,16 +105,23 @@ class PointingConfig:
         self.fp_pars = optics.get_ufm_to_fp_pars(
             self.tel_type, self.wafer_slot, self.fp_file
         )
-        self.dx = self.fp_pars['dx']
-        self.dy = self.fp_pars['dy']
-        self.theta = np.deg2rad(self.fp_pars['theta'])
+
+        self.ot_pars = optics.get_fp_to_ot_pars(
+            self.tube_slot, self.ot_file)
 
     def get_pointing(self, x, y, pol=0):
         if self.tel_type.upper() == 'SAT':
-            xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
-            yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
-            xi, eta, gamma = optics.SAT_focal_plane(
-                None, x=xp, y=yp, pol=pol, roll=self.roll
+            xi, eta, gamma = optics.get_focal_plane(
+                None,
+                x=x,
+                y=y,
+                pol=pol,
+                roll=self.roll,
+                telescope_flavor="SAT",
+                tube_slot=self.tube_slot,
+                wafer_slot=self.wafer_slot,
+                ufm_to_fp_pars=self.fp_pars,
+                fp_to_ot_pars=self.ot_pars,
             )
         elif self.tel_type.upper() == 'LAT':
             xi, eta, gamma = optics.get_focal_plane(
@@ -127,7 +134,7 @@ class PointingConfig:
                 tube_slot=self.tube_slot,
                 wafer_slot=self.wafer_slot,
                 ufm_to_fp_pars=self.fp_pars,
-                ot_config_path=self.ot_file,
+                fp_to_ot_pars=self.ot_pars,
                 zemax_path=self.zemax_path,
             )
         return xi, eta, gamma
