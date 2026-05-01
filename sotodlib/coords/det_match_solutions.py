@@ -109,6 +109,7 @@ class SolutionsCfg:
 
     initial_pointing_offset: Tuple[float, float] = (0, 0)
     ufm_to_fp_path: Optional[str] = None
+    fp_to_ot_path: Optional[str] = None
     freq_correct_by_muxband: bool = True
 
     ctx: Context = field(init=False)
@@ -145,6 +146,10 @@ class SolutionsCfg:
         if self.ufm_to_fp_path is None:
             self.ufm_to_fp_path = os.path.join(
                 self.site_pipeline_cfg_dir, "shared/focalplane/ufm_to_fp.yaml"
+            )
+        if self.fp_to_ot_path is None:
+            self.fp_to_ot_path = os.path.join(
+                self.site_pipeline_cfg_dir, "shared/focalplane/optics_tubes.yaml"
             )
 
 

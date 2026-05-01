@@ -80,6 +80,7 @@ class PointingConfig:
         Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
+    ot_file: str
     wafer_slot: str
     tel_type: str
     zemax_path: Optional[str] = None
@@ -109,17 +110,25 @@ class PointingConfig:
         self.theta = np.deg2rad(self.fp_pars['theta'])
 
     def get_pointing(self, x, y, pol=0):
-        xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
-        yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
-
         if self.tel_type.upper() == 'SAT':
+            xp = x * np.cos(self.theta) - y * np.sin(self.theta) + self.dx
+            yp = x * np.sin(self.theta) + y * np.cos(self.theta) + self.dy
             xi, eta, gamma = optics.SAT_focal_plane(
                 None, x=xp, y=yp, pol=pol, roll=self.roll
             )
         elif self.tel_type.upper() == 'LAT':
-            xi, eta, gamma = optics.LAT_focal_plane(
-                None, self.zemax_path, x=xp, y=yp, pol=pol,
-                roll=self.roll, tube_slot=self.tube_slot
+            xi, eta, gamma = optics.get_focal_plane(
+                None,
+                x=x,
+                y=y,
+                pol=pol,
+                roll=self.roll,
+                telescope_flavor="LAT",
+                tube_slot=self.tube_slot,
+                wafer_slot=self.wafer_slot,
+                ufm_to_fp_pars=self.fp_pars,
+                ot_config_path=self.ot_file,
+                zemax_path=self.zemax_path,
             )
         return xi, eta, gamma
 
