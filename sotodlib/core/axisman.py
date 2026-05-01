@@ -882,7 +882,11 @@ class AxisManager:
                     # Non float arrays may have weird
                     # behavior for newly added indexes. 
                     # Oh well.
-                    new_v *= np.nan  
+                    new_v = np.full(shape, np.nan)
+                elif v.dtype == int:
+                    # Fill with -1 values which generally
+                    # correspond ot unassigned (e.g. bias lines)
+                    new_v = np.full(shape, -1)
 
                 for i, index in enumerate(indexes):
                     if np.isnan(index) or not (0 <= index < len(v)):
