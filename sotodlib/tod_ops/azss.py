@@ -337,6 +337,8 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         The number of Legendre modes to use for azss when method is 'fit'. Required when method is 'fit'.
     modes_axis_name: string, optional
         The name assigned to the LabelAxis of azss legendre modes when method is 'fit'.
+        Set a unique name when fitting azss with different max_mode values to avoid axis name conflicts.
+        Defaults to 'azss_modes'.
     subtract_in_place: bool
         If True, it subtract the modeled tod from original signal. The aman.signal will be modified.
     merge_stats: boolean, optional
@@ -497,7 +499,7 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
 
 
 def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None,
-                  modes_axis_name='modes_axis_name', azrange=None,
+                  modes_axis_name='azss_modes', azrange=None,
                   scan_flags=None, subtract_name='azss_remove', in_place=False, remove_template=False):
     """
     Subtract the scan synchronous signal (azss) template from the
