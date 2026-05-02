@@ -67,22 +67,22 @@ class PointingConfig:
         Path to focal-plane file that is used by the optics module.
     wafer_slot: str
         Wafer slot of the UFM. For example: "ws0"
-    tel_type: str
-        Tel type for the optics model. Either "SAT" or "LAT"
+    platform: str
+        Which platform to use for the optics model.
     zemax_path: str
-        If running for a "LAT" tel_type, the path to the zemax file must be specified.
+        If running for the lat platform, the path to the zemax file must be specified.
     roll: float
         Rotation about the line of sight.
         For the LAT this is elev - 60 - corotator.
         For the SAT this is -1*boresight.
     tube_slot: str/int
-        If running for a "LAT" tel_type, the tube slot must be specified.
+        If running for the lat platform, the tube slot must be specified.
         Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
     ot_file: str
     wafer_slot: str
-    tel_type: str
+    platform: str
     zemax_path: Optional[str] = None
     roll: Optional[float] = 0
     tube_slot: Optional[Union[str, int]] = None
@@ -93,6 +93,10 @@ class PointingConfig:
     fp_pars: dict = field(init=False)
 
     def __post_init__(self):
+        if self.platform.lower() in ["satp1", "satp2", "satp3"]:
+            self.tel_type = "SAT"
+        elif self.platform.lower() == "lat":
+            self.tel_type = "LAT"
         if self.tel_type == 'LAT':
             if self.zemax_path is None:
                 raise ValueError("zemax path must be set for 'LAT' tel_type")
@@ -301,7 +305,8 @@ class ResSet:
         return np.array(data, dtype=dtype)
 
     @classmethod
-    def from_aman(cls, aman, stream_id, det_cal=None, name=None, pointing: Optional[AxisManager]=None):
+    def from_aman(cls, aman, stream_id, det_cal=None, name=None, pointing: Optional[AxisManager]=None,
+                 ignore_north_south=False):
         """
         Load a resonator set from a Context object based on an obs_id
 
@@ -331,7 +336,10 @@ class ResSet:
         resonators = []
         for i, ri in enumerate(np.where(m)[0]):
             band, channel = aman.det_info.smurf.band[ri], aman.det_info.smurf.channel[ri]
-            is_north = north_is_highband ^ (band < 4)
+            if not ignore_north_south:
+                is_north = north_is_highband ^ (band < 4)
+            else:
+                is_north = 1
             readout_id = aman.det_info.readout_id[ri]
             bg = det_cal.bg[ri]
             res_freq=aman.det_info.smurf.frequency[ri]
@@ -352,7 +360,7 @@ class ResSet:
 
     @classmethod
     def from_tunefile(cls, tunefile, name=None, north_is_highband=True,
-                      resfit_file=None, bgmap_file=None):
+                      resfit_file=None, bgmap_file=None, ignore_north_south=False):
         """
         Creates an instance based on a smurf-tune file. If a resfit or bgmap
         file is included, that data will be added to the Resonance objects as
@@ -379,7 +387,10 @@ class ResSet:
                 continue
 
             for res_idx, d in _v['resonances'].items():
-                is_north = north_is_highband ^ (band < 4)
+                if not ignore_north_south:
+                    is_north = north_is_highband ^ (band < 4)
+                else:
+                    is_north = 1
                 res = Resonator(
                     idx=idx, smurf_res_idx=res_idx, res_freq=d['freq'],
                     smurf_band=band, is_north=is_north
@@ -401,7 +412,8 @@ class ResSet:
 
     @classmethod
     def from_wafer_info_file(cls, wafer_info_file, array_name, name=None,
-                             pt_cfg: Optional[PointingConfig]=None):
+                             pt_cfg: Optional[PointingConfig]=None,
+                             ignore_north_south=False):
         """
         Initialize a ResSet from a wafer info file. This is a file that contains
         detector design information.
@@ -431,7 +443,11 @@ class ResSet:
         resonators = []
         idx = 0
         for r in wafer_array:
-            is_north = r['dets:wafer.coax'] == b'N'
+            # always true for LF
+            if not ignore_north_south:
+                is_north = r['dets:wafer.coax'] == b'N'
+            else:
+                is_north = 1
             kwargs = dict(
                 idx=idx,
                 det_id=r['dets:det_id'].decode(),
@@ -473,7 +489,8 @@ class ResSet:
 
     @classmethod
     def from_solutions(cls, sol_file, north_is_highband=True, name=None,
-                       fp_pars=None, platform='SAT', zemax_path=None):
+                       fp_pars=None, platform='SAT', zemax_path=None,
+                       ignore_north_south=False):
         """
         Creates an instance from an input-solution file. This will include both design data, along with smurf-band
         and smurf-channel info. Resonance frequencies used here are the VNA
@@ -521,7 +538,10 @@ class ResSet:
                     continue
                 # is_north = north_is_highband ^ (_int(d['smurf_band']) < 4)
                 # is_north = d['is_north'].lower().strip() == 'true'
-                is_north = _int(d['bias_line']) < 6
+                if not ignore_north_south:
+                    is_north = _int(d['bias_line']) < 6
+                else:
+                    is_north = 1
                 is_optical = (d['is_optical'].lower() == 'true')
 
                 kwargs = dict(
@@ -761,7 +781,7 @@ class Match:
 
         mat = np.zeros((len(self.src), len(self.dst)), dtype=float)
 
-        # N/S mismatch
+        # N/S mismatch (all N for LF)
         m = src_arr['is_north'][:, None] != dst_arr['is_north'][None, :]
         mat[m] = np.inf
 
@@ -954,7 +974,10 @@ class Match:
         stats.unmatched_src = np.sum(~src_arr['matched'].astype(bool))
         stats.unmatched_dst = np.sum(~dst_arr['matched'].astype(bool))
 
+        # print(stats.unmatched_src, stats.unmatched_dst)
+
         has_pt = ~np.isnan(src_arr['xi'])
+        # print(has_pt)
         stats.unmatched_src_with_pointing = np.sum(
             (~src_arr['matched'].astype(bool)) & has_pt
         )

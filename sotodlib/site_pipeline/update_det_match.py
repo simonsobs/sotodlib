@@ -245,7 +245,12 @@ def get_failed_detsets(cache_file):
 def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     stream_id = aman.det_info.stream_id[aman.det_info.detset == detset][0]
 
-    rs0 = det_match.ResSet.from_aman(aman, stream_id)
+    if wafer_slot == "ws.":
+        ignore_north_south = True
+    else:
+        ignore_north_south = False
+
+    rs0 = det_match.ResSet.from_aman(aman, stream_id, ignore_north_south=ignore_north_south)
     rs0.name = 'meas'
 
     rs1 = load_solution_set(runner, stream_id, wafer_slot=wafer_slot)
