@@ -876,7 +876,6 @@ class AxisManager:
                     for s in np.shape(v)[1:]:
                         shape.append(s)
 
-                new_v = np.empty(shape, dtype=v.dtype)
                 if v.dtype == float:
                     # Fill any float arrays with nans
                     # Non float arrays may have weird
@@ -887,6 +886,8 @@ class AxisManager:
                     # Fill with -1 values which generally
                     # correspond ot unassigned (e.g. bias lines)
                     new_v = np.full(shape, -1)
+                else:
+                    new_v = np.zeros(shape, dtype=v.dtype)
 
                 for i, index in enumerate(indexes):
                     if np.isnan(index) or not (0 <= index < len(v)):
