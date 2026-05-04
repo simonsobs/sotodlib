@@ -36,6 +36,7 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
+<<<<<<< HEAD
     parser.add_argument(      "--iunit",     type=str, default="K", help="Unit of the raw tod")
     parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
     parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
@@ -43,6 +44,9 @@ def get_parser(parser=None):
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
     parser.add_argument("--hits", action="store_true", help="Write hits maps")
     parser.add_argument("--cut-type",        type=str, default="full")
+=======
+    parser.add_argmuent(      "--fixed-tones", type=int, default=0, help="0: don't include fixed tones in noise model. Nonzero: include fixed tones in noise model")
+>>>>>>> 25c7509a (Load fixed tones to obs if desired)
     return parser
 
 unit_defs   = {"nK":1e-9, "uK":1e-6, "mK":1e-3, "K":1.0, "kK":1e3, "MK": 1e6, "GK":1e9}
@@ -220,7 +224,8 @@ def main(**args):
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
-                    obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                    obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta,
+                                                         special_channels=args.fixed_tones)
                 if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
@@ -238,7 +243,11 @@ def main(**args):
                     L.debug("%s has all 0s in at least 1 detector" % (sub_id))
                     obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
                 # Cut non-optical dets, this will be redundant if the preprocessing already cut them
-                obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
+                # Keep fixed tones if desired
+                if args.fixed_tones:
+                    obs.restrict('dets', obs.dets.vals[(obs.det_info.wafer.type == 'OPTC') | (obs.det_info.wafer.type == 'PROB')])
+                else:
+                    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
