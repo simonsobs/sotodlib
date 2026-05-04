@@ -1,12 +1,35 @@
 ################################
 ####### Noise model stuff ######
 ################################
+import os
 import numpy as np
 import so3g
 from pixell import fft, utils, bunch
 import warnings
 
 from .utils import *
+
+_NOISE_MODEL_LOG_COUNTS = {}
+
+def _noise_model_rank():
+    for env_name in ["OMPI_COMM_WORLD_RANK", "PMI_RANK", "SLURM_PROCID", "RANK"]:
+        rank = os.environ.get(env_name)
+        if rank is not None:
+            return rank
+    return None
+
+def _log_noise_model_event(key, message, limit=3):
+    count = _NOISE_MODEL_LOG_COUNTS.get(key, 0)
+    if count < limit:
+        rank = _noise_model_rank()
+        prefix = f"[noise_model pid={os.getpid()}"
+        if rank is not None:
+            prefix += f" rank={rank}"
+        prefix += "]"
+        print(f"{prefix} {message}")
+        if count == limit - 1:
+            print(f"{prefix} Further '{key}' logs suppressed")
+    _NOISE_MODEL_LOG_COUNTS[key] = count + 1
 
 class Nmat:
     def __init__(self):
@@ -40,7 +63,7 @@ class Nmat:
             raise ValueError("Attempt to use partially constructed %s. Typically one gets a fully constructed one from the return value of nmat.build(tod)" % type(self).__name__)
 
 class NmatUncorr(Nmat):
-    def __init__(self, spacing="exp", nbin=100, nmin=10, window=2, bins=None, ips_binned=None, ivar=None, nwin=None):
+    def __init__(self, spacing="exp", nbin=100, nmin=10, window=2, bins=None, ips_binned=None, ivar=None, nwin=None, detrend_order=None):
         self.spacing    = spacing
         self.nbin       = nbin
         self.nmin       = nmin
@@ -49,9 +72,16 @@ class NmatUncorr(Nmat):
         self.ivar       = ivar
         self.window     = window
         self.nwin       = nwin
+        if detrend_order is not None and detrend_order > 2:
+            warnings.warn(f"detrend_order={detrend_order} is not supported. Defaulting to 2 (parabola).")
+            self.detrend_order = 2
+        else:
+            self.detrend_order = detrend_order
         self.ready      = bins is not None and ips_binned is not None and ivar is not None
 
     def build(self, tod, srate, **kwargs):
+        # Detrend the data before windowing & FFT to prevent spectral leakage
+        self.detrend_inplace(tod)
         # Apply window while taking fft
         nwin  = utils.nint(self.window*srate)
         apply_window(tod, nwin)
@@ -76,16 +106,37 @@ class NmatUncorr(Nmat):
         for bi, b in enumerate(bins):
             ivar += ips_binned[:,bi]*(b[1]-b[0])
         ivar /= bins[-1,1]-bins[0,0]
-        return NmatUncorr(spacing=self.spacing, nbin=len(bins), nmin=self.nmin, bins=bins, ips_binned=ips_binned, ivar=ivar, window=self.window, nwin=nwin)
+        built = NmatUncorr(
+            spacing=self.spacing,
+            nbin=len(bins),
+            nmin=self.nmin,
+            bins=bins,
+            ips_binned=ips_binned,
+            ivar=ivar,
+            window=self.window,
+            nwin=nwin,
+            detrend_order=self.detrend_order,
+        )
+        _log_noise_model_event(
+            "NmatUncorr.build_fourier",
+            f"Built NmatUncorr with detrend_order={built.detrend_order}, nwin={built.nwin}, spacing={built.spacing}, nbin={built.nbin}",
+        )
+        return built
 
     def apply(self, tod, inplace=False, exp=1):
         self.check_ready()
         if inplace: tod = np.array(tod)
+        # Detrending needs to be part of the operations to ensure:
+        # 1. We are properly marginalizing over the data trends to not bias the sky signal estimate
+        # 2. Trends in the current sky signal estimate are not causing spectral leakage
+        # We also need to apply the operations symmetrically to ensure the system solved through CG is strictly symmetric.
+        self.detrend_inplace(tod)
         if self.nwin > 0: apply_window(tod, self.nwin)
         ftod = fft.rfft(tod)
         self.apply_fourier(ftod, tod.shape[1], exp=exp)
         fft.irfft(ftod, tod)
         apply_window(tod, self.nwin)
+        self.detrend_inplace(tod)
         return tod
 
     def apply_fourier(self, ftod, nsamp, exp=1):
@@ -95,6 +146,51 @@ class NmatUncorr(Nmat):
             ftod[:,b[0]:b[1]] *= (self.ips_binned[:,None,bi])**exp/nsamp
         # I divided by the normalization above instead of passing normalize=True
         # here to reduce the number of operations needed
+        
+    def _get_detrend_basis(self, n_samps, dtype):
+        """Lazily initialize and cache the orthogonal polynomials based on detrend_order."""
+        if not hasattr(self, '_detrend_cache') or self._detrend_cache[0] != n_samps:
+            v1, v1_norm, v2, v2_norm = None, None, None, None
+            # Only compute slope basis if order >= 1
+            if self.detrend_order is not None and self.detrend_order >= 1:
+                v1 = np.linspace(-0.5, 0.5, n_samps, dtype=dtype)
+                v1_norm = np.dot(v1, v1)
+            # Only compute parabola basis if order >= 2
+            if self.detrend_order is not None and self.detrend_order >= 2:
+                x2 = v1 ** 2
+                v2 = x2 - np.mean(x2)
+                v2_norm = np.dot(v2, v2)
+            self._detrend_cache = (n_samps, v1, v1_norm, v2, v2_norm)
+        return self._detrend_cache[1:]
+
+    def detrend_inplace(self, tod):
+        """Symmetric, in-place projection up to detrend_order."""
+        # Skip entirely if requested
+        if self.detrend_order is None or self.detrend_order < 0:
+            return tod
+        n_dets, n_samps = tod.shape
+        # 0th Order (Mean). We do this first to center the data, 
+        # protecting the float32 precision of the subsequent dot products
+        means = np.mean(tod, axis=-1, keepdims=True)
+        tod -= means 
+        if self.detrend_order == 0:
+            return tod
+        # Get cached basis vectors
+        v1, v1_norm, v2, v2_norm = self._get_detrend_basis(n_samps, tod.dtype)
+        # 1st Order (Slope)
+        if self.detrend_order == 1:
+            slopes = np.dot(tod, v1) / v1_norm
+            # This is not vectorized but saves memory & cache locality
+            for i in range(n_dets):
+                tod[i] -= slopes[i] * v1
+            return tod
+        # 2nd Order (Parabola)
+        if self.detrend_order == 2:
+            slopes = np.dot(tod, v1) / v1_norm
+            paras  = np.dot(tod, v2) / v2_norm
+            for i in range(n_dets):
+                tod[i] -= (slopes[i] * v1 + paras[i] * v2)
+            return tod
 
     def white(self, tod, inplace=True):
         self.check_ready()
@@ -107,13 +203,28 @@ class NmatUncorr(Nmat):
     def write(self, fname):
         self.check_ready()
         data = bunch.Bunch(type="NmatUncorr")
-        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar", "window", "nwin"]:
+        for field in ["spacing", "nbin", "nmin", "bins", "ips_binned", "ivar", "window", "nwin", "detrend_order"]:
             data[field] = getattr(self, field)
         bunch.write(fname, data)
 
     @staticmethod
     def from_bunch(data):
-        return NmatUncorr(spacing=data.spacing, nbin=data.nbin, nmin=data.nmin, bins=data.bins, ips_binned=data.ips_binned, ivar=data.ivar, window=data.window, nwin=data.nwin)
+        built = NmatUncorr(
+            spacing=data.spacing,
+            nbin=data.nbin,
+            nmin=data.nmin,
+            bins=data.bins,
+            ips_binned=data.ips_binned,
+            ivar=data.ivar,
+            window=data.window,
+            nwin=data.nwin,
+            detrend_order=getattr(data, "detrend_order", None),
+        )
+        _log_noise_model_event(
+            "NmatUncorr.from_bunch",
+            f"Restored NmatUncorr with detrend_order={built.detrend_order}, nwin={built.nwin}, spacing={built.spacing}, nbin={built.nbin}",
+        )
+        return built
 
 class NmatDetvecs(Nmat):
     def __init__(self, bin_edges="act_default", nbin=100, nmin=10, eig_lim=16, single_lim=0.55, mode_bins=[0.25,4.0,20], downweight=[], 
@@ -225,9 +336,11 @@ class NmatDetvecs(Nmat):
         )
         nmode= vecs.shape[1]
         if nmode == 0:
-            if self.verbose:
-                print("NmatDetvecs: Could not find any noise modes, defaulting to uncorrelated noise model")
-            noise_uncorr = NmatUncorr(window=self.window)
+            _log_noise_model_event(
+                "NmatDetvecs.fallback",
+                f"No detector modes found; defaulting to NmatUncorr with detrend_order={self.detrend_order}, window={self.window}, nwin={nwin}",
+            )
+            noise_uncorr = NmatUncorr(window=self.window, nbin=self.nbin, nmin=self.nmin, detrend_order=self.detrend_order)
             return noise_uncorr.build_fourier(ftod, nsamp, srate, nwin=nwin)
         # Compute frequency bins when needed
         if self.bin_edges in ["exp", "lin"]:
@@ -279,9 +392,36 @@ class NmatDetvecs(Nmat):
         iD   = np.ascontiguousarray(iD.astype(dtype))
         iV   = np.ascontiguousarray(iV.astype(dtype))
 
-        return NmatDetvecs(bin_edges=self.bin_edges, eig_lim=self.eig_lim, single_lim=self.single_lim,
-                window=self.window, nwin=nwin, downweight=self.downweight, verbose=self.verbose,
-                mode_bins= self.mode_bins, bins=bins, D=D, V=V, iD=iD, iV=iV, s=s, ivar=ivar)
+        built = NmatDetvecs(
+            bin_edges=self.bin_edges,
+            nbin=self.nbin,
+            nmin=self.nmin,
+            eig_lim=self.eig_lim,
+            single_lim=self.single_lim,
+            mode_bins=self.mode_bins,
+            downweight=self.downweight,
+            window=self.window,
+            nwin=nwin,
+            verbose=self.verbose,
+            bins=bins,
+            D=D,
+            V=V,
+            iD=iD,
+            iV=iV,
+            s=s,
+            ivar=ivar,
+            bmin_eigvec=self.bmin_eigvec,
+            skip_mean=self.skip_mean,
+            mp_significance=self.mp_significance,
+            wnoise_band=self.wnoise_band,
+            max_noise_modes=self.max_noise_modes,
+            detrend_order=self.detrend_order,
+        )
+        _log_noise_model_event(
+            "NmatDetvecs.build_fourier",
+            f"Built NmatDetvecs with detrend_order={built.detrend_order}, nwin={built.nwin}, nmode={nmode}, mode_bins={built.mode_bins}",
+        )
+        return built
 
     def apply(self, tod, inplace=True, slow=False):
         self.check_ready()
@@ -370,7 +510,7 @@ class NmatDetvecs(Nmat):
     def write(self, fname):
         self.check_ready()
         data = bunch.Bunch(type="NmatDetvecs")
-        for field in ["bin_edges", "eig_lim", "single_lim", "window", "nwin", "downweight",
+        for field in ["bin_edges", "nbin", "nmin", "eig_lim", "single_lim", "window", "nwin", "downweight",
                 "bins", "D", "V", "iD", "iV", "s", "ivar", "mode_bins", "verbose", "bmin_eigvec",
                 "skip_mean", "mp_significance", "wnoise_band", "max_noise_modes", "detrend_order"]:
             val = getattr(self, field)
@@ -382,23 +522,38 @@ class NmatDetvecs(Nmat):
             msg = f"Failed to write {fname}: {e}"
             raise RuntimeError(msg)
 
-@staticmethod
-def from_bunch(data):
-    return NmatDetvecs(
-        bin_edges   = getattr(data, "bin_edges", None),
-        eig_lim     = getattr(data, "eig_lim", None),
-        single_lim  = getattr(data, "single_lim", None),
-        window      = getattr(data, "window", None),
-        nwin        = getattr(data, "nwin", None),
-        downweight  = getattr(data, "downweight", None),
-        bins        = getattr(data, "bins", None),
-        D           = getattr(data, "D", None),
-        V           = getattr(data, "V", None),
-        iD          = getattr(data, "iD", None),
-        iV          = getattr(data, "iV", None),
-        s           = getattr(data, "s", None),
-        ivar        = getattr(data, "ivar", None),
-    )
+    @staticmethod
+    def from_bunch(data):
+        built = NmatDetvecs(
+            bin_edges=getattr(data, "bin_edges", None),
+            nbin=getattr(data, "nbin", 100),
+            nmin=getattr(data, "nmin", 10),
+            eig_lim=getattr(data, "eig_lim", None),
+            single_lim=getattr(data, "single_lim", None),
+            mode_bins=getattr(data, "mode_bins", [0.25, 4.0, 20]),
+            downweight=getattr(data, "downweight", None),
+            window=getattr(data, "window", None),
+            nwin=getattr(data, "nwin", None),
+            verbose=getattr(data, "verbose", False),
+            bins=getattr(data, "bins", None),
+            D=getattr(data, "D", None),
+            V=getattr(data, "V", None),
+            iD=getattr(data, "iD", None),
+            iV=getattr(data, "iV", None),
+            s=getattr(data, "s", None),
+            ivar=getattr(data, "ivar", None),
+            bmin_eigvec=getattr(data, "bmin_eigvec", 1000),
+            skip_mean=getattr(data, "skip_mean", True),
+            mp_significance=getattr(data, "mp_significance", None),
+            wnoise_band=getattr(data, "wnoise_band", None),
+            max_noise_modes=getattr(data, "max_noise_modes", None),
+            detrend_order=getattr(data, "detrend_order", None),
+        )
+        _log_noise_model_event(
+            "NmatDetvecs.from_bunch",
+            f"Restored NmatDetvecs with detrend_order={built.detrend_order}, nwin={built.nwin}, mode_bins={built.mode_bins}, mp_significance={built.mp_significance}",
+        )
+        return built
 
 # Combination of NmatDetvecs and NmatUncorr. The first handles the correlations while the
 # latter handles the variance
@@ -424,7 +579,12 @@ class NmatScaledvecs(Nmat):
         nmat_detvecs= self.nmat_detvecs.build_fourier(ftod, nsamp, srate)
         # Unapply window again
         apply_window(tod, nwin, -1)
-        return NmatScaledvecs(nmat_uncorr, nmat_detvecs, window=self.window, nwin=self.nwin)
+        built = NmatScaledvecs(nmat_uncorr, nmat_detvecs, window=self.window, nwin=nwin)
+        _log_noise_model_event(
+            "NmatScaledvecs.build",
+            f"Built NmatScaledvecs with nwin={built.nwin}, uncorr_detrend_order={getattr(nmat_uncorr, 'detrend_order', None)}, detvecs_detrend_order={getattr(nmat_detvecs, 'detrend_order', None)}",
+        )
+        return built
 
     def apply(self, tod, inplace=True):
         self.check_ready()
