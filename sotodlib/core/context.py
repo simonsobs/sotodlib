@@ -407,6 +407,7 @@ class Context(odict):
                     aman.det_info.stream_id[i] = aman.tones.stream_id[int(tidx)]
                     aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
                     aman.det_info.smurf.band[i] = aman.tones.band[int(tidx)]
+                    aman.det_info.wafer.type[i] = 'PROB'
     
                 def add_tdet_ids(aman, tdet_indexes, tdet_ids):
                     """
