@@ -6,7 +6,6 @@ from tqdm import tqdm
 import numpy as np
 from scipy import interpolate
 from scipy.optimize import curve_fit
-#from joblib import Parallel, delayed
 
 from sotodlib import core
 from sotodlib import coords

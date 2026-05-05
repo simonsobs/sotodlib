@@ -19,6 +19,12 @@ DEG = np.pi/180
 CRVAL = [34.0*DEG, -20.9*DEG]
 TOL_RAD = .00001 * DEG
 
+if hasattr(so3g.proj.quat, "quat"):
+    g3quat = so3g.proj.quat.quat
+else:
+    g3quat = so3g.proj.quat.Quat
+
+
 def get_sightline():
     ra0, dec0, gamma0 = CRVAL[0], CRVAL[1], 0
     ra, dec, gamma = [np.array([_x]) for _x in [ra0, dec0, gamma0]]
@@ -80,7 +86,7 @@ class FootprintTest(unittest.TestCase):
             # Extracts.
             m1 = map0[:10,:10]
             m2 = map0[-10:,-10:]
-            
+
             # Reconstruct.
             sg = coords.get_supergeom((m1.shape, m1.wcs), (m2.shape, m2.wcs))
             mapx = enmap.zeros(*sg)
@@ -157,7 +163,7 @@ class CoordsUtilsTest(unittest.TestCase):
         qa = coords.ScalarLastQuat(test_array[0])
         self.assertIsInstance(qa, np.ndarray)
         q3 = qa.to_g3()
-        self.assertIsInstance(q3, so3g.proj.quat.quat)
+        self.assertIsInstance(q3, g3quat)
         self.assertEqual(q3.a, 1)
         qb = coords.ScalarLastQuat(q3)
         np.testing.assert_array_equal(qa, qb)
@@ -178,7 +184,7 @@ class CoordsUtilsTest(unittest.TestCase):
         y = np.linspace(-R, R, 45)
         xy = np.transpose(list(itertools.product(x, y)))
         s = xy[0]**2 + xy[1]**2 < R**2
-        
+
         xy = xy[:,s] + np.array([x0, y0])[:,None]
         (xi0, eta0), R0, (xi, eta) = \
             coords.helpers.get_focal_plane_cover(count=16, xieta=xy)
@@ -248,7 +254,7 @@ class CoordsUtilsTest(unittest.TestCase):
 
 class OpticsTest(unittest.TestCase):
     def test_sat_fp(self):
-        x = np.array([-100, 0, 100]) 
+        x = np.array([-100, 0, 100])
         y = x.copy()
         pol = x.copy()
 

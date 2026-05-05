@@ -799,6 +799,17 @@ def get_obsids_to_run(cfg: DetCalCfg) -> List[str]:
 def add_to_failed_cache(cfg: DetCalCfg, obs_id: str, msg: str) -> None:
     if "KeyboardInterrupt" in msg:  # Don't cache keyboard interrupts
         return
+    # Transient errors of metadata loading.
+    # These can happen when hwpss_subtraction is True, but we can retry.
+    transient_errors = [
+        'sotodlib.core.metadata.loader.LoaderError',
+        'BlockingIOError',
+    ]
+    for err in transient_errors:
+        if err in msg:
+            logger.error(f"obs_id {obs_id} failed to load metadata {err}."
+                         " Try again later")
+            return
 
     if cfg.cache_failed_obsids:
         logger.info(f"Adding {obs_id} to failed_file_cache")
@@ -825,10 +836,6 @@ def handle_result(result: CalRessetResult, cfg: DetCalCfg) -> None:
         msg = result.fail_msg
         if msg is None:
             msg = "unknown error"
-        if 'sotodlib.core.metadata.loader.LoaderError' in msg:
-            logger.error(f"obs_id {obs_id} failed due to medatada loader "
-                         "error, try again later")
-            return
         add_to_failed_cache(cfg, obs_id, msg)
         return
 

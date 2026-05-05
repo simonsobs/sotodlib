@@ -53,13 +53,14 @@ from . import (
     make_source_flags,
     make_uncal_beam_map,
     preprocess_tod,
+    solve_pointing_model,
     update_g3tsmurf_db,
     update_hkdb,
     update_obsdb,
     update_obsdb_ancil,
     make_coadd_atomic_map,
     make_cosamp_hk,
-    solve_pointing_model,
+    update_det_match,
 )
 
 # Dictionary matching element name to a submodule (which must have
@@ -77,13 +78,14 @@ ELEMENTS = {
     'make-source-flags': make_source_flags,
     'make-uncal-beam-map': make_uncal_beam_map,
     'preprocess-tod': preprocess_tod,
+    'solve-pointing-model': solve_pointing_model,
     'update-g3tsmurf-db': update_g3tsmurf_db,
     'update-hkdb': update_hkdb,
     'update-obsdb': update_obsdb,
     'update-obsdb-ancil': update_obsdb_ancil,
     'make-cosamp-hk': make_cosamp_hk,
     'make-coadd-atomic-map': make_coadd_atomic_map,
-    'solve-pointing-model': solve_pointing_model,
+    'update-det-match': update_det_match,
 }
 
 CLI_NAME = 'so-site-pipeline'

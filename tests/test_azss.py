@@ -11,6 +11,7 @@ from numpy.polynomial import legendre as L
 
 from sotodlib import core
 from sotodlib.tod_ops import azss
+from so3g.proj import RangesMatrix
 
 
 def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
@@ -61,7 +62,7 @@ def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
     az_min, az_max = np.min(azpoint), np.max(azpoint)
     x = ( 2*azpoint - (az_min+az_max) ) / (az_max - az_min)
 
-    fake_signal = np.zeros((ndets, len(ts)))
+    fake_signal = np.zeros((ndets, len(ts)), dtype='float32')
     if input_coeffs is None:
         input_coeffs = np.random.uniform(-10, 11, size=(ndets, max_mode+1))
     for nd in range(ndets):
@@ -85,6 +86,7 @@ def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
                   axis_map=[(0, 'dets'), (1, 'samps')])
     tod_fake.wrap('input_coeffs', np.atleast_2d(input_coeffs),
                   axis_map=[(0, 'dets'), (1, 'modes')])
+    tod_fake.wrap('flags', core.AxisManager())
     return tod_fake
 
 
@@ -104,10 +106,59 @@ class AzssTest(unittest.TestCase):
     def test_fit(self):
         max_mode = 10
         tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
-        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, azrange=None, bins=100)
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='fit',
+            max_mode=max_mode,
+            azrange=None,
+            bins=100
+        )
         ommedian = get_coeff_metric(tod)
         print(ommedian)
         self.assertTrue(ommedian < 5.0)
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
+    def test_interpolate(self):
+        """
+        Test the interpolation method of Azimuth Synchronous Signal subtraction.
+        """
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='interpolate',
+            azrange=None,
+            bins=100,
+        )
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
+    def test_interpolate_with_flags(self):
+        """
+        Test the interpolation method of Azimuth Synchronous Signal subtraction
+        with flags.
+        """
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+
+        mask = np.zeros((tod.dets.count, tod.samps.count), dtype=bool)
+        mask[-1, :] = True  # one detector has low az coverage
+        flags = RangesMatrix.from_mask(mask)
+
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='interpolate',
+            azrange=None,
+            bins=100,
+            flags=flags,
+            return_det_mask=True,
+            exclude_turnarounds=False,
+        )
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
 
 if __name__ == '__main__':
     unittest.main()

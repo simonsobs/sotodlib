@@ -261,6 +261,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         - azss_stats: core.AxisManager
             - azss statistics including: azumith bin centers, bin counts, binned signal, std of each detector-az bin, std of each detector.
             - If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
+            - If ``return_det_mask=True`` then also includes: bad_dets, coverages.
         - model_sig_tod: numpy.array
             - azss model as a function of time either from fits or interpolation depending on ``method`` argument.
     """
@@ -353,8 +354,6 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
     -------
     model: array-like
         AZSS model for each detector
-    good_dets_mask: array-like (optional)
-        Boolean mask of detectors with sufficient coverage (if return_det_mask=True)
     """
     if az is None:
         az = aman.boresight.az
@@ -365,10 +364,25 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
         model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=azrange)
 
     if method == 'interpolate':
-        # mask az bins that has no data and extrapolate
-        mask = ~np.any(np.isnan(azss_stats.binned_signal), axis=0)
-        f_template = interp1d(azss_stats.binned_az[mask], azss_stats.binned_signal[:, mask], fill_value='extrapolate')
-        model = f_template(az)
+        model = np.zeros((aman.dets.count, aman.samps.count))
+        if 'bad_dets' in azss_stats:
+            valid_dets = ~azss_stats['bad_dets']
+        else:
+            valid_dets = np.ones(aman.dets.count, dtype=bool)
+        if sum(valid_dets) == 0:
+            logger.info('All the detectors have low az coverage and cannot make model')
+            return model
+
+        mask = ~np.isnan(azss_stats.binned_signal[valid_dets, :])
+        is_uniform = np.all(mask == mask[0, :])
+        if is_uniform:
+            m = mask[0, :]
+            f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[:, m][valid_dets, :], fill_value='extrapolate')
+            model[valid_dets, :] = f_template(az)
+        else:
+            for i, (m, binned_signal) in enumerate(zip(mask, azss_stats.binned_signal[valid_dets, :])):
+                f_template = interp1d(azss_stats.binned_az[m], binned_signal[m], fill_value='extrapolate')
+                model[valid_dets, :][i] = f_template(az)
 
     if np.any(~np.isfinite(model)):
         logger.warning('azss model has nan. set zero to nan but this may make glitch')

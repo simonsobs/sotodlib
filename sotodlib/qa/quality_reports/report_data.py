@@ -13,6 +13,7 @@ import numpy as np
 import sys
 from influxdb import InfluxDBClient
 from collections import defaultdict
+import traceback
 
 from sotodlib.io import hkdb
 from sotodlib.io.hkdb import HkConfig
@@ -176,7 +177,10 @@ def get_apex_data(cfg: ReportDataConfig):
         return None
 
     def date_converter(d):
-        naive_dt = dt.datetime.fromisoformat(d)
+        if isinstance(d, bytes):
+            naive_dt = dt.datetime.fromisoformat(d.decode('utf-8'))
+        else:
+            naive_dt = dt.datetime.fromisoformat(d)
         return naive_dt.replace(tzinfo=dt.timezone.utc)
 
     data = np.genfromtxt(
@@ -252,7 +256,9 @@ def get_and_merge_apex_pwv(cfg: ReportDataConfig, result=None):
     try:
         result_apex = get_apex_data(cfg)
     except Exception as e:
-        logger.error(f"get_apex_data failed with {e}")
+        errmsg = f'{type(e)}: {e}'
+        tb = ''.join(traceback.format_tb(e.__traceback__))
+        logger.error(f"get_apex_data failed with {errmsg}\n{tb}")
         result_apex = None
 
     if result_apex is not None:
@@ -292,7 +298,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets', 'bandpass']
+    keys = ['time', 'num_valid_dets', 'bandpass', 'wafer_slot']
     if cfg.platform == "lat":
         keys += ['array_noise_T', 'det_noise_T']
     elif cfg.platform in ['satp1', 'satp2', 'satp3']:
@@ -331,10 +337,32 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scal
         else:
             return ""
 
+    def det_nep_agg(nep_series, N_series):
+        mask = np.isfinite(nep_series) & (nep_series > 0) & np.isfinite(N_series) & (N_series > 0)
+        if not np.any(mask):
+            return np.nan
+        N = N_series[mask]
+        nep = nep_series[mask]
+        return np.sqrt(np.sum(N) / np.sum(N / nep**2))
+
+    def array_nep_agg(nep_series):
+        mask = np.isfinite(nep_series) & (nep_series > 0)
+        if not np.any(mask):
+            return np.nan
+        nep = nep_series[mask]
+        return 1 / np.sqrt(np.sum(1 / nep**2))
+
     df["obs_id"] = df["timestamp"].apply(find_obsid)
 
-    nep_cols = [c for c in df.columns if "_noise_" in c]
-    agg_dict = {"num_valid_dets": "sum", **{c: "sum" for c in nep_cols}}
+    det_nep_cols = [c for c in df.columns if "det_noise_" in c]
+    array_nep_cols = [c for c in df.columns if "array_noise_" in c]
+    agg_dict = {"num_valid_dets": "sum"}
+
+    for c in det_nep_cols:
+        agg_dict[c] = lambda s, n= "num_valid_dets": det_nep_agg(s, df.loc[s.index, n])
+
+    for c in array_nep_cols:
+        agg_dict[c] = array_nep_agg
 
     totals = (
         df.groupby(["obs_id", "bandpass"], as_index=False)
