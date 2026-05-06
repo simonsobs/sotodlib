@@ -168,6 +168,8 @@ def get_parser(parser=None):
                         action="store_true")
     parser.add_argument("--checked-file", 
         help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
+    parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
+    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set")
     return parser
 
 if __name__ == '__main__':
