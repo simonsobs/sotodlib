@@ -18,7 +18,8 @@ from sotodlib.io.datapkg_utils import load_configs
 
 def main(config: Optional[str] = None, update_delay: float = 2, 
          from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False, checked_file: Optional[str]=None):
+         index_via_actions: bool=False, checked_file: Optional[str]=None,
+         profile: bool=False, profile_output: Optional[str]=None):
     """
     Arguments
     ---------
@@ -40,7 +41,17 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         a file name that contains a list of observations that would by default 
         cause errors to be thrown during this script but have been manually
         checked and dealt with
+    profile: bool
+        if True, will run the script with pyinstrument and output to profile_output
+    profile_output: str
+        if profile is True, the file name of the directory 
+        to output the pyinstrument profiling results to
     """
+    if profile:
+        from pyinstrument import Profiler
+        profiler = Profiler()
+        profiler.start()
+
     show_pb = True if verbosity > 1 else False
 
     if verbosity == 0:
@@ -109,6 +120,13 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
         if (obs.stop is not None) and len(obs.tunesets)==0:
             raise_list_readout_ids.append(obs.obs_id)
+
+    if profile:
+        profiler.stop()
+        if profile_output is not None:
+            output_filename = f"{profile_output}/profile_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            with open(output_filename, "w") as f:
+                f.write(profiler.output_html())
 
     if len(raise_list_timing) > 0 or len(raise_list_readout_ids) > 0:
         logger.info(
