@@ -356,14 +356,14 @@ class Hn(Operator):
 
             
             fname = os.path.join(self.output_dir, f"{self.name}_{det}_{name}_{n}."+self.file_format)
-            if '.fits' in fname or '.hdf5' in fname:
-                data[self.h_n_map].write(fname)
-            else:
+            if self.file_format == "npy":
                 self._write_h_n_map_npy(
                     data[self.h_n_map],
                     fname,
                     single_precision=self.use_single_precision,
                 )
+            else:
+                data[self.h_n_map].write(fname)
             log.info_rank(f"Wrote h_n map to {fname}", comm=data.comm.comm_world)
 
     @function_timer
