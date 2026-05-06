@@ -100,7 +100,7 @@ class Hn(Operator):
     )
 
     file_format = Unicode(
-        "fits", help="File format for output maps: 'npy', 'fits', or 'hdf5'"
+        "fits", help="File format for output maps: 'npy', 'fits', 'hdf', or 'hdf5'"
     )
 
     nmin = Int(0, help="Minimum `n` to evaluate.")
@@ -131,8 +131,8 @@ class Hn(Operator):
     @traitlets.validate("file_format")
     def _check_file_format(self, proposal):
         file_format = proposal["value"]
-        if file_format not in ("npy", "fits", "hdf5"):
-            raise traitlets.TraitError("File format should be 'npy', 'fits', or 'hdf5'")
+        if file_format not in ("npy", "fits", "hdf", "hdf5"):
+            raise traitlets.TraitError("File format should be 'npy', 'fits', 'hdf', or 'hdf5'")
         return file_format
 
     @traitlets.validate("pixel_pointing")
