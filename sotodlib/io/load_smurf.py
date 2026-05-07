@@ -2304,7 +2304,7 @@ class SmurfStatus:
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
                     else:
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
-                    status.update(yaml.safe_load(frame["status"]))
+                    status.update(yaml.load(frame["status"], Loader=yaml.CSafeLoader))
                     if frame["dump"]:
                         status["dump_frame"] = True
                         return True
