@@ -48,7 +48,7 @@ def get_obs_list(ufm,ctx,timestamp_min,timestamp_max):
 
     ufm = ufm.lower()
     ot = get_ot(ufm)
-    downsample_factor_tag = get_downsample_factor_tag(ctx)
+    downsample_factor_tag = get_downsample_factor_tags(ctx)
     
     obs_list = ctx.obsdb.query(
         f"tube_slot == '{ot}' and stimulator and timestamp >= {timestamp_min} and timestamp <= {timestamp_max}",
@@ -360,12 +360,12 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
             for fit_key in ['fit_amp', 'fit_phase__no_dt', 'fit_phase__fix_tau', 'fit_phase__free']:
                 params = params_bases[fit_key].copy()
                 if fit_key == 'fit_amp':
-                    weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
+                    weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None and fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
                     weights = np.array(weights)
                     #result = models[fit_key].fit(a0s,params,f=f,weights=weights, method='least_squares')
                     result = models[fit_key].fit(a0s,params,f=f, method='least_squares')# No weight for first step analysis
                 else:
-                    weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
+                    weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None and fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
                     weights = np.array(weights) *360
                     if fit_key == 'fit_phase__fix_tau':
                         params['tau'].set(value=fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
@@ -1223,7 +1223,8 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
             for key in vailed_result[0].params.keys():
                 arr = np.array([float(x.params[key].value) if x is not None else np.nan for x in result])
                 field.wrap(key, arr, [(0,'dets')], overwrite=True)
-                arr = np.array([float(x.params[key].stderr) if x is not None else np.nan for x in result])
+                arr = np.array([x.params[key].stderr if x is not None else np.nan for x in result])
+                arr = np.array([float(x.params[key].stderr) if x is not None and x.params[key].stderr is not None else np.nan for x in result])
                 field.wrap(f'{key}_stderr', arr, [(0,'dets')], overwrite=True)
                 arr = np.array([float(x.chisqr) if x is not None else np.nan for x in result])
                 field.wrap(f'chisqr', arr, [(0,'dets')], overwrite=True)
