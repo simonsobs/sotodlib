@@ -38,6 +38,29 @@ def get_ufm_list(type):
     return list_ufm
 
 
+def get_obs_list(ufm,ctx,timestamp_min,timestamp_max):
+    # Getting obs_list for stimulator during specified time range
+    # 
+    # ufm: ufm name
+    # ctx: context file
+    # timestamp_min: Minimum timestamp
+    # timestamp_max: Maximum timestamp
+
+    ufm = ufm.lower()
+    ot = get_ot(ufm)
+    downsample_factor_tag = get_downsample_factor_tag(ctx)
+    
+    obs_list = ctx.obsdb.query(
+        f"tube_slot == '{ot}' and stimulator and timestamp >= {timestamp_min} and timestamp <= {timestamp_max}",
+        tags=['stimulator', 'gain', 'time_constant', 'gain_and_timeconstant']+downsample_factor_tag
+        )
+    
+    if len(obs_list) == 0:
+        raise ValueError("Error: No stimulator data in the specified time range")
+
+    return obs_list
+
+
 def get_ot(ufm):
     # Getting Optics tube name
     # ufm: ufm name
@@ -74,61 +97,6 @@ def get_ot(ufm):
         raise ValueError('No OT')
     
     return ot
-
-
-def get_downsample_factor_tag(ctx):
-    # Getting downsample factor of SMuRF readout
-    # ctx: context file
-
-    cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
-    all_tags = np.array([row[0] for row in cursor.fetchall()])
-    mask = np.char.find(all_tags,'downsample') != -1
-    
-    return np.array(all_tags)[mask].tolist()
-
-
-def get_downsample_factor(aman,ctx):
-    # Getting downsample factor of SMuRF readout for the axis manager data
-    # aman: Axis manager of detector data
-    # ctx: context file
-
-    downsample_factor_tag = get_downsample_factor_tag(ctx)
-
-    obs_list = ctx.obsdb.query(
-        f"obs.obs_id == '{aman.obs_info.obs_id}'",
-        tags=downsample_factor_tag
-        )
-
-    obs = obs_list[0]
-    for tag in downsample_factor_tag:
-        if obs[tag] == 1:
-            downsample_factor = int(tag.split('_')[-1])
-
-    aman.obs_info.wrap('downsample_factor', downsample_factor, overwrite=True)
-    aman.obs_info.wrap('sampling_rate', 4000/downsample_factor, overwrite=True)
-
-
-def get_obs_list(ufm,ctx,timestamp_min,timestamp_max):
-    # Getting obs_list for stimulator during specified time range
-    # 
-    # ufm: ufm name
-    # ctx: context file
-    # timestamp_min: Minimum timestamp
-    # timestamp_max: Maximum timestamp
-
-    ufm = ufm.lower()
-    ot = get_ot(ufm)
-    downsample_factor_tag = get_downsample_factor_tag(ctx)
-    
-    obs_list = ctx.obsdb.query(
-        f"tube_slot == '{ot}' and stimulator and timestamp >= {timestamp_min} and timestamp <= {timestamp_max}",
-        tags=['stimulator', 'gain', 'time_constant', 'gain_and_timeconstant']+downsample_factor_tag
-        )
-    
-    if len(obs_list) == 0:
-        raise ValueError("Error: No stimulator data in the specified time range")
-
-    return obs_list
 
 
 def get_meta(ufm,ctx,obs_id,bool_restrict=True):
@@ -185,112 +153,39 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     result = hkdb.load_hk(lspec) 
 
     return result
-
-
-def func_sines(t,a0,a1,a2,a3,a4,a5,a6,t0,t1,t2,t3,t4,t5,t6):
-    # Define fitting function
-    #
-    # t: time or timing_frac of stimulator signal.
-   
-    y = (a0*np.sin(1*(t-t0)*2*np.pi)
-         + a1*np.sin(2*(t-t1)*2*np.pi)
-         + a2*np.sin(3*(t-t2)*2*np.pi)
-         + a3*np.sin(4*(t-t3)*2*np.pi)
-         + a4*np.sin(5*(t-t4)*2*np.pi)
-         + a5*np.sin(6*(t-t5)*2*np.pi)
-         + a6*np.sin(7*(t-t6)*2*np.pi))
     
-    return y
+
+def get_downsample_factor(aman,ctx):
+    # Getting downsample factor of SMuRF readout for the axis manager data
+    # aman: Axis manager of detector data
+    # ctx: context file
+
+    downsample_factor_tag = get_downsample_factor_tags(ctx)
+
+    obs_list = ctx.obsdb.query(
+        f"obs.obs_id == '{aman.obs_info.obs_id}'",
+        tags=downsample_factor_tag
+        )
+
+    obs = obs_list[0]
+    for tag in downsample_factor_tag:
+        if obs[tag] == 1:
+            downsample_factor = int(tag.split('_')[-1])
+
+    aman.obs_info.wrap('downsample_factor', downsample_factor, overwrite=True)
+    aman.obs_info.wrap('sampling_rate', 4000/downsample_factor, overwrite=True)
 
 
-def func_response_amplitude(f, tau, a):
-    # Detector response function of amplitude
-    #
-    # f: Chopping frequency
-    # tau: time constant of a detector in [s]
-    # a: Amplitude of sin function for '0' frequency signal
+def get_downsample_factor_tags(ctx):
+    # Getting downsample factor of SMuRF readout
+    # ctx: context file
 
-    y = a /np.sqrt(1+(2*np.pi*f*tau)**2)
-    return y
-
-
-def func_response_phase(f, tau, theta_geo):
-    # Detector response function of phase
-    #
-    # f: Chopping frequency [Hz]
-    # tau: time constant of a detector in [s]
-    # theta_geo: Offset of phase delay [deg]
-    # theta: Phase delay of stimulator signal [deg]
-
-    theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo
-    return theta
-
-
-def func_response_phase_with_dt(f, tau, theta_geo, dt):
-    # Detector response function of phase
-    #
-    # f: Chopping frequency [Hz]
-    # tau: time constant of a detector in [s]
-    # theta: Phase delay of stimulator signal [deg]
-    # theta_geo: Offset of phase delay due to hardware effect, geo = geometry [deg]
-    # theta_dt: Offset of phase delay due to readout issue [deg], theta_dt*(pi/180) =  -delta_t*2pi*f
-    # dt: Time difference due to wrong time stamps
-
-    theta_dt = -dt*2*np.pi*f *(180/np.pi)
-    theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo + theta_dt
-    return theta
+    cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
+    all_tags = np.array([row[0] for row in cursor.fetchall()])
+    mask = np.char.find(all_tags,'downsample') != -1
     
+    return np.array(all_tags)[mask].tolist()
     
-def s_open(theta):
-    #theta: 0 to pi/8
-    r1 = 70.5e-3 #Radius for chopper. chopper center to optical pipe center
-    r2 = 43e-3/2 #Radius of optical pipe
-    theta_1 = np.arcsin(r2/r1) #Angle at the border
-    
-    if 0<= theta and theta < theta_1:
-        phi1 = np.arcsin(-1/r2 * np.sqrt(r2**2-r1**2*np.sin(theta)**2))
-        phi2 = np.arcsin( 1/r2 * np.sqrt(r2**2-r1**2*np.sin(theta)**2))
-        return np.pi*r2**2 + 2*r1 * np.sin(theta) * np.sqrt(r2**2 - r1**2 * np.sin(theta)**2) - r2**2/2 * (1/2*np.sin(2*phi2)+phi2) + r2**2/2 * (1/2*np.sin(2*phi1)+phi1)
-    elif theta < np.pi/8:
-        return np.pi*r2**2
-    else:
-        return 'error'
-
-
-def stm_signal_raytrace(temp_heater,temp_blackbody,theta):
-    #theta: 0 to pi/4, signal of half cycle
-    r2 = 43e-3/2 #Radius of optical pipe
-    
-    if theta < np.pi/8:
-        theta_tmp = theta
-    else:
-        theta_tmp = np.pi/8 - (theta-np.pi/8)
-
-    return s_open(theta_tmp)/(np.pi*r2**2) * (temp_heater - temp_blackbody) + temp_blackbody
-
-
-def func_opening(frac_timing,a,c,timing0):
-    #frac_timing: list,0 to 1
-    #timing0: 0 to 1
-    #a: amplitude
-    #c: offset
-
-    theta_list = (frac_timing-timing0) * np.pi/2#1 cycle = pi/2
-    
-    y = [] 
-
-    for theta in theta_list:
-        if theta < 0:
-            theta = theta + np.pi/2
-
-        if theta < np.pi/4:
-            y.append(stm_signal_raytrace(1,0,theta)*a + c)
-        else:
-            theta = theta - np.pi/4
-            y.append(stm_signal_raytrace(0,1,theta)*a + c)
-    
-    return np.array(y)
-
 
 def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preprocess=True,output_dir=None):
     # aman: axis manager of tod data, including timestamps and raw signal
@@ -530,6 +425,7 @@ def get_encoder_timing(aman,hkdata):
     aman.stm_ana.wrap('t_enc', t_enc, [(0,'stm_samps')], overwrite=True)
     aman.stm_ana.wrap('t_hk', t_hk, [(0,'stm_samps')], overwrite=True)
 
+
 def get_chopping_status(aman):
     # Get chopping frequency and timing
     # aman: axis manager with aman.stm_ana field
@@ -667,33 +563,6 @@ def get_signal_temp(aman,hkdata):
     aman.stm_ana.wrap('temps',arr,[(0,'positions'),(1,'freqs')],overwrite=True)
 
 
-def filtering__with_delay_filter(aman,filter,signal_name_pre,signal_name_new):
-    # filtering signal data using the filter which has timing delay
-    # aman: axis manager
-    # filter: filter of tod_ops.filters
-    # signal_name_pre: signal name which will be filtered 
-    # signal_name_new: New name for filtered signal
-
-    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
-    signal_new = np.fliplr(signal_new)
-    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
-    
-    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_new)
-    signal_new = np.fliplr(signal_new)
-    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
-
-
-def filtering__without_delay_filter(aman,filter,signal_name_pre,signal_name_new):
-    # filtering signal data using the filter which doesn't have timing delay
-    # aman: axis manager
-    # filter: filter of tod_ops.filters
-    # signal_name_pre: signal name which will be filtered 
-    # signal_name_new: New name for filtered signal
-
-    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
-    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
-
-
 def filtering(aman, chopping_freqs, cal_type):
     # filtering signal data
     # aman: axis manager
@@ -731,6 +600,33 @@ def filtering(aman, chopping_freqs, cal_type):
     filtering_params = {'hpf_cutoff': hpf_cutoff, 'lpf_cutoff_factor': cutoff_factor, 'lpf_width_fraction': width_fraction, 'chopping_freqs': chopping_freqs}
 
     return filtering_params
+
+
+def filtering__with_delay_filter(aman,filter,signal_name_pre,signal_name_new):
+    # filtering signal data using the filter which has timing delay
+    # aman: axis manager
+    # filter: filter of tod_ops.filters
+    # signal_name_pre: signal name which will be filtered 
+    # signal_name_new: New name for filtered signal
+
+    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
+    signal_new = np.fliplr(signal_new)
+    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
+    
+    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_new)
+    signal_new = np.fliplr(signal_new)
+    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
+
+
+def filtering__without_delay_filter(aman,filter,signal_name_pre,signal_name_new):
+    # filtering signal data using the filter which doesn't have timing delay
+    # aman: axis manager
+    # filter: filter of tod_ops.filters
+    # signal_name_pre: signal name which will be filtered 
+    # signal_name_new: New name for filtered signal
+
+    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
+    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
 
 def get_dicts(cal_type):
@@ -908,6 +804,60 @@ def get_fit_params(cal_type):
         params_base['fit_phase__free']   .add('dt',value=0.125*1e-3,min=-3e-3,max=3e-3)
 
     return model,params_base
+
+
+def func_sines(t,a0,a1,a2,a3,a4,a5,a6,t0,t1,t2,t3,t4,t5,t6):
+    # Define fitting function
+    #
+    # t: time or timing_frac of stimulator signal.
+   
+    y = (a0*np.sin(1*(t-t0)*2*np.pi)
+         + a1*np.sin(2*(t-t1)*2*np.pi)
+         + a2*np.sin(3*(t-t2)*2*np.pi)
+         + a3*np.sin(4*(t-t3)*2*np.pi)
+         + a4*np.sin(5*(t-t4)*2*np.pi)
+         + a5*np.sin(6*(t-t5)*2*np.pi)
+         + a6*np.sin(7*(t-t6)*2*np.pi))
+    
+    return y
+
+
+def func_response_amplitude(f, tau, a):
+    # Detector response function of amplitude
+    #
+    # f: Chopping frequency
+    # tau: time constant of a detector in [s]
+    # a: Amplitude of sin function for '0' frequency signal
+
+    y = a /np.sqrt(1+(2*np.pi*f*tau)**2)
+    return y
+
+
+def func_response_phase(f, tau, theta_geo):
+    # Detector response function of phase
+    #
+    # f: Chopping frequency [Hz]
+    # tau: time constant of a detector in [s]
+    # theta_geo: Offset of phase delay [deg]
+    # theta: Phase delay of stimulator signal [deg]
+
+    theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo
+    return theta
+
+
+def func_response_phase_with_dt(f, tau, theta_geo, dt):
+    # Detector response function of phase
+    #
+    # f: Chopping frequency [Hz]
+    # tau: time constant of a detector in [s]
+    # theta: Phase delay of stimulator signal [deg]
+    # theta_geo: Offset of phase delay due to hardware effect, geo = geometry [deg]
+    # theta_dt: Offset of phase delay due to readout issue [deg], theta_dt*(pi/180) =  -delta_t*2pi*f
+    # dt: Time difference due to wrong time stamps
+
+    theta_dt = -dt*2*np.pi*f *(180/np.pi)
+    theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo + theta_dt
+    return theta
 
 
 def plot_hkdata(aman,hkdata,cal_type):
@@ -1300,3 +1250,54 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
     if cal_type == 'timeconstant':
         arr = np.array([float(x.best_values['tau']) if x is not None else np.nan for x in fit_result['fit_amp']['lpf']])
         aman.det_cal.wrap(f'stm_tau', arr, [(0,'dets')], overwrite=True)
+
+# Misc functions
+def s_open(theta):
+    #theta: 0 to pi/8
+    r1 = 70.5e-3 #Radius for chopper. chopper center to optical pipe center
+    r2 = 43e-3/2 #Radius of optical pipe
+    theta_1 = np.arcsin(r2/r1) #Angle at the border
+    
+    if 0<= theta and theta < theta_1:
+        phi1 = np.arcsin(-1/r2 * np.sqrt(r2**2-r1**2*np.sin(theta)**2))
+        phi2 = np.arcsin( 1/r2 * np.sqrt(r2**2-r1**2*np.sin(theta)**2))
+        return np.pi*r2**2 + 2*r1 * np.sin(theta) * np.sqrt(r2**2 - r1**2 * np.sin(theta)**2) - r2**2/2 * (1/2*np.sin(2*phi2)+phi2) + r2**2/2 * (1/2*np.sin(2*phi1)+phi1)
+    elif theta < np.pi/8:
+        return np.pi*r2**2
+    else:
+        return 'error'
+
+
+def stm_signal_raytrace(temp_heater,temp_blackbody,theta):
+    #theta: 0 to pi/4, signal of half cycle
+    r2 = 43e-3/2 #Radius of optical pipe
+    
+    if theta < np.pi/8:
+        theta_tmp = theta
+    else:
+        theta_tmp = np.pi/8 - (theta-np.pi/8)
+
+    return s_open(theta_tmp)/(np.pi*r2**2) * (temp_heater - temp_blackbody) + temp_blackbody
+
+
+def func_opening(frac_timing,a,c,timing0):
+    #frac_timing: list,0 to 1
+    #timing0: 0 to 1
+    #a: amplitude
+    #c: offset
+
+    theta_list = (frac_timing-timing0) * np.pi/2#1 cycle = pi/2
+    
+    y = [] 
+
+    for theta in theta_list:
+        if theta < 0:
+            theta = theta + np.pi/2
+
+        if theta < np.pi/4:
+            y.append(stm_signal_raytrace(1,0,theta)*a + c)
+        else:
+            theta = theta - np.pi/4
+            y.append(stm_signal_raytrace(0,1,theta)*a + c)
+    
+    return np.array(y)
