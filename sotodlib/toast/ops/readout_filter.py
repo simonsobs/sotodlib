@@ -91,6 +91,13 @@ class ReadoutFilter(Operator):
 
             # Get valid local detectors
             local_dets = ob.select_local_detectors(detectors, flagmask=self.det_mask)
+            if len(local_dets) == 0:
+                # We have no detectors.  Wait for other processes in the group to finish
+                # and then move on to the next observation.
+                if ob.comm.comm_group is not None:
+                    ob.comm.comm_group.barrier()
+                continue
+
             local_set_dets = set(local_dets)
 
             # Get the rows of the focalplane table containing these dets
@@ -126,6 +133,8 @@ class ReadoutFilter(Operator):
                 self._filter_detectors(
                     rate, freq, signal, ob[self.iir_params], flags, mask
                 )
+            if ob.comm.comm_group is not None:
+                ob.comm.comm_group.barrier()
 
     @function_timer
     def _filter_detectors(self, rate, freq, det_array, iir_props, flags, mask):
