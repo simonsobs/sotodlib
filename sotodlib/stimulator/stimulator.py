@@ -472,6 +472,8 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
                 else:
                     weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
                     weights = np.array(weights) *360
+                    if fit_key == 'fit_phase__fix_tau':
+                        params['tau'].set(value=fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
                     #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
                     result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
                 fit_result[fit_key][filt_key].append(result)
@@ -898,11 +900,11 @@ def get_fit_params(cal_type):
         params_base['fit_phase__fix_tau'].add('theta_geo',value=0,min=-90,max=90)
         params_base['fit_phase__no_dt']  .add('theta_geo',value=0,min=-90,max=90)
         params_base['fit_phase__free']   .add('theta_geo',value=0,min=-90,max=90)
-        params_base['fit_phase__fix_tau'].add('tau',value=1e-3,min=0,max=0.1)
+        params_base['fit_phase__fix_tau'].add('tau')
         params_base['fit_phase__no_dt']  .add('tau',value=1e-3,min=0,max=0.1)
         params_base['fit_phase__free']   .add('tau',value=1e-3,min=0,max=0.1)
         params_base['fit_phase__fix_tau'].add('dt',value=0.125*1e-3,min=-3e-3,max=3e-3)
-        params_base['fit_phase__no_dt']  .add('dt',value=0.125*1e-3,min=-3e-3,max=3e-3)
+        params_base['fit_phase__no_dt']  .add('dt',value=0,vary=False)
         params_base['fit_phase__free']   .add('dt',value=0.125*1e-3,min=-3e-3,max=3e-3)
 
     return model,params_base
@@ -1181,9 +1183,8 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
             elif ufm[0] == 'L':
                 axes[i_y,i_x].set_ylim(-0.005,0.005)
 
-    
-            i_x=1
 
+            i_x=1
             x = coadd_data['iirc'][f_key]['x'][-1]
             y = coadd_data['iirc'][f_key]['y'][-1]
             yerr = coadd_data['iirc'][f_key]['yerr'][-1]
