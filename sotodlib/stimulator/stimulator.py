@@ -1278,9 +1278,10 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
                 field.wrap(f'chisqr', arr, [(0,'dets')], overwrite=True)
                 arr = np.array([float(x.redchi) if x is not None else np.nan for x in result])
                 field.wrap(f'redchi', arr, [(0,'dets')], overwrite=True)
-                arr = np.array([x.weights if x is not None else np.full(field._axes[weight_axis].count, np.nan) for x in result])
-                arr = arr.astype(float)
-                field.wrap(f'weights', arr, [(0,'dets'), (1,weight_axis)], overwrite=True)
+                if weight_axis == 'bins':# Because we don't use weight for time-constant fit for the first step analysis
+                    arr = np.array([x.weights if x is not None else np.full(field._axes[weight_axis].count, np.nan) for x in result])
+                    arr = arr.astype(float)
+                    field.wrap(f'weights', arr, [(0,'dets'), (1,weight_axis)], overwrite=True)
 
     # Fill result to aman.det_cal
     if 'det_cal' not in aman.keys():
@@ -1298,102 +1299,3 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
     if cal_type == 'timeconstant':
         arr = np.array([float(x.best_values['tau']) if x is not None else np.nan for x in fit_result['fit_amp']['lpf']])
         aman.det_cal.wrap(f'stm_tau', arr, [(0,'dets')], overwrite=True)
-
-
-
-
-
-# Make forcal plane mapping
-def make_mapping(aman,data_name,cuts=None,output_dir=None):
-    # aman: Axis manager for the data
-    # data_name: axis name. "stm_gain" or "stm_timeconstant"
-    # cuts: min and max value of data
-    
-    fig, ax = plt.subplots(1,2,figsize=(9,4))
-
-    ufm = aman.det_info.stream_id[0][4:]
-    ufm = ufm[0].upper() + ufm[1:]
-    obs_id = aman['obs_info']['obs_id']
-    
-    if data_name == 'stm_gain':
-        plt.suptitle(f'{ufm} Gain, Left:A, Right:B'+f'\n{obs_id}')
-    elif data_name == 'stm_timeconstant':
-        plt.suptitle(f'{ufm} Time-constant, Left:A, Right:B'+f'\n{obs_id}')
-    elif data_name == 'stm_timeconstant_dt':
-        plt.suptitle(fr'{ufm} $\Delta t$ with $\tau_\text{{amp}}$, Left:A, Right:B'+f'\n{obs_id}')
-    
-    # Write here for band selection
-    if np.isin('f090', aman.det_info.wafer.bandpass):
-        bands = ['f090','f150']
-    elif np.isin('f220', aman.det_info.wafer.bandpass):
-        bands = ['f220','f280']
-    elif np.isin('f030', aman.det_info.wafer.bandpass):
-        bands = ['f030','f040']
-
-    patches = {}
-    datas = {}
-
-    for band in bands:
-        patches[band] = []
-        datas[band] = []
-
-    for i_det in range(aman.signal.shape[0]):
-        if aman.det_info.wafer.pol[i_det]=='D':
-            continue
-        
-        if aman.det_info.wafer.pol[i_det]=='A':
-            theta1,theta2 = [90,270]
-        elif aman.det_info.wafer.pol[i_det]=='B':
-            theta1,theta2 = [-90,90]
-        else:
-            #print('Error: pol is strange')
-            continue
-
-
-        wedge = Wedge(center=[aman.det_info.wafer.x[i_det],aman.det_info.wafer.y[i_det]],r=2,theta1=theta1,theta2=theta2)
-        band = aman.det_info.wafer.bandpass[i_det]
-        
-        if data_name == 'stm_gain':
-            data = aman[data_name][i_det]
-        elif data_name == 'stm_timeconstant':
-            data = aman[data_name][i_det]
-        elif data_name == 'stm_timeconstant_phase':
-            data = aman['stm_timeconstant_all'][i_det]['phase__free'].best_values['tau'] if aman['stm_timeconstant_all'][i_det] is not None else np.nan
-        elif data_name == 'stm_timeconstant_dt':
-            data = aman['stm_timeconstant_all'][i_det]['phase__fix_tau'].best_values['dt'] if aman['stm_timeconstant_all'][i_det] is not None else np.nan
-
-        if band not in bands:
-            continue
-        if cuts is not None:
-            if (abs(data) < cuts[0]) or (cuts[1] < abs(data)):
-                continue
-        if data == np.nan:
-            continue
-        patches[band].append(wedge)
-        datas[band].append(abs(data))
-
-    for i_x,band in enumerate(bands):
-        #norm = plt.Normalize(vmin=0, vmax=1)
-        #collection = PatchCollection(patches,cmap='viridis',norm=norm)
-
-        # Gain or time-constant plot 
-        if datas[band] == []:
-            continue
-        collection = PatchCollection(patches[band],cmap='viridis')
-        collection.set_array(datas[band])
-        plt.colorbar(collection,ax=ax[i_x])
-        ax[i_x].add_collection(collection)
-
-        ax[i_x].set_title(f"{band}")
-        
-        ax[i_x].set_ylabel('y [mm]')
-        ax[i_x].set_xlabel('x [mm]')
-        ax[i_x].set_xlim(-60,60)
-        ax[i_x].set_ylim(-60,60)
-        ax[i_x].grid()
-    plt.tight_layout()   
-
-    if output_dir is None:
-        plt.savefig(f'/home/ys9136/scratch/plot/{ufm}_{obs_id}/{ufm}_mapping_{data_name}.pdf')
-    else:
-        plt.savefig(f'{output_dir}/{ufm}_mapping_{data_name}.pdf')
