@@ -539,7 +539,7 @@ def get_chopping_status(aman):
     y = 1/(xx1-xx0)
 
     x_min = int(x.min())
-    x_max = int(x.max())
+    x_max = int(min(x.max(),aman.timestamps[-1]-aman.timestamps[0]))
     if x_min < 0:
         x_min = 0
 
@@ -573,11 +573,8 @@ def get_chopping_status(aman):
 
         refined_bkps.append(left + idx +1)
 
-    # Correcting last point
-    if aman.timestamps[-1]-aman.timestamps[0] < x_ave[refined_bkps[-1]-1] :
-        t_end = aman.timestamps[-1]-aman.timestamps[0]
-        idx = np.where(x_ave == int(t_end)+0.5)[0][0]
-        refined_bkps[-1] = idx+1
+    # Add last point
+    refined_bkps.append(x_ave.size) # index +1
 
     # Get average of chopping frequency 
     wait_t = 5
