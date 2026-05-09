@@ -1174,7 +1174,7 @@ def save_group_and_cleanup(obs_id, configs, context=None, subdir='temp',
             except OSError as e:
                 # remove if it can't be opened
                 os.remove(outputs_grp['temp_file'])
-            except Error as e:
+            except Exception as e:
                 err_str = str(e)
 
                 if "destination object already exists" in err_str:

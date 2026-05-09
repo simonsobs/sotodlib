@@ -156,10 +156,13 @@ def measure_cov(d, nmax=10000):
 def project_out(d, modes): return d-modes.T.dot(modes.dot(d))
 
 def project_out_from_matrix(A, V):
-    # Used Woodbury to project out the given vectors from the covmat A
+    """This is the equivalent of deprojecting V in a timestream,
+    and then measuring the covariance of the resulting timestream.
+    It will therefore always be positive definite."""
     if V.size == 0: return A
-    Q = A.dot(V)
-    return A - Q.dot(np.linalg.solve(np.conj(V.T).dot(Q), np.conj(Q.T)))
+    AV = A.dot(V)
+    # q = a-VV'a, Q = <qq'> = A + VV'AV'V - AVV' - VV'A
+    return A + V.dot(V.T.dot(AV)).dot(V.T) - AV.dot(V.T) - V.dot(AV.T)
 
 def measure_power(d): return np.real(np.mean(d*np.conj(d),-1))
 
@@ -782,8 +785,9 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
     such that each category is as compact in RA as possible, and each
     category has as similar size as possible. Assumes that all obs
     are at the same site."""
-    owners = np.arange(nsplit,dtype=int)[:len(obsinfo)]
-    if len(obsinfo) > nsplit:
+    if len(obsinfo) <= nsplit:
+        return np.arange(nsplit)[:len(obsinfo)]
+    else:
         # Get a reprsentative RA per entry
         az    = obsinfo["az_center"] * putils.degree
         el    = obsinfo["el_center"] * putils.degree
@@ -797,12 +801,13 @@ def distribute_tods_ra(obsinfo, nsplit, site="so", weather="typical"):
         weight= obsinfo["n_samples"][order]
         cum   = putils.cumsum(weight)
         wtot  = cum[-1]+weight[-1] # = np.sum(weight)
+        owners = np.zeros(len(obsinfo),int)
         owners[order] = putils.floor(cum*nsplit/wtot)
         # Make sure none ended up empty. If they did, fall back to unweighted,
         # which will always succeed
         if np.any(np.bincount(owners, minlength=nsplit) == 0):
             owners[order] = np.arange(len(obsinfo))*nsplit/len(obsinfo)
-    return owners
+        return owners
 
 Base = declarative_base()
 

@@ -379,6 +379,22 @@ def render_report(
     else:
         unique_obs = [o for o in data.obs_list if o.obs_type == "obs"]
 
+    total_time = (dt.datetime.fromisoformat(stop_time_str) - dt.datetime.fromisoformat(start_time_str)).total_seconds() / 3600
+
+    if data.pwv is not None:
+        mask = data.pwv[1] < 3
+        timediff = np.diff(data.pwv[0][mask])
+        # prevent gaps from adding time unnecessarily
+        mask = timediff < 120
+        good_time = np.sum(timediff[mask]) / 3600
+    else:
+        good_time = 0.
+
+    cmb_good_pwvtime = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv < 3])) / 3600
+    cmb_all_pwvtime = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv])) / 3600
+    idle_good_time = good_time - cmb_good_pwvtime
+    idle_all_time = total_time - cmb_all_pwvtime
+
     jinja_data = {
         "data": data,
         "report_interval": cfg.report_interval.capitalize(),
@@ -395,6 +411,10 @@ def render_report(
             "Number of Cal Observations": len([o for o in unique_obs if o.obs_subtype == "cal"]),
             "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb"])) / 3600, 1),
             "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cal"])) / 3600, 1),
+            "Percentage of Time on CMB Observations (PWV < 3):": np.round(100 * cmb_good_pwvtime / good_time, 2),
+            "Percentage of Time on CMB Observations:": np.round(100 * cmb_all_pwvtime / total_time, 2),
+            "Percentage of Time spent not observing CMB (PWV < 3):": np.round(100 * idle_good_time / good_time, 2),
+            "Percentage of Time spent not observing CMB:": np.round(100 * idle_all_time / total_time, 2),
             "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cmb"]) else 0,
             "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
             "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
