@@ -18,7 +18,7 @@ from sotodlib.io.metadata import read_dataset, write_dataset
 
 logger = logging.getLogger("finalize_focal_plane")
 plt.style.use("tableau-colorblind10")
-
+plt.rcParams['font.size'] = 20
 
 def _add_attrs(dset, attrs):
     for k, v in attrs.items():
@@ -639,10 +639,10 @@ class Receiver:
 
     @property
     def lims(self):
-        xmax = np.max([np.nanmax(fp.transformed[:, 0]) for fp in self.focal_planes])
-        xmin = np.min([np.nanmin(fp.transformed[:, 0]) for fp in self.focal_planes])
-        ymax = np.max([np.nanmax(fp.transformed[:, 1]) for fp in self.focal_planes])
-        ymin = np.min([np.nanmin(fp.transformed[:, 1]) for fp in self.focal_planes])
+        xmax = np.max([np.nanmax(fp.template.fp[:, 0]) for fp in self.focal_planes])
+        xmin = np.min([np.nanmin(fp.template.fp[:, 0]) for fp in self.focal_planes])
+        ymax = np.max([np.nanmax(fp.template.fp[:, 1]) for fp in self.focal_planes])
+        ymin = np.min([np.nanmin(fp.template.fp[:, 1]) for fp in self.focal_planes])
         return (xmin, xmax), (ymin, ymax)
 
     @property
@@ -820,8 +820,8 @@ def plot_receiver(receiver, plot_dir):
     max_diff = np.nanpercentile(np.abs(all_diffs), 99)
     max_diff *= 180 * 60 * 60 / np.pi
     xlims, ylims = receiver.lims
-    xlims = np.array(xlims)*1.1
-    ylims = np.array(ylims)*1.1
+    xlims = np.array(xlims)*1.05
+    ylims = np.array(ylims)*1.05
     have_gamma = np.prod([fp.have_gamma for fp in receiver.focal_planes])
     nax = 2 + int(have_gamma)
 
@@ -830,7 +830,7 @@ def plot_receiver(receiver, plot_dir):
     valid_ids = np.unique(_convert_ids(valid_ids, bp_groups))
     
     fig, axs_all = plt.subplots(
-        len(valid_ids), nax, sharex="col", sharey="row", constrained_layout=False, figsize=(50*np.ptp(xlims)*nax, 50*np.ptp(ylims)*len(valid_ids)), gridspec_kw = {'wspace':0, 'hspace':0},
+        len(valid_ids), nax, sharex="col", sharey="row", constrained_layout=False, figsize=(120*np.ptp(xlims)*nax, 80*np.ptp(ylims)*len(valid_ids)), gridspec_kw = {'wspace':0, 'hspace':0},
     )
     axs = axs_all.flat
     axs[0].set_title("Xi")
@@ -851,8 +851,8 @@ def plot_receiver(receiver, plot_dir):
                 continue
             diff = fp.diff * 180 * 60 * 60 / np.pi
             cf = axs[nax * i + 0].scatter(
-                fp.transformed[msk, 0],
-                fp.transformed[msk, 1],
+                fp.template.fp[msk, 0],
+                fp.template.fp[msk, 1],
                 c = diff[msk, 0],
                 marker=".",
                 vmin=-1 * max_diff,
@@ -861,8 +861,8 @@ def plot_receiver(receiver, plot_dir):
                 alpha=.5
             )
             cf = axs[nax * i + 1].scatter(
-                fp.transformed[msk, 0],
-                fp.transformed[msk, 1],
+                fp.template.fp[msk, 0],
+                fp.template.fp[msk, 1],
                 c = diff[msk, 1],
                 marker=".",
                 vmin=-1 * max_diff,
@@ -872,8 +872,8 @@ def plot_receiver(receiver, plot_dir):
             )
             if fp.have_gamma:
                 cf = axs[nax * i + 2].scatter(
-                    fp.transformed[msk, 0],
-                    fp.transformed[msk, 1],
+                    fp.template.fp[msk, 0],
+                    fp.template.fp[msk, 1],
                     c = diff[msk, 2],
                     marker=".",
                     vmin=-1 * max_diff,
