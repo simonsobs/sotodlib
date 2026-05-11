@@ -195,7 +195,10 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
     # bool_save: If true, save plot
 
     det_mask = np.full(aman.dets.count, False)
-    det_mask[idxs] = True
+    if idxs is None:
+        det_mask[:] = True
+    else:
+        det_mask[idxs] = True
 
     if bool_preprocess:
         get_encoder_timing(aman, hkdata)# Get timing against encoder t0
@@ -250,7 +253,22 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
                 fit_result['fit_coadd'][filt_key]['f1_gain'].append(None)
                 continue
 
-            result = model.fit(y, params, t=x, weights=1/np.array(yerr)) 
+            if filt_key=='lpf':
+                params['a1'].set(value=0,vary=False)
+                params['a2'].set(value=0,vary=False)
+                params['a3'].set(value=0,vary=False)
+                params['a4'].set(value=0,vary=False)
+                params['a5'].set(value=0,vary=False)
+                params['a6'].set(value=0,vary=False)
+                params['t1'].set(value=0,vary=False)
+                params['t2'].set(value=0,vary=False)
+                params['t3'].set(value=0,vary=False)
+                params['t4'].set(value=0,vary=False)
+                params['t5'].set(value=0,vary=False)
+                params['t6'].set(value=0,vary=False)
+                result = model.fit(y, params, t=x, weights=1/np.array(yerr)) 
+            else:
+                result = model.fit(y, params, t=x, weights=1/np.array(yerr)) 
 
             fit_result['fit_coadd'][filt_key]['f1_gain'].append(result)
 
@@ -279,9 +297,11 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
     # bool_plot: if true, makes plot.
     # bool_save: If true, save plot
 
-
     det_mask = np.full(aman.dets.count, False)
-    det_mask[idxs] = True
+    if idxs is None:
+        det_mask[:] = True
+    else:
+        det_mask[idxs] = True
 
     if bool_preprocess:
         get_encoder_timing(aman, hkdata)# Get timing against encoder t0
@@ -310,6 +330,7 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
     n_bins = 40
     get_coadd_data(aman,coadd_data,n_bins,det_mask)
 
+
     for i_det,m in enumerate(det_mask):
         if not m:
             fill_none(fit_result=fit_result) 
@@ -334,7 +355,22 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
                     fit_result['fit_coadd'][filt_key][f_key].append(None)
                     continue
 
-                result = models['fit_coadd'].fit(y, params, t=x, weights=1/np.array(yerr)) 
+                if filt_key=='lpf':
+                    params['a1'].set(value=0,vary=False)
+                    params['a2'].set(value=0,vary=False)
+                    params['a3'].set(value=0,vary=False)
+                    params['a4'].set(value=0,vary=False)
+                    params['a5'].set(value=0,vary=False)
+                    params['a6'].set(value=0,vary=False)
+                    params['t1'].set(value=0,vary=False)
+                    params['t2'].set(value=0,vary=False)
+                    params['t3'].set(value=0,vary=False)
+                    params['t4'].set(value=0,vary=False)
+                    params['t5'].set(value=0,vary=False)
+                    params['t6'].set(value=0,vary=False)
+                    result = models['fit_coadd'].fit(y, params, t=x, weights=1/np.array(yerr)) 
+                else:
+                    result = models['fit_coadd'].fit(y, params, t=x, weights=1/np.array(yerr)) 
     
                 fit_result['fit_coadd'][filt_key][f_key].append(result)
 
@@ -706,6 +742,7 @@ def get_coadd_data(aman,coadd_data,n_bins,det_mask):
     for freq_key in coadd_data['hpf'].keys():
         idx = np.where(aman.stm_ana.freqs.vals == freq_key)[0][0]
         t_min,t_max = aman.stm_ana.t_cuts[idx]
+
         cut1 = (t_min <= aman.timestamps-t0) & (aman.timestamps-t0 < t_max)
 
         cuts[freq_key] = []
@@ -713,8 +750,7 @@ def get_coadd_data(aman,coadd_data,n_bins,det_mask):
             cut2 = (i_bin/n_bins <= aman.frac_timing) & (aman.frac_timing < (i_bin+1)/n_bins)
             cut = cut1 & cut2
             cuts[freq_key].append(cut)
-
-
+    
     for i_det,m in enumerate(det_mask):
         if not m:
             fill_none(coadd_data=coadd_data)
@@ -724,15 +760,14 @@ def get_coadd_data(aman,coadd_data,n_bins,det_mask):
             continue
 
         for filt_key in coadd_data.keys():
-            if filt_key == 'hpf' or filt_key == 'iirc':
-                key = f'signal_{filt_key}'
-            elif filt_key == 'lpf':
-                if freq_key == 'f1_gain':
-                    key = 'signal_lpf'
-                else:
-                    key = f'signal_lpf_{freq_key}'
-           
             for freq_key in coadd_data['hpf'].keys():
+                if filt_key == 'hpf' or filt_key == 'iirc':
+                    key = f'signal_{filt_key}'
+                elif filt_key == 'lpf':
+                    if freq_key == 'f1_gain':
+                        key = 'signal_lpf'
+                    else:
+                        key = f'signal_lpf_{freq_key}'
 
                 data = [[] for _ in range(n_bins)]
                 for i_bin in range(n_bins):
@@ -1058,7 +1093,6 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
         axes[i_y,i_x].plot(x, hpf(x,y),label='HPF', color='C1')
         axes[i_y,i_x].plot(x, lpf(x,y),label='LPF', color='C2')
         axes[i_y,i_x].legend()
-
 
     
     elif cal_type == 'timeconstant':
