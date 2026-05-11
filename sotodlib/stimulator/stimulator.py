@@ -5,6 +5,8 @@ from matplotlib.patches import Wedge
 from matplotlib.collections import PatchCollection
 from pathlib import Path
 import ruptures as rpt
+from joblib import Parallel, delayed
+import datetime
 
 from sotodlib import tod_ops, core
 from sotodlib.io import hkdb
@@ -146,7 +148,7 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     # Load stimulator's data
     lspec = hkdb.LoadSpec(
         hkdb_cfg, 
-        fields=feed_list, 
+        fields=feed_list,
         start=t_start, 
         end=t_end,
     )
@@ -200,8 +202,9 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
     else:
         det_mask[idxs] = True
 
+    vailed_data = True
     if bool_preprocess:
-        get_encoder_timing(aman, hkdata)# Get timing against encoder t0
+        vailed_data = get_encoder_timing(aman, hkdata)# Get timing against encoder t0
 
         get_chopping_status(aman)
 
@@ -211,6 +214,10 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
 
     if bool_plot==True:
         plot_hkdata(aman,hkdata,cal_type='gain')
+   
+    if not vailed_data:
+        return vailed_data
+
 
     chopping_freqs = {}
     if round(aman.stm_ana.chopping_freqs[0]) != CHOPPING_FREQS['f1']: 
@@ -287,6 +294,8 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
                 plt.close(fig)
             
     fill_data(aman,coadd_data,fit_result,n_bins,cal_type='gain')    
+    
+    return vailed_data
 
 
 
@@ -303,8 +312,9 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
     else:
         det_mask[idxs] = True
 
+    vailed_data = True
     if bool_preprocess:
-        get_encoder_timing(aman, hkdata)# Get timing against encoder t0
+        vailed_data = get_encoder_timing(aman, hkdata)# Get timing against encoder t0
 
         get_chopping_status(aman)
 
@@ -314,6 +324,8 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
 
     if bool_plot==True:
         plot_hkdata(aman,hkdata,cal_type='timeconstant')
+    if not vailed_data:
+        return vailed_data
     
     chopping_freqs = {}
     for i,(key,f) in enumerate(CHOPPING_FREQS.items()):
@@ -419,6 +431,170 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
 
     
     fill_data(aman,coadd_data,fit_result,n_bins,cal_type='timeconstant')    
+        
+    return vailed_data
+
+
+def calc_timeconstant_parallel(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preprocess=True,output_dir=None):
+    # aman: axis manager of tod data, including timestamps and raw signal
+    # hkdata: hkdata for aman
+    # idxs: list of detector index for calculation. If None, all detectors are calculated.
+    # bool_plot: if true, makes plot.
+    # bool_save: If true, save plot
+
+    det_mask = np.full(aman.dets.count, False)
+    if idxs is None:
+        det_mask[:] = True
+    else:
+        det_mask[idxs] = True
+
+    vailed_data = True
+    if bool_preprocess:
+        vailed_data = get_encoder_timing(aman, hkdata)# Get timing against encoder t0
+
+        get_chopping_status(aman)
+
+        get_timing_cut(aman)
+
+        get_signal_temp(aman,hkdata)
+
+    if bool_plot==True:
+        plot_hkdata(aman,hkdata,cal_type='timeconstant')
+    if not vailed_data:
+        return vailed_data
+    
+    chopping_freqs = {}
+    for i,(key,f) in enumerate(CHOPPING_FREQS.items()):
+        if round(aman.stm_ana.chopping_freqs[0]) != f: 
+            chopping_freqs[key] = round(aman.stm_ana.chopping_freqs[i])
+        else:
+            chopping_freqs[key] = f
+
+    filtering_params = filtering(aman,chopping_freqs,'timeconstant')
+
+    models, params_bases = get_fit_params(cal_type='timeconstant')
+    
+    coadd_data, fit_result = get_dicts('timeconstant')
+    n_bins = 40
+    get_coadd_data(aman,coadd_data,n_bins,det_mask)
+
+
+    def fit_one_detector(i_det):
+        _, one_fit_result = get_dicts('timeconstant')
+
+        if not det_mask[i_det]:
+            fill_none(fit_result=one_fit_result) 
+            return one_fit_result
+
+        # Strange data check
+        if not np.isfinite(aman.signal[i_det]).all():
+            fill_none(fit_result=one_fit_result) 
+            return one_fit_result
+
+            
+        # Fitting
+        for filt_key in fit_result['fit_coadd'].keys():
+
+            for f_key in chopping_freqs.keys():
+                params = params_bases['fit_coadd'].copy()
+                
+                x = coadd_data[filt_key][f_key]['x'][i_det]
+                y = coadd_data[filt_key][f_key]['y'][i_det]
+                yerr = coadd_data[filt_key][f_key]['yerr'][i_det]
+
+                if y is None:
+                    fit_result['fit_coadd'][filt_key][f_key].append(None)
+                    continue
+
+                if filt_key=='lpf':
+                    params['a1'].set(value=0,vary=False)
+                    params['a2'].set(value=0,vary=False)
+                    params['a3'].set(value=0,vary=False)
+                    params['a4'].set(value=0,vary=False)
+                    params['a5'].set(value=0,vary=False)
+                    params['a6'].set(value=0,vary=False)
+                    params['t1'].set(value=0,vary=False)
+                    params['t2'].set(value=0,vary=False)
+                    params['t3'].set(value=0,vary=False)
+                    params['t4'].set(value=0,vary=False)
+                    params['t5'].set(value=0,vary=False)
+                    params['t6'].set(value=0,vary=False)
+                    result = models['fit_coadd'].fit(y, params, t=x, weights=1/np.array(yerr)) 
+                else:
+                    result = models['fit_coadd'].fit(y, params, t=x, weights=1/np.array(yerr)) 
+    
+                one_fit_result['fit_coadd'][filt_key][f_key].append(result)
+
+            a0s = [one_fit_result['fit_coadd'][filt_key][f_key][-1].best_values['a0'] if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
+            t0s = [one_fit_result['fit_coadd'][filt_key][f_key][-1].best_values['t0'] if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
+
+            # Edit a0 and t0 result
+            for i in range(len(t0s)):
+                if a0s[i] < 0:
+                    t0s[i] = t0s[i]-0.5
+                if i > 0:
+                    if t0s[i] < t0s[i-1]:
+                        t0s[i] = t0s[i] + 1
+            a0s = np.abs(a0s)
+
+            f = [chopping_freqs[f_key] for f_key in chopping_freqs.keys()]
+            for fit_key in ['fit_amp', 'fit_phase__fix_tau', 'fit_phase__free']:
+                params = params_bases[fit_key].copy()
+                if fit_key == 'fit_amp':
+                    weights = [one_fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None and one_fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
+                    weights = np.array(weights)
+                    #result = models[fit_key].fit(a0s,params,f=f,weights=weights, method='least_squares')
+                    result = models[fit_key].fit(a0s,params,f=f, method='least_squares')# No weight for first step analysis
+                else:
+                    weights = [one_fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None and one_fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
+                    weights = np.array(weights) *360
+                    if fit_key == 'fit_phase__fix_tau':
+                        params['tau'].set(value=one_fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
+                    #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
+                    result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+                one_fit_result[fit_key][filt_key].append(result)
+        
+        
+
+        return one_fit_result
+
+    all_fit_result = Parallel(n_job=-1,prefer='threads')(
+        delayed(fit_one_detector)(i_det)
+        for i_det in range(aman.dets.count)
+    )
+    
+
+    for i_det in range(len(all_fit_result)):
+        for fit_key in fit_result.keys():
+            for filt_key in fit_result[fit_key].keys():
+                if fit_key == 'fit_coadd':
+                    for freq_key in fit_result[fit_key][filt_key].keys():
+                        fit_result[fit_key][filt_key][freq_key].append(all_fit_result[i_det][fit_key][filt_key][freq_key][0])
+                else: 
+                    fit_result[fit_key][filt_key].append(all_fit_result[i_det][fit_key][filt_key][0])
+
+
+    for i_det,m in enumerate(det_mask):
+        if not m:
+            continue
+        
+        if bool_plot==False and bool_save==False:
+            pass
+        else:
+            plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='timeconstant')
+
+            obs_id = aman['obs_info']['obs_id']
+            if bool_save==True:
+                output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
+                output_dir_.mkdir(parents=True, exist_ok=True)
+                plt.savefig(f'{output_dir_}/Tau_det{i_det:04d}.png')
+            if bool_plot==False:
+                plt.close(fig)
+    
+    
+    fill_data(aman,coadd_data,fit_result,n_bins,cal_type='timeconstant')    
+        
+    return vailed_data
 
 
 def get_encoder_timing(aman,hkdata):
@@ -445,8 +621,6 @@ def get_encoder_timing(aman,hkdata):
 
         frac_timing.append((t - t1_enc_tmp)/(t2_enc_tmp-t1_enc_tmp))
     
-    # Add timing against encoder to axis manager
-    aman.wrap('frac_timing', np.array(frac_timing), [(0,'samps')], overwrite=True)
 
     if not 'stm_samps' in aman._axes.keys():
         stm_samps = core.IndexAxis('stm_samps',t_enc.size)
@@ -455,7 +629,17 @@ def get_encoder_timing(aman,hkdata):
     aman.stm_ana.wrap('t_enc', t_enc, [(0,'stm_samps')], overwrite=True)
     aman.stm_ana.wrap('t_hk', t_hk, [(0,'stm_samps')], overwrite=True)
 
+    vailed_data = True
+    if t_enc[-1] < aman.timestamps[-1]:
+        print(f'Invailed HK data. last t_enc: {t_enc[-1]}, last TOD timestamp: {aman.timestamps[-1]}')
+        vailed_data = False
+    else:
+    # Add timing against encoder to axis manager
+        aman.wrap('frac_timing', np.array(frac_timing), [(0,'samps')], overwrite=True)
 
+    return vailed_data
+
+    
 def get_chopping_status(aman):
     # Get chopping frequency and timing
     # aman: axis manager with aman.stm_ana field
@@ -576,7 +760,8 @@ def get_signal_temp(aman,hkdata):
         y = hkdata.data[key][1]+273.15
 
         for t_min,t_max in aman.stm_ana.t_cuts:
-            y_mean = y[(t_min <= x) & (x < t_max)].mean()
+            arr = y[(t_min <= x) & (x < t_max)]
+            y_mean = np.mean(arr) if arr.size > 0 else np.nan
             temps[position_key].append(y_mean)
 
         temps[position_key] = np.array(temps[position_key])
@@ -1197,7 +1382,7 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
             
             axes[i_y,i_x].plot(x, fit_result['fit_coadd']['hpf'][f_key][i_det].best_fit, '-', color='red',zorder=5)
             axes[i_y,i_x].plot(x, fit_result['fit_coadd']['lpf'][f_key][i_det].best_fit, '-', color='green',zorder=5)
-            y = fit_result['fit_coadd']['hpf'][f_key][-1].best_values['a0']*np.sin((x-fit_result['fit_coadd']['hpf'][f_key][-1].best_values['t0'])*2*np.pi)
+            y = fit_result['fit_coadd']['hpf'][f_key][i_det].best_values['a0']*np.sin((x-fit_result['fit_coadd']['hpf'][f_key][i_det].best_values['t0'])*2*np.pi)
             axes[i_y,i_x].plot(x, y, linestyle=(0,(2,8)), color='red',zorder=1,label=fr'sin$\theta$ for HPF fit')
             axes[i_y,i_x].legend()
         
