@@ -180,8 +180,8 @@ def _main(
                 obs_id=job.tags['obs_id'],
                 n_split=n_split,
             ))
-        for future in futures:
-            obs_id, rset = as_completed_callable(future.result())
+        for future in as_completed_callable(futures):
+            obs_id, rset = future.result()
             for job in jobs:
                 if job.tags['obs_id'] == obs_id:
                     break
