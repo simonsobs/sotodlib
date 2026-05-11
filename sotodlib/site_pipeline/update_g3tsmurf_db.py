@@ -4,6 +4,7 @@ is specifically designed to work when the data is dynamically coming in. Meaning
 is designed to work from something like a cronjob.
 """
 import os
+from pathlib import Path
 import yaml
 import datetime as dt
 import numpy as np
@@ -123,7 +124,7 @@ def core(
 def main(config: Optional[str] = None, update_delay: float = 2,
          from_scratch: bool = False, verbosity: int = 2,
          index_via_actions: bool=False, checked_file: Optional[str]=None,
-         profile: bool=False, profile_output: Optional[str]=None):
+         profile: bool=False, profile_output: Optional[Path]=None):
     """
     Arguments
     ---------
@@ -155,7 +156,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     if profile:
         import pyinstrument
         filename = f"profile_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-        output_filename = f"{args.profile_output}/{filename}"
+        output_filename = profile_output / filename if profile_output is not None else filename
         profiler = pyinstrument.Profiler()
         profiler.start()
     
@@ -168,7 +169,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     finally:
         if profile:
             profiler.stop()
-            if args.profile_output is not None:
+            if profile_output is not None:
                 with open(output_filename, "w") as f:
                     f.write(profiler.output_html())
 
@@ -189,7 +190,8 @@ def get_parser(parser=None):
     parser.add_argument("--checked-file",
         help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
     parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
-    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set")
+    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set", 
+                        type=Path)
     return parser
 
 if __name__ == '__main__':
