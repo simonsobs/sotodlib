@@ -132,6 +132,7 @@ def _main(
         obslist = ctx.obsdb.query(' and '.join(query), tags=[tag])
         for obs in obslist:
             obs_ids.append(obs['obs_id'])
+    obs_ids = sorted(obs_ids, reverse=True)
 
     db_path = os.path.join(output_dir, 'tau_hwp.sqlite')
     if os.path.exists(db_path):
