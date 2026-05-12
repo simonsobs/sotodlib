@@ -12,6 +12,7 @@ from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from pixell import utils as putils
 
 from sotodlib.site_pipeline.utils.mapcat import commit_coadd_maps
+from mapcat.helper import Settings
 
 class CoaddAtomicConfig:
     """
@@ -77,10 +78,10 @@ class CoaddAtomicConfig:
         overwrite: bool = False,
         output_root: str = None,
         plot: bool = False,
-        mapcat_database_name: str = os.environ.get('MAPCAT_DATABASE_NAME', ''),
-        mapcat_database_type: str = os.environ.get('MAPCAT_DATABASE_TYPE', ''),
-        mapcat_atomic_parent: str = os.environ.get('MAPCAT_ATOMIC_PARENT', ''),
-        mapcat_atomic_coadd_parent: str = os.environ.get('MAPCAT_ATOMIC_COADD_PARENT', ''),
+        mapcat_database_name: str = None,
+        mapcat_database_type: str = None,
+        mapcat_atomic_parent: str = None,
+        mapcat_atomic_coadd_parent: str = None,
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.interval = interval
@@ -93,10 +94,19 @@ class CoaddAtomicConfig:
         self.overwrite = overwrite
         self.output_root = output_root
         self.plot = plot
-        self.mapcat_database_name = mapcat_database_name
-        self.mapcat_database_type = mapcat_database_type
-        self.mapcat_atomic_parent = mapcat_atomic_parent
-        self.mapcat_atomic_coadd_parent = mapcat_atomic_coadd_parent
+        
+        if mapcat_database_name is None:
+            mapcat_database_name = Settings().database_name
+        if mapcat_database_type is None:
+            mapcat_database_type = Settings().database_type
+        if mapcat_atomic_parent is None:
+            mapcat_atomic_parent = Settings().atomic_parent
+        if mapcat_atomic_coadd_parent is None:
+            mapcat_atomic_coadd_parent = Settings().atomic_coadd_parent
+        self.mapcat_settings = Settings(database_name = mapcat_database_name,
+                                        database_type = mapcat_database_type,
+                                        atomic_parent = mapcat_atomic_parent,
+                                        atomic_coadd_parent = mapcat_atomic_coadd_parent)
         
         def convert_to_datetime(
             time: Union[dt.datetime, float, str, None],
@@ -154,11 +164,6 @@ def main(config_file: str, verbosity: int) -> None:
     putils.mkdir(cfg.output_root)
 
     logger.info(f"Using database at {cfg.output_db}")
-    
-    mapcat_settings = {"database_type": cfg.mapcat_database_type,
-                       "database_name": cfg.mapcat_database_name,
-                       "atomic_parent": cfg.mapcat_atomic_parent,
-                       "atomic_coadd_parent": cfg.mapcat_atomic_coadd_parent,}
 
     for start_time, stop_time in cfg.time_intervals:
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
@@ -173,7 +178,7 @@ def main(config_file: str, verbosity: int) -> None:
                                                    cfg.interval, cfg.geom_file_prefix, 
                                                    overwrite=cfg.overwrite, unit=cfg.unit, 
                                                    logger=logger, plot=cfg.plot, 
-                                                   mapcat_settings=mapcat_settings)
+                                                   mapcat_settings=cfg.mapcat_settings)
 
 
                 if not success:
@@ -193,7 +198,7 @@ def main(config_file: str, verbosity: int) -> None:
                                       stop_time=stop_time.timestamp(),
                                       geom_file_path=f"{cfg.geom_file_prefix}_{band}",
                                       coadd_atomic=maps_made["coadd_atomic"],
-                                      mapcat_settings=mapcat_settings)
+                                      mapcat_settings=cfg.mapcat_settings)
 
             except Exception as e:
                 tb = ''.join(traceback.format_tb(e.__traceback__))

@@ -195,10 +195,10 @@ def get_atomic_matches(
     value: List[Tuple[str, str, str, int]],
     split_label: str,
     obs_infos: np.recarray,
-    mapcat_settings: Dict[str, str],
+    mapcat_settings: Settings,
 ):
 
-    with Settings(**mapcat_settings).session() as session:
+    with mapcat_settings.session() as session:
         query_ = select(AtomicMapTable).where(
             (AtomicMapTable.obs_id == value[0][0])
             & (AtomicMapTable.telescope == obs_infos[value[0][3]].telescope)
@@ -223,10 +223,10 @@ def commit_coadd_maps(
     stop_time: float,
     geom_file_path: str,
     coadd_atomic: bool,
-    mapcat_settings: Dict[str, str],
+    mapcat_settings: Settings,
 ) -> None:
 
-    with Settings(**mapcat_settings).session() as session:
+    with mapcat_settings.session() as session:
         data = AtomicMapCoaddTable(
             coadd_name=map_name,
             prefix_path=prefix_path,

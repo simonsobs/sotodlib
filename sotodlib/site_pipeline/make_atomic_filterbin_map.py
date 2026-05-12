@@ -111,6 +111,12 @@ class Cfg:
         Data type for timestreams
     dtype_map: str
         Data type for maps
+    mapcat_database_name : str
+        Path to mapcat database.
+    mapcat_database_type : str
+        Choices: ["sqlite", "postgresql"]
+    mapcat_atomic_parent : str
+        Path to base directory of atomic maps
     """
     def __init__(
         self,
@@ -152,6 +158,10 @@ class Cfg:
         wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True,
         compress: bool = True,
+        mapcat_database_name: str = None,
+        mapcat_database_type: str = None,
+        mapcat_atomic_parent: str = None,
+        mapcat_atomic_coadd_parent: str = None,
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -191,6 +201,16 @@ class Cfg:
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
         self.compress = compress
+        
+        if mapcat_database_name is None:
+            mapcat_database_name = Settings().database_name
+        if mapcat_database_type is None:
+            mapcat_database_type = Settings().database_type
+        if mapcat_atomic_parent is None:
+            mapcat_atomic_parent = Settings().atomic_parent
+        self.mapcat_settings = Settings(database_name = mapcat_database_name,
+                                        database_type = mapcat_database_type,
+                                        atomic_parent = mapcat_atomic_parent)
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -355,10 +375,6 @@ def main(
         split_labels.append('scan_right')
     if not split_labels:
         split_labels.append('full')
-        
-    mapcat_settings = {"database_type": Settings().database_type,
-                       "database_name": Settings().database_name,
-                       "atomic_parent": Settings().atomic_parent,}
 
     # We open the data base for checking if we have maps already,
     # if we do we will not run them again.
@@ -370,7 +386,7 @@ def main(
             for key, value in obslists.items():
                 missing_split = False
                 for split_label in split_labels:
-                    matches = get_atomic_matches(key=key,value=value,obs_infos=obs_infos,split_label=split_label,mapcat_settings=mapcat_settings)
+                    matches = get_atomic_matches(key=key,value=value,obs_infos=obs_infos,split_label=split_label,mapcat_settings=args.mapcat_settings)
                     if len(matches) == 0:
                         # this means one of the requested splits is missing
                         # in the data base
@@ -495,7 +511,7 @@ def main(
                 list_infos = []
                 for n_split in range(len(split_labels)):
                     list_infos.append(AtomicMapTable(**d_[n_split]))
-                with Settings(**mapcat_settings).session() as session:
+                with args.mapcat_settings.session() as session:
                     session.add_all(list_infos)
                     session.commit()
         except Exception as e:

@@ -150,7 +150,7 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     
     if lower_interval:
         logger.debug('Attempting to coadd from existing coadded maps')
-        with Settings(**mapcat_settings).session() as session:
+        with mapcat_settings.session() as session:
             statement = select(AtomicMapCoaddTable)
             statement = statement.where(AtomicMapCoaddTable.interval == lower_interval)
             statement = statement.where(AtomicMapCoaddTable.platform == platform)
@@ -167,7 +167,7 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
             coadd_atomic = True
     
     if coadd_atomic:
-        with Settings(**mapcat_settings).session() as session:
+        with mapcat_settings.session() as session:
             statement = select(AtomicMapTable)
             statement = statement.where(AtomicMapTable.telescope == platform)
             statement = statement.where(AtomicMapTable.split_label == split_label)
@@ -179,7 +179,7 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
             map_ids = [m.atomic_map_id for m in maps]
     
     if not overwrite:
-        with Settings(**mapcat_settings).session() as session:
+        with mapcat_settings.session() as session:
             statement = select(AtomicMapCoaddTable)
             statement = statement.where(AtomicMapCoaddTable.interval == interval)
             statement = statement.where(AtomicMapCoaddTable.platform == platform)
@@ -252,8 +252,8 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
         Examples: ["daily", "weekly", "monthly"]
     geom_file_prefix : str
         Prefix path to geometry file, omitting the band.
-    mapcat_settings : Dict[str, str]
-        Dictionary of mapcat settings
+    mapcat_settings : mapcat.Settings
+        Mapcat settings object with database and parent path info.
     overwrite : bool
         Set to True to re-run coadding and overwrite database if time interval
         found in database.
@@ -279,9 +279,9 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     mapmaker.logger.info(f"Using geometry from {mapmaker.geom_file_path}")
     for m in tqdm(mapmaker.maps, total=len(mapmaker.maps)):
         if mapmaker.coadd_atomic:
-            full_prefix_path = os.path.join(mapcat_settings["atomic_parent"], m.prefix_path)
+            full_prefix_path = os.path.join(mapcat_settings.atomic_parent, m.prefix_path)
         else:
-            full_prefix_path = os.path.join(mapcat_settings["atomic_coadd_parent"], m.prefix_path)
+            full_prefix_path = os.path.join(mapcat_settings.atomic_coadd_parent, m.prefix_path)
         mapmaker.add_map(full_prefix_path)
 
     if mapmaker.coadd_atomic:
