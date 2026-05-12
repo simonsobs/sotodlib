@@ -61,6 +61,9 @@ class CoaddAtomicConfig:
         Path to base directory of atomic maps
     mapcat_atomic_coadd_parent : str
         Path to base directory of atomic coadd maps
+    update_delay : int
+        Number of days in the past to start coadding. Overrides start_time, but
+        the calculated intervals retain the starting hour.
     """
     def __init__(
         self,
@@ -82,6 +85,7 @@ class CoaddAtomicConfig:
         mapcat_database_type: str = None,
         mapcat_atomic_parent: str = None,
         mapcat_atomic_coadd_parent: str = None,
+        update_delay: Optional[int] = None,
     ) -> None:
         self.platform: Literal["satp1", "satp2", "satp3", "lat"] = platform
         self.interval = interval
@@ -126,6 +130,12 @@ class CoaddAtomicConfig:
         self.stop_time = convert_to_datetime(stop_time)
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
         time_of_day = dt.time(self.start_time.hour, self.start_time.minute, self.start_time.second, tzinfo=self.start_time.tzinfo)
+        
+        if update_delay is not None:
+            self.start_time = dt.datetime.combine((convert_to_datetime(None) - dt.timedelta(days=update_delay)).date(),
+                                                  time_of_day,
+                                                  tzinfo=self.start_time.tzinfo)
+        
         if self.interval == "daily":
             delta = dt.timedelta(days=1)
         elif self.interval == "weekly":
