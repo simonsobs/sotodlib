@@ -172,7 +172,7 @@ def _fit_one_det(binned_signal_i, x_bin, m, sigma_i, max_mode):
     return coeffs, binned_model, ssq, redchi2
 
 
-def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
+def fit_azss(az, azss_stats, max_mode, modes_axis_name='azss_modes', fit_range=None, overwrite=False):
     """
     Function for fitting Legendre polynomials to signal binned in azimuth.
 
@@ -185,6 +185,8 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
         Created by ``get_azss`` function.
     max_mode: integer
         Highest order Legendre polynomial to include in the fit.
+    modes_axis_name: string, optional
+        The name to assign to the LabelAxis of azss legendre modes when method is 'fit'.
     fit_range: list
         Azimuth range used to renormalized to the [-1,1] range spanned
         by the Legendre polynomials for fitting. Default is the max-min
@@ -267,11 +269,11 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
             return model
 
     mode_names = np.array([f'legendre{mode}' for mode in range(max_mode + 1)], dtype='<U10')
-    modes_axis = core.LabelAxis(name='azss_modes', vals=mode_names)
+    modes_axis = core.LabelAxis(name=modes_axis_name, vals=mode_names)
     azss_stats.add_axis(modes_axis)
     azss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_az_samps')])
-    azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'azss_modes')])
+    azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, modes_axis_name)])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
     return model
@@ -280,7 +282,7 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
 def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None, scan_flags=None,
              apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
-             method='interpolate', max_mode=None, subtract_in_place=False,
+             method='interpolate', max_mode=None, modes_axis_name='azss_modes', subtract_in_place=False,
              merge_stats=True, azss_stats_name='azss_stats',
              merge_model=True, azss_model_name='azss_model', coverage_threshold=0.95,
              exclude_turnarounds=True, return_det_mask=False):
@@ -333,6 +335,10 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         Defaults to 'interpolate'.
     max_mode: integer, optional
         The number of Legendre modes to use for azss when method is 'fit'. Required when method is 'fit'.
+    modes_axis_name: string, optional
+        The name assigned to the LabelAxis of azss legendre modes when method is 'fit'.
+        Set a unique name when fitting azss with different max_mode values to avoid axis name conflicts.
+        Defaults to 'azss_modes'.
     subtract_in_place: bool
         If True, it subtract the modeled tod from original signal. The aman.signal will be modified.
     merge_stats: boolean, optional
@@ -414,7 +420,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
                                                 exclude_turnarounds=exclude_turnarounds)
         azss_stats.wrap('bad_dets', bad_dets, [(0, 'dets')])
         azss_stats.wrap('az_coverage', coverages, [(0, 'dets')])
-    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange)
+    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, modes_axis_name, azrange)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -426,7 +432,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
 
 
 def get_azss_model(aman, azss_stats, az=None, method='interpolate',
-                   max_mode=None, azrange=None):
+                   max_mode=None, modes_axis_name='azss_modes', azrange=None):
     """
     Function to return the azss template for subtraction given the azss_stats AxisManager
 
@@ -442,9 +448,11 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
         Method for modeling: 'interpolate' or 'fit'
     max_mode: int, optional
         Maximum Legendre mode for 'fit' method
+    modes_axis_name: string, optional
+        The name assigned to the LabelAxis of azss legendre modes when method is 'fit'.
     azrange: list, optional
         Azimuth range for fitting
-        
+
     Returns
     -------
     model: array-like
@@ -456,7 +464,9 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
     if method == 'fit':
         if not isinstance(max_mode, int):
             raise ValueError('max_mode is not provided as integer')
-        model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=azrange)
+        model = fit_azss(
+            az=az, azss_stats=azss_stats, max_mode=max_mode,
+            modes_axis_name=modes_axis_name, fit_range=azrange)
 
     if method == 'interpolate':
         model = np.zeros((aman.dets.count, aman.samps.count))
@@ -488,7 +498,8 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
     return model
 
 
-def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None, azrange=None,
+def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None,
+                  modes_axis_name='azss_modes', azrange=None,
                   scan_flags=None, subtract_name='azss_remove', in_place=False, remove_template=False):
     """
     Subtract the scan synchronous signal (azss) template from the
@@ -536,7 +547,8 @@ def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_m
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
-    model = get_azss_model(aman, azss_stats, method=method, max_mode=max_mode, azrange=azrange)
+    model = get_azss_model(aman, azss_stats, method=method, max_mode=max_mode,
+                           modes_axis_name=modes_axis_name, azrange=azrange)
 
     if scan_flags is None:
         scan_flags = np.ones(aman.samps.count, dtype=bool)
