@@ -99,18 +99,16 @@ class CoaddAtomicConfig:
         self.output_root = output_root
         self.plot = plot
         
-        if mapcat_database_name is None:
-            mapcat_database_name = Settings().database_name
-        if mapcat_database_type is None:
-            mapcat_database_type = Settings().database_type
-        if mapcat_atomic_parent is None:
-            mapcat_atomic_parent = Settings().atomic_parent
-        if mapcat_atomic_coadd_parent is None:
-            mapcat_atomic_coadd_parent = Settings().atomic_coadd_parent
-        self.mapcat_settings = Settings(database_name = mapcat_database_name,
-                                        database_type = mapcat_database_type,
-                                        atomic_parent = mapcat_atomic_parent,
-                                        atomic_coadd_parent = mapcat_atomic_coadd_parent)
+        self.mapcat_settings = Settings(
+            **{
+                k: v for k, v in {
+                    "database_name": mapcat_database_name,
+                    "database_type": mapcat_database_type,
+                    "atomic_parent": mapcat_atomic_parent,
+                    "atomic_coadd_parent": mapcat_atomic_coadd_parent,
+                }.items() if v is not None
+            }
+        )
         
         def convert_to_datetime(
             time: Union[dt.datetime, float, str, None],

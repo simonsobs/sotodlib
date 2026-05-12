@@ -161,7 +161,6 @@ class Cfg:
         mapcat_database_name: str = None,
         mapcat_database_type: str = None,
         mapcat_atomic_parent: str = None,
-        mapcat_atomic_coadd_parent: str = None,
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -202,15 +201,15 @@ class Cfg:
         self.apply_wobble = apply_wobble
         self.compress = compress
         
-        if mapcat_database_name is None:
-            mapcat_database_name = Settings().database_name
-        if mapcat_database_type is None:
-            mapcat_database_type = Settings().database_type
-        if mapcat_atomic_parent is None:
-            mapcat_atomic_parent = Settings().atomic_parent
-        self.mapcat_settings = Settings(database_name = mapcat_database_name,
-                                        database_type = mapcat_database_type,
-                                        atomic_parent = mapcat_atomic_parent)
+        self.mapcat_settings = Settings(
+            **{
+                k: v for k, v in {
+                    "database_name": mapcat_database_name,
+                    "database_type": mapcat_database_type,
+                    "atomic_parent": mapcat_atomic_parent,
+                }.items() if v is not None
+            }
+        )
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
