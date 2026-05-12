@@ -397,22 +397,37 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
                     if t0s[i] < t0s[i-1]:
                         t0s[i] = t0s[i] + 1
             a0s = np.abs(a0s)
+            t0s = np.array(t0s)
 
             f = [chopping_freqs[f_key] for f_key in chopping_freqs.keys()]
             for fit_key in ['fit_amp', 'fit_phase__fix_tau', 'fit_phase__free']:
                 params = params_bases[fit_key].copy()
                 if fit_key == 'fit_amp':
+                    if np.isnan(a0s).all():
+                        fit_result[fit_key][filt_key].append(None)
+                        continue
+
                     weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None and fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
                     weights = np.array(weights)
                     #result = models[fit_key].fit(a0s,params,f=f,weights=weights, method='least_squares')
                     result = models[fit_key].fit(a0s,params,f=f, method='least_squares')# No weight for first step analysis
                 else:
+                    if np.isnan(t0s).all():
+                        fit_result[fit_key][filt_key].append(None)
+                        continue
+
                     weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None and fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
                     weights = np.array(weights) *360
                     if fit_key == 'fit_phase__fix_tau':
-                        params['tau'].set(value=fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
-                    #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
-                    result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+                        if fit_result['fit_amp'][filt_key][-1] is not None:
+                            params['tau'].set(value=fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
+                            #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
+                            result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+                        else:
+                            result = None
+                    else:
+                        #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
+                        result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
                 fit_result[fit_key][filt_key].append(result)
         
         
@@ -536,29 +551,52 @@ def calc_timeconstant_parallel(aman,hkdata,idxs=None,bool_plot=False,bool_save=F
                     if t0s[i] < t0s[i-1]:
                         t0s[i] = t0s[i] + 1
             a0s = np.abs(a0s)
+            t0s = np.array(t0s)
 
             f = [chopping_freqs[f_key] for f_key in chopping_freqs.keys()]
-            for fit_key in ['fit_amp', 'fit_phase__fix_tau', 'fit_phase__free']:
+            
+
+            for fit_key in ['fit_amp']:
+                if np.isnan(a0s).all():
+                    one_fit_result[fit_key][filt_key].append(None)
+                    continue
+                
                 params = params_bases[fit_key].copy()
-                if fit_key == 'fit_amp':
-                    weights = [one_fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None and one_fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
-                    weights = np.array(weights)
-                    #result = models[fit_key].fit(a0s,params,f=f,weights=weights, method='least_squares')
-                    result = models[fit_key].fit(a0s,params,f=f, method='least_squares')# No weight for first step analysis
-                else:
-                    weights = [one_fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None and one_fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
-                    weights = np.array(weights) *360
-                    if fit_key == 'fit_phase__fix_tau':
+
+                weights = [one_fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None and one_fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
+                weights = np.array(weights)
+                #result = models[fit_key].fit(a0s,params,f=f,weights=weights, method='least_squares')
+                result = models[fit_key].fit(a0s,params,f=f, method='least_squares')# No weight for first step analysis
+
+                one_fit_result[fit_key][filt_key].append(result)
+
+            for fit_key in ['fit_phase__fix_tau', 'fit_phase__free']:
+                if np.isnan(t0s).all():
+                    one_fit_result[fit_key][filt_key].append(None)
+                    continue
+
+                params = params_bases[fit_key].copy()
+
+                weights = [one_fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr if one_fit_result['fit_coadd'][filt_key][f_key][-1] is not None and one_fit_result['fit_coadd'][filt_key][f_key][-1].params['t0'].stderr is not None else np.nan for f_key in one_fit_result['fit_coadd'][filt_key].keys()]
+                weights = np.array(weights) *360
+
+                if fit_key == 'fit_phase__fix_tau':
+                    if one_fit_result['fit_amp'][filt_key][-1] is not None:
                         params['tau'].set(value=one_fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
+                        result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+                    else:
+                        result = None
+                else:   
                     #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
                     result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+
                 one_fit_result[fit_key][filt_key].append(result)
         
         
 
         return one_fit_result
 
-    all_fit_result = Parallel(n_job=-1,prefer='threads')(
+    all_fit_result = Parallel(n_jobs=4,prefer='threads')(
         delayed(fit_one_detector)(i_det)
         for i_det in range(aman.dets.count)
     )
@@ -957,9 +995,10 @@ def get_coadd_data(aman,coadd_data,n_bins,det_mask):
                 data = [[] for _ in range(n_bins)]
                 for i_bin in range(n_bins):
                     data[int(i_bin)] = aman[key][i_det][cuts[freq_key][i_bin]]
-                
-                y = np.array([np.nanmean(d) for d in data])
-                yerr = np.array([np.array(d).std(ddof=1)/np.sqrt(len(d)) for d in data])
+                    
+
+                y = np.array([np.nanmean(d) if not np.isnan(d).all() else np.nan for d in data])
+                yerr = np.array([np.array(d).std(ddof=1)/np.sqrt(len(d)) if len(d) > 0 and not np.isnan(d).all() else np.nan for d in data])
 
                 mask = np.isfinite(y)
                 xx = x[mask]
