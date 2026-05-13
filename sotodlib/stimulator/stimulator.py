@@ -643,6 +643,12 @@ def get_encoder_timing(aman,hkdata):
     t_enc = np.array(hkdata.data['stimulator-enc.stim_enc.timestamps_tai'][1])[state == 0]-37
     t_hk = np.array(hkdata.data['stimulator-enc.stim_enc.timestamps_tai'][0])[state == 0]
 
+    # Cut Encoder data not to contain next run data
+    # Take 30s buffer from last TOD data
+    mask = t_hk < aman.timestamps[-1]+30
+    t_enc = t_enc[mask]
+    t_hk = t_hk[mask]
+
     # Get timing against encoder t0 
     i_enc=0
     frac_timing = []
