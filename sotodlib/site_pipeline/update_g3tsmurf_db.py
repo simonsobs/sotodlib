@@ -155,7 +155,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     if profile:
         import pyinstrument
-        filename = f"profile_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        filename = f"update_g3tsmurf_db_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         output_filename = profile_output / filename if profile_output is not None else filename
         profiler = pyinstrument.Profiler()
         profiler.start()
