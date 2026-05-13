@@ -319,6 +319,8 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
         get_chopping_status(aman)
 
         get_timing_cut(aman)
+        if aman.stm_ana.chopping_freqs.shape[0] <= 2:
+            vailed_data = False
 
         get_signal_temp(aman,hkdata)
 
@@ -470,6 +472,8 @@ def calc_timeconstant_parallel(aman,hkdata,idxs=None,bool_plot=False,bool_save=F
         get_chopping_status(aman)
 
         get_timing_cut(aman)
+        if aman.stm_ana.chopping_freqs.shape[0] <= 2:
+            vailed_data = False
 
         get_signal_temp(aman,hkdata)
 
