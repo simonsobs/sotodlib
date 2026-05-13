@@ -78,6 +78,7 @@ class ReadoutFilter(Operator):
             if self.iir_params not in ob:
                 msg = "Cannot apply readout filter. "
                 msg += f"'{self.iir_params}' does not exist in '{ob.name}'"
+                log.error(msg)
                 raise RuntimeError(msg)
 
             # Get the sample rate from the data.  We also have nominal sample rates
@@ -94,9 +95,14 @@ class ReadoutFilter(Operator):
             if len(local_dets) == 0:
                 # We have no detectors.  Wait for other processes in the group to finish
                 # and then move on to the next observation.
+                msg = f"{ob.name} group rank {ob.comm.group_rank} has no dets"
+                log.verbose(msg)
                 if ob.comm.comm_group is not None:
                     ob.comm.comm_group.barrier()
                 continue
+
+            msg = f"{ob.name} group rank {ob.comm.group_rank} has {len(local_dets)} dets"
+            log.verbose(msg)
 
             local_set_dets = set(local_dets)
 
@@ -118,28 +124,52 @@ class ReadoutFilter(Operator):
             ):
                 # We need to filter one wafer at a time.
                 for wf in all_wafers:
+                    msg = f"{ob.name} group rank {ob.comm.group_rank} filter wafer {wf}"
+                    log.verbose(msg)
                     wafer_dets = [
                         x
                         for x, y in zip(local_dets, det_table[self.wafer_key][fp_rows])
                         if y == wf
                     ]
-                    signal = ob.detdata[self.det_data][wafer_dets, :]
+                    # Ensure we always have a list of signals, even if there is only
+                    # one detector.
+                    signal = list()
+                    for d in wafer_dets:
+                        signal.append(ob.detdata[self.det_data][d, :])
+                    msg = f"{ob.name} group rank {ob.comm.group_rank} calling get_flags"
+                    log.verbose(msg)
                     flags, mask = self._get_flags(ob, wafer_dets)
-                    self._filter_detectors(rate, freq, signal, ob[wf], flags, mask)
+                    msg = f"{ob.name} group rank {ob.comm.group_rank} calling filter dets"
+                    log.verbose(msg)
+                    self._filter_detectors(ob, rate, freq, signal, ob[wf], flags, mask)
             else:
-                # We are filtering all detectors at once
-                signal = ob.detdata[self.det_data][local_dets, :]
+                # We are filtering all detectors at once.
+                # Ensure we always have a list of signals, even if there is only
+                # one detector.
+                signal = list()
+                for d in local_dets:
+                    signal.append(ob.detdata[self.det_data][d, :])
+                msg = f"{ob.name} group rank {ob.comm.group_rank} calling get_flags"
+                log.verbose(msg)
                 flags, mask = self._get_flags(ob, local_dets)
+                msg = f"{ob.name} group rank {ob.comm.group_rank} calling filter dets"
+                log.verbose(msg)
                 self._filter_detectors(
-                    rate, freq, signal, ob[self.iir_params], flags, mask
+                    ob, rate, freq, signal, ob[self.iir_params], flags, mask
                 )
+            msg = f"{ob.name} group rank {ob.comm.group_rank} hit barrier"
+            log.verbose(msg)
             if ob.comm.comm_group is not None:
                 ob.comm.comm_group.barrier()
 
     @function_timer
-    def _filter_detectors(self, rate, freq, det_array, iir_props, flags, mask):
+    def _filter_detectors(self, ob, rate, freq, det_array, iir_props, flags, mask):
         # Get the common filter kernel for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
+
+        log = Logger.get()
+        msg = f"DBG rank {ob.comm.group_rank}: {det_array} {flags} {iir_filter}"
+        log.verbose(msg)
 
         # Deconvolve
         convolve(
@@ -154,6 +184,8 @@ class ReadoutFilter(Operator):
             algorithm="numpy",
             debug=self.debug_root,
         )
+        msg = f"DBG rank {ob.comm.group_rank}: finish convolve"
+        log.verbose(msg)
 
     def _get_flags(self, obs, fdets):
         """Helper function to get flags and mask to pass to convolution."""
@@ -161,7 +193,7 @@ class ReadoutFilter(Operator):
             flags = None
             flag_mask = None
         else:
-            flags = obs.detdata[self.det_flags][fdets, :]
+            flags = list()
             if self.shared_flags is not None:
                 # These shared flags will effectively be propagated to
                 # detector flags by this operator
@@ -169,8 +201,12 @@ class ReadoutFilter(Operator):
                     obs.shared[self.shared_flags].data & self.shared_flag_mask,
                     dtype=np.uint8,
                 )
-                for detflag in flags:
-                    detflag |= shflg
+                for det in fdets:
+                    obs.detdata[self.det_flags][det, :] |= shflg
+                    flags.append(obs.detdata[self.det_flags][det])
+            else:
+                for det in fdets:
+                    flags.append(obs.detdata[self.det_flags][det])
             flag_mask = self.det_flag_mask
         return flags, flag_mask
 
