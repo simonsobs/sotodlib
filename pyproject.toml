@@ -61,7 +61,8 @@ site_pipeline = [
   "requests",
   "tilemaker",
   "GitPython",
-  "sqlmodel"
+  "sqlmodel",
+  "pyinstrument"
 ]
 tests = [
   "socs",

@@ -67,6 +67,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     session = SMURF.Session()
     SMURF.index_metadata(min_ctime=min_time.timestamp(), session=session)
+    logger.info("Starting to index files")
     SMURF.index_archive(
         min_ctime=min_time.timestamp(), 
         show_pb=show_pb, 
@@ -81,9 +82,11 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         min_ctime=min_time.timestamp(),
         session=session
     )
+    logger.info("Starting Finialization Update")
     SMURF.update_finalization(update_time=updates_start, session=session)
     SMURF.last_update = updates_start
-
+    logger.info(f"G3tSmurf Finalization Time now {updates_start}")
+    
     new_obs = session.query(Observations).filter(
         or_(
             Observations.start >= min_time,
@@ -93,6 +96,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     raise_list_timing = []
     raise_list_readout_ids = []
+    logger.info(f"Updating {len(new_obs)} incomplete observations")
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
