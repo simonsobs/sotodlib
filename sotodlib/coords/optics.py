@@ -2,6 +2,9 @@
 Map positions on physical focal plane to sky using physical optics.
 Also includes tools for computing transforms between point clouds.
 
+See https://simonsobs.atlassian.net/wiki/spaces/PRO/pages/101974017/Focal+Plane+Coordinates
+for details on the definations of the intermediate coordinate systems.
+
 LAT code adapted from code provided by Simon Dicker.
 """
 
@@ -232,9 +235,9 @@ def ufm_to_fp(aman, x=None, y=None, pol=None, theta=0, dx=0, dy=0):
 
 
 @lru_cache(maxsize=None)
-def get_fp_to_ot_pars(ot, config_path):
+def get_fp_to_rx_pars(ot, config_path):
     """
-    Get (and cache) the parameters to transform from focal_plane to OT coordinates
+    Get (and cache) the parameters to transform from focal_plane to receiver coordinates
     for a specific slot of a given telescope's focal plane.
 
     Arguments:
@@ -251,9 +254,9 @@ def get_fp_to_ot_pars(ot, config_path):
     return config[ot]
 
 
-def fp_to_ot(aman, x=None, y=None, pol=None, phi=0, dx=0, dy=0):
+def fp_to_rx(aman, x=None, y=None, pol=None, phi=0, dx=0, dy=0):
     """
-    Transform from coords internal to focal plane to OT coordinates.
+    Transform from coords internal to focal plane to receiver coordinates.
 
     Arguments:
 
@@ -277,11 +280,11 @@ def fp_to_ot(aman, x=None, y=None, pol=None, phi=0, dx=0, dy=0):
 
     Returns:
 
-        x_fp: X position on focal plane.
+        x_rx: X position in the receiver.
 
-        y_fp: Y position on focal plane.
+        y_rx: Y position in the receiver.
 
-        pol_fp: Pol angle on focal plane.
+        pol_rx: Pol angle in the receiver.
     """
     if x is None:
         x = aman.focal_plane.x_fp
@@ -294,21 +297,21 @@ def fp_to_ot(aman, x=None, y=None, pol=None, phi=0, dx=0, dy=0):
     rot = R.from_euler("z", phi, degrees=True)
     xy = rot.apply(xy)
 
-    x_ot = xy[:, 0] + dx
-    y_ot = xy[:, 1] + dy
-    pol_ot = pol + phi
+    x_rx = xy[:, 0] + dx
+    y_rx = xy[:, 1] + dy
+    pol_rx = pol + phi
 
     if aman is not None:
         focal_plane = core.AxisManager(aman.dets)
-        focal_plane.wrap("x_ot", x_ot, [(0, focal_plane.dets)])
-        focal_plane.wrap("y_ot", y_ot, [(0, focal_plane.dets)])
-        focal_plane.wrap("pol_ot", pol_ot, [(0, focal_plane.dets)])
+        focal_plane.wrap("x_rx", x_rx, [(0, focal_plane.dets)])
+        focal_plane.wrap("y_rx", y_rx, [(0, focal_plane.dets)])
+        focal_plane.wrap("pol_rx", pol_rx, [(0, focal_plane.dets)])
         if "focal_plane" in aman:
             aman.focal_plane.merge(focal_plane)
         else:
             aman.wrap("focal_plane", focal_plane)
 
-    return x_ot, y_ot, pol_ot
+    return x_rx, y_rx, pol_rx
 
 
 def LAT_pix2sky(x, y, sec2el, sec2xel, array2secx, array2secy, rot=0, opt2cryo=30.0):
@@ -506,11 +509,11 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
                If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
-        x = aman.focal_plane.x_ot
+        x = aman.focal_plane.x_fp
     if y is None:
-        y = aman.focal_plane.y_ot
+        y = aman.focal_plane.y_fp
     if pol is None:
-        pol = aman.focal_plane.pol_ot
+        pol = aman.focal_plane.pol_fp
 
     sec2el, sec2xel = LAT_optics(zemax_path)
     array2secx, array2secy = LATR_optics(zemax_path, tube_slot)
@@ -662,7 +665,7 @@ def get_focal_plane(
     config_path=None,
     ufm_to_fp_pars=None,
     ot_config_path=None,
-    fp_to_ot_pars=None,
+    fp_to_rx_pars=None,
     zemax_path=None,
     mapping_data=None,
     return_fp=False,
@@ -699,11 +702,15 @@ def get_focal_plane(
 
         ufm_to_fp_pars: Loaded ufm_to_fp_pars to focalplane params.
                         If provided config_path is is ignored.
+                        Should be a dict where each key is an ws pointing
+                        to a dict with keys dx, dy, and theta.
 
         ot_config_path: Path to the optics_tubes config file.
 
-        fp_to_ot_pars: Loaded optics_tubes params.
-                        If provided ot_config_path is is ignored.
+        fp_to_rx_pars: Loaded optics_tubes params.
+                       If provided ot_config_path is is ignored.
+                       Should be a dict where each key is an OT pointing
+                       to a dict with keys dx, dy, and phi.
 
         zemax_path: Path to the data file from Zemax.
                     Only used by the LAT.
@@ -734,13 +741,13 @@ def get_focal_plane(
         pol_fp: Pol angle on focal plane.
                 Only returned if return_fp is True.
 
-        x_ot: X position in the OT.
+        x_rx: X position in the receiver.
               Only returned if return_fp is True.
 
-        y_ot: Y position in the OT.
+        y_rx: Y position in the receiver.
               Only returned if return_fp is True.
 
-        pol_ot: Pol angle in the OT.
+        pol_rx: Pol angle in the receiver.
                 Only returned if return_fp is True.
     """
     if aman is not None and "obs_info" in aman:
@@ -757,12 +764,12 @@ def get_focal_plane(
     if ufm_to_fp_pars is None:
         ufm_to_fp_pars = get_ufm_to_fp_pars(telescope_flavor, wafer_slot, config_path)
     x_fp, y_fp, pol_fp = ufm_to_fp(aman, x=x, y=y, pol=pol, **ufm_to_fp_pars)
-    if fp_to_ot_pars is None:
-        fp_to_ot_pars = get_fp_to_ot_pars(tube_slot, ot_config_path)
-    x_ot, y_ot, pol_ot = fp_to_ot(aman, x=x_fp, y=y_fp, pol=pol_fp, **fp_to_ot_pars)
+    if fp_to_rx_pars is None:
+        fp_to_rx_pars = get_fp_to_rx_pars(tube_slot, ot_config_path)
+    x_rx, y_rx, pol_rx = fp_to_rx(aman, x=x_fp, y=y_fp, pol=pol_fp, **fp_to_rx_pars)
     # We dont want to use the shift of the OT when computing on sky locations
-    x_use, y_use, pol_use = fp_to_ot(
-        aman, x=x_fp, y=y_fp, pol=pol_fp, phi=fp_to_ot_pars["phi"]
+    x_use, y_use, pol_use = fp_to_rx(
+        aman, x=x_fp, y=y_fp, pol=pol_fp, phi=fp_to_rx_pars["phi"]
     )
     if telescope_flavor == "LAT":
         if zemax_path is None:
@@ -782,7 +789,7 @@ def get_focal_plane(
         )
 
     if return_fp:
-        return xi, eta, gamma, x_fp, y_fp, pol_fp, x_ot, y_ot, pol_ot
+        return xi, eta, gamma, x_fp, y_fp, pol_fp, x_rx, y_rx, pol_rx
     return xi, eta, gamma
 
 
