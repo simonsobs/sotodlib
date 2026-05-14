@@ -9,7 +9,7 @@ import numpy as np
 import toast
 from toast.utils import Logger
 from toast.traits import trait_docs, Int, Unicode, Instance, List, Bool
-from toast.timing import function_timer
+from toast.timing import function_timer, Timer
 from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
 from toast.ops import Operator, FlagIntervals
@@ -708,13 +708,6 @@ class Splits(Operator):
             ]:
                 if not write:
                     continue
-                if binner_key is not None:
-                    # get the product name from BinMap
-                    mkey = getattr(self.mapmaker.binning, binner_key)
-                else:
-                    # hits and covariance are not made by BinMap.
-                    # Try synthesizing the product name
-                    mkey = f"{mname}_{prod}"
                 fname = os.path.join(
                     self.output_dir,
                     f"{self.name}_{spname}_{prod}.{fname_suffix}"
@@ -726,6 +719,9 @@ class Splits(Operator):
 
     def write_splits(self, data, split_name=None):
         """Write out all split products."""
+        log = Logger.get()
+        timer = Timer()
+
         if not hasattr(self, "_split_obj"):
             msg = "No splits have been created yet, cannot write"
             raise RuntimeError(msg)
@@ -745,6 +741,7 @@ class Splits(Operator):
         else:
             fname_suffix = "fits"
 
+        timer.start()
         for spname, spl in to_write.items():
             mname = f"{self.name}_{split_name}"
             for prod, binner_key, write in [
@@ -764,6 +761,10 @@ class Splits(Operator):
                     # hits and covariance are not made by BinMap.
                     # Try synthesizing the product name
                     mkey = f"{mname}_{prod}"
+                    if mkey not in data:
+                        # FilterBin makes a distinction between filtered
+                        # and unfiltered maps
+                        mkey = f"{mname}_filtered_{prod}"
                 if mkey not in data:
                     msg = f"'{mkey}' not found in data. "
                     msg += f"Available keys are {data.keys()}"
@@ -777,6 +778,12 @@ class Splits(Operator):
                     force_serial=self.mapmaker.write_hdf5_serial,
                     single_precision=True,
                 )
+                log.info_rank(
+                    f"Wrote {spname} {prod} to {fname} in",
+                    comm=data.comm.comm_world,
+                    timer=timer
+                )
+
             # Clean up all products for this split
             for prod in [
                 "hits",
