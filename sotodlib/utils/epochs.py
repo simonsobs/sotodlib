@@ -584,15 +584,25 @@ class Calendar:
                         slstr = slstr[:-1]
                     else:
                         raise ValueError(f"Invalid cover string {cname}")
-                    ival = intervals[iname]
-                    interval_dict[str(ival)] = ival
                     slc = slice(
                         *map(
                             lambda x: float(x.strip()) if x.strip() else None,
                             slstr.split(":"),
                         )
                     )
-                    covers += [ival[slc]]
+                    # Now allow for two cases
+                    # Case 1: this is simply an interval ref
+                    if iname in intervals:
+                        ival = intervals[iname]
+                        interval_dict[str(ival)] = ival
+                        covers += [ival[slc]]
+                    # Case 2: we are refering to a previously defined epoch
+                    if iname in epoch_dict: 
+                        # In this case we want to add the intervals that this epoch covers
+                        # But no need to add this to the interval dict
+                        for ival in epoch_dict[iname].covers:
+                            islc = slice(max(slc.start, ival.start), min(slc.stop, ival.stop))
+                            covers += [ival[islc]]
                 epoch = Epoch(name, ename, tuple(covers), strict=strict_epoch)
                 epochs += [epoch]
                 epoch_dict[f"{ename}.{name}"] = epoch
