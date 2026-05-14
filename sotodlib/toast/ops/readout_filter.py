@@ -167,10 +167,6 @@ class ReadoutFilter(Operator):
         # Get the common filter kernel for all detectors
         iir_filter = filters.iir_filter(iir_params=iir_props)(freq, None)
 
-        log = Logger.get()
-        msg = f"DBG rank {ob.comm.group_rank}: {det_array} {flags} {iir_filter}"
-        log.verbose(msg)
-
         # Deconvolve
         convolve(
             det_array,
@@ -184,8 +180,6 @@ class ReadoutFilter(Operator):
             algorithm="numpy",
             debug=self.debug_root,
         )
-        msg = f"DBG rank {ob.comm.group_rank}: finish convolve"
-        log.verbose(msg)
 
     def _get_flags(self, obs, fdets):
         """Helper function to get flags and mask to pass to convolution."""
