@@ -99,6 +99,9 @@ class Cfg:
     compress: bool
         When running preprocess from scratch, whether to
         compress the files
+    interpol: str
+        Sub-pixel interpolation. If None it will be nearest,
+        can be bilinear.
     center_at: str
     max_dets: int
     fixed_time: int
@@ -140,6 +143,7 @@ class Cfg:
         center_at: Optional[str] = None,
         max_dets: Optional[int] = None,
         fixed_time: Optional[int] = None,
+        interpol: Optional[str] = None,
         min_dur: Optional[int] = 300,
         verbose: int = 0,
         quiet: int = 0,
@@ -190,6 +194,7 @@ class Cfg:
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
         self.compress = compress
+        self.interpol = interpol
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -488,7 +493,7 @@ def main(
             site=args.site, unit=args.unit,
             use_psd=args.use_psd,
             wn_label=args.wn_label,apply_wobble=args.apply_wobble,
-            compress=args.compress)
+            compress=args.compress, interpol=args.interpol)
             for r in run_list]
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
