@@ -8,6 +8,7 @@ how to use look at docstring of DemodMapmaker.
 __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map','setup_demod_map']
 import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
+import warnings
 
 from .. import coords
 from . import utils as smutils
@@ -190,6 +191,9 @@ class DemodSignalMap(DemodSignal):
 
             if self.tiled:
                 self.wrapper = coords.healpix_utils.tiled_to_full
+            if self.interpol not in [None,'nearest']:
+                # you set an interpol but on healpix map, issue warning
+                warnings.warn("You set a pixel interp, but running on healpix maps. Bilinear currently not implemented on healpix", UserWarning)
         else:
             if shape is None:
                 # We will set shape, wcs from wcs_kernel on loading the first obs                
