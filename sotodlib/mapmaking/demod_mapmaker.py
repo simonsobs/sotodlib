@@ -177,6 +177,7 @@ class DemodSignalMap(DemodSignal):
         self.wrapper = lambda x : x
         self.wcs = wcs
         ncomp      = len(comps)
+        self.interpol = interpol
 
         self.pix_scheme = "rectpix" if (wcs is not None) else "healpix"
         if self.pix_scheme == "healpix":
