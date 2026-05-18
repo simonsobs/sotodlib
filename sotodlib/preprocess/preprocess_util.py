@@ -516,8 +516,7 @@ def load_preprocess_det_select(obs_id, configs, context=None,
 
 
 def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
-                        no_signal=None, logger=None, return_full_aman=False,
-                        special_channels=None):
+                        no_signal=None, logger=None, return_full_aman=False):
     """Loads the saved information from the preprocessing pipeline and runs
     the processing section of the pipeline.
 
@@ -547,9 +546,6 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
     return_full_aman : bool
         Optional. Return unrestricted axis manager alongside restricted aman
         if True, otherwise return None.
-    special_channels : bool
-        Optional. Load special channels (fixed tones) to add to mapmaker
-        noise model if True; defaults None
 
     Returns
     -------
@@ -589,10 +585,9 @@ def load_and_preprocess(obs_id, configs, context=None, dets=None, meta=None,
         return None
     else:
         pipe = Pipeline(configs["process_pipe"], logger=logger)
-        aman = context.get_obs(meta, no_signal=no_signal,
-                               special_channels=special_channels,
-                               reindex_dets=special_channels)
+        aman = context.get_obs(meta, no_signal=no_signal)
         pipe.run(aman, aman.preprocess, select=False)
+
         return aman, full_aman
 
 
