@@ -24,7 +24,8 @@ def main(config: Optional[str] = None, profile: bool=False,
 
     if profile:
         import pyinstrument
-        filename = f"update_librarian_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        timestamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d_%H%M%S')
+        filename = f"update_librarian_{timestamp}.html"
         output_filename = profile_output / filename if profile_output is not None else filename
         profiler = pyinstrument.Profiler()
         profiler.start()
