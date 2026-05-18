@@ -36,7 +36,6 @@ def get_parser(parser=None):
     parser.add_argument("-T", "--tiled"  ,   type=int, default=1, help="0: untiled maps. Nonzero: tiled maps")
     parser.add_argument(      "--srcsamp",   type=str, default=None, help="path to mask file where True regions indicate where bright object mitigation should be applied. Mask is in equatorial coordinates. Not tiled, so should be low-res to not waste memory.")
     parser.add_argument(      "--unit",      type=str, default="uK", help="Unit of the maps")
-<<<<<<< HEAD
     parser.add_argument(      "--iunit",     type=str, default="K", help="Unit of the raw tod")
     parser.add_argument(      "--maxcut", type=float, default=.3, help="Maximum fraction of cut samples in a detector.")
     parser.add_argument(      "--no-sidelobe", action="store_true", help="Do not mask Moon/Sun sidelobes")
@@ -44,9 +43,7 @@ def get_parser(parser=None):
     parser.add_argument(      "--moon-mask", type=str, default="/global/cfs/cdirs/sobs/users/sigurdkn/masks/sidelobe/moon.fits", help="Location of Moon sidelobe mask")
     parser.add_argument("--hits", action="store_true", help="Write hits maps")
     parser.add_argument("--cut-type",        type=str, default="full")
-=======
-    parser.add_argmuent(      "--fixed-tones", type=int, default=0, help="0: don't include fixed tones in noise model. Nonzero: include fixed tones in noise model")
->>>>>>> 25c7509a (Load fixed tones to obs if desired)
+    parser.add_argument(      "--fixed-tones", type=int, default=0, help="0: don't include fixed tones in noise model. Nonzero: include fixed tones in noise model")
     return parser
 
 unit_defs   = {"nK":1e-9, "uK":1e-6, "mK":1e-3, "K":1.0, "kK":1e3, "MK": 1e6, "GK":1e9}
@@ -221,11 +218,89 @@ def main(**args):
                 if args.max_dets is not None:
                     meta.restrict('dets', meta['dets'].vals[:args.max_dets])
                 if len(my_dets) == 0: raise DataMissing("no dets left")
+                # Load fixed tones before context changes
+                if args.fixed_tones:
+                    L.debug('Loading tones')
+                    tones_aman = context.get_obs(meta.obs_info.obs_id, no_signal=True,
+                                                 special_channels=True,
+                                                 reindex_dets=True)
+                    L.debug('Beginning restrictions')
+                    # Get relevant UFMs
+                    keep = np.isin(tones_aman.det_info.stream_id, np.unique(meta.det_info.stream_id))
+                    tones_aman.restrict("dets", keep)
+
+                    # Get just tones
+                    keep = tones_aman.det_info.wafer.type == 'PROB'
+                    tones_aman.restrict("dets", keep)
+
+                    L.debug('Done restricting')
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
-                    obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta,
-                                                         special_channels=args.fixed_tones)
+                    obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
+                L.debug('After loading: %i detectors; %i optical, %i fixed' % \
+                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
+                
+                def zeros_like_aman(template, dets_axis):
+                    """
+                    Build a new AxisManager mirroring `template`'s structure, with the dets
+                    axis swapped for `dets_axis`. Array fields are zero-filled; RangesMatrix
+                    fields are built as empty (no flagged samples).
+                    """
+                    new_axes = []
+                    for ax_name, ax in template._axes.items():
+                        new_axes.append(dets_axis if ax_name == 'dets' else ax)
+                    out = core.AxisManager(*new_axes)
+
+                    for name, field in template._fields.items():
+                        assignment = template._assignments[name]
+
+                        if isinstance(field, core.AxisManager):
+                            out.wrap(name, zeros_like_aman(field, dets_axis))
+                            continue
+
+                        if assignment is None or all(a is None for a in assignment):
+                            # Non-axis-aligned metadata — copy as-is
+                            out.wrap(name, field)
+                            continue
+
+                        if isinstance(field, so3g.proj.RangesMatrix):
+                            # Build an empty RangesMatrix with the right shape.
+                            # Ranges only knows about the last (samps) dimension; the leading
+                            # dims are nested lists of Ranges.
+                            shape = []
+                            for dim_size, ax_name in zip(field.shape, assignment):
+                                shape.append(dets_axis.count if ax_name == 'dets' else dim_size)
+                            nsamps = shape[-1]
+
+                            def build(dims):
+                                if len(dims) == 1:
+                                    return so3g.proj.Ranges(dims[0])
+                                return so3g.proj.RangesMatrix([build(dims[1:]) for _ in range(dims[0])])
+
+                            rm = build(shape)
+                            wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
+                            out.wrap(name, rm, wrap_axes)
+                            continue
+
+                        # Plain ndarray field
+                        shape = []
+                        for dim_size, ax_name in zip(field.shape, assignment):
+                            shape.append(dets_axis.count if ax_name == 'dets' else dim_size)
+                        arr = np.zeros(shape, dtype=getattr(field, 'dtype', float))
+                        wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
+                        out.wrap(name, arr, wrap_axes)
+
+                    return out
+
+                # Load special channels
+                if args.fixed_tones:
+                    # Add to aman
+                    tones_aman.wrap('preprocess', zeros_like_aman(obs.preprocess, tones_aman.dets))
+                    obs = core.AxisManager.concatenate([obs, tones_aman], axis='dets', other_fields='first')
+                    L.debug('Done adding')
+                L.debug('After tones: %i detectors; %i optical, %i fixed' % \
+                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
@@ -244,10 +319,14 @@ def main(**args):
                     obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
                 # Cut non-optical dets, this will be redundant if the preprocessing already cut them
                 # Keep fixed tones if desired
+                L.debug('Before restrict: %i detectors; %i optical, %i fixed' % \
+                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 if args.fixed_tones:
                     obs.restrict('dets', obs.dets.vals[(obs.det_info.wafer.type == 'OPTC') | (obs.det_info.wafer.type == 'PROB')])
                 else:
                     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
+                L.debug('After restrict: %i detectors; %i optical, %i fixed' % \
+                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
