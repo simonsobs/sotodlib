@@ -8,7 +8,6 @@ how to use look at docstring of DemodMapmaker.
 __all__ = ['DemodMapmaker','DemodSignal','DemodSignalMap','make_demod_map','setup_demod_map']
 import numpy as np
 from pixell import enmap, utils as putils, tilemap, bunch, mpi
-import warnings
 
 from .. import coords
 from . import utils as smutils
@@ -159,7 +158,7 @@ class DemodSignal:
 class DemodSignalMap(DemodSignal):
     def __init__(self, shape=None, wcs=None, comm=None, comps="TQU", name="sky", ofmt="{name}", output=True,
                  ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False,
-                 nside=None, nside_tile=None, interpol=None):
+                 nside=None, nside_tile=None):
         """
         Parent constructor; use for_rectpix or for_healpix instead. Args described there.
         """
@@ -178,7 +177,6 @@ class DemodSignalMap(DemodSignal):
         self.wrapper = lambda x : x
         self.wcs = wcs
         ncomp      = len(comps)
-        self.interpol = interpol
 
         self.pix_scheme = "rectpix" if (wcs is not None) else "healpix"
         if self.pix_scheme == "healpix":
@@ -191,9 +189,6 @@ class DemodSignalMap(DemodSignal):
 
             if self.tiled:
                 self.wrapper = coords.healpix_utils.tiled_to_full
-            if self.interpol not in [None,'nearest']:
-                # you set an interpol but on healpix map, issue warning
-                warnings.warn("You set a pixel interp, but running on healpix maps. Bilinear currently not implemented on healpix", UserWarning)
         else:
             if shape is None:
                 # We will set shape, wcs from wcs_kernel on loading the first obs                
@@ -205,7 +200,7 @@ class DemodSignalMap(DemodSignal):
 
     @classmethod
     def for_rectpix(cls, shape, wcs, comm, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False, interpol=None):
+            ext="fits", dtype_map=np.float64, dtype_tod=np.float32, sys=None, recenter=None, tile_shape=(500,500), tiled=False, Nsplits=1, singlestream=False):
         """
         Signal describing a non-distributed sky map. Signal describing a sky map in the coordinate 
         system given by "sys", which defaults to equatorial coordinates. If tiled==True, then this 
@@ -249,17 +244,15 @@ class DemodSignalMap(DemodSignal):
             If True, do not perform demodulated filter+bin mapmaking but rather regular 
             filter+bin mapmaking, i.e. map from obs.signal rather than from obs.dsT, 
             obs.demodQ, obs.demodU
-        interpol: str, optional
-            Sub-pixel interpolation, if None it will be nearest. Can be bilinear.
         
         """
         return cls(shape=shape, wcs=wcs, comm=comm, comps=comps, name=name, ofmt=ofmt, output=output,
                    ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=sys, recenter=recenter, tile_shape=tile_shape, tiled=tiled,
-                   Nsplits=Nsplits, singlestream=singlestream, nside=None, nside_tile=None, interpol=interpol)
+                   Nsplits=Nsplits, singlestream=singlestream, nside=None, nside_tile=None)
 
     @classmethod
     def for_healpix(cls, nside, nside_tile=None, comps="TQU", name="sky", ofmt="{name}", output=True,
-            ext="fits.gz", dtype_map=np.float64, dtype_tod=np.float32, Nsplits=1, singlestream=False, interpol=None):
+            ext="fits.gz", dtype_map=np.float64, dtype_tod=np.float32, Nsplits=1, singlestream=False):
         """
         Signal describing a sky map in healpix pixelization, NEST ordering.
 
@@ -295,7 +288,7 @@ class DemodSignalMap(DemodSignal):
         """
         return cls(shape=None, wcs=None, comm=None, comps=comps, name=name, ofmt=ofmt, output=output,
                    ext=ext, dtype_map=dtype_map, dtype_tod=dtype_tod, sys=None, recenter=None, tile_shape=None, tiled=False,
-                   Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile, interpol=interpol)
+                   Nsplits=Nsplits, singlestream=singlestream, nside=nside, nside_tile=nside_tile)
 
     def add_obs(self, id, obs, nmat, Nd, pmap=None, split_labels=None, apply_wobble=True):
         # Nd will have 3 components, corresponding to ds_T, demodQ, demodU with the noise model applied
@@ -342,7 +335,7 @@ class DemodSignalMap(DemodSignal):
                     threads = ["tiles", "simple"][self.hp_geom.nside_tile is None]
                     geom = self.hp_geom
                     wcs_kernel = None
-                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True, sight=sight, interpol=self.interpol)
+                pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=geom, rot=rot, wcs_kernel=wcs_kernel, threads=threads, weather=smutils.unarr(obs.weather), site=smutils.unarr(obs.site), cuts=cuts, hwp=True, sight=sight)
             else:
                 pmap_local = pmap
 
@@ -447,7 +440,7 @@ class DemodSignalMap(DemodSignal):
 def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                     comm=mpi.COMM_WORLD, comps='TQU', split_labels=['full'],
                     singlestream=False, dtype_tod=np.float32,
-                    dtype_map=np.float64, recenter=None, verbose=0, interpol=None):
+                    dtype_map=np.float64, recenter=None, verbose=0):
     """
     Setup the classes for demod mapmaking and return
     a DemodMapmmaker object
@@ -458,14 +451,14 @@ def setup_demod_map(noise_model, shape=None, wcs=None, nside=None,
                                               dtype_map=dtype_map, dtype_tod=dtype_tod, tiled=False,
                                               ofmt="", Nsplits=Nsplits,
                                               singlestream=singlestream,
-                                              recenter=recenter, interpol=interpol)
+                                              recenter=recenter)
     elif nside is not None:
         Nsplits = len(split_labels)
         signal_map = DemodSignalMap.for_healpix(nside, nside_tile='auto', 
                                     comps=comps, dtype_map=dtype_map, dtype_tod=dtype_tod,
                                     ofmt="", Nsplits=Nsplits,
                                     singlestream=singlestream,
-                                    ext="fits.gz", interpol=interpol)
+                                    ext="fits.gz")
     signals    = [signal_map]
     mapmaker   = DemodMapmaker(signals, noise_model=noise_model,
                                          dtype=dtype_tod,
@@ -511,7 +504,7 @@ def make_demod_map(context, obslist, noise_model, info,
                     tag="", verbose=0, split_labels=['full'], L=None,
                     site='so_sat3', recenter=None, singlestream=False,
                     unit='K', use_psd=True, wn_label='preprocess.noiseQ_mapmaking.psd',
-                    apply_wobble=True, compress=True, interpol=None):
+                    apply_wobble=True, compress=True):
     """
     Make a demodulated map from the list of observations in obslist.
 
@@ -595,8 +588,7 @@ def make_demod_map(context, obslist, noise_model, info,
     mapmaker = setup_demod_map(noise_model, shape=shape, wcs=wcs, nside=nside,
                     comm=comm, comps=comps, split_labels=split_labels,
                     singlestream=singlestream, dtype_tod=dtype_tod,
-                    dtype_map=dtype_map, recenter=recenter, verbose=verbose,
-                    interpol=interpol)
+                    dtype_map=dtype_map, recenter=recenter, verbose=verbose)
 
     if comm.rank == 0: L.info(pre + "Building RHS")
     # And feed it with our observations
