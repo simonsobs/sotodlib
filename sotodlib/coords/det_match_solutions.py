@@ -34,6 +34,8 @@ class SolutionsCfg:
         Path to the wafer_info h5 file.
     platform: str
         Telescope platform.
+    wafer_slots: list
+        Optional list of wafer slots to make solutions for.
     base_obs_id: str
         Obs_id to use as a base for matching when merging multiple pointing
         obs_ids for a wafer.  Will default to the pointing obs_id with the
@@ -92,6 +94,7 @@ class SolutionsCfg:
     results_dir: str
     wafer_info_path: str
     platform: str
+    wafer_slots: Optional[list[str]] = None
     base_obs_id: Optional[str] = None
     zemax_path: Optional[str] = None
     apply_roll: bool = True
@@ -127,6 +130,9 @@ class SolutionsCfg:
 
     def __post_init__(self):
         self.ctx = Context(self.ctx_path)
+
+        if self.wafer_slots is None:
+            self.wafer_slots = ["ws.", "ws0", "ws1", "ws2", "ws3", "ws4", "ws5", "ws6"]
 
         if not os.path.exists(self.results_dir):
             if os.path.exists(os.path.split(self.results_dir)[0]):
@@ -444,8 +450,8 @@ def match_wafer(
         src = meas_rset
 
     if ignore_north_south:
-        wafer_slot = []
-        wafer_dict = {}
+        wafer_slots = []
+        wafers_dict = {}
 
         # get wafer and wafer_slot entry from imprinter
         with open(cfg.imprinter_path, "r") as f:
@@ -455,14 +461,14 @@ def match_wafer(
             if v['tube_slot'] == tube_slot:
                 for ws in v['wafer_slots']:
                     if 'wafer' in ws.keys():
-                        wafer_dict[ws['wafer_slot']] = (ws['wafer'].split('_')[-1].capitalize())
-                        wafer_slot.append(ws['wafer_slot'])
+                        wafers_dict[ws['wafer_slot']] = (ws['wafer'].split('_')[-1].capitalize())
+                        wafer_slots.append(ws['wafer_slot'])
     else:
-        wafer_slot = [wafer_slot]
-        wafer_dict = None
+        wafer_slots = [wafer_slot]
+        wafers_dict = None
 
     dst = []
-    for ws in wafer_slot:
+    for ws in wafer_slots:
         pt_cfg = dm.PointingConfig(
             fp_file=cfg.ufm_to_fp_path, ot_file=cfg.fp_to_ot_path,
             wafer_slot=ws, platform=cfg.platform,
@@ -477,8 +483,8 @@ def match_wafer(
             ignore_north_south=ignore_north_south,
         ).as_array()
 
-        if wafer_dict is not None:
-            mask = [wafer_dict[ws] in d["det_id"].astype(str) for d in dst_wafer]
+        if wafers_dict is not None:
+            mask = [wafers_dict[ws] in d["det_id"].astype(str) for d in dst_wafer]
             dst_wafer = dst_wafer[mask]
 
         dst.append(dst_wafer)
@@ -616,10 +622,8 @@ def get_wafer_solution(
     else:
         base_idx = 0
 
-    if wafer_slot == "ws.":
-        ignore_north_south = True
-    else:
-        ignore_north_south = False
+    # Whether or not to use North/South in match
+    ignore_north_south = (wafer_slot == "ws.")
 
     meas_rset, pointing_map = merge_pointing_info(
         cfg, pointing_results, base_idx=base_idx,
@@ -648,8 +652,7 @@ def get_wafer_solution(
 
 
 def solve_all(cfg) -> Dict[str, Optional[FullWaferSolution]]:
-    wafer_slots = ["ws.", "ws0", "ws1", "ws2", "ws3", "ws4", "ws5", "ws6"]
-    results = {ws: get_wafer_solution(cfg, ws, save=True) for ws in wafer_slots}
+    results = {ws: get_wafer_solution(cfg, ws, save=True) for ws in cfg.wafer_slots}
     return results
 
 

@@ -443,7 +443,6 @@ class ResSet:
         resonators = []
         idx = 0
         for r in wafer_array:
-            # always true for LF
             if not ignore_north_south:
                 is_north = r['dets:wafer.coax'] == b'N'
             else:
@@ -489,7 +488,7 @@ class ResSet:
 
     @classmethod
     def from_solutions(cls, sol_file, north_is_highband=True, name=None,
-                       fp_pars=None, platform='SAT', zemax_path=None,
+                       fp_pars=None, platform='LAT', zemax_path=None,
                        ignore_north_south=False):
         """
         Creates an instance from an input-solution file. This will include both design data, along with smurf-band
@@ -508,7 +507,7 @@ class ResSet:
                 Result of the function ``sotododlib.coords.optics.get_ufm_to_fp_pars``. If this is None, detector positions will
                 not be mapped to pointing angles.
             platform (str):
-                'SAT' or 'LAT'. Used to determine which focal plane function to
+                Which platform.  Used to determine which focal plane function to
                 use for pointing
             zemax_path (str):
                 zemax path, required to get pointing for LAT optics

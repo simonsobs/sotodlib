@@ -373,7 +373,7 @@ def load_zemax(path):
         zemax_dat: Dictionairy with data from zemax
     """
     try:
-        zemax_dat = np.load(path, allow_pickle=True)
+        zemax_dat = np.load(path, allow_pickle=True, encoding='bytes').items()
     except Exception as e:
         logger.error("Can't load data from " + path)
         raise e
@@ -398,6 +398,7 @@ def LAT_optics(zemax_path):
     zemax_dat = load_zemax(zemax_path)
     try:
         LAT = zemax_dat["LAT"][()]
+        LAT = {k.decode(): v for k, v in zemax_dat["LAT"][()].items()}
     except Exception as e:
         logger.error("LAT key missing from dictionary")
         raise e
@@ -436,6 +437,10 @@ def LATR_optics(zemax_path, tube_slot):
     zemax_dat = load_zemax(zemax_path)
     try:
         LATR = zemax_dat["LATR"][()]
+        LATR = np.array([
+            {k.decode(): v for k, v in d.items()}
+            for d in LATR
+        ], dtype=object)
     except Exception as e:
         logger.error("LATR key missing from dictionary")
         raise e
