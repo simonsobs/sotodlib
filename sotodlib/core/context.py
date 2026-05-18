@@ -399,10 +399,15 @@ class Context(odict):
     
                 # Finally use the tdet idxs to fill in the tdet data
                 # For the signal, band, and channels
+
+                # If there is no signal, need to pre-populate the signal axis
+                if no_signal:
+                    del aman['signal']
+                    aman.wrap_new('signal', ('dets', 'samps'), dtype='float32')
                 for i, tidx in enumerate(tdet_indexes):
                     if np.isnan(tidx):
                         continue
-    
+   
                     aman.signal[i] = aman.tones.signal[int(tidx)]
                     aman.det_info.stream_id[i] = aman.tones.stream_id[int(tidx)]
                     aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
