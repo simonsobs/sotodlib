@@ -7,7 +7,7 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, sessionmaker
 import importlib
 import numpy as np
 import so3g
-from pixell import enmap, fft, resample, tilemap, bunch, utils as putils
+from pixell import enmap, fft, resample, tilemap, bunch, utils as putils, sqlite
 from scipy.sparse import issparse, sparray
 
 from .. import coords, core, tod_ops
@@ -334,9 +334,15 @@ def get_obsinfo_subids(subids, context):
     on that. This function is a bit inefficient, since it starts
     from the full obsdb and then looks up the subids from it"""
     obsids  = split_subids(subids)[0]
-    ids_str = ",".join(f"'{subid}'" for subid in obsids)                                       
-    rs = context.obsdb.query("obs_id IN (%s)" % ids_str)
-    return rs
+    # Make a temporary database with the obsids we want to extract info for
+    with sqlite.SQL() as db:
+        rows = [(val,ind) for ind, val in enumerate(obsids)]
+        db.execute("create table want (id text, ind integer)")
+        db.executemany("insert into want (id, ind) values (?,?)", rows)
+        db.execute("commit")
+        # Then attach the obsdb to it, so we can use it in a joint query
+        with db.attach(context.obsdb.conn, mode="r"):
+            return core.metadata.resultset.ResultSet.from_cursor(db.execute("select o.* from want join other.obs as o on want.id = o.obs_id order by want.ind"))
 
 def expand_ids(obs_ids, context=None, bands=None):
     """Given a list of ids that are either obs_ids or sub_ids, expand any obs_ids
