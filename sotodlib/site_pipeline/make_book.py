@@ -31,6 +31,8 @@ def bind_books_parallel(platform, book_list, n_proc ):
             if status == FAILED:
                 failed_list.append( book.bid)
                 print(f"Error binding book {book.bid}: {err}")
+            else:
+                print(f"Finished binding {book.bid}")
     return failed_list
 
 def _bookbinding_helper(platform, bid ):
@@ -63,9 +65,6 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
 
     if n_proc>1:
         multiprocessing.set_start_method('spawn')
-        #parallel_list = [
-        #    book for book in unbound_books if book.type == 'oper'
-        #]
         bind_books_parallel(imprinter.daq_node, unbound_books, n_proc=n_proc)
     else:
         for book in unbound_books:
