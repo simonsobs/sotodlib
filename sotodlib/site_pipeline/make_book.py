@@ -98,7 +98,13 @@ def main(config: str, n_proc:int=1, alert_webhook: list[str]=None):
             print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
-            alert = send_alert(alert_webhook, alertname=book.bid, tag='bookbinder', error=str(e), timestamp=book.start)
+            alert = send_alert(
+                alert_webhook,
+                alertname=book.bid,
+                tag='bookbinder',
+                error=str(e),
+                timestamp=book.start
+            )
             print(alert)
 
 
