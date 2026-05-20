@@ -467,7 +467,8 @@ def match_wafer(
         wafer_slots = [wafer_slot]
         wafers_dict = None
 
-    dst = []
+    dst_merged = []
+    # loop through and get pointing information for all wafers
     for ws in wafer_slots:
         pt_cfg = dm.PointingConfig(
             fp_file=cfg.ufm_to_fp_path, ot_file=cfg.fp_to_ot_path,
@@ -483,12 +484,32 @@ def match_wafer(
             ignore_north_south=ignore_north_south,
         ).as_array()
 
+        # extract current wafer
         if wafers_dict is not None:
             mask = [wafers_dict[ws] in d["det_id"].astype(str) for d in dst_wafer]
             dst_wafer = dst_wafer[mask]
+        dst_wafer['wafer_slot'][:] = ws
 
-        dst.append(dst_wafer)
-    dst = dm.ResSet.from_array(np.concatenate(dst))
+        dst_merged.append(dst_wafer)
+    dst_merged = np.concatenate(dst_merged)
+
+    # get full wafer info and populate pointing and wafer_slot information
+    # from merged dst (not necesary if matching a single wafer)
+    if ignore_north_south:
+        dst = dm.ResSet.from_wafer_info_file(
+                cfg.wafer_info_path,
+                stream_id,
+                pt_cfg=None,
+                ignore_north_south=ignore_north_south,
+            ).as_array()
+
+        merge_fields = ["xi", "eta", "wafer_slot"]
+        for i, d in enumerate(dst_all):
+            idx = np.where(dst_merged['det_id'] == d['det_id'])[0][0]
+            if idx:
+                for field in merge_fields:
+                    dst[i][field] = dst_merged[idx][field]
+        dst = dm.ResSet.from_array(dst)
 
     # first match
     match_pars = dm.MatchParams(

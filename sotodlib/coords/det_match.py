@@ -160,6 +160,8 @@ class Resonator:
     smurf_subband: int = -1
     readout_id: str = ''
 
+    wafer_slot: str = 'ws.'
+
     xi: float = np.nan
     eta: float = np.nan
     gamma: float = np.nan
@@ -214,7 +216,7 @@ def apply_design_properties(smurf_res, design_res, in_place=False, apply_pointin
         'det_pol', 'det_freq', 'det_bandpass', 'det_angle_raw_deg',
         'det_angle_actual_deg', 'det_type', 'det_id', 'is_optical',
         'mux_bondpad', 'mux_subband', 'mux_band', 'mux_channel',
-        'mux_layout_pos'
+        'mux_layout_pos', 'wafer_slot'
     ]
 
     # for LF
@@ -973,10 +975,7 @@ class Match:
         stats.unmatched_src = np.sum(~src_arr['matched'].astype(bool))
         stats.unmatched_dst = np.sum(~dst_arr['matched'].astype(bool))
 
-        # print(stats.unmatched_src, stats.unmatched_dst)
-
         has_pt = ~np.isnan(src_arr['xi'])
-        # print(has_pt)
         stats.unmatched_src_with_pointing = np.sum(
             (~src_arr['matched'].astype(bool)) & has_pt
         )
