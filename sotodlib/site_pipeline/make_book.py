@@ -40,7 +40,7 @@ def _bookbinding_helper(platform, bid ):
     return imprint._run_book_binding(bid)
 
 
-def main(config: str, n_proc:int=1, alert_webhook: str=''):
+def main(config: str, n_proc:int=1, alert_webhook: list[str]=None):
     """Make books based on imprinter db
     
     Parameters
@@ -49,8 +49,8 @@ def main(config: str, n_proc:int=1, alert_webhook: str=''):
         path to imprinter configuration file
     n_proc : int
         Number of processes
-    alert_webhook : str
-        Webhook URL to send alerts
+    alert_webhook : list[str]
+        Webhook URLs to send alerts
     """
     imprinter = Imprinter(
         config, 
@@ -115,7 +115,7 @@ def get_parser(parser=None):
         help="The number of processes to run for operations books"
     )
     parser.add_argument(
-        "--alert-webhook", type=str, default='',
+        "--alert-webhook", type=str, default='', nargs="+",
         help="Webhook address to send error alerts"
     )
     return parser
