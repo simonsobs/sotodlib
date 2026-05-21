@@ -220,11 +220,9 @@ def main(**args):
                 if len(my_dets) == 0: raise DataMissing("no dets left")
                 # Load fixed tones before context changes
                 if args.fixed_tones:
-                    L.debug('Loading tones')
                     tones_aman = context.get_obs(meta.obs_info.obs_id, no_signal=True,
                                                  special_channels=True,
                                                  reindex_dets=True)
-                    L.debug('Beginning restrictions')
                     # Get relevant UFMs
                     keep = np.isin(tones_aman.det_info.stream_id, np.unique(meta.det_info.stream_id))
                     tones_aman.restrict("dets", keep)
@@ -233,74 +231,94 @@ def main(**args):
                     keep = tones_aman.det_info.wafer.type == 'PROB'
                     tones_aman.restrict("dets", keep)
 
-                    L.debug('Done restricting')
                 # Actually read the data
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
                     obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
-                L.debug('After loading: %i detectors; %i optical, %i fixed' % \
-                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 
-                def zeros_like_aman(template, dets_axis):
-                    """
-                    Build a new AxisManager mirroring `template`'s structure, with the dets
-                    axis swapped for `dets_axis`. Array fields are zero-filled; RangesMatrix
-                    fields are built as empty (no flagged samples).
-                    """
-                    new_axes = []
-                    for ax_name, ax in template._axes.items():
-                        new_axes.append(dets_axis if ax_name == 'dets' else ax)
-                    out = core.AxisManager(*new_axes)
+                # Add special channels
+                if args.fixed_tones:
+                    # Helper functions for filling out to match amans
+                    def zeros_like_aman(template, dets_axis):
+                        """
+                        Build a new AxisManager mirroring `template`'s structure, with the dets
+                        axis swapped for `dets_axis`. Array fields are zero-filled; RangesMatrix
+                        fields are built as empty (no flagged samples).
+                        """
+                        new_axes = []
+                        for ax_name, ax in template._axes.items():
+                            new_axes.append(dets_axis if ax_name == 'dets' else ax)
+                        out = core.AxisManager(*new_axes)
 
-                    for name, field in template._fields.items():
-                        assignment = template._assignments[name]
+                        for name, field in template._fields.items():
+                            assignment = template._assignments[name]
 
-                        if isinstance(field, core.AxisManager):
-                            out.wrap(name, zeros_like_aman(field, dets_axis))
-                            continue
+                            if isinstance(field, core.AxisManager):
+                                out.wrap(name, zeros_like_aman(field, dets_axis))
+                                continue
 
-                        if assignment is None or all(a is None for a in assignment):
-                            # Non-axis-aligned metadata — copy as-is
-                            out.wrap(name, field)
-                            continue
+                            if assignment is None or all(a is None for a in assignment):
+                                # Non-axis-aligned metadata — copy as-is
+                                out.wrap(name, field)
+                                continue
 
-                        if isinstance(field, so3g.proj.RangesMatrix):
-                            # Build an empty RangesMatrix with the right shape.
-                            # Ranges only knows about the last (samps) dimension; the leading
-                            # dims are nested lists of Ranges.
+                            if isinstance(field, so3g.proj.RangesMatrix):
+                                shape = tuple(
+                                    (dets_axis.count if a == 'dets' else template._axes[a].count)
+                                    for a in assignment if a is not None
+                                )
+                                rm = so3g.proj.RangesMatrix.zeros(shape)
+                                wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
+                                out.wrap(name, rm, wrap_axes)
+                                continue
+
+                            # Plain ndarray field
                             shape = []
                             for dim_size, ax_name in zip(field.shape, assignment):
                                 shape.append(dets_axis.count if ax_name == 'dets' else dim_size)
-                            nsamps = shape[-1]
-
-                            def build(dims):
-                                if len(dims) == 1:
-                                    return so3g.proj.Ranges(dims[0])
-                                return so3g.proj.RangesMatrix([build(dims[1:]) for _ in range(dims[0])])
-
-                            rm = build(shape)
+                            arr = np.zeros(shape, dtype=getattr(field, 'dtype', float))
                             wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
-                            out.wrap(name, rm, wrap_axes)
-                            continue
+                            out.wrap(name, arr, wrap_axes)
 
-                        # Plain ndarray field
-                        shape = []
-                        for dim_size, ax_name in zip(field.shape, assignment):
-                            shape.append(dets_axis.count if ax_name == 'dets' else dim_size)
-                        arr = np.zeros(shape, dtype=getattr(field, 'dtype', float))
-                        wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
-                        out.wrap(name, arr, wrap_axes)
+                        return out
 
-                    return out
+                    def sync_nested_amans(target, reference):
+                        """Make `target` match `reference`'s field structure, using target's dets axis
+                        and zero/empty values for anything missing."""
+                        for name, field in reference._fields.items():
+                            assignment = reference._assignments[name]
 
-                # Load special channels
-                if args.fixed_tones:
-                    # Add to aman
-                    tones_aman.wrap('preprocess', zeros_like_aman(obs.preprocess, tones_aman.dets))
+                            if name not in target._fields:
+                                # Field is entirely missing — build a zeroed version
+                                if isinstance(field, core.AxisManager):
+                                    target.wrap(name, zeros_like_aman(field, target.dets))
+                                elif assignment is None or all(a is None for a in assignment):
+                                    target.wrap(name, field)  # scalar metadata — share
+                                elif isinstance(field, so3g.proj.RangesMatrix):
+                                    shape = tuple(
+                                        target.dets.count if a == 'dets' else reference._axes[a].count
+                                        for a in assignment if a is not None
+                                    )
+                                    rm = so3g.proj.RangesMatrix.zeros(shape)
+                                    wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
+                                    target.wrap(name, rm, wrap_axes)
+                                else:
+                                    shape = tuple(
+                                        target.dets.count if a == 'dets' else reference._axes[a].count
+                                        for a in assignment if a is not None
+                                    )
+                                    arr = np.zeros(shape, dtype=getattr(field, 'dtype', float))
+                                    wrap_axes = [(i, a) for i, a in enumerate(assignment) if a is not None]
+                                    target.wrap(name, arr, wrap_axes)
+                            elif isinstance(field, core.AxisManager):
+                                # Both sides have it as a nested aman — recurse
+                                sync_nested_amans(target._fields[name], field)
+
+                    # Apply
+                    sync_nested_amans(tones_aman, obs)
+
+                    # Combine
                     obs = core.AxisManager.concatenate([obs, tones_aman], axis='dets', other_fields='first')
-                    L.debug('Done adding')
-                L.debug('After tones: %i detectors; %i optical, %i fixed' % \
-                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 if obs.dets.count < 50:
                     L.debug("Skipped %s (Not enough detectors)" % (sub_id))
                     L.debug("Datacount: %s full" % (sub_id))
@@ -319,14 +337,10 @@ def main(**args):
                     obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
                 # Cut non-optical dets, this will be redundant if the preprocessing already cut them
                 # Keep fixed tones if desired
-                L.debug('Before restrict: %i detectors; %i optical, %i fixed' % \
-                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 if args.fixed_tones:
                     obs.restrict('dets', obs.dets.vals[(obs.det_info.wafer.type == 'OPTC') | (obs.det_info.wafer.type == 'PROB')])
                 else:
                     obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
-                L.debug('After restrict: %i detectors; %i optical, %i fixed' % \
-                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
                 # Fix boresight
                 mapmaking.fix_boresight_glitches(obs)
                 # Get our sample rate. Would have been nice to have this available in the axisman
@@ -360,6 +374,9 @@ def main(**args):
                     rms  = d1u.measure_rms(obs.signal, dt=1/srate)
                     rms *= unit_defs[args.unit]/unit_defs["uK"]
                     good = d1u.sensitivity_cut(rms, d1u.SENS_LIMITS[band])
+                    # Force fixed tones to satisfy
+                    if args.fixed_tones:
+                        good[obs.det_info.wafer.type == 'PROB'] = True
                     if np.logical_not(good).sum() / obs.dets.count > 0.5:
                         L.debug("Skipped %s (more than 50 percent of detectors cut by sens)" % (sub_id))
                         L.debug("Datacount: %s full" % (sub_id))
@@ -369,6 +386,9 @@ def main(**args):
                         obs.restrict("dets", good)
                     # Disqualify overly cut detectors
                     good_dets = mapmaking.find_usable_detectors(obs, args.maxcut)
+                    # Force fixed tones to satisfy
+                    if args.fixed_tones:
+                        good_dets = np.unique(np.concatenate((good_dets, obs.dets.vals[obs.det_info.wafer.type == 'PROB'])))
                     obs.restrict("dets", good_dets)
                     if obs.dets.count == 0:
                         to_skip += [sub_id]
@@ -403,6 +423,9 @@ def main(**args):
                     L.debug("Reading noise model %s" % nmat_file)
                     nmat = mapmaking.read_nmat(nmat_file)
                 else: nmat = None
+
+                L.debug('Add obs: %i detectors; %i optical, %i fixed' % \
+                        (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
 
                 # And add it to the mapmaker
                 with bench.mark("add_obs %s" % sub_id):
