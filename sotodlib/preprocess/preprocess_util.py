@@ -810,7 +810,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        sim_map, meta=None,
                                        logger=None, init_only=False,
                                        ignore_cfg_check=False,
-                                       data_amans=None):
+                                       data_amans=None,
+                                       interpol=None):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -850,6 +851,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         filled with AxisManager processed up to step-1. This is used
         to pre-load all data AxisManager which could be required when
         processing simulations (e.g. to provide a T2P template)
+    interpol: str
+        Optional. The sub-pixel interpolation to use in from_map
  
     Returns
     -------
@@ -932,7 +935,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
             aman.move("signal", None)
 
             logger.info("Reading in simulated map")
-            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True)
+            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True, interpol=interpol)
 
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, sim=True)
