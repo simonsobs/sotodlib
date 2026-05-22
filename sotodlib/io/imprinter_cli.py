@@ -242,7 +242,11 @@ class DroppedMountData(BookError):
     def fix_book(self):
         if self.dropped is None:
             self.report_error()
-
+        if self.dropped < 0:
+            raise ValueError(
+                f"Could not parse dropped sample duration for {self.book.bid}"
+                " cannot repair book."
+            )
         if self.book.type == 'obs':
             if self.dropped > self.max_drop_time_to_fix:
                 print(f"ACU readout dropped for {self.dropped} seconds. Autofixing"
@@ -259,7 +263,10 @@ class DroppedMountData(BookError):
 
     def report_error(self):
         pattern = r"dropped\s*\[(.*?)\]\s*samples over\s*\[(.*?)\]"
-        m = re.search(pattern, self.book.message.split("\n")[-2])
+        m = re.search(pattern, self.book.message, re.DOTALL)
+        if m is None:
+            self.dropped = -999
+            return f"{self.book.bid} has ACU dropout (could not parse drop duration)"
         self.dropped = sum([float(x) for x in m.group(2).split()])
         return (
             f"{self.book.bid} has the ACU dropping out {len(m.group(2).split())} time(s) "
