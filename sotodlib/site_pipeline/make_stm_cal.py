@@ -11,14 +11,15 @@ from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.core.metadata.loader import LoaderError
-from sotodlib.site_pipeline.calibration.stimulator import (
-    stm_config as _stm_config,
-    load_hk_data,
+from sotodlib.stimulator.stimulator import (
+    get_hk,
     calc_gain,
     calc_timeconstant,
 )
 
 _OBS_TYPES = ('gain', 'time_constant', 'gain_and_timeconstant')
+_DEFAULT_R_FRAC_MIN = 0.2
+_DEFAULT_R_FRAC_MAX = 0.8
 
 
 def run(
@@ -36,7 +37,9 @@ def run(
     Returns (obs_id, result AxisManager) where result holds stm_gain and/or
     stm_timeconstant as float arrays aligned to the dets axis.
     """
-    cfg = _stm_config(**stm_config_dict)
+    hkdb_cfg = stm_config_dict['hkdb_cfg']
+    r_frac_min = stm_config_dict.get('r_frac_min', _DEFAULT_R_FRAC_MIN)
+    r_frac_max = stm_config_dict.get('r_frac_max', _DEFAULT_R_FRAC_MAX)
 
     try:
         ctx = core.Context(context_path, metadata_list=metadata_list)
@@ -45,8 +48,8 @@ def run(
         if hasattr(meta, 'det_cal') and hasattr(meta.det_cal, 'r_frac'):
             meta.restrict(
                 'dets',
-                (meta.det_cal.r_frac > cfg.r_frac_min)
-                & (meta.det_cal.r_frac < cfg.r_frac_max),
+                (meta.det_cal.r_frac > r_frac_min)
+                & (meta.det_cal.r_frac < r_frac_max),
             )
 
         logger.info(f'Processing {obs_id} ({obs_type}), {meta.dets.count} dets')
@@ -63,19 +66,24 @@ def run(
             tod = ctx.get_obs(meta_chunk)
 
             if hkdata is None:
-                hkdata = load_hk_data(
-                    cfg.hkdb_cfg, tod.timestamps[0], tod.timestamps[-1])
+                hkdata = get_hk(hkdb_cfg, aman=tod)
 
             if obs_type in ('gain', 'gain_and_timeconstant'):
-                calc_gain(tod, hkdata, cfg)
+                if calc_gain(tod, hkdata) is False:
+                    raise RuntimeError(f'Invalid stimulator HK data for {obs_id}')
             if obs_type in ('time_constant', 'gain_and_timeconstant'):
-                calc_timeconstant(tod, hkdata, cfg)
+                preprocess = obs_type != 'gain_and_timeconstant'
+                if calc_timeconstant(
+                    tod, hkdata, preprocess=preprocess
+                ) is False:
+                    raise RuntimeError(f'Invalid stimulator HK data for {obs_id}')
 
             chunk = core.AxisManager(meta_chunk.dets)
             if obs_type in ('gain', 'gain_and_timeconstant'):
-                chunk.wrap('stm_gain', tod.stm_gain, [(0, 'dets')])
+                chunk.wrap('stm_gain', tod.det_cal.stm_gain, [(0, 'dets')])
             if obs_type in ('time_constant', 'gain_and_timeconstant'):
-                chunk.wrap('stm_timeconstant', tod.stm_timeconstant, [(0, 'dets')])
+                chunk.wrap(
+                    'stm_timeconstant', tod.det_cal.stm_tau, [(0, 'dets')])
 
             if result is None:
                 result = chunk
@@ -148,17 +156,22 @@ def _main(
 
     # Collect (obs_id, obs_type) pairs to process
     obs_pairs = []
+    obs_type_query = ' or '.join(f'`{tag}`=1' for tag in obs_type_tags)
+    obs_rows = ctx.obsdb.query(obs_type_query, tags=obs_type_tags)
     if obs_id is not None:
+        rows_by_obs_id = {}
+        for row in obs_rows:
+            rows_by_obs_id.setdefault(row['obs_id'], []).append(row)
         for oid in obs_id:
-            for otype in obs_type_tags:
-                rows = ctx.obsdb.query(tags=[otype])
-                if any(r['obs_id'] == oid for r in rows):
-                    obs_pairs.append((oid, otype))
-                    break
+            for row in rows_by_obs_id.get(oid, []):
+                for otype in obs_type_tags:
+                    if row[otype]:
+                        obs_pairs.append((oid, otype))
     else:
         for otype in obs_type_tags:
-            for row in ctx.obsdb.query(tags=[otype]):
-                obs_pairs.append((row['obs_id'], otype))
+            for row in obs_rows:
+                if row[otype]:
+                    obs_pairs.append((row['obs_id'], otype))
 
     # ManifestDb: one per calibration product
     dbs = {}
