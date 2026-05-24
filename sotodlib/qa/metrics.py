@@ -196,7 +196,7 @@ class PreprocessValidDets(PreprocessQA):
         # extract parameters
         self._tags = process_args.get("tags", {})
         self._thresh = process_args.get("thresh", 0.75)
-        self._key = process_args.get("process_name", "glitches")
+        self._key = process_args.get("process_name", "")
 
     def _process(self, meta):
 
@@ -227,10 +227,18 @@ class PreprocessValidDets(PreprocessQA):
 
                 if len(subset) > 0:
                     # Compute the number of samples that are valid
-                    frac_valid = np.array([
-                        np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
-                        for r in meta.preprocess[self._key].valid[subset]
-                    ])
+                    if self._key:
+                        frac_valid = np.array([
+                            np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
+                            for r in meta.preprocess[self._key].valid[subset]
+                        ])
+                    elif "valid_data" in meta.preprocess:
+                        frac_valid = np.array([
+                            np.dot(r.ranges(), [-1, 1]).sum() / len(subset)
+                            for r in meta.preprocess.valid_data.valid_data[subset]
+                        ])
+                    else:
+                        raise Exception("No field to calculate valid detectors.")
 
                     # Count detectors with fraction valid above threshold
                     n_good = (frac_valid > self._thresh).sum()
