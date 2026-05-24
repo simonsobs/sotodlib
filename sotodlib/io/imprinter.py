@@ -1231,7 +1231,9 @@ class Imprinter:
             books. Useful as a debugging tool
         incomplete_timeouts: tuple
             hours passed for (attempting to complete observation, raising a error) 
-            if incomplete observations are found in the g3tsmurf database
+            if incomplete observations are found in the g3tsmurf database. Also used
+            as limits to decide if the g3tsmurf database is stale and raise warnings/
+            errors accordingly.
         """
         if not self.build_det:
             return
@@ -1262,8 +1264,20 @@ class Imprinter:
         final_time = SMURF.get_final_time(
             streams, min_ctime, max_ctime, check_control=True
         )
+        ## this will catch suprsync drops and hk/g3tsmurf databases not being updated
         if final_time < max_ctime:
+            if max_ctime - final_time > 3600*incomplete_timeouts[1]:
+                raise ValueError(
+                   f"G3tSMURF + HK databases are stale. Last updates were "
+                    f"more than {incomplete_timeouts[1]} hours in the past."
+                )
+            if max_ctime - final_time > 3600*incomplete_timeouts[0]:
+                self.logger.warning(
+                    f"G3tSMURF + HK databases are stale. Last updates were "
+                    f"more than {incomplete_timeouts[0]} hours in the past."
+                )
             max_ctime = final_time
+
         self.logger.debug(f"Searching between {min_ctime} and {max_ctime}")
 
         # check for incomplete observations in time range

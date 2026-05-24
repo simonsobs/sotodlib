@@ -1467,7 +1467,7 @@ class G3tSmurf:
 
     def get_final_time(
         self, stream_ids, start=None, stop=None, check_control=True,
-        session=None
+        session=None,
     ):
         """Return the ctime to which database is finalized for a set of 
         stream_ids between ctimes start and stop. If check_control is True it 
@@ -1488,6 +1488,18 @@ class G3tSmurf:
             session = self.Session()
         
         HK = self.get_HK()
+        last_update = HK.get_last_update()
+        if stop > last_update:
+            if stop > last_update + 2*3600:
+                logger.warning(
+                    f"""
+                    HK database updates are stale. Last update 
+                    {dt.datetime.fromtimestamp(last_update, dt.timezone.utc)}. 
+                    Trying to check until 
+                    {dt.datetime.fromtimestamp(stop, dt.timezone.utc)}
+                    """
+                )
+            stop = last_update
 
         agent_list = []
         if "servers" not in self.finalize:
@@ -1517,14 +1529,7 @@ class G3tSmurf:
                 agent_list.append(server["smurf-suprsync"])
                 agent_list.append(server["timestream-suprsync"])
                 continue
-            if stop > HK.get_last_update():
-                if stop > HK.get_last_update()+3600:
-                    logger.error(f"HK database not updated recently enough to"
-                                  " check finalization time. Last update "
-                                 f"{HK.get_last_update}. Trying to check until"
-                                 f"{stop}")
-                else:
-                    stop = HK.get_last_update()
+            
             sids = pysmurf_monitor_control_list(pm, start, stop, HK)
             if np.any([s in stream_ids for s in sids]):
                 agent_list.append(server["smurf-suprsync"])
