@@ -271,7 +271,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
-      pca_wrap (str): If specified, the PCA model modes and weights will be wrapped into tod[pca_wrap].
+      pca_wrap (str): If specified, the PCA model modes and weights calculated for subtraction will be wrapped into tod[pca_wrap].
       edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
         Default is None. (Nothing happens.)
 
