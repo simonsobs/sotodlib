@@ -1486,7 +1486,9 @@ class G3tSmurf:
             )
         if session is None:
             session = self.Session()
-        
+        if stop is None:
+            stop = dt.datetime.now().timestamp()
+            
         HK = self.get_HK()
         last_update = HK.get_last_update()
         if stop > last_update:
