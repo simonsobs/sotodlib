@@ -681,18 +681,15 @@ def pack_into_aman(cfg:BgmapDelayCfg,
     Return: AxisManager
         dets : LabelAxis
             Axis for channels. It should be readout_id.
-        params: LabelAxis
-            Parameters of ExponBoxParams:
-            [t0, amp, tau, w, poly0, ...]
         fsample: float(dets)
             Sampling rate of the bgmap data in Hz, usually 4000.
         valid: bool(dets)
             Flag if the detector condition seems good.
-        popt_expon: float(dets,params)
+        popt_expon: AxisManager(t0[dets], amp[dets], tau[dets], w[dets], poly0[dets], ...)
             Best fit values for w=0 model.
-        popt_exponbox: float(dets,params)
+        popt_exponbox: AxisManager(t0[dets], amp[dets], tau[dets], w[dets], poly0[dets], ...)
             Best fit values varying w.
-        popt_exponbox: float(dets,params)
+        popt_exponbox: AxisManager(t0[dets], amp[dets], tau[dets], w[dets], poly0[dets], ...)
             Best fit values for w=cfg.analysis.box_sample_width.
     """
     models = ['expon', 'exponbox', 'exponboxw']
@@ -700,13 +697,12 @@ def pack_into_aman(cfg:BgmapDelayCfg,
 
     # Define axis
     dets = det_info.dets
-    params = core.LabelAxis(
-        'params',
+    params = (
         ['t0', 'amp', 'tau', 'w'] +
         [f'poly{i}' for i in range(cfg.analysis.poly_order + 1)])
 
     # Make AxisManager and initialize
-    aman = core.AxisManager(dets, params)
+    aman = core.AxisManager(dets)
     fsample = aman.wrap_new('fsample', (dets,), dtype='float64')
     fsample[:] = np.nan
     valid = aman.wrap_new('valid', (dets,), dtype=bool)
@@ -715,9 +711,11 @@ def pack_into_aman(cfg:BgmapDelayCfg,
     popts = {}
     for model in models:
         name = f'popt_{model}'
-        popts[model] = aman.wrap_new(
-            name, (dets, params), dtype='float64')
-        popts[model][:] = np.nan
+        popt_aman = popts[model] = core.AxisManager(dets)
+        for param in params:
+            popt_aman.wrap_new(param, (dets,), dtype='float64')
+            popt_aman[param][:] = np.nan
+        aman.wrap(name, popt_aman)
 
 
     # Fill results
@@ -741,7 +739,8 @@ def pack_into_aman(cfg:BgmapDelayCfg,
         # Fill
         fsample[idx] = r.chdata.fsample
         for model in models:
-            popts[model][idx] = r.results[model].asarray()
+            for p, v in zip(params, r.results[model].asarray()):
+                popts[model][p][idx] = v
 
         # Quality check
         p = r.results[main_model]
