@@ -177,7 +177,7 @@ class AnalysisCfg:
         Order of polynomials to fit the response.
     box_sample_width: float = 1.5
         With of the box window in sample number.
-    sc_amp_thresh: float = 0.05
+    sc_amp_thresh: float = 0.1
         Bias step |dItes/dIbias-1| threshold above which
         TES should be considered not superconducting and flagged.
     tau_thresh: float = 0.0005
@@ -186,7 +186,7 @@ class AnalysisCfg:
     '''
     poly_order: int = 1
     box_sample_width: float = 1.5
-    sc_amp_thresh: float = 0.05
+    sc_amp_thresh: float = 0.1
     tau_thresh: float = 0.0005
 
 
@@ -264,12 +264,12 @@ class BgmapDelayCfg:
         if which == 'bgmap':
             failed_file = self.output.failed_bgmap_file
             index_path = self.output.bgmap_index_path
-            query = 'type=="oper" and subtype="bgmap"'
+            query = "type=='oper' and subtype='bgmap'"
             num_process = self.process.num_bgmap
         elif which == 'obs':
             failed_file = self.output.failed_obsid_file
             index_path = self.output.obs_index_path
-            query = 'type=="obs"'
+            query = "type=='obs'"
             num_process = self.process.num_obs
         else:
             raise ValueError(f'which is not bgmap or obs but {which}')
@@ -683,8 +683,6 @@ def pack_into_aman(cfg:BgmapDelayCfg,
             Axis for channels. It should be readout_id.
         fsample: float(dets)
             Sampling rate of the bgmap data in Hz, usually 4000.
-        valid: bool(dets)
-            Flag if the detector condition seems good.
         popt_expon: AxisManager(t0[dets], amp[dets], tau[dets], w[dets], poly0[dets], ...)
             Best fit values for w=0 model.
         popt_exponbox: AxisManager(t0[dets], amp[dets], tau[dets], w[dets], poly0[dets], ...)
@@ -693,7 +691,6 @@ def pack_into_aman(cfg:BgmapDelayCfg,
             Best fit values for w=cfg.analysis.box_sample_width.
     """
     models = ['expon', 'exponbox', 'exponboxw']
-    main_model = 'exponboxw'
 
     # Define axis
     dets = det_info.dets
@@ -705,8 +702,6 @@ def pack_into_aman(cfg:BgmapDelayCfg,
     aman = core.AxisManager(dets)
     fsample = aman.wrap_new('fsample', (dets,), dtype='float64')
     fsample[:] = np.nan
-    valid = aman.wrap_new('valid', (dets,), dtype=bool)
-    valid[:] = False
 
     popts = {}
     for model in models:
@@ -742,15 +737,127 @@ def pack_into_aman(cfg:BgmapDelayCfg,
             for p, v in zip(params, r.results[model].asarray()):
                 popts[model][p][idx] = v
 
-        # Quality check
-        p = r.results[main_model]
-        is_valid = True
-        if abs(p.amp - 1.0) > cfg.analysis.sc_amp_thresh:
-            is_valid = False
-        if p.tau > cfg.analysis.tau_thresh:
-            is_valid = False
-        valid[idx] = is_valid
+    return aman
 
+def process_aman(cfg: BgmapDelayCfg,
+                 aman: core.AxisManager,
+                 det_info: core.AxisManager,
+) -> core.AxisManager:
+    """
+    Process AxisManager to evaluate delay.
+
+    Args:
+    ------
+    cfg.analysis.sc_amp_thresh: float
+    cfg.analysis.tau_thresh: float
+        Thresholds to find reasonable i.e. superconducting channels
+    aman: AxisManager(
+            fsample[dets],
+            popt_expon*[dets],
+            popt_exponbox*[dets],
+            popt_exponboxw*[dets]
+            dets:LabelAxis)
+        From pack_into_aman
+    det_info: AxisManager
+        meta.det_info including dets and smurf
+
+    Return: AxisManager
+        dets:LabelAxis,
+        fsample[dets],
+        popt_expon*[dets],
+        popt_exponbox*[dets],
+        popt_exponboxw*[dets],
+        fsample: float[dets]
+            Sampling rate of the bgmap data in Hz, usually 4000.
+            Here we round it and fill the value into nan channels.
+        model: str
+            Main model used
+        mean_delay: float[dets]
+            Median delay among channels [sec]
+        channel_delay: float[dets]
+            Relative delay from the mean for each channel [sec]
+            The unit is quantized to sampling = 1 / fsample.
+        flag: int(dets)
+            Flag if the detector condition seems good.
+            bit0: t0 < 0
+            bit1: tau < tau_thresh
+            bit2: | amp / median(amp) - 1 | >  sc_amp_thresh
+            bit3: deviation of delay from mean > sample_error_threshold
+            bit4: isolated channel
+    """
+    main_model = 'exponboxw'
+    sample_error_threshold = 0.2
+
+    # Channel delay should appear as a step in readout channel
+    dets = det_info.dets
+    band = det_info.smurf.band
+    channel = det_info.smurf.channel
+    bandchannel = band * 512 + channel
+    sort_in_bc = np.argsort(bandchannel)
+    sort_in_dets = np.argsort(sort_in_bc)
+
+    ndets = dets.count
+    idx = np.arange(ndets)
+
+    aman.wrap_new('mean_delay', (dets,), dtype='float64')
+    aman.wrap_new('channel_delay', (dets,), dtype='float64')
+    aman.wrap_new('flag', (dets,), dtype='int64')
+
+    
+    fsample = np.round(np.nanmedian(aman.fsample))
+    aman.fsample[:] = fsample
+    popt = aman['popt_' + main_model]
+    t0 = popt.t0[sort_in_bc]
+    amp = popt.amp[sort_in_bc]
+    tau = popt.tau[sort_in_bc]
+    sample0 = t0 * fsample
+    flag = np.zeros(ndets, dtype=np.int64)
+
+    # Select reliable channel
+    ok = t0 > 0
+    bad = ~ok
+    flag[bad] += 1
+    if cfg.analysis.tau_thresh is not None:
+        bad = (flag==0) * (tau > cfg.analysis.tau_thresh)
+        flag[bad] += 1 << 1
+    use = flag == 0
+    if cfg.analysis.sc_amp_thresh is not None:
+        ramp = amp / np.nanmedian(amp[use])
+        bad = (flag==0) * (np.abs(ramp - 1.0) > cfg.analysis.sc_amp_thresh)
+        flag[bad] += 1 << 2
+    use = flag == 0
+    offset = np.median(sample0[use] % 1)
+    offset = np.nanmedian((sample0[use] - offset + 0.5) % 1 - 0.5 + offset)
+    ok = np.abs((sample0 - offset + 0.5) % 1 - 0.5) <= sample_error_threshold
+    bad = (flag==0) * (~ok)
+    flag[bad] += 1 << 3
+    use = flag == 0
+    # Drop isolated channel
+    x = np.round(sample0[use] - offset)
+    for _ in range(3):
+        ok = np.hstack([
+            x[1] == x[0],
+            (x[1:-1] == x[:-2]) + (x[1:-1] == x[2:]),
+            x[-2] == x[-1]])
+        if ok.all():
+            break
+        use[use] = ok
+        if not use.any():
+            break
+        x = np.round(sample0[use] - offset)
+    bad = (flag==0) * (~use)
+    flag[bad] += 1 << 4
+    channel_delay = np.round(np.interp(idx, idx[use], x)) / fsample
+
+    # Sort back to dets
+    flag = flag[sort_in_dets]
+    channel_delay = channel_delay[sort_in_dets]
+    
+    # Put into aman
+    aman.wrap('model', main_model)
+    aman['mean_delay'][:] = offset / fsample
+    aman['flag'][:] = flag
+    aman['channel_delay'][:] = channel_delay
     return aman
 
 
@@ -822,7 +929,10 @@ def run_bgmap_process(
                 as_completed_callable=as_completed_callable)
 
         # Gather results into AxisManager
-        res.results = pack_into_aman(cfg, rs, meta.det_info)
+        aman = pack_into_aman(cfg, rs, meta.det_info)
+        # Analysis with AxisManager
+        aman = process_aman(cfg, aman, meta.det_info)
+        res.results = aman
         res.success = True
     except Exception as e:
         res.traceback = traceback.format_exc()
