@@ -2382,6 +2382,7 @@ class FilterForSources(_Preprocess):
           source_flags: "source_flags"
           edge_guard: 10 # Number of samples to make the first and last flags False
           trim_samps: 100
+          pca_wrap: "pca_model" # optional, if provided, the PCA model is wrapped into proc_aman under this name
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -2400,10 +2401,11 @@ class FilterForSources(_Preprocess):
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
         edge_guard = self.process_cfgs.get('edge_guard')
+        pca_wrap = self.process_cfgs.get('pca_wrap',None)
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard, pca_wrap=pca_wrap)
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
             proc_aman.restrict('samps', (aman.samps.offset + trim,
