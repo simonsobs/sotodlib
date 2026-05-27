@@ -2382,7 +2382,7 @@ class FilterForSources(_Preprocess):
           source_flags: "source_flags"
           edge_guard: 10 # Number of samples to make the first and last flags False
           trim_samps: 100
-          pca_wrap: "pca_model" # optional, if provided, the PCA model is wrapped into proc_aman under this name
+          pca_wrap: "pca_model" # optional, if provided, the PCA model is wrapped into aman under this name
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
