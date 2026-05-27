@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import time
+import traceback
 import yaml
 import argparse
 from typing import Optional, List, Callable
@@ -92,14 +93,14 @@ def run(
                     [result, chunk], axis='dets', other_fields='first')
 
         assert result.dets.count == meta.dets.count
-        return obs_id, result
+        return obs_id, result, None
 
     except (LoaderError, OSError) as e:
         logger.error(f'Failed to load {obs_id}: {e}')
-        return obs_id, None
+        return obs_id, None, (type(e).__name__, str(e), traceback.format_exc())
     except Exception as e:
         logger.error(f'Failed to process {obs_id}: {e}')
-        return obs_id, None
+        return obs_id, None, (type(e).__name__, str(e), traceback.format_exc())
 
 
 def _main(
@@ -148,6 +149,7 @@ def _main(
         Jobs locked longer than this many seconds are unlocked before starting.
     """
     logger = init_logger(__name__, 'make_stm_cal: ', verbosity=verbosity)
+    errlog = os.path.join(output_dir, 'errlog.txt')
 
     if obs_type_tags is None:
         obs_type_tags = list(_OBS_TYPES)
@@ -219,16 +221,27 @@ def _main(
             ))
 
         for future in as_completed_callable(futures):
-            oid, result = future.result()
+            oid, result, error_info = future.result()
             for job in jobs:
                 if job.tags['obs_id'] == oid:
                     break
+            else:
+                # This should not happen but just in case.
+                logger.error(f'No job found for obs_id={oid}, skipping.')
+                continue
+
+            obs_type = job.tags['obs_type']
+
+            if error_info is not None:
+                with open(errlog, 'a') as f:
+                    f.write(f"{time.time()}, {oid}, {obs_type}, {error_info[0]}\n")
+                    f.write("\t" + error_info[1] + "\n")
+                    f.write("\t" + error_info[2] + "\n")
 
             if result is not None:
                 try:
                     logger.info(f'Saving {oid}...')
                     unix = oid.split('_')[1][:4]
-                    obs_type = job.tags['obs_type']
 
                     output_keys = []
                     if obs_type in ('gain', 'gain_and_timeconstant'):
@@ -253,6 +266,10 @@ def _main(
                     continue
                 except Exception as e:
                     logger.error(f'Failed to save {oid}: {e}')
+                    with open(errlog, 'a') as f:
+                        f.write(f"{time.time()}, {oid}, {obs_type}, {type(e).__name__}\n")
+                        f.write("\t" + str(e) + "\n")
+                        f.write("\t" + traceback.format_exc() + "\n")
 
             if job.visit_count > max_retry:
                 logger.error(f'Mark {oid} as failed.')
