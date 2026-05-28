@@ -298,6 +298,8 @@ class G3tHk:
             update_last_file=update_last_file,
         )
 
+        logger.info(f"Adding {len(file_list)} files to hkfiles database")
+
         for path in tqdm(sorted(file_list), disable=(not show_pb)):
             try:
                 root, filename = os.path.split(path)
@@ -322,6 +324,7 @@ class G3tHk:
                 logger.warning(f"Failed on file {filename}:\n{e}")
 
     def add_file(self, path, overwrite=False):
+        logger.debug(f"Adding file {path} to database")
         db_file = (
             self.session.query(HKFiles)
             .filter(
@@ -331,6 +334,7 @@ class G3tHk:
         )
 
         if db_file is not None and not overwrite:
+            logger.debug(f"File {path} already exists in database")
             return
         if db_file is None:
             db_file = HKFiles(path=path)
