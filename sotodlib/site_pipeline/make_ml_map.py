@@ -70,7 +70,7 @@ def main(**args):
     warnings.simplefilter('ignore')
     args    = bunch.Bunch(**args)
     SITE    = args.site.lower()
-    verbose = args.verbose - args.quiet
+    verbosity = args.verbose - args.quiet
     comm    = mpi.COMM_WORLD
     shape, wcs = enmap.read_map_geometry(args.area)
 
@@ -90,7 +90,7 @@ def main(**args):
     prefix= args.odir + "/"
     if args.prefix: prefix += args.prefix + "_"
     utils.mkdir(args.odir)
-    L = mapmaking.init(level=mapmaking.DEBUG, rank=comm.rank)
+    L = mapmaking.init(level=mapmaking.verbosity2level(verbosity), rank=comm.rank)
 
     recenter = None
     if args.center_at:
@@ -177,8 +177,8 @@ def main(**args):
         # split into two parts signal.translate_single and signal.forward_single). But I don't think those
         # building blocks would be very reusable, and the full thing is more general.
         if   args.nmat == "uncorr": noise_model = mapmaking.NmatUncorr()
-        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbose>1, window=args.window)
-        elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbose>1)
+        elif args.nmat == "corr":   noise_model = mapmaking.NmatDetvecs(verbose=verbosity>=3, window=args.window)
+        elif args.nmat == "corr_dct": noise_model = mapmaking.NmatDetvecsDCT(verbose=verbosity>=3)
         elif args.nmat == "debug":  noise_model = mapmaking.NmatDebug()
         else: raise ValueError("Unrecognized noise model '%s'" % args.nmat)
 
@@ -192,7 +192,7 @@ def main(**args):
             # affected samples in the tod (inherited from SignalCut). Might have been better
             # to factorize out that zeroing into its own thing that's easier to control.
             signals.append(signal_srcsamp)
-        mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0)
+        mapmaker   = mapmaking.MLMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbosity>=2)
         sidelobe_cutters = {}
 
         nkept = 0
