@@ -23,6 +23,62 @@ _DEFAULT_R_FRAC_MIN = 0.2
 _DEFAULT_R_FRAC_MAX = 0.8
 
 
+def _merge_stm_ana(base, new_chunk):
+    """Merge det-dependent fields of new_chunk's stm_ana into base in-place.
+
+    Obs-level fields (no dets axis: t_enc, temps, etc.) are left unchanged.
+    Arrays bound to the dets axis are concatenated along that dimension.
+    All dets LabelAxis objects in the AxisManager tree are updated with the
+    merged det ids.
+    """
+    det_axis = 'dets'
+
+    def _find_det_vals(am):
+        """Return det vals from the first node in the tree that has a dets
+        axis, or None if not found."""
+        if det_axis in am._axes:
+            return am._axes[det_axis].vals
+        for val in am._fields.values():
+            if isinstance(val, core.AxisManager):
+                result = _find_det_vals(val)
+                if result is not None:
+                    return result
+        return None
+
+    def _update_det_axes(am, merged_vals):
+        """Recursively replace every dets LabelAxis with merged_vals."""
+        if det_axis in am._axes:
+            am._axes[det_axis] = core.LabelAxis(det_axis, merged_vals)
+        for val in am._fields.values():
+            if isinstance(val, core.AxisManager):
+                _update_det_axes(val, merged_vals)
+
+    def _concat_arrays(base_am, new_am):
+        """Recursively concatenate dets-bound numpy arrays in-place."""
+        for name in list(base_am._fields.keys()):
+            if name not in new_am._fields:
+                continue
+            bv = base_am._fields[name]
+            nv = new_am._fields[name]
+            if isinstance(bv, np.ndarray):
+                for dim, ax in enumerate(base_am._assignments.get(name) or []):
+                    if ax == det_axis:
+                        base_am._fields[name] = np.concatenate(
+                            [bv, nv], axis=dim)
+                        break
+            elif isinstance(bv, core.AxisManager):
+                _concat_arrays(bv, nv)
+
+    base_dets = _find_det_vals(base)
+    new_dets = _find_det_vals(new_chunk)
+    if base_dets is None or new_dets is None:
+        return
+
+    merged_dets = np.concatenate([base_dets, new_dets])
+    _concat_arrays(base, new_chunk)
+    _update_det_axes(base, merged_dets)
+
+
 def run(
     logger,
     context_path,
@@ -58,6 +114,7 @@ def run(
         nper = int(np.ceil(meta.dets.count / n_split))
         hkdata = None
         result = None
+        stm_ana = None
 
         for i in range(n_split):
             dets = meta.dets.vals[i * nper:(i + 1) * nper]
@@ -88,19 +145,21 @@ def run(
 
             if result is None:
                 result = chunk
+                stm_ana = tod.stm_ana
             else:
                 result = core.AxisManager.concatenate(
                     [result, chunk], axis='dets', other_fields='first')
+                _merge_stm_ana(stm_ana, tod.stm_ana)
 
         assert result.dets.count == meta.dets.count
-        return obs_id, result, None
+        return obs_id, result, stm_ana, None
 
     except (LoaderError, OSError) as e:
         logger.error(f'Failed to load {obs_id}: {e}')
-        return obs_id, None, (type(e).__name__, str(e), traceback.format_exc())
+        return obs_id, None, None, (type(e).__name__, str(e), traceback.format_exc())
     except Exception as e:
         logger.error(f'Failed to process {obs_id}: {e}')
-        return obs_id, None, (type(e).__name__, str(e), traceback.format_exc())
+        return obs_id, None, None, (type(e).__name__, str(e), traceback.format_exc())
 
 
 def _main(
@@ -221,7 +280,7 @@ def _main(
             ))
 
         for future in as_completed_callable(futures):
-            oid, result, error_info = future.result()
+            oid, result, stm_ana, error_info = future.result()
             for job in jobs:
                 if job.tags['obs_id'] == oid:
                     break
@@ -262,6 +321,13 @@ def _main(
                             {'obs:obs_id': oid, 'dataset': oid},
                             filename=h5_fn, replace=overwrite,
                         )
+
+                    if stm_ana is not None:
+                        h5_fn = f'stm_ana_{unix}.h5'
+                        h5_path = os.path.join(output_dir, h5_fn)
+                        stm_ana.save(h5_path, overwrite=overwrite,
+                                     compression='gzip', group=oid)
+
                     job.jstate = 'done'
                     continue
                 except Exception as e:
