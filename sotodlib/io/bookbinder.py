@@ -1576,7 +1576,10 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
             continue
 
         subpath = os.path.join(hkdir, subdir)
-        files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
+        files.extend([
+            os.path.join(subpath, f) for f in os.listdir(subpath)
+            if 'suprsync' not in f
+        ])
 
     files = np.array(sorted(files))
     file_times = np.array(
