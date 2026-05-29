@@ -164,7 +164,7 @@ class Books(Base):
 
 # convenient decorator to repeat a method over all data sources
 def loop_over_tubes(method):
-    def wrapper(self, *args, **kwargs) -> :
+    def wrapper(self, *args, **kwargs) -> tuple[list | None, list[tuple[str, Exception]] | None]:
         outs = []
         errors = []
         for tube in self.tubes:
