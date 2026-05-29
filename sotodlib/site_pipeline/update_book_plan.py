@@ -136,7 +136,8 @@ def main(
         record_book_counts(monitor, imprinter)
 
     if update_errors is not None:
-        logger.error(f"Errors updating book database: {update_errors}")
+        for tube, error in update_errors:
+            logger.error(f"Errors updating book database: error in tube {tube}: {error}")
         raise ValueError(f"Errors updating book database: {update_errors}")
     
 
