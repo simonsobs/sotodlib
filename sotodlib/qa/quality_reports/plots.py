@@ -89,6 +89,7 @@ class Colors:
 @dataclass
 class ObsEfficiencyPlots:
     pie: go.Figure
+    pie_good_pwv: go.Figure
     heatmap: go.Figure
 
 
@@ -390,7 +391,7 @@ def hwp_freq_vs_time(d: ReportData) -> go.Figure:
         return go.Figure()
 
 
-def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
+def wafer_obs_efficiency(d: ReportData, nsegs=3000) -> ObsEfficiencyPlots:
     """Plot heatmap of wafer vs time and pie chart showing observation efficiency"""
 
     wafers = get_wafers(d.cfg.platform)
@@ -403,6 +404,7 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     obs_values = {k: i for i, k in enumerate(obs_types)}
 
     data = np.ones((nwafers, nsegs), dtype=int) * (len(obs_types) - 1)
+    data_pie = np.ones((nwafers, nsegs), dtype=int) * (len(obs_types) - 1)
 
     for o in d.obs_list:
         m = np.logical_and.reduce([tstamps > o.start_time, tstamps < o.stop_time])
@@ -430,19 +432,84 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
     if (data == (len(obs_types) - 1)).all():
         reverse = True
 
-    # Compile data for pie chart
-    unique_vals, counts = np.unique(data, return_counts=True)
-    percentages = counts / counts.sum() * 100
-    labels = [obs_types[i] for i in unique_vals]
-    COLORS = Colors(names=labels, reverse=reverse)
-    colorscale: List[Tuple[float, str]] = []
-    ntypes = len(labels)
-    for i, t in enumerate(labels):
-        colorscale.extend([(i / ntypes, COLORS[t]), ((i + 1) / ntypes, COLORS[t])])
-    pie_colors = [COLORS[t] for t in labels]
-    colorbar=dict(tickvals=list(range(len(labels))), ticktext=labels,)
+    # pwv < 3
+    for o in d.obs_list:
+        if o.pwv > 3:
+            continue
+        m = np.logical_and.reduce([tstamps > o.start_time, tstamps < o.stop_time])
+        wafer_slots_list = o.wafer_slots_list.split(",")
+        for wafer_slot in wafer_slots_list:
+            if d.cfg.platform == "lat":
+                idx = np.where(np.array(wafers) == o.obs_tube_slot + "_" + wafer_slot)[0][0]
+            else:
+                idx = int(wafer_slot.strip()[-1])
+            if o.obs_type == "obs":
+                if o.obs_subtype == "cmb":
+                    data_pie[idx][m] = obs_values[o.obs_subtype]
+                elif o.obs_subtype == "cal":
+                    matches = [item for item in o.obs_tags.split(',') if item in d.cfg.cal_targets]
+                    if matches:
+                        data_pie[idx][m] = obs_values[matches[0]]
+                    else:
+                        data_pie[idx][m] = obs_values[o.obs_subtype]
+                else:
+                    data_pie[idx][m] = obs_values[o.obs_type]
+            else:
+                data_pie[idx][m] = obs_values[o.obs_type]
+
+    pwv_interp = np.interp(tstamps, d.pwv[0], d.pwv[1])
+    good = pwv_interp < 3
+
+    pies = []
+
+    datasets = [
+        data,
+        data[:, good],
+    ]
+
+    for arr in datasets:
+        unique_vals, counts = np.unique(arr, return_counts=True)
+        percentages = counts / counts.sum() * 100
+        labels = [obs_types[i] for i in unique_vals]
+        COLORS = Colors(names=labels, reverse=reverse)
+        colorscale = []
+
+        ntypes = len(labels)
+
+        for i, t in enumerate(labels):
+            colorscale.extend([
+                (i / ntypes, COLORS[t]),
+                ((i + 1) / ntypes, COLORS[t])
+            ])
+
+        pie_colors = [COLORS[t] for t in labels]
+
+        colorbar = dict(
+            tickvals=list(range(len(labels))),
+            ticktext=labels,
+        )
+
+        fig = go.Figure(
+            data=go.Pie(
+                labels=labels,
+                values=percentages,
+                textinfo="label+percent",
+            ),
+        )
+
+        fig.update_traces(
+            marker=dict(colors=pie_colors)
+        )
+
+        fig.update_layout(
+            margin=dict(l=0, r=0, t=0, b=0),
+            height=300
+        )
+
+        pies.append(fig)
 
     unique_sorted = np.sort(np.unique(data))
+    labels = [obs_types[i] for i in unique_vals]
     mapping = {v: i for i, v in enumerate(unique_sorted)}
     vectorized_map = np.vectorize(mapping.get)
     data = vectorized_map(data)
@@ -482,17 +549,7 @@ def wafer_obs_efficiency(d: ReportData, nsegs=2000) -> ObsEfficiencyPlots:
 
     heatmap.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=height)
 
-    pie = go.Figure(
-        data=go.Pie(
-            labels=labels,
-            values=percentages,
-            textinfo="label+percent",
-        ),
-    )
-    pie.update_traces(marker=dict(colors=pie_colors))
-    pie.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=300)
-
-    return ObsEfficiencyPlots(pie=pie, heatmap=heatmap)
+    return ObsEfficiencyPlots(pie=pies[0], pie_good_pwv=pies[1], heatmap=heatmap)
 
 
 def pwv_vs_time(d: ReportData, fig: go.Figure, ds_factor: int=5):

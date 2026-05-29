@@ -306,7 +306,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
 
     query = f"""
         SELECT """ + ", ".join(keys) +  f""" from "autogen"."preprocesstod" WHERE (
-            "tel_tube"::tag = '{cfg.platform}'
+            "telescope"::tag = '{cfg.platform}'
             AND time >= '{t0_str}'
             AND time <= '{t1_str}'
         )

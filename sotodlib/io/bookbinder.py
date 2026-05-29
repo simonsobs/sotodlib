@@ -266,8 +266,8 @@ def validate_mount_field(hk_field: HkDataField, times):
             ## don't change error message without changing imprinter CLI
             err= DroppedMountData(
                 f"{hk_field.addr} dropped "
-                f"{arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
-                f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
+                f"{arr[m][np.where(arr[m]>MAX_DROPPED_HK)[0]].astype(int)} samples over "
+                f"{np.diff(hk_field.times)[m][np.where(arr[m]>MAX_DROPPED_HK)[0]]} "
                 "seconds. Interpolation may be questionable."
             )
         return arr > 2, err
