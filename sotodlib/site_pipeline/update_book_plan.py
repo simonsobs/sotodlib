@@ -85,7 +85,7 @@ def main(
 
     # obs and oper books
     logger.info("Registering obs/oper Books")
-    imprinter.update_bookdb_from_g3tsmurf(
+    _, update_errors = imprinter.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
         ignore_singles=False,
         stream_ids=stream_ids,
@@ -134,11 +134,15 @@ def main(
     if monitor is not None:
         logger.info("Sending Updates to monitor")
         record_book_counts(monitor, imprinter)
+
+    if update_errors is not None:
+        logger.error(f"Errors updating book database: {update_errors}")
+        raise ValueError(f"Errors updating book database: {update_errors}")
     
 
 def record_book_counts(monitor, imprinter):
     """Send a record of the current book count status to the InfluxDb
-    site-pipeline montir
+    site-pipeline monitor
     """
     tags = [{"telescope" : imprinter.config["monitor"]["telescope"]}]
     log_tags = {}

@@ -164,14 +164,30 @@ class Books(Base):
 
 # convenient decorator to repeat a method over all data sources
 def loop_over_tubes(method):
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self, *args, **kwargs) -> :
         outs = []
+        errors = []
         for tube in self.tubes:
-            x = method(self, tube, *args, **kwargs)
+            try:
+                x = method(self, tube, *args, **kwargs)
+            except ValueError as e:
+                # We want to try the other tubes even if we do error out on one.
+                # Return errors as values here and taise them at the end of the script.
+                # It's the callers responsibility to handle those errors.
+                self.logger.error(f"Error in {method.__name__} for tube {tube}: {e}, skipping tube")
+                errors.append((tube, e))
+                continue
             if x is not None:
                 outs.extend(x)
-        if len(outs)>0:
-            return outs        
+
+        if not outs:
+            outs = None
+        
+        if not errors:
+            errors = None
+
+        return outs, errors
+        
     return wrapper
 
 
