@@ -154,7 +154,6 @@ class Runner:
         self.cfg = cfg
         self.ctx = core.Context(cfg.context_path)
         self.detset_db = None
-        self.detset_db_path = None
         self.detcal_db = None
         with open(self.cfg.wafer_map_path, 'r') as f:
             self.wafer_map = yaml.safe_load(f)
@@ -170,8 +169,7 @@ class Runner:
             else:
                 continue
             if entry_name == cfg.detset_meta_name:
-                self.detset_db_path = d['db']
-                self.detset_db = core.metadata.ManifestDb(self.detset_db_path)
+                self.detset_db = core.metadata.ManifestDb(d['db'])
             elif entry_name == cfg.detcal_meta_name:
                 self.detcal_db = core.metadata.ManifestDb(d['db'])
 
