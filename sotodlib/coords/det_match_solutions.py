@@ -506,7 +506,7 @@ def match_wafer(
             ).as_array()
 
         merge_fields = ["xi", "eta", "wafer_slot"]
-        for i, d in enumerate(dst_all):
+        for i, d in enumerate(dst_merged):
             idx = np.where(dst_merged['det_id'] == d['det_id'])[0][0]
             if idx:
                 for field in merge_fields:
