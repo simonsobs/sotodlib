@@ -506,10 +506,10 @@ def match_wafer(
 
         merge_fields = ["xi", "eta", "wafer_slot"]
         for i, d in enumerate(dst_merged):
-            idx = np.where(dst_merged['det_id'] == d['det_id'])[0][0]
+            idx = np.where(dst['det_id'] == d['det_id'])[0][0]
             if idx:
                 for field in merge_fields:
-                    dst[i][field] = dst_merged[idx][field]
+                    dst[idx][field] = dst_merged[i][field]
         dst = dm.ResSet.from_array(dst)
     else:
         dst = dm.ResSet.from_array(dst_merged)
@@ -588,7 +588,6 @@ def match_wafer(
     match.match_pars.dist_width = np.deg2rad(cfg.match_pars["match2"]["dist_width"])
 
     match._match()
-
     match_iterations.append(deepcopy(match))
 
     return MatchSolution(
