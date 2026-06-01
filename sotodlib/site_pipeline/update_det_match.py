@@ -244,29 +244,6 @@ def get_failed_detsets(cache_file):
 
     return list(x.keys())
 
-def update_detset_wafer_slot(runner: Runner, ds, match):
-    """
-    Update a deset with the wafer_slot field from a match.
-    """
-    ds_base_path = os.path.dirname(detset_db_path)
-    db = self.detset_db.inspect()
-    entry = [d for d in db if d['dataset'] == ds][0]
-
-    h5_path = "os.path.join(ds_base_path, entry['filename'])"
-    with h5py.File(os.path.join(ds_base_path, entry['filename'])) as h5f:
-        dataset = h5f[entry['dets:detset']][:]
-
-    # replace wafer_slot
-    merged = match.merged.as_array()
-    for i, row in enumerate(dataset):
-        idx = np.where(merged['readout_id'] == row['dets:readout_id'].astype(str))[0]
-        if idx.size != 0:
-            row[i]['dets:wafer_slot'] = merged[idx[0]]['wafer_slot']
-
-    # write entry back out to detset
-    write_dataset(core.metadata.ResultSet.from_friend(dataset), h5_path, ds, overwrite=True)
-
-
 def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     stream_id = aman.det_info.stream_id[aman.det_info.detset == detset][0]
 
@@ -347,8 +324,6 @@ def run_match(runner: Runner, detset: str) -> bool:
         match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
         fpath = os.path.join(runner.match_dir, f"{ds}.h5")
         match.save(fpath)
-        if wafer_slot == "ws.":
-            update_detset_wafer_slot(runner, ds, match)
         logger.info(f"Saved match to file: {fpath}")
 
     return True
