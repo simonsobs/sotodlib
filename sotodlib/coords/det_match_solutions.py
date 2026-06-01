@@ -6,7 +6,6 @@ from collections import defaultdict
 import os
 import numpy as np
 import yaml
-from copy import deepcopy
 from scipy import interpolate
 from tqdm.auto import tqdm, trange
 from copy import deepcopy
