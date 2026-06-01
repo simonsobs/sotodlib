@@ -249,8 +249,8 @@ def get_horizon_P(tod, az, el, receiver_fixed=False, **kw):
 
 
 def filter_for_sources(tod=None, signal=None, source_flags=None,
-                       n_modes=10, low_pass=None,
-                       wrap=None, edge_guard=None):
+                       n_modes=10, low_pass=None, wrap=None, 
+                       pca_wrap=None, edge_guard=None):
     """Mask and gap-fill the signal at samples flagged by source_flags.
     Then PCA the resulting time ordered data.  Restore the flagged
     signal, remove the strongest modes from PCA.
@@ -271,6 +271,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
         subject to change.
       wrap (str): If specified, the result will be stored at
         tod[wrap].
+      pca_wrap (str): If specified, the PCA model modes and weights calculated for subtraction will be wrapped into tod[pca_wrap].
       edge_guard (int): Number of samples at the beginning and end of the flags to change them False.
         Default is None. (Nothing happens.)
 
@@ -339,7 +340,7 @@ def filter_for_sources(tod=None, signal=None, source_flags=None,
 
         # Get PCA model and discard the source vectors.
         pca = tod_ops.pca.get_pca_model(
-            tod, signal=signal_pca, n_modes=n_modes)
+            tod, signal=signal_pca, n_modes=n_modes, wrap=pca_wrap)
         del signal_pca
 
         # Remove the PCA model.

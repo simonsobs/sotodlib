@@ -142,7 +142,7 @@ def make_map(tod,
              'weight': wTQU}
     return output
 
-def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False):
+def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=False, interpol=None):
     """
     Generate simulated TOD with HWP from a given signal map.
 
@@ -154,6 +154,7 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
         wrap (bool, optional): Whether to wrap the simulated data. Default is False.
         modulated (bool, optional): If True, return modulated signal. If False, return the demodulated signal
         (`dsT`, `demodQ`, and `demodU`). Default is False.
+        interpol : Sub-pixel interpolation method. If None it will be nearest. Can be bilinear.
 
     Returns:
         `modulate==False`: A tuple containing the TOD (np.array) of dsT, demodQ and demodU.
@@ -163,7 +164,7 @@ def from_map(tod, signal_map, cuts=None, flip_gamma=True, wrap=False, modulated=
     Tmap, Qmap, Umap = signal_map
 
     P = coords.P.for_tod(tod=tod, geom=signal_map.geometry, cuts=cuts,
-                         comps='QU', hwp=flip_gamma)
+                         comps='QU', hwp=flip_gamma, interpol=interpol)
     dsT_sim = P.from_map(Tmap, comps='T')
     demodQ_sim = P.from_map(enmap.enmap([Qmap, Umap]), comps='QU')
     demodU_sim = P.from_map(enmap.enmap([Umap, -Qmap]), comps='QU')

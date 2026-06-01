@@ -80,6 +80,7 @@ def _main(
     metadata_list: Optional[List[str]] = 'all',
     verbosity: Optional[int] = 2,
     overwrite: Optional[bool] = False,
+    query: Optional[List[str]] = ["subtype = 'cal'"],
     tags: Optional[List[str]] = None,
     obs_id: Optional[List[str]] = None,
     n_split: Optional[int] = 10,
@@ -104,6 +105,9 @@ def _main(
         0: Error, 1: Warning, 2: Info, 3: Debug
     overwrite: bool
         If true, overwrites existing entries in the database
+    query: List of str
+        List of query strings to filter observations. Multiple conditions
+        are joined with ``and``. Defaults to ``["subtype = 'cal'"]``
     tags: List of str
         List of tag to use for quering observations
     obs_id: List of str
@@ -125,9 +129,10 @@ def _main(
     ctx = core.Context(context_path, metadata_list=metadata_list)
     obs_ids = []
     for tag in tags:
-        obslist = ctx.obsdb.query("subtype = 'cal'", tags=[tag])
+        obslist = ctx.obsdb.query(' and '.join(query), tags=[tag])
         for obs in obslist:
             obs_ids.append(obs['obs_id'])
+    obs_ids = sorted(obs_ids, reverse=True)
 
     db_path = os.path.join(output_dir, 'tau_hwp.sqlite')
     if os.path.exists(db_path):
@@ -175,7 +180,7 @@ def _main(
                 obs_id=job.tags['obs_id'],
                 n_split=n_split,
             ))
-        for future in futures:
+        for future in as_completed_callable(futures):
             obs_id, rset = future.result()
             for job in jobs:
                 if job.tags['obs_id'] == obs_id:
@@ -205,6 +210,7 @@ def _main(
                 job.jstate = 'failed'
             else:
                 logger.error(f'Failed {obs_id}, try again later')
+            futures.remove(future)
 
 
 def main(config):

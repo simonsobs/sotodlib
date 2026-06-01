@@ -266,8 +266,8 @@ def validate_mount_field(hk_field: HkDataField, times):
             ## don't change error message without changing imprinter CLI
             err= DroppedMountData(
                 f"{hk_field.addr} dropped "
-                f"{arr[np.where(arr>MAX_DROPPED_HK)[0]].astype(int)} samples over "
-                f"{np.diff(hk_field.times)[np.where(arr>MAX_DROPPED_HK)[0]]} "
+                f"{arr[m][np.where(arr[m]>MAX_DROPPED_HK)[0]].astype(int)} samples over "
+                f"{np.diff(hk_field.times)[m][np.where(arr[m]>MAX_DROPPED_HK)[0]]} "
                 "seconds. Interpolation may be questionable."
             )
         return arr > 2, err
@@ -1576,7 +1576,10 @@ def get_hk_files(hkdir, start, stop, tbuff=10*60):
             continue
 
         subpath = os.path.join(hkdir, subdir)
-        files.extend([os.path.join(subpath, f) for f in os.listdir(subpath)])
+        files.extend([
+            os.path.join(subpath, f) for f in os.listdir(subpath)
+            if 'suprsync' not in f
+        ])
 
     files = np.array(sorted(files))
     file_times = np.array(

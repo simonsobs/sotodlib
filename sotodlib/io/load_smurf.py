@@ -1415,8 +1415,12 @@ class G3tSmurf:
             )
         return self.HK
 
-    def update_finalization(self, update_time, session=None):
-        """Update the finalization time rows in the database"""
+    def update_finalization(self, update_time, session=None, load_data=False):
+        """Update the finalization time rows in the database
+        
+        If load_data is false then use the maximum update time in database. otherwise
+        load the data directly to check the update time.
+        """
         
         if session is None:
             session = self.Session()
@@ -1429,44 +1433,41 @@ class G3tSmurf:
         for agent in agent_list:
             if agent.agent == "G3tSMURF":
                 continue
-            db_agent = (
-                HK.session.query(HKAgents)
+            db_field = (
+                HK.session.query(HKFields).join(HKAgents)
                 .filter(
                     HKAgents.instance_id == agent.agent,
                     HKAgents.start <= update_time,
+                    HKFields.field.like("%finalized_until%")
                 )
                 .order_by(db.desc(HKAgents.start))
                 .first()
             )
-            if db_agent is None:
+            if db_field is None:
                 logger.info(
                     f"Agent {agent.agent} not found in HK database before"
                     f" update time {update_time}"
                 )
                 continue
-            f = [f for f in db_agent.fields if "finalized_until" in f.field]
-            if len(f) == 0:
-                logger.warning(
-                    f"Did not find finalized_until in Agent {agent}"
-                    f"from file {db_agent.hkfile.filename}"
-                )
-                continue
-            f = f[0]
-            data = HK.load_data(f)
-            x = np.where(data[f.field][0] <= update_time)[0]
-            if len(x) < 1:
-                logger.error(
-                    f"No data points before update time for agent "
-                    f"{agent} in file {db_agent.hkfile.filename}?"
-                )
-            x = x[0]
-            agent.time = data[f.field][1][x]
+            if load_data:
+                data = HK.load_data(db_field)
+                x = np.where(data[db_field.field][0] <= update_time)[0]
+                if len(x) < 1:
+                    logger.error(
+                        f"No data points before update time for agent "
+                        f"{agent} in file {db_agent.hkfile.filename}?"
+                    )
+                max_time = max(data[db_field.field][1][x])
+            else:
+                #make sure we don't get ahead of the g3tsmurf updates
+                max_time = min([update_time, db_field.max_val])
+            agent.time = max_time
 
         session.commit()
 
     def get_final_time(
         self, stream_ids, start=None, stop=None, check_control=True,
-        session=None
+        session=None,
     ):
         """Return the ctime to which database is finalized for a set of 
         stream_ids between ctimes start and stop. If check_control is True it 
@@ -1485,8 +1486,22 @@ class G3tSmurf:
             )
         if session is None:
             session = self.Session()
-        
+        if stop is None:
+            stop = dt.datetime.now().timestamp()
+            
         HK = self.get_HK()
+        last_update = HK.get_last_update()
+        if stop > last_update:
+            if stop > last_update + 2*3600:
+                logger.warning(
+                    f"""
+                    HK database updates are stale. Last update 
+                    {dt.datetime.fromtimestamp(last_update, dt.timezone.utc)}. 
+                    Trying to check until 
+                    {dt.datetime.fromtimestamp(stop, dt.timezone.utc)}
+                    """
+                )
+            stop = last_update
 
         agent_list = []
         if "servers" not in self.finalize:
@@ -1516,14 +1531,7 @@ class G3tSmurf:
                 agent_list.append(server["smurf-suprsync"])
                 agent_list.append(server["timestream-suprsync"])
                 continue
-            if stop > HK.get_last_update():
-                if stop > HK.get_last_update()+3600:
-                    logger.error(f"HK database not updated recently enough to"
-                                  " check finalization time. Last update "
-                                 f"{HK.get_last_update}. Trying to check until"
-                                 f"{stop}")
-                else:
-                    stop = HK.get_last_update()
+            
             sids = pysmurf_monitor_control_list(pm, start, stop, HK)
             if np.any([s in stream_ids for s in sids]):
                 agent_list.append(server["smurf-suprsync"])
@@ -2304,7 +2312,7 @@ class SmurfStatus:
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
                     else:
                         status["stop"] = frame["time"].time / spt3g_core.G3Units.s
-                    status.update(yaml.safe_load(frame["status"]))
+                    status.update(yaml.load(frame["status"], Loader=yaml.CSafeLoader))
                     if frame["dump"]:
                         status["dump_frame"] = True
                         return True
