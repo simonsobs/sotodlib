@@ -10,8 +10,8 @@ import yaml
 import argparse
 import logging
 from tqdm.auto import tqdm, trange
-from dataclasses import dataclass, astuple, field, fields
-from typing import Optional, Union, Any, Literal, Callable, Self
+from dataclasses import dataclass, field
+from typing import Optional, Union, Literal, Callable, Self
 from numpy.typing import NDArray
 import numpy as np
 from scipy.optimize import leastsq
@@ -20,7 +20,7 @@ from sotodlib.io import load_book
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
-from concurrent.futures import ProcessPoolExecutor, as_completed, Future
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 logger = logging.getLogger("bgmap_delay")
 if not logger.hasHandlers():
@@ -142,8 +142,7 @@ class OutputCfg:
         if "KeyboardInterrupt" in msg:  # Don't cache keyboard interrupts
             return
 
-        # Transient errors of metadata loading.
-        # These can happen when hwpss_subtraction is True, but we can retry.
+        # Transient errors of metadata loading. We will retry later.
         transient_errors = [
             'sotodlib.core.metadata.loader.LoaderError',
             'BlockingIOError',
@@ -195,8 +194,6 @@ class ProcessCfg:
     '''
     Configurations for processing
 
-    run_method: 'site' or 'nersc'
-        Option for parallel processing. Only 'site' is implemented for now.
     multiprocess_start_method: Literal["spawn", "fork"] = "spawn"
         Method to use to start child processes.
     nprocs_channel: int = 4
@@ -212,7 +209,6 @@ class ProcessCfg:
     show_pb: bool = True
         If True, show progress bar in the run_update function.
     '''
-    run_method: Literal['site', 'nersc'] = 'site'
     multiprocess_start_method: Literal["spawn", "fork"] = "spawn"
     nprocs_channel: int = 4
     num_bgmap: Optional[int] = None
@@ -312,6 +308,7 @@ class BiasStepAnalysis:
     dIbias: NDArray[np.float64]
     resp_times: NDArray[np.float64]
     mean_resp: NDArray[np.float64]
+    pts_before_step: int = 20
     """
     bands: NDArray[np.int64]
     channels: NDArray[np.int64]
@@ -319,6 +316,7 @@ class BiasStepAnalysis:
     dIbias: NDArray[np.float64]
     resp_times: NDArray[np.float64]
     mean_resp: NDArray[np.float64]
+    pts_before_step: int = 20 # samples before bias step at t=0
 
     @classmethod
     def load(cls, ctx:core.Context, obs_id:str) -> Self:
@@ -329,7 +327,13 @@ class BiasStepAnalysis:
         d = load_book.load_smurf_npy_data(ctx, obs_id, 'bias_step')
         use = ['bands', 'channels', 'bgmap',
                'dIbias', 'resp_times', 'mean_resp']
-        return cls(**{k:d[k] for k in use})
+        d = {k:d[k] for k in use}
+        for t in d['resp_times']:
+            if np.isnan(t).any():
+                continue
+            d['pts_before_step'] = np.argmin(np.abs(t))
+            break
+        return cls(**d)
 
 
 @dataclass
@@ -346,6 +350,7 @@ class ChannelData:
     mean_resp: averaged channel response (current).
        Here, we normalize this by the step of the bias current.
        So that it should be ~1 if channel is superconducting.
+    pts_before_step: samples before t = 0
     """
     band: int
     channel: int
@@ -353,6 +358,7 @@ class ChannelData:
     fsample: float # Hz
     resp_times: np.ndarray # sec
     mean_resp: np.ndarray # dItes/dIbias
+    pts_before_step: int
 
     @classmethod
     def from_data(
@@ -378,7 +384,7 @@ class ChannelData:
 
         # Use normalized and offset-subtracted mean_resp
         mean_resp = bsa.mean_resp[bs_idx] / bsa.dIbias[bg]
-        mean_resp -= mean_resp[:20].mean()
+        mean_resp -= mean_resp[:bsa.pts_before_step].mean()
 
         return cls(
             band=band,
@@ -387,6 +393,7 @@ class ChannelData:
             fsample=fsample,
             resp_times=resp_times,
             mean_resp=mean_resp,
+            pts_before_step=bsa.pts_before_step,
         )
 
 
@@ -531,14 +538,15 @@ def fit_channel(
     We fit three models: expon, exponbox, exponboxw.
     They are different in the width of the box window.
     """
-    # Normalize not to bee very small value
+    # Normalize not to be very small value
+    pts_before_step = chdata.pts_before_step
     t = chdata.resp_times * chdata.fsample
-    std = chdata.mean_resp[:20].std()
+    std = chdata.mean_resp[:pts_before_step].std()
     y = chdata.mean_resp / std
 
     # Usual BiasStepAnalysis has 20 samples before t=0.
-    y1 = y[:20].mean()
-    y2 = y[-20:].mean()
+    y1 = y[:pts_before_step].mean()
+    y2 = y[-pts_before_step:].mean()
 
     # Select model by changing w_fix parameter.
     fit_models = [
@@ -936,7 +944,6 @@ def run_bgmap_process(
         res.success = True
     except Exception as e:
         res.traceback = traceback.format_exc()
-        res.fail_msg = res.traceback
         if cfg.process.raise_exceptions:
             raise e
     return res
@@ -964,7 +971,7 @@ def handle_bgmap_result(result: RunBgmapResult, cfg: BgmapDelayCfg) -> None:
         logger.error(f"Failed on bgmap_id: {bgmap_id}")
         logger.error(result.traceback)
 
-        msg = result.fail_msg
+        msg = result.traceback
         if msg is None:
             msg = "unknown error"
         cfg.output.add_to_failed_cache(bgmap_id, msg, 'bgmap')
@@ -997,7 +1004,7 @@ class RunObsResult:
     bgmap_ids: Optional[list[str]] = None
 
 
-def run_obs_process(cfg: BgmapDelayCfg, obs_id: str) -> RunBgmapResult:
+def run_obs_process(cfg: BgmapDelayCfg, obs_id: str) -> RunObsResult:
     """
     Process for each observation to find bgmap ids.
     This will be processed in serial.
@@ -1027,7 +1034,6 @@ def run_obs_process(cfg: BgmapDelayCfg, obs_id: str) -> RunBgmapResult:
         res.success = True
     except Exception as e:
         res.traceback = traceback.format_exc()
-        res.fail_msg = res.traceback
         if cfg.process.raise_exceptions:
             raise e
     return res
@@ -1048,7 +1054,7 @@ def handle_obs_result(result: RunObsResult, cfg: BgmapDelayCfg) -> None:
         logger.error(f"Failed on obs_id: {obs_id}")
         logger.error(result.traceback)
 
-        msg = result.fail_msg
+        msg = result.traceback
         if msg is None:
             msg = "unknown error"
         cfg.output.add_to_failed_cache(obs_id, msg, 'obs')
@@ -1069,12 +1075,12 @@ def handle_obs_result(result: RunObsResult, cfg: BgmapDelayCfg) -> None:
 
 ######################################################
 
-def run_update_bgmap_site(
+def run_update_bgmap(
         cfg: BgmapDelayCfg,
         executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
         as_completed_callable: Callable) -> None:
     """
-    Main run script for computing bgmap delay results at the site.
+    Main run script for computing bgmap delay results.
     This will loop over bgmaps serially, and compute the delay
     in parallel among readout channels. The results will be stored
     into hdf5 file and bgmap database.
@@ -1102,7 +1108,7 @@ def run_update_bgmap_site(
     return
 
 
-def run_update_obs_site(cfg: BgmapDelayCfg) -> None:
+def run_update_obs(cfg: BgmapDelayCfg) -> None:
     """
     Update another database for mapping from observation to bgmap.
     This is processed in serial.
@@ -1139,23 +1145,11 @@ def _main(
 
     Next, we make another db to map observation and the bgmap.
     We will process this in serial since it should be quick.
-
-
-    Args:
-    -----
-    cfg.process.run_method: Literal['site', 'nersc']
-        Workaround for multi-processing.
-        but currently only 'site' is implemented.
     """
 
-    run_method = cfg.process.run_method
-    if run_method == "site":
-        run_update_bgmap_site(cfg, executor, as_completed_callable)
-        run_update_obs_site(cfg)
-    elif run_method == "nersc":
-        raise ValueError("Not implemented yet...")
-    else:
-        raise ValueError(f"Unknown run_method: {run_method}")
+    run_update_bgmap(cfg, executor, as_completed_callable)
+    run_update_obs(cfg)
+    return
 
 
 def main(config_file: str):
