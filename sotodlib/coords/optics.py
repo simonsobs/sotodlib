@@ -254,7 +254,6 @@ def get_fp_to_rx_pars(ot, config_path):
     return config[ot]
 
 
-
 def fp_to_rx(aman, x=None, y=None, pol=None, phi=0, dx=0, dy=0):
     """
     Transform from coords internal to focal plane to receiver coordinates.
@@ -515,11 +514,11 @@ def LAT_focal_plane(aman, zemax_path, x=None, y=None, pol=None, roll=0, tube_slo
                If aman is provided then will be wrapped as aman.focal_plane.eta.
     """
     if x is None:
-        x = aman.focal_plane.x_ot
+        x = aman.focal_plane.x_fp
     if y is None:
-        y = aman.focal_plane.y_ot
+        y = aman.focal_plane.y_fp
     if pol is None:
-        pol = aman.focal_plane.pol_ot
+        pol = aman.focal_plane.pol_fp
 
     sec2el, sec2xel = LAT_optics(zemax_path)
     array2secx, array2secy = LATR_optics(zemax_path, tube_slot)
@@ -717,11 +716,6 @@ def get_focal_plane(
                        If provided ot_config_path is is ignored.
                        Should be a dict where each key is an OT pointing
                        to a dict with keys dx, dy, and phi.
-
-        ot_config_path: Path to the optics_tubes config file.
-
-        fp_to_ot_pars: Loaded optics_tubes params.
-                        If provided ot_config_path is is ignored.
 
         zemax_path: Path to the data file from Zemax.
                     Only used by the LAT.
