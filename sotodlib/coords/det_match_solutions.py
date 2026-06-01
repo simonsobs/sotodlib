@@ -85,6 +85,8 @@ class SolutionsCfg:
         (xi_offset, eta_offset) where both are in radians.
     ufm_to_fp_path: str
         Path to file that maps wafer_slot to position on focal plane.
+    fp_to_rx_path: str
+        Path to file that maps tube slot to position on focal plane.
     freq_correct_by_muxband: bool
         If true, apply the same freq offset correction to all resonators in a mux-band.
     """
@@ -112,7 +114,7 @@ class SolutionsCfg:
 
     initial_pointing_offset: Tuple[float, float] = (0, 0)
     ufm_to_fp_path: Optional[str] = None
-    fp_to_ot_path: Optional[str] = None
+    fp_to_rx_path: Optional[str] = None
     imprinter_path: Optional[str] = None
     freq_correct_by_muxband: bool = True
 
@@ -154,8 +156,8 @@ class SolutionsCfg:
             self.ufm_to_fp_path = os.path.join(
                 self.site_pipeline_cfg_dir, "shared/focalplane/ufm_to_fp.yaml"
             )
-        if self.fp_to_ot_path is None:
-            self.fp_to_ot_path = os.path.join(
+        if self.fp_to_rx_path is None:
+            self.fp_to_rx_path = os.path.join(
                 self.site_pipeline_cfg_dir, "shared/focalplane/optics_tubes.yaml"
             )
         if self.imprinter_path is None:
@@ -471,7 +473,7 @@ def match_wafer(
     # loop through and get pointing information for all wafers
     for ws in wafer_slots:
         pt_cfg = dm.PointingConfig(
-            fp_file=cfg.ufm_to_fp_path, ot_file=cfg.fp_to_ot_path,
+            fp_file=cfg.ufm_to_fp_path, rx_file=cfg.fp_to_rx_path,
             wafer_slot=ws, platform=cfg.platform,
             zemax_path=cfg.zemax_path,
             roll=np.deg2rad(am.obs_info.roll_center) if cfg.apply_roll else 0.0,
@@ -510,6 +512,8 @@ def match_wafer(
                 for field in merge_fields:
                     dst[i][field] = dst_merged[idx][field]
         dst = dm.ResSet.from_array(dst)
+    else:
+        dst = dm.ResSet.from_array(dst_merged)
 
     # first match
     match_pars = dm.MatchParams(

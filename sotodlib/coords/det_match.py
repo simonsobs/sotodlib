@@ -65,6 +65,8 @@ class PointingConfig:
     -----
     fp_file: str
         Path to focal-plane file that is used by the optics module.
+    rx_file: str
+        Path to optics tube YAML file that is used by the optics module.
     wafer_slot: str
         Wafer slot of the UFM. For example: "ws0"
     platform: str
@@ -80,7 +82,7 @@ class PointingConfig:
         Either the tube name as a string or the tube number as an int.
     """
     fp_file: str
-    ot_file: str
+    rx_file: str
     wafer_slot: str
     platform: str
     zemax_path: Optional[str] = None
@@ -110,8 +112,8 @@ class PointingConfig:
             self.tel_type, self.wafer_slot, self.fp_file
         )
 
-        self.ot_pars = optics.get_fp_to_ot_pars(
-            self.tube_slot, self.ot_file)
+        self.rx_pars = optics.get_fp_to_rx_pars(
+            self.tube_slot, self.rx_file)
 
     def get_pointing(self, x, y, pol=0):
         if self.tel_type.upper() == 'SAT':
@@ -125,7 +127,7 @@ class PointingConfig:
                 tube_slot=self.tube_slot,
                 wafer_slot=self.wafer_slot,
                 ufm_to_fp_pars=self.fp_pars,
-                fp_to_ot_pars=self.ot_pars,
+                fp_to_rx_pars=self.rx_pars,
             )
         elif self.tel_type.upper() == 'LAT':
             xi, eta, gamma = optics.get_focal_plane(
@@ -138,7 +140,7 @@ class PointingConfig:
                 tube_slot=self.tube_slot,
                 wafer_slot=self.wafer_slot,
                 ufm_to_fp_pars=self.fp_pars,
-                fp_to_ot_pars=self.ot_pars,
+                fp_to_rx_pars=self.rx_pars,
                 zemax_path=self.zemax_path,
             )
         return xi, eta, gamma
