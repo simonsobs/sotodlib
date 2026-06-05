@@ -142,6 +142,7 @@ class FocalPlane:
     avg_fp: NDArray[np.floating]  # (ndim, ndet)
     weights: NDArray[np.floating]  # (ndet,)
     det_boresight: NDArray[np.floating] # (ndim, ndet)
+    xe_fit_err: NDArray[np.floating] # (ndim, ndet)
     transformed: NDArray[np.floating]  # (ndet, ndim)
     center: NDArray[np.floating]  # (1, ndim)
     center_transformed: NDArray[np.floating]  # (1, ndim)
@@ -221,6 +222,7 @@ class FocalPlane:
         avg_fp = np.full_like(template.fp, np.nan)
         weight = np.zeros((len(template.det_ids), 2))
         det_boresight = np.zeros((len(template.det_ids), 3)) + np.nan # az, el, roll
+        xe_fit_err = np.zeros((len(template.det_ids), 2)) + np.nan #xi_err, eta_err #for SATs
         transformed = template.fp.copy()
         center = template.center.copy()
         center_transformed = template.center.copy()
@@ -235,6 +237,7 @@ class FocalPlane:
             avg_fp,
             weight,
             det_boresight,
+            xe_fit_err,
             transformed,
             center,
             center_transformed,
@@ -262,10 +265,16 @@ class FocalPlane:
         srt = np.argsort(aman.det_info.det_id[msk])
         xi = aman.pointing.xi[msk][srt][mapping]
         eta = aman.pointing.eta[msk][srt][mapping]
+        xi_err = np.nan + np.zeros_like(xi)
+        eta_err = np.nan + np.zeros_like(eta)
         r2 = np.nan + np.zeros_like(eta)
         az = np.deg2rad(aman.obs_info.az_center) * np.ones_like(eta)
         el = np.deg2rad(aman.obs_info.el_center) * np.ones_like(eta)
         roll = np.deg2rad(aman.obs_info.roll_center) * np.ones_like(eta)
+        if "xi_err" in aman.pointing:
+            xi_err = aman.pointing.xi_err[msk][srt][mapping] #Probably only true for SAT
+        if "eta_err" in aman.pointing:
+            eta_err = aman.pointing.eta_err[msk][srt][mapping] #Probably only true for SAT
         if "R2" in aman.pointing:
             r2 = aman.pointing.R2[msk][srt][mapping]
         if "az" in aman.pointing:
@@ -283,15 +292,17 @@ class FocalPlane:
             gamma = np.full(len(xi), np.nan)
         fp = np.column_stack((xi, eta, gamma))
         det_boresight = np.column_stack((az, el, roll))
-        return fp, r2, det_boresight, template_msk
+        xe_fit_err = np.column_stack((xi_err, eta_err))
+        return fp, r2, det_boresight, xe_fit_err, template_msk
 
-    def add_fp(self, i, fp, weights, det_boresight, template_msk):
-        if self.full_fp is None or self.tot_weight is None or self.det_boresight is None:
-            raise ValueError("full_fp or tot_weight or det_boresight not initialized")
+    def add_fp(self, i, fp, weights, det_boresight, xe_fit_err, template_msk):
+        if self.full_fp is None or self.tot_weight is None or self.det_boresight is None or self.xe_fit_err is None:
+            raise ValueError("full_fp or tot_weight or det_boresight or xe_fit_err not initialized")
         self.full_fp[template_msk, :, i] = fp * weights[:, 0][..., None]
         weights = np.nan_to_num(weights)
         self.tot_weight[template_msk] += weights
         self.det_boresight[template_msk, :] = det_boresight
+        self.xe_fit_err[template_msk, :] = xe_fit_err
 
     def save(self, f, db_info, group):
         logger.info("Saving %s", self.stream_id)
@@ -340,6 +351,8 @@ class FocalPlane:
             ("az", np.float32),
             ("el", np.float32),
             ("roll", np.float32),
+            ("xi_err", np.float32),
+            ("eta_err", np.float32),
             ("n_point", np.int8),
             ("n_gamma", np.int8),
         ]
@@ -351,6 +364,7 @@ class FocalPlane:
                 *(self.avg_fp.T),
                 *(self.weights.T),
                 *(self.det_boresight.T),
+                *(self.xe_fit_err.T),
                 self.n_point,
                 self.n_gamma,
             ),
@@ -404,6 +418,12 @@ class FocalPlane:
                 np.array(fp_full["roll"]),
             )
         )
+        xe_fit_err = np.column_stack(
+            (
+                np.array(fp_full["xi_err"]),
+                np.array(fp_full["eta_err"]),
+            )
+        )
         # For backwards compatibility
         weights = np.array(fp_full["weights"])
         if "r2" in fp_full.keys:
@@ -451,6 +471,7 @@ class FocalPlane:
             avg_fp,
             np.array(weights),
             det_boresight,
+            xe_fit_err,
             transformed,
             center,
             center_transformed,

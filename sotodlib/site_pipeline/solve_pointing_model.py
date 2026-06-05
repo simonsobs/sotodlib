@@ -97,9 +97,9 @@ def load_per_obs_data(config, t0, tf):
 
     return filelist, obs_ufm_centers, weights_ufm, nom_ufm_centers, obs_index, ot_list, ancil, roll_c
 
-def load_nom_focal_plane_full(config, t0, ufm):
+def load_nom_focal_plane_full(config, fpt_timestamp, ufm):
     which_template = config.get("use_as_template", "ffp")
-    t0 = str(t0)
+    fpt_timestamp = str(fpt_timestamp)
     if which_template == "nominal":
         ffp_path = config.get("nominal")
         with h5py.File(ffp_path, "r") as template_fp:
@@ -112,7 +112,7 @@ def load_nom_focal_plane_full(config, t0, ufm):
     elif which_template == "ffp":
         ffp_path = config.get("ffp_path")
         with h5py.File(ffp_path, "r") as template_fp:
-            OT = template_fp[t0]["st1"]
+            OT = template_fp[fpt_timestamp]["st1"]
             fpf = np.array(OT[ufm]["focal_plane_full"][:])
             # Extracting specific columns using structured arrays
             det_ids = fpf[
@@ -152,9 +152,10 @@ def _create_culling_mask(obs_index, cull_dets):
     return culling_mask 
 
     
-def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=False):
+def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, return_all_dets=False):
     per_obs_fps = config.get("per_obs_fps")
     skip_tags = config.get("skip_tags", [])
+    ufm_list = [ufm.split("_")[1] for ufm in config.get('ufms')]
     rxs = fpc.Receiver.load_file(per_obs_fps)
     which_data = config.get("use_as_data")
     which_weights = config.get("use_as_weights", None)
@@ -182,7 +183,7 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
         if config.get("use_these_files") is not None:
             filelist = [filelist[i] for i in config.get("use_these_files")]
 
-    obs_dets_fits, det_boresight, weights_dets, stream_id_list, ot_list, obs_index = [], [], [], [], [], []
+    obs_dets_fits, det_boresight, weights_dets, tot_xe_err, stream_id_list, ot_list, obs_index = [], [], [], [], [], [], []
     for i, ffp in enumerate(filelist):
         obs_info = ctx.obsdb.get(ffp)
         this_OT = rxs[ffp].optics_tubes[0]
@@ -192,6 +193,15 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
             stream_id_list.append(ufm.stream_id)
             weights = ufm.weights[:, 1] if which_weights == "r2" else ufm.weights[:, 0]
             weights_dets.append(weights)
+            try:
+                xe_fit_err = getattr(ufm, "xe_fit_err")
+                xi_err = xe_fit_err.T[0]
+                eta_err = xe_fit_err.T[1]
+                tot_xe = (xi_err ** 2 + eta_err ** 2) ** 0.5 / DEG * 3600 #arcsec
+            except AttributeError as e:
+                print("Focal Plane object has no attribute \'xe_fit_err\'. Will apply default zeros.")
+                tot_xe = np.zeros_like(weights)
+            tot_xe_err.append(tot_xe)               
             data = ufm.avg_fp if which_data == "raw" else ufm.transformed
             obs_dets_fits.append(data)
             obs_index.append(np.repeat(i, len(ufm.weights)))
@@ -208,20 +218,29 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
             det_pointing[:,2] = np.ones(np.shape(data)[0]) * obs_info["roll_center"]
             det_boresight.append(det_pointing)
             
-    nom_data = [load_nom_focal_plane_full(config, t0, s) for s in stream_id_list]
+    nom_data = [load_nom_focal_plane_full(config, fpt_timestamp, s) for s in stream_id_list]
     all_det_ids, all_nom_det_array = map(np.concatenate, zip(*nom_data))
     weights_dets = np.concatenate(weights_dets)
+    tot_xe_err = np.concatenate(tot_xe_err)
     obs_dets_fits = np.concatenate(obs_dets_fits, axis=0)
     det_boresight = np.concatenate(det_boresight, axis=0)
     obs_index = np.concatenate(obs_index)
     ot_list = np.concatenate(ot_list)
 
-    #Order: [data fits, detector boresight, weights, nominal, ids, index]
-    data_group = [obs_dets_fits, det_boresight, weights_dets, all_nom_det_array, all_det_ids, obs_index, ot_list]
-
+    #Order: [data fits, detector boresight, weights,
+    #        nominal, xe_err, detids, ot_list, obs_index]
+    #obs_index needs to be last or change index on culling/sizing masks below.
+    # det_ids also needs to be 5th, or change index on ds_det_ids below
+    data_group = [obs_dets_fits, det_boresight, weights_dets,
+                  all_nom_det_array, tot_xe_err, all_det_ids, 
+                  ot_list, obs_index] #obs_index needs to be last.
+    
     weights_dets[weights_dets < config.get("weight_cutoff")] = 0.0
     obs_dets_fits[np.where(weights_dets == 0)] = np.nan
-    mask = ~np.isnan(weights_dets)  
+    #tot_xe_err[tot_xe_err > config.get("xe_fit_max_cutoff", 12)] = 1000
+    obs_dets_fits[np.where(tot_xe_err > config.get("xe_fit_max_cutoff", 12))] = np.nan
+    #mask = ~np.isnan(weights_dets)  
+    mask = ~np.isnan(obs_dets_fits[:,0]) 
     if not no_downsample:
         # Reduce detector counts for computation
         if band is not None:
@@ -240,10 +259,16 @@ def load_per_detector_data(config, t0, tf, no_downsample=False, return_all_dets=
         # Only apply weights mask, (Used for plotting)
         data_group = [arr[mask] for arr in data_group]
 
-    return (filelist, *data_group)
+    #create arrays of det ufm ids and wafer numbers after applying masks
+    #Eliminates issues with NO_MATCH readout-ids.
+    ds_det_ids = data_group[5]
+    det_ufm = np.array([d.decode('utf-8').split('_')[0].lower() for d in ds_det_ids])
+    det_wafer = np.array([ufm_list.index(d) for d in det_ufm])
+    
+    return (filelist, *data_group, det_ufm, det_wafer)
 
 
-def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_all_dets=False):
+def build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample=False, return_all_dets=False):
     aman = core.AxisManager(core.IndexAxis("samps"))
     obs_info = core.AxisManager()
     obs_info.wrap("platform", config.get("platform"))
@@ -289,10 +314,13 @@ def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_
             det_boresight,
             weights_dets,
             all_nom_det_array,
+            tot_xe_err,
             all_det_ids,
-            obs_index,
             ot_list,
-        ) = load_per_detector_data(config, t0, tf, no_downsample, return_all_dets)
+            obs_index,
+            det_ufm,
+            det_wafer,
+        ) = load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample, return_all_dets)
         ancil = core.AxisManager(core.IndexAxis("samps"))
         ancil.wrap("az_enc", det_boresight[:,0], [(0, "samps")])
         ancil.wrap("el_enc", det_boresight[:,1], [(0, "samps")])
@@ -315,10 +343,15 @@ def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_
             [(0, core.LabelAxis("xietagamma", ["xi", "eta", "gamma"])),
             (1, "samps")],
         )
+        aman.wrap("radial", np.sqrt(aman.nominal_xieta_locs[0] ** 2 
+                                    + aman.nominal_xieta_locs[1] ** 2) / DEG,[(0, "samps")])
+        aman.wrap("det_ufm", det_ufm, [(0, "samps")])
+        aman.wrap("det_wafer", det_wafer, [(0, "samps")]) 
         aman.wrap("weights", weights_dets, [(0, "samps")])
         aman.wrap("det_ids", all_det_ids,  [(0, "samps")])
         aman.wrap("obs_index", obs_index, [(0, "samps")])
         aman.wrap("ot_list", ot_list, [(0, "samps")])
+        aman.wrap("tot_xe_err", tot_xe_err, [(0, "samps")])
 
         return aman
 
@@ -326,6 +359,7 @@ def build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_
 def _init_fit_params(config, epochs):
     pm_version = config.get("pm_version")
     initial_params = config.get("initial_params", {})
+    bounds_config = config.get("param_bounds", {})
     fixed_params = config.get("fixed_params",[])
     float_ots = config.get("float_ots", False)
     init_params = pm.param_defaults[pm_version]
@@ -369,7 +403,14 @@ def _init_fit_params(config, epochs):
     # Initialize lmfit Parameter object
     fit_params = Parameters()
     for p in init_params.keys():
-        fit_params.add(p, value=init_params[p], vary=True)
+        p_min, p_max = -np.inf, np.inf #Default limits
+        for bound_key in sorted(bounds_config.keys(), key=len, reverse=True):
+            if p == bound_key or p.startswith(bound_key + "_"):
+                p_min, p_max = bounds_config[bound_key]
+                p_min = float(p_min) if isinstance(p_min, str) else p_min
+                p_max = float(p_max) if isinstance(p_max, str) else p_max
+                break
+        fit_params.add(p, value=init_params[p], vary=True, min=p_min, max=p_max)
     # Turn off various parameters depending on platform
     for fix in fixed_params:
         if fix in fit_params:
@@ -551,17 +592,16 @@ def get_full_correlation_matrix(lmfit_result, epoch_params):
     return full_corr_mat, param_names
 
     
-def analyze_PM_with_all_dets(config, t0, tf, params):
-    full_aman = build_data_aman(config, t0, tf, per_det = True, no_downsample=False, return_all_dets=True)
+def analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, params):
+    full_aman = build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample=False, return_all_dets=True)
     ufm_list = [ufm.split("_")[1] for ufm in config.get('ufms')]
-    xi_nom, eta_nom = full_aman.nominal_xieta_locs[0], full_aman.nominal_xieta_locs[1]
-    full_aman.wrap("radial", np.sqrt(xi_nom ** 2 + eta_nom ** 2) / DEG, [(0, "samps")])
-    #np.sqrt(full_aman.nominal_xieta_locs[0]**2 + full_aman.nominal_xieta_locs[1]**2)/DEG,
-    det_ufms = np.array([d.decode('utf-8').split('_')[0].lower() for d in full_aman.det_ids])
-    full_aman.wrap("det_ufm", det_ufms, [(0, "samps")])
-    full_aman.wrap("det_wafer", 
-                   np.array([ufm_list.index(d) for d in det_ufms]),
-                   [(0, "samps")])
+    #xi_nom, eta_nom = full_aman.nominal_xieta_locs[0], full_aman.nominal_xieta_locs[1]
+    #full_aman.wrap("radial", np.sqrt(xi_nom ** 2 + eta_nom ** 2) / DEG, [(0, "samps")])
+    #det_ufms = np.array([d.decode('utf-8').split('_')[0].lower() for d in full_aman.det_ids])
+    #full_aman.wrap("det_ufm", det_ufms, [(0, "samps")])
+    #full_aman.wrap("det_wafer", 
+    #               np.array([ufm_list.index(d) for d in det_ufms]),
+    #               [(0, "samps")])
     # Apply model to data.
     xieta_model = config.get("xieta_model", "measured")
     (full_modeled, full_residuals, rms, _ 
@@ -730,7 +770,7 @@ def main(config_path: str):
         logger.info("Will test initial_parameters against pointing data.")
         for epoch in epochs:
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
-                
+            fpt_timestamp = epoch["fp_template_timestamp"]    
             test_params, epochs = _init_fit_params(config, epochs)
             logger.info("Using these parameters to test pointing: ")
             for p in test_params:
@@ -779,13 +819,14 @@ def main(config_path: str):
 
         for epoch in epochs:
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
+            fpt_timestamp = epoch["fp_template_timestamp"]
             # Make axis manager with full detector set.
             # Keep wafer/band/obs cuts but do not further downsample.
-            fitcheck_aman = build_data_aman(config, t0, tf, per_det = True, no_downsample=True)
+            fitcheck_aman = build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample=True)
             logger.info("Loaded %s fit check data points", len(fitcheck_aman.weights))
 
             #Now make axis manager that has down sampled data for computation
-            solver_aman = build_data_aman(config, t0, tf, per_det = True, no_downsample=False)
+            solver_aman = build_data_aman(config, t0, tf, fpt_timestamp, per_det = True, no_downsample=False)
             logger.info("Loaded %s data points", len(solver_aman.weights))
 
             epoch["solver_aman"] = solver_aman
@@ -798,7 +839,8 @@ def main(config_path: str):
         # Load in focal_plane and boresight data
         for epoch in epochs:
             t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
-            solver_aman = build_data_aman(config, t0, tf, per_det=False)
+            fpt_timestamp = epoch["fp_template_timestamp"]
+            solver_aman = build_data_aman(config, t0, tf, fpt_timestamp, per_det=False)
             logger.info("Loaded per-obs FFP data from %s: ", config.get("per_obs_fps"))
             logger.info("Including data from these obs:")
             logger.info(solver_aman.obs_info.obs_ids)
@@ -896,12 +938,11 @@ def main(config_path: str):
         logger.info(f"2 stdev away from residual Median: {cutoff:.2f} arcmin")
 
         if config.get("make_plots"): 
-            t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
+            fpt_timestamp = epoch["fp_template_timestamp"]
             plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                        config=config,
                                        save_dir=save_dir,
-                                       t0=t0,
-                                       tf=tf,
+                                       fpt_timestamp = fpt_timestamp,
                                        iteration_tag=f"_{epoch['name']}_i1",
                                        save_figure=True,
                                        plotlims=plotlims)
@@ -1060,12 +1101,11 @@ def main(config_path: str):
                 
             if config.get("make_plots"):
                 tag = f"_{epoch['name']}_i2"
-                t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
+                fpt_timestamp = epoch["fp_template_timestamp"]
                 plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                            config=config,
                                            save_dir=save_dir,
-                                           t0=t0,
-                                           tf=tf,
+                                           fpt_timestamp = fpt_timestamp,
                                            iteration_tag=tag,
                                            save_figure=True,
                                            plotlims=plotlims)
@@ -1086,12 +1126,11 @@ def main(config_path: str):
     else:
         if config.get("make_plots"):
             for epoch in epochs:
-                t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
+                fpt_timestamp = epoch["fp_template_timestamp"]
                 plotter = ModelFitsPlotter(solver_aman=epoch["solver_aman"],
                                            config=config,
                                            save_dir=save_dir,
-                                           t0=t0,
-                                           tf=tf,
+                                           fpt_timestamp = fpt_timestamp,
                                            iteration_tag=f"_{epoch["name"]}",
                                            save_figure=True,
                                            plotlims=plotlims)
@@ -1127,7 +1166,7 @@ def main(config_path: str):
     if config.get("make_full_analysis_plots", True):
         for epoch in epochs:
             #Fill up axis manager with ALL the data (only cuts from culling and time stamps remain)
-            t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
+            fpt_timestamp = epoch["fp_template_timestamp"]
             test_params = epoch["solver_aman"].pointing_model
             if "ot_float_aman" in epoch["solver_aman"]._assignments:
                 test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
@@ -1140,8 +1179,7 @@ def main(config_path: str):
             plotter = ModelFitsPlotter(solver_aman=full_aman,
                                        config=config,
                                        save_dir=save_dir,
-                                       t0 = t0,
-                                       tf = tf,
+                                       fpt_timestamp = fpt_timestamp,
                                        iteration_tag=f"_{epoch["name"]}",
                                        save_figure=True,
                                        plotlims=plotlims,
@@ -1160,7 +1198,7 @@ def main(config_path: str):
 ####################
 
 class ModelFitsPlotter:
-    def __init__(self, solver_aman, config, save_dir, t0, tf, iteration_tag="", save_figure=True, plotlims=None):
+    def __init__(self, solver_aman, config, save_dir, fpt_timestamp, iteration_tag="", save_figure=True, plotlims=None):
 
         self.aman = solver_aman
         self.config = config
@@ -1173,8 +1211,7 @@ class ModelFitsPlotter:
         plot_dir = os.path.join(save_dir, "plots")
         os.makedirs(plot_dir, exist_ok=True)
         self.plot_dir = plot_dir
-        self.t0 = t0
-        self.tf = tf
+        self.fpt_timestamp = fpt_timestamp
         self.platform = config.get("platform")
         self.pm_version = config.get("pm_version")
         self.ufms = config.get("ufms")
@@ -1390,6 +1427,25 @@ class ModelFitsPlotter:
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_full_Hist_Residuals{tag}.png", dpi=350) 
             
+    def plot_SAT_wafer_resid_scatter_and_hist(self):
+        platform = self.platform
+        plotlims = self.plotlims
+        plot_dir = self.plot_dir
+        tag = self.tag
+        append = self.append_string
+        config = self.config
+
+        fit_residuals = self.aman.fit_residuals
+        xieta_model = config.get("xieta_model")
+        if xieta_model == "measured":
+            to_comp = "measured_xieta_data"
+        if xieta_model == "template":
+            to_comp = "nominal_xieta_locs"
+
+        
+        
+
+        
     def plot_dets_in_these_obs(self):  
         platform = self.platform
         plot_dir = self.plot_dir
@@ -1447,7 +1503,7 @@ class ModelFitsPlotter:
             ufm_list = self.ufms
         plotmask = np.where(weights)
         nom_array = np.concatenate(
-            [load_nom_focal_plane_full(self.config, self.t0, ufm)[1] for ufm in ufm_list],
+            [load_nom_focal_plane_full(self.config, self.fpt_timestamp, ufm)[1] for ufm in ufm_list],
             axis=0,
         )
         rms = np.round(fit_rms, 4)
@@ -2258,7 +2314,9 @@ class ModelFitsPlotter:
         plt.grid(False) # Grid usually looks messy on masked heatmaps
         if self.save_figure:
             plt.savefig(f"{plot_dir}/{platform}_correlation_matrix{tag}.png", dpi=350)
-            plt.close()        
+            plt.close()    
+
+
 ############
 
 if __name__ == "__main__":

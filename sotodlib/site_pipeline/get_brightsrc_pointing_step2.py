@@ -27,6 +27,8 @@ from sotodlib.preprocess import Pipeline
 from sotodlib.utils.procs_pool import get_exec_env
 from sotodlib.site_pipeline.utils.logging import init_logger as sp_init_logger
 
+DEG = np.pi/180
+
 logger = logging.getLogger("get_brightsrc_pointing_step2")
 if not logger.hasHandlers():
     sp_init_logger("get_brightsrc_pointing_step2")
@@ -100,7 +102,7 @@ def wrap_fp_from_hdf(tod, fp_hdf_file, data_set='focal_plane'):
     return
     
     
-def update_xieta(tod, 
+def update_xieta(tod,
                  sso_name=None,
                  fp_hdf_file=None,
                  force_zero_roll=False,
@@ -113,6 +115,8 @@ def update_xieta(tod,
                  error_estimation_method='force_one_redchi2',
                  flag_name_rms_calc = 'source',
                  flag_rms_calc_exclusive = True, 
+                 result_dir = None,
+                 make_plots = False
                  ):
     """
     Update xieta parameters for each detector by TOD fitting of a point source observation.
@@ -151,6 +155,8 @@ def update_xieta(tod,
         Name of the flag used for RMS calculation. Default is 'source'.
     - flag_rms_calc_exclusive (bool):
         Flag indicating whether the RMS calculation is exclusive to the flag. Default is True.
+    - result_dir (str): result directory to store test plot folder in.
+    - make_plots (bool): Default is False. Will plot masked region for SSO with TOD. Debugging. If N_dets > 10, will not plot.
 
     Returns:
     - focal_plane (ResultSet): ResultSet containing updated xieta parameters for each detector.
@@ -180,9 +186,11 @@ def update_xieta(tod,
         tod.flags.move('source', None)
     coords.planets.compute_source_flags(tod, 
                                         center_on=sso_name,
-                                        max_pix=1e10, 
+                                        max_pix=1e10,
+                                        res= 5 / 60 / 180 * np.pi, #arcmin
                                         wrap='source', 
                                         mask={'shape':'circle', 'xyr':[0.,0.,mask_deg]})
+
 
     # restrict data to duration when at least one detector hit the source
     summed_flag = np.sum(tod.flags['source'].mask()[~xieta_isnan], axis=0).astype('bool')
@@ -212,14 +220,18 @@ def update_xieta(tod,
     q_bore_roll = quat.rotation_iso(0, 0, np.median(tod.boresight.roll))
     sig_ds = tod.signal[:, mask_ds]
     source_flags_ds = tod.flags['source'].mask()[:, mask_ds]
+
+    plot_dir = os.path.join(result_dir, 'tod_plots')
+    os.makedirs(plot_dir, exist_ok=True)
     
     # fit each detector data
     xieta_dict = {}
-    for di, det in enumerate(tqdm(tod.dets.vals)):
+    for di, det in enumerate(tod.dets.vals):
         mask_di = source_flags_ds[di]
-        bs_az = np.nanmedian(tod.boresight.az[mask_ds][mask_di])
-        bs_el = np.nanmedian(tod.boresight.el[mask_ds][mask_di])
-        bs_roll = np.nanmedian(tod.boresight.roll[mask_ds][mask_di])
+        #take a weighted average, a little more robust than the median for when the mask is off center.
+        bs_az = np.nansum(tod.boresight.az[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
+        bs_el = np.nansum(tod.boresight.el[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
+        bs_roll = np.nansum(tod.boresight.roll[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
         
         if np.any([xieta_isnan[di], np.all(mask_di==False), tod.rms[di]==0.]):
             xieta_dict[det] = {'xi': np.nan, 'eta':  np.nan, 'xi_err': np.nan, 'eta_err': np.nan,
@@ -265,7 +277,6 @@ def update_xieta(tod,
                 redchi2 = chi2 / (np.prod(xieta_src.shape) - popt.shape[0])
                 R2 = 1. - np.sum((fit_func(xieta_src, *popt) - sig)**2) / np.sum((sig - sig.mean())**2)
                 xi_opt, eta_opt = popt[0], popt[1]
-
                 if error_estimation_method == 'rms_from_data':
                     xi_err, eta_err = np.sqrt(pcov[0,0]), np.sqrt(pcov[1,1])                
                 elif error_estimation_method == 'force_one_redchi2':
@@ -273,6 +284,41 @@ def update_xieta(tod,
                     # as the reduced chi-square is equal to unity.
                     xi_err, eta_err = np.sqrt(pcov[0,0] * redchi2), np.sqrt(pcov[1,1] * redchi2)
                     redchi2 = 1.
+                    if make_plots & di < 15:
+                        plt.figure()
+                        plt.plot(ts_ds - ts_ds[0], sig_ds[di],'k,',linewidth=0.8)
+                        plt.plot(ts - ts_ds[0], sig, '.c',alpha=0.2)
+                        plt.plot(ts - ts_ds[0], fit_func(xieta_src, *popt), '-',
+                                label = f"redchi2:{redchi2:.3f} \n R2: {R2:.3f}\n init xi,eta: ({xieta_det[0]/DEG*60:.3f},{xieta_det[1]/DEG*60:.3f}) \n new xi, eta:({(xieta_det[0]+xi_opt)/DEG*60:.3f}, {(xieta_det[1]+eta_opt)/DEG*60:.3f}) \n Az, El ({bs_az/DEG:.4f},{bs_el/DEG:.4f})")
+                        plt.title(f"(xierr, etaerr) = ({xi_err/DEG*60*60:.3f}, {eta_err/DEG*60*60:.3f})")
+                        plotmin = np.min(np.where(mask_di)) * ds_factor / 200.
+                        plotmax = np.max(np.where(mask_di)) * ds_factor / 200.
+                        plt.xlim(plotmin - 100, plotmax + 100)
+                        #plt.xlim(1000,1400)
+                        plt.legend()
+                        plt.savefig(os.path.join(plot_dir, f"{det}.png"))
+                        plt.close()
+
+                        plt.figure()
+                        plt.plot(ts_ds - ts_ds[0], tod.boresight.az[mask_ds]/DEG,'k,',linewidth=0.8)
+                        plt.plot(ts - ts_ds[0], tod.boresight.az[mask_ds][mask_di]/DEG,'r.',linewidth=0.8)
+                        plt.axhline(np.nansum(tod.boresight.az[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])/DEG,
+                                    0,1, color='k')
+                        plt.savefig(os.path.join(plot_dir, f"Az_{det}.png"))
+                        plt.close()
+
+                        plt.figure()
+                        plt.plot(tod.boresight.az[mask_ds]/DEG, sig_ds[di],'k,',
+                                 linestyle='-',linewidth=0.5,alpha=0.4)
+                        peaktime = ts[np.argmax(sig)]
+                        plt.scatter(tod.boresight.az[mask_ds][mask_di]/DEG,
+                                    sig,
+                                    c = ts, vmin= peaktime - 8*60, vmax=peaktime+8*60,
+                                    cmap='jet', marker='.', lw=0,alpha=0.6)
+                        plt.xlim(np.min(tod.boresight.az[mask_ds][mask_di]/DEG)-4,
+                                 np.max(tod.boresight.az[mask_ds][mask_di]/DEG)+4)
+                        plt.savefig(os.path.join(plot_dir, f"SigVsAz_{det}.png"))
+                        plt.close()
                 else:
                     raise NameError("Unsupported name for 'error_estimation_method'")
 
@@ -314,6 +360,7 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
     force_zero_roll = configs.get('force_zero_roll', True)
     if force_zero_roll:
         result_dir = result_dir + '_force_zero_roll'
+    os.makedirs(result_dir, exist_ok=True)
     
     # get sso_name if it is not specified
     if sso_name is None:
@@ -342,7 +389,6 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
     flag_name_rms_calc = configs.get('flag_name_rms_calc', 'source')
     flag_rms_calc_exclusive = configs.get('flag_rms_calc_exclusive', True)
     
-     
     # Load data
     logger.info('loading data')
     meta = ctx.get_meta(obs_id, dets={'wafer_slot': wafer_slot})
@@ -351,8 +397,7 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
             restrict_dets_for_debug = int(restrict_dets_for_debug)
             meta.restrict('dets', meta.dets.vals[:restrict_dets_for_debug])
         except ValueError:
-            _testdets = restrict_dets_for_debug.split(',')
-            restrict_list = [det.split('\'')[1].strip() for det in _testdets]
+            restrict_list = [det for det in restrict_dets_for_debug.split(',')]
             meta.restrict('dets', restrict_list)
             
     tod = ctx.get_obs(meta)
@@ -371,9 +416,10 @@ def main_one_wafer(configs, obs_id, wafer_slot, sso_name=None,
                                      error_estimation_method=error_estimation_method,
                                      flag_name_rms_calc = flag_name_rms_calc,
                                      flag_rms_calc_exclusive = flag_rms_calc_exclusive, 
-                                     )
-    
-    os.makedirs(result_dir, exist_ok=True)
+                                     result_dir = result_dir,
+                                     make_plots = configs.get("make_masked_TOD_plots", False),
+                                   )
+
     write_dataset(focal_plane_rset, 
                   filename=os.path.join(result_dir, f'focal_plane_{obs_id}_{wafer_slot}.hdf'),
                   address='focal_plane',
@@ -526,7 +572,7 @@ def main_one_obs(configs, obs_id, sso_name=None,
     fp_rset_full_file = os.path.join(os.path.join(result_dir, f'focal_plane_{obs_id}_all.hdf'))
     write_dataset(fp_rset_full, filename=fp_rset_full_file,
                   address='focal_plane', overwrite=True)
-    logger.info(f'ta da! Finsihed with {obs_id}')
+    logger.info(f'ta da! Finished with {obs_id}')
         
 def main(configs, min_ctime=None, max_ctime=None, update_delay=None,
          obs_id=None, wafer_slot=None, sso_name=None, restrict_dets_for_debug=False):
