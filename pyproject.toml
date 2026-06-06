@@ -31,6 +31,7 @@ dependencies = [
   "flacarray>=0.3.4",
   "h5py",
   "mapcat",
+  "opentelemetry",
 ]
 dynamic=["version"]
 classifiers = [

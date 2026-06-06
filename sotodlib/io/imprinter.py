@@ -32,6 +32,9 @@ from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.utils.logging import init_logger
 
+from opentelemetry import trace
+
+tracer = trace.get_tracer("sotodlib")
 
 ####################
 # useful constants #
@@ -1756,25 +1759,48 @@ class Imprinter:
         if self.librarian is None:
             self._librarian_connect()
         
-        assert book.status == BOUND, "cannot upload unbound books"
+        with tracer.start_as_current_span("librarian_upload", attributes={
+            "book.bid": book.bid,
+            "book.type": book.type,
+            "book.status": book.status,
+            "librarian.host": self.librarian.host,
+        }) as span:
+            self.logger.info(f"Uploading book {book.bid} to librarian")
+            try:     
+                assert book.status == BOUND, "cannot upload unbound books"
 
-        self.logger.info(f"Uploading book {book.bid} to librarian")
-        try:     
-            self.librarian.upload(
-                Path( self.get_book_abs_path(book) ), 
-                Path( book.path ), 
-            )
-            book.status = UPLOADED
-            session.commit()
-        except Exception as e:
-            self.logger.error(
-                f"Failed to upload book {book.bid}."
-            )
-            if raise_on_error:
-                raise e
-            else:
-                return False, e
-        return True, None
+                local_path = Path(self.get_book_abs_path(book))
+                dest_path = Path(book.path)
+
+                span.set_attributes(
+                    {
+                        "book.local_path": str(local_path),
+                        "librarian.dest_path": str(dest_path),
+                    }
+                )
+
+                self.librarian.upload(
+                    local_path, 
+                    dest_path, 
+                )
+
+                book.status = UPLOADED
+                session.commit()
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to upload book {book.bid}."
+                )
+                span.record_exception(e)
+                span.set_status(trace.Status(trace.StatusCode.ERROR))
+
+                if raise_on_error:
+                    raise e
+                else:
+                    return False, e
+                
+            span.set_status(trace.Status(trace.StatusCode.OK))
+
+            return True, None
             
     def check_book_in_librarian(
         self, 
