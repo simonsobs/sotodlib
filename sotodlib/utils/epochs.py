@@ -2,11 +2,23 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import reduce
-from operator import add, and_, mul, or_
+import operator
 from typing import Any, Literal, Optional, Self, cast, overload
+import numpy as np
 
 import yaml
 from deepdiff import DeepDiff
+
+OP_MAP = {
+    "|": operator.or_,
+    "&": operator.and_,
+    "*": operator.mul,
+    "+": operator.add,
+    "/": operator.truediv,
+    "-": operator.sub,
+    "**": operator.pow,
+    "@": operator.matmul,
+}
 
 
 @dataclass
@@ -19,14 +31,14 @@ class Interval:
     Two `Interval` instances can be combined with the following operators,
     all operators are functionally addition but with differing checks:
 
-    * `|`: Intervals must be overlapping, but data and tags can differ
-    * `&`: Allow gaps between intervals, but data and tags can differ
-    * `*`: Invervals must be overlapping, data must be the same but tags can differ
-    * `+`: Allow gaps between intervals, data must be the same but tags can differ
-    * `/`: Invervals must be overlapping, data can differ but tags must be the same
-    * `-`: Allow gaps between intervals, data can differ but tags must be the same
-    * `**`: Allow gaps between invervals, data and tags must be the same
-    * `@`: Allow gaps between intervals, data and tags must be the same
+    * `|`: Intervals must overlap; data and tags may differ.
+    * `&`: Gaps are allowed; data and tags may differ.
+    * `*`: Intervals must overlap; data must be identical, but tags may differ.
+    * `+`: Gaps are allowed; data must be identical, but tags may differ.
+    * `/`: Intervals must overlap; tags must be identical, but data may differ.
+    * `-`: Gaps are allowed; tags must be identical, but data may differ.
+    * `**`: Intervals must overlap; data and tags must both be identical.
+    * `@`: Gaps are allowed; data and tags must both be identical.
 
     In cases where `data` is not the same but the `Invervals` are combined,
     the new `data` will keep values from the right hand `Inverval` for overlapping keys.
@@ -128,10 +140,10 @@ class Interval:
     def __iadd__(self, tocombine) -> Self:
         return self.combine(tocombine, True, True, True, False)
 
-    def __div__(self, tocombine) -> Self:
+    def __truediv__(self, tocombine) -> Self:
         return self.combine(tocombine, False, False, False, True)
 
-    def __idiv__(self, tocombine) -> Self:
+    def __itruediv__(self, tocombine) -> Self:
         return self.combine(tocombine, True, False, False, True)
 
     def __sub__(self, tocombine) -> Self:
@@ -141,10 +153,10 @@ class Interval:
         return self.combine(tocombine, True, True, False, True)
 
     def __pow__(self, tocombine) -> Self:
-        return self.combine(tocombine, False, False, False, True)
+        return self.combine(tocombine, False, False, True, True)
 
     def __ipow__(self, tocombine) -> Self:
-        return self.combine(tocombine, True, False, False, True)
+        return self.combine(tocombine, True, False, True, True)
 
     def __matmul__(self, tocombine) -> Self:
         return self.combine(tocombine, False, True, True, True)
@@ -165,23 +177,24 @@ class Epoch:
         Name for this epoch.
     era_name : str
         Name of the era that this epoch belongs to.
-    covers: tuple[Interval]
+    covers : tuple[Interval]
         Collections of overlapping `Invervals` that make up an `Epoch`.
-    strict : bool
-        If `True` than in addition to being overlapping the `Intervals` must
-        also contain the same data.
+    operator : str
+        The operator to use when constructing the interal combined `_interval`.
+        This acts as a check on strictness, so choose the operator most appropraite to
+        checking what your requirements are.
     """
 
     name: str
     era_name: str
     covers: tuple[Interval, ...]
-    strict: bool
+    operator: str
     _internal: Interval = field(init=False)
 
     def __post_init__(self):
-        self._internal = cast(
-            Interval, reduce(mul if self.strict else or_, self.covers)
-        )
+        if self.operator not in OP_MAP:
+            raise ValueError(f"Invalid operator: {self.operator}")
+        self._internal = cast(Interval, reduce(OP_MAP[self.operator], self.covers))
 
     def __repr__(self) -> str:
         return (
@@ -189,7 +202,7 @@ class Epoch:
             + "("
             + ",".join([str(ival) for ival in self.covers])
             + ")"
-            + ("*" * self.strict)
+            + (self.operator)
         )
 
     def __setattr__(self, name, value):
@@ -219,13 +232,15 @@ class Epoch:
         if field not in self._internal.data:
             return False
         if strict:
-            tester = self if self.strict else deepcopy(self)
+            tester = deepcopy(self)
             try:
-                tester.strict = True
+                tester.operator = "+"
             except ValueError:
                 return False
             return True
-        return cast(bool, reduce(and_, [field in ival.data for ival in self.covers]))
+        return cast(
+            bool, reduce(OP_MAP["&"], [field in ival.data for ival in self.covers])
+        )
 
 
 @dataclass
@@ -240,20 +255,22 @@ class Era:
         Name for this era.
     epochs : tuple[Epoch]
         Collections of non-overlapping `Epochs` that make up an `Era`.
-    strict : bool
-        If `True` than in addition to being non-overlapping the `Epochs` must
-        also contain the same data.
+    operator : str
+        The operator to use when constructing the interal combined `_interval`.
+        This acts as a check on strictness, so choose the operator most appropraite to
+        checking what your requirements are.
     """
 
     name: str
     epochs: tuple[Epoch, ...]
-    strict: bool
+    operator: str
     _internal: Interval = field(init=False)
 
     def __post_init__(self):
+        if self.operator not in OP_MAP:
+            raise ValueError(f"Invalid operator: {self.operator}")
         self._internal = cast(
-            Interval,
-            reduce(add if self.strict else and_, [e._internal for e in self.epochs]),
+            Interval, reduce(OP_MAP[self.operator], [e._internal for e in self.epochs])
         )
 
     def __setattr__(self, name, value):
@@ -276,7 +293,8 @@ class Era:
 
         """
         return cast(
-            bool, reduce(and_, [e.check_data(field, strict) for e in self.epochs])
+            bool,
+            reduce(OP_MAP["&"], [e.check_data(field, strict) for e in self.epochs]),
         )
 
 
@@ -567,11 +585,11 @@ class Calendar:
         # Load epochs
         epoch_dict = {}
         for ename, era in eras.items():
-            strict_era = era.get("strict_era", False)
-            strict_epoch = era.get("strict_epochs", True)
+            era_op = era.get("era_op", "&")
+            epoch_op = era.get("epoch_op", "&")
             epochs = []
             for name, ec in era.items():
-                if name in ["strict_era", "strict_epochs"]:
+                if name in ["epoch_op", "era_op"]:
                     continue
                 covers = []
                 for cname in ec.get("covers", []):
@@ -597,15 +615,24 @@ class Calendar:
                         interval_dict[str(ival)] = ival
                         covers += [ival[slc]]
                     # Case 2: we are refering to a previously defined epoch
-                    if iname in epoch_dict: 
+                    if iname in epoch_dict:
                         # In this case we want to add the intervals that this epoch covers
                         # But no need to add this to the interval dict
                         for ival in epoch_dict[iname].covers:
-                            islc = slice(max(slc.start, ival.start), min(slc.stop, ival.stop))
+                            islc = slice(
+                                max(
+                                    slc.start if slc.start is not None else -1 * np.inf,
+                                    ival.start,
+                                ),
+                                min(
+                                    slc.stop if slc.stop is not None else np.inf,
+                                    ival.stop,
+                                ),
+                            )
                             covers += [ival[islc]]
-                epoch = Epoch(name, ename, tuple(covers), strict=strict_epoch)
+                epoch = Epoch(name, ename, tuple(covers), operator=epoch_op)
                 epochs += [epoch]
                 epoch_dict[f"{ename}.{name}"] = epoch
-            eras[ename] = Era(ename, tuple(epochs), strict_era)
+            eras[ename] = Era(ename, tuple(epochs), era_op)
 
         return cls(interval_dict, epoch_dict, eras, data, [])
