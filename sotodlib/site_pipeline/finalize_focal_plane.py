@@ -249,6 +249,8 @@ def _load_ctx(config):
             continue
         if aman.obs_info.tube_slot == "stp1":
             aman.obs_info.tube_slot = "st1"
+        if aman.obs_info.tube_slot == "o6":
+            continue
         if "det_info" not in aman:
             raise ValueError(f"No det_info in {obs_id}")
         if "wafer" not in aman.det_info and dm_name in aman:
@@ -399,7 +401,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
         "tube_slot": tube_slot,
         "wafer_slot": wafer_slot,
         "config_path": config_path,
-        "ot_config_path": config_path,
+        "ot_config_path": ot_config_path,
         "zemax_path": zemax_path,
         "return_fp": False,
     }
@@ -622,6 +624,7 @@ def main():
         raise ValueError("No stream_ids found!")
     if np.any(ot_sids[:, 0] != ot_sids[0][0]):
         raise ValueError("Not all AxisManagers agree on telescope!")
+    logger.info("%d obs loaded", len(amans))
 
     weight_factor = config.get("weight_factor", 1000)
     min_points = config.get("min_points", 50)
