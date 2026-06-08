@@ -558,7 +558,7 @@ class G3tSmurf:
         ## files must be updated in sequencial order. otherwise we may end up
         ## with more TuneSets than are necessary
         for i,f in tqdm(enumerate(sorted(files)), disable=(not show_pb)):
-            if i>0 and np.mod(i,25)==0:
+            if (i % 25) == 0:
                 logger.info(f"Have indexed {i} of {len(files)} files.")
             try:
                 self.add_file(os.path.join(root, f), session)
