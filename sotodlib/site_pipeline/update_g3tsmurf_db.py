@@ -20,6 +20,7 @@ from sotodlib.io.datapkg_utils import load_configs
 def core(
     config: Optional[str] = None, update_delay: float = 2,
     from_scratch: bool = False, verbosity: int = 2,
+    min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
     index_via_actions: bool=False, checked_file: Optional[str]=None, 
 ):
     """
@@ -36,34 +37,56 @@ def core(
     elif verbosity == 3:
         logger.setLevel(logging.DEBUG)
 
+    make_db = False
     if from_scratch:
         logger.info("Building Database from Scratch, May take awhile")
-        min_time = dt.datetime.utcfromtimestamp(int(1.6e9))
+        min_ctime = int(1.6e9)
         make_db = True
-    else:
-        min_time = dt.datetime.now() - dt.timedelta(days=update_delay)
-        make_db = False
+    if min_ctime is None:
+        min_ctime = (dt.datetime.now() - dt.timedelta(days=update_delay)).timestamp()
 
     cfgs = load_configs( config )
     SMURF = G3tSmurf.from_configs(cfgs, make_db=make_db)
 
     updates_start = dt.datetime.now().timestamp()
+    if max_ctime is not None:
+        assert max_ctime > min_ctime, "max_ctime is before min_ctime"
+        ## if we're setting a maximum ctime then we need to be sure we don't 
+        ## believe the database is more updated than that.
+        updates_start = max_ctime
+    
+    ## make sure we don't have a gap between currently finalized time and when we're 
+    ## starting updates now
+    current_time = SMURF.last_update
+    assert min_ctime <= current_time, "min_ctime is higher than current database coverage"
+    logger.info(
+        f"G3tSmurf is updated through {current_time}. Beginning updates"
+        f" from {min_ctime} to {max_ctime}"
+    )
 
     session = SMURF.Session()
-    SMURF.index_metadata(min_ctime=min_time.timestamp(), session=session)
+    SMURF.index_metadata(
+        min_ctime=min_ctime, 
+        max_ctime=max_ctime, 
+        session=session
+    )
+
     logger.info("Starting to index files")
     SMURF.index_archive(
-        min_ctime=min_time.timestamp(),
+        min_ctime=min_ctime,
+        max_ctime=max_ctime,
         show_pb=show_pb,
         session=session
     )
     if index_via_actions:
         SMURF.index_action_observations(
-            min_ctime=min_time.timestamp(),
+            min_ctime=min_ctime,
+            max_ctime=max_ctime,
             session=session
         )
     SMURF.index_timecodes(
-        min_ctime=min_time.timestamp(),
+        min_ctime=min_ctime,
+        max_ctime=max_ctime,
         session=session
     )
     logger.info("Starting Finialization Update")
@@ -73,7 +96,11 @@ def core(
     
     new_obs = session.query(Observations).filter(
         or_(
-            Observations.start >= min_time,
+            ## the replace nonsense is because g3tsmurf is timezone naive. longer
+            ## term thing to deal with.
+            Observations.start >= dt.datetime.fromtimestamp(
+                min_ctime, tz=dt.timezone.utc
+            ).replace(tzinfo=None),
             Observations.start == None,
         )
     ).all()
@@ -130,6 +157,7 @@ def core(
 
 def main(config: Optional[str] = None, update_delay: float = 2,
          from_scratch: bool = False, verbosity: int = 2,
+         min_ctime: Optional[float]=None, max_ctime: Optional[float]=None,
          index_via_actions: bool=False, checked_file: Optional[str]=None,
          profile: bool=False, profile_output: Optional[Path]=None):
     """
@@ -172,6 +200,7 @@ def main(config: Optional[str] = None, update_delay: float = 2,
         core(
             config=config, update_delay=update_delay, from_scratch=from_scratch,
             verbosity=verbosity, index_via_actions=index_via_actions,
+            min_ctime=min_ctime, max_ctime=max_ctime,
             checked_file=checked_file
         )
     finally:
@@ -197,6 +226,14 @@ def get_parser(parser=None):
                         action="store_true")
     parser.add_argument("--checked-file",
         help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
+    parser.add_argument("--min_ctime",
+        help="minimum ctime to start search, overrides time set by update-delay",
+        default=None, type=int
+    )
+    parser.add_argument("--max_ctime",
+        help="maximum ctime to search, otherwise searches through 'now'",
+        default=None, type=int
+    )
     parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
     parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set", 
                         type=Path)
