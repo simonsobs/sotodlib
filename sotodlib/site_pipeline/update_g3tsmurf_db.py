@@ -80,7 +80,14 @@ def core(
 
     raise_list_timing = []
     raise_list_readout_ids = []
-    logger.info(f"Updating {len(new_obs)} incomplete observations")
+    
+    obs_to_edit = [
+        obs for obs in new_obs
+        if obs.stop is None or len(obs.tunesets) == 0
+    ]
+    logger.info(f"Updating {len(obs_to_edit)} incomplete observations")
+
+    ## still loop over new_obs to check others for timing
     for obs in new_obs:
         if obs.stop is None or len(obs.tunesets)==0:
             SMURF.update_observation_files(
