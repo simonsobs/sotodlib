@@ -1363,6 +1363,8 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
         #axes[i_y,i_x].errorbar(f,fit_result['fit_amp']['lpf'][i_det].data,fit_result['fit_amp']['lpf'][i_det].weights,fmt='o')
         axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].data,'o')# No errorbar for first step analysis
         axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].best_fit, '-', color='red',zorder=3,label=fr'$\tau$= {fit_result['fit_amp']['lpf'][i_det].best_values['tau']*1e3:.2f}ms')
+        axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*1.1,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3,label=fr'$\pm 10\%$ change of $\tau$')
+        axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*0.9,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3)
         axes[i_y,i_x].set_xlabel('Chopping freq [Hz]')
         axes[i_y,i_x].set_ylabel('sin_theta amplitude [pW]')
         axes[i_y,i_x].set_title('Amplitude fit')
@@ -1485,31 +1487,36 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
 
 
         for filt_key in fit_result[fit_key].keys():
+            def fill_field(field, result, weight_axis):
+                vailed_result = [x for x in result if x is not None]
+                for key in vailed_result[0].params.keys():
+                    arr = np.array([float(x.params[key].value) if x is not None else np.nan for x in result])
+                    field.wrap(key, arr, [(0,'dets')], overwrite=True)
+                    arr = np.array([x.params[key].stderr if x is not None else np.nan for x in result])
+                    arr = np.array([float(x.params[key].stderr) if x is not None and x.params[key].stderr is not None else np.nan for x in result])
+                    field.wrap(f'{key}_stderr', arr, [(0,'dets')], overwrite=True)
+                    arr = np.array([float(x.chisqr) if x is not None else np.nan for x in result])
+                    field.wrap(f'chisqr', arr, [(0,'dets')], overwrite=True)
+                    arr = np.array([float(x.redchi) if x is not None else np.nan for x in result])
+                    field.wrap(f'redchi', arr, [(0,'dets')], overwrite=True)
+                    if weight_axis == 'bins':# Because we don't use weight for time-constant fit for the first step analysis
+                        arr = np.array([x.weights if x is not None else np.full(field._axes[weight_axis].count, np.nan) for x in result])
+                        arr = arr.astype(float)
+                        field.wrap(f'weights', arr, [(0,'dets'), (1,weight_axis)], overwrite=True)
+
             if fit_key == 'fit_coadd':
                 for freq_key in fit_result[fit_key][filt_key].keys():
                     field = aman.stm_ana.fit_coadd[filt_key][freq_key]
                     result = fit_result[fit_key][filt_key][freq_key]
                     weight_axis = 'bins'
+
+                    fill_field(field, result, weight_axis)
             else:
                 field = aman.stm_ana[fit_key][filt_key]
                 result = fit_result[fit_key][filt_key]
                 weight_axis = 'ndata_taufit'
+                fill_field(field, result, weight_axis)
 
-            vailed_result = [x for x in result if x is not None]
-            for key in vailed_result[0].params.keys():
-                arr = np.array([float(x.params[key].value) if x is not None else np.nan for x in result])
-                field.wrap(key, arr, [(0,'dets')], overwrite=True)
-                arr = np.array([x.params[key].stderr if x is not None else np.nan for x in result])
-                arr = np.array([float(x.params[key].stderr) if x is not None and x.params[key].stderr is not None else np.nan for x in result])
-                field.wrap(f'{key}_stderr', arr, [(0,'dets')], overwrite=True)
-                arr = np.array([float(x.chisqr) if x is not None else np.nan for x in result])
-                field.wrap(f'chisqr', arr, [(0,'dets')], overwrite=True)
-                arr = np.array([float(x.redchi) if x is not None else np.nan for x in result])
-                field.wrap(f'redchi', arr, [(0,'dets')], overwrite=True)
-                if weight_axis == 'bins':# Because we don't use weight for time-constant fit for the first step analysis
-                    arr = np.array([x.weights if x is not None else np.full(field._axes[weight_axis].count, np.nan) for x in result])
-                    arr = arr.astype(float)
-                    field.wrap(f'weights', arr, [(0,'dets'), (1,weight_axis)], overwrite=True)
 
     # Fill result to aman.det_cal
     if 'det_cal' not in aman.keys():
