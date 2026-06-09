@@ -31,6 +31,8 @@ def main(
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
     use_monitor: bool = False,
+    delay_warning: Optional[float] = None, 
+    delay_error: Optional[float] = None,
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
@@ -63,6 +65,11 @@ def main(
     use_monitor : bool
         if True, will send monitor information to influx, set to false by
         default so we can use identical config files for development
+    delay_warning: float, optional
+        if max_ctime - SMURF.final time > delay_warning: print warning about stale databases. Additionally, for any incomplete observations (obs), if max_ctime - obs.timestamp > delay_warning: look to see if a new stream has been started for obs.stream_id and force completion of the earlier obs.
+    delay_error: float, optional
+        if max_ctime - SMURF.final time > delay_error: raise an error about stale 
+        databases. Additionally, for any incomplete observations (obs), if max_ctime - obs.timestamp > delay_error: raise error about incomplete obseravtions.
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
@@ -89,7 +96,9 @@ def main(
         min_ctime=min_ctime, max_ctime=max_ctime,
         ignore_singles=False,
         stream_ids=stream_ids,
-        force_single_stream=force_single_stream
+        force_single_stream=force_single_stream,
+        delay_warning=delay_warning, 
+        delay_error=delay_error,
     )
 
     ## over-ride timecode book making if specific values given
@@ -223,6 +232,16 @@ def get_parser(parser=None):
         '--update-delay', type=float, 
         help="Days to subtract from now to set as minimum ctime",
         default=1
+    )
+    parser.add_argument(
+        '--delay_warning', type=float, 
+        help="Hours before incomplete observation fixes and database warnings are issued",
+        default=3,
+    )
+    parser.add_argument(
+        '--delay_error', type=float, 
+        help="Hours before incomplete observation fixes and database errors are issued",
+        default=6,
     )
     parser.add_argument(
         '--from-scratch', help="Builds or updates database from scratch",
