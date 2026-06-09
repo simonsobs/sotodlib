@@ -31,8 +31,8 @@ def main(
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
     use_monitor: bool = False,
-    delay_warning: float = 3, 
-    delay_error: float = 6,
+    delay_warning: Optional[float] = None, 
+    delay_error: Optional[float] = None,
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
@@ -66,16 +66,10 @@ def main(
         if True, will send monitor information to influx, set to false by
         default so we can use identical config files for development
     delay_warning: float, optional
-        if max_ctime - SMURF.final time > delay_warning: print warning about stale 
-        databases. Additionally, for any incomplete observations (obs), if max_ctime - 
-        obs.timestamp > delay_warning: look to see if a new stream has been started for 
-        obs.stream_id and force completion of the earlier obs.
-        delay_warning is specified in hours.
+        if max_ctime - SMURF.final time > delay_warning: print warning about stale databases. Additionally, for any incomplete observations (obs), if max_ctime - obs.timestamp > delay_warning: look to see if a new stream has been started for obs.stream_id and force completion of the earlier obs.
     delay_error: float, optional
         if max_ctime - SMURF.final time > delay_error: raise an error about stale 
-        databases. Additionally, for any incomplete observations (obs), if max_ctime - 
-        obs.timestamp > delay_error: raise error about incomplete obseravtions.
-        delay_error is specified in hours.
+        databases. Additionally, for any incomplete observations (obs), if max_ctime - obs.timestamp > delay_error: raise error about incomplete obseravtions.
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")

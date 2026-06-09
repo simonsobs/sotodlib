@@ -1221,8 +1221,8 @@ class Imprinter:
         stream_ids=None,
         force_single_stream=False,
         return_obsset=False,
-        delay_warning = 3,
-        delay_error = 6,
+        delay_warning = None,
+        delay_error = None,
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1247,19 +1247,22 @@ class Imprinter:
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
         delay_warning: float, optional
-            if max_ctime - SMURF.final_time > delay_warning: print warning about stale 
+            if max_ctime - SMURF.final time > delay_warning: print warning about stale 
             databases. Additionally, for any incomplete observations (obs), if max_ctime 
             - obs.timestamp > delay_warning: look to see if a new stream has been started 
             for obs.stream_id and force completion of the earlier obs.
-            delay_warning is specified in hours.
         delay_error: float, optional
-            if max_ctime - SMURF.final_time > delay_error: raise an error about stale 
+            if max_ctime - SMURF.final time > delay_error: raise an error about stale 
             databases. Additionally, for any incomplete observations (obs), if max_ctime 
             - obs.timestamp > delay_error: raise error about incomplete obseravtions.
-            delay_error is specified in hours.
         """
         if not self.build_det:
             return
+
+        if delay_warning is None:
+            delay_warning = 3
+        if delay_error is None:
+            delay_error = 6
 
         session, SMURF = self.get_g3tsmurf_session(return_archive=True)
         # set sensible ctime range is none is given
