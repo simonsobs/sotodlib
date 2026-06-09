@@ -66,10 +66,14 @@ def main(
         if True, will send monitor information to influx, set to false by
         default so we can use identical config files for development
     delay_warning: float, optional
-        if max_ctime - SMURF.final time > delay_warning: print warning about stale databases. Additionally, for any incomplete observations (obs), if max_ctime - obs.timestamp > delay_warning: look to see if a new stream has been started for obs.stream_id and force completion of the earlier obs.
+        if max_ctime - SMURF.final time > delay_warning: print warning about stale 
+        databases. Additionally, for any incomplete observations (obs), if max_ctime - 
+        obs.timestamp > delay_warning: look to see if a new stream has been started for 
+        obs.stream_id and force completion of the earlier obs.
     delay_error: float, optional
         if max_ctime - SMURF.final time > delay_error: raise an error about stale 
-        databases. Additionally, for any incomplete observations (obs), if max_ctime - obs.timestamp > delay_error: raise error about incomplete obseravtions.
+        databases. Additionally, for any incomplete observations (obs), if max_ctime - 
+        obs.timestamp > delay_error: raise error about incomplete obseravtions.
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
