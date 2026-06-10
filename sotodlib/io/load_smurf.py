@@ -886,6 +886,7 @@ class G3tSmurf:
             session,
             calibration=(status.tags[0] == "oper"),
             session_id=status.session_id,
+            status=status,
         )
 
     def add_new_observation(
@@ -897,6 +898,7 @@ class G3tSmurf:
         calibration,
         session_id=None,
         max_early=5,
+        status=None,
     ):
         """Add new entry to the observation table. Called by the
         index_metadata function.
@@ -916,6 +918,9 @@ class G3tSmurf:
             session id, if known, for timestream files that should go with the observations
         max_early : int (optional)
             Buffer time to allow the g3 file to be earlier than the smurf action
+        status: SmurfStatus (optional)
+            We're often making observations straight from a status object so 
+            this can be used to prevent reloading that status object
         """
 
         if session_id is None:
@@ -952,6 +957,7 @@ class G3tSmurf:
         )
         logger.debug(f"Observations {obs_id} already exists")
 
+        ## if observation does not exist, create one
         if obs is None:
             db_file = session.query(Files)
             db_file = db_file.filter(
@@ -967,7 +973,9 @@ class G3tSmurf:
                     return
             
             # Verify the files we found match with Observation
-            status = SmurfStatus.from_file(db_file.name)
+            if status is None:
+                status = SmurfStatus.from_file(db_file.name)
+            
             if status.action is not None:
                 assert status.action == action_name
                 assert status.action_timestamp == action_ctime
@@ -1003,6 +1011,7 @@ class G3tSmurf:
                 obs,
                 session,
                 max_early=max_early,
+                status=status,
             )
 
     def update_observation_files(
@@ -1012,6 +1021,7 @@ class G3tSmurf:
         max_early=5, 
         force=False, 
         force_stop=False,
+        status=None,
     ):
         """Update existing observation. A separate function to make it easier
         to deal with partial data transfers. See add_new_observation for args
@@ -1030,6 +1040,9 @@ class G3tSmurf:
             of the current file list. Useful for completing observations where
             computer systems crashed/restarted during the observations so no end
             frames were written.
+        status: SmurfStatus (optional)
+            We're often making and updating observations straight from a status object so 
+            this can be used to prevent reloading that status object
         """
 
         if not force and obs.stop is not None:
@@ -1056,7 +1069,10 @@ class G3tSmurf:
         obs.start = flist[0].start
 
         ## Load Status Information
-        status = SmurfStatus.from_file(flist[0].name)
+        if status is None:
+            status = SmurfStatus.from_file(flist[0].name)
+        assert status.session_id == obs.timestamp, "status does not match observation"
+        assert status.stream_id  == obs.stream_id, "status does not match observation"
 
         # Add any tags from the status
         if len(status.tags) > 0:
@@ -1457,7 +1473,7 @@ class G3tSmurf:
                 if len(x) < 1:
                     logger.error(
                         f"No data points before update time for agent "
-                        f"{agent} in file {db_agent.hkfile.filename}?"
+                        f"{agent} in file {db_field.hkfile.filename}?"
                     )
                 max_time = max(data[db_field.field][1][x])
             else:

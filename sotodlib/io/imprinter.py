@@ -1221,7 +1221,8 @@ class Imprinter:
         stream_ids=None,
         force_single_stream=False,
         return_obsset=False,
-        incomplete_timeouts = (3,6),
+        delay_warning = None,
+        delay_error = None,
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1245,14 +1246,24 @@ class Imprinter:
         return_obsset: boolean
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
-        incomplete_timeouts: tuple
-            hours passed for (attempting to complete observation, raising a error) 
-            if incomplete observations are found in the g3tsmurf database. Also used
-            as limits to decide if the g3tsmurf database is stale and raise warnings/
-            errors accordingly.
+        delay_warning: float, optional
+            if max_ctime - SMURF.final time > delay_warning: print warning about stale 
+            databases. Additionally, for any incomplete observations (obs), if max_ctime 
+            - obs.timestamp > delay_warning: look to see if a new stream has been started 
+            for obs.stream_id and force completion of the earlier obs.
+        delay_error: float, optional
+            if max_ctime - SMURF.final time > delay_error: raise an error about stale 
+            databases. Additionally, for any incomplete observations (obs), if max_ctime 
+            - obs.timestamp > delay_error: raise error about incomplete obseravtions.
         """
         if not self.build_det:
             return
+
+        if delay_warning is None:
+            delay_warning = 3
+        if delay_error is None:
+            delay_error = 6
+
         session, SMURF = self.get_g3tsmurf_session(return_archive=True)
         # set sensible ctime range is none is given
         if min_ctime is None:
@@ -1282,15 +1293,15 @@ class Imprinter:
         )
         ## this will catch suprsync drops and hk/g3tsmurf databases not being updated
         if final_time < max_ctime:
-            if max_ctime - final_time > 3600*incomplete_timeouts[1]:
+            if max_ctime - final_time > 3600*delay_error:
                 raise ValueError(
                    f"G3tSMURF + HK databases are stale. Last updates were "
-                    f"more than {incomplete_timeouts[1]} hours in the past."
+                    f"more than {delay_error} hours in the past."
                 )
-            if max_ctime - final_time > 3600*incomplete_timeouts[0]:
+            if max_ctime - final_time > 3600*delay_warning:
                 self.logger.warning(
                     f"G3tSMURF + HK databases are stale. Last updates were "
-                    f"more than {incomplete_timeouts[0]} hours in the past."
+                    f"more than {delay_warning} hours in the past."
                 )
             max_ctime = final_time
 
@@ -1304,10 +1315,10 @@ class Imprinter:
         if q_incomplete.count() > 0:
             incomplete_obs = q_incomplete.all()
             new_ctime = min([obs.timestamp for obs in incomplete_obs])
-            if max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
+            if max_ctime - new_ctime > 3600*delay_warning:
                 self.logger.warning(
                     f"Found {q_incomplete.count()} incomplete observations "
-                    f"more than {incomplete_timeouts[0]} hours in the past."
+                    f"more than {delay_warning} hours in the past."
                     " Will attempt to complete these observations"
                 )
                 self._attempt_incomplete_fix(incomplete_obs)
@@ -1317,13 +1328,13 @@ class Imprinter:
         # bookbind any observations overlapping the incomplete ones.
         if q_incomplete.count() > 0:
             new_ctime = min([obs.timestamp for obs in q_incomplete.all()])
-            if max_ctime - new_ctime > 3600*incomplete_timeouts[1]:
+            if max_ctime - new_ctime > 3600*delay_error:
                 raise ValueError(
                     f"Found {q_incomplete.count()} incomplete observations. "
                     f"New max ctime would be {new_ctime}. More than "
-                    f"{incomplete_timeouts[1]} hours in the past."
+                    f"{delay_error} hours in the past."
                 )
-            elif max_ctime - new_ctime > 3600*incomplete_timeouts[0]:
+            elif max_ctime - new_ctime > 3600*delay_warning:
                 level = self.logger.warning
             else:
                 level = self.logger.debug
