@@ -382,8 +382,15 @@ class ChannelData:
         resp_times = bsa.resp_times[bg]
         fsample = 1. / np.diff(resp_times).mean()
 
+        dIbias = bsa.dIbias[bg]
+        if dIbias == 0.0:
+            # This case happens in some crazy data!
+            # Take dIbias from other bias groups.
+            # example: bg4 of oper_1780020153_satp1_0001000
+            dIbias = np.median(bsa.dIbias[bsa.dIbias > 0.0])
+
         # Use normalized and offset-subtracted mean_resp
-        mean_resp = bsa.mean_resp[bs_idx] / bsa.dIbias[bg]
+        mean_resp = bsa.mean_resp[bs_idx] / dIbias
         mean_resp -= mean_resp[:bsa.pts_before_step].mean()
 
         return cls(
@@ -830,7 +837,9 @@ def process_aman(cfg: BgmapDelayCfg,
         flag[bad] += 1 << 1
     use = flag == 0
     if cfg.analysis.sc_amp_thresh is not None:
-        ramp = amp / np.nanmedian(amp[use])
+        rough_amp_thresh = max(cfg.analysis.sc_amp_thresh, 0.2)
+        bad = np.abs(amp - 1.0) > rough_amp_thresh
+        ramp = amp / np.nanmedian(amp[use * (~bad)])
         bad = (flag==0) * (np.abs(ramp - 1.0) > cfg.analysis.sc_amp_thresh)
         flag[bad] += 1 << 2
     use = flag == 0
@@ -843,6 +852,8 @@ def process_aman(cfg: BgmapDelayCfg,
     # Drop isolated channel
     x = np.round(sample0[use] - offset)
     for _ in range(3):
+        if np.sum(use) < 3:
+            break
         ok = np.hstack([
             x[1] == x[0],
             (x[1:-1] == x[:-2]) + (x[1:-1] == x[2:]),
@@ -850,17 +861,18 @@ def process_aman(cfg: BgmapDelayCfg,
         if ok.all():
             break
         use[use] = ok
-        if not use.any():
-            break
         x = np.round(sample0[use] - offset)
     bad = (flag==0) * (~use)
     flag[bad] += 1 << 4
-    channel_delay = np.round(np.interp(idx, idx[use], x)) / fsample
+    if not use.any():
+        channel_delay = np.full(ndets, np.nan)
+    else:
+        channel_delay = np.round(np.interp(idx, idx[use], x)) / fsample
 
     # Sort back to dets
     flag = flag[sort_in_dets]
     channel_delay = channel_delay[sort_in_dets]
-    
+
     # Put into aman
     aman.wrap('model', main_model)
     aman['mean_delay'][:] = offset / fsample
