@@ -15,19 +15,24 @@ CHOPPING_FREQS = {'f1':6, 'f2':15,'f3':33,'f4':63,'f5':93,'f6':123,'f7':147}
 
 
 def get_ufm_list(type):
-    # Getting UFM names in LATR
-    #
-    # type: 'SO' or 'ASO', which means before or after ASO deployment on 2026 Jan, respectively.
+    """
+    Get UFM names in LATR.
+    
+    Args:
+        type: 'SO' or 'ASO', which means before or after ASO deployment on 2026 Jan, respectively.
 
+    Return:
+        List of UFM names.
+    """
     if type == 'SO':
-        list_ufm = ['Uv38','Uv39','Uv46',
+        ufm_list = ['Uv38','Uv39','Uv46',
                     'Uv31','Uv42','Uv47',
                     'Mv21','Mv24','Mv28',
                     'Mv13','Mv20','Mv34',
                     'Mv14','Mv32','Mv49',
                     'Mv25','Mv26','Mv11']
     elif type == 'ASO':
-        list_ufm = ['Uv54','Uv58','Uv60',
+        ufm_list = ['Uv54','Uv58','Uv60',
                     'Uv57','Uv59','Uv62',
                     'Mv29','Mv68','Mv73',
                     'Mv65','Mv67','Mv75',
@@ -37,17 +42,22 @@ def get_ufm_list(type):
     else:
         raise ValueError("Invalid type. Please specify either 'SO' or 'ASO'.")
 
-    return list_ufm
+    return ufm_list
 
 
-def get_obs_list(ufm,ctx,timestamp_min,timestamp_max):
-    # Getting obs_list for stimulator during specified time range
-    # 
-    # ufm: ufm name
-    # ctx: context file
-    # timestamp_min: Minimum timestamp
-    # timestamp_max: Maximum timestamp
+def get_obs_list(ufm, ctx, timestamp_min, timestamp_max):
+    """
+    Get obs_list for stimulator during specified time range.
+    
+    Args:
+        ufm: ufm name
+        ctx: context file
+        timestamp_min: Minimum timestamp
+        timestamp_max: Maximum timestamp
 
+    Return:
+        List of observation id during specified time range.
+    """
     ufm = ufm.lower()
     ot = get_ot(ufm)
     downsample_factor_tag = get_downsample_factor_tags(ctx)
@@ -64,9 +74,15 @@ def get_obs_list(ufm,ctx,timestamp_min,timestamp_max):
 
 
 def get_ot(ufm):
-    # Getting Optics tube name
-    # ufm: ufm name
+    """
+    Get Optics tube name.
+    
+    Args:
+        ufm: ufm name
 
+    Return:
+        Optics tube name
+    """
     ufm = ufm.lower()
     
     if ufm in ['uv38','uv39','uv46']:
@@ -101,15 +117,21 @@ def get_ot(ufm):
     return ot
 
 
-def get_meta(ufm,ctx,obs_id,bool_restrict=True):
-    # Getting meta data for specified UFM and obs_id
-    #
-    # ufm: ufm name
-    # ctx: context file
-    # obs_id: observation ID
-    # bool_restrict: If True, enable custom restriction.
-    #                UFM restriction will be applyied regardress this specification.
+def get_meta(ufm, ctx, obs_id, bool_restrict=True):
+    """
+    Get metadata for the specified UFM and observation.
+    
+    UFM restriction is applied regardless of this specification.
+    
+    Args:
+        ufm: UFM name.
+        ctx: Context file.
+        obs_id: Observation ID.
+        bool_restrict: If True, enable custom restriction.
 
+    Return:
+        Metadata for the specified UFM and observation.
+    """
     ufm = ufm.lower()
     
     #meta = ctx.get_meta(obs_id)
@@ -124,13 +146,18 @@ def get_meta(ufm,ctx,obs_id,bool_restrict=True):
 
 
 def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
-    # Getting hk data for one axis manager data
-    #
-    # hkdb_cfg: HK data base config
-    # aman: Axis manager of detector data
-    # t_start: Start time of hk data. If None, use aman's start time.
-    # t_end: End time of hk data. If None, use aman's end time.
+    """
+    Get housekeeping data for one axis manager.
+    
+    Args:
+        hkdb_cfg: HK database config.
+        aman: Axis manager of detector data.
+        t_start: Start time of HK data. If None, use aman's start time.
+        t_end: End time of HK data. If None, use aman's end time.
 
+    Return:
+        Housekeeping data.
+    """
     feed_list = ['stimulator-blh.motor.*',
                  'stimulator-ds378.relay.*',
                  'stimulator-enc.stim_enc.*',
@@ -157,11 +184,14 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     return result
     
 
-def get_downsample_factor(aman,ctx):
-    # Getting downsample factor of SMuRF readout for the axis manager data
-    # aman: Axis manager of detector data
-    # ctx: context file
-
+def get_downsample_factor(aman, ctx):
+    """
+    Get downsample factor of SMuRF readout for the axis manager data.
+    
+    Args:
+        aman: Axis manager of detector data
+        ctx: context file
+    """
     downsample_factor_tag = get_downsample_factor_tags(ctx)
 
     obs_list = ctx.obsdb.query(
@@ -179,9 +209,15 @@ def get_downsample_factor(aman,ctx):
 
 
 def get_downsample_factor_tags(ctx):
-    # Getting downsample factor of SMuRF readout
-    # ctx: context file
+    """
+    Get downsample factor of SMuRF readout.
+    
+    Args:
+        ctx: context file
 
+    Return:
+        List of downsample factor tags in the database.
+    """
     cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
     all_tags = np.array([row[0] for row in cursor.fetchall()])
     mask = np.char.find(all_tags,'downsample') != -1
@@ -189,13 +225,22 @@ def get_downsample_factor_tags(ctx):
     return np.array(all_tags)[mask].tolist()
     
 
-def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preprocess=True,output_dir=None):
-    # aman: axis manager of tod data, including timestamps and raw signal
-    # hkdata: hkdata for aman
-    # idxs: list of detector index for calculation. If None, all detectors are calculated.
-    # bool_plot: If true, makes plot.
-    # bool_save: If true, save plot
+def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_preprocess=True, output_dir=None):
+    """
+    Calculate the gain of the detectors.
+    
+    Args:
+        aman: Axis manager of TOD data, including timestamps and raw signal.
+        hkdata: HK data for aman.
+        idxs: List of detector indices for calculation. If None, all detectors are calculated.
+        bool_plot: If true, make plots.
+        bool_save: If true, save plots.
+        bool_preprocess: If True, perform preprocessing before calculation.
+        output_dir: Directory to save plots.
 
+    Return:
+        bool: True if data is valid and calculation is performed, False otherwise.
+    """
     det_mask = np.full(aman.dets.count, False)
     if idxs is None:
         det_mask[:] = True
@@ -204,7 +249,7 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
 
     vailed_data = True
     if bool_preprocess:
-        vailed_data = get_encoder_timing(aman, hkdata)# Get timing against encoder t0
+        vailed_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
 
         get_chopping_status(aman)
 
@@ -299,13 +344,22 @@ def calc_gain(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preproc
 
 
 
-def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool_preprocess=True,output_dir=None):
-    # aman: axis manager of tod data, including timestamps and raw signal
-    # hkdata: hkdata for aman
-    # idxs: list of detector index for calculation. If None, all detectors are calculated.
-    # bool_plot: if true, makes plot.
-    # bool_save: If true, save plot
+def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_preprocess=True, output_dir=None):
+    """
+    Calculate the time constant of the detectors.
+    
+    Args:
+        aman: Axis manager of TOD data, including timestamps and raw signal.
+        hkdata: HK data for aman.
+        idxs: List of detector indices for calculation. If None, all detectors are calculated.
+        bool_plot: If true, make plots.
+        bool_save: If true, save plots.
+        bool_preprocess: If True, perform preprocessing before calculation.
+        output_dir: Directory to save plots.
 
+    Return:
+        bool: True if data is valid and calculation is performed, False otherwise.
+    """
     det_mask = np.full(aman.dets.count, False)
     if idxs is None:
         det_mask[:] = True
@@ -314,7 +368,7 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
 
     vailed_data = True
     if bool_preprocess:
-        vailed_data = get_encoder_timing(aman, hkdata)# Get timing against encoder t0
+        vailed_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
 
         get_chopping_status(aman)
 
@@ -412,7 +466,7 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
                     weights = [fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr if fit_result['fit_coadd'][filt_key][f_key][-1] is not None and fit_result['fit_coadd'][filt_key][f_key][-1].params['a0'].stderr is not None else np.nan for f_key in fit_result['fit_coadd'][filt_key].keys()]
                     weights = np.array(weights)
                     #result = models[fit_key].fit(a0s,params,f=f,weights=weights, method='least_squares')
-                    result = models[fit_key].fit(a0s,params,f=f, method='least_squares')# No weight for first step analysis
+                    result = models[fit_key].fit(a0s,params,f=f, method='least_squares')  # No weight for first step analysis
                 else:
                     if np.isnan(t0s).all():
                         fit_result[fit_key][filt_key].append(None)
@@ -424,12 +478,12 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
                         if fit_result['fit_amp'][filt_key][-1] is not None:
                             params['tau'].set(value=fit_result['fit_amp'][filt_key][-1].best_values['tau'],vary=False)
                             #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
-                            result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+                            result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')  # No weight for first step analysis
                         else:
                             result = None
                     else:
                         #result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, weights=weights, method='least_squares')
-                        result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')# No weight for first step analysis
+                        result = models[fit_key].fit(-np.array(t0s)*360,params,f=f, method='least_squares')  # No weight for first step analysis
                 fit_result[fit_key][filt_key].append(result)
         
         
@@ -452,10 +506,17 @@ def calc_timeconstant(aman,hkdata,idxs=None,bool_plot=False,bool_save=False,bool
     return vailed_data
 
 
-def get_encoder_timing(aman,hkdata):
-    # Get timing against encoder t0 
+def get_encoder_timing(aman, hkdata):
+    """
+    Get timing against encoder start time t0.
     
-    # Get encoder t0 list
+    Args:
+        aman: Axis manager with the detector data.
+        hkdata: The housekeeping data.
+    
+    Returns:
+        bool: True if timing data is valid, False otherwise.
+    """
     state = np.array(hkdata.data['stimulator-enc.stim_enc.state'][1])
     t_enc = np.array(hkdata.data['stimulator-enc.stim_enc.timestamps_tai'][1])[state == 0]-37
     t_hk = np.array(hkdata.data['stimulator-enc.stim_enc.timestamps_tai'][0])[state == 0]
@@ -502,10 +563,12 @@ def get_encoder_timing(aman,hkdata):
 
     
 def get_chopping_status(aman):
-    # Get chopping frequency and timing
-    # aman: axis manager with aman.stm_ana field
-
-    # Get chopping frequency vs time
+    """
+    Get chopping frequency and timing when the chopping speed changes.
+    
+    Args:
+        aman: axis manager with aman.stm_ana field
+    """
     xx0 = aman.stm_ana.t_enc[:-1]
     xx1 = aman.stm_ana.t_enc[1:]
     x = (xx0+xx1)/2 - aman.timestamps[0]
@@ -569,9 +632,16 @@ def get_chopping_status(aman):
     aman.stm_ana.wrap('chopping_freqs',np.array(chopping_freqs),overwrite=True)
 
 
-def get_timing_cut(aman,dt_gain=60,dt_timeconstant=10,dt_wait=9):
-    # Get timing range for analysis
+def get_timing_cut(aman, dt_gain=60, dt_timeconstant=10, dt_wait=9):
+    """
+    Get timing range for analysis.
 
+    Args:
+        aman: axis manager with aman.stm_ana field
+        dt_gain: Time duration for gain analysis.
+        dt_timeconstant: Time duration for time constant analysis from the time when chopping speed changes and dt_wait passed.
+        dt_wait: Waiting time after chopping speed changes to avoid chopper's acceleration time.
+    """
     if len(aman.stm_ana.t_chopping_change)==2:
         cal_type = 'gain'
     elif len(aman.stm_ana.t_chopping_change)>2:
@@ -582,7 +652,7 @@ def get_timing_cut(aman,dt_gain=60,dt_timeconstant=10,dt_wait=9):
 
     t_cuts = []
 
-    t_start = 2+aman.stm_ana.t_chopping_change[0]# 2 seconds to avoid ringing by high-pass filter
+    t_start = 2+aman.stm_ana.t_chopping_change[0]  # 2 seconds to avoid ringing by high-pass filter
     t_end = min(t_start+dt_gain, aman.stm_ana.t_chopping_change[1]) 
     t_cuts.append((t_start,t_end))
 
@@ -590,7 +660,7 @@ def get_timing_cut(aman,dt_gain=60,dt_timeconstant=10,dt_wait=9):
         for i in range(len(aman.stm_ana.t_chopping_change)-1):
             t_start = aman.stm_ana.t_chopping_change[i] + dt_wait
             if i==0:
-                t_start = 2+aman.stm_ana.t_chopping_change[i]# 2 seconds to avoid ringing by high-pass filter
+                t_start = 2+aman.stm_ana.t_chopping_change[i]  # 2 seconds to avoid ringing by high-pass filter
             t_end = min(t_start+dt_timeconstant, aman.stm_ana.t_chopping_change[i+1])
             t_cuts.append((t_start,t_end))
 
@@ -606,7 +676,15 @@ def get_timing_cut(aman,dt_gain=60,dt_timeconstant=10,dt_wait=9):
     aman.stm_ana.wrap('t_cuts',np.array(t_cuts),[(0,'freqs')],overwrite=True)
 
 
-def get_signal_temp(aman,hkdata):
+def get_signal_temp(aman, hkdata):
+    """
+    Get signal temperature for chopping frequency.
+
+    Args:
+        aman: axis manager with aman.stm_ana field
+        hkdata: Housekeeping data including temperature data.
+    """
+
     position_keys = ['heater','chopper_rear','chopper_front','air']
     keys = ['stimulator-thermo.temperatures.Channel_0_T',
             'stimulator-thermo.temperatures.Channel_4_T',
@@ -640,12 +718,16 @@ def get_signal_temp(aman,hkdata):
 
 
 def filtering(aman, chopping_freqs, cal_type):
-    # filtering signal data
-    # aman: axis manager
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-    # chopping_freqs: dictionary of chopping frequencies
+    """
+    Filtering signal data.
+    
+    Args:
+        aman: axis manager
+        cal_type: 'gain' or 'timeconstant'. type of calibration
+        chopping_freqs: dictionary of chopping frequencies
+    """
 
-    # Invert IIR filter 
+    #Invert IIR filter
     iirc_filter = tod_ops.filters.iir_filter(aman, invert=True)
     signal_new = tod_ops.fourier_filter(aman, iirc_filter, signal_name='signal')
     aman.wrap(f'signal_iirc', signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
@@ -678,13 +760,16 @@ def filtering(aman, chopping_freqs, cal_type):
     return filtering_params
 
 
-def filtering__with_delay_filter(aman,filter,signal_name_pre,signal_name_new):
-    # filtering signal data using the filter which has timing delay
-    # aman: axis manager
-    # filter: filter of tod_ops.filters
-    # signal_name_pre: signal name which will be filtered 
-    # signal_name_new: New name for filtered signal
-
+def filtering__with_delay_filter(aman, filter, signal_name_pre, signal_name_new):
+    """
+    Filtering signal data using the filter which has timing delay.
+    
+    Args:
+        aman: axis manager
+        filter: filter of tod_ops.filters
+        signal_name_pre: signal name which will be filtered
+        signal_name_new: New name for filtered signal
+    """
     signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
     signal_new = np.fliplr(signal_new)
     aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
@@ -694,21 +779,31 @@ def filtering__with_delay_filter(aman,filter,signal_name_pre,signal_name_new):
     aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
 
-def filtering__without_delay_filter(aman,filter,signal_name_pre,signal_name_new):
-    # filtering signal data using the filter which doesn't have timing delay
-    # aman: axis manager
-    # filter: filter of tod_ops.filters
-    # signal_name_pre: signal name which will be filtered 
-    # signal_name_new: New name for filtered signal
-
+def filtering__without_delay_filter(aman, filter, signal_name_pre, signal_name_new):
+    """
+    Filtering signal data using the filter which doesn't have timing delay.
+    
+    Args:
+        aman: axis manager
+        filter: filter of tod_ops.filters
+        signal_name_pre: signal name which will be filtered
+        signal_name_new: New name for filtered signal
+    """
     signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
     aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
 
 def get_dicts(cal_type):
-    # Get dictionaries for co-added data and fit result
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
+    """
+    Get dictionaries for co-added data and fit result.
+    
+    Args:
+        cal_type: 'gain' or 'timeconstant'. type of calibration
 
+    Return:
+        coadd_data: Dictionary for co-added data
+        fit_result: Dictionary for fit result
+    """
     filt_keys = ['iirc','hpf','lpf']
 
     coadd_data = {}
@@ -721,8 +816,8 @@ def get_dicts(cal_type):
         freq_keys = CHOPPING_FREQS.keys()
         fit_keys = ['fit_coadd','fit_amp','fit_phase__fix_tau','fit_phase__free']
     else:
-        ValueError(f"'{cal_type}' is a wrong type. Please specify 'gain' or 'timeconstant'.")
-    
+        raise ValueError(f"'{cal_type}' is a wrong type. Please specify 'gain' or 'timeconstant'.")
+
     # Initialize coadd_data dictionary
     for filt_key in filt_keys:
         coadd_data[filt_key] = {}
@@ -750,10 +845,13 @@ def get_dicts(cal_type):
 
 
 def fill_none(coadd_data=None, fit_result=None):
-    # Fill None for co-added data and fit result when there is no valid data for calculation
-    # coadd_data: Dictionary for co-added data 
-    # fit_result: List for fit result
-
+    """
+    Fill None for co-added data and fit result when there is no valid data for calculation.
+    
+    Args:
+        coadd_data: Dictionary for co-added data
+        fit_result: List for fit result
+    """
     if fit_result is not None:
         for fit_key in fit_result.keys():
             for filt_key in fit_result[fit_key].keys():
@@ -770,15 +868,17 @@ def fill_none(coadd_data=None, fit_result=None):
                     coadd_data[filt_key][freq_key][key].append(None)
 
 
-def get_coadd_data(aman,coadd_data,n_bins,det_mask):
-    # Making co-added data
-    # aman: axis manager of tod data, including timestamps and tod signal
-    # coadd_data: Dictionary for co-added data 
-    # n_bins: # of bins for co-added data
-    # t_min: Minimum time for the data analysis
-    # t_max: Maximum time for the data analysis
-
-
+def get_coadd_data(aman, coadd_data, n_bins, det_mask):
+    """
+    Making co-added data.
+    
+    Args:
+        aman: axis manager of tod data, including timestamps and tod signal
+        coadd_data: Dictionary for co-added data
+        n_bins: # of bins for co-added data
+        t_min: Minimum time for the data analysis
+        t_max: Maximum time for the data analysis
+    """
     t0 = aman.timestamps[0]
     bins = np.linspace(0,1-1/n_bins,n_bins)  
     x = bins + 1/n_bins/2
@@ -837,10 +937,16 @@ def get_coadd_data(aman,coadd_data,n_bins,det_mask):
 
 
 def get_fit_params(cal_type):
-    # Get fit parameters for fitting
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
+    """
+    Get fit parameters for fitting.
     
+    Args:
+        cal_type: 'gain' or 'timeconstant'. type of calibration
 
+    Return:
+        model: lmfit model for fitting
+        params_base: lmfit parameters for fitting
+    """
     if cal_type == 'gain':
         model = lmfit.Model(func_sines)
        
@@ -898,11 +1004,18 @@ def get_fit_params(cal_type):
     return model,params_base
 
 
-def func_sines(t,a0,a1,a2,a3,a4,a5,a6,t0,t1,t2,t3,t4,t5,t6):
-    # Define fitting function
-    #
-    # t: time or timing_frac of stimulator signal.
-   
+def func_sines(t, a0, a1, a2, a3, a4, a5, a6, t0, t1, t2, t3, t4, t5, t6):
+    """
+    Define fitting function.
+    
+    Args:
+        t: time or timing_frac of stimulator signal.
+        a0-6: Amplitude of sin function for first to seventh frequency signal
+        t0-6: Timing offset of sin function for first to seventh frequency signal
+    
+    Return:
+        y: Value of fitting function.
+    """
     y = (a0*np.sin(1*(t-t0)*2*np.pi)
          + a1*np.sin(2*(t-t1)*2*np.pi)
          + a2*np.sin(3*(t-t2)*2*np.pi)
@@ -915,44 +1028,67 @@ def func_sines(t,a0,a1,a2,a3,a4,a5,a6,t0,t1,t2,t3,t4,t5,t6):
 
 
 def func_response_amplitude(f, tau, a):
-    # Detector response function of amplitude
-    #
-    # f: Chopping frequency
-    # tau: time constant of a detector in [s]
-    # a: Amplitude of sin function for '0' frequency signal
+    """
+    Detector response function of amplitude.
+    
+    Args:
+        f: Chopping frequency
+        tau: time constant of a detector in [s]
+        a: Amplitude of sin function for '0' frequency signal
 
+    Return:
+        y: Value of fitting function.
+    """
     y = a /np.sqrt(1+(2*np.pi*f*tau)**2)
     return y
 
 
 def func_response_phase(f, tau, theta_geo):
-    # Detector response function of phase
-    #
-    # f: Chopping frequency [Hz]
-    # tau: time constant of a detector in [s]
-    # theta_geo: Offset of phase delay [deg]
-    # theta: Phase delay of stimulator signal [deg]
+    """
+    Detector response function of phase.
+    
+    Args:
+        f: Chopping frequency [Hz]
+        tau: time constant of a detector in [s]
+        theta_geo: Offset of phase delay [deg]
+        theta: Phase delay of stimulator signal [deg]
 
+    Return:
+        theta: Value of fitting function.
+    """
     theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo
     return theta
 
 
 def func_response_phase_with_dt(f, tau, theta_geo, dt):
-    # Detector response function of phase
-    #
-    # f: Chopping frequency [Hz]
-    # tau: time constant of a detector in [s]
-    # theta: Phase delay of stimulator signal [deg]
-    # theta_geo: Offset of phase delay due to hardware effect, geo = geometry [deg]
-    # theta_dt: Offset of phase delay due to readout issue [deg], theta_dt*(pi/180) =  -delta_t*2pi*f
-    # dt: Time difference due to wrong time stamps
+    """
+    Detector response function of phase.
+    
+    Args:
+        f: Chopping frequency [Hz]
+        tau: time constant of a detector in [s]
+        theta: Phase delay of stimulator signal [deg]
+        theta_geo: Offset of phase delay due to hardware effect, geo = geometry [deg]
+        theta_dt: Offset of phase delay due to readout issue [deg], theta_dt*(pi/180) =  -delta_t*2pi*f
+        dt: Time difference due to wrong time stamps
 
+    Return:
+        theta: Value of fitting function.
+    """
     theta_dt = -dt*2*np.pi*f *(180/np.pi)
     theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo + theta_dt
     return theta
 
 
-def plot_hkdata(aman,hkdata,cal_type):
+def plot_hkdata(aman, hkdata, cal_type):
+    """
+    Plot housekeeping data and timing information.
+
+    Args:
+        aman: axis manager with aman.stm_ana field
+        hkdata: Housekeeping data including temperature data and encoder timing data.
+        cal_type: Type of calibration to be performed.
+    """
 
     fig, axes = plt.subplot_mosaic([['A','A'],['B','C'],['D','E']],figsize=(10,8))
 
@@ -1040,13 +1176,16 @@ def plot_hkdata(aman,hkdata,cal_type):
     plt.tight_layout()
 
 
-def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
-    # Make plot for one detector
-    # aman: axis manager
-    # data: co-added data for one detector
-    # result: fit result for one detector
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-
+def plot(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
+    """
+    Make plot for one detector.
+    
+    Args:
+        aman: axis manager
+        data: co-added data for one detector
+        result: fit result for one detector
+        cal_type: 'gain' or 'timeconstant'. type of calibration
+    """
     t0 = aman.timestamps[0]
     ufm = aman.det_info.stream_id[i_det][4:]
     ufm = ufm[0].upper() + ufm[1:]
@@ -1174,7 +1313,7 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
         i_y=1; i_x=0
         f = fit_result['fit_amp']['lpf'][i_det].userkws['f']
         #axes[i_y,i_x].errorbar(f,fit_result['fit_amp']['lpf'][i_det].data,fit_result['fit_amp']['lpf'][i_det].weights,fmt='o')
-        axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].data,'o')# No errorbar for first step analysis
+        axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].data,'o')  # No errorbar for first step analysis
         axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].best_fit, '-', color='red',zorder=3,label=fr'$\tau$= {fit_result['fit_amp']['lpf'][i_det].best_values['tau']*1e3:.2f}ms')
         axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*1.1,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3,label=fr'$\pm 10\%$ change of $\tau$')
         axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*0.9,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3)
@@ -1187,7 +1326,7 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
         result = fit_result['fit_phase__free']['lpf'][i_det]
         f = result.userkws['f']
         #axes[i_y,i_x].errorbar(f,result.data,result.weights,fmt='o')
-        axes[i_y,i_x].plot(f,result.data,'o')# No errorbar for first step analysis
+        axes[i_y,i_x].plot(f,result.data,'o')  # No errorbar for first step analysis
 
         result = fit_result['fit_phase__free']['lpf'][i_det]
         axes[i_y,i_x].plot(f,result.best_fit,'-', color='blue', zorder=3,label=fr'$\tau$={result.best_values['tau']*1e3:.2f}ms, $\theta_\text{{geo}}$={result.best_values['theta_geo']:.0f}deg, $\Delta t$={result.best_values['dt']*1e3:.2f}ms')
@@ -1259,14 +1398,17 @@ def plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type):
     plt.tight_layout()
 
 
-def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
-    # Fill co-added data and fit result to axis manager
-    # aman: axis manager
-    # coadd_data: co-added data 
-    # fit_result: fit result
-    # n_bins: number of bins
-    # cal_type: 'gain' or 'timeconstant'. type of calibration
-
+def fill_data(aman, coadd_data, fit_result, n_bins, cal_type):
+    """
+    Fill co-added data and fit result to axis manager.
+    
+    Args:
+        aman: axis manager
+        coadd_data: co-added data
+        fit_result: fit result
+        n_bins: number of bins
+        cal_type: 'gain' or 'timeconstant'. type of calibration
+    """
     if not 'coadd_data' in aman.stm_ana.keys():
         bins = core.IndexAxis('bins',n_bins)
         aman.stm_ana.wrap('coadd_data',core.AxisManager(aman._axes['dets'],bins))
@@ -1312,7 +1454,7 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
                     field.wrap(f'chisqr', arr, [(0,'dets')], overwrite=True)
                     arr = np.array([float(x.redchi) if x is not None else np.nan for x in result])
                     field.wrap(f'redchi', arr, [(0,'dets')], overwrite=True)
-                    if weight_axis == 'bins':# Because we don't use weight for time-constant fit for the first step analysis
+                    if weight_axis == 'bins':  # Because we don't use weight for time-constant fit for the first step analysis
                         arr = np.array([x.weights if x is not None else np.full(field._axes[weight_axis].count, np.nan) for x in result])
                         arr = arr.astype(float)
                         field.wrap(f'weights', arr, [(0,'dets'), (1,weight_axis)], overwrite=True)
@@ -1347,10 +1489,17 @@ def fill_data(aman,coadd_data,fit_result,n_bins,cal_type):
     if cal_type == 'timeconstant':
         arr = np.array([float(x.best_values['tau']) if x is not None else np.nan for x in fit_result['fit_amp']['lpf']])
         aman.det_cal.wrap(f'stm_tau', arr, [(0,'dets')], overwrite=True)
+        arr = np.array([float(x.best_values['dt']) if x is not None else np.nan for x in fit_result['fit_phase__fix_tau']['lpf']])
+        aman.det_cal.wrap(f'readout_delay', arr, [(0,'dets')], overwrite=True)
 
 # Misc functions
 def s_open(theta):
-    #theta: 0 to pi/8
+    """
+    Calculate the open area of the stimulator chopper for a given angle.
+    
+    Args:
+        theta: Angle in radians, between 0 and pi/8.
+    """
     r1 = 70.5e-3 #Radius for chopper. chopper center to optical pipe center
     r2 = 43e-3/2 #Radius of optical pipe
     theta_1 = np.arcsin(r2/r1) #Angle at the border
@@ -1365,8 +1514,18 @@ def s_open(theta):
         return 'error'
 
 
-def stm_signal_raytrace(temp_heater,temp_blackbody,theta):
-    #theta: 0 to pi/4, signal of half cycle
+def stm_signal_raytrace(temp_heater, temp_blackbody, theta):
+    """
+    Calculate the stimulator signal using ray tracing.
+    
+    Args:
+        temp_heater: Temperature of the heater.
+        temp_blackbody: Temperature of the blackbody.
+        theta: Angle of the signal, 0 to pi/4 for a half cycle.
+    
+    Returns:
+        float: The calculated signal.
+    """
     r2 = 43e-3/2 #Radius of optical pipe
     
     if theta < np.pi/8:
@@ -1377,13 +1536,20 @@ def stm_signal_raytrace(temp_heater,temp_blackbody,theta):
     return s_open(theta_tmp)/(np.pi*r2**2) * (temp_heater - temp_blackbody) + temp_blackbody
 
 
-def func_opening(frac_timing,a,c,timing0):
-    #frac_timing: list,0 to 1
-    #timing0: 0 to 1
-    #a: amplitude
-    #c: offset
-
-    theta_list = (frac_timing-timing0) * np.pi/2#1 cycle = pi/2
+def func_opening(frac_timing, a, c, timing0):
+    """
+    Calculate the opening area of the stimulator as a function of timing.
+    
+    Args:
+        frac_timing: Fractional timing values between 0 and 1.
+        a: Amplitude.
+        c: Offset.
+        timing0: Timing offset between 0 and 1.
+    
+    Returns:
+        numpy.ndarray: The calculated opening area.
+    """
+    theta_list = (frac_timing-timing0) * np.pi/2  #1 cycle = pi/2
     
     y = [] 
 
