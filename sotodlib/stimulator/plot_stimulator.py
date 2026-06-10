@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from sotodlib.stimulator.fit_func import func_response_amplitude
+from sotodlib.stimulator.utils_stimulator import func_sines, func_response_amplitude, func_response_phase, func_response_phase_with_dt  
 
 
 def plot_hkdata(aman, hkdata, cal_type):
