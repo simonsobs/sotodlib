@@ -126,7 +126,7 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
 
         get_signal_temp(aman,hkdata)
 
-    if bool_plot==True:
+    if bool_plot:
         plot_hkdata(aman,hkdata,cal_type='gain')
    
     if not vailed_data:
@@ -198,7 +198,7 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
         else: 
             plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='gain')
             
-            if bool_save == True:
+            if bool_save:
                 obs_id = aman.obs_info.obs_id
                 if output_dir is not None:
                     output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
@@ -247,7 +247,7 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
 
         get_signal_temp(aman,hkdata)
 
-    if bool_plot==True:
+    if bool_plot:
         plot_hkdata(aman,hkdata,cal_type='timeconstant')
     if not vailed_data:
         return vailed_data
@@ -362,7 +362,7 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
             plot(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='timeconstant')
 
             obs_id = aman['obs_info']['obs_id']
-            if bool_save==True:
+            if bool_save:
                 output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
                 output_dir_.mkdir(parents=True, exist_ok=True)
                 plt.savefig(f'{output_dir_}/Tau_det{i_det:04d}.png')
