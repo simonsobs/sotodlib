@@ -853,7 +853,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         processing simulations (e.g. to provide a T2P template)
     interpol: str
         Optional. The sub-pixel interpolation to use in from_map
- 
+
     Returns
     -------
     aman : core.AxisManager or None
