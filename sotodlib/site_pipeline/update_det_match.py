@@ -245,7 +245,9 @@ def get_failed_detsets(cache_file):
 def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
     stream_id = aman.det_info.stream_id[aman.det_info.detset == detset][0]
 
-    rs0 = det_match.ResSet.from_aman(aman, stream_id)
+    ignore_north_south = True if wafer_slot == "ws." else False
+
+    rs0 = det_match.ResSet.from_aman(aman, stream_id, ignore_north_south=ignore_north_south)
     rs0.name = 'meas'
 
     rs1 = load_solution_set(runner, stream_id, wafer_slot=wafer_slot)
@@ -261,6 +263,7 @@ def run_match_aman(runner: Runner, aman, detset, wafer_slot=None):
         match_pars.freq_offset_mhz = opt_freq
     match = det_match.Match(rs0, rs1, match_pars=match_pars, 
                      apply_dst_pointing=runner.cfg.apply_solution_pointing)
+
     return match
 
 def run_match(runner: Runner, detset: str) -> bool:
@@ -314,23 +317,8 @@ def run_match(runner: Runner, detset: str) -> bool:
         logger.info(f"    - {ds}")
 
     for ds in new_detsets:
-
         stream_id = aman.det_info.stream_id[aman.det_info.detset == ds][0]
-        # Try to get wafer slot info from book idx
-        if 'wafer_slots' in book_idx:
-            for ws in book_idx['wafer_slots']:  
-                if ws['stream_id'] == stream_id:
-                    wafer_slot = ws['wafer_slot']
-                    break
-            else:
-                logger.error(
-                    f"Could not find wafer_slot from book index for ds={detset}, "
-                    f"obs_id={obs_id}"
-                )
-                raise Exception("Could not find wafer-slot")
-        else:
-            wafer_slot = None
-
+        wafer_slot = aman.det_info.wafer_slot[aman.det_info.detset == ds][0]
         match = run_match_aman(runner, aman, ds, wafer_slot=wafer_slot)
         fpath = os.path.join(runner.match_dir, f"{ds}.h5")
         match.save(fpath)
