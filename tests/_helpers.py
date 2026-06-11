@@ -77,12 +77,14 @@ def create_outdir(subdir=None, mpicomm=None):
     if rank == 0:
         pwd = os.path.abspath(".")
         testdir = os.path.join(pwd, "sotodlib_test_output")
+        if not os.path.isdir(testdir):
+            os.mkdir(testdir)
         retdir = testdir
         if subdir is not None:
             retdir = os.path.join(testdir, subdir)
-        if not os.path.isdir(testdir):
-            os.mkdir(testdir)
-        if not os.path.isdir(retdir):
+            if os.path.isdir(retdir):
+                # Clear any stale contents
+                shutil.rmtree(retdir)
             os.mkdir(retdir)
     if mpicomm is not None:
         retdir = mpicomm.bcast(retdir, root=0)
