@@ -1,7 +1,7 @@
 """update_mapviewer_dbs.py
 
 This module maintains databases for mapviewer instances that show atomic/depth-1 maps
-per instrument. 
+per instrument.
 
 """
 
@@ -13,6 +13,7 @@ import datetime
 import tempfile
 from pathlib import Path
 import argparse
+from sotodlib.core.metadata import sqlite_connect
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 
@@ -167,17 +168,17 @@ def query_database(db_path: Path, cutoff_days: int):
   """
 
   try:
-    conn = sqlite3.connect(db_path, timeout=30)
+    conn = sqlite_connect(filename=db_path, mode="r")
     conn.row_factory = sqlite3.Row
     cursor = conn.execute(sql, (cutoff_seconds,))
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
-  
+
   except sqlite3.Error as exc:
     raise AtomicDBQueryError(
         f"Query to {db_path} failed: {exc}"
     ) from exc
-  
+
   finally:
     if conn is not None:
       conn.close()
@@ -205,7 +206,7 @@ def generate_sat_map_groups(instrument_name: str, instrument_db_path: Path, cuto
 
     if (map_group is None):
       map_groups[row_data["ctime"]] = create_map_group(row_data)
-    
+
     existing_map = None
     for map_obj in map_groups[row_data["ctime"]]["maps"]:
       if (map_obj["name"] == row_data["wafer"]):
@@ -283,7 +284,7 @@ def main(mapviewer_dbs_root_path: str, instrument_db_paths: list[str], cutoff_da
     if instrument_db_paths is None:
        logger.info("Missing instrument-db-paths required to update mapviewer dbs. Exiting update.")
        return
-    
+
     logger.info("Updating mapviewer dbs")
 
     # Convert string paths to Path objects
@@ -296,7 +297,7 @@ def main(mapviewer_dbs_root_path: str, instrument_db_paths: list[str], cutoff_da
     for instrument_db_path in instrument_db_path_objects:
         # Try to determine the instrument name and, if not recognized, skip
         instrument_name = get_instrument_name(instrument_db_path)
-        
+
         if (instrument_name is None):
            logger.warning("Instrument name not recognized from the instrument_db_path '" + instrument_db_path + "'. Exiting update for this path.")
            continue
@@ -311,7 +312,7 @@ def main(mapviewer_dbs_root_path: str, instrument_db_paths: list[str], cutoff_da
         # a. If db exists, delete any map groups that are older than a day
         # ------------------------------------------------------------------------------
         if instrument_mapviewer_db_path.exists():
-            conn = sqlite3.connect(instrument_mapviewer_db_path)
+            conn = sqlite_connect(filename=instrument_mapviewer_db_path, mode="w")
             try:
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("""

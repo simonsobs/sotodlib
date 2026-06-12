@@ -3,7 +3,6 @@
 
 import copy
 import re
-import sqlite3
 import yaml
 from datetime import datetime, timezone
 
@@ -33,6 +32,7 @@ import so3g
 
 from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
+from ...core.metadata import sqlite_connect
 
 from ..instrument import SOSite
 from ..hkmanager import HKManager
@@ -459,7 +459,7 @@ class LoadContext(Operator):
             if (preproc_conf is not None) and (not self.ignore_preprocess_archive):
                 preproc_lookup = dict()
                 preproc_db = preproc_conf["archive"]["index"]
-                con = sqlite3.connect(preproc_db)
+                con = sqlite_connect(filename=preproc_db, mode="r")
                 cur = con.cursor()
                 res = cur.execute('select "obs:obs_id","dets:wafer_slot" from map')
                 for row in res.fetchall():

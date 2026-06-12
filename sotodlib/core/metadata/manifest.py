@@ -41,7 +41,6 @@ The ManifestScheme includes:
 """
 
 from __future__ import annotations
-import sqlite3
 import os
 import sys
 import json
@@ -266,7 +265,7 @@ class ManifestScheme:
         unassigned = list(params.keys())
         for col in self.cols:
             (name, purpose, match, dtype) = col
-            if not name in params:
+            if name not in params:
                 raise ValueError('Parameter %s is not optional.' % name)
             unassigned.remove(name)
             if match == 'exact':
@@ -294,7 +293,7 @@ class ManifestScheme:
         unassigned = [k for k in params.keys() if k not in '_id']
         for col in self.cols:
             (name, purpose, match, dtype) = col
-            if not name in params:
+            if name not in params:
                 continue
             unassigned.remove(name)
             if match == 'exact':
@@ -316,7 +315,7 @@ class ManifestScheme:
         return [c[0] for c in self.cols if c[1] == 'in']
 
 
-class ManifestDb:
+class ManifestDb(common.DBObject):
     """
     Expose a map from Index Data to Endpoint Data, including a
     filename.
@@ -335,20 +334,19 @@ class ManifestDb:
         """
         if scheme is not None and readonly:
             raise ValueError("Cannot initialize the schema of a read-only DB")
-        self._readonly = readonly
-        if isinstance(map_file, sqlite3.Connection):
-            self.conn = map_file
-        else:
-            if map_file is None:
-                map_file = ':memory:'
-            self.conn = common.sqlite_connect(
-                filename=map_file,
-                mode=("r" if readonly else "w"),
-            )
-        self.conn.row_factory = sqlite3.Row  # access columns by name
+        super().__init__(
+            map_file=map_file,
+            init_db=True, # Always trigger the call to _initdb()
+            readonly=readonly,
+            scheme=scheme,
+        )
 
+    def _initdb(self, scheme=None):
+        """Called by the base class constructor."""
+        print(f"ManifestDb _initdb scheme = {scheme}", flush=True)
         if scheme is None:
-            self.scheme = ManifestScheme.from_database(self.conn)
+            with self.connection() as conn:
+                self.scheme = ManifestScheme.from_database(conn)
         elif scheme is False:
             pass
         else:
@@ -359,24 +357,26 @@ class ManifestDb:
         Create the database tables, incorporating the provided
         ManifestScheme.
         """
+        print(f"ManifestDb _create scheme = {manifest_scheme}", flush=True)
         # Create the tables:
         table_defs = [
             ('input_scheme', TABLE_DEFS['input_scheme']),
             ('files', TABLE_DEFS['files']),
             ('map', manifest_scheme._get_map_table_def())]
-        c = self.conn.cursor()
-        for table_name, column_defs in table_defs:
-            q = ('create table if not exists `%s` (' % table_name  +
-                 ','.join(column_defs) + ')')
-            c.execute(q)
-        self.conn.commit()
-        # Commit the schema...
-        for r in manifest_scheme._get_scheme_rows():
-            c.execute('insert into input_scheme (name,purpose,match,dtype) '
-                      'values (?,?,?,?)', tuple(r))
-        self.conn.commit()
-
-        self.scheme = ManifestScheme.from_database(self.conn)
+        with self.connection() as conn:
+            c = conn.cursor()
+            for table_name, column_defs in table_defs:
+                q = ('create table if not exists `%s` (' % table_name  +
+                    ','.join(column_defs) + ')')
+                c.execute(q)
+            conn.commit()
+            # Commit the schema...
+            for r in manifest_scheme._get_scheme_rows():
+                c.execute('insert into input_scheme (name,purpose,match,dtype) '
+                        'values (?,?,?,?)', tuple(r))
+            conn.commit()
+            self.scheme = ManifestScheme.from_database(conn)
+        print(f"ManifestDb _create loaded scheme = {self.scheme}", flush=True)
 
     def copy(self, map_file=None, overwrite=False):
         """
@@ -396,10 +396,13 @@ class ManifestDb:
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
+        with self.connection() as conn:
+            script = ' '.join(conn.iterdump())
+
         new_db = ManifestDb(map_file=map_file, scheme=False, readonly=False)
-        script = ' '.join(self.conn.iterdump())
-        new_db.conn.executescript(script)
-        new_db.scheme = ManifestScheme.from_database(new_db.conn)
+        with new_db.connection() as conn:
+            conn.executescript(script)
+            new_db.scheme = ManifestScheme.from_database(conn)
         return new_db
 
     def to_file(self, filename, overwrite=True, fmt=None):
@@ -413,7 +416,8 @@ class ManifestDb:
             unless the filename ends with '.gz', in which it is 'gz'.
 
         """
-        return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
+        with self.connection() as conn:
+            common.sqlite_to_file(conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
     def from_file(cls, filename, fmt=None, force_new_db=True):
@@ -438,7 +442,7 @@ class ManifestDb:
 
         """
         conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
-        return cls(conn)
+        return cls(map_file=conn)
 
     @classmethod
     def readonly(cls, filename):
@@ -452,25 +456,28 @@ class ManifestDb:
           ManifestDb.
 
         """
-        conn = common.sqlite_connect(filename=filename, mode="r")
-        return cls(conn)
+        return cls(map_file=filename, mode="r")
 
     def _get_file_id(self, filename, create=False):
         """
         Lookup a file_id in the file table, or create it if `create` and not found.
         """
-        c = self.conn.cursor()
-        c.execute('select id from files where name=?', (filename,))
-        row_id = c.fetchone()
-        if row_id is None:
-            if create:
-                if self._readonly:
-                    raise RuntimeError("Cannot add file_id to table in read-only DB")
-                c.execute('insert into files (name) values (?)', (filename,))
-                row_id = c.lastrowid
-                return row_id
-            return None
-        return row_id[0]
+        with self.connection() as conn:
+            c = conn.cursor()
+            c.execute('select id from files where name=?', (filename,))
+            row_id = c.fetchone()
+            if row_id is None:
+                if create:
+                    if self._readonly:
+                        raise RuntimeError("Cannot add file_id to table in read-only DB")
+                    c.execute('insert into files (name) values (?)', (filename,))
+                    row_id = c.lastrowid
+                    ret = row_id
+                else:
+                    ret = None
+            else:
+                ret = row_id[0]
+        return ret
 
     def match(self, params, multi=False, prefix=None):
         """Given Index Data, return Endpoint Data.
@@ -489,25 +496,29 @@ class ManifestDb:
         """
         q, p, rp = self.scheme.get_match_query(params)
         cols = ['files`.`name'] + list(rp)
-        c = self.conn.cursor()
-        where_str = ''
-        if len(q):
-            where_str = 'where %s' % q
-        c.execute('select `%s` ' % ('`,`'.join(cols)) +
-                  'from map join files on map.file_id=files.id %s' % where_str, p)
-        rows = c.fetchall()
-        rp.insert(0, 'filename')
-        rows = [dict(zip(rp, r)) for r in rows]
-        if prefix is not None:
-            for r in rows:
-                r['filename'] = os.path.join(prefix, r['filename'])
-        if multi:
-            return rows
-        if len(rows) == 0:
-            return None
-        if len(rows) > 1:
-            raise ValueError('Matched multiple rows with index data: %s' % rows)
-        return rows[0]
+        with self.connection() as conn:
+            c = conn.cursor()
+            where_str = ''
+            if len(q):
+                where_str = 'where %s' % q
+            c.execute('select `%s` ' % ('`,`'.join(cols)) +
+                    'from map join files on map.file_id=files.id %s' % where_str, p)
+            rows = c.fetchall()
+            rp.insert(0, 'filename')
+            rows = [dict(zip(rp, r)) for r in rows]
+            if prefix is not None:
+                for r in rows:
+                    r['filename'] = os.path.join(prefix, r['filename'])
+            if multi:
+                ret = rows
+            elif len(rows) == 0:
+                ret = None
+            elif len(rows) > 1:
+                self.close_conn(conn)
+                raise ValueError('Matched multiple rows with index data: %s' % rows)
+            else:
+                ret = rows[0]
+        return ret
 
     def inspect(self, params={}, strict=True, prefix=None):
         """Given (partial) Index Data and Endpoint Data, find and return the
@@ -533,22 +544,26 @@ class ManifestDb:
         q, p, rp = self.scheme.get_match_query(params, partial=True, strict=strict)
         cols = ['map`.`id', 'files`.`name'] + list(rp)
         rp = ['_id', 'filename'] + rp
-        c = self.conn.cursor()
-        where_str = ''
+        with self.connection() as conn:
+            c = conn.cursor()
+            where_str = ''
 
-        if len(q):
-            where_str = 'where %s' % q
+            if len(q):
+                where_str = 'where %s' % q
 
-        c.execute('select `%s` ' % ('`,`'.join(cols)) +
-                  'from map join files on map.file_id=files.id %s' % where_str, p)
-        rows = c.fetchall()
-        rows = [self.scheme._format_row(dict(zip(rp, r))) for r in rows]
-        if prefix is not None:
-            for r in rows:
-                r['filename'] = os.path.join(prefix, r['filename'])
-        if filename:
-            # manual filter...
-            rows = [r for r in rows if r['filename'] == filename]
+            sel_com = 'select `%s` ' % ('`,`'.join(cols)) + 'from map join files on map.file_id=files.id %s' % where_str
+            print(f"ManifestDb inspect sel_comm = {sel_com}", flush=True)
+            c.execute(sel_com, p)
+            rows = c.fetchall()
+            print(f"ManifestDb inspect fetchall = {rows}", flush=True)
+            rows = [self.scheme._format_row(dict(zip(rp, r))) for r in rows]
+            if prefix is not None:
+                for r in rows:
+                    r['filename'] = os.path.join(prefix, r['filename'])
+            if filename is not None:
+                # manual filter...
+                rows = [r for r in rows if r['filename'] == filename]
+            print(f"ManifestDb inspect rows = {rows}", flush=True)
         return rows
 
     def add_entry(self, params, filename=None, create=True, commit=True,
@@ -582,17 +597,19 @@ class ManifestDb:
         q, p = self.scheme.get_insertion_query(params)
         file_id = self._get_file_id(filename, create=create)
         assert(file_id is not None)
-        c = self.conn.cursor()
-        marks = ','.join('?' * len(p))
-        c = self.conn.cursor()
-        query = 'into map (%s,file_id) values (%s,?)' % (q, marks)
-        if replace:
-            query = 'insert or replace ' + query
-        else:
-            query = 'insert ' + query
-        c.execute(query, p + (file_id,))
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            c = conn.cursor()
+            marks = ','.join('?' * len(p))
+            c = conn.cursor()
+            query = 'into map (%s,file_id) values (%s,?)' % (q, marks)
+            if replace:
+                query = 'insert or replace ' + query
+            else:
+                query = 'insert ' + query
+            print(f"ManifestDb add_entry {query}", flush=True)
+            c.execute(query, p + (file_id,))
+            if commit:
+                conn.commit()
 
     def update_entry(self, params, filename=None, commit=True):
         """Update an existing entry.
@@ -618,14 +635,15 @@ class ManifestDb:
         assert(filename is None and 'filename' not in params)
         if filename is None:
             filename = params.get('filename')
-
-        c = self.conn.cursor()
-        marks = ','.join('?' * len(p))
-        c = self.conn.cursor()
-        query = 'update map set %s where id=?' % q
-        c.execute(query, p + (_id,))# + (file_id,))
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            c = conn.cursor()
+            marks = ','.join('?' * len(p))
+            c = conn.cursor()
+            query = 'update map set %s where id=?' % q
+            print(f"ManifestDb update_entry {query}", flush=True)
+            c.execute(query, p + (_id,))# + (file_id,))
+            if commit:
+                conn.commit()
 
     def remove_entry(self, _id, commit=True):
         """Remove the entry identified by row id _id.
@@ -639,17 +657,18 @@ class ManifestDb:
             raise RuntimeError("Cannot remove_entry() in read-only DB")
         if isinstance(_id, dict):
             _id = _id['_id']
-        c = self.conn.cursor()
-        file_id = c.execute('select file_id from map where id=?',
-                             (_id, )).fetchall()
-        if len(file_id) == 0:
-            raise ValueError(f'Row with id={_id} does not exist!')
-        file_id = file_id[0][0]
-        c.execute('delete from map where id=?', (_id, ))
-        if len(c.execute('select id from map where file_id=?', (file_id, )).fetchall()) == 0:
-            c.execute('delete from files where id=?', (file_id, ))
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            c = conn.cursor()
+            file_id = c.execute('select file_id from map where id=?',
+                                (_id, )).fetchall()
+            if len(file_id) == 0:
+                raise ValueError(f'Row with id={_id} does not exist!')
+            file_id = file_id[0][0]
+            c.execute('delete from map where id=?', (_id, ))
+            if len(c.execute('select id from map where file_id=?', (file_id, )).fetchall()) == 0:
+                c.execute('delete from files where id=?', (file_id, ))
+            if commit:
+                conn.commit()
 
     def get_entries(self, fields):
         """Return unique combinations of data fields (endpoint data) in the
@@ -673,8 +692,10 @@ class ManifestDb:
         if not isinstance(fields, list):
             raise ValueError("fields must be a list")
         q = f"select distinct {','.join(fields)} from map"
-        c = self.conn.execute(q)
-        return resultset.ResultSet.from_cursor(c)
+        with self.connection() as conn:
+            c = conn.execute(q)
+            ret = resultset.ResultSet.from_cursor(c)
+        return ret
 
     def validate(self):
         """
@@ -885,14 +906,13 @@ class DbBatchManager:
         if len(existing_entries) == 0:
             # Add the entry without committing
             self.db.add_entry(
-                params, filename=filename, create=create, commit=False, replace=replace
+                params, filename=filename, create=create, replace=replace
             )
             self.batch_counter += 1
 
             # Commit if we've reached the batch size
             if self.batch_counter >= self.batch_size:
                 self.logger.info(f'Committing batch of {self.batch_counter} operations')
-                self.db.conn.commit()
                 self.batch_counter = 0
         else:
             self.logger.debug(f'Entry already exists for {params}, skipping')
@@ -901,7 +921,6 @@ class DbBatchManager:
         """Force a commit of any pending operations."""
         if self.batch_counter > 0:
             self.logger.info(f'Forced commit of {self.batch_counter} batched operations')
-            self.db.conn.commit()
             self.batch_counter = 0
 
 
@@ -1002,6 +1021,7 @@ def main(args=None):
         args.mode = 'summary'
 
     db = ManifestDb.from_file(args.filename, force_new_db=False)
+    conn = db.open_conn()
 
     if args.mode == 'summary':
         header = f'Summary for {args.filename}'
@@ -1010,7 +1030,7 @@ def main(args=None):
         print()
 
         schema = db.scheme.as_resultset()
-        row_count = db.conn.execute('select count(id) from map').fetchone()[0]
+        row_count = conn.execute('select count(id) from map').fetchone()[0]
         print(f'Total number of index entries:  {row_count:>7}')
         print()
 
@@ -1031,12 +1051,11 @@ def main(args=None):
         print('   ' + '-' * (len(hdr) - 3))
         for row in schema:
             if row['purpose'] == 'out':
-                count = len(db.conn.execute("select distinct `%s` from map" % row['field']).fetchall())
+                count = len(conn.execute("select distinct `%s` from map" % row['field']).fetchall())
                 print(fmt.format(count=count, **row))
-        file_count = db.conn.execute('select count(id) from files').fetchone()[0]
+        file_count = conn.execute('select count(id) from files').fetchone()[0]
         print(fmt.format(
             field='filename', data_type='filename', count=file_count))
-
         print()
 
     elif args.mode == 'entries':
@@ -1055,13 +1074,13 @@ def main(args=None):
         keys.append('filename')
         print(keys)
         print(['-'] * len(keys))
-        for row in db.conn.execute('select map.*, files.name as filename from '
+        for row in conn.execute('select map.*, files.name as filename from '
                                    'map join files where map.file_id=files.id'):
             print([row[k] for k in keys])
 
     elif args.mode == 'files':
         # Get all files.
-        rows = db.conn.execute(
+        rows = conn.execute(
             'select files.id, files.name as filename, count(map.id) '
             'from map join files on '
             'map.file_id==files.id group by filename').fetchall()
@@ -1126,7 +1145,7 @@ def main(args=None):
             db = ManifestDb.from_file(args.filename, force_new_db=True)
 
         # Get all files matching this prefix ...
-        c = db.conn.execute("select id, name from files "
+        c = conn.execute("select id, name from files "
                             "where name like '%s%%'" % (args.old_prefix))
         rows = c.fetchall()
         print('Found %i records matching prefix ...'
@@ -1136,7 +1155,7 @@ def main(args=None):
         n_examples = 1
 
         if not args.dry_run:
-            c = db.conn.cursor()
+            c = conn.cursor()
 
         for (_id, name) in rows:
             new_name = args.new_prefix + name[len(args.old_prefix):]
@@ -1151,9 +1170,10 @@ def main(args=None):
 
         print('Saving to %s' % args.output_db)
         if not args.dry_run:
-            db.conn.commit()
+            conn.commit()
             c.execute('vacuum')
             db.to_file(args.output_db)
 
     else:
         print(f'Sorry, {args.mode} not implemented.')
+    db.close_conn(conn)

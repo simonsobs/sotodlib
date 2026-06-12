@@ -32,7 +32,7 @@ TABLE_DEFS = {
 SPECIAL_COLS = ['det_id', 'time0', 'time1']
 
 
-class DetDb(object):
+class DetDb(common.DBObject):
     """
     Detector database.  The database stores data about a set of
     detectors.
@@ -87,46 +87,48 @@ class DetDb(object):
                 in read-only mode.  Not valid on dbs held in :memory:.
 
         """
-        if init_db and readonly:
-            raise ValueError("Cannot initialize a read-only DB")
-        self._readonly = readonly
-        if isinstance(map_file, sqlite3.Connection):
-            self.conn = map_file
-        else:
-            self.conn = common.sqlite_connect(
-                filename=map_file,
-                mode=("r" if readonly else "w"),
-            )
-        self.conn.row_factory = sqlite3.Row  # access columns by name
+        super().__init__(
+            map_file=map_file,
+            init_db=init_db,
+            readonly=readonly,
+        )
 
-        if init_db:
-            # Create dets table if not found.
-            c = self.conn.cursor()
+    def _initdb(self):
+        """Called by the base class constructor."""
+        # Create dets table if not found.
+        with self.connection() as conn:
+            c = conn.cursor()
             c.execute("SELECT name FROM sqlite_master "
                       "WHERE type='table' and name not like 'sqlite_%';")
             tables = [r[0] for r in c]
-            if 'dets' not in tables:
-                self.create_table('dets', TABLE_DEFS['dets'], raw=True)
+        if 'dets' not in tables:
+            self.create_table('dets', TABLE_DEFS['dets'], raw=True)
 
     def __len__(self):
-        return self.conn.execute('select count(id) from dets').fetchone()[0]
+        with self.connection() as conn:
+            ret = conn.execute('select count(id) from dets').fetchone()[0]
+        return ret
 
     def _get_property_tables(self):
         """Return a list of all property tables."""
-        c = self.conn.cursor()
-        c.execute("SELECT name FROM sqlite_master WHERE "
-                  "type='table' and name not like 'sqlite_%' "
-                  "and name != 'dets';")
-        return [str(x[0]) for x in c]
+        with self.connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT name FROM sqlite_master WHERE "
+                    "type='table' and name not like 'sqlite_%' "
+                    "and name != 'dets';")
+            ret = [str(x[0]) for x in c]
+        return ret
 
     def _get_property_list(self, table_name):
         """Return a list of all property columns for the specified property
         table.
 
         """
-        c = self.conn.cursor()
-        c.execute(f'PRAGMA table_info({table_name})')
-        return [r[1] for r in c if r[1] not in SPECIAL_COLS]
+        with self.connection() as conn:
+            c = conn.cursor()
+            c.execute(f'PRAGMA table_info({table_name})')
+            ret = [r[1] for r in c if r[1] not in SPECIAL_COLS]
+        return ret
 
     def validate(self):
         """
@@ -136,34 +138,35 @@ class DetDb(object):
         have overlapping property intervals.  Raises SchemaError in
         the first case, IntervalError in the second.
         """
-        c = self.conn.cursor()
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' "
-                  "and name not like 'sqlite_%';")
-        tables = [r[0] for r in c]
-        if 'dets' not in tables:
-            raise SchemaError("Database does not contain a `dets` table.")
-        tables.remove('dets')
-        for t in tables:
-            try:
-                c.execute("SELECT det_id,time0,time1 from `%s` "
-                          "order by det_id,time0" % t)
-            except sqlite3.OperationalError as e:
-                raise SchemaError("Key columns not found in table `%s`" % t)
-            last_id, last_t1 = None, None
-            for r in c:
-                _id, _t0, _t1 = r
-                if (_t1 < _t0):
-                    raise IntervalError(
-                        "Negative size time interval for table %s, "
-                        "det_id=%i" % (t, _id))
-                if _id == last_id:
-                    if _t0 < last_t1:
+        with self.connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                    "and name not like 'sqlite_%';")
+            tables = [r[0] for r in c]
+            if 'dets' not in tables:
+                raise SchemaError("Database does not contain a `dets` table.")
+            tables.remove('dets')
+            for t in tables:
+                try:
+                    c.execute("SELECT det_id,time0,time1 from `%s` "
+                            "order by det_id,time0" % t)
+                except sqlite3.OperationalError as e:
+                    raise SchemaError("Key columns not found in table `%s`" % t)
+                last_id, last_t1 = None, None
+                for r in c:
+                    _id, _t0, _t1 = r
+                    if (_t1 < _t0):
                         raise IntervalError(
-                            "Overlapping interval for table %s, "
+                            "Negative size time interval for table %s, "
                             "det_id=%i" % (t, _id))
-                    last_t1 = _t1
-                else:
-                    last_id, last_t1 = _id, _t1
+                    if _id == last_id:
+                        if _t0 < last_t1:
+                            raise IntervalError(
+                                "Overlapping interval for table %s, "
+                                "det_id=%i" % (t, _id))
+                        last_t1 = _t1
+                    else:
+                        last_id, last_t1 = _id, _t1
 
     def create_table(self, table_name, column_defs, raw=False, commit=True):
         """Add a property table to the database.
@@ -186,15 +189,16 @@ class DetDb(object):
         """
         if self._readonly:
             raise RuntimeError("Cannot use create_table() on a read-only DB")
-        c = self.conn.cursor()
-        pre_cols = self.TABLE_TEMPLATE
-        if raw:
-            pre_cols = []
-        q = ('create table if not exists `%s` (' % table_name +
-             ','.join(pre_cols + column_defs) + ')')
-        c.execute(q)
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            c = conn.cursor()
+            pre_cols = self.TABLE_TEMPLATE
+            if raw:
+                pre_cols = []
+            q = ('create table if not exists `%s` (' % table_name +
+                ','.join(pre_cols + column_defs) + ')')
+            c.execute(q)
+            if commit:
+                conn.commit()
         return self
 
     def copy(self, map_file=None, overwrite=False):
@@ -206,7 +210,7 @@ class DetDb(object):
         simply discard the returned object.
         """
         if (
-            map_file is not None and 
+            map_file is not None and
             map_file != ":memory:" and
             os.path.exists(map_file)
         ):
@@ -215,9 +219,12 @@ class DetDb(object):
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
+        with self.connection() as conn:
+            script = ' '.join(conn.iterdump())
+
         new_db = DetDb(map_file=map_file, init_db=False, readonly=False)
-        script = ' '.join(self.conn.iterdump())
-        new_db.conn.executescript(script)
+        with new_db.connection() as conn:
+            conn.executescript(script)
         return new_db
 
     def to_file(self, filename, overwrite=True, fmt=None):
@@ -243,12 +250,14 @@ class DetDb(object):
             _ = self.copy(map_file=filename, overwrite=overwrite)
         elif fmt == 'dump':
             with open(filename, 'w') as fout:
-                for line in self.conn.iterdump():
-                    fout.write(line)
+                with self.connection() as conn:
+                    for line in conn.iterdump():
+                        fout.write(line)
         elif fmt == 'gz':
             with gzip.GzipFile(filename, 'wb') as fout:
-                for line in self.conn.iterdump():
-                    fout.write(line.encode('utf-8'))
+                with self.connection() as conn:
+                    for line in conn.iterdump():
+                        fout.write(line.encode('utf-8'))
         else:
             raise RuntimeError(f'Unknown format "{fmt}" requested.')
 
@@ -260,7 +269,6 @@ class DetDb(object):
         conn = common.sqlite_from_file(filename, fmt=fmt,
                                        force_new_db=force_new_db)
         return cls(conn, init_db=False)
-
 
     def reduce(self, dets=None, time0=None, time1=None,
                inplace=False):
@@ -300,32 +308,33 @@ class DetDb(object):
         else:
             assert(time1 is None)
 
-        c = self.conn.cursor()
-        if dets is not None:
-            # Convert to a list of names.
-            if isinstance(dets, ResultSet):
-                dets = dets['name']
-            # Create a temporary table to list dets we're keeping.
-            self.create_table('_keepers', ["`name` varchar"], raw=True)
-            for d in dets:
-                c.execute('insert into _keepers (name) values (?)', (d,))
-            # Intersect dets against _keepers, discard _keepers.
-            c.execute('delete from dets where not dets.name in '
-                      '(select name from _keepers)')
-            c.execute('drop table _keepers')
-            det_clause = 'not det_id in (select id from dets)'
-        else:
-            det_clause = '0'
+        with self.connection() as conn:
+            c = conn.cursor()
+            if dets is not None:
+                # Convert to a list of names.
+                if isinstance(dets, ResultSet):
+                    dets = dets['name']
+                # Create a temporary table to list dets we're keeping.
+                self.create_table('_keepers', ["`name` varchar"], raw=True)
+                for d in dets:
+                    c.execute('insert into _keepers (name) values (?)', (d,))
+                # Intersect dets against _keepers, discard _keepers.
+                c.execute('delete from dets where not dets.name in '
+                        '(select name from _keepers)')
+                c.execute('drop table _keepers')
+                det_clause = 'not det_id in (select id from dets)'
+            else:
+                det_clause = '0'
 
-        # Remove orphaned rows from other tables.
-        for t in self._get_property_tables():
-            c.execute('delete from %s where %s or %s' %
-                      (t, det_clause, time_clause))
-        self.conn.commit()
+            # Remove orphaned rows from other tables.
+            for t in self._get_property_tables():
+                c.execute('delete from %s where %s or %s' %
+                        (t, det_clause, time_clause))
+            conn.commit()
 
-        # Compact the db.
-        c.execute('vacuum')
-        self.conn.commit()
+            # Compact the db.
+            c.execute('vacuum')
+            conn.commit()
 
         return self
 
@@ -335,19 +344,20 @@ class DetDb(object):
         dets table yet, and create==True, then it is added.
 
         """
-        c = self.conn.execute('select id from dets where name=?',
-                              (name,))
-        db_id = c.fetchone()
-        if db_id is not None:
-            return db_id[0]
-        if not create:
-            raise ValueError("Detector {} not in table and "
-                             "create=False".format(name))
-        c = self.conn.execute('insert into dets (name) values (?)',
-                              (name,))
-        db_id = c.lastrowid
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            c = conn.execute('select id from dets where name=?',
+                                (name,))
+            db_id = c.fetchone()
+            if db_id is not None:
+                return db_id[0]
+            if not create:
+                raise ValueError("Detector {} not in table and "
+                                "create=False".format(name))
+            c = conn.execute('insert into dets (name) values (?)',
+                                (name,))
+            db_id = c.lastrowid
+            if commit:
+                conn.commit()
         return db_id
 
     def add_props(self, table_, name_, time_range=None, commit=True, **kw):
@@ -375,10 +385,11 @@ class DetDb(object):
         val_string = '?,?,?' + ''.join([',?'] * len(keys))
         q = (f'insert into {table_} ({key_string}) '
              f'values ({val_string})')
-        self.conn.execute(
-            q, (row_id, time_range[0], time_range[1]) + tuple(values))
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            conn.execute(
+                q, (row_id, time_range[0], time_range[1]) + tuple(values))
+            if commit:
+                conn.commit()
 
     # Forward lookup.
     def dets(self, timestamp=None, props={}):
@@ -444,9 +455,11 @@ class DetDb(object):
         if (restricts):
             q += ' where ' + ' and '.join(restricts)
         q = q + ' group by id'
-        c = self.conn.cursor()
-        c.execute(q, tuple(args))
-        return ResultSet.from_cursor(c)
+        with self.connection() as conn:
+            c = conn.cursor()
+            c.execute(q, tuple(args))
+            ret = ResultSet.from_cursor(c)
+        return ret
 
     # Reverse lookup.
     def props(self, dets=None, timestamp=None, props=None,
@@ -457,56 +470,57 @@ class DetDb(object):
         column called 'name').
         """
         # Create temporary table
-        c = self.conn.cursor()
-        c.execute('begin transaction')
-        c.execute('drop table if exists _dets')
-        c.execute('create temp table _dets (`name` varchar(32))')
-        q = 'insert into _dets (name) values (?)'
-        if dets is None:
-            dets = self.dets()['name']
-        if isinstance(dets, ResultSet):
-            dets = dets['name']
-        elif isinstance(dets, dict):
-            # This is intended to handle a single row extracted from a
-            # ResultSet.
-            dets = [dets['name']]
-        for a in dets:
-            c.execute(q, (a,))
-        c.execute('end transaction')
+        with self.connection() as conn:
+            c = conn.cursor()
+            c.execute('begin transaction')
+            c.execute('drop table if exists _dets')
+            c.execute('create temp table _dets (`name` varchar(32))')
+            q = 'insert into _dets (name) values (?)'
+            if dets is None:
+                dets = self.dets()['name']
+            if isinstance(dets, ResultSet):
+                dets = dets['name']
+            elif isinstance(dets, dict):
+                # This is intended to handle a single row extracted from a
+                # ResultSet.
+                dets = [dets['name']]
+            for a in dets:
+                c.execute(q, (a,))
+            c.execute('end transaction')
 
-        # Expand props argument.
-        if props is None:
-            props = [t + '.' for t in self._get_property_tables()]
+            # Expand props argument.
+            if props is None:
+                props = [t + '.' for t in self._get_property_tables()]
 
-        props, props_ = [], props
-        for p in props_:
-            if p.endswith('.'):
-                table_p = self._get_property_list(p[:-1])
-                props.extend([p + _p for _p in table_p])
-            else:
-                props.append(p)
+            props, props_ = [], props
+            for p in props_:
+                if p.endswith('.'):
+                    table_p = self._get_property_list(p[:-1])
+                    props.extend([p + _p for _p in table_p])
+                else:
+                    props.append(p)
 
-        # Now look stuff up in it.
-        other_tables = []
-        fields, keys = [], []
-        for i, m in enumerate(props):
-            if '.' in m:
-                t, f = m.split('.', 1)
-            else:
-                t, f = 'base', m
-            if t not in other_tables:
-                other_tables.append(t)
-            key = f'{t}.{f}'
-            keys.append(key)
-            fields.append(f'{key} as result{i}')
-        q = ('select ' + ', '.join(fields) +
-             ' from _dets join dets on _dets.name=dets.name ' +
-             ' '.join(['join %s on %s.det_id=dets.id' % (m, m)
-                       for m in other_tables]))
-        c.execute(q)
-        results = ResultSet.from_cursor(c, keys=keys)
-        c.execute('drop table if exists _dets')
-        results.strip(['base.'])
+            # Now look stuff up in it.
+            other_tables = []
+            fields, keys = [], []
+            for i, m in enumerate(props):
+                if '.' in m:
+                    t, f = m.split('.', 1)
+                else:
+                    t, f = 'base', m
+                if t not in other_tables:
+                    other_tables.append(t)
+                key = f'{t}.{f}'
+                keys.append(key)
+                fields.append(f'{key} as result{i}')
+            q = ('select ' + ', '.join(fields) +
+                ' from _dets join dets on _dets.name=dets.name ' +
+                ' '.join(['join %s on %s.det_id=dets.id' % (m, m)
+                        for m in other_tables]))
+            c.execute(q)
+            results = ResultSet.from_cursor(c, keys=keys)
+            c.execute('drop table if exists _dets')
+            results.strip(['base.'])
         return results
 
     def intersect(self, *specs, resolve=False):
@@ -598,9 +612,6 @@ def get_example():
                                      det_type='bolo',
                                      **tel_info, **info, commit=False)
 
-    print('Committing {} detectors...'.format(len(det_names)))
-    db.conn.commit()
-
     # Organize these dets in a big square.  This is not the plan.
     n_row = int(len(det_names)**.5 + 1)
     for i in range(n_row):
@@ -611,8 +622,6 @@ def get_example():
             x, y, ang = i * .02, j * .02, (i+j) % 12. * 15
             db.add_props('geometry', det_names[d], commit=False,
                          wafer_x=x, wafer_y=y, wafer_pol=ang)
-
-    db.conn.commit()
 
     print('Checking the work...')
     db.validate()

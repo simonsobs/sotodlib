@@ -135,8 +135,7 @@ def update_obsdb(config_file, time_range=None, datasets=None, redo=False,
             obsdb = core.metadata.ObsDb(cfg['target_obsdb'])
             for rec, result in zip(rec_bunch, results):
                 logger.debug(f"{rec['obs_id']} : {result}")
-                obsdb.update_obs(rec['obs_id'], result, commit=False)
-            obsdb.conn.commit()
+                obsdb.update_obs(rec['obs_id'], result)
             del obsdb
 
 

@@ -9,17 +9,17 @@ make_coadd_map.
 __all__ = ['CoaddMapmaker','make_coadd_map','setup_coadd_map','write_coadd_map','eplot']
 import numpy as np
 from pixell import enmap, enplot, utils as putils
-import sqlite3
 import os
 from tqdm import tqdm
 import datetime as dt
 import logging
 
+from ..core.metadata import sqlite_connect
 from . import safe_invert_div
 
-def eplot(mapdata, fname_prefix, **kwargs): 
+def eplot(mapdata, fname_prefix, **kwargs):
     """Function to help us plot the maps neatly
-    
+
     Arguments
     ---------
     mapdata : pixell.enmap
@@ -33,7 +33,7 @@ def eplot(mapdata, fname_prefix, **kwargs):
 class CoaddMapmaker:
     """
     Class to initialize, create, and write coadded atomic maps
-    
+
     Arguments
     ---------
     data : dict
@@ -53,7 +53,7 @@ class CoaddMapmaker:
     logger : Logger, optional
         Logger for printing on the screen.
     """
-    def __init__(self, data, shape, wcs, geom_file_path, 
+    def __init__(self, data, shape, wcs, geom_file_path,
                  wmap_coadd, weights_coadd, hits_coadd, logger=None):
         self.data = data
         self.shape = shape
@@ -63,18 +63,18 @@ class CoaddMapmaker:
         self.weights_coadd = weights_coadd
         self.hits_coadd = hits_coadd
         self.map_coadd = None
-        
+
         self.coadd_atomic = self.data.get('coadd_atomic', True)
-        
+
         if logger is None:
             logger = logging.getLogger("coadd")
         self.logger = logger
-        
+
     def add_map(self, file):
         """
         Accumulates an obs into the CoaddMapmaker object, adding to wmap,
         weights, and hits.
-        
+
         Arguments
         ---------
         file : str
@@ -97,8 +97,8 @@ class CoaddMapmaker:
             self.wmap_coadd += wmap * weights
 
         self.hits_coadd += hits
-            
-    def write(self, output_root, output_db, band, platform, split_label, start_time, 
+
+    def write(self, output_root, output_db, band, platform, split_label, start_time,
               stop_time, interval, unit='K', plot=False):
         time_str = f"{start_time:%Y%m%d}_{stop_time:%Y%m%d}"
         if isinstance(start_time, dt.datetime):
@@ -118,7 +118,7 @@ class CoaddMapmaker:
         self.logger.info(f'wrote weights to {oname}'+'_weights.fits')
         self.logger.info(f'wrote hits to {oname}'+'_hits.fits')
 
-        conn = sqlite3.connect(output_db)
+        conn = sqlite_connect(filename=output_db, mode="w")
         cur = conn.cursor()
         col_names = ['telescope', 'freq_channel', 'split_label', 'prefix_path', 'geom_file_path', 'obslist', 'start_time', 'stop_time']
         placeholders = ','.join(['?'] * len(col_names))
@@ -128,7 +128,7 @@ class CoaddMapmaker:
         conn.commit()
         conn.close()
         self.logger.info(f'added entry to {interval} table in {output_db}')
-        
+
         if plot:
             params = {"downgrade":4, "colorbar":True, "ticks":20, "color":"planck", 'mask':0, 'range':2000 }
             eplot(self.map_coadd[0] * 1e6, oname+'_T', **params)
@@ -138,9 +138,9 @@ class CoaddMapmaker:
             params = {"downgrade":4, "colorbar":True, "ticks":20, "color":"viridis" }
             eplot(self.hits_coadd[0], oname+'_hits', **params)
             self.logger.info('wrote PNG plots')
-        
+
 def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
-                    start_time, stop_time, interval, geom_file_prefix, 
+                    start_time, stop_time, interval, geom_file_prefix,
                     overwrite=False, logger=None):
     """
     Queries the atomic database and setup the CoaddMapmaker object.
@@ -149,31 +149,31 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
         start_time = start_time.timestamp()
     if isinstance(stop_time, dt.datetime):
         stop_time = stop_time.timestamp()
-       
+
     lower_interval = None
     coadd_atomic = False
     if (interval == 'weekly') or (interval == 'monthly'):
         lower_interval = 'daily'
     else:
         coadd_atomic = True
-    
+
     if lower_interval:
         logger.debug('Attempting to coadd from existing coadded maps')
         columns = ['telescope', 'freq_channel', 'split_label', 'prefix_path', 'geom_file_path', 'obslist', 'start_time', 'stop_time']
-        conn = sqlite3.connect(output_db)
+        conn = sqlite_connect(filename=output_db, mode="r")
         cur = conn.cursor()
         query_stmt = f"SELECT {','.join(columns)} FROM {lower_interval} WHERE telescope = ? AND freq_channel = ? AND split_label = ? AND start_time >= ? AND stop_time <= ?"
         cur.execute(query_stmt, (platform,band,split_label,start_time,stop_time,))
         rows = cur.fetchall()
         conn.close()
-        
+
         if len(rows) == 0:
             logger.debug('No existing coadds found. Coadding from atomic maps')
             coadd_atomic = True
-    
+
     if coadd_atomic:
         columns = ['obs_id', 'telescope', 'freq_channel', 'ctime', 'split_label', 'prefix_path']
-        conn = sqlite3.connect(atomic_db)
+        conn = sqlite_connect(filename=atomic_db, mode="r")
         cur = conn.cursor()
         if '+' in band:
             query_stmt = f"SELECT {','.join(columns)} FROM atomic WHERE telescope = ? AND split_label = ? AND ctime >= ? AND ctime <= ?"
@@ -183,7 +183,7 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
             cur.execute(query_stmt, (platform,split_label,start_time,stop_time,band,))
         rows = cur.fetchall()
         conn.close()
-        
+
     data = {}
     for col in columns:
         data[col] = []
@@ -198,14 +198,14 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
         combined_list = []
         for obslist in data['obslist']:
             combined_list.extend(obslist.split(','))
-        
+
         obslist = ','.join(np.unique(combined_list))
         data['coadd_atomic'] = False
-    
+
     data['obslist'] = obslist
-    
+
     if not overwrite:
-        conn = sqlite3.connect(output_db)
+        conn = sqlite_connect(filename=output_db, mode="r")
         cur = conn.cursor()
         query_stmt = f"SELECT * FROM {interval} WHERE telescope = ? AND freq_channel = ? AND split_label = ? AND start_time = ? AND stop_time = ? AND obslist = ?"
         cur.execute(query_stmt, (platform,band,split_label,start_time,stop_time,obslist,))
@@ -224,26 +224,26 @@ def setup_coadd_map(atomic_db, output_db, band, platform, split_label,
     else:
         weights_coadd = enmap.zeros((3,)+shape, wcs=wcs)
     hits_coadd = enmap.zeros((3,)+shape, wcs=wcs)
-    
-    mapmaker = CoaddMapmaker(data, shape, wcs, geom_file_path, 
+
+    mapmaker = CoaddMapmaker(data, shape, wcs, geom_file_path,
                              wmap_coadd, weights_coadd, hits_coadd, logger=logger)
-    
+
     return mapmaker
-    
-def write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
+
+def write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label,
                     start_time, stop_time, interval, unit='K', plot=False):
     """
     Wrapper for CoaddMapmaker write function.
     """
-    mapmaker.write(output_root, output_db, band, platform, split_label, start_time, 
+    mapmaker.write(output_root, output_db, band, platform, split_label, start_time,
                    stop_time, interval, unit=unit, plot=plot)
-        
+
 def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_label,
                    start_time, stop_time, interval, geom_file_prefix, overwrite=False,
                    unit='K', logger=None, plot=False):
     """
     Makes coadded atomic maps from a given time interval.
-    
+
     Arguments
     ---------
     atomic_db : str
@@ -278,17 +278,17 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     plot : bool
         Set to True to also output PNG plots when writing maps.
     """
-    mapmaker = setup_coadd_map(atomic_db, output_db, band, platform, 
-                               split_label, start_time, stop_time, interval, 
+    mapmaker = setup_coadd_map(atomic_db, output_db, band, platform,
+                               split_label, start_time, stop_time, interval,
                                geom_file_prefix, overwrite=overwrite, logger=logger)
-    
+
     if not mapmaker:
         return False, "Map found in database and overwrite=False. Skipping."
 
     if len(mapmaker.data['prefix_path']) == 0:
         return False, "No fits files found to coadd. Skipping."
     mapmaker.logger.info(f"# of fits files: {len(mapmaker.data['prefix_path'])}")
-    
+
     mapmaker.logger.info(f"Using geometry from {mapmaker.geom_file_path}")
     for file in tqdm(mapmaker.data['prefix_path'], total=len(mapmaker.data['prefix_path'])):
         mapmaker.add_map(file)
@@ -299,8 +299,8 @@ def make_coadd_map(atomic_db, output_root, output_db, band, platform, split_labe
     else:
         mapmaker.map_coadd = np.nan_to_num(mapmaker.wmap_coadd / mapmaker.weights_coadd, nan=0.0)
 
-    write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label, 
+    write_coadd_map(mapmaker, output_root, output_db, band, platform, split_label,
                     start_time, stop_time, interval, unit=unit, plot=plot)
 
-    
+
     return True, "Done."

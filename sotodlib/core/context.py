@@ -109,7 +109,7 @@ class Context(odict):
         hook_func(self, *args, **kwargs)
 
     def _get_warn_missing(self, k, default=None):
-        if not k in self:
+        if k not in self:
             logger.warning(f'Key "{k}" not present in context.')
             return default
         return self[k]
@@ -220,9 +220,9 @@ class Context(odict):
             channels that are normally skipped (e.g. fixed tones).
           reindex_dets (bool) If True, reindexes the axismanager
             "dets" axis to include any special dets that may have
-            been loaded. All special det signals, bands, channels, 
+            been loaded. All special det signals, bands, channels,
             and readout_ids will be inserted along the dets axis
-            and respective data arrays. Does not destroy special 
+            and respective data arrays. Does not destroy special
             dets axes like the "tdets" axis. WARNING: ~Doubles
             run time and instantaenous memory usage as the signal
             dataset has to effectively be copied! Memory returned
@@ -361,46 +361,46 @@ class Context(odict):
                 det_channels = aman.det_info.smurf.channel
                 tdet_bands = aman.tones.band
                 tdet_channels = aman.tones.channel
-    
+
                 # Create a sorted array of dets + tdets
                 special_band_ch = [(b, c) for b, c in zip(tdet_bands, tdet_channels)]
                 normal_band_ch = [(b, c) for b, c in zip(det_bands, det_channels)]
                 band_ch = np.array(sorted(normal_band_ch + special_band_ch))
-    
+
                 # Grab the det idxs from the det band + channels
                 det_indexes = np.full(len(band_ch), np.nan)
                 for i, (b, c) in enumerate(band_ch):
                     w = np.where((det_bands == b) & (det_channels == c))[0]
                     if len(w) == 0:
                         continue
-    
+
                     det_indexes[i] = w[0]
-    
+
                 # Grab the tdet idxs from the tdet band + channels
                 tdet_indexes = np.full(len(band_ch), np.nan)
                 for i, (b, c) in enumerate(band_ch):
                     w = np.where((tdet_bands == b) & (tdet_channels == c))[0]
                     if len(w) == 0:
                         continue
-    
+
                     tdet_indexes[i] = w[0]
-    
+
                 # Use the det idxs to reindex all datasets assigned to the dets axis
                 # This will set the len to dets + tdets
                 # And will insert nans where the tdet channels exist
                 # in the sorted band_ch array
                 aman.reindex_axis(axis='dets', indexes=det_indexes)
-    
+
                 # Finally use the tdet idxs to fill in the tdet data
                 # For the signal, band, and channels
                 for i, tidx in enumerate(tdet_indexes):
                     if np.isnan(tidx):
                         continue
-    
+
                     aman.signal[i] = aman.tones.signal[int(tidx)]
                     aman.det_info.smurf.channel[i] = aman.tones.channel[int(tidx)]
                     aman.det_info.smurf.band[i] = aman.tones.band[int(tidx)]
-    
+
                 def add_tdet_ids(aman, tdet_indexes, tdet_ids):
                     """
                         Small Function for recursively delving through
@@ -412,23 +412,23 @@ class Context(odict):
                         if isinstance(aman[assignment], AxisManager) and "dets" in axes:
                             # If they have a Dets axis, go fix it first.
                             add_tdet_ids(aman[assignment], tdet_indexes, tdet_ids)
-    
+
                     # Skip current aman if it doesn't have a dets axis.
                     # This is the recursion base case
                     # Assuming someone didn't make an infinitely deep aman
                     # Or circular amans....
                     if "dets" not in aman._axes.keys():
                         return
-    
+
                     # If this aman has a dets axis, add in tdet ids.
                     for i, tidx in enumerate(tdet_indexes):
                         if np.isnan(tidx):
                             continue
                         aman.dets.vals[i] = tdet_ids[int(tidx)]
-    
+
                 # Add in tdet ids to all amans.
                 add_tdet_ids(aman, tdet_indexes, aman.tdets.vals)
-    
+
                 # obs_aman tdet info is merged!
 
         return aman

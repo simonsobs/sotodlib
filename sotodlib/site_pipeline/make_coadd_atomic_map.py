@@ -2,12 +2,12 @@ from argparse import ArgumentParser
 import os
 import yaml
 import traceback
-import sqlite3
 import datetime as dt
 from dateutil.relativedelta import relativedelta
 from typing import Literal, Union, Dict, Any, Optional, Tuple, List
 
 from sotodlib import mapmaking
+from sotodlib.core.metadata import sqlite_connect
 from sotodlib.site_pipeline.utils.logging import init_logger
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from pixell import utils as putils
@@ -16,7 +16,7 @@ from pixell import utils as putils
 class CoaddAtomicConfig:
     """
     Class to configure make-coadd-atomic-map
-    
+
     Arguments
     ---------
     platform : str
@@ -81,7 +81,7 @@ class CoaddAtomicConfig:
         self.overwrite = overwrite
         self.output_root = output_root
         self.plot = plot
-        
+
         def convert_to_datetime(
             time: Union[dt.datetime, float, str, None],
         ) -> dt.datetime:
@@ -95,7 +95,7 @@ class CoaddAtomicConfig:
                 return time
             else:
                 raise Exception(f"Could not convert type {type(time)} to datetime")
-                
+
         self.start_time = convert_to_datetime(start_time)
         self.stop_time = convert_to_datetime(stop_time)
         self.time_intervals: List[Tuple[dt.datetime, dt.datetime]] = []
@@ -122,7 +122,7 @@ class CoaddAtomicConfig:
                 break
             self.time_intervals.append((start, stop))
             start += delta
-            
+
     @classmethod
     def from_yaml(cls, path) -> "CoaddAtomicConfig":
         with open(path, "r") as f:
@@ -134,7 +134,7 @@ def main(config_file: str, verbosity: int) -> None:
     cfg = CoaddAtomicConfig.from_yaml(config_file)
     logger.info(f"Setup {cfg.interval} intervals")
     logger.debug(cfg.time_intervals)
-    
+
     putils.mkdir(cfg.output_root)
 
     logger.info(f"Database initialized at {cfg.output_db}")
@@ -148,10 +148,10 @@ def main(config_file: str, verbosity: int) -> None:
             logger.info(f'Coadding band {band}')
             try:
                 success, err = mapmaking.make_coadd_map(cfg.atomic_db, cfg.output_root,
-                                                   cfg.output_db, band, cfg.platform, 
-                                                   cfg.split_label, start_time, stop_time, 
-                                                   cfg.interval, cfg.geom_file_prefix, 
-                                                   overwrite=cfg.overwrite, unit=cfg.unit, 
+                                                   cfg.output_db, band, cfg.platform,
+                                                   cfg.split_label, start_time, stop_time,
+                                                   cfg.interval, cfg.geom_file_prefix,
+                                                   overwrite=cfg.overwrite, unit=cfg.unit,
                                                    logger=logger, plot=cfg.plot)
                 if not success:
                     logger.warning(err)
@@ -161,7 +161,7 @@ def main(config_file: str, verbosity: int) -> None:
     return True
 
 def init_output_db(output_db, interval):
-    conn = sqlite3.connect(output_db)
+    conn = sqlite_connect(filename=output_db, mode="w")
     cur = conn.cursor()
     create_stmt = f'''
         CREATE TABLE IF NOT EXISTS {interval} (

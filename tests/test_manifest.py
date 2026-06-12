@@ -44,9 +44,6 @@ class TestDbBatchManager(unittest.TestCase):
             # Test that the manager doesn't close the db after context
             self.assertIsNotNone(manager.db)
 
-            # Clean up the db
-            db.conn.close()
-
         finally:
             # Clean up
             if os.path.exists(temp_dir):
@@ -86,9 +83,6 @@ class TestDbBatchManager(unittest.TestCase):
                 # Verify entries were added
                 results = manager.db.inspect({})
                 self.assertEqual(len(results), 8)
-
-            # Clean up the db
-            db.conn.close()
 
         finally:
             # Clean up
@@ -130,10 +124,6 @@ class TestMultiDbBatchManager(unittest.TestCase):
                 self.assertEqual(mgr1.batch_counter, 0)
                 self.assertEqual(mgr2.batch_counter, 0)
 
-            # Clean up the databases
-            db1.conn.close()
-            db2.conn.close()
-
         finally:
             # Clean up
             if os.path.exists(temp_dir):
@@ -166,11 +156,6 @@ class TestMultiDbBatchManager(unittest.TestCase):
                 self.assertEqual(mgr1.batch_size, 5)
                 self.assertEqual(mgr2.batch_size, 10)
                 self.assertEqual(mgr3.batch_size, 15)
-
-            # Clean up the databases
-            db1.conn.close()
-            db2.conn.close()
-            db3.conn.close()
 
         finally:
             # Clean up
@@ -226,10 +211,6 @@ class TestMultiDbBatchManager(unittest.TestCase):
             self.assertEqual(len(results1), 7)
             self.assertEqual(len(results2), 8)
 
-            # Clean up the databases
-            db1.conn.close()
-            db2.conn.close()
-
         finally:
             # Clean up
             if os.path.exists(temp_dir):
@@ -256,10 +237,6 @@ class TestMultiDbBatchManager(unittest.TestCase):
             # Should raise ValueError because batch_sizes length doesn't match databases length
             with self.assertRaises(ValueError):
                 MultiDbBatchManager([db1, db2], batch_size=[5, 10, 15])
-
-            # Clean up the databases
-            db1.conn.close()
-            db2.conn.close()
 
         finally:
             # Clean up
@@ -313,10 +290,6 @@ class TestMultiDbBatchManager(unittest.TestCase):
             results2 = db2.inspect({})
             self.assertEqual(len(results1), 3)
             self.assertEqual(len(results2), 3)
-
-            # Clean up the databases
-            db1.conn.close()
-            db2.conn.close()
 
         finally:
             # Clean up

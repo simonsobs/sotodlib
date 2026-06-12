@@ -2,6 +2,8 @@ import sqlite3
 import gzip
 import os
 
+from contextlib import contextmanager
+
 
 def sqlite_connect(filename=None, mode="w"):
     """Utility function for connecting to an sqlite3 DB.
@@ -25,7 +27,9 @@ def sqlite_connect(filename=None, mode="w"):
         # Memory-backed DB
         if mode == "r":
             raise ValueError("Cannot open memory DB in read-only mode")
-        return sqlite3.connect(":memory:")
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        return conn
 
     # This timeout is in seconds.  If multiple processes are writing, they
     # might be blocked for a while until they get their turn.  This prevents
@@ -104,6 +108,9 @@ def sqlite_connect(filename=None, mode="w"):
     if mode == "r":
         conn.execute("pragma query_only=true")
 
+    # Allow access to columns by name, not just tuple index
+    conn.row_factory = sqlite3.Row
+
     return conn
 
 
@@ -155,7 +162,7 @@ def sqlite_from_file(filename, fmt=None, force_new_db=True):
       filename (str): path to the file.
       fmt (str): format of the input; see to_file for details.
       force_new_db (bool): Used if connecting to an sqlite database. If True the
-        databas is copied into memory and if False returns a connection to the
+        database is copied into memory and if False returns a connection to the
         database without reading it into memory
 
     """
@@ -180,3 +187,77 @@ def sqlite_from_file(filename, fmt=None, force_new_db=True):
     db.executescript(data)
     return db
 
+
+class DBObject(object):
+    """Class representing interactions with a database
+
+    Several classes throughout the codebase represent an interface
+    to an sqlite DB with a particular schema and support for both
+    in-memory and on disk databases.  This base class is intended
+    to serve as a foundation for those and centralize the use of
+    sqlite connections.
+
+    Any additional kwargs in the constructor are passed to the
+    initdb() method to initialize the derived class.
+
+    Args:
+        map_file (str or sqlite3.Connection):  If this is a string,
+            it will be treated as the filename for the sqlite3
+            database, and opened as an sqlite3.Connection.  If this is
+            an open sqlite3.Connection, it is cached and used.  If this
+            argument is None (the default), then the sqlite3.Connection
+            is opened on ':memory:'.
+        init_db (bool):  If True, then any ObsDb tables that do not
+            already exist in the database will be created.
+        readonly (bool):  If True, this class instance will connect
+            to the DB with read-only options.
+
+    """
+    def __init__(self, map_file=None, init_db=True, readonly=False, **kwargs):
+        if init_db and readonly:
+            raise ValueError("Cannot initialize a read-only DB")
+        self._readonly = readonly
+        self._map_file = map_file
+        if self._map_file is None or self._map_file == ':memory:':
+            self._map_file = ':memory:'
+            self._mem_db = sqlite_connect(filename=self._map_file, mode="w")
+        else:
+            self._mem_db = None
+        print(f"BASE class map_file = {self._map_file}, init_db={init_db}, {kwargs}", flush=True)
+        if init_db:
+            print("BASE class call initdb", flush=True)
+            self.initdb(**kwargs)
+
+    def initdb(self, **kwargs):
+        """Initialize the DB.  This dispatches to the derived class."""
+        self._initdb(**kwargs)
+
+    def _initdb(self, **kwargs):
+        raise NotImplementedError("Fell through to base class")
+
+    def open_conn(self):
+        if self._mem_db is not None:
+            return self._mem_db
+        if isinstance(self._map_file, sqlite3.Connection):
+            return self._map_file
+        else:
+            conn = sqlite_connect(
+                filename=self._map_file,
+                mode=("r" if self._readonly else "w"),
+            )
+            return conn
+
+    def close_conn(self, conn):
+        if self._mem_db is not None:
+            return
+        if isinstance(self._map_file, sqlite3.Connection):
+            return
+        conn.close()
+
+    @contextmanager
+    def connection(self):
+        cn = self.open_conn()
+        try:
+            yield cn
+        finally:
+            self.close_conn(cn)

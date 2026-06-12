@@ -1,4 +1,3 @@
-import sqlite3
 import os
 import numpy as np
 import warnings
@@ -10,7 +9,7 @@ from .. import util
 
 DBROW_ALL = '_all'
 
-class ObsDb(object):
+class ObsDb(common.DBObject):
     """Observation database.
 
     The ObsDb helps to associate observations, indexed by an obs_id,
@@ -47,6 +46,8 @@ class ObsDb(object):
             the ObsDb will be indexed by obs_id, wafer_slot, and bandpass.
             This is only required when first initialializing a database;
             otherwise the primary fields are determined from the loaded database.
+          readonly (bool):  If True, this class instance will connect
+            to the DB with read-only options.
 
         Notes:
           If map_file is provided, the database will be connected to
@@ -54,21 +55,20 @@ class ObsDb(object):
           this object be written back to the file.
 
         """
-        if init_db and readonly:
-            raise ValueError("Cannot initialize a read-only DB")
-        self._readonly = readonly
-        if isinstance(map_file, sqlite3.Connection):
-            self.conn = map_file
-        else:
-            self.conn = common.sqlite_connect(
-                filename=map_file,
-                mode=("r" if readonly else "w"),
-            )
+        self._wafer_info = wafer_info
+        super().__init__(
+            map_file=map_file,
+            init_db=init_db,
+            readonly=readonly,
+            wafer_info=wafer_info,
+        )
+        self.primary_keys = self._get_primary_fields(wafer_info)
 
-        self.conn.row_factory = sqlite3.Row  # access columns by name
-        if init_db:
+    def _initdb(self, wafer_info=None):
+        """Called by the base class constructor."""
+        with self.connection() as conn:
             pkeys = ["`obs_id`"]
-            if wafer_info:
+            if wafer_info is not None:
                 pkeys.extend([f"`{k}`" for k in wafer_info])
 
             self._table_defs = {'obs': [
@@ -88,8 +88,7 @@ class ObsDb(object):
                 'idx_obs': f'obs({pkeys_str})',
                 'idx_tags': f'tags({pkeys_str})',
             }
-
-            c = self.conn.cursor()
+            c = conn.cursor()
             c.execute("SELECT type, name FROM sqlite_master "
                       "WHERE type in ('table', 'index') and name not like 'sqlite_%';")
             tables = [r[1] for r in c]
@@ -105,22 +104,22 @@ class ObsDb(object):
                     c.execute(f'CREATE INDEX IF NOT EXISTS {index} on {cols}')
                     changes = True
             if changes:
-                self.conn.commit()
-        self.primary_keys = self._get_primary_fields(wafer_info)
+                conn.commit()
 
     def _get_primary_fields(self, wafer_info=None):
         """Retrieve the primary keys of the specified table.
            This is used whether to index by obs_id or
            obs_id plus additional fields defined by wafer_info."""
         query = "PRAGMA table_info('obs')"
-        c = self.conn.execute(query)
-        primary_keys = [row['name'] for row in c.fetchall() if row['pk'] > 0]
-        if wafer_info:
-            pkeys = ["obs_id"]
-            pkeys.extend([f"{k}" for k in wafer_info])
-            if sorted(pkeys) != sorted(primary_keys): # sorted allows for different order
-                raise ValueError(f"Primary keys do not match: {primary_keys} != {pkeys}"+
-                                f" must use `wafer_info`=={primary_keys} or create a new dB with {pkeys}")
+        with self.connection() as conn:
+            c = conn.execute(query)
+            primary_keys = [row['name'] for row in c.fetchall() if row['pk'] > 0]
+            if wafer_info is not None:
+                pkeys = ["obs_id"]
+                pkeys.extend([f"{k}" for k in wafer_info])
+                if sorted(pkeys) != sorted(primary_keys): # sorted allows for different order
+                    raise ValueError(f"Primary keys do not match: {primary_keys} != {pkeys}"+
+                                    f" must use `wafer_info`=={primary_keys} or create a new dB with {pkeys}")
         return primary_keys
 
     def _convert_wafer_info(self, obs_id, wafer_info):
@@ -166,7 +165,11 @@ class ObsDb(object):
         return wafer_info
 
     def __len__(self):
-        return self.conn.execute(f'SELECT COUNT({self.primary_keys[0]}) FROM obs').fetchone()[0]
+        with self.connection() as conn:
+            ret = conn.execute(
+                f'SELECT COUNT({self.primary_keys[0]}) FROM obs'
+            ).fetchone()[0]
+        return ret
 
     def add_obs_columns(self, column_defs, ignore_duplicates=True, commit=True):
         """Add columns to the obs table.
@@ -202,33 +205,34 @@ class ObsDb(object):
         """
         if self._readonly:
             raise RuntimeError("Cannot add_obs_columns() on a read-only DB")
-        current_cols = self.conn.execute('pragma table_info(obs)').fetchall()
-        current_cols = [r[1] for r in current_cols]
-        if isinstance(column_defs, str):
-            column_defs = column_defs.split(',')
-        for column_def in column_defs:
-            if isinstance(column_def, str):
-                column_def = column_def.split()
-            name, typestr = column_def
-            if typestr is float:
-                typestr = 'float'
-            elif typestr is int:
-                typestr = 'int'
-            elif typestr is str:
-                typestr = 'text'
-            check_name = name
-            if name.startswith('`'):
-                check_name = name[1:-1]
-            else:
-                name = '`' + name + '`'
-            if check_name in current_cols:
-                if ignore_duplicates:
-                    continue
-                raise ValueError("Column %s already exists in table obs" % check_name)
-            self.conn.execute('ALTER TABLE obs ADD COLUMN %s %s' % (name, typestr))
-            current_cols.append(check_name)
-        if commit:
-            self.conn.commit()
+        with self.connection() as conn:
+            current_cols = conn.execute('pragma table_info(obs)').fetchall()
+            current_cols = [r[1] for r in current_cols]
+            if isinstance(column_defs, str):
+                column_defs = column_defs.split(',')
+            for column_def in column_defs:
+                if isinstance(column_def, str):
+                    column_def = column_def.split()
+                name, typestr = column_def
+                if typestr is float:
+                    typestr = 'float'
+                elif typestr is int:
+                    typestr = 'int'
+                elif typestr is str:
+                    typestr = 'text'
+                check_name = name
+                if name.startswith('`'):
+                    check_name = name[1:-1]
+                else:
+                    name = '`' + name + '`'
+                if check_name in current_cols:
+                    if ignore_duplicates:
+                        continue
+                    raise ValueError("Column %s already exists in table obs" % check_name)
+                conn.execute('ALTER TABLE obs ADD COLUMN %s %s' % (name, typestr))
+                current_cols.append(check_name)
+            if commit:
+                conn.commit()
         return self
 
     def update_obs(self, obs_id, data={}, tags=[],
@@ -273,32 +277,33 @@ class ObsDb(object):
             for i, k in enumerate(self.primary_keys[1:]):
                 obs_key[k] = wafer_info[i]
 
-        c = self.conn.cursor()
-        columns = ', '.join(obs_key.keys())
-        placeholders = ', '.join(['?'] * len(obs_key))
-        c.execute(f'INSERT OR IGNORE INTO obs ({columns}) VALUES ({placeholders})',
-                  tuple(obs_key.values()))
+        with self.connection() as conn:
+            c = conn.cursor()
+            columns = ', '.join(obs_key.keys())
+            placeholders = ', '.join(['?'] * len(obs_key))
+            c.execute(f'INSERT OR IGNORE INTO obs ({columns}) VALUES ({placeholders})',
+                    tuple(obs_key.values()))
 
-        if len(data.keys()):
-            settors = [f'{k}=?' for k in data.keys()]
-            where_str = ' AND '.join([f'{k}=?' for k in obs_key.keys()])
-            c.execute(f'UPDATE obs SET {", ".join(settors)} WHERE {where_str}',
-                      tuple(data.values()) + tuple(obs_key.values()))
-
-        for t in tags:
-            if t[0] == '!':
-                # Kill this tag
+            if len(data.keys()):
+                settors = [f'{k}=?' for k in data.keys()]
                 where_str = ' AND '.join([f'{k}=?' for k in obs_key.keys()])
-                c.execute(f'DELETE FROM tags WHERE {where_str} AND tag=?',
-                            tuple(obs_key.values()) + (t[1:],))
-            else:
-                # Add the tag for the specific primary key combination.
-                columns = ', '.join(list(obs_key.keys()) + ['tag'])
-                placeholders = ', '.join(['?'] * (len(obs_key) + 1))
-                c.execute(f'INSERT OR REPLACE INTO tags ({columns}) VALUES ({placeholders})',
-                            tuple(obs_key.values()) + (t,))
-        if commit:
-            self.conn.commit()
+                c.execute(f'UPDATE obs SET {", ".join(settors)} WHERE {where_str}',
+                        tuple(data.values()) + tuple(obs_key.values()))
+
+            for t in tags:
+                if t[0] == '!':
+                    # Kill this tag
+                    where_str = ' AND '.join([f'{k}=?' for k in obs_key.keys()])
+                    c.execute(f'DELETE FROM tags WHERE {where_str} AND tag=?',
+                                tuple(obs_key.values()) + (t[1:],))
+                else:
+                    # Add the tag for the specific primary key combination.
+                    columns = ', '.join(list(obs_key.keys()) + ['tag'])
+                    placeholders = ', '.join(['?'] * (len(obs_key) + 1))
+                    c.execute(f'INSERT OR REPLACE INTO tags ({columns}) VALUES ({placeholders})',
+                                tuple(obs_key.values()) + (t,))
+            if commit:
+                conn.commit()
         return self
 
     def copy(self, map_file=None, overwrite=False):
@@ -310,7 +315,7 @@ class ObsDb(object):
         simply discard the returned object.
         """
         if (
-            map_file is not None and 
+            map_file is not None and
             map_file != ":memory:" and
             os.path.exists(map_file)
         ):
@@ -319,9 +324,12 @@ class ObsDb(object):
             else:
                 raise RuntimeError("Output file %s exists (overwrite=True "
                                    "to overwrite)." % map_file)
+        with self.connection() as conn:
+            script = ' '.join(conn.iterdump())
+
         new_db = ObsDb(map_file=map_file, init_db=False, readonly=False)
-        script = ' '.join(self.conn.iterdump())
-        new_db.conn.executescript(script)
+        with new_db.connection() as conn:
+            conn.executescript(script)
         return new_db
 
     def to_file(self, filename, overwrite=True, fmt=None):
@@ -335,7 +343,8 @@ class ObsDb(object):
             unless the filename ends with '.gz', in which it is 'gz'.
 
         """
-        return common.sqlite_to_file(self.conn, filename, overwrite=overwrite, fmt=fmt)
+        with self.connection() as conn:
+            common.sqlite_to_file(conn, filename, overwrite=overwrite, fmt=fmt)
 
     @classmethod
     def from_file(cls, filename, fmt=None, force_new_db=True):
@@ -343,7 +352,7 @@ class ObsDb(object):
             :func:`sotodlib.core.metadata.common.sqlite_from_file`
         """
         conn = common.sqlite_from_file(filename, fmt=fmt, force_new_db=force_new_db)
-        return cls(conn, init_db=False)
+        return cls(map_file=conn, init_db=False)
 
     def get(self, obs_id=None, wafer_info=None, tags=None, add_prefix=''):
         """Returns the entry for obs_id, as an ordered dict.
@@ -385,8 +394,9 @@ class ObsDb(object):
         if tags:
             # "distinct" should not be needed given uniqueness constraint.
             where_str = ' AND '.join([f"{k}='{v}'" for k, v in zip(self.primary_keys, [obs_id] + list(wafer_info))])
-            c = self.conn.execute(f'SELECT DISTINCT tag FROM tags WHERE {where_str}')
-            output['tags'] = [r[0] for r in c]
+            with self.connection() as conn:
+                c = conn.execute(f'SELECT DISTINCT tag FROM tags WHERE {where_str}')
+                output['tags'] = [r[0] for r in c]
         return output
 
     def query(self, query_text='1', tags=None, sort=['obs_id'], add_prefix=''):
@@ -462,10 +472,11 @@ class ObsDb(object):
                           f"obs.obs_id = tt{tagi}.obs_id")
         extra_fields = ''.join([','+f for f in extra_fields])
         q = 'select obs.* %s from obs %s where %s %s' % (extra_fields, joins, query_text, sort_text)
-        c = self.conn.execute(q)
-        results = ResultSet.from_cursor(c)
-        if add_prefix is not None:
-            results.keys = [add_prefix + k for k in results.keys]
+        with self.connection() as conn:
+            c = conn.execute(q)
+            results = ResultSet.from_cursor(c)
+            if add_prefix is not None:
+                results.keys = [add_prefix + k for k in results.keys]
         return results
 
     def query_linked_dbs(self, secondary_dbs, query_text, add_prefix='',
@@ -534,8 +545,9 @@ class ObsDb(object):
             fields[k] = (len(items), _short_list(items))
 
         # Count occurances of each tag ...
-        c = self.conn.execute('select tag, count(obs_id) from tags group by tag order by tag')
-        tags = {r[0]: r[1] for r in c}
+        with self.connection() as conn:
+            c = conn.execute('select tag, count(obs_id) from tags group by tag order by tag')
+            tags = {r[0]: r[1] for r in c}
 
         return {
             'count': len(rs),
@@ -646,11 +658,13 @@ def diff_obsdbs(obsdb_left, obsdb_right, return_detail=False):
         pd['new_obs'].append(full[1][idx])
 
     # Tag check.
-    tags_tuples = [
-        list(map(tuple, db.conn.execute(
-            'select distinct obs_id, tag from tags  '
-            'order by obs_id, tag').fetchall()))
-        for db in [obsdb_left, obsdb_right]]
+    with obsdb_left.connection() as conn_left:
+        with obsdb_right.connection() as conn_right:
+            tags_tuples = [
+                list(map(tuple, conn.execute(
+                    'select distinct obs_id, tag from tags  '
+                    'order by obs_id, tag').fetchall()))
+                for conn in [conn_left, conn_right]]
 
     # Collapse tags to single strings and eliminate duplicates.
     DELIM = ':::/:::'
@@ -689,7 +703,7 @@ def patch_obsdb(patch_data, target_db):
 
     for obs_entry in patch_data['new_obs']:
         target_db.update_obs(obs_entry['obs_id'], obs_entry,
-                             commit=False)
+                             commit=True)
 
     # Group new tags by obs.
     tags_obsed = {}
@@ -699,6 +713,4 @@ def patch_obsdb(patch_data, target_db):
         else:
             tags_obsed[k].append(v)
     for obs, tags in tags_obsed.items():
-        target_db.update_obs(obs, {}, tags=tags, commit=False)
-
-    target_db.conn.commit()
+        target_db.update_obs(obs, {}, tags=tags, commit=True)
