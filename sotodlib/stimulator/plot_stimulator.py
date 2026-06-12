@@ -75,7 +75,7 @@ def plot_hkdata(aman, hkdata, cal_type):
 
     # Encoder timing and stream timing
     axes['C'].plot(aman.stm_ana.t_enc-t0,aman.stm_ana.t_enc-aman.stm_ana.t_hk,'.')
-    axes['C'].set_title(f'PTP_time - hk_time')
+    axes['C'].set_title('PTP_time - hk_time')
     axes['C'].set_xlabel('t_enc - t0_stream [s]')
     axes['C'].set_ylabel('t_enc - t_hk [s] (should be -0.1<t<0)')
 
@@ -130,7 +130,8 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         fig, axes = plt.subplots(3,2,figsize=(10,8))
         fig.suptitle(f'Stimulator data, {ufm}, i_det: {i_det}, det_id: {aman.det_info.det_id[i_det]}')
 
-        i_y=0;i_x=0
+        i_y = 0
+        i_x = 0
         y = aman.signal[i_det]-np.mean(aman.signal[i_det])
         axes[i_y,i_x].plot(aman.timestamps-t0,y,label='Raw_data - mean')
         axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal_hpf[i_det],label='HPFed data')
@@ -141,7 +142,8 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         axes[i_y,i_x].legend()
 
     
-        i_y=1;i_x=0
+        i_y = 1
+        i_x = 0
         x_min = 30
         x_max = 30.5
         i_x_min=int(aman.obs_info.sampling_rate*x_min)
@@ -158,13 +160,15 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         elif ufm[0] == 'U':
             axes[i_y,i_x].set_ylim(-0.02,0.02)
         axes[i_y,i_x].set_xlim(x_min,x_max)
-        i_y=2;i_x=0
+        i_y = 2
+        i_x = 0
         f = np.arange(0,10,0.01)
-        axes[i_y,i_x].set_title(f'High Pass Filter')
+        axes[i_y,i_x].set_title('High Pass Filter')
         axes[i_y,i_x].set_xlabel('Frequency [Hz]')
         axes[i_y,i_x].set_ylabel('HPF')
    
-        i_y=0;i_x=1
+        i_y = 0
+        i_x = 1
         x = coadd_data['iirc']['f1_gain']['x'][i_det]
         y = coadd_data['iirc']['f1_gain']['y'][i_det]
         yerr = coadd_data['iirc']['f1_gain']['yerr'][i_det]
@@ -173,7 +177,8 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         axes[i_y,i_x].set_xlabel('Timing (1 cycle)')
         axes[i_y,i_x].set_ylabel('TOD ave [pW]')
     
-        i_y=1;i_x=1
+        i_y = 1
+        i_x = 1
         x = coadd_data['hpf']['f1_gain']['x'][i_det]
         y = coadd_data['hpf']['f1_gain']['y'][i_det]
         yerr = coadd_data['hpf']['f1_gain']['yerr'][i_det]
@@ -189,11 +194,12 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         axes[i_y,i_x].plot(x, fit_result['fit_coadd']['hpf']['f1_gain'][i_det].best_fit, '-', color='red',zorder=1)
         axes[i_y,i_x].plot(x, fit_result['fit_coadd']['lpf']['f1_gain'][i_det].best_fit, '-', color='green',zorder=1)
         y = fit_result['fit_coadd']['hpf']['f1_gain'][i_det].best_values['a0']*np.sin((x-fit_result['fit_coadd']['hpf']['f1_gain'][i_det].best_values['t0'])*2*np.pi)
-        axes[i_y,i_x].plot(x, y, linestyle=(0,(2,8)), color='red',zorder=1,label=fr'sin$\theta$ for HPF fit')
+        axes[i_y,i_x].plot(x, y, linestyle=(0,(2,8)), color='red',zorder=1,label=r'sin$\theta$ for HPF fit')
         axes[i_y,i_x].legend()
    
     
-        i_y=2;i_x=1
+        i_y = 2
+        i_x = 1
         axes[i_y,i_x].plot(aman.stm_ana.t_enc[:-1]-t0,1/(aman.stm_ana.t_enc[1:] - aman.stm_ana.t_enc[:-1]),label='y: chopping freq, t: encoder')
         axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal[i_det],label='TOD')
         for key_freq, (t_min, t_max) in zip(aman.stm_ana.freqs.vals,aman.stm_ana.t_cuts):
@@ -204,7 +210,8 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         axes[i_y,i_x].set_xlabel('TOD time [s]')
         axes[i_y,i_x].legend()
 
-        i_y=2;i_x=0
+        i_y = 2
+        i_x = 0
         hpf = tod_ops.filters.high_pass_sine2(filtering_params['hpf_cutoff'])
         filter_cutoff = filtering_params['lpf_cutoff_factor']*filtering_params['chopping_freqs']['f1_gain']
         lpf = tod_ops.filters.low_pass_sine2(filter_cutoff, filter_cutoff*filtering_params['lpf_width_fraction'])
@@ -221,7 +228,8 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         fig, axes = plt.subplots(9,2,figsize=(10,18))
         fig.suptitle(f'Stimulator data, i_det: {i_det}, det_id: {aman.det_info.det_id[i_det]}')
 
-        i_y=0;i_x=0
+        i_y = 0
+        i_x = 0
         y = aman.signal[i_det]-np.mean(aman.signal[i_det])
         axes[i_y,i_x].plot(aman.timestamps-t0,y,label='Raw_data - mean')
         axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal_hpf[i_det],label='HPFed data')
@@ -231,7 +239,8 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         axes[i_y,i_x].set_ylabel('TOD [pW]')
         axes[i_y,i_x].legend()
 
-        i_y=0;i_x=1
+        i_y = 0
+        i_x = 1
         axes[i_y,i_x].plot(aman.stm_ana.t_enc[:-1]-t0,1/(aman.stm_ana.t_enc[1:] - aman.stm_ana.t_enc[:-1]),label='y: chopping freq, t: encoder')
         axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal[i_det],label='TOD')
         for key_freq, (t_min, t_max) in zip(aman.stm_ana.freqs.vals,aman.stm_ana.t_cuts):
@@ -245,26 +254,28 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         axes[i_y,i_x].set_xlabel('TOD time [s]')
         axes[i_y,i_x].legend()
 
-        i_y=1; i_x=0
+        i_y = 1
+        i_x = 0
         f = fit_result['fit_amp']['lpf'][i_det].userkws['f']
         axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].data,'o')
-        axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].best_fit, '-', color='red',zorder=3,label=fr'$\tau$= {fit_result['fit_amp']['lpf'][i_det].best_values['tau']*1e3:.2f}ms')
-        axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*1.1,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3,label=fr'$\pm 10\%$ change of $\tau$')
+        axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].best_fit, '-', color='red',zorder=3,label=fr'$\tau$= {fit_result["fit_amp"]["lpf"][i_det].best_values["tau"]*1e3:.2f}ms')
+        axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*1.1,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3,label=r'$\pm 10\%$ change of $\tau$')
         axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*0.9,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3)
         axes[i_y,i_x].set_xlabel('Chopping freq [Hz]')
         axes[i_y,i_x].set_ylabel('sin_theta amplitude [pW]')
         axes[i_y,i_x].set_title('Amplitude fit')
         axes[i_y,i_x].legend()
         
-        i_y=1; i_x=1
+        i_y = 1
+        i_x = 1
         result = fit_result['fit_phase__free']['lpf'][i_det]
         f = result.userkws['f']
         axes[i_y,i_x].plot(f,result.data,'o')
 
         result = fit_result['fit_phase__free']['lpf'][i_det]
-        axes[i_y,i_x].plot(f,result.best_fit,'-', color='blue', zorder=3,label=fr'$\tau$={result.best_values['tau']*1e3:.2f}ms, $\theta_\text{{geo}}$={result.best_values['theta_geo']:.0f}deg, $\Delta t$={result.best_values['dt']*1e3:.2f}ms')
+        axes[i_y,i_x].plot(f,result.best_fit,'-', color='blue', zorder=3,label=fr'$\tau$={result.best_values["tau"]*1e3:.2f}ms, $\theta_\text{{geo}}$={result.best_values["theta_geo"]:.0f}deg, $\Delta t$={result.best_values["dt"]*1e3:.2f}ms')
         result = fit_result['fit_phase__fix_tau']['lpf'][i_det]
-        axes[i_y,i_x].plot(f,result.best_fit,'-', color='green',zorder=3,label=fr'$\tau$={result.best_values['tau']*1e3:.2f}ms(fix), $\theta_\text{{geo}}$={result.best_values['theta_geo']:.0f}deg , $\Delta t$={result.best_values['dt']*1e3:.2f}ms')
+        axes[i_y,i_x].plot(f,result.best_fit,'-', color='green',zorder=3,label=fr'$\tau$={result.best_values["tau"]*1e3:.2f}ms(fix), $\theta_\text{{geo}}$={result.best_values["theta_geo"]:.0f}deg , $\Delta t$={result.best_values["dt"]*1e3:.2f}ms')
         
         axes[i_y,i_x].set_xlabel('Chopping freq [Hz]')
         axes[i_y,i_x].set_ylabel('Phase delay [deg]')
@@ -319,7 +330,7 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
             axes[i_y,i_x].plot(x, fit_result['fit_coadd']['hpf'][f_key][i_det].best_fit, '-', color='red',zorder=5)
             axes[i_y,i_x].plot(x, fit_result['fit_coadd']['lpf'][f_key][i_det].best_fit, '-', color='green',zorder=5)
             y = fit_result['fit_coadd']['hpf'][f_key][i_det].best_values['a0']*np.sin((x-fit_result['fit_coadd']['hpf'][f_key][i_det].best_values['t0'])*2*np.pi)
-            axes[i_y,i_x].plot(x, y, linestyle=(0,(2,8)), color='red',zorder=1,label=fr'sin$\theta$ for HPF fit')
+            axes[i_y,i_x].plot(x, y, linestyle=(0,(2,8)), color='red',zorder=1,label=r'sin$\theta$ for HPF fit')
             axes[i_y,i_x].legend()
         
     else:
