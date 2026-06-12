@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import lmfit
-from pathlib import Path
 import ruptures as rpt
 import astropy
 
@@ -11,6 +10,7 @@ from sotodlib.stimulator.plot_stimulator import plot_hkdata, plot_tod
 from sotodlib.stimulator.utils_stimulator import func_sines, func_response_amplitude, func_response_phase_with_dt  
 
 CHOPPING_FREQS = {'f1': 6, 'f2': 15, 'f3': 33,'f4': 63, 'f5': 93, 'f6': 123, 'f7': 147}
+STM_NORMALIZE_TEMP = 750 # Kelvin. Normalization temperature for stimulator signal temperature.
 
 
 def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
@@ -93,7 +93,7 @@ def get_downsample_factor_tags(ctx):
     return np.array(all_tags)[mask].tolist()
     
 
-def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_plot=False, saving_plot=False, output_dir=None):
+def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True):
     """
     Calculate the gain of the detectors.
     
@@ -103,9 +103,6 @@ def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_pl
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
         n_bins: Number of bins for co-adding data.
         preprocessing: If True, perform preprocessing before calculation.
-        showing_plot: If true, make plots.
-        saving_plot: If true, save plots.
-        output_dir: Directory to save plots.
 
     Return:
         bool: True if data is valid and calculation is performed, False otherwise.
@@ -126,11 +123,6 @@ def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_pl
 
         get_signal_temp(aman,hkdata)
 
-    if showing_plot:
-        fig_hk, axes_hk = plot_hkdata(aman,hkdata,cal_type='gain')
-        if not showing_plot:
-            plt.close(fig_hk)
-   
     if not valid_data:
         return valid_data
 
@@ -194,28 +186,12 @@ def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_pl
 
             fit_result['fit_coadd'][filt_key]['f1_gain'].append(result)
 
-        if not showing_plot and not saving_plot:
-            pass
-        else: 
-            fig_tod, axes_tod = plot_tod(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='gain')
-            
-            if saving_plot:
-                obs_id = aman.obs_info.obs_id
-                if output_dir is not None:
-                    ufm = aman.det_info.stream_id[i_det][4:]
-                    ufm = ufm[0].upper() + ufm[1:]
-                    output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
-                    output_dir_.mkdir(parents=True, exist_ok=True)
-                    plt.savefig(f'{output_dir_}/Gain_det{i_det:04d}.png')
-            if not showing_plot:
-                plt.close(fig_tod)
-            
-    fill_data(aman,coadd_data,fit_result,n_bins,cal_type='gain')    
+    fill_data(aman, coadd_data, fit_result, filtering_params, n_bins, cal_type='gain')    
     
     return valid_data
 
 
-def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_plot=False, saving_plot=False, output_dir=None):
+def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True):
     """
     Calculate the time constant of the detectors.
     
@@ -225,9 +201,6 @@ def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, sh
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
         n_bins: Number of bins for co-adding data.
         preprocessing: If True, perform preprocessing before calculation.
-        showing_plot: If true, make and show plots.
-        saving_plot: If true, make and save plots.
-        output_dir: Directory to save plots.
 
     Return:
         bool: True if data is valid and calculation is performed, False otherwise.
@@ -250,10 +223,6 @@ def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, sh
 
         get_signal_temp(aman,hkdata)
 
-    if showing_plot:
-        fig_hk, axes_hk = plot_hkdata(aman,hkdata,cal_type='timeconstant')
-        if not showing_plot:
-            plt.close(fig_hk)
     if not valid_data:
         return valid_data
     
@@ -357,23 +326,9 @@ def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, sh
                 fit_result[fit_key][filt_key].append(result)
         
         
-        if not showing_plot and not saving_plot:
-            pass
-        else:
-            fig_tod, axes_tod = plot_tod(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='timeconstant')
-
-            obs_id = aman['obs_info']['obs_id']
-            if saving_plot:
-                ufm = aman.det_info.stream_id[i_det][4:]
-                ufm = ufm[0].upper() + ufm[1:]
-                output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
-                output_dir_.mkdir(parents=True, exist_ok=True)
-                plt.savefig(f'{output_dir_}/Tau_det{i_det:04d}.png')
-            if not showing_plot:
-                plt.close(fig_tod)
 
     
-    fill_data(aman,coadd_data,fit_result,n_bins,cal_type='timeconstant')    
+    fill_data(aman, coadd_data, fit_result, filtering_params, n_bins, cal_type='timeconstant')    
         
     return valid_data
 
@@ -881,7 +836,7 @@ def get_fit_params(cal_type):
     return model,params_base
 
 
-def fill_data(aman, coadd_data, fit_result, n_bins, cal_type):
+def fill_data(aman, coadd_data, fit_result, filtering_params, n_bins, cal_type):
     """
     Fill co-added data and fit result to axis manager.
     
@@ -889,14 +844,30 @@ def fill_data(aman, coadd_data, fit_result, n_bins, cal_type):
         aman: axis manager
         coadd_data: co-added data
         fit_result: fit result
+        filtering_params: filtering parameters
         n_bins: number of bins
         cal_type: 'gain' or 'timeconstant'. type of calibration
     """
+
+    # Fill filtering parameters to axis manager
+    if 'filtering_params' not in aman.stm_cal.keys():
+        aman.stm_cal.wrap('filtering_params', core.AxisManager())
+
+    for key, value in filtering_params.items():
+        if key == 'chopping_freqs':
+            if len(value) == 1:
+                aman.stm_cal.filtering_params.wrap(f'{key}_gain', value, overwrite=True)
+            else:
+                aman.stm_cal.filtering_params.wrap(f'{key}_tau', value, overwrite=True)
+            
+        else:
+            aman.stm_cal.filtering_params.wrap(key, value, [(0,'dets')], overwrite=True)
+
+    # Fill co-added data to axis manager
     if 'coadd_data' not in aman.stm_cal.keys():
         axis_bins = core.IndexAxis('stm_coadd_bins',n_bins)
         aman.stm_cal.wrap('coadd_data',core.AxisManager(aman._axes['dets'],axis_bins))
     
-    # Fill co-added data to axis manager
     for filt_key in coadd_data.keys():
         if filt_key not in aman.stm_cal.coadd_data.keys():
             aman.stm_cal.coadd_data.wrap(filt_key,core.AxisManager())
@@ -965,7 +936,7 @@ def fill_data(aman, coadd_data, fit_result, n_bins, cal_type):
         env_temp = aman.stm_cal.temps[idx][0]
 
         arr = np.array([float(x.best_values['a0']) if x is not None else np.nan for x in fit_result['fit_coadd']['lpf']['f1_gain']])
-        arr = abs(arr) * (750/(heater_temp-env_temp)) # Noralizing to typical signal temperature 750 Kelvin.
+        arr = abs(arr) * (STM_NORMALIZE_TEMP/(heater_temp-env_temp))
         aman.stm_cal.wrap('stm_gain', arr, [(0,'dets')], overwrite=True)
     if cal_type == 'timeconstant':
         arr = np.array([float(x.best_values['tau']) if x is not None else np.nan for x in fit_result['fit_amp']['lpf']])
