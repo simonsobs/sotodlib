@@ -33,7 +33,7 @@ def func_response_amplitude(f, tau, a):
         a: Amplitude of sin function for '0' frequency signal
 
     Return:
-        y: Value of fitting function.
+        y: Stimulator signal amplitude at chopping frequency f.
     """
     y = a /np.sqrt(1+(2*np.pi*f*tau)**2)
     return y
@@ -47,10 +47,9 @@ def func_response_phase(f, tau, theta_geo):
         f: Chopping frequency [Hz]
         tau: time constant of a detector in [s]
         theta_geo: Offset of phase delay [deg]
-        theta: Phase delay of stimulator signal [deg]
 
     Return:
-        theta: Value of fitting function.
+        theta: Phase delay of stimulator signal [deg]
     """
     theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo
     return theta
@@ -63,13 +62,12 @@ def func_response_phase_with_dt(f, tau, theta_geo, dt):
     Args:
         f: Chopping frequency [Hz]
         tau: time constant of a detector in [s]
-        theta: Phase delay of stimulator signal [deg]
         theta_geo: Offset of phase delay due to hardware effect, geo = geometry [deg]
         theta_dt: Offset of phase delay due to readout issue [deg], theta_dt*(pi/180) =  -delta_t*2pi*f
         dt: Time difference due to wrong time stamps
 
     Return:
-        theta: Value of fitting function.
+        theta: Phase delay of stimulator signal [deg]
     """
     theta_dt = -dt*2*np.pi*f *(180/np.pi)
     theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo + theta_dt
