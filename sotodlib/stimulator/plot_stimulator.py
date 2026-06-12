@@ -1,6 +1,7 @@
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
-from sotodlib.stimulator.utils_stimulator import func_sines, func_response_amplitude, func_response_phase, func_response_phase_with_dt  
+from sotodlib.stimulator.utils_stimulator import func_response_amplitude  
+from sotodlib import tod_ops
 
 
 def plot_hkdata(aman, hkdata, cal_type):
@@ -11,6 +12,10 @@ def plot_hkdata(aman, hkdata, cal_type):
         aman: axis manager with aman.stm_ana field
         hkdata: Housekeeping data including temperature data and encoder timing data.
         cal_type: Type of calibration to be performed.
+
+    Return:
+        fig: figure object
+        axes: axes object
     """
 
     fig, axes = plt.subplot_mosaic([['A','A'],['B','C'],['D','E']],figsize=(10,8))
@@ -98,6 +103,8 @@ def plot_hkdata(aman, hkdata, cal_type):
 
     plt.tight_layout()
 
+    return fig, axes
+
 
 def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
     """
@@ -107,7 +114,12 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         aman: axis manager
         data: co-added data for one detector
         result: fit result for one detector
+        filtering_params: filtering parameters
         cal_type: 'gain' or 'timeconstant'. type of calibration
+
+    Return:
+        fig: figure object
+        axes: axes object
     """
     t0 = aman.timestamps[0]
     ufm = aman.det_info.stream_id[i_det][4:]
@@ -235,8 +247,7 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
 
         i_y=1; i_x=0
         f = fit_result['fit_amp']['lpf'][i_det].userkws['f']
-        #axes[i_y,i_x].errorbar(f,fit_result['fit_amp']['lpf'][i_det].data,fit_result['fit_amp']['lpf'][i_det].weights,fmt='o')
-        axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].data,'o')  # No errorbar for first step analysis
+        axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].data,'o')
         axes[i_y,i_x].plot(f,fit_result['fit_amp']['lpf'][i_det].best_fit, '-', color='red',zorder=3,label=fr'$\tau$= {fit_result['fit_amp']['lpf'][i_det].best_values['tau']*1e3:.2f}ms')
         axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*1.1,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3,label=fr'$\pm 10\%$ change of $\tau$')
         axes[i_y,i_x].plot(f,func_response_amplitude(f,tau=fit_result['fit_amp']['lpf'][i_det].params['tau']*0.9,a=fit_result['fit_amp']['lpf'][i_det].params['a']) , '--', color='orange',zorder=3)
@@ -248,8 +259,7 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         i_y=1; i_x=1
         result = fit_result['fit_phase__free']['lpf'][i_det]
         f = result.userkws['f']
-        #axes[i_y,i_x].errorbar(f,result.data,result.weights,fmt='o')
-        axes[i_y,i_x].plot(f,result.data,'o')  # No errorbar for first step analysis
+        axes[i_y,i_x].plot(f,result.data,'o')
 
         result = fit_result['fit_phase__free']['lpf'][i_det]
         axes[i_y,i_x].plot(f,result.best_fit,'-', color='blue', zorder=3,label=fr'$\tau$={result.best_values['tau']*1e3:.2f}ms, $\theta_\text{{geo}}$={result.best_values['theta_geo']:.0f}deg, $\Delta t$={result.best_values['dt']*1e3:.2f}ms')
@@ -319,3 +329,5 @@ def plot_tod(aman, i_det, coadd_data, fit_result, filtering_params, cal_type):
         for i_x in range(len(axes[0])):
             axes[i_y,i_x].grid() 
     plt.tight_layout()
+
+    return fig, axes
