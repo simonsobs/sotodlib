@@ -92,7 +92,7 @@ def get_downsample_factor_tags(ctx):
     return np.array(all_tags)[mask].tolist()
     
 
-def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_preprocess=True, output_dir=None):
+def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_plot=False, saving_plot=False, output_dir=None):
     """
     Calculate the gain of the detectors.
     
@@ -100,9 +100,10 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
         aman: Axis manager of TOD data, including timestamps and raw signal.
         hkdata: HK data for aman.
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
-        bool_plot: If true, make plots.
-        bool_save: If true, save plots.
-        bool_preprocess: If True, perform preprocessing before calculation.
+        n_bins: Number of bins for co-adding data.
+        preprocessing: If True, perform preprocessing before calculation.
+        showing_plot: If true, make plots.
+        saving_plot: If true, save plots.
         output_dir: Directory to save plots.
 
     Return:
@@ -115,7 +116,7 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
         det_mask[idxs] = True
 
     valid_data = True
-    if bool_preprocess:
+    if preprocessing:
         valid_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
 
         get_chopping_status(aman)
@@ -124,9 +125,9 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
 
         get_signal_temp(aman,hkdata)
 
-    if bool_plot:
+    if showing_plot:
         fig_hk, axes_hk = plot_hkdata(aman,hkdata,cal_type='gain')
-        if not bool_plot:
+        if not showing_plot:
             plt.close(fig_hk)
    
     if not valid_data:
@@ -147,7 +148,6 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
 
     # Make and get co-added data
     coadd_data, fit_result = get_dicts('gain')
-    n_bins = 40
     get_coadd_data(aman,coadd_data,n_bins,det_mask)
 
     for i_det,m in enumerate(det_mask):
@@ -193,12 +193,12 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
 
             fit_result['fit_coadd'][filt_key]['f1_gain'].append(result)
 
-        if not bool_plot and not bool_save:
+        if not showing_plot and not saving_plot:
             pass
         else: 
             fig_tod, axes_tod = plot_tod(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='gain')
             
-            if bool_save:
+            if saving_plot:
                 obs_id = aman.obs_info.obs_id
                 if output_dir is not None:
                     ufm = aman.det_info.stream_id[i_det][4:]
@@ -206,7 +206,7 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
                     output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
                     output_dir_.mkdir(parents=True, exist_ok=True)
                     plt.savefig(f'{output_dir_}/Gain_det{i_det:04d}.png')
-            if not bool_plot:
+            if not showing_plot:
                 plt.close(fig_tod)
             
     fill_data(aman,coadd_data,fit_result,n_bins,cal_type='gain')    
@@ -214,7 +214,7 @@ def calc_gain(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_pr
     return valid_data
 
 
-def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False, bool_preprocess=True, output_dir=None):
+def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True, showing_plot=False, saving_plot=False, output_dir=None):
     """
     Calculate the time constant of the detectors.
     
@@ -222,9 +222,10 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
         aman: Axis manager of TOD data, including timestamps and raw signal.
         hkdata: HK data for aman.
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
-        bool_plot: If true, make plots.
-        bool_save: If true, save plots.
-        bool_preprocess: If True, perform preprocessing before calculation.
+        n_bins: Number of bins for co-adding data.
+        preprocessing: If True, perform preprocessing before calculation.
+        showing_plot: If true, make and show plots.
+        saving_plot: If true, make and save plots.
         output_dir: Directory to save plots.
 
     Return:
@@ -237,7 +238,7 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
         det_mask[idxs] = True
 
     valid_data = True
-    if bool_preprocess:
+    if preprocessing:
         valid_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
 
         get_chopping_status(aman)
@@ -248,9 +249,9 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
 
         get_signal_temp(aman,hkdata)
 
-    if bool_plot:
+    if showing_plot:
         fig_hk, axes_hk = plot_hkdata(aman,hkdata,cal_type='timeconstant')
-        if not bool_plot:
+        if not showing_plot:
             plt.close(fig_hk)
     if not valid_data:
         return valid_data
@@ -267,7 +268,6 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
     models, params_bases = get_fit_params(cal_type='timeconstant')
     
     coadd_data, fit_result = get_dicts('timeconstant')
-    n_bins = 40
     get_coadd_data(aman,coadd_data,n_bins,det_mask)
 
 
@@ -356,19 +356,19 @@ def calc_timeconstant(aman, hkdata, idxs=None, bool_plot=False, bool_save=False,
                 fit_result[fit_key][filt_key].append(result)
         
         
-        if not bool_plot and not bool_save:
+        if not showing_plot and not saving_plot:
             pass
         else:
             fig_tod, axes_tod = plot_tod(aman,i_det,coadd_data,fit_result,filtering_params,cal_type='timeconstant')
 
             obs_id = aman['obs_info']['obs_id']
-            if bool_save:
+            if saving_plot:
                 ufm = aman.det_info.stream_id[i_det][4:]
                 ufm = ufm[0].upper() + ufm[1:]
                 output_dir_ = Path(f'{output_dir}/{ufm}_{obs_id}')
                 output_dir_.mkdir(parents=True, exist_ok=True)
                 plt.savefig(f'{output_dir_}/Tau_det{i_det:04d}.png')
-            if not bool_plot:
+            if not showing_plot:
                 plt.close(fig_tod)
 
     
