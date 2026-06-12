@@ -333,7 +333,7 @@ class ManifestDb:
         uninitialized.
 
         """
-        if scheme and readonly:
+        if scheme is not None and readonly:
             raise ValueError("Cannot initialize the schema of a read-only DB")
         self._readonly = readonly
         if isinstance(map_file, sqlite3.Connection):
@@ -341,16 +341,9 @@ class ManifestDb:
         else:
             if map_file is None:
                 map_file = ':memory:'
-
-            connect_args = {}
-            timeout_env = os.getenv('SOTODLIB_SQLITE_TIMEOUT')
-            if timeout_env not in (None, ''):
-                connect_args['timeout'] = int(timeout_env)
-
             self.conn = common.sqlite_connect(
                 filename=map_file,
                 mode=("r" if readonly else "w"),
-                **connect_args,
             )
         self.conn.row_factory = sqlite3.Row  # access columns by name
 
@@ -394,7 +387,7 @@ class ManifestDb:
         simply discard the returned object.
         """
         if (
-            map_file is not None and 
+            map_file is not None and
             map_file != ":memory:" and
             os.path.exists(map_file)
         ):

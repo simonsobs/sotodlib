@@ -3,7 +3,7 @@ import gzip
 import os
 
 
-def sqlite_connect(filename=None, mode="w", timeout=1000):
+def sqlite_connect(filename=None, mode="w"):
     """Utility function for connecting to an sqlite3 DB.
 
     This provides a single function for opening an sqlite connection
@@ -30,8 +30,11 @@ def sqlite_connect(filename=None, mode="w", timeout=1000):
     # This timeout is in seconds.  If multiple processes are writing, they
     # might be blocked for a while until they get their turn.  This prevents
     # them from giving up too soon if other processes have a write lock.
-    # https://www.sqlite.org/pragma.html#pragma_busy_timeout
-    busy_time = timeout
+    timeout_env = os.getenv("SOTODLIB_SQLITE_TIMEOUT")
+    if timeout_env not in (None, ""):
+        busy_time = float(timeout_env)
+    else:
+        busy_time = 60
 
     # Journaling options
 
