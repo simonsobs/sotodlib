@@ -570,19 +570,22 @@ def filtering(aman, chopping_freqs, cal_type, hpf_cutoff=1, hpf_width=2, lpf_cut
 
     # Make HPFed data
     hpf = tod_ops.filters.high_pass_sine2(hpf_cutoff, hpf_width)
-    filtering_without_delay_filter(aman, hpf, signal_name_pre='signal_iirc', signal_name_new='signal_hpf') 
+    signal_new = tod_ops.fourier_filter(aman, hpf, signal_name='signal_iirc')
+    aman.wrap('signal_hpf', signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
     # Make LPFed data
     if cal_type == 'gain':
         filter_cutoff = lpf_cutoff_factor*chopping_freqs['f1_gain']
         lpf = tod_ops.filters.low_pass_sine2(filter_cutoff,filter_cutoff*lpf_width_fraction)
-        filtering_without_delay_filter(aman, lpf, signal_name_pre='signal_hpf', signal_name_new='signal_lpf') 
+        signal_new = tod_ops.fourier_filter(aman, lpf, signal_name='signal_hpf')
+        aman.wrap('signal_lpf', signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
     elif cal_type == 'timeconstant':
         for key, chopping_freq in chopping_freqs.items():
             filter_cutoff = lpf_cutoff_factor*chopping_freq
             lpf = tod_ops.filters.low_pass_sine2(filter_cutoff,filter_cutoff*lpf_width_fraction)
-            filtering_without_delay_filter(aman, lpf, signal_name_pre='signal_hpf', signal_name_new=f'signal_lpf_{key}') 
+            signal_new = tod_ops.fourier_filter(aman, lpf, signal_name='signal_hpf')
+            aman.wrap(f'signal_lpf_{key}', signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
     else:
         raise ValueError(f"'{cal_type}' is a wrong type. Please specify 'gain' or 'timeconstant'.")
@@ -590,39 +593,6 @@ def filtering(aman, chopping_freqs, cal_type, hpf_cutoff=1, hpf_width=2, lpf_cut
     filtering_params = {'hpf_cutoff': hpf_cutoff, 'hpf_width': hpf_width, 'lpf_cutoff_factor': lpf_cutoff_factor, 'lpf_width_fraction': lpf_width_fraction, 'chopping_freqs': chopping_freqs}
 
     return filtering_params
-
-
-def filtering_with_delay_filter(aman, filter, signal_name_pre, signal_name_new):
-    """
-    Filtering signal data using the filter which has timing delay.
-    
-    Args:
-        aman: axis manager
-        filter: filter of tod_ops.filters
-        signal_name_pre: signal name which will be filtered
-        signal_name_new: New name for filtered signal
-    """
-    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
-    signal_new = np.fliplr(signal_new)
-    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
-    
-    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_new)
-    signal_new = np.fliplr(signal_new)
-    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
-
-
-def filtering_without_delay_filter(aman, filter, signal_name_pre, signal_name_new):
-    """
-    Filtering signal data using the filter which doesn't have timing delay.
-    
-    Args:
-        aman: axis manager
-        filter: filter of tod_ops.filters
-        signal_name_pre: signal name which will be filtered
-        signal_name_new: New name for filtered signal
-    """
-    signal_new = tod_ops.fourier_filter(aman, filter, signal_name=signal_name_pre)
-    aman.wrap(signal_name_new, signal_new, [(0,'dets'),(1,'samps')], overwrite=True)
 
 
 def get_dicts(cal_type):
