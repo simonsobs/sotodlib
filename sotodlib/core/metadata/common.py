@@ -252,6 +252,7 @@ class DBObject(object):
             return
         if isinstance(self._map_file, sqlite3.Connection):
             return
+        conn.commit()
         conn.close()
 
     @contextmanager
