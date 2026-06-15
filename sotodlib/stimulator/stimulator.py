@@ -1,12 +1,10 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import lmfit
 import ruptures as rpt
 import astropy
 
 from sotodlib import tod_ops, core
 from sotodlib.io import hkdb
-from sotodlib.stimulator.plot_stimulator import plot_hkdata, plot_tod
 from sotodlib.stimulator.utils_stimulator import func_sines, func_response_amplitude, func_response_phase_with_dt  
 
 CHOPPING_FREQS = {'f1': 6, 'f2': 15, 'f3': 33,'f4': 63, 'f5': 93, 'f6': 123, 'f7': 147}
@@ -393,12 +391,22 @@ def get_encoder_timing(aman, hkdata):
     return valid_data
 
     
-def get_chopping_status(aman):
+def get_chopping_status(aman, min_step_duration=10,penalty=100,delta_t=5,wait_t=5):
     """
     Get chopping frequency and timing when the chopping speed changes.
     
     Args:
         aman: axis manager with aman.stm_cal field
+        min_step_duration: Minimum duration to search for each chopping step.
+            The unit is in seconds but it should be an integer.
+            This is used to avoid small chopping speed fluctuations that are shorter than this duration.
+        penalty: Penalty value for change point detection.
+            This is used to control the sensitivity of change point detection.
+            A larger penalty will result in fewer detected change points.
+        delta_t: Time duration for averaging chopping frequency in seconds.
+        wait_t: Waiting time after chopping speed changes to avoid chopper's acceleration time. The unit is in seconds.
+            The averaging of chopping frequency will be calculated after this waiting time.
+
     """
     xx0 = aman.stm_cal.t_enc[:-1]
     xx1 = aman.stm_cal.t_enc[1:]
@@ -421,8 +429,8 @@ def get_chopping_status(aman):
     y_ave = np.array([np.nanmean(d) for d in data])
 
     # Get breakout points where the chopping speed changes
-    model1 = rpt.Pelt(model='l2',min_size=10).fit(y_ave)
-    bkps = model1.predict(pen=100) # index +1
+    model1 = rpt.Pelt(model='l2',min_size=min_step_duration).fit(y_ave)
+    bkps = model1.predict(pen=penalty) # index +1
 
     # Re-calculate the breakout points
     refined_bkps = []
@@ -444,8 +452,8 @@ def get_chopping_status(aman):
     refined_bkps.append(x_ave.size) # index +1
 
     # Get average of chopping frequency 
-    wait_t = 5
-    delta_t = 5 # 5s average
+    wait_t = wait_t
+    delta_t = delta_t
     n_freq = len(refined_bkps)
     chopping_freqs = []
     for i_freq in range(n_freq):
