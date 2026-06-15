@@ -162,8 +162,8 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         i_x = 0
         x_min = 30
         x_max = 30.5
-        i_x_min=int(aman.obs_info.sampling_rate*x_min)
-        i_x_max=int(aman.obs_info.sampling_rate*x_max)
+        i_x_min=int(aman.stm_cal.sampling_rate*x_min)
+        i_x_max=int(aman.stm_cal.sampling_rate*x_max)
         axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal[i_det]- np.mean(aman.signal[i_det][i_x_min:i_x_max]),label='Raw data - mean')
         axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal_hpf[i_det],label='HPFed data',color='C1')
         axes[i_y,i_x].set_title(f'TOD data, i_det={i_det}')
@@ -306,8 +306,8 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             idx = np.where(aman.stm_cal.freqs.vals == f_key)[0][0]
             x_min = aman.stm_cal.t_cuts[idx][0]
             x_max = x_min+0.2 
-            i_x_min=int(aman.obs_info.sampling_rate*x_min)
-            i_x_max=int(aman.obs_info.sampling_rate*x_max)
+            i_x_min=int(aman.stm_cal.sampling_rate*x_min)
+            i_x_max=int(aman.stm_cal.sampling_rate*x_max)
             axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal[i_det]- np.mean(aman.signal[i_det][i_x_min:i_x_max]),label='Raw data - mean')
             axes[i_y,i_x].plot(aman.timestamps-t0,aman.signal_hpf[i_det],label='HPFed data',color='C1')
             axes[i_y,i_x].set_title(f'TOD data, i_det={i_det}, f={aman.stm_cal.chopping_freqs[idx]:.0f}Hz')

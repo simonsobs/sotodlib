@@ -72,3 +72,46 @@ def func_response_phase_with_dt(f, tau, theta_geo, dt):
     theta_dt = -dt*2*np.pi*f *(180/np.pi)
     theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo + theta_dt
     return theta
+
+
+def get_downsample_factor(aman, ctx):
+    """
+    Get downsample factor of SMuRF readout for the axis manager data.
+    
+    Args:
+        aman: Axis manager of detector data
+        ctx: context file
+
+    Return:
+        downsample_factor: String representing the Downsample factor of SMuRF readout.
+    """
+    downsample_factor_tag = get_downsample_factor_tags(ctx)
+
+    obs_list = ctx.obsdb.query(
+        f"obs.obs_id == '{aman.obs_info.obs_id}'",
+        tags=downsample_factor_tag
+        )
+
+    obs = obs_list[0]
+    for tag in downsample_factor_tag:
+        if obs[tag] == 1:
+            downsample_factor = tag.split('_')[-1]
+
+    return downsample_factor
+
+
+def get_downsample_factor_tags(ctx):
+    """
+    Get downsample factor of SMuRF readout.
+    
+    Args:
+        ctx: context file
+
+    Return:
+        List of downsample factor tags in the database.
+    """
+    cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
+    all_tags = np.array([row[0] for row in cursor.fetchall()])
+    mask = np.char.find(all_tags,'downsample') != -1
+    
+    return np.array(all_tags)[mask].tolist()

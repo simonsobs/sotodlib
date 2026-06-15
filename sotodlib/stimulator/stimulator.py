@@ -50,47 +50,6 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     return result
     
 
-def get_downsample_factor(aman, ctx):
-    """
-    Get downsample factor of SMuRF readout for the axis manager data.
-    
-    Args:
-        aman: Axis manager of detector data
-        ctx: context file
-    """
-    downsample_factor_tag = get_downsample_factor_tags(ctx)
-
-    obs_list = ctx.obsdb.query(
-        f"obs.obs_id == '{aman.obs_info.obs_id}'",
-        tags=downsample_factor_tag
-        )
-
-    obs = obs_list[0]
-    for tag in downsample_factor_tag:
-        if obs[tag] == 1:
-            downsample_factor = int(tag.split('_')[-1])
-
-    aman.obs_info.wrap('downsample_factor', downsample_factor, overwrite=True)
-    aman.obs_info.wrap('sampling_rate', 4000/downsample_factor, overwrite=True)
-
-
-def get_downsample_factor_tags(ctx):
-    """
-    Get downsample factor of SMuRF readout.
-    
-    Args:
-        ctx: context file
-
-    Return:
-        List of downsample factor tags in the database.
-    """
-    cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
-    all_tags = np.array([row[0] for row in cursor.fetchall()])
-    mask = np.char.find(all_tags,'downsample') != -1
-    
-    return np.array(all_tags)[mask].tolist()
-    
-
 def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True):
     """
     Calculate the gain of the detectors.
@@ -114,6 +73,8 @@ def calc_gain(aman, hkdata, idxs=None, n_bins=40, preprocessing=True):
     valid_data = True
     if preprocessing:
         valid_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
+    
+        aman.stm_cal.wrap('sampling_rate', 1 / np.median(np.diff(aman.timestamps)), overwrite=True)
 
         get_chopping_status(aman)
 
@@ -213,6 +174,8 @@ def calc_timeconstant(aman, hkdata, idxs=None, n_bins=40, preprocessing=True):
     if preprocessing:
         valid_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
 
+        aman.stm_cal.wrap('sampling_rate', 1 / np.median(np.diff(aman.timestamps)), overwrite=True)
+        
         get_chopping_status(aman)
 
         get_timing_cut(aman)
