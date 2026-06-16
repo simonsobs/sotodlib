@@ -3,12 +3,12 @@ import numpy as np
 def func_sines(t, a0, a1, a2, a3, a4, a5, a6, t0, t1, t2, t3, t4, t5, t6):
     """
     Define fitting function.
-    
+
     Args:
         t: time or timing_frac of stimulator signal.
         a0-6: Amplitude of sin function for first to seventh frequency signal
         t0-6: Timing offset of sin function for first to seventh frequency signal
-    
+
     Return:
         y: Value of fitting function.
     """
@@ -19,14 +19,14 @@ def func_sines(t, a0, a1, a2, a3, a4, a5, a6, t0, t1, t2, t3, t4, t5, t6):
          + a4*np.sin(5*(t-t4)*2*np.pi)
          + a5*np.sin(6*(t-t5)*2*np.pi)
          + a6*np.sin(7*(t-t6)*2*np.pi))
-    
+
     return y
 
 
 def func_response_amplitude(f, tau, a):
     """
     Detector response function of amplitude.
-    
+
     Args:
         f: Chopping frequency
         tau: time constant of a detector in [s]
@@ -42,7 +42,7 @@ def func_response_amplitude(f, tau, a):
 def func_response_phase(f, tau, theta_geo):
     """
     Detector response function of phase.
-    
+
     Args:
         f: Chopping frequency [Hz]
         tau: time constant of a detector in [s]
@@ -58,7 +58,7 @@ def func_response_phase(f, tau, theta_geo):
 def func_response_phase_with_dt(f, tau, theta_geo, dt):
     """
     Detector response function of phase.
-    
+
     Args:
         f: Chopping frequency [Hz]
         tau: time constant of a detector in [s]
@@ -77,7 +77,7 @@ def func_response_phase_with_dt(f, tau, theta_geo, dt):
 def get_downsample_factor(aman, ctx):
     """
     Get downsample factor of SMuRF readout for the axis manager data.
-    
+
     Args:
         aman: Axis manager of detector data
         ctx: context file
@@ -103,7 +103,7 @@ def get_downsample_factor(aman, ctx):
 def get_downsample_factor_tags(ctx):
     """
     Get downsample factor of SMuRF readout.
-    
+
     Args:
         ctx: context file
 
@@ -113,5 +113,5 @@ def get_downsample_factor_tags(ctx):
     cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
     all_tags = np.array([row[0] for row in cursor.fetchall()])
     mask = np.char.find(all_tags,'downsample') != -1
-    
+
     return np.array(all_tags)[mask].tolist()
