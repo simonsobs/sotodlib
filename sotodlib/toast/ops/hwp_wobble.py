@@ -89,11 +89,13 @@ class HWPWobbleCorrect(Operator):
             else:
                 bore = None
             ob.shared[self.boresight_azel].set(bore)
+
             if ob.comm_col_rank == 0:
                 bore = qa.mult(ob.shared[self.boresight_radec].data, qa.inv(deflq))
             else:
                 bore = None
             ob.shared[self.boresight_radec].set(bore)
+
             del bore
 
     def _finalize(self, data, **kwargs):
