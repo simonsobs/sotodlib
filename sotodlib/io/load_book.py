@@ -766,9 +766,11 @@ class AccumulatorNamed(Accumulator):
             if self.samples[1] is not None:
                 self.shape = (self.samples[1] - self.samples[0], )
             if hasattr(data, 'names'):
+                print('g3t')
                 # G3SuperTimestream ...
                 self.keys = [k for k in data.names]
             else:
+                print('not')
                 # G3TimesampleMap ...
                 self.keys = [k for k in data.keys()]
 
@@ -835,17 +837,19 @@ class Accumulator2d(Accumulator):
         if self.insert_at is not None and self.samples[1] is None:
             self.samples[1] = self.insert_at.shape[-1] + self.samples[0]
         self.calibrate = calibrate
+        self.cal_applied = False
 
     def _sample_count(self, _data):
         return len(_data.times)
 
     def _extract(self, data, src_slice, dest_slice):
 
-        if self.calibrate is not None:
+        if self.calibrate is not None and hasattr(data, 'calibrate'):
             # This is a low cost operation if you do it before
             # decompression.  (Also do it before you use data.dtype,
             # in "first frame stuff".)
             data.calibrate(np.array([self.calibrate] * len(data.names)))
+            self.cal_applied = True
 
         # First frame stuff ...
         if self.data is None:
@@ -892,25 +896,30 @@ class Accumulator2d(Accumulator):
             return
 
         # Store data from this frame.
+        _data = data.data
+        del data
+        if self.calibrate is not None and not self.cal_applied:
+            _data = _data * self.calibrate
+
         if self.insert_at is not None:
             # Indexed by name
             for i0, i1 in zip(self.insert_at_idx, self.extract_at_idx):
-                self.insert_at[i0, dest_slice] = data.data[i1, src_slice]
+                self.insert_at[i0, dest_slice] = _data[i1, src_slice]
 
         elif self.shape is not None:
             # Full array to hold data.
             if self.extract_at_idx is not None:
                 for i, j in enumerate(self.extract_at_idx):
-                    self.data[i, dest_slice] = data.data[j, src_slice]
+                    self.data[i, dest_slice] = _data[j, src_slice]
             else:
-                self.data[:, dest_slice] = data.data[:, src_slice]
+                self.data[:, dest_slice] = _data[:, src_slice]
 
         else:
             # List of arrays, to be hstacked later.
             if self.extract_at_idx is not None:
-                self.data.append(data.data[self.extract_at_idx, src_slice])
+                self.data.append(_data[self.extract_at_idx, src_slice])
             else:
-                self.data.append(data.data[:, src_slice])
+                self.data.append(_data[:, src_slice])
 
     def finalize(self):
         if self.insert_at is not None:
@@ -965,8 +974,9 @@ def _frames_iterator(files, prefix, samples, smurf_proc=None, use_temp_dir=None)
                 if smurf_proc is not None and smurf_proc.process(frame):
                     # We found a dump frame, so stop looking.
                     smurf_proc = None
-                if frame.type is not spt3g_core.G3FrameType.Scan:
+                if frame.type != spt3g_core.G3FrameType.Scan:
                     continue
+
                 yield frame, offset
                 offset += len(frame['ancil'].times)
                 # Alternately, use frame['sample_range']
