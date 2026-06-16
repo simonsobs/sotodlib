@@ -212,6 +212,8 @@ class DuplicateAncillaryData(BookError):
     def report_error(self):
         return f"{self.book.bid} has duplicate ancillary data"
 
+
+
 class NoMountData(BookError):
     @staticmethod
     def has_error(book):
@@ -367,6 +369,53 @@ class BadTimeSamples(BookError):
                 msg += l + "\n"
         return msg
 
+class NonMonotonicAncillaryTimes(BookError):
+    fields_to_fix = {
+        "acu.acu_status.Azimuth_mode": 5,
+    }
+    n_samps = None
+    field_dropped = None
+
+    @staticmethod
+    def has_error(book):
+        return "NonMonotonicAncillaryTimes" in book.message
+
+    def report_error(self):
+        field_match = re.search(r'Times from (\S+) have (\d+) samples', self.book.message)
+        if not field_match:
+            raise ValueError(
+                f"Message for {self.book.bid} was not parsed correctly for "
+                "non-monotonic ancillary times"
+            )
+        self.field_dropped = field_match.group(1)
+        self.n_samps = int(field_match.group(2))
+        return (
+            f"{self.book.bid} has non-monotonic ancillary times: "
+            f"{self.field_dropped}: {self.n_samps}"
+        )
+
+    def fix_book(self):
+        if self.field_dropped is None or self.n_samps is None:
+            self.report_error()
+        if self.field_dropped is None or self.n_samps is None:
+            raise ValueError(
+                f"Message for {self.book.bid} was not parsed correctly for "
+                "non-monotonic ancillary times"
+            )
+        max_samps = self.fields_to_fix.get( self.field_dropped )
+        if max_samps is None:
+            print(f"Cannot fix book with non-monotonic field {self.field_dropped}")
+            return
+        if self.n_samps>max_samps:
+            print(
+                f"Cannot fix book with non-monotonic field {self.field_dropped} having"
+                f" flipped more than {max_samps} samples"
+            )
+            return
+        print(f"Binding book {self.book.bid} without requiring monotonic times")
+        utils.set_book_rebind(self.imprint, self.book)
+        self.imprint.bind_book(self.book, require_monotonic_times=False,)
+
 AUTOFIX_ERRORS = [
     SecondFail,
     BookDirHasFiles,
@@ -380,6 +429,7 @@ AUTOFIX_ERRORS = [
     TimingSystemOff,
     FileTooLargeError,
     BadTimeSamples,
+    NonMonotonicAncillaryTimes,
 ]
 
 def process_book_failure(
@@ -428,6 +478,8 @@ def autofix_failed_books(
             Books.start <= dt.datetime.utcfromtimestamp(max_ctime),
         )
     failed = failed.all()
+    if len(failed) == 0:
+        print("No Failed Books!!")
     for book in failed:
         success = process_book_failure(
             imprint, book, 
