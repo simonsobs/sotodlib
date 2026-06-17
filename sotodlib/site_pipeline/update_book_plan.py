@@ -31,8 +31,8 @@ def main(
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
     use_monitor: bool = False,
-    delay_warning: Optional[float] = None, 
-    delay_error: Optional[float] = None,
+    delay_warning: float = 3, 
+    delay_error: float = 6,
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
