@@ -190,18 +190,20 @@ class G3tHk:
         max_vals = []
         stds = []
 
-        for i in range(len(hkfs)):
-            data = arc.simple(hkfs[i])
-            time = data[0]
+        data = arc.simple(hkfs)
+
+        for field in data:
+            time = field[0]
             starts.append(time[0])
             stops.append(time[-1])
             try:
-                medians.append(np.median(data[1]))
-                means.append(np.mean(data[1]))
-                min_vals.append(np.min(data[1]))
-                max_vals.append(np.max(data[1]))
-                stds.append(np.std(data[1]))
-            except:
+                medians.append(np.median(field[1]))
+                means.append(np.mean(field[1]))
+                min_vals.append(np.min(field[1]))
+                max_vals.append(np.max(field[1]))
+                stds.append(np.std(field[1]))
+            except Exception as e:
+                logger.warning(f"Error processing field {field}: {e}, setting to nan")
                 medians.append(np.nan)
                 means.append(np.nan)
                 min_vals.append(np.nan)
