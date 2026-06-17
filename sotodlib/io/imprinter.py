@@ -1253,9 +1253,10 @@ class Imprinter:
             for obs.stream_id and force completion of the earlier obs.
             delay_warning is specified in hours.
         delay_error: float, optional
-            if max_ctime - SMURF.final time > delay_error: raise an error about stale 
+            if max_ctime - SMURF.final_time > delay_error: raise an error about stale 
             databases. Additionally, for any incomplete observations (obs), if max_ctime 
             - obs.timestamp > delay_error: raise error about incomplete obseravtions.
+            delay_error is specified in hours.
         """
         if not self.build_det:
             return
