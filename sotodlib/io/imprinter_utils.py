@@ -128,8 +128,14 @@ def delete_level2_obs_and_book(imprint, book, session=None):
     session.commit()   
 
 
-def remove_level2_obs_from_book(imprint, book, bad_obs_id):
+def remove_level2_obs_from_book(
+    imprint, book, bad_obs_id, 
+    register_wont_bind=False
+):
     """If one level2 observation is problematic, delete that book and re-register without it.
+
+    register_wont_bind: if true, register the removed level 2 observation as a 
+    book and set it's status to WONT_BIND.
     """
     assert book.type == "obs", f"Book should be an 'obs' book"
 
@@ -146,6 +152,7 @@ def remove_level2_obs_from_book(imprint, book, bad_obs_id):
             G3tObservations.obs_id == o
         ).one() for o in new_obs_list
     ]
+    tel_tube = book.tel_tube
     oset = ObsSet(
         olist,
         mode=book.type, 
@@ -157,7 +164,26 @@ def remove_level2_obs_from_book(imprint, book, bad_obs_id):
         session.delete(o)
     session.delete(book)
     session.commit()
-    return imprint.register_book(oset, session=session)
+    new_book = imprint.register_book(oset, session=session)
+
+    if register_wont_bind:
+        bad_obs = g3session.query(G3tObservations).filter(
+            G3tObservations.obs_id == bad_obs_id
+        ).one()
+        bad_oset = ObsSet(
+            [bad_obs],
+            mode='obs',
+            slots=imprint.tubes[tel_tube]['slots'],
+            tel_tube=tel_tube
+        )
+        bad_book = imprint.register_book(bad_oset, session=session)
+        set_book_wont_bind(
+            imprint, bad_book,
+            message=f"Removed from {new_book.bid}: observation {bad_obs_id} excluded during autofix",
+            session=session,
+        )
+
+    return new_book
 
 def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     """ helper function for when a level 2 observation could span multiple
