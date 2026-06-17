@@ -50,6 +50,9 @@ _TES_BIAS_COUNT = 12  # per detset / primary file group
 #: Signal DAC units are rescaled to phase before returning.
 SIGNAL_RESCALE = np.pi / 2**15
 
+#: Signal dtype used to cast / create new arrays as needed.
+SIGNAL_DTYPE = 'float32'
+
 DEG = np.pi / 180
 
 TMPDIR_VAR = 'SOTODLIB_TOD_TMPDIR'
@@ -142,7 +145,7 @@ def load_obs_book(db, obs_id, dets=None, prefix=None, samples=None,
     signal_buffer = None
     if samples[1] is not None and not no_signal:
         signal_buffer = np.empty((len(dets_req), samples[1] - samples[0]),
-                                 dtype='float32')
+                                 dtype=SIGNAL_DTYPE)
 
     ancil = None
     timestamps = None
@@ -314,11 +317,13 @@ def _load_book_detset(files, prefix='', load_ancil=True,
         signal_acc = Accumulator2d(
             samples=samples,
             keys_to_keep=dets,
+            dtype=SIGNAL_DTYPE,
             calibrate=SIGNAL_RESCALE)
 
     if special_channels:
         tones_acc = Accumulator2d(
             samples=samples,
+            dtype=SIGNAL_DTYPE,
             calibrate=SIGNAL_RESCALE)
     else:
         tones_acc = None
@@ -364,7 +369,10 @@ def _load_book_detset(files, prefix='', load_ancil=True,
                 more_data |= signal_acc.append(frame['signal'], frame_offset)
 
         if 'untracked' in frame and special_channels:
-            more_data |= tones_acc.append(frame['untracked'], frame_offset)
+            # The len(names) check here is related to a shape check
+            # bug in case of empty arrays.
+            if len(frame['untracked'].names):
+                more_data |= tones_acc.append(frame['untracked'], frame_offset)
 
         if 'flag_smurfgaps' in frame and 'smurfgaps' in flag_accs:
             more_data |= flag_accs['smurfgaps'].append(frame['flag_smurfgaps'])
@@ -507,7 +515,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             aman.wrap('signal', signal_buffer,
                       [(0, 'dets'), (1, 'samps')])
         else:
-            aman.wrap_new('signal', shape=('dets', 'samps'), dtype='float32')
+            aman.wrap_new('signal', shape=('dets', 'samps'), dtype=SIGNAL_DTYPE)
             dets_ofs = 0
             for v in results.values():
                 d = v['signal'].finalize()
@@ -534,7 +542,7 @@ def _concat_filesets(results, ancil=None, timestamps=None,
             aman.tones.wrap('stream_id', ts, axis_map=[(0, 'tdets')])
             aman.tones.wrap('band', tb, axis_map=[(0, 'tdets')])
             aman.tones.wrap('channel', tc, axis_map=[(0, 'tdets')])
-            aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype='float32')
+            aman.tones.wrap_new('signal', shape=('tdets', 'samps'), dtype=SIGNAL_DTYPE)
             dets_ofs = 0
             for v in results.values():
                 d = v['tones'].data
@@ -765,14 +773,7 @@ class AccumulatorNamed(Accumulator):
         if self.data is None:
             if self.samples[1] is not None:
                 self.shape = (self.samples[1] - self.samples[0], )
-            if hasattr(data, 'names'):
-                print('g3t')
-                # G3SuperTimestream ...
-                self.keys = [k for k in data.names]
-            else:
-                print('not')
-                # G3TimesampleMap ...
-                self.keys = [k for k in data.keys()]
+            self.keys = [k for k in data.names]
 
         if self.shape is not None:
             # Determinate.
@@ -795,11 +796,15 @@ class AccumulatorNamed(Accumulator):
 
 
 class AccumulatorTimesampleMap(AccumulatorNamed):
-    """Accumulator for unpacking 2-d data (G3TimestampleMap) into
+    """Accumulator for unpacking 2-d data (G3TimesampleMap) into
     individual (named) 1-d vectors.
 
     """
     def _extract(self, data, src_slice, dest_slice):
+        # This differs from AccumulatorNamed._extract in how the field
+        # names are determined, and in how the data vectors are
+        # extracted from the container.
+
         # On first frame, check if we know the final data shape.
         if self.data is None:
             if self.samples[1] is not None:
@@ -827,17 +832,18 @@ class Accumulator2d(Accumulator):
 
     """
     def __init__(self, *args, insert_at=None, keys_to_keep=None,
-                 calibrate=None, **kwargs):
+                 dtype=None, calibrate=None, **kwargs):
         super().__init__(*args, **kwargs)
         # An optional destination buffer for the data.
         self.insert_at = insert_at
+        self.dtype = dtype
         self.keys_to_keep = keys_to_keep
         self.insert_at_idx = None
         self.extract_at_idx = None
         if self.insert_at is not None and self.samples[1] is None:
             self.samples[1] = self.insert_at.shape[-1] + self.samples[0]
         self.calibrate = calibrate
-        self.cal_applied = False
+        self._cal_preapplied = False
 
     def _sample_count(self, _data):
         return len(_data.times)
@@ -849,7 +855,7 @@ class Accumulator2d(Accumulator):
             # decompression.  (Also do it before you use data.dtype,
             # in "first frame stuff".)
             data.calibrate(np.array([self.calibrate] * len(data.names)))
-            self.cal_applied = True
+            self._cal_preapplied = True
 
         # First frame stuff ...
         if self.data is None:
@@ -868,7 +874,8 @@ class Accumulator2d(Accumulator):
                 # Set shape, if we know it.
                 if self.samples[1] is not None:
                     self.shape = (len(self.keys), self.samples[1] - self.samples[0])
-                    self.data = np.empty(self.shape, data.dtype)
+                    _dtype = self.dtype if self.dtype is not None else data.dtype
+                    self.data = np.empty(self.shape, dtype=_dtype)
                 else:
                     self.data = []
 
@@ -898,7 +905,7 @@ class Accumulator2d(Accumulator):
         # Store data from this frame.
         _data = data.data
         del data
-        if self.calibrate is not None and not self.cal_applied:
+        if self.calibrate is not None and not self._cal_preapplied:
             _data = _data * self.calibrate
 
         if self.insert_at is not None:
