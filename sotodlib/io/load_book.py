@@ -1037,5 +1037,83 @@ def get_cal_obsids(ctx, obs_id, cal_type):
 
     return obs_ids
 
+#
+# Testing
+#
+
+def _timev(t):
+    return spt3g_core.G3VectorTime(t * spt3g_core.G3Units.s)
+
+if hasattr(so3g, 'G3SuperTimestream'):
+    def _supertimestream(*a, **kw):
+        return so3g.G3SuperTimestream(*a, **kw)
+else:
+    def _supertimestream(keys, times, data):
+        return spt3g_core.G3TimestreamMap(keys, data, times[0], times[-1],
+                                  compression_level=5)
+
+def _sim_g3_generator(dets, samps, stream_id=None, frame_size=200):
+    """
+    Simulate book data and yield G3Frames.
+    """
+    prims = ['Counter0', 'Counter2', 'UnixTimestamp']
+    bias_lines = ['bias%02i' % i for i in range(_TES_BIAS_COUNT)]
+    if stream_id is None:
+        stream_id = 'ufm_fako99'
+    untracked_dets = []#'sch_NONE_3_4']
+
+    if isinstance(dets, int):
+        dets = np.array(['det_%04i' % i for i in range(dets)])
+    nd = len(dets)
+    ns = samps
+
+    t0 = 1678900000.
+    f = 200.
+    times = np.arange(ns) / f + t0
+
+    test_det = 32
+    test_sig = (np.random.uniform(size=ns) * 100).astype('int32')
+
+    offset = 0
+
+    while offset < ns:
+        print(offset)
+        _ns = min(frame_size, ns - offset)
+        _t = times[offset:offset+_ns]
+        _tv = _timev(_t)
+        f = spt3g_core.G3Frame(spt3g_core.G3FrameType.Scan)
+
+        # Metadata
+        f['stream_id'] = spt3g_core.G3String(stream_id)
+        f['sample_range'] = spt3g_core.G3VectorInt([offset, offset+_ns])
+
+        # Ancil
+        ancil = spt3g_core.G3TimesampleMap()
+        ancil.times = _tv
+        for k, m, b in [
+                ('az_enc', 1., 270.),
+                ('el_enc', 0., 55.),
+                ('boresight_enc', 0, -45.)]:
+            ancil[k] = spt3g_core.G3VectorDouble(m * (_t - t0) + b)
+        f['ancil']= ancil
+
+        # Main smurf payloads
+        f['signal'] = _supertimestream(
+            dets, _tv, np.zeros((nd, _ns), dtype='int32'))
+        f['signal'].data[:] = (np.arange(nd)+1000)[:,None]
+        f['signal'].data[test_det,:] = test_sig[offset:offset+_ns]
+        f['primary'] = _supertimestream(
+            prims, _tv, np.zeros((len(prims), _ns), dtype='int64'))
+        f['tes_biases'] = _supertimestream(
+            bias_lines, _tv, np.zeros((len(bias_lines), _ns), dtype='int32'))
+        f['untracked'] = _supertimestream(
+            untracked_dets, _tv, np.zeros((len(untracked_dets), _ns), dtype='int32'))
+
+        # Flags
+        f['flag_smurfgaps'] = spt3g_core.G3VectorBool([False] * _ns)
+
+        yield f
+        offset += _ns
+
 
 core.OBSLOADER_REGISTRY['obs-book'] = load_obs_book
