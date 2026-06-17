@@ -697,8 +697,10 @@ class Accumulator:
         # self.samples; global sample indices of this block are:
         block_samples = [self.consumed, self.consumed + data_count]
 
-        # Does this block precede our area of interest?
-        if block_samples[1] <= self.samples[0]:
+        # Does this block precede or follow our area of interest?
+        if (block_samples[1] <= self.samples[0]) \
+           or (self.samples[1] is not None
+               and block_samples[0] >= self.samples[1]):
             self.consumed += data_count
             return True
 
@@ -723,11 +725,11 @@ class Accumulator:
         # Specialization ...
         self._extract(data, src_slice, dest_slice)
 
-        if over_samples[1] != block_samples[1]:
-            return False
-
+        # It's important to keep this up to date even once finished
+        # reading.
         self.consumed += data_count
-        return True
+
+        return (over_samples[1] == block_samples[1])
 
 
 class Accumulator1d(Accumulator):
@@ -1074,10 +1076,21 @@ def _sim_g3_generator(dets, samps, stream_id=None, frame_size=200):
     test_det = 32
     test_sig = (np.random.uniform(size=ns) * 100).astype('int32')
 
-    offset = 0
+    f = spt3g_core.G3Frame(spt3g_core.G3FrameType.Wiring)
+    wiring = {
+        'AMCc.SmurfProcessor.ChannelMapper.NumChannels': nd,
+        'AMCc.SmurfProcessor.ChannelMapper.Mask':
+        ','.join(['%i' % i for i in range(nd)]),
+        'AMCc.FpgaTopLevel.AppTop.AppCore.SysgenCryo.Base[0].digitizerFrequency_MHz': 614.4,
+        'AMCc.FpgaTopLevel.AppTop.AppCore.RtmCryoDet.RampMaxCnt': 76799,
+    }
+    f['status'] = spt3g_core.G3String(yaml.dump(wiring))
+    f['dump'] = True
+    f['time'] = spt3g_core.G3Time(t0 * spt3g_core.G3Units.s)
+    yield f
 
+    offset = 0
     while offset < ns:
-        print(offset)
         _ns = min(frame_size, ns - offset)
         _t = times[offset:offset+_ns]
         _tv = _timev(_t)
