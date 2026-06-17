@@ -1221,8 +1221,8 @@ class Imprinter:
         stream_ids=None,
         force_single_stream=False,
         return_obsset=False,
-        delay_warning = None,
-        delay_error = None,
+        delay_warning = 3,
+        delay_error = 6,
     ):
         """Update bdb with new observations from g3tsmurf db.
 
@@ -1260,11 +1260,6 @@ class Imprinter:
         """
         if not self.build_det:
             return
-
-        if delay_warning is None:
-            delay_warning = 3
-        if delay_error is None:
-            delay_error = 6
 
         session, SMURF = self.get_g3tsmurf_session(return_archive=True)
         # set sensible ctime range is none is given

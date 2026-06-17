@@ -40,7 +40,7 @@ def core(
     make_db = False
     if from_scratch:
         logger.info("Building Database from Scratch, May take awhile")
-        min_ctime = int(1.6e9)
+        min_ctime = 1.6e9
         make_db = True
     if min_ctime is None:
         min_ctime = (dt.datetime.now() - dt.timedelta(days=update_delay)).timestamp()
