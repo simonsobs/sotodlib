@@ -1247,10 +1247,11 @@ class Imprinter:
             if True, return the list of observation sets instead of registering
             books. Useful as a debugging tool
         delay_warning: float, optional
-            if max_ctime - SMURF.final time > delay_warning: print warning about stale 
+            if max_ctime - SMURF.final_time > delay_warning: print warning about stale 
             databases. Additionally, for any incomplete observations (obs), if max_ctime 
             - obs.timestamp > delay_warning: look to see if a new stream has been started 
             for obs.stream_id and force completion of the earlier obs.
+            delay_warning is specified in hours.
         delay_error: float, optional
             if max_ctime - SMURF.final time > delay_error: raise an error about stale 
             databases. Additionally, for any incomplete observations (obs), if max_ctime 
