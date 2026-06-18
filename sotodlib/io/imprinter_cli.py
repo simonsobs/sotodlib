@@ -451,7 +451,28 @@ class TimingCounterError(BookError):
         return  f"{self.book.bid} has bad counter statistics"
     
     def fix_book(self):
-        return  f"{self.book.bid} has bad counter statistics. No fix implemented"
+        g3session, SMURF = self.imprint.get_g3tsmurf_session(
+            return_archive=True
+        )
+
+        obsdb = self.imprint.get_g3tsmurf_obs_for_book(self.book)
+        for obs_id, obs in obsdb.items():
+            ## if this was tagged correctly at level 2, ready to bind
+            if "bad" == obs.tag.split(',')[1]:
+                continue
+            # otherwise, try and tag it correctly
+            print(f"Updating level 2 files and observation for {obs_id}")
+            for db_file in obs.files:
+                SMURF.add_file(db_file.name, g3session, overwrite=True)
+            SMURF.update_observation_files(obs, g3session, force=True)
+            assert "bad" == obs.tag.split(',')[1], "level 2 file is not reporting bad counters"
+
+        # bad timing books can't be multiwafer
+        books = utils.split_book_by_obs(self.imprint, self.book)
+        for book in books:
+            print(f"Binding book {book.bid} allowing bad timing")
+            utils.set_book_rebind(self.imprint, book)
+            self.imprint.bind_book(book, allow_bad_timing=True,)
 
 AUTOFIX_ERRORS = [
     SecondFail,
@@ -467,6 +488,7 @@ AUTOFIX_ERRORS = [
     FileTooLargeError,
     BadTimeSamples,
     NonMonotonicAncillaryTimes,
+    TimingCounterError,
 ]
 
 def process_book_failure(

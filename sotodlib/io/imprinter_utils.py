@@ -185,6 +185,71 @@ def remove_level2_obs_from_book(
 
     return new_book
 
+def split_book_by_obs(imprint, book, session=None):
+    """Split a book with data from multiple wafers into books for each individual wafer.
+
+    If the book contains only one observation, returns the book and makes
+    no changes. Otherwise, deletes the original book from the BookDB and
+    registers a new book for each observation it contained.
+
+    Parameters
+    ----------
+    imprint : Imprinter instance
+    book : str or Book
+        The book to split. If a string, it is looked up via imprint.get_book().
+    session : BookDB session, optional
+        If None, one is obtained from imprint.get_session().
+
+    Returns
+    -------
+    new_books : list of Book
+        The newly registered single-observation books. If the original
+        book had only one observation returns [book].
+    """
+    if session is None:
+        session = imprint.get_session()
+
+    if isinstance(book, str):
+        book = imprint.get_book(book)
+
+    obs_dict = imprint.get_g3tsmurf_obs_for_book(book)
+
+    if len(obs_dict) <= 1:
+        imprint.logger.info(
+            f"Book {book.bid} has {len(obs_dict)} observation(s); no split needed."
+        )
+        return [book]
+
+    imprint.logger.info(
+        f"Splitting book {book.bid} with {len(obs_dict)} observations into "
+        f"{len(obs_dict)} single-observation books."
+    )
+
+    # Clean up any staged files before re-registering
+    set_book_rebind(imprint, book)
+
+    # Remove the observations from the book to deal with uniqueness constraints
+    for o in book.obs:
+        session.delete(o)
+    session.commit()
+
+    new_books = []
+    for obs_id, obs in obs_dict.items():
+        oset = ObsSet(
+            [obs],
+            mode=book.type,
+            slots=imprint.tubes[book.tel_tube]['slots'],
+            tel_tube=book.tel_tube,
+        )
+        new_book = imprint.register_book(oset, session=session)
+        new_books.append(new_book)
+        imprint.logger.info(f"Registered new book {new_book.bid} for obs {obs_id}")
+
+    session.delete(book)
+    session.commit()
+
+    return new_books
+
 def find_overlaps(imprint, obs_id, min_ctime, max_ctime):
     """ helper function for when a level 2 observation could span multiple
     books. Creates a list of ObsSets with that obs_id, prints info to screen and
