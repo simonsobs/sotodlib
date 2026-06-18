@@ -3,8 +3,10 @@ import yaml
 import itertools
 import logging
 
+import so3g
 from so3g.hk import load_range
 from sotodlib import core
+from spt3g import core as g3core
 
 from scipy.interpolate import interp1d
 
@@ -466,3 +468,56 @@ def get_detcosamp_hkaman(det_aman, config=None, alias=None, fields=None, data_di
             amans = make_hkaman(grouped_data=data, alias_exists=True,
                                 det_cosampled=True, det_aman=det_aman)
             return amans
+
+
+def quick_load_hk(path, fields=None):
+    """
+    Rapidly loads housekeeping (HK) data from a given path using .g3 frames.
+
+    Args:
+        path (str): Path to the HK .g3 data file.
+        fields (list, optional): List of specific fields. If None, fetches
+                                 all fields. Default is None.
+
+    Returns:
+
+        Dictionary with structure::
+
+        {
+            field[i] : (time[i], data[i])
+        }
+
+        Same output format as `load_range`. Masked to only have data from
+        start and stop of .g3 file provided in path argument.
+
+    """
+    hk_data = {}
+    times_unc = {}  # unconverted times 
+    reader = so3g.G3IndexedReader(path)
+
+    while True:
+        frames = reader.Process(None)
+        if not frames:
+            break
+
+        for frame in frames:
+            if 'address' in frame:
+                for v in frame['blocks']:
+                    for k in v.keys():
+                        field = '.'.join([frame['address'], k])
+
+                        if 'daq-registry' in field:
+                            continue
+                        
+                        if fields is None or field in fields:
+                            times = v.times
+                            times_unc.setdefault(field, []).extend(times)
+
+                            data = v[k]
+                            hk_data.setdefault(field, ([], []))
+                            hk_data[field][1].extend(data)
+    
+    for field, times in times_unc.items():
+        hk_data[field] = (np.array([t.time / g3core.G3Units.s for t in times]), np.array(hk_data[field][1]))
+
+    return hk_data
