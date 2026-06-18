@@ -911,3 +911,121 @@ def get_tau_hwp(
         aman.wrap(name, result)
 
     return result
+
+
+def get_hwpss_subscan(
+    aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
+    lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
+    prefilt_cfg=None, prefilt_detrend='linear', flags=None,
+    apodize_edges=True, apodize_edges_samps=1600,
+    apodize_flags=True, apodize_flags_samps=200,
+    hwpss_model_name='hwpss_model',replace_model = False, n_buf = 150, window='hann'
+):
+    '''
+    Function to fit and subtract HWPSS by subscan and merge hwpss_model.
+    This assumes that turnaround flags and subscan flags have already been calculated and wrapped.
+    Arguments: same as `get_hwpss`, followed by:
+    
+    replace_model: bool, set True if want to overwrite the hwpss model name in aman (if the same as the hwpss_model_name argument)
+    n_buf: int,  number of samples used to patch the hwpss signal fitted coefficients at the center of each turnaround region.
+    window: str,  scipy.signal.windows.get_window input for the subscan hwpss stitching function. The stitching is done as:
+
+    Take c(s)_i to be the best-fit coefficient for the 4th hwpss harmonic of detector i at sample s:
+
+    At the boundary of subscan_1 and subscan_2 (with constant coefficients c_s1, c_s2, respectively):
+    c(t)_i = {c_s1 for s < s_pivot - n_buf
+              c_s2 + (c_s1 - c_s2)*wn(s) for  s_pivot - n_buf <= s <= s_pivot + n_buf
+              c_s2 for s > s_pivot + n_buf}
+
+    Here, wn(s) is the window function chosen to span 2*n_buf for a smooth transition between coefficients, 
+    and s_pivot is the single sample transition point between subscan_1 and subscan_2.
+    '''
+    if f'{hwpss_model_name}' in aman._assignments:
+        if not replace_model:
+            raise ValueError('hwpss_model_name must be different than what is already in aman if replace_model=False')
+        else:
+            aman.move(hwpss_model_name,None)
+    
+    aman.wrap(hwpss_model_name, np.zeros_like(aman.signal,dtype='float32'),[(0, 'dets'), (1, 'samps')])
+
+    #re-calculate subscan flags with turnarounds included, for apodization purposes
+    subscan_info = tod_ops.flags.get_subscans(aman, flags=None, merge=False, include_turnarounds=True, overwrite=False)
+    num_subscans = len(subscan_info.subscan_flags)
+
+    #transition_flag = np.zeros_like(aman.hwpss_model)
+    coeffs = np.zeros(shape=(aman.dets.count,2*len(modes),len(subscan_info.subscan_flags))) #list of hwpss_subscan harmonic coeff
+    transition_indices = np.array([])
+
+    for j in range(num_subscans):
+        subscan_flag = subscan_info.subscan_flags[j]
+        i = subscan_flag.ranges()[0]
+        sub_aman = aman.restrict('samps', (i[0] + aman.samps.offset, i[1] + aman.samps.offset), in_place=False)
+        sub_aman.move(hwpss_model_name, None)
+        if flags is None:
+            sub_flag = RangesMatrix.from_mask(np.zeros(aman.samps.count, dtype=int)[i[0]:i[1]])
+        else:
+            sub_flag = RangesMatrix.from_mask(flags.mask()[:, i[0]:i[1]])
+
+        
+        get_hwpss(
+            aman=sub_aman,
+            flags=sub_flag,
+            signal=signal,
+            hwp_angle=hwp_angle,
+            bin_signal=bin_signal,
+            bins=bins,
+            lin_reg=lin_reg,
+            modes=modes,
+            apply_prefilt=apply_prefilt,
+            prefilt_cfg=prefilt_cfg,
+            prefilt_detrend=prefilt_detrend,
+            apodize_edges=apodize_edges,
+            apodize_edges_samps=apodize_edges,
+            apodize_flags=apodize_flags,
+            apodize_flags_samps=apodize_flags,
+            merge_stats=True,
+            merge_model=True,
+            hwpss_model_name=hwpss_model_name,
+        )
+        aman.get(hwpss_model_name)[:, i[0]:i[1]] = sub_aman.hwpss_model
+        coeffs[:,:,j]+=sub_aman.hwpss_stats.coeffs
+        del sub_aman
+
+        transition_msk = aman.flags.turnarounds.mask() & subscan_flag.mask()
+        transition_idx = np.where(np.diff(transition_msk.astype(int)) == -1)[0] #determining index of falling edge which denotes transition to the next subscan 
+
+        if j == num_subscans-1:
+            continue
+        else:
+            transition_indices = np.append(transition_indices,transition_idx[1])
+
+    #patch hwpss discontinuity regions between subscans
+    coeffs_diff = -1*np.diff(coeffs,axis=2) #minus sign gives us a1-a2 where a1,a2 time ordered
+    apodize = scipy.signal.windows.get_window(window, 4*n_buf, fftbins=False)
+    apodize = apodize[2*n_buf:] #only get range from wn(x) = 1 to wn(x) = 0
+    apodize = np.tile(apodize,(coeffs.shape[0],coeffs.shape[1])).reshape(coeffs.shape[0],coeffs.shape[1],2*n_buf)
+    for k in range(len(transition_indices)):
+        tidx = transition_indices[k].astype(int)
+        hwp_chi = aman.hwp_angle[tidx-n_buf:tidx+n_buf]
+        a2 = np.repeat(coeffs[:,:,k+1],2*n_buf).reshape(coeffs.shape[0],coeffs.shape[1],2*n_buf)
+        diff = np.repeat(coeffs_diff[:,:,k],2*n_buf).reshape(coeffs.shape[0],coeffs.shape[1],2*n_buf)
+        coeff_t = a2 + diff*apodize #harmonic coefficients as a function of time
+
+        vects = np.zeros([2*len(modes), hwp_chi.shape[0]], dtype=coeff_t[0][0].dtype)
+        for i, mode in enumerate(modes):
+            vects[2*i, :] = np.sin(mode*hwp_chi)
+            vects[2*i+1, :] = np.cos(mode*hwp_chi)
+                
+        vects = np.tile(vects,(coeffs.shape[0],1)).reshape(coeffs.shape[0],coeffs.shape[1],2*n_buf)
+        patch = np.einsum('ijk -> ik',coeff_t*vects)
+
+        aman.hwpss_model[:,tidx-n_buf:tidx+n_buf] = patch
+
+        del hwp_chi
+        del a2
+        del diff
+        del coeff_t
+        del vects
+        del patch
+
+    return
