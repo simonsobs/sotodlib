@@ -243,7 +243,6 @@ def split_book_by_obs(imprint, book, session=None):
         )
         new_book = imprint.register_book(oset, session=session)
         new_books.append(new_book)
-        imprint.logger.info(f"Registered new book {new_book.bid} for obs {obs_id}")
 
     session.delete(book)
     session.commit()
