@@ -3,6 +3,8 @@ import datetime as dt
 from pathlib import Path
 from typing import Optional
 
+from opentelemetry import trace
+
 from sotodlib.io.imprinter import Imprinter, BOUND, UPLOADED
 from sotodlib.site_pipeline.utils.logging import init_logger
 
@@ -49,29 +51,46 @@ def core(config: str):
         Path to config file for imprinter
     """
 
-    imprinter = Imprinter(
-        config, 
-        db_args={'connect_args': {'check_same_thread': False}},
-    )
+    tracer = trace.get_tracer("sotodlib")
 
-    session = imprinter.get_session()
-    to_upload = imprinter.get_bound_books(session=session)
-
-    failed_list = []
-    for book in to_upload:
-        success, err = imprinter.upload_book_to_librarian(
-            book, session=session, raise_on_error=False
+    with tracer.start_as_current_span("update_librarian"):
+        imprinter = Imprinter(
+            config, 
+            db_args={'connect_args': {'check_same_thread': False}},
         )
-        if not success:
-            failed_list.append( (book.bid, err) )
-        ## don't just continually fail
-        if len(failed_list) > 5:
-            break
-    
-    if len(failed_list) != 0:
-        # raise the first error so we know something is wrong
-        logger.error(f"Failed to upload books {[f[0] for f in failed_list]}")
-        raise failed_list[0][1]
+
+        session = imprinter.get_session()
+        to_upload = imprinter.get_bound_books(session=session)
+
+        failed_list = []
+        for book in to_upload:
+            with tracer.start_as_current_span("upload_book_to_librarian") as span:
+                span.set_attribute("book_id", book.bid)
+
+                success, err = imprinter.upload_book_to_librarian(
+                    book, session=session, raise_on_error=False
+                )
+
+                if not success:
+                    span.set_status(
+                        trace.Status(
+                            trace.StatusCode.ERROR,
+                            f"Failed to upload book to librarian with error {err}"
+                        )
+                    )
+
+                    failed_list.append( (book.bid, err) )
+                else:
+                    span.set_status(trace.Status(trace.StatusCode.OK))
+
+                # Pause if we fail too many in total.
+                if len(failed_list) > 5:
+                    break
+        
+        if len(failed_list) != 0:
+            # raise the first error so we know something is wrong
+            logger.error(f"Failed to upload books {[f[0] for f in failed_list]}")
+            raise failed_list[0][1]
 
 
 def get_parser(parser=None):
