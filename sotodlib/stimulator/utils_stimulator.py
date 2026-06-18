@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def func_sines(t, a0, a1, a2, a3, a4, a5, a6, t0, t1, t2, t3, t4, t5, t6):
     """
     Define fitting function.
@@ -12,13 +13,15 @@ def func_sines(t, a0, a1, a2, a3, a4, a5, a6, t0, t1, t2, t3, t4, t5, t6):
     Return:
         y: Value of fitting function.
     """
-    y = (a0*np.sin(1*(t-t0)*2*np.pi)
-         + a1*np.sin(2*(t-t1)*2*np.pi)
-         + a2*np.sin(3*(t-t2)*2*np.pi)
-         + a3*np.sin(4*(t-t3)*2*np.pi)
-         + a4*np.sin(5*(t-t4)*2*np.pi)
-         + a5*np.sin(6*(t-t5)*2*np.pi)
-         + a6*np.sin(7*(t-t6)*2*np.pi))
+    y = (
+        a0 * np.sin(1 * (t - t0) * 2 * np.pi)
+        + a1 * np.sin(2 * (t - t1) * 2 * np.pi)
+        + a2 * np.sin(3 * (t - t2) * 2 * np.pi)
+        + a3 * np.sin(4 * (t - t3) * 2 * np.pi)
+        + a4 * np.sin(5 * (t - t4) * 2 * np.pi)
+        + a5 * np.sin(6 * (t - t5) * 2 * np.pi)
+        + a6 * np.sin(7 * (t - t6) * 2 * np.pi)
+    )
 
     return y
 
@@ -35,7 +38,7 @@ def func_response_amplitude(f, tau, a):
     Return:
         y: Stimulator signal amplitude at chopping frequency f.
     """
-    y = a /np.sqrt(1+(2*np.pi*f*tau)**2)
+    y = a / np.sqrt(1 + (2 * np.pi * f * tau) ** 2)
     return y
 
 
@@ -51,7 +54,7 @@ def func_response_phase(f, tau, theta_geo):
     Return:
         theta: Phase delay of stimulator signal [deg]
     """
-    theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo
+    theta = np.arctan(-2 * np.pi * f * tau) * (180 / np.pi) + theta_geo
     return theta
 
 
@@ -69,8 +72,8 @@ def func_response_phase_with_dt(f, tau, theta_geo, dt):
     Return:
         theta: Phase delay of stimulator signal [deg]
     """
-    theta_dt = -dt*2*np.pi*f *(180/np.pi)
-    theta = np.arctan(-2*np.pi*f*tau)*(180/np.pi) + theta_geo + theta_dt
+    theta_dt = -dt * 2 * np.pi * f * (180 / np.pi)
+    theta = np.arctan(-2 * np.pi * f * tau) * (180 / np.pi) + theta_geo + theta_dt
     return theta
 
 
@@ -88,14 +91,13 @@ def get_downsample_factor(aman, ctx):
     downsample_factor_tag = get_downsample_factor_tags(ctx)
 
     obs_list = ctx.obsdb.query(
-        f"obs.obs_id == '{aman.obs_info.obs_id}'",
-        tags=downsample_factor_tag
-        )
+        f"obs.obs_id == '{aman.obs_info.obs_id}'", tags=downsample_factor_tag
+    )
 
     obs = obs_list[0]
     for tag in downsample_factor_tag:
         if obs[tag] == 1:
-            downsample_factor = tag.split('_')[-1]
+            downsample_factor = tag.split("_")[-1]
 
     return downsample_factor
 
@@ -112,6 +114,6 @@ def get_downsample_factor_tags(ctx):
     """
     cursor = ctx.obsdb.conn.execute("SELECT DISTINCT tag FROM tags")
     all_tags = np.array([row[0] for row in cursor.fetchall()])
-    mask = np.char.find(all_tags,'downsample') != -1
+    mask = np.char.find(all_tags, "downsample") != -1
 
     return np.array(all_tags)[mask].tolist()
