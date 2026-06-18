@@ -1,3 +1,4 @@
+import numpy as np
 import datetime as dt
 from typing import Optional
 import argparse

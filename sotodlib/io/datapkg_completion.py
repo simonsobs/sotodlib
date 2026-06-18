@@ -710,9 +710,11 @@ class DataPackaging:
             timecode, dry_run=False, include_hk=include_hk,
             verify_with_librarian=verify_with_librarian,
         )
+        return check
 
+    def cleanup_level2_folders(self, timecode):
         if not self.imprint.build_det:
-            return check
+            return 
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
 
@@ -722,4 +724,4 @@ class DataPackaging:
         if os.path.exists(ttc):
             if len(os.listdir(ttc)) == 0 or just_suprsync(ttc):
                 shutil.rmtree(ttc)
-        return check
+        return 
