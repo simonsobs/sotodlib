@@ -999,6 +999,13 @@ class BookBinder:
         self.file_idxs = None
         self.meta_files = None
 
+    def close(self):
+        """Completely closes the log file
+        """
+        for handler in self.log.handlers[:]:
+            handler.close()
+            self.log.removeHandler(handler)
+            
     def set_min_max_ctime(self):
         """Function to be run after stream.preprocess is finished to set the ctimes.
         Splitting this out because it is useful for debugging purposes as well

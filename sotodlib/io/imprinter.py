@@ -878,7 +878,11 @@ class Imprinter:
             message = f"{message}\ntrace={err_msg}" if message else err_msg
             status = FAILED
             err = e
-        
+            
+        ## bookbinder creates a log file and holds the connection open. 
+        ## Doesn't matter during normal operations but make some fixing operations annoying
+        binder.close()
+
         return book.bid, status, message, err
 
     def bind_book(
