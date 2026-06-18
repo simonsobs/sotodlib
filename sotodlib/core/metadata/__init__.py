@@ -4,6 +4,7 @@
 """
 
 from .resultset import ResultSet
+from .common import sqlite_connect
 from .detdb import DetDb
 from .obsdb import ObsDb
 from .obsfiledb import ObsFileDb
