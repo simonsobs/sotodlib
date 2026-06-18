@@ -1082,10 +1082,39 @@ The first block are mandatory entries. The second block are optional.
     # ufms: ['ufm_mv5', 'ufm_mv27', 'ufm_mv35', 'ufm_mv12',
     # 'ufm_mv23', 'ufm_mv33', 'ufm_mv17'] #satp3
 
-    # Optional configuration parameters
+    # Define pointing epochs for db.sqlite time ranges.
+    # Needs entry even if not using multiple epochs.
+    # Specify any indepedent parameters allowed to vary across epochs.
+    # Create optional expression definitions if parameters are correlated.
+    # Note, independent params are given epoch's name as suffix inside code.
+    epochs:
+      - begin_timerange: 1700000000 
+        end_timerange: 1770569999 
+        fp_template_timestamp: 1750000000 # determine correct val with ffp_path's .h5
+        name: satp2_epoch_1  
+        indep_list: ['enc_offset_az']  #optional
+      - begin_timerange: 1770570000
+        end_timerange: 2000000000
+        fp_template_timestamp: 1750000000 # determine correct val with ffp_path's .h5
+        name: satp2_epoch_2  #
+        indep_list: ['enc_offset_az'] #optional
+        param_expr:
+          enc_offset_az_satp2_epoch_2: 'enc_offset_az_satp2_epoch_1 + radians(3.86)' 
 
-    # parameters included here will be fixed in the minimization.
-    # See comments for which to fix for different platforms.
+    # Optional configuration parameters
+    
+    # Any additional tag to append on results directory as subfolder
+    append: ""
+    save_output: True  # Save fit info to an h5 file. Save model as db.sqlite.
+    # Exclude full or partial timestamps in obs_ids e.g. bad PWV or bad timing. 
+    skip_tags:
+      - "_1713" #bad timing satp1
+      - "1716423951" #Just a very bad fit satp1
+
+    # Select some subset of the observations. Indexes on obs in per_obs focal_plane.h5
+    use_these_files:   #{None or list e.g. [0,1,18,20,21,22,30]} 
+    # Select parameters to fix in the minimization routine.
+    # See comments for which to fix for different SAT platforms.
     fixed_params:
       - az_rot          #all
       - base_tilt_cos   #all
@@ -1093,6 +1122,14 @@ The first block are mandatory entries. The second block are optional.
       - fp_rot_eta0     #all
       - fp_offset_eta0  #all
       - fp_rot_xi0      #satp3 only
+
+    # Initialize parameter values for fitter.   (radians)
+    # If not specified, defaults from coords/pointing_model.py..
+    initial_params:
+      enc_offset_az: -0.06 # (radians)
+      enc_offset_el:  0.001 
+
+    just_test_params: False  #If True, makes analysis plots with initial_params
     # "xieta_model" decides which parameter space the fitting occurs in.
     # "measured": The fitter applies pointing model to template UFM xi-eta
     #             locations based on El and Roll of the obs, to get the modeled
@@ -1102,22 +1139,50 @@ The first block are mandatory entries. The second block are optional.
     #             xieta data points to match them to template locations.
     #             The modeled data points cluster around
     #             the nominal template locations.
-    # Each method gives slightly different results. "measured" is default.
-    xieta_model: measured
-    # Define a weight cutoff for fitting routine.
-    weight_cutoff: 0.2
-    # Cut out any known bad observations.
-    skip_tags:
-      - "_1713" #bad timing satp1
-      - "1716423951" #Just a very bad fit satp1
+    # Each method gives slightly different results. "measured" is default. "template" is friendlier with some plotting methods.
+    xieta_model: measured # {template, measured}
+    # Specify preferred lmfit method. Friendly with most options. Defaults to leastsq
+    fit_method: leastsq  
+    second_fit_method:   #For iterated fits. Default same as fit_method. 
+    # Specify choice of data to use in fitter. 
+    # "detector":
+    # "ufm_center": avgd ufm center location (as solved from per-obs finalize_focal_plane)
+    fit_type: detector # {detector, ufm_center}
+    # Define a weight cutoff for fitting routine. 
+    # typical per-detector cutoff is above 0.97-0.98 for SAT 
+    # typical per-obs cutoff 0.2 for SAT
+    weight_cutoff: 0.97
+
+    #Additional Choices for Per-Detector Fitting Option
+    band:   # None for all bands, or e.g. 'f220'}
+    which_ufm:  # None or specify ufm_mv29 or list of ufms.
+    cull_dets:  # Select downsample factor. Default None
+    # Define xieta fit error cutoff for fitting routine. (In arc seconds)
+    # If xieta fit errors not in input data, XE errs are set to 0, and no data is cut here.
+    xe_fit_max_cutoff: 12   # Default=12. 
+    # Select data type to use as pointing data. (for per-detector fits)
+    # "ffp" - takes focal planes fitted/shifted/stretched to match moon/planet observations
+    # "raw" - takes raw moon/planet detector fits.
+    use_as_data: raw  #{ffp or raw}
+    # Choose template to compare pointing data against
+    # "ffp": averaged focal plane from finalize_focal_plane
+    # "nominal": from a nominal optical template
+    use_as_template: ffp #{ffp, nominal} # hard-coded as nominal in per-observation case.
+
     # Option to iterate parameter fitting. If not None, data points with
     # fit residuals higher than cutoff will be excluded from second round of fits.
     iterate_cutoff: None # or arcmin
-    # Make diagnostic plots.
-    make_plots: True
-    # any additional tag to append on results directory
-    append: ""
-    save_output: True
+
+    # Diagnostic Plotting Options
+    make_plots: True 
+    plotlims: 25  # will set plot lims in arcmin on some diagnostic plots.
+    # Full analysis plots loads all dets from non skipped obs that pass weight/xi-eta error cuts.
+    # Only ignores downsampling, band selection, wafer selections. 
+    # Averages residuals per wafer and per observation.
+    make_full_analysis_plots: True 
+    
+
+
 
 
 Output file format

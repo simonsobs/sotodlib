@@ -237,10 +237,9 @@ def load_per_detector_data(config, t0, tf, fpt_timestamp, no_downsample=False, r
     
     weights_dets[weights_dets < config.get("weight_cutoff")] = 0.0
     obs_dets_fits[np.where(weights_dets == 0)] = np.nan
-    #tot_xe_err[tot_xe_err > config.get("xe_fit_max_cutoff", 12)] = 1000
     obs_dets_fits[np.where(tot_xe_err > config.get("xe_fit_max_cutoff", 12))] = np.nan
     #mask = ~np.isnan(weights_dets)  
-    mask = ~np.isnan(obs_dets_fits[:,0]) 
+    mask = ~np.isnan(obs_dets_fits[:,0]) # won't plot excluded dets with bad pointing fits 
     if not no_downsample:
         # Reduce detector counts for computation
         if band is not None:
@@ -368,7 +367,9 @@ def _init_fit_params(config, epochs):
     # Add independant params
     orig_pars = np.array(list(init_params.keys()))
     par_list = orig_pars.copy()
+    param_expr = {}
     added_ots = []
+
     for epoch in epochs: 
         indep_list = epoch["indep_list"]
         if float_ots:
@@ -388,8 +389,13 @@ def _init_fit_params(config, epochs):
         for ipar, par in zip(indep_list, epoch["indep_list"]):
             init_params[ipar] = init_params[par]
     par_count = np.zeros(len(par_list))
-    for epoch in epochs: 
+    for epoch in epochs:
         indep_list = epoch["indep_list"]
+        special_par = epoch.get("param_expr", {})
+        for par in special_par.keys():
+            if par not in par_list:
+                raise ValueError(f"Invalid parameter expression key in epoch {epoch["name"]}")
+            param_expr[par] = special_par[par]
         pmsk = np.zeros(len(par_list), bool)
         pmsk[:len(orig_pars)] = True
         pmsk[np.isin(par_list, indep_list)] = False
@@ -403,14 +409,17 @@ def _init_fit_params(config, epochs):
     # Initialize lmfit Parameter object
     fit_params = Parameters()
     for p in init_params.keys():
-        p_min, p_max = -np.inf, np.inf #Default limits
-        for bound_key in sorted(bounds_config.keys(), key=len, reverse=True):
-            if p == bound_key or p.startswith(bound_key + "_"):
-                p_min, p_max = bounds_config[bound_key]
-                p_min = float(p_min) if isinstance(p_min, str) else p_min
-                p_max = float(p_max) if isinstance(p_max, str) else p_max
-                break
-        fit_params.add(p, value=init_params[p], vary=True, min=p_min, max=p_max)
+        if p not in param_expr.keys():
+            p_min, p_max = -np.inf, np.inf #Default limits
+            for bound_key in sorted(bounds_config.keys(), key=len, reverse=True):
+                if p == bound_key or p.startswith(bound_key + "_"):
+                    p_min, p_max = bounds_config[bound_key]
+                    p_min = float(p_min) if isinstance(p_min, str) else p_min
+                    p_max = float(p_max) if isinstance(p_max, str) else p_max
+                    break
+            fit_params.add(p, value=init_params[p], vary=True, min=p_min, max=p_max)
+        elif p in param_expr.keys():
+            fit_params.add(p, expr = param_expr[p])
     # Turn off various parameters depending on platform
     for fix in fixed_params:
         if fix in fit_params:
@@ -776,7 +785,7 @@ def main(config_path: str):
             for p in test_params:
                 logger.info(f"{p}: {test_params[p].value}")
             #logger.info(test_params)
-            full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
+            full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params)
             logger.info(f"for epoch {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")
@@ -1166,12 +1175,13 @@ def main(config_path: str):
     if config.get("make_full_analysis_plots", True):
         for epoch in epochs:
             #Fill up axis manager with ALL the data (only cuts from culling and time stamps remain)
+            t0, tf = epoch["begin_timerange"], epoch["end_timerange"]
             fpt_timestamp = epoch["fp_template_timestamp"]
             test_params = epoch["solver_aman"].pointing_model
             if "ot_float_aman" in epoch["solver_aman"]._assignments:
                 test_params = test_params.merge(epoch["solver_aman"].ot_float_aman)
                 
-            full_aman = analyze_PM_with_all_dets(config, t0, tf, test_params)
+            full_aman = analyze_PM_with_all_dets(config, t0, tf, fpt_timestamp, test_params)
             logger.info(f"for this epoch: {epoch["name"]}")
             logger.info(f"full rms: {full_aman.rms:.3f} (arcmin) ")
             logger.info(f"obs_rms: {full_aman.per_obs_stats.rms:.3f} (arcmin) ")

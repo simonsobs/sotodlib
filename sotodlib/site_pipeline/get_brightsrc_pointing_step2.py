@@ -229,9 +229,14 @@ def update_xieta(tod,
     for di, det in enumerate(tod.dets.vals):
         mask_di = source_flags_ds[di]
         #take a weighted average, a little more robust than the median for when the mask is off center.
-        bs_az = np.nansum(tod.boresight.az[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
-        bs_el = np.nansum(tod.boresight.el[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
-        bs_roll = np.nansum(tod.boresight.roll[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
+        try:
+            bs_az = np.nansum(tod.boresight.az[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
+            bs_el = np.nansum(tod.boresight.el[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
+            bs_roll = np.nansum(tod.boresight.roll[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])
+        except:
+            bs_az = np.nanmedian(tod.boresight.az[mask_ds][mask_di])
+            bs_el = np.nanmedian(tod.boresight.el[mask_ds][mask_di])
+            bs_roll = np.nanmedian(tod.boresight.roll[mask_ds][mask_di])
         
         if np.any([xieta_isnan[di], np.all(mask_di==False), tod.rms[di]==0.]):
             xieta_dict[det] = {'xi': np.nan, 'eta':  np.nan, 'xi_err': np.nan, 'eta_err': np.nan,
@@ -284,44 +289,46 @@ def update_xieta(tod,
                     # as the reduced chi-square is equal to unity.
                     xi_err, eta_err = np.sqrt(pcov[0,0] * redchi2), np.sqrt(pcov[1,1] * redchi2)
                     redchi2 = 1.
-                    if make_plots & di < 15:
-                        plt.figure()
-                        plt.plot(ts_ds - ts_ds[0], sig_ds[di],'k,',linewidth=0.8)
-                        plt.plot(ts - ts_ds[0], sig, '.c',alpha=0.2)
-                        plt.plot(ts - ts_ds[0], fit_func(xieta_src, *popt), '-',
-                                label = f"redchi2:{redchi2:.3f} \n R2: {R2:.3f}\n init xi,eta: ({xieta_det[0]/DEG*60:.3f},{xieta_det[1]/DEG*60:.3f}) \n new xi, eta:({(xieta_det[0]+xi_opt)/DEG*60:.3f}, {(xieta_det[1]+eta_opt)/DEG*60:.3f}) \n Az, El ({bs_az/DEG:.4f},{bs_el/DEG:.4f})")
-                        plt.title(f"(xierr, etaerr) = ({xi_err/DEG*60*60:.3f}, {eta_err/DEG*60*60:.3f})")
-                        plotmin = np.min(np.where(mask_di)) * ds_factor / 200.
-                        plotmax = np.max(np.where(mask_di)) * ds_factor / 200.
-                        plt.xlim(plotmin - 100, plotmax + 100)
-                        #plt.xlim(1000,1400)
-                        plt.legend()
-                        plt.savefig(os.path.join(plot_dir, f"{det}.png"))
-                        plt.close()
-
-                        plt.figure()
-                        plt.plot(ts_ds - ts_ds[0], tod.boresight.az[mask_ds]/DEG,'k,',linewidth=0.8)
-                        plt.plot(ts - ts_ds[0], tod.boresight.az[mask_ds][mask_di]/DEG,'r.',linewidth=0.8)
-                        plt.axhline(np.nansum(tod.boresight.az[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])/DEG,
-                                    0,1, color='k')
-                        plt.savefig(os.path.join(plot_dir, f"Az_{det}.png"))
-                        plt.close()
-
-                        plt.figure()
-                        plt.plot(tod.boresight.az[mask_ds]/DEG, sig_ds[di],'k,',
-                                 linestyle='-',linewidth=0.5,alpha=0.4)
-                        peaktime = ts[np.argmax(sig)]
-                        plt.scatter(tod.boresight.az[mask_ds][mask_di]/DEG,
-                                    sig,
-                                    c = ts, vmin= peaktime - 8*60, vmax=peaktime+8*60,
-                                    cmap='jet', marker='.', lw=0,alpha=0.6)
-                        plt.xlim(np.min(tod.boresight.az[mask_ds][mask_di]/DEG)-4,
-                                 np.max(tod.boresight.az[mask_ds][mask_di]/DEG)+4)
-                        plt.savefig(os.path.join(plot_dir, f"SigVsAz_{det}.png"))
-                        plt.close()
                 else:
                     raise NameError("Unsupported name for 'error_estimation_method'")
+                if make_plots & di < 15:
+                    plt.figure()
+                    plt.plot(ts_ds - ts_ds[0], sig_ds[di],'k,',linewidth=0.8)
+                    plt.plot(ts - ts_ds[0], sig, '.c',alpha=0.2)
+                    plt.plot(ts - ts_ds[0], fit_func(xieta_src, *popt), '-',
+                            label = f"redchi2:{redchi2:.3f} \n R2: {R2:.3f}\n \
+                            init xi/eta: ({xieta_det[0]/DEG*60:.3f},{xieta_det[1]/DEG*60:.3f}) \n \
+                            new xi/eta:({(xieta_det[0]+xi_opt)/DEG*60:.3f},{(xieta_det[1]+eta_opt)/DEG*60:.3f}) \n \
+                            Az/El ({bs_az/DEG:.4f},{bs_el/DEG:.4f})")
+                    plt.title(f"(xierr, etaerr) = ({xi_err/DEG*60*60:.3f}, {eta_err/DEG*60*60:.3f})")
+                    plotmin = np.min(np.where(mask_di)) * ds_factor / 200.
+                    plotmax = np.max(np.where(mask_di)) * ds_factor / 200.
+                    plt.xlim(plotmin - 100, plotmax + 100)
+                    #plt.xlim(1000,1400)
+                    plt.legend()
+                    plt.savefig(os.path.join(plot_dir, f"{det}.png"))
+                    plt.close()
 
+                    plt.figure()
+                    plt.plot(ts_ds - ts_ds[0], tod.boresight.az[mask_ds]/DEG,'k,',linewidth=0.8)
+                    plt.plot(ts - ts_ds[0], tod.boresight.az[mask_ds][mask_di]/DEG,'r.',linewidth=0.8)
+                    plt.axhline(np.nansum(tod.boresight.az[mask_ds][mask_di] * ts_ds[mask_di])/np.nansum(ts_ds[mask_di])/DEG,
+                                0,1, color='k')
+                    plt.savefig(os.path.join(plot_dir, f"Az_{det}.png"))
+                    plt.close()
+
+                    plt.figure()
+                    plt.plot(tod.boresight.az[mask_ds]/DEG, sig_ds[di],'k,',
+                             linestyle='-',linewidth=0.5,alpha=0.4)
+                    peaktime = ts[np.argmax(sig)]
+                    plt.scatter(tod.boresight.az[mask_ds][mask_di]/DEG,
+                                sig,
+                                c = ts, vmin= peaktime - 8*60, vmax=peaktime+8*60,
+                                cmap='jet', marker='.', lw=0,alpha=0.6)
+                    plt.xlim(np.min(tod.boresight.az[mask_ds][mask_di]/DEG)-4,
+                             np.max(tod.boresight.az[mask_ds][mask_di]/DEG)+4)
+                    plt.savefig(os.path.join(plot_dir, f"SigVsAz_{det}.png"))
+                    plt.close()
                 xieta_det += np.array([xi_opt, eta_opt])
                 xieta_dict[det] = {'xi': xieta_det[0], 'eta': xieta_det[1], 'xi_err': xi_err, 'eta_err': eta_err,
                                    'R2': R2, 'redchi2': redchi2, 'az' : bs_az, 'el': bs_el, 'roll': bs_roll}
