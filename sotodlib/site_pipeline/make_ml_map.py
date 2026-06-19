@@ -236,16 +236,26 @@ def main(**args):
                     tones_aman.restrict("dets", keep)
 
                     # Set calibrations
+                    tones_aman.det_cal.phase_to_pW[tones_aman.det_info.wafer.type == 'PROB'] = np.nanmedian(meta.det_cal.phase_to_pW)
                     tones_aman.relcal.relcal[tones_aman.det_info.wafer.type == 'PROB'] = 1
                     for k in tones_aman.abscal._fields:
                         tones_aman.abscal[k][tones_aman.det_info.wafer.type == 'PROB'] = np.nanmedian(meta.abscal[k])
+
+                    # Detrend
+                    tones_aman.signal -= np.median(tones_aman.signal, axis=-1)[..., None]
+                    utils.deslope(tones_aman.signal, w=5, inplace=True)
+
+                    # Convert to K_CMB
+                    tones_aman.signal *= tones_aman.det_cal.phase_to_pW[..., None]
+                    tones_aman.signal *= tones_aman.abscal.abscal_cmb[..., None]
+                    tones_aman.signal *= tones_aman.relcal.relcal[..., None]
 
                 # Actually read the data
                 L.debug('Loading obs')
                 with bench.mark("read_obs %s" % sub_id):
                     #obs = context.get_obs(sub_id, meta=meta)
                     obs, _ = pp_util.load_and_preprocess(obs_id, preproc, context=context, meta=meta)
-                
+
                 # Add special channels
                 if args.fixed_tones:
                     # Helper functions for filling out to match amans
@@ -348,6 +358,43 @@ def main(**args):
                 if np.any(zero_dets == 0.0):
                     L.debug("%s has all 0s in at least 1 detector" % (sub_id))
                     obs.restrict('dets', obs.dets.vals[np.logical_not(zero_dets == 0.0)])
+
+                # Zero out T and P contributions to pointing matrix for fixed tones
+                obs.focal_plane.wrap('T', np.ones(obs.dets.count), [(0, obs.focal_plane.dets)])
+                obs.focal_plane.wrap('P', np.ones(obs.dets.count), [(0, obs.focal_plane.dets)])
+                if args.fixed_tones:
+                    # Ensure gammas are zero
+                    obs.focal_plane.gamma[obs.det_info.wafer.type == 'PROB'] = 0
+
+                    # Set xi, eta to nearest matches
+                    for idx in np.argwhere(obs.det_info.wafer.type == 'PROB').flatten():
+                        # Get possible channels
+                        chans = obs.det_info.smurf.channel[(obs.det_info.wafer.type == 'OPTC') & \
+                                                           (obs.det_info.stream_id == obs.det_info.stream_id[idx]) & \
+                                                           (obs.det_info.smurf.band == obs.det_info.smurf.band[idx])]
+
+                        # Detectors on this band may have been filtered
+                        if len(chans) == 0:
+                            continue
+
+                        # Find closest match
+                        opt_chan = chans[np.argmin(np.abs(chans - obs.det_info.smurf.channel[idx]))]
+
+                        # Get index
+                        opt_idx = np.argwhere((obs.det_info.wafer.type == 'OPTC') & \
+                                              (obs.det_info.stream_id == obs.det_info.stream_id[idx]) & \
+                                              (obs.det_info.smurf.band == obs.det_info.smurf.band[idx]) & \
+                                              (obs.det_info.smurf.channel == opt_chan)).flatten()
+                        assert len(opt_idx) == 1
+
+                        # Set xi, eta accordingly
+                        obs.focal_plane.xi[idx]  = obs.focal_plane.xi[opt_idx[0]]
+                        obs.focal_plane.eta[idx] = obs.focal_plane.eta[opt_idx[0]]
+
+                    # Zero out T, P (not natively in focal plane)
+                    obs.focal_plane.T[obs.det_info.wafer.type == 'PROB'] = 0
+                    obs.focal_plane.P[obs.det_info.wafer.type == 'PROB'] = 0
+
                 # Cut non-optical dets, this will be redundant if the preprocessing already cut them
                 # Keep fixed tones if desired
                 if args.fixed_tones:
@@ -439,41 +486,6 @@ def main(**args):
 
                 L.debug('Add obs: %i detectors; %i optical, %i fixed' % \
                         (obs.signal.shape[0], np.sum(obs.det_info.wafer.type == 'OPTC'), np.sum(obs.det_info.wafer.type == 'PROB')))
-                # Zero out T and P contributions to pointing matrix for fixed tones
-                obs.focal_plane.wrap('T', np.ones(obs.dets.count), [(0, obs.focal_plane.dets)])
-                obs.focal_plane.wrap('P', np.ones(obs.dets.count), [(0, obs.focal_plane.dets)])
-                if args.fixed_tones:
-                    # Ensure gammas are zero
-                    obs.focal_plane.gamma[obs.det_info.wafer.type == 'PROB'] = 0
-
-                    # Set xi, eta to nearest matches
-                    for idx in np.argwhere(obs.det_info.wafer.type == 'PROB').flatten():
-                        # Get possible channels
-                        chans = obs.det_info.smurf.channel[(obs.det_info.wafer.type == 'OPTC') & \
-                                                           (obs.det_info.stream_id == obs.det_info.stream_id[idx]) & \
-                                                           (obs.det_info.smurf.band == obs.det_info.smurf.band[idx])]
-
-                        # Detectors on this band may have been filtered
-                        if len(chans) == 0:
-                            continue
-
-                        # Find closest match
-                        opt_chan = chans[np.argmin(np.abs(chans - obs.det_info.smurf.channel[idx]))]
-
-                        # Get index
-                        opt_idx = np.argwhere((obs.det_info.wafer.type == 'OPTC') & \
-                                              (obs.det_info.stream_id == obs.det_info.stream_id[idx]) & \
-                                              (obs.det_info.smurf.band == obs.det_info.smurf.band[idx]) & \
-                                              (obs.det_info.smurf.channel == opt_chan)).flatten()
-                        assert len(opt_idx) == 1
-
-                        # Set xi, eta accordingly
-                        obs.focal_plane.xi[idx]  = obs.focal_plane.xi[opt_idx[0]]
-                        obs.focal_plane.eta[idx] = obs.focal_plane.eta[opt_idx[0]]
-                    
-                    # Zero out T, P (not natively in focal plane)
-                    obs.focal_plane.T[obs.det_info.wafer.type == 'PROB'] = 0
-                    obs.focal_plane.P[obs.det_info.wafer.type == 'PROB'] = 0
 
                 # And add it to the mapmaker
                 with bench.mark("add_obs %s" % sub_id):
