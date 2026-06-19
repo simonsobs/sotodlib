@@ -1350,6 +1350,9 @@ class TimeCodeBinder:
         else:
             self.compress_output = False    
 
+    def close(self):
+        pass 
+        
     def get_metadata(self, telescope=None, tube_config={}):
         return {
             "book_id": self.book.bid,
