@@ -839,6 +839,7 @@ class Imprinter:
         assert book.type in VALID_OBSTYPES
 
         err = None
+        binder = None
         try:
             # find appropriate binder for the book type
             binder = self._get_binder_for_book(
@@ -881,7 +882,8 @@ class Imprinter:
             
         ## bookbinder creates a log file and holds the connection open. 
         ## Doesn't matter during normal operations but make some fixing operations annoying
-        binder.close()
+        if binder is not None:
+            binder.close()
 
         return book.bid, status, message, err
 
