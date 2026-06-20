@@ -206,7 +206,7 @@ class G3tHk:
             except Exception as e:
                 if not isinstance(e, TypeError):
                     # TypeErrors are expected from attempting to take the median of a list of strings.
-                    logger.warning(f"Error processing field {index} for {hk_path}, setting to nan")
+                    logger.warning(f"Error processing field {index} for {hk_path}, setting to nan (Error: {e})")
 
                 medians.append(np.nan)
                 means.append(np.nan)
