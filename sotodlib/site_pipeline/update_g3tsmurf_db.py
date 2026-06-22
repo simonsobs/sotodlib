@@ -4,20 +4,20 @@ is specifically designed to work when the data is dynamically coming in. Meaning
 is designed to work from something like a cronjob.
 """
 import os
-from pathlib import Path
-import yaml
 import datetime as dt
-import numpy as np
 import argparse
 import logging
-from sqlalchemy import not_, or_, and_
+from sqlalchemy import or_
 from typing import Optional
+
+
+from sotodlib.site_pipeline.utils.profiler import profile, add_profile_args
 
 from sotodlib.io.load_smurf import G3tSmurf, Observations, logger
 from sotodlib.io.datapkg_utils import load_configs
 
-
-def core(
+@profile("update_g3tsmurf_db")
+def main(
     config: Optional[str] = None, update_delay: float = 2,
     from_scratch: bool = False, verbosity: int = 2,
     index_via_actions: bool=False, checked_file: Optional[str]=None, 
@@ -128,61 +128,6 @@ def core(
             f" obs_ids are {raise_list_readout_ids}."
         )
 
-def main(config: Optional[str] = None, update_delay: float = 2,
-         from_scratch: bool = False, verbosity: int = 2,
-         index_via_actions: bool=False, checked_file: Optional[str]=None,
-         profile: bool=False, profile_output: Optional[Path]=None):
-    """
-    Arguments
-    ---------
-    config: string
-        configuration file for G3tSmurf
-    update_delay: float
-        number of days to 'look back' to update observation information
-    from_scratch: bool
-        if True, run database update with minimum ctime of 1.6e9 (all SO time).
-        overrides update_delay
-    verbosity: int
-        0-3, higher numbers = more printouts
-    index_via_actions: bool
-        if True, will look through action folders to create observations, this
-        will be necessary for data older than Oct 2022 but creates concurancy
-        issues on systems (like the site) running automatic deletion of level 2
-        data.
-    checked_file: str
-        a file name that contains a list of observations that would by default
-        cause errors to be thrown during this script but have been manually
-        checked and dealt with
-    profile: bool
-        if True, will run the script with pyinstrument and output to profile_output
-    profile_output: str
-        if profile is True, the file name of the directory
-        to output the pyinstrument profiling results to
-    """
-
-    if profile:
-        import pyinstrument
-        timestamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d_%H%M%S')
-        filename = f"update_g3tsmurf_db_{timestamp}.html"
-        output_filename = profile_output / filename if profile_output is not None else filename
-        profiler = pyinstrument.Profiler()
-        profiler.start()
-    
-    try:
-        core(
-            config=config, update_delay=update_delay, from_scratch=from_scratch,
-            verbosity=verbosity, index_via_actions=index_via_actions,
-            checked_file=checked_file
-        )
-    finally:
-        if profile:
-            profiler.stop()
-            if profile_output is not None:
-                with open(output_filename, "w") as f:
-                    f.write(profiler.output_html())
-
-  
-
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
@@ -197,9 +142,9 @@ def get_parser(parser=None):
                         action="store_true")
     parser.add_argument("--checked-file",
         help="Filename of file containing a list of observations that are problematic but have been manually acknowledged")
-    parser.add_argument("--profile", help="Run with pyinstrument profiling", action="store_true")
-    parser.add_argument("--profile-output", help="Directory to output pyinstrument profiling results to, if --profile is set", 
-                        type=Path)
+    
+    add_profile_args(parser)
+
     return parser
 
 if __name__ == '__main__':
