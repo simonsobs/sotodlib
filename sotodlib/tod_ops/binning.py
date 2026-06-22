@@ -16,6 +16,7 @@ def bin_signal(aman, bin_by, signal=None,
         The array by which signal is binned. It should has the same samps as aman.
     signal : str, optional
         The name of the signal to be binned. Defaults to aman.signal if not specified.
+        Either 1D array of shape ``(samps,)`` or 2D array of shape ``(dets, samps)``.
     range : list or None
         A list specifying the bin range ([min, max]). Default is None, which means bin range
         is set to [min(bin_by), max(bin_by)].
@@ -42,6 +43,22 @@ def bin_signal(aman, bin_by, signal=None,
     """
     if signal is None:
         signal = aman.signal
+    elif isinstance(signal, str):
+        signal = aman.get(signal)
+
+    if signal.ndim == 1:
+        is_1d = True
+    elif signal.ndim == 2:
+        is_1d = False
+    else:
+        raise ValueError(
+            f"signal must be 1D (samps,) or 2D (dets, samps); got ndim={signal.ndim}")
+
+    if signal.shape[-1] != aman.samps.count:
+        raise ValueError(
+            f"signal last axis ({signal.shape[-1]}) does not match "
+            f"aman.samps.count ({aman.samps.count})")
+
     if range is None:
         range = (np.nanmin(bin_by), np.nanmax(bin_by))
 
@@ -55,42 +72,61 @@ def bin_signal(aman, bin_by, signal=None,
     bin_centers = (bin_edges[1] - bin_edges[0])/2. + bin_edges[:-1] # edge to center
     nbins = len(bin_centers)
     
-    # prepare binned signal array
-    binned_signal = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
-    binned_signal_squared_mean = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
-    binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
-    
     # get bin indices
     bin_indices = np.digitize(bin_by, bin_edges) - 1
     bin_indices = np.clip(bin_indices, 0, nbins-1)
-        
-    # bin tod
-    if flags is None:
-        bin_counts, _ = np.histogram(bin_by, bins=bins, range=range, weights = weight_for_signal)
-        mcnts = bin_counts > 0
-        
-        for i, dets in enumerate(aman.dets.vals):      
-            binned_signal[i][mcnts] = np.bincount(bin_indices, weights=signal[i]*weight_for_signal, minlength=nbins
-                                                 )[mcnts]/bin_counts[mcnts]
-            binned_signal_squared_mean[i][mcnts] = np.bincount(bin_indices, weights=(signal[i]*weight_for_signal)**2, minlength=nbins
-                                                 )[mcnts]/bin_counts[mcnts]
-            
-        binned_signal_sigma[:, mcnts] = np.sqrt(np.abs(binned_signal_squared_mean[:,mcnts] - binned_signal[:,mcnts]**2)
-                                      ) / np.sqrt(bin_counts[mcnts])
-        bin_counts_dets = np.tile(bin_counts, (aman.dets.count, 1))
 
+    # Drop NaN bin_by and out-of-range samples so that np.digitize + np.clip
+    # do not silently pile them into the first/last bin.
+    base_valid = (
+        np.isfinite(bin_by)
+        & (bin_by >= range[0])
+        & (bin_by <= range[1])
+    )
+
+    if flags is None:
+        flag_is_2d = False
+        m = base_valid
     else:
-        bin_counts_dets = np.full([aman.dets.count, nbins], np.nan)
         if isinstance(flags, str):
             flags = aman.flags.get(flags)
-        if flags.shape == (aman.dets.count, aman.samps.count):
+        if (not is_1d) and flags.shape == (aman.dets.count, aman.samps.count):
             flag_is_2d = True
-            m_2d = ~flags.mask()
-        elif flags.shape == (aman.samps.count, ):
+            m_2d = base_valid[None, :] & ~flags.mask()
+        elif is_id and flags.shape == (aman.samps.count, ):
             flag_is_2d = False
-            m = ~flags.mask()
+            m = base_valid & ~flags.mask()
         else:
             raise ValueError('flags should have shape of (`dets`, `samps`) or (`samps`,)')
+
+    if is_1d:
+        if weight_for_signal.shape != (aman.samps.count,):
+            raise ValueError(
+                'weight_for_signal should have shape of (`samps`,) when signal is 1D')
+
+        # prepare binned signal array
+        binned_signal = np.full(nbins, np.nan, signal_dtype)
+        binned_signal_sigma = np.full(nbins, np.nan, signal_dtype)
+
+        bin_counts = np.bincount(
+            bin_indices[m], weights=weight_for_signal[m], minlength=nbins)
+        mcnts = bin_counts > 0
+        binned_signal[mcnts] = np.bincount(
+            bin_indices[m], weights=signal[m] * weight_for_signal[m], minlength=nbins
+        )[mcnts] / bin_counts[mcnts]
+        binned_signal_squared_mean = np.bincount(
+            bin_indices[m], weights=(signal[m] * weight_for_signal[m]) ** 2,
+            minlength=nbins
+        )[mcnts] / bin_counts[mcnts]
+        binned_signal_sigma[mcnts] = np.sqrt(
+            np.abs(binned_signal_squared_mean - binned_signal[mcnts] ** 2)
+        ) / np.sqrt(bin_counts[mcnts])
+
+    else:
+        # prepare binned signal array
+        binned_signal = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
+        binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
+        bin_counts_dets = np.full([aman.dets.count, nbins], np.nan)
 
         for i, dets in enumerate(aman.dets.vals):
             if flag_is_2d:
