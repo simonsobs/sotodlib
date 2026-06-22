@@ -192,10 +192,11 @@ class G3tHk:
 
         data = arc.simple(hkfs)
 
-        for field in data:
+        for index, field in enumerate(data):
             time = field[0]
             starts.append(time[0])
             stops.append(time[-1])
+
             try:
                 medians.append(np.median(field[1]))
                 means.append(np.mean(field[1]))
@@ -203,7 +204,10 @@ class G3tHk:
                 max_vals.append(np.max(field[1]))
                 stds.append(np.std(field[1]))
             except Exception as e:
-                logger.warning(f"Error processing field {field}: {e}, setting to nan")
+                if not isinstance(e, TypeError):
+                    # TypeErrors are expected from attempting to take the median of a list of strings.
+                    logger.warning(f"Error processing field {index} for {hk_path}, setting to nan (Error: {e})")
+
                 medians.append(np.nan)
                 means.append(np.nan)
                 min_vals.append(np.nan)
