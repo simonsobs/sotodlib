@@ -116,6 +116,32 @@ def get_sample_timestamps(frame):
         times = np.array([t.time / spt3g_core.G3Units.s for t in frame["data"].times()])
         return times, TimingParadigm.G3Timestream
 
+def check_frame_counters( frame ):
+    """check counters in frame are doing what we want them to do.
+    bookbinder also checks but we'll see these warnings faster
+    """
+    fo = frame.get('primary', None)
+    if fo is None:
+        return  False # no good timing without primary
+    key_map = {k: i for i, k in enumerate(fo.names)}
+    c0 = fo.data[ key_map['Counter0']]
+    c2 = fo.data[ key_map['Counter2']]
+
+    s, ns = split_ts_bits(c2)
+    # Add 20 years in seconds (accounting for leap years) to handle
+    # offset between EPICS time referenced to 1990 relative to UNIX time.
+    c2 = s + ns*1e-9 + 5*(4*365 + 1)*24*60*60
+
+    # check all counters are incrementing
+    counters = np.all( np.diff( c0 ) != 0 ) 
+    counters = counters and np.all( np.diff( c2 ) != 0)
+    
+        # Look for evidence of counters de-syncing. 
+    stat = c2-(c0/480000) - np.round(c2-(c0/480000))
+    counters = counters and (
+        (np.ptp(stat)<0.001) and (np.abs(np.mean(stat))<0.0025)
+    )
+    return counters
 
 def _file_has_end_frames(filename):
     ended = False
@@ -331,6 +357,16 @@ class G3tSmurf:
             agent.time = time
             session.commit()
 
+    def get_observation(self, obs_id, session=None, ):
+        """
+            get the observation object for obs_id
+        """
+        if session is None:
+            session = self.Session()
+        return session.query(Observations).filter(
+            Observations.obs_id==obs_id
+        ).one_or_none()
+
     def add_file(self, path, session, overwrite=False):
         """
         Indexes a single file and adds it to the sqlite database. Creates a
@@ -450,18 +486,7 @@ class G3tSmurf:
                         timing = timing and (
                             frame.get("timing_paradigm", "") == "High Precision"
                         )
-                    fo = frame.get('primary', None)
-                    if fo is None:
-                        timing = False # no good timing without primary
-                    else:
-                        key_map = {k: i for i, k in enumerate(fo.names)}
-                        counters = np.all(
-                            np.diff( fo.data[ key_map['Counter0']] ) != 0 
-                        ) and np.all( 
-                            np.diff( fo.data[ key_map['Counter2']] ) != 0
-                        )
-                        # check all counters are incrementing
-                        timing = timing and counters 
+                    timing = timing and check_frame_counters(frame)
 
                 else:
                     db_frame.n_samples = data.n_samples
@@ -498,6 +523,9 @@ class G3tSmurf:
                 logger.debug(f"file {db_file.name} is an observation")
                 self.add_new_observation_from_status(status, session)
 
+    
+
+        
     def index_archive(
         self,
         stop_at_error=False,
