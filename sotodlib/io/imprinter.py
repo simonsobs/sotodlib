@@ -1800,6 +1800,7 @@ class Imprinter:
         """have the librarian validate the books is stored offsite. returns true
         if at least n_copies are storied offsite.
         """
+        self.logger.info(f"Checking {book.bid} in librarian")
         if self.librarian is None:
             self._librarian_connect()
         try:

@@ -654,12 +654,27 @@ class DataPackaging:
         verify_with_librarian=True,
     ):
         book_list = self.books_in_timecode(timecode, include_hk=include_hk)
+        good_to_delete = []
         books_not_deleted = []
 
         for book in book_list:
+            if verify_with_librarian:
+                in_lib = self.imprint.check_book_in_librarian(
+                    book, n_copies=2, n_tries=2,
+                    raise_on_error=False
+                )
+                if in_lib:
+                    good_to_delete.append(book)
+                else:
+                    books_not_deleted.append(book)   
+            else:
+                good_to_delete.append(book)    
+        
+        for book in good_to_delete:
+            # verify false here because, if true, we just checked it
             stat = self.imprint.delete_level2_files(
-                book, verify_with_librarian=verify_with_librarian,
-                n_copies_in_lib=2, dry_run=dry_run, n_tries=2
+                book, verify_with_librarian=False,
+                dry_run=dry_run,
             )
             if stat > 0:
                 books_not_deleted.append(book)    
