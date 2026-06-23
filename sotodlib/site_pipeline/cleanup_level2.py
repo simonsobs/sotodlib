@@ -8,6 +8,11 @@ from sotodlib.site_pipeline.utils.logging import init_logger
 
 logger = init_logger(__name__, "cleanup_level2: ")
 
+def log_response(resp):
+    if resp[0]:
+        logger.info(resp[1])
+    else:
+        logger.error(resp[1])
 
 def main(
     platform: str,
@@ -180,6 +185,7 @@ def main(
             )
         else:
             check = dpk.make_timecode_complete(timecode)
+            log_response(check)
             if not check[0]:
                 complete_failures.append((timecode, check[1]))
                 continue
@@ -187,6 +193,7 @@ def main(
                 timecode, include_hk=True,
                 verify_with_librarian=False,
             )
+            log_response(check)
             if not check[0]:
                 complete_failures.append((timecode, check[1]))
                 continue
@@ -199,6 +206,7 @@ def main(
                 )
             else:
                 check = dpk.delete_timecode_staged(timecode, verify_with_librarian=False)
+                log_response(check)
                 if not check[0]:
                     logger.error(f"Failed to remove staged for {timecode}")
                     staged_failures.append((timecode, check[1]))
@@ -214,6 +222,7 @@ def main(
                 check = dpk.delete_timecode_level2(timecode, dry_run=False, 
                     verify_with_librarian=True
                 )
+                log_response(check)
                 dpk.cleanup_level2_folders(timecode)
                 if not check[0]:
                     logger.error(f"Failed to remove level 2 for {timecode}")

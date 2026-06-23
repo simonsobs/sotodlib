@@ -497,6 +497,8 @@ class DataPackaging:
         if books != 0:
             complete[0] = False
             complete[1] += f"Have {books} unbound or failed books in timecode \n"
+        if complete[0]:
+            complete[1] += f"Timecode {timecode} is complete"
         return complete
 
     def books_in_timecode(
@@ -643,6 +645,8 @@ class DataPackaging:
                 self.logger.warning(msg)
                 deletable[0] = True
                 deletable[1] += msg
+        if deletable[0]:
+            deletable[1] += f"Timecode {timecode} is deletable"
         return deletable
 
     def delete_timecode_level2(
@@ -665,8 +669,8 @@ class DataPackaging:
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
-            return False, ""
-        return True, ""
+            return False, msg
+        return True, f"Level 2 deleted for Timecode {timecode}"
 
     
     def delete_timecode_staged(
@@ -697,7 +701,7 @@ class DataPackaging:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
             return False, msg
-        return True, ""
+        return True, f"Staged deleted for Timecode {timecode}"
     
     def check_and_delete_timecode(
         self, timecode, include_hk=True, verify_with_librarian=True
