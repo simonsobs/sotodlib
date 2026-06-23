@@ -80,7 +80,7 @@ def plot_hkdata(aman, hkdata, cal_type, show=True, output_dir=None):
     axes["B"].set_xlabel("Time [s]")
 
     for key_freq, env_temp, (t_min, t_max) in zip(
-        aman.stm_cal.freqs.vals, env_temps, aman.stm_cal.t_cuts
+        aman.stm_cal.chopping_freq_key.vals, env_temps, aman.stm_cal.t_cuts
     ):
         if cal_type == "gain":
             if key_freq == "f1_gain":
@@ -115,7 +115,7 @@ def plot_hkdata(aman, hkdata, cal_type, show=True, output_dir=None):
     # Plot timing cut area
     for key_ax in ["A", "B", "D"]:
         for key_freq, (t_min, t_max) in zip(
-            aman.stm_cal.freqs.vals, aman.stm_cal.t_cuts
+            aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.t_cuts
         ):
             if cal_type == "gain":
                 if key_freq == "f1_gain":
@@ -293,7 +293,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         )
         axes[i_y, i_x].plot(aman.timestamps - t0, aman.signal[i_det], label="TOD")
         for key_freq, (t_min, t_max) in zip(
-            aman.stm_cal.freqs.vals, aman.stm_cal.t_cuts
+            aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.t_cuts
         ):
             if key_freq == "f1_gain":
                 axes[i_y, i_x].axvspan(t_min, t_max, alpha=0.3, label="used data")
@@ -309,7 +309,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         )
         filter_cutoff = (
             aman.stm_cal.filtering_params["lpf_cutoff_factor"]
-            * aman.stm_cal.filtering_params["chopping_freqs_gain"][0]
+            * aman.stm_cal.filtering_params["filter_freq_gain"][0]
         )
         lpf = tod_ops.filters.low_pass_sine2(
             filter_cutoff,
@@ -353,7 +353,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         )
         axes[i_y, i_x].plot(aman.timestamps - t0, aman.signal[i_det], label="TOD")
         for key_freq, (t_min, t_max) in zip(
-            aman.stm_cal.freqs.vals, aman.stm_cal.t_cuts
+            aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.t_cuts
         ):
             if key_freq != "f1_gain":
                 if key_freq == "f1":
@@ -367,7 +367,14 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
 
         i_y = 1
         i_x = 0
-        f = aman.stm_cal["fit_amp"]["lpf"]["f"][i_det]
+        f = [
+            freq
+            for key, freq in zip(
+                aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs
+            )
+            if key != "f1_gain"
+        ]
+        f = np.array(f)
         axes[i_y, i_x].plot(f, aman.stm_cal["fit_amp"]["lpf"]["data"][i_det], "o")
         axes[i_y, i_x].plot(
             f,
@@ -411,7 +418,6 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
 
         i_y = 1
         i_x = 1
-        f = aman.stm_cal["fit_phase__free"]["lpf"]["f"][i_det]
         data = aman.stm_cal["fit_phase__free"]["lpf"]["data"][i_det]
         axes[i_y, i_x].plot(f, data, "o")
 
@@ -449,7 +455,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             i_y += 1
 
             i_x = 0
-            idx = np.where(aman.stm_cal.freqs.vals == f_key)[0][0]
+            idx = np.where(aman.stm_cal.chopping_freq_key.vals == f_key)[0][0]
             x_min = aman.stm_cal.t_cuts[idx][0]
             x_max = x_min + 0.2
             i_x_min = int(aman.stm_cal.sampling_rate * x_min)
@@ -466,7 +472,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
                 color="C1",
             )
             axes[i_y, i_x].set_title(
-                f"TOD data, i_det={i_det}, f={aman.stm_cal.filtering_params.chopping_freqs_tau[i_freq]:.0f}Hz"
+                f"TOD data, i_det={i_det}, f={aman.stm_cal.chopping_freqs[aman.stm_cal.chopping_freq_key.vals == f_key][0]:.0f}Hz"
             )
             axes[i_y, i_x].set_xlabel("time [s]")
             axes[i_y, i_x].set_ylabel("TOD [pW]")
@@ -491,7 +497,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
                 x, y - np.mean(y), yerr, fmt="o", capsize=5, label="IIRCed data - mean"
             )
             axes[i_y, i_x].set_title(
-                f"Co-added signal, f={aman.stm_cal.filtering_params.chopping_freqs_tau[i_freq]:.0f}Hz"
+                f"Co-added signal, f={aman.stm_cal.chopping_freqs[aman.stm_cal.chopping_freq_key.vals == f_key][0]:.0f}Hz"
             )
             axes[i_y, i_x].set_xlabel("Timing (1 cycle)")
             axes[i_y, i_x].set_ylabel("TOD [pW]")
