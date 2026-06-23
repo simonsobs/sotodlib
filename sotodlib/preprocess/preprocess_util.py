@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 from tqdm import tqdm
 from sotodlib.hwp import hwp_angle_model
+from sotodlib.coords import pointing_model
+from sotodlib.coords.helpers import get_deflected_sightline
 from sotodlib.coords import demod as demod_mm
 from sotodlib.tod_ops import t2pleakage
 from sotodlib.core.flagman import has_any_cuts
@@ -811,7 +813,8 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                                        logger=None, init_only=False,
                                        ignore_cfg_check=False,
                                        data_amans=None,
-                                       interpol=None):
+                                       interpol=None,
+                                       apply_wobble=False):
     """Loads the saved information from the preprocessing pipeline from a
     reference and a dependent database, loads the signal from a (simulated)
     map into the AxisManager and runs the processing section of the pipeline
@@ -853,7 +856,11 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         processing simulations (e.g. to provide a T2P template)
     interpol: str
         Optional. The sub-pixel interpolation to use in from_map
- 
+    apply_wobble: bool
+        If true, apply pointing wobble to boreight pointing.
+        This only works whrn all detectors belong to a single wafer_slot
+        and bandpass. See `coords.helpers.get_deflected_sightline`.
+        Defaults to False.
     Returns
     -------
     aman : core.AxisManager or None
@@ -923,8 +930,9 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
 
             aman = context_init.get_obs(meta_proc, no_signal=True)
 
-            # One needs to correct HWP model and gamma
+            # One needs to correct pointing, HWP model and gamma
             # before loading in the simulated map
+            pointing_model.apply_pointing_model(aman)
             aman = hwp_angle_model.apply_hwp_angle_model(aman)
             if "wiregrid_cal" in aman.det_info:
                 logger.info(f"gamma from wiregrid_cal")
@@ -932,10 +940,16 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
                     name="det_info.wiregrid_cal.gamma",
                     new_name="focal_plane.gamma"
                 )
+            logger.info("Reading in simulated map")
+            if apply_wobble and ("wobble_params" in aman):
+                logger.info("Apply pointing wobble")
+                sight = get_deflected_sightline(aman)
+            else:
+                sight = None
             aman.move("signal", None)
 
-            logger.info("Reading in simulated map")
-            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True, interpol=interpol)
+            demod_mm.from_map(aman, sim_map, wrap=True, modulated=True,
+                              interpol=interpol, sight=sight)
 
             logger.info("Running initial pipeline")
             pipe_init.run(aman, aman.preprocess, sim=True)
