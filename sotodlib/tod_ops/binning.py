@@ -93,7 +93,7 @@ def bin_signal(aman, bin_by, signal=None,
         if (not is_1d) and flags.shape == (aman.dets.count, aman.samps.count):
             flag_is_2d = True
             m_2d = base_valid[None, :] & ~flags.mask()
-        elif is_id and flags.shape == (aman.samps.count, ):
+        elif flags.shape == (aman.samps.count, ):
             flag_is_2d = False
             m = base_valid & ~flags.mask()
         else:
@@ -106,25 +106,27 @@ def bin_signal(aman, bin_by, signal=None,
 
         # prepare binned signal array
         binned_signal = np.full(nbins, np.nan, signal_dtype)
+        binned_signal_squared_mean = np.full(nbins, np.nan, signal_dtype)
         binned_signal_sigma = np.full(nbins, np.nan, signal_dtype)
 
-        bin_counts = np.bincount(
+        bin_counts_dets = np.bincount(
             bin_indices[m], weights=weight_for_signal[m], minlength=nbins)
-        mcnts = bin_counts > 0
+        mcnts = bin_counts_dets > 0
         binned_signal[mcnts] = np.bincount(
             bin_indices[m], weights=signal[m] * weight_for_signal[m], minlength=nbins
-        )[mcnts] / bin_counts[mcnts]
-        binned_signal_squared_mean = np.bincount(
+        )[mcnts] / bin_counts_dets[mcnts]
+        binned_signal_squared_mean[mcnts] = np.bincount(
             bin_indices[m], weights=(signal[m] * weight_for_signal[m]) ** 2,
             minlength=nbins
-        )[mcnts] / bin_counts[mcnts]
+        )[mcnts] / bin_counts_dets[mcnts]
         binned_signal_sigma[mcnts] = np.sqrt(
-            np.abs(binned_signal_squared_mean - binned_signal[mcnts] ** 2)
-        ) / np.sqrt(bin_counts[mcnts])
+            np.abs(binned_signal_squared_mean[mcnts] - binned_signal[mcnts] ** 2)
+        ) / np.sqrt(bin_counts_dets[mcnts])
 
     else:
         # prepare binned signal array
         binned_signal = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
+        binned_signal_squared_mean = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
         binned_signal_sigma = np.full([aman.dets.count, nbins], np.nan, signal_dtype)
         bin_counts_dets = np.full([aman.dets.count, nbins], np.nan)
 
