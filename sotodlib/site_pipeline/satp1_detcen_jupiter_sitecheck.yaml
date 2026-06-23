@@ -1,0 +1,497 @@
+context_file: "/home/gs8865/work/files/contexts/satp1/use_this_local_251215_tmatm.yaml" # path to the context file, same as 251215 for comparing this with 2025/12/15 result
+
+dbpath: '/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/maps/satp1/site_check/detcen_jupiter_postrf.sqlite' # path to the database of planet observtions
+errlogpath: '/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/err/satp1/site_check/satp1_detcen_jupiter_errlog_postrf.txt' # path to the error log file
+overwrite: True # overwrite maps even if they already exist
+mapmaker_path: '/home/gs8865/work/scripts/pwg-scripts/flp/planet_mapmaker'
+
+mapmaking:
+    inv_var:
+      signal: 'demodQ' # Which signal to use for inverse variance: 'demodQ','demodU' or 'demodQU'.
+    fittod:
+      process: True # False for not performing the fit
+      Tsignal: "signal" # name of Tsignal. Usually "dsT" or "signal", but you can use anthing if you make special Tsignal.
+      dbpath: '/scratch/gpfs/SIMONSOBS/users/ys5857/workspace/output/2026/03/05/db/detcen_jupiter_todfit.sqlite'
+      #flags: "planet_mapmaking"
+      r_use: 1.0 # degrees, the radius of the circle used for process
+      r_fit: 0.8 # degrees, the radius of the circle used for fit
+      mask_res: 2 # arcmin, the resolution of the map for making flags
+      detrend_eachscan: True # whether to detrend each set of scan
+      npoly: 0 # order of polynomial for detrending
+      deflection_model: True # whether to use pointing deflection model for todfit
+      fitselection: False # Whether to apply selection based on todfit results. If True, it will apply selection based on todfit residuals. If False, it will not apply any selection.
+      threshold_path: '/scratch/gpfs/SIMONSOBS/users/ys5857/workspace/output/2025/12/15/detcen_jupiter/todfit_selection_threshold.pkl'
+    xieta_correction:
+      process: False # True, apply xi/eta correciton based on todfit
+    deflection_correction:
+      process: True # True, apply pointing deflection correction
+      wafer_base: True # True, apply wafer-base correction. False and process is True, apply pointing deflection correction for every single detector based on todfit
+    map:
+      coordinate: "detector_center" # "detector_center" or "boresight_center" or "planet_equatorial" or "planet_horizon"
+      recv_coords: False # Whether to use receiver coordinates system, only works with "planet_horizon"
+      source: "jupiter"
+      res: 2/60 # degrees
+      size: 5 # degrees
+      proj: "car"
+      flags: "planet_mapmaking" # define the flags used in mapmaking
+      Tsignal: "signal" # name of Tsignal. Usually "dsT" or "signal", but you can use anthing if you make special Tsignal.
+      recenter: True # whether to recenter output maps
+      var_minr: 50 # arcmin, minimum radius for calculating map variance
+      var_maxr: 72 # arcmin, maximum radius for calculating map variance
+      save_dire: "/scratch/gpfs/SIMONSOBS/users/gs8865/jupiter_analysis/maps/satp1/site_check/detcen_jupiter_postrf/"
+      single_save: False # Save single map or not, currently only works with "detector_center" or "boresight_center" coordinate
+
+process_pipe:
+    - name: "pointing_model"
+      process: True
+
+    - name: "hwp_angle_model"
+      process: True
+      calc:
+        on_sign_ambiguous: 'fail'
+      save: True
+
+    - name: "correct_iir_params"
+      process: True
+
+    - name: "smurfgaps_flags"
+      calc:
+        buffer: 200
+        name: "smurfgaps"
+        merge: True
+      save: True
+
+    - name: "dark_dets"
+      signal: "signal"
+      calc: True
+      save: True
+      select: True
+
+    - name : "fp_flags"
+      calc:
+        merge: False
+      save: True
+      select: True
+
+    - name: "detcal_nan_cuts"
+      select:
+        fields: [tau_eff, phase_to_pW]
+
+    - name: "flag_turnarounds"
+      process: 
+        method: "scanspeed"
+        t_buffer: 4. 
+      calc:
+        method: "scanspeed"
+      save: True
+
+    - name: "det_bias_flags"
+      calc: 
+        rfrac_range: [0.2, 0.8]
+        #psat_range: [0.1, 10]  
+        rn_range: [6.5e-3, 9.5e-3]
+      save: True
+      select: True
+
+    - name : "source_flags"
+      calc:
+        mask: {'shape': 'circle',
+              'xyr': [0, 0, 1.2]}
+        center_on: ['jupiter', 'tauA'] # list of str
+        res: 2 # arcmin
+        max_pix: 4000000 # max number of allowed pixels in map
+        distance: 0 # max distance of footprint from source in degrees
+        inv_flag: True
+      save: True
+      select: # optional
+        kind: "any"
+        invert: True
+        select_source: ['jupiter']
+
+    - name : "source_flags"
+      source_flags_name: 'source_flags_moon'
+      calc:
+        mask: {'shape': 'circle',
+              'xyr': [0, 0, 3]}
+        center_on: ['moon'] # list of str
+        res: 2 # arcmin
+        max_pix: 4000000 # max number of allowed pixels in map
+        distance: 0 # max distance of footprint from source in degrees
+        inv_flag: False
+      save: True
+      select: # optional
+        kind: "any"
+        invert: False
+        select_source: ['moon']
+
+    - name: "trends"
+      calc:
+        max_trend: 2.5
+        t_piece: 10
+      save: True
+      select:
+        kind: "any"
+
+    - name: "jumps"
+      skip_on_sim: False
+      calc:
+        function: "slow_jumps"
+        jump_configs:
+          win_size: 800
+          thresh: 20.0
+      save:
+        jumps_name: "jumps_slow"
+      select:
+        max_n_jumps: 5
+
+    - name: "fix_jumps"
+      skip_on_sim: True
+      process:
+        jumps_aman: "jumps_slow"
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['source_flags.jupiter_inv', 'jumps_slow.jump_flag']
+        method: '*'
+        total_flags_label: 'glitchfill_jamps_slow'
+
+    - name: "glitchfill"
+      skip_on_sim: False  # Not skipped but will have no effect on sims
+      process:
+        nbuf: 10
+        use_pca: False
+        modes: 1
+        wrap: "signal"
+        glitch_flags: "glitchfill_jamps_slow"
+
+    - name: "jumps"
+      skip_on_sim: False
+      calc:
+        function: "twopi_jumps"
+        jump_configs:
+          win_size: 30
+          nsigma: 10.0
+      save:
+        jumps_name: "jumps_2pi"
+      select:
+        max_n_jumps: 20
+
+    - name: "fix_jumps"
+      skip_on_sim: True
+      process:
+        jumps_aman: "jumps_2pi"
+        nbuf: 10
+        use_pca: False
+        modes: 1
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['source_flags.jupiter_inv', 'jumps_2pi.jump_flag']
+        method: '*'
+        total_flags_label: 'glitchfill_jamps_2pi'
+
+    - name: "glitchfill"
+      skip_on_sim: False  # Not skipped but will have no effect on sims
+      process:
+        nbuf: 10
+        use_pca: False
+        modes: 1
+        wrap: "signal"
+        glitch_flags: "glitchfill_jamps_2pi"
+
+    - name: "detrend"
+      process:
+        method: "median"
+
+    - name: "glitches"
+      skip_on_sim: False
+      glitch_name: "glitches_pre_hwpss"
+      calc:
+        t_glitch: 0.007
+        buffer: 100
+        hp_fc: 6.0
+        n_sig: 30
+        subscan: True
+      save: True
+      select:
+        max_n_glitch: 1000
+        sig_glitch: 30
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['turnaround_flags.turnarounds', 'smurfgaps.smurfgaps', 'source_flags.jupiter',
+                      'jumps_slow.jump_flag', 'jumps_2pi.jump_flag', 'glitches_pre_hwpss.glitch_flags']
+        method: '+'
+        total_flags_label: 'pre_hwpss_flags'
+
+    - name: "calibrate"
+      skip_on_sim: True  # This would multiply the sim TODs with the wrong factor.
+      process:
+        kind: "array"
+        cal_array: "det_cal.phase_to_pW"
+
+    - name: "estimate_hwpss"
+      skip_on_sim: True
+      calc:
+        hwpss_stats_name: "pre_hwpss_stats"
+        flags: "flags.pre_hwpss_flags"
+      save: True
+
+    - name: "subtract_hwpss"
+      skip_on_sim: False  # Deprojecting HWPSS template for sims
+      hwpss_stats: "pre_hwpss_stats"
+      process:
+        subtract_name: "signal"
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['source_flags.jupiter_inv', 'glitches_pre_hwpss.glitch_flags']
+        method: '*'
+        total_flags_label: 'pre_glitchfill'
+
+    - name: "glitchfill"
+      skip_on_sim: False  # Not skipped but will have no effect on sims
+      process:
+        nbuf: 10
+        use_pca: False
+        modes: 1
+        wrap: "signal"
+        glitch_flags: "pre_glitchfill"
+
+    - name: "glitches"
+      skip_on_sim: False
+      glitch_name: "glitches_post_hwpss"
+      calc:
+        t_glitch: 0.007
+        buffer: 100
+        hp_fc: 6.0
+        n_sig: 30
+        subscan: True
+      save: True
+      select:
+        max_n_glitch: 100
+        sig_glitch: 30
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['turnaround_flags.turnarounds', 'smurfgaps.smurfgaps', 'source_flags.jupiter',
+                      'jumps_slow.jump_flag', 'jumps_2pi.jump_flag', 'glitches_pre_hwpss.glitch_flags', 'glitches_post_hwpss.glitch_flags']
+        total_flags_label: 'glitch_flags'
+        method: 'union'
+
+    - name: "estimate_hwpss"
+      skip_on_sim: True
+      calc:
+        hwpss_stats_name: "post_hwpss_stats"
+        flags: "glitch_flags"
+      save: True
+
+    - name: "subtract_hwpss"
+      skip_on_sim: False  # Deprojecting HWPSS template for sims
+      hwpss_stats: "post_hwpss_stats"
+      process:
+        subtract_name: "signal"
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['source_flags.jupiter_inv', 'glitches_post_hwpss.glitch_flags']
+        method: '*'
+        total_flags_label: 'post_glitchfill'
+
+    - name: "glitchfill"
+      skip_on_sim: False  # Not skipped but will have no effect on sims
+      process:
+        nbuf: 10
+        use_pca: False
+        modes: 1
+        wrap: "signal"
+        glitch_flags: "post_glitchfill"
+
+    - name: "detrend"
+      process:
+        method: "median"
+
+    - name : "ptp_flags"
+      calc:
+        signal_name: "signal"
+        kurtosis_threshold: 5
+      save: True
+      select: True
+
+    - name: "psd"
+      signal: "signal"
+      wrap: "Pxx_raw"
+      process:
+        max_samples: 524288 #2**19
+        merge: False
+        nperseg: 65536 #2**16
+        noverlap: 0
+        full_output: True
+      save: True
+    
+    - name: "noise"
+      psd: "Pxx_raw"
+      fit: False
+      calc:
+        low_f: 5 
+        high_f: 20 
+      save:
+        wrap_name: "white_noise_nofit"
+      select:
+        min_noise: 2e-6
+        max_noise: 80e-6
+
+    - name: "calibrate"
+      skip_on_sim: True  # This would multiply the sim TODs with the wrong factor.
+      process:
+        kind: "array"
+        cal_array: "relcal.rel_factor" # HEre we are doing relcal from a manifest product in the context
+
+    - name: "detrend"
+      process:
+        method: "median"
+
+    - name: "apodize"
+      process:
+        apodize_samps: 2000
+
+    - name: "fourier_filter"
+      process:
+        filt_function: "iir_filter"
+        filter_params:
+          invert: True
+
+    - name: "fourier_filter"
+      process:
+        filt_function: "timeconst_filter"
+        filter_params:
+          timeconst: "det_cal.tau_eff"
+          invert: True
+
+    - name: "detrend"
+      process:
+        method: "median"
+
+    - name: "apodize"
+      process:
+        apodize_samps: 2000
+    
+    - name: "demodulate"
+      process:
+        trim_samps: 6000
+        demod_cfgs: 
+          signal: "signal"
+          demod_mode: 4
+          bpf_cfg: {'type': 'sine2', 'center': '4*f_HWP', 'width': '3.8*f_HWP', 'trans_width': 0.1}
+          lpf_cfg: {'type': 'sine2', 'cutoff': '1.9*f_HWP', 'trans_width': 0.1}
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['turnaround_flags.turnarounds', 'source_flags.jupiter', 'jumps_slow.jump_flag', 'jumps_2pi.jump_flag']
+        method: '+'
+        total_flags_label: 'pca_exclude'
+
+    - name: "filter_for_sources"
+      signal: "signal"
+      skip_on_sim: True  # updated
+      process:
+        n_modes: 40
+        source_flags: "pca_exclude"
+        edge_guard: 10
+
+    - name: "filter_for_sources"
+      signal: "dsT"
+      skip_on_sim: True  # updated
+      process:
+        n_modes: 40
+        source_flags: "pca_exclude"
+        edge_guard: 10
+
+    - name: "filter_for_sources"
+      signal: "demodQ"
+      skip_on_sim: True  # updated
+      process:
+        n_modes: 40
+        source_flags: "pca_exclude"
+        edge_guard: 10
+
+    - name: "filter_for_sources"
+      signal: "demodU"
+      skip_on_sim: True  # updated
+      process:
+        n_modes: 40
+        source_flags: "pca_exclude"
+        edge_guard: 10
+        trim_samps: 100
+
+    - name: "psd"
+      signal: "demodQ"
+      wrap: "psdQ"
+      process:
+        max_samples: 524288 #2**19
+        merge: False
+        nperseg: 65536 #2**16
+        noverlap: 0
+        full_output: True
+      save: True
+
+    - name: "psd"
+      signal: "demodU"
+      wrap: "psdU"
+      process:
+        max_samples: 524288 #2**19
+        merge: False
+        nperseg: 65536 #2**16
+        noverlap: 0
+        full_output: True
+      save: True
+
+    - name: "noise"
+      psd: "psdQ"
+      fit: False
+      calc:
+        low_f: 0.1
+        high_f: 1
+      save:
+        wrap_name: "noiseQ_nofit"
+
+    - name: "noise"
+      psd: "psdU"
+      fit: False
+      calc:
+        low_f: 0.1
+        high_f: 1
+      save:
+        wrap_name: "noiseU_nofit"
+
+    - name: "glitches"
+      signal: "demodQ"
+      glitch_name: "demodQ_glitches"
+      calc:
+        t_glitch: 0.007
+        buffer: 2000
+        hp_fc: 6.0
+        n_sig: 40
+      save: True
+      select:
+        max_n_glitch: 50000
+        sig_glitch: 40
+
+    - name: "glitches"
+      signal: "demodU"
+      glitch_name: "demodU_glitches"
+      calc:
+        t_glitch: 0.007
+        buffer: 2000
+        hp_fc: 6.0
+        n_sig: 40
+      save: True
+      select:
+        max_n_glitch: 50000
+        sig_glitch: 40
+
+    - name: "combine_flags"
+      process:
+        flag_labels: ['turnaround_flags.turnarounds', 'jumps_slow.jump_flag', 'jumps_2pi.jump_flag', 'demodQ_glitches.glitch_flags', 'demodU_glitches.glitch_flags']
+        method: '+'
+        total_flags_label: 'planet_mapmaking'
