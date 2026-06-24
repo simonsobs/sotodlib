@@ -517,7 +517,7 @@ class DataPackaging:
         if not include_hk:
             q = q.filter(Books.type != 'hk')
         if not include_level2_deleted:
-            q = q.filter(Books.status < DONE)
+            q = q.filter(not_(Books.lvl2_deleted))
         return q.all()
 
     def file_list_from_database(
@@ -657,7 +657,8 @@ class DataPackaging:
         verify_with_librarian=True,
     ):
         book_list = self.books_in_timecode(
-            timecode, include_hk=include_hk, include_level2_deleted=False,
+            timecode, include_hk=include_hk, 
+            include_level2_deleted=False,
         )
         good_to_delete = []
         books_not_deleted = []
