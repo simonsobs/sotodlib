@@ -502,7 +502,8 @@ class DataPackaging:
         return complete
 
     def books_in_timecode(
-        self, timecode, include_wont_fix=False, include_hk=True
+        self, timecode, include_wont_fix=False, include_hk=True,
+        include_level2_deleted=True,
     ):
         min_ctime = timecode*1e5
         max_ctime = (timecode+1)*1e5
@@ -515,6 +516,8 @@ class DataPackaging:
             q = q.filter(Books.status != WONT_BIND)
         if not include_hk:
             q = q.filter(Books.type != 'hk')
+        if not include_level2_deleted:
+            q = q.filter(Books.status < DONE)
         return q.all()
 
     def file_list_from_database(
@@ -653,7 +656,9 @@ class DataPackaging:
         self, timecode, dry_run=True, include_hk=True, 
         verify_with_librarian=True,
     ):
-        book_list = self.books_in_timecode(timecode, include_hk=include_hk)
+        book_list = self.books_in_timecode(
+            timecode, include_hk=include_hk, include_level2_deleted=False,
+        )
         good_to_delete = []
         books_not_deleted = []
 
