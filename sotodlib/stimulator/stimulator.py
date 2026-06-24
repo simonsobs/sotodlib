@@ -57,19 +57,36 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     return result
 
 
-def preprocessing(aman, hkdata):
+def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
     """
     Preprocessing for stimulator data analysis using HK data.
-    This includes getting timing against encoder signal, chopping status, timing cut for analysis, and signal temperature.
+    This includes getting timing against encoder signal, chopping status,
+    timing cut for analysis, signal temperature, filtering of TOD, and making and fitting coadded data.
+
+    For each detector, the raw signal is deconvolved using the IIR filter, and then either high-pass filtered (hpf),
+    or both low-pass and high-pass filtered (lpf) to form a bandpass around the stimulator's chopping frequency.
+    The filtered signal is co-added into chopper phase bins.
+    In former case (hpf), coadded signal is fit to a seven-harmonic sine model to obtain its fundamental amplitude (a0).
+    In the latter case (lpf), the co-added waveform is instead fit to a single-mode sine curve.
+
+    Lowest chopping frequency data will be used for gain calculation,
+    while higher frequencies will be used for time constant calculation.
 
     Args:
         aman: Axis manager of detector data.
         hkdata: Housekeeping data for aman.
-
+        idxs: List of detector indices for calculation. If None, all detectors are calculated.
+        n_bins: Number of bins for co-adding data.
+        delete_filtered_tod: Whether to delete filtered TOD data after processing.
     Return:
         valid_gain: bool, True if gain can be calculated, False otherwise.
         valid_timeconstant: bool, True if time constant can be calculated, False otherwise.
     """
+    det_mask = np.full(aman.dets.count, False)
+    if idxs is None:
+        det_mask[:] = True
+    else:
+        det_mask[idxs] = True
 
     valid_data = get_encoder_timing(aman, hkdata)  # Get timing against encoder t0
     aman.stm_cal.wrap(
@@ -80,6 +97,7 @@ def preprocessing(aman, hkdata):
     get_chopping_freqs(aman)
     get_signal_temp(aman, hkdata)
 
+    # Check if data is valid for gain or time constant calculation
     if not valid_data:
         valid_gain = False
         valid_timeconstant = False
@@ -90,49 +108,61 @@ def preprocessing(aman, hkdata):
         else:
             valid_timeconstant = True
 
+    # Calculate filtering frequencies
+    if valid_gain:
+        filter_freqs = {}
+        if round(aman.stm_cal.chopping_freqs[0]) != CHOPPING_FREQS["f1"]:
+            filter_freqs["f1_gain"] = round(aman.stm_cal.chopping_freqs[0])
+        else:
+            filter_freqs["f1_gain"] = CHOPPING_FREQS["f1"]
+        filtering(aman, filter_freqs, "gain")
+
+    if valid_timeconstant:
+        filter_freqs = {}
+        for key, freq in [
+            (key, freq)
+            for key, freq in zip(
+                aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs
+            )
+            if key != "f1_gain"
+        ]:
+            if round(freq) != CHOPPING_FREQS[key]:
+                filter_freqs[key] = round(freq)
+            else:
+                filter_freqs[key] = CHOPPING_FREQS[key]
+        filtering(aman, filter_freqs, "timeconstant")
+
+    # Make and fit co-added data
+    model, params_base = get_fit_params(cal_type="coadd")
+    initialize_aman(aman, "coadd", model, n_bins)
+
+    if valid_gain:
+        get_coadd_data(aman, "gain", n_bins, det_mask)
+        fit_coadd_data(aman, "gain", det_mask, model, params_base)
+
+    if valid_timeconstant:
+        get_coadd_data(aman, "timeconstant", n_bins, det_mask)
+        fit_coadd_data(aman, "timeconstant", det_mask, model, params_base)
+
+    # Delete filtered TOD data if requested. This operation will run for each filtering frequency in near future to save memory usage.
+    if delete_filtered_tod:
+        for key in aman._fields:
+            if key.startswith("signal_"):
+                del aman[key]
+
     return valid_gain, valid_timeconstant
 
 
-def calc_gain(aman, idxs=None, n_bins=40):
+def calc_gain(aman):
     """
     Calculate the gain of the detectors.
-    For each detector, the raw signal is deconvolved using the IIR filter, and then either high-pass filtered (hpf),
-    or both low-pass and high-pass filtered (lpf) to form a bandpass around the stimulator's chopping frequency.
-    The filtered signal is co-added into chopper phase bins.
-    In former case (hpf), coadded signal is fit to a seven-harmonic sine model to obtain its fundamental amplitude (a0).
-    In the latter case (lpf), the co-added waveform is instead fit to a single-mode sine curve.
-    Gain is the amplitude (a0) normalized to a typical temperature of 750 K by the measured heater/env temperatures.
+    Gain is the amplitude of the fundamental sine wave (a0)
+    normalized to a typical temperature of 750 K by the measured heater/env temperatures.
     Results are written into aman.stm_cal.
 
     Args:
         aman: Axis manager of TOD data, including timestamps and raw signal.
-        hkdata: HK data for aman.
-        idxs: List of detector indices for calculation. If None, all detectors are calculated.
-        n_bins: Number of bins for co-adding data.
     """
-    det_mask = np.full(aman.dets.count, False)
-    if idxs is None:
-        det_mask[:] = True
-    else:
-        det_mask[idxs] = True
-
-    filter_freqs = {}
-    if round(aman.stm_cal.chopping_freqs[0]) != CHOPPING_FREQS["f1"]:
-        filter_freqs["f1_gain"] = round(aman.stm_cal.chopping_freqs[0])
-    else:
-        filter_freqs["f1_gain"] = CHOPPING_FREQS["f1"]
-
-    filtering(aman, filter_freqs, "gain")
-
-    model, params_base = get_fit_params(cal_type="coadd")
-
-    # Make and get co-added data
-    initialize_aman(aman, "coadd", model, n_bins)
-
-    get_coadd_data(aman, "gain", n_bins, det_mask)
-
-    fit_coadd_data(aman, "gain", det_mask, model, params_base)
-
     heater_temp = aman.stm_cal.temps[aman.stm_cal.positions.vals == "heater"][0][0]
     env_temp = aman.stm_cal.temps[aman.stm_cal.positions.vals == "env"][0][0]
 
@@ -142,14 +172,14 @@ def calc_gain(aman, idxs=None, n_bins=40):
     aman.stm_cal.wrap("stm_gain", arr, [(0, "dets")], overwrite=True)
 
 
-def calc_timeconstant(aman, idxs=None, n_bins=40):
+def calc_timeconstant(aman, idxs=None):
     """
     Calculate the time constant of the detectors and the readout delay.
 
-    For each detector, filters the raw signal (HPF/LPF) around the stimulator's chopping frequency,
-    co-adds it into chopper phase bins, and fits the co-added waveform to a seven harmonics sine model to get its fundamental amplitude (a0) and phase delay (t0) per chopping frequency.
-    Fits amplitude (a0) vs. chopping frequency to a single-pole response model to get the time constant (tau), then
-    fits phase delay (t0) vs. chopping frequency with tau fixed to get the readout delay (dt).
+    For each detector, TOD is co-added and fitted by a seven harmonics sine model to get its fundamental amplitude (a0)
+    and phase delay (t0) per chopping frequency during preprocessing() function.
+    In this function, fits amplitude (a0) vs. chopping frequency to a single-pole response model to get the time constant (tau),
+    then fits phase delay (t0) vs. chopping frequency with tau fixed to get the readout delay (dt).
     Additionally fits phase delay (t0) vs. chopping frequency with both timeconstant and readout delay as free parameters.
     Results are written into aman.stm_cal
 
@@ -157,38 +187,12 @@ def calc_timeconstant(aman, idxs=None, n_bins=40):
         aman: Axis manager of TOD data, including timestamps and raw signal.
         hkdata: HK data for aman.
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
-        n_bins: Number of bins for co-adding data.
-
-    Return:
-        bool: True if data is valid and calculation is performed, False otherwise.
     """
     det_mask = np.full(aman.dets.count, False)
     if idxs is None:
         det_mask[:] = True
     else:
         det_mask[idxs] = True
-
-    filter_freqs = {}
-    for key, freq in [
-        (key, freq)
-        for key, freq in zip(
-            aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs
-        )
-        if key != "f1_gain"
-    ]:
-        if round(freq) != CHOPPING_FREQS[key]:
-            filter_freqs[key] = round(freq)
-        else:
-            filter_freqs[key] = CHOPPING_FREQS[key]
-
-    filtering(aman, filter_freqs, "timeconstant")
-
-    model, params_base = get_fit_params(cal_type="coadd")
-    initialize_aman(aman, "coadd", model, n_bins)
-
-    get_coadd_data(aman, "timeconstant", n_bins, det_mask)
-
-    fit_coadd_data(aman, "timeconstant", det_mask, model, params_base)
 
     models, params_bases = get_fit_params(cal_type="timeconstant")
     initialize_aman(aman, "timeconstant", models)
