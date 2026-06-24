@@ -858,7 +858,7 @@ def multilayer_load_and_preprocess_sim(obs_id, configs_init, configs_proc,
         Optional. The sub-pixel interpolation to use in from_map
     apply_wobble: bool
         If true, apply pointing wobble to boreight pointing.
-        This only works whrn all detectors belong to a single wafer_slot
+        This only works when all detectors belong to a single wafer_slot
         and bandpass. See `coords.helpers.get_deflected_sightline`.
         Defaults to False.
     Returns
