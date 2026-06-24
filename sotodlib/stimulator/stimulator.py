@@ -144,9 +144,13 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
         get_coadd_data(aman, "timeconstant", n_bins, det_mask)
         fit_coadd_data(aman, "timeconstant", det_mask, model, params_base)
 
-    # Delete filtered TOD data if requested. This operation will run for each filtering frequency in near future to save memory usage.
+    # Delete filtered TOD data if requested.
+    # This operation will run for each filtering frequency in near future to save memory usage.
     if delete_filtered_tod:
-        for key in aman._fields:
+        keys_to_delete = [
+            key for key in aman._fields if key.startswith("signal_")
+        ]
+        for key in keys_to_delete:
             if key.startswith("signal_"):
                 del aman[key]
 
@@ -278,6 +282,13 @@ def calc_timeconstant(aman, idxs=None):
         [(0, "dets")],
         overwrite=True,
     )
+
+    if 'stm_gain' in aman.stm_cal._fields:
+        f = aman.stm_cal.chopping_freqs[aman.stm_cal.chopping_freq_key.vals == "f1"][0]
+        correction_factor = 1 / func_response_amplitude(f=f, tau=aman.stm_cal["fit_amp"]["lpf"]["tau"], a=1)
+        aman.stm_cal.wrap(
+            "stm_gain_with_tau_correction", aman.stm_cal.stm_gain * correction_factor, [(0, "dets")], overwrite=True
+            )
 
 
 def get_encoder_timing(aman, hkdata):
