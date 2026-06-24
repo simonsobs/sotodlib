@@ -147,9 +147,7 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
     # Delete filtered TOD data if requested.
     # This operation will run for each filtering frequency in near future to save memory usage.
     if delete_filtered_tod:
-        keys_to_delete = [
-            key for key in aman._fields if key.startswith("signal_")
-        ]
+        keys_to_delete = [key for key in aman._fields if key.startswith("signal_")]
         for key in keys_to_delete:
             if key.startswith("signal_"):
                 del aman[key]
@@ -283,12 +281,17 @@ def calc_timeconstant(aman, idxs=None):
         overwrite=True,
     )
 
-    if 'stm_gain' in aman.stm_cal._fields:
+    if "stm_gain" in aman.stm_cal._fields:
         f = aman.stm_cal.chopping_freqs[aman.stm_cal.chopping_freq_key.vals == "f1"][0]
-        correction_factor = 1 / func_response_amplitude(f=f, tau=aman.stm_cal["fit_amp"]["lpf"]["tau"], a=1)
+        correction_factor = 1 / func_response_amplitude(
+            f=f, tau=aman.stm_cal["fit_amp"]["lpf"]["tau"], a=1
+        )
         aman.stm_cal.wrap(
-            "stm_gain_with_tau_correction", aman.stm_cal.stm_gain * correction_factor, [(0, "dets")], overwrite=True
-            )
+            "stm_gain_with_tau_correction",
+            aman.stm_cal.stm_gain * correction_factor,
+            [(0, "dets")],
+            overwrite=True,
+        )
 
 
 def get_encoder_timing(aman, hkdata):
@@ -1001,222 +1004,3 @@ def get_fit_params(cal_type):
             params_base[fit_key].add("dt", value=0.125 * 1e-3, min=-3e-3, max=3e-3)
 
     return model, params_base
-
-
-def get_dicts(aman, cal_type):
-    """
-    Get dictionaries for co-added data and fit result.
-
-    Args:
-        aman: axis manager
-        cal_type: 'gain' or 'timeconstant'. type of calibration
-
-    Return:
-        fit_result: Dictionary for fit result
-    """
-    filt_keys = ["iirc", "hpf", "lpf"]
-
-    fit_result = {}
-
-    if cal_type == "gain":
-        freq_keys = ["f1_gain"]
-        fit_keys = ["fit_coadd"]
-    elif cal_type == "timeconstant":
-        freq_keys = CHOPPING_FREQS.keys()
-        fit_keys = ["fit_coadd", "fit_amp", "fit_phase__fix_tau", "fit_phase__free"]
-    else:
-        raise ValueError(
-            f"'{cal_type}' is a wrong type. Please specify 'gain' or 'timeconstant'."
-        )
-
-    # Initialize fit_result dictionary
-    for fit_key in fit_keys:
-        fit_result[fit_key] = {}
-        for filt_key in filt_keys:
-            if filt_key != "iirc":
-                if fit_key == "fit_coadd":
-                    fit_result[fit_key][filt_key] = {}
-                    for freq_key in freq_keys:
-                        fit_result[fit_key][filt_key][freq_key] = np.full(
-                            aman.dets.count, np.nan, dtype=object
-                        )
-                else:
-                    fit_result[fit_key][filt_key] = np.full(
-                        aman.dets.count, np.nan, dtype=object
-                    )
-
-    return fit_result
-
-
-def fill_data(aman, fit_result, cal_type):
-    """
-    Fill co-added data and fit result to axis manager.
-
-    Args:
-        aman: axis manager
-        fit_result: fit result
-        n_bins: number of bins
-        cal_type: 'gain' or 'timeconstant'. type of calibration
-    """
-
-    # Fill fit result to axis manager
-    for fit_key in fit_result.keys():
-        if fit_key not in aman.stm_cal.keys():
-            aman.stm_cal.wrap(fit_key, core.AxisManager(aman.dets))
-
-        for filt_key in fit_result[fit_key].keys():
-            if fit_key == "fit_coadd":
-                if filt_key not in aman.stm_cal[fit_key].keys():
-                    aman.stm_cal[fit_key].wrap(filt_key, core.AxisManager(aman.dets))
-                for freq_key in fit_result[fit_key][filt_key].keys():
-                    aman.stm_cal[fit_key][filt_key].wrap(
-                        freq_key,
-                        core.AxisManager(
-                            aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
-                        ),
-                        overwrite=True,
-                    )
-            else:
-                aman.stm_cal[fit_key].wrap(
-                    filt_key,
-                    core.AxisManager(
-                        aman.dets,
-                        core.IndexAxis(
-                            "ndata_taufit",
-                            aman.stm_cal.filtering_params.filter_freq_tau.size,
-                        ),
-                    ),
-                    overwrite=True,
-                )
-
-        for filt_key in fit_result[fit_key].keys():
-
-            def fill_field(field, result, weight_axis):
-                valid_result = [x for x in result if not isinstance(x, (int, float))]
-                if len(valid_result) == 0:
-                    return
-
-                for key in valid_result[0].params.keys():
-                    arr = np.array(
-                        [
-                            float(x.params[key].value)
-                            if not isinstance(x, (int, float))
-                            else np.nan
-                            for x in result
-                        ]
-                    )
-                    field.wrap(key, arr, [(0, "dets")], overwrite=True)
-                    arr = np.array(
-                        [
-                            float(x.params[key].stderr)
-                            if not isinstance(x, (int, float))
-                            and x.params[key].stderr is not None
-                            else np.nan
-                            for x in result
-                        ]
-                    )
-                    field.wrap(f"{key}_stderr", arr, [(0, "dets")], overwrite=True)
-                    arr = np.array(
-                        [
-                            float(x.chisqr)
-                            if not isinstance(x, (int, float))
-                            else np.nan
-                            for x in result
-                        ]
-                    )
-                    field.wrap("chisqr", arr, [(0, "dets")], overwrite=True)
-                    arr = np.array(
-                        [
-                            float(x.redchi)
-                            if not isinstance(x, (int, float))
-                            else np.nan
-                            for x in result
-                        ]
-                    )
-                    field.wrap("redchi", arr, [(0, "dets")], overwrite=True)
-                    if (
-                        weight_axis == "stm_coadd_bins"
-                    ):  # Because we don't use weight for time-constant fit for the first step analysis
-                        arr = np.array(
-                            [
-                                x.weights
-                                if not isinstance(x, (int, float))
-                                else np.full(field._axes[weight_axis].count, np.nan)
-                                for x in result
-                            ]
-                        )
-                        arr = arr.astype(float)
-                        field.wrap(
-                            "weights",
-                            arr,
-                            [(0, "dets"), (1, weight_axis)],
-                            overwrite=True,
-                        )
-                if fit_key != "fit_coadd":
-                    data_len = len(valid_result[0].data)
-                    arr = np.array(
-                        [
-                            x.data
-                            if not isinstance(x, (int, float))
-                            else np.full(data_len, np.nan)
-                            for x in result
-                        ]
-                    )
-                    field.wrap("data", arr, [(0, "dets")], overwrite=True)
-                    arr = np.array(
-                        [
-                            x.userkws["f"]
-                            if not isinstance(x, (int, float))
-                            else np.full(data_len, np.nan)
-                            for x in result
-                        ]
-                    )
-                    field.wrap("f", arr, [(0, "dets")], overwrite=True)
-
-            if fit_key == "fit_coadd":
-                for freq_key in fit_result[fit_key][filt_key].keys():
-                    field = aman.stm_cal.fit_coadd[filt_key][freq_key]
-                    result = fit_result[fit_key][filt_key][freq_key]
-                    weight_axis = "stm_coadd_bins"
-
-                    fill_field(field, result, weight_axis)
-            else:
-                field = aman.stm_cal[fit_key][filt_key]
-                result = fit_result[fit_key][filt_key]
-                weight_axis = "ndata_taufit"
-                fill_field(field, result, weight_axis)
-
-    # Fill result for general people
-    if cal_type == "gain":
-        heater_temp = aman.stm_cal.temps[aman.stm_cal.positions.vals == "heater"][0][0]
-        env_temp = aman.stm_cal.temps[aman.stm_cal.positions.vals == "env"][0][0]
-
-        arr = np.array(
-            [
-                float(x.best_values["a0"])
-                if not isinstance(x, (int, float))
-                else np.nan
-                for x in fit_result["fit_coadd"]["lpf"]["f1_gain"]
-            ]
-        )
-        arr = abs(arr) * (STM_NORMALIZE_TEMP / (heater_temp - env_temp))
-        aman.stm_cal.wrap("stm_gain", arr, [(0, "dets")], overwrite=True)
-    if cal_type == "timeconstant":
-        arr = np.array(
-            [
-                float(x.best_values["tau"])
-                if not isinstance(x, (int, float))
-                else np.nan
-                for x in fit_result["fit_amp"]["lpf"]
-            ]
-        )
-        aman.stm_cal.wrap("stm_tau", arr, [(0, "dets")], overwrite=True)
-        arr = np.array(
-            [
-                float(x.best_values["dt"])
-                if not isinstance(x, (int, float))
-                else np.nan
-                for x in fit_result["fit_phase__fix_tau"]["lpf"]
-            ]
-        )
-        aman.stm_cal.wrap("readout_delay", arr, [(0, "dets")], overwrite=True)
