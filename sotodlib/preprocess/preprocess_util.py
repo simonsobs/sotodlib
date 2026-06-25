@@ -1298,12 +1298,12 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         (or a coadd of both) replacing the real-data TOD before writing to the
         preproc DBs and running the pipelines.
         If False, noise_aman and sim_map are ignored.
-    NEW - sim_aman_file : str
+    sim_aman_file : str
         Optional. Path to H5 file ith AxisManager with simulated TOD.
         If not None, sim_aman.signal will replace the aman.signal.
         Accepts fstring obs_id, freq, and wafer.
         Should be compatible with obs_id. Ignored if load_sim_tod is False.
-    NEW - sim_map_file : str
+    sim_map_file : str
         Optional. Path to imulated TQU map to read in as modulated signal TOD
         before both preprocessing layers using demod_mm.from_map. 
         Ignored if load_sim_tod is False.
