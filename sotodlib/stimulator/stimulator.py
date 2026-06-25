@@ -101,12 +101,16 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
     if not valid_data:
         valid_gain = False
         valid_timeconstant = False
+        return valid_gain, valid_timeconstant
     else:
         valid_gain = True
         if aman.stm_cal.chopping_freqs.shape[0] <= 1:
             valid_timeconstant = False
         else:
             valid_timeconstant = True
+
+    model, params_base = get_fit_params(cal_type="coadd")
+    initialize_aman(aman, "coadd", model, n_bins)
 
     # Calculate filtering frequencies
     if valid_gain:
@@ -118,9 +122,6 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
         filtering(aman, filter_freqs, "gain")
 
         # Make and fit co-added data
-        model, params_base = get_fit_params(cal_type="coadd")
-        initialize_aman(aman, "coadd", model, n_bins)
-
         get_coadd_data(aman, "gain", n_bins, det_mask)
         fit_coadd_data(aman, "gain", det_mask, model, params_base)
 
@@ -144,9 +145,6 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
         filtering(aman, filter_freqs, "timeconstant")
 
         # Make and fit co-added data
-        model, params_base = get_fit_params(cal_type="coadd")
-        initialize_aman(aman, "coadd", model, n_bins)
-
         get_coadd_data(aman, "timeconstant", n_bins, det_mask)
         fit_coadd_data(aman, "timeconstant", det_mask, model, params_base)
 
