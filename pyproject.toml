@@ -63,7 +63,8 @@ site_pipeline = [
   "tilemaker",
   "GitPython",
   "sqlmodel",
-  "ruptures"
+  "pyinstrument",
+  "ruptures",
 ]
 tests = [
   "socs",

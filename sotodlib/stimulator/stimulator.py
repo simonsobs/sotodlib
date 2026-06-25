@@ -134,7 +134,7 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
     if valid_timeconstant:
         filter_freqs = {}
         for key, freq in zip(aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs):
-            if key != 'f1_gain':
+            if key == 'f1_gain':
                 continue
 
             if round(freq) != CHOPPING_FREQS[key]:
@@ -156,9 +156,6 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
             keys_to_delete = [key for key in aman._fields if key.startswith("signal_")]
             for key in keys_to_delete:
                 aman.move(key, None)
-
-
-
 
     return valid_gain, valid_timeconstant
 
@@ -357,7 +354,7 @@ def get_encoder_timing(aman, hkdata):
 
     if "stm_samps" not in aman._axes.keys():
         stm_samps = core.IndexAxis("stm_samps", t_enc.size)
-        stm_cal = core.AxisManager(stm_samps)
+        stm_cal = core.AxisManager(stm_samps, aman.samps)
         aman.wrap("stm_cal", stm_cal, overwrite=True)
     aman.stm_cal.wrap("t_enc", t_enc, [(0, "stm_samps")], overwrite=True)
     aman.stm_cal.wrap("t_hk", t_hk, [(0, "stm_samps")], overwrite=True)
@@ -840,8 +837,8 @@ def get_coadd_data(aman, cal_type, n_bins, det_mask):
 
         cuts[freq_key] = []
         for i_bin in range(n_bins):
-            cut2 = (i_bin / n_bins <= aman.frac_timing) & (
-                aman.frac_timing < (i_bin + 1) / n_bins
+            cut2 = (i_bin / n_bins <= aman.stm_cal.frac_timing) & (
+                aman.stm_cal.frac_timing < (i_bin + 1) / n_bins
             )
             cut = cut1 & cut2
             cuts[freq_key].append(cut)
