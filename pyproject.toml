@@ -63,7 +63,6 @@ site_pipeline = [
   "GitPython",
   "sqlmodel",
   "pyinstrument",
-  "ruptures",
 ]
 tests = [
   "socs",
