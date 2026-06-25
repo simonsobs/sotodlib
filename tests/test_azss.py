@@ -11,6 +11,7 @@ from numpy.polynomial import legendre as L
 
 from sotodlib import core
 from sotodlib.tod_ops import azss
+from so3g.proj import RangesMatrix
 
 
 def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
@@ -51,7 +52,7 @@ def get_scan(n_scans=33, scan_accel=0.025, scanrate=0.025,
 
 
 def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
-                      ndets=2, input_coeffs=None):
+                      ndets=3, input_coeffs=None):
     """
     Makes an axis manager with azimuth synchronous signal
     in it, populated via legendre polynomials plus gaussian noise.
@@ -61,7 +62,7 @@ def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
     az_min, az_max = np.min(azpoint), np.max(azpoint)
     x = ( 2*azpoint - (az_min+az_max) ) / (az_max - az_min)
 
-    fake_signal = np.zeros((ndets, len(ts)))
+    fake_signal = np.zeros((ndets, len(ts)), dtype='float32')
     if input_coeffs is None:
         input_coeffs = np.random.uniform(-10, 11, size=(ndets, max_mode+1))
     for nd in range(ndets):
@@ -85,6 +86,7 @@ def make_fake_azss_tod(max_mode=20, noise_amp=1, n_scans=10,
                   axis_map=[(0, 'dets'), (1, 'samps')])
     tod_fake.wrap('input_coeffs', np.atleast_2d(input_coeffs),
                   axis_map=[(0, 'dets'), (1, 'modes')])
+    tod_fake.wrap('flags', core.AxisManager())
     return tod_fake
 
 
@@ -92,22 +94,106 @@ def get_coeff_metric(tod):
     """
     Evaluates fit is working by comparing coefficients in to out.
     """
-    print(tod.input_coeffs[0])
-    print(tod.azss_stats.coeffs[0])
+    print(tod.input_coeffs)
+    print(tod.azss_stats.coeffs)
     outmetric_num = (tod.azss_stats.coeffs - tod.input_coeffs)**2
     outmetric_denom = (tod.input_coeffs)**2
     return np.median(100*(outmetric_num/outmetric_denom))
 
 
 class AzssTest(unittest.TestCase):
-    "Test the Azimuth Synchronous Signal fitting functions"
     def test_fit(self):
+        """
+        Test the Azimuth Synchronous Signal fitting functions
+        """
         max_mode = 10
         tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
-        azss_stats, model_sig_tod = azss.get_azss(tod, method='fit', max_mode=max_mode, azrange=None, bins=100)
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='fit',
+            max_mode=max_mode,
+            azrange=None,
+            bins=100
+        )
         ommedian = get_coeff_metric(tod)
         print(ommedian)
         self.assertTrue(ommedian < 5.0)
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
+        model = azss.fit_azss(tod.boresight.az, azss_stats, max_mode)
+        self.assertTrue(np.all(model_sig_tod == model))
+
+    def test_fit_with_flags(self):
+        """
+        Test the Azimuth Synchronous Signal fitting functions with flags
+        """
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+
+        mask = np.zeros((tod.dets.count, tod.samps.count), dtype=bool)
+        # one detector has partial az coverage, one detector has zero az coverage
+        mask[0, tod.boresight.az > np.percentile(tod.boresight.az, 95)] = True
+        mask[-1, :] = True
+        flags = RangesMatrix.from_mask(mask)
+
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='fit',
+            max_mode=max_mode,
+            azrange=None,
+            bins=100,
+            flags=flags,
+        )
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal[~mask]) > np.std(tod.signal[~mask] - model_sig_tod[~mask]))
+
+        # check consistency of model made with cached legendre coeffs
+        model = azss.fit_azss(tod.boresight.az, azss_stats, max_mode)
+        self.assertTrue(np.all(model_sig_tod == model))
+
+    def test_interpolate(self):
+        """
+        Test the interpolation method of Azimuth Synchronous Signal subtraction.
+        """
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='interpolate',
+            azrange=None,
+            bins=100,
+        )
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
+    def test_interpolate_with_flags(self):
+        """
+        Test the interpolation method of Azimuth Synchronous Signal subtraction
+        with flags.
+        """
+        max_mode = 10
+        tod = make_fake_azss_tod(noise_amp=0, n_scans=50, max_mode=max_mode)
+
+        mask = np.zeros((tod.dets.count, tod.samps.count), dtype=bool)
+        # one detector has partial az coverage, one detector has zero az coverage
+        mask[0, tod.boresight.az > np.percentile(tod.boresight.az, 95)] = True
+        mask[-1, :] = True
+        flags = RangesMatrix.from_mask(mask)
+
+        azss_stats, model_sig_tod = azss.get_azss(
+            tod,
+            method='interpolate',
+            azrange=None,
+            bins=100,
+            flags=flags,
+            return_det_mask=True,
+            exclude_turnarounds=False,
+        )
+        self.assertTrue(~np.any(np.isnan(tod.signal)))
+        self.assertTrue(np.std(tod.signal) > np.std(tod.signal - model_sig_tod))
+
 
 if __name__ == '__main__':
     unittest.main()

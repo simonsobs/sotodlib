@@ -6,6 +6,10 @@ from copy import deepcopy
 from importlib import import_module
 from typing import List, Optional
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 import git
 import h5py
 import megham.transform as mt
@@ -387,6 +391,7 @@ def _load_rset(config):
 def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
     config_dir = config.get("pipeline_config_dir", os.environ["PIPELINE_CONFIG_DIR"])
     config_path = os.path.join(config_dir, "shared/focalplane/ufm_to_fp.yaml")
+    ot_config_path = os.path.join(config_dir, "shared/focalplane/optics_tubes.yaml")
     zemax_path = config.get("zemax_path", None)
 
     pointing_cfg = {
@@ -394,6 +399,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
         "tube_slot": tube_slot,
         "wafer_slot": wafer_slot,
         "config_path": config_path,
+        "ot_config_path": config_path,
         "zemax_path": zemax_path,
         "return_fp": False,
     }
@@ -403,7 +409,7 @@ def _mk_pointing_config(telescope_flavor, tube_slot, wafer_slot, config):
 def _restrict_inliers(aman, focal_plane):
     # TODO: Use gamma as well
     # Map to template
-    fp, _, template_msk = focal_plane.map_by_det_id(aman)
+    fp, _, _, template_msk = focal_plane.map_by_det_id(aman)
     fp = fp[:, :2]
     inliers = np.ones(len(fp), dtype=bool)
 
@@ -779,7 +785,7 @@ def main():
                 _restrict_inliers(aman, focal_plane)
 
                 # Mapping to template
-                fp, r2, template_msk = focal_plane.map_by_det_id(aman)
+                fp, r2, det_boresight, template_msk = focal_plane.map_by_det_id(aman)
                 focal_plane.template.add_wafer_info(aman, template_msk)
 
                 # Try an initial alignment and get weights
@@ -816,7 +822,7 @@ def main():
 
                 # Store weighted values
                 weights = np.column_stack((weights, r2))
-                focal_plane.add_fp(i, fp, weights, template_msk)
+                focal_plane.add_fp(i, fp, weights, det_boresight, template_msk)
 
                 n_obs += 1
 

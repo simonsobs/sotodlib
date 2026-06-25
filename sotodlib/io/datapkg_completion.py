@@ -576,6 +576,7 @@ class DataPackaging:
 
     def verify_timecode_deletable(
         self, timecode, verify_with_librarian=True, include_hk=True,
+        raise_extra_db_files=False,
     ):
         """
         Checkes that all books in that timecode are uploaded to the librarian 
@@ -589,6 +590,10 @@ class DataPackaging:
         folders into this list since they aren't book bound but we'd like them 
         to be deleted 
         3. Compare the two lists and make sure they're the same.
+
+        If raise_extra_db_files is False, don't raise an error if we find files in
+        the database but not on disk. In the last 1 year, this has only happened 
+        when a previous cleanup script failed for a locked database
         """
         deletable = [True, ""]
 
@@ -630,9 +635,14 @@ class DataPackaging:
             msg = f"Files in database but not on disk: {extra_files}"
             for f in missed_files:
                 msg += f"\t{f}\n"
-            self.logger.error(msg)
-            deletable[0] = False
-            deletable[1] += msg
+            if raise_extra_db_files:
+                self.logger.error(msg)
+                deletable[0] = False
+                deletable[1] += msg
+            else:
+                self.logger.warning(msg)
+                deletable[0] = True
+                deletable[1] += msg
         return deletable
 
     def delete_timecode_level2(

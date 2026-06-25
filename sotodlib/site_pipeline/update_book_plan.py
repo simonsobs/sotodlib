@@ -31,6 +31,8 @@ def main(
     max_ctime_timecodes: Optional[float] = None,
     from_scratch: bool = False,
     use_monitor: bool = False,
+    delay_warning: float = 3, 
+    delay_error: float = 6,
     ):
     """
     Update the book plan database with new data from the g3tsmurf database.
@@ -63,6 +65,17 @@ def main(
     use_monitor : bool
         if True, will send monitor information to influx, set to false by
         default so we can use identical config files for development
+    delay_warning: float, optional
+        if max_ctime - SMURF.final time > delay_warning: print warning about stale 
+        databases. Additionally, for any incomplete observations (obs), if max_ctime - 
+        obs.timestamp > delay_warning: look to see if a new stream has been started for 
+        obs.stream_id and force completion of the earlier obs.
+        delay_warning is specified in hours.
+    delay_error: float, optional
+        if max_ctime - SMURF.final time > delay_error: raise an error about stale 
+        databases. Additionally, for any incomplete observations (obs), if max_ctime - 
+        obs.timestamp > delay_error: raise error about incomplete obseravtions.
+        delay_error is specified in hours.
     """
     if stream_ids is not None:
         stream_ids = stream_ids.split(",")
@@ -85,11 +98,13 @@ def main(
 
     # obs and oper books
     logger.info("Registering obs/oper Books")
-    imprinter.update_bookdb_from_g3tsmurf(
+    _, update_errors = imprinter.update_bookdb_from_g3tsmurf(
         min_ctime=min_ctime, max_ctime=max_ctime,
         ignore_singles=False,
         stream_ids=stream_ids,
-        force_single_stream=force_single_stream
+        force_single_stream=force_single_stream,
+        delay_warning=delay_warning, 
+        delay_error=delay_error,
     )
 
     ## over-ride timecode book making if specific values given
@@ -134,11 +149,16 @@ def main(
     if monitor is not None:
         logger.info("Sending Updates to monitor")
         record_book_counts(monitor, imprinter)
+
+    if update_errors is not None:
+        for tube, error in update_errors:
+            logger.error(f"Errors updating book database: error in tube {tube}: {error}")
+        raise ValueError(f"Errors updating book database: {update_errors}")
     
 
 def record_book_counts(monitor, imprinter):
     """Send a record of the current book count status to the InfluxDb
-    site-pipeline montir
+    site-pipeline monitor
     """
     tags = [{"telescope" : imprinter.config["monitor"]["telescope"]}]
     log_tags = {}
@@ -218,6 +238,16 @@ def get_parser(parser=None):
         '--update-delay', type=float, 
         help="Days to subtract from now to set as minimum ctime",
         default=1
+    )
+    parser.add_argument(
+        '--delay_warning', type=float, 
+        help="Hours before incomplete observation fixes and database warnings are issued",
+        default=3,
+    )
+    parser.add_argument(
+        '--delay_error', type=float, 
+        help="Hours before incomplete observation fixes and database errors are issued",
+        default=6,
     )
     parser.add_argument(
         '--from-scratch', help="Builds or updates database from scratch",

@@ -100,6 +100,7 @@ class IntensityTemplates(Operator):
         "radius:<Quantity> -- Average the intensity in the disc.  Use a small "
         "value to match only one pixel\n"
         "all -- Average all detectors matching `pattern`"
+        "pixel -- Group detectors based on `focalplane_pixel_key`"
         )
 
     submode = Unicode(
@@ -137,6 +138,12 @@ class IntensityTemplates(Operator):
         "focalplane pixel can get separated.",
     )
 
+    focalplane_pixel_key = Unicode(
+        "pixel",
+        allow_none=True,
+        help="The focalplane key defining the pixe of each detector",
+    )
+
     @traitlets.validate("det_mask")
     def _check_det_mask(self, proposal):
         check = proposal["value"]
@@ -168,13 +175,16 @@ class IntensityTemplates(Operator):
 
     @function_timer
     def _det_to_pixel(self, det, focalplane):
-        """Translate detector name into pixel name
+        """Translate detector name into pixel name.
 
-        For now, this is done by translating the detector quaternion
-        into a row and column on the focalplane.  If a suitable
-        detector property is reliably available in the focalplane
-        database, it should be used instead.
+        If the pixel column is specified, it is used.  Otherwise,
+        this is done by translating the detector quaternion
+        into a row and column on the focalplane.
+
         """
+
+        if self.focalplane_pixel_key in focalplane.properties:
+            return focalplane[det][self.focalplane_pixel_key]
 
         # Get a detector position on the focal plane by rotating the
         # boresight on the X-axis and taking the detector pointing
@@ -306,6 +316,9 @@ class IntensityTemplates(Operator):
 
             if self.mode.lower() == "all":
                 template_key = "all"
+                radius = None
+            elif self.mode.lower() == "pixel":
+                template_key = "{pixel}"
                 radius = None
             else:
                 template_key = "{pixel}"
@@ -443,6 +456,8 @@ class IntensityTemplates(Operator):
 
             intensity_templates["det_to_key"] = det_to_key
             ob[self.template_name] = intensity_templates
+            msg = f"{ob.name}: Built intensity templates {ob[self.template_name]}"
+            log.verbose(msg)
 
         return
 

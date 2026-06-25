@@ -1183,7 +1183,17 @@ class A2Stats(_Preprocess):
             proc_aman.wrap(self.save_name, a2_stats)
 
 class Apodize(_Preprocess):
-    """Apodize the edges of a signal. All process configs go to `apodize_cosine`
+    """Apodize the edges of a signal. All process configs go to `apodize_cosine`.
+    If flags is provided, apodize based on it; otherwise, apodize the edge of
+    the timestream.
+
+    Example config block::
+
+      - name: "apodize"
+        process:
+          signal_name: signal
+          apodize_samps: 2000
+          flags: glitch_flags
 
     .. autofunction:: sotodlib.tod_ops.apodize.apodize_cosine
     """
@@ -1369,15 +1379,17 @@ class AzSS(_Preprocess):
         else:
             tod_ops.azss.get_azss(aman, **self.calc_cfgs)
         return aman, proc_aman
-    
+
     def select(self, meta, proc_aman=None, in_place=True):
         if self.select_cfgs is None:
             return meta
-        if 'bad_dets' in meta[self.azss_stats_name]:
-            keep = ~meta[self.azss_stats_name]['bad_dets']
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if 'bad_dets' in proc_aman[self.save_name]:
+            keep = ~proc_aman[self.save_name]['bad_dets']
         else:
-            keep = np.ones(aman.dets.count, dtype=bool)
-        
+            keep = np.ones(meta.dets.count, dtype=bool)
+
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep])
             return meta
@@ -1943,7 +1955,6 @@ class SourceFlags(_Preprocess):
 
         if in_place:
             meta.restrict("dets", meta.dets.vals[keep_all])
-            source_flags.restrict("dets", source_flags.dets.vals[keep_all])
             return meta
         else:
             return keep_all
@@ -2381,6 +2392,7 @@ class FilterForSources(_Preprocess):
           source_flags: "source_flags"
           edge_guard: 10 # Number of samples to make the first and last flags False
           trim_samps: 100
+          pca_wrap: "pca_model" # optional, if provided, the PCA model is wrapped into aman under this key
 
     .. autofunction:: sotodlib.coords.planets.filter_for_sources
     """
@@ -2399,10 +2411,11 @@ class FilterForSources(_Preprocess):
         signal = aman.get(self.signal)
         flags = aman.flags.get(self.process_cfgs.get('source_flags'))
         edge_guard = self.process_cfgs.get('edge_guard')
+        pca_wrap = self.process_cfgs.get('pca_wrap',None)
         if aman.dets.count < n_modes:
             raise ValueError(f'The number of pca modes {n_modes} is '
                              f'larger than the number of detectors {aman.dets.count}.')
-        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard)
+        planets.filter_for_sources(aman, signal=signal, source_flags=flags, n_modes=n_modes, edge_guard=edge_guard, pca_wrap=pca_wrap)
         if self.process_cfgs.get("trim_samps"):
             trim = self.process_cfgs["trim_samps"]
             proc_aman.restrict('samps', (aman.samps.offset + trim,
@@ -2700,8 +2713,8 @@ class UnionFlags(_Preprocess):
         return aman, proc_aman
 
 class CombineFlags(_Preprocess):
-    """Do the conbine of relevant flags for mapping
-    
+    """Do the combination of relevant flags for mapping
+
 
     Saves results for aman under the "flags.[total_flags_label]" field.
 
@@ -2711,8 +2724,11 @@ class CombineFlags(_Preprocess):
           process:
             flag_labels: ['glitches.glitch_flags', 'source_flags.jupiter_inv']
             total_flags_label: 'glitch_flags'
-            method: 'union' # You can select a method from ['union', '+', 'intersect', '*'].
-            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. Lentgh must match the length of flag_labels.
+            method: 'union' # You can select a method from ['union', '+', 'intersect', '*', 'except', '-'].
+            #method: ['+', '*'] # Or you can pass individual method for each flags as a list. 
+               # Length of list must match the length of flag_labels.
+               # If a list, the first method must be '+', as if adding the first flag set to an empty flag set. 
+               # Operations are performed strictly from Left to Right, '*' are not performed first.
 
     """
     name = "combine_flags"
@@ -2729,13 +2745,12 @@ class CombineFlags(_Preprocess):
         if isinstance(self.process_cfgs['method'], list):
             if len(self.process_cfgs['flag_labels']) != len(self.process_cfgs['method']):
                 raise ValueError("The length of method does not match to the length of flag_labels")
-            elif any(method not in ['+', 'union', '*', 'intersect'] for method in self.process_cfgs['method']):
-                raise ValueError("The method provided does not match one of '+', '*', 'union', or 'intersect'")
-        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect']:
+            elif any(method not in ['+', 'union', '*', 'intersect', '-', 'except'] for method in self.process_cfgs['method']):
+                raise ValueError("One or more methods in list are not valid")
+        elif self.process_cfgs['method'] in ['+', 'union', '*', 'intersect', '-', 'except']:
             self.process_cfgs['method'] =  ['+'] + (len(self.process_cfgs['flag_labels']) - 1)*[self.process_cfgs['method']]
         else:
-            raise ValueError("The method matches neither list nor the one of the ['+', 'union', '*', 'intersect']")
-        
+            raise ValueError("The method matches neither list nor the one of the valid operations")
         total_flags = RangesMatrix.zeros([proc_aman.dets.count, proc_aman.samps.count]) # get an empty flags with shape (Ndets,Nsamps)
         for i, (method, label) in enumerate(zip(self.process_cfgs['method'], self.process_cfgs['flag_labels'])):
             _label = attrgetter(label)
@@ -2748,6 +2763,8 @@ class CombineFlags(_Preprocess):
                     total_flags += _label(proc_aman) # The + operator is the union operator in this case
                 elif method in ['*', 'intersect']:
                     total_flags *= _label(proc_aman) # The * operator is the intersect operator in this case
+                elif method in ['-', 'except']:
+                    total_flags *= ~ _label(proc_aman) # The - operator is the except operator in this case
 
         if 'flags' not in aman._fields:
             from sotodlib.core import FlagManager

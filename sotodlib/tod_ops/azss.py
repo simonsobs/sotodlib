@@ -43,6 +43,19 @@ def _check_azcoverage(aman, flags, az=None, coverage_threshold=0.95,
     return coverages < coverage_threshold, coverages
 
 
+def _valid_dets_mask(azss_stats, min_valid_bins=1):
+    """
+    Boolean mask of detectors usable for fitting / interpolation.
+
+    A detector is considered valid if it has at least ``min_valid_bins``
+    non-NaN bins and is not flagged in ``azss_stats['bad_dets']``, if present.
+    """
+    valid = (~np.isnan(azss_stats.binned_signal)).sum(axis=1) >= min_valid_bins
+    if 'bad_dets' in azss_stats:
+        valid &= ~azss_stats['bad_dets']
+    return valid
+
+
 def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
               apodize_edges=True, apodize_edges_samps=1600,
               apodize_flags=True, apodize_flags_samps=200):
@@ -120,7 +133,46 @@ def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
                               range=azrange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
 
-def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
+
+def _legendre_x(az, binned_az, m, fit_range, bin_width):
+    """
+    Build Legendre x-coordinates (rescaled to [-1, 1]) for both the sample
+    azimuth array and the bin centers, given a 1D mask m of valid bins.
+
+    If fit_range is None the range is inferred from the bin centers
+    selected by m (extended by half a bin on each side).
+    """
+    if fit_range is None:
+        az_min = binned_az[m].min() - bin_width / 2
+        az_max = binned_az[m].max() + bin_width / 2
+    else:
+        az_min, az_max = fit_range[0], fit_range[1]
+    span = az_max - az_min
+    mid = az_min + az_max
+    x_samp = (2 * az - mid) / span
+    x_bin = np.where(m, (2 * binned_az - mid) / span, np.nan)
+    return x_samp, x_bin
+
+
+def _fit_one_det(binned_signal_i, x_bin, m, sigma_i, max_mode):
+    """
+    Fit a Legendre polynomial to one detector's binned signal.
+
+    Returns
+    -------
+    coeffs : ndarray, shape (max_mode + 1,)
+    binned_model : ndarray, shape (nbins,)  (NaN at masked bins)
+    sum_of_squares : float
+    redchi2 : float
+    """
+    coeffs = L.legfit(x_bin[m], binned_signal_i[m], max_mode)
+    binned_model = np.where(m, L.legval(x_bin, coeffs), np.nan)
+    ssq = np.sum((binned_signal_i[m] - binned_model[m])**2)
+    redchi2 = ssq / sigma_i**2 / (m.sum() - max_mode - 1)
+    return coeffs, binned_model, ssq, redchi2
+
+
+def fit_azss(az, azss_stats, max_mode, modes_axis_name='azss_modes', fit_range=None, overwrite=False):
     """
     Function for fitting Legendre polynomials to signal binned in azimuth.
 
@@ -133,6 +185,8 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
         Created by ``get_azss`` function.
     max_mode: integer
         Highest order Legendre polynomial to include in the fit.
+    modes_axis_name: string, optional
+        The name to assign to the LabelAxis of azss legendre modes when method is 'fit'.
     fit_range: list
         Azimuth range used to renormalized to the [-1,1] range spanned
         by the Legendre polynomials for fitting. Default is the max-min
@@ -148,44 +202,87 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None, overwrite=False):
         Model fit for each detector size ndets x n_samps
     """
     bin_width = azss_stats.binned_az[1] - azss_stats.binned_az[0]
-    m = ~np.isnan(azss_stats.binned_signal[0])  # masks bins without counts
-    if np.count_nonzero(m) < max_mode + 1:
-        raise ValueError('Number of valid bins is smaller than mode of Legendre function')
+    ndets = azss_stats.dets.count
+    nbins = azss_stats.bin_az_samps.count
 
-    if fit_range is None:
-        az_min = np.min(azss_stats.binned_az[m]) - bin_width / 2
-        az_max = np.max(azss_stats.binned_az[m]) + bin_width / 2
+    m_2d = ~np.isnan(azss_stats.binned_signal)
+
+    # Number of valid bins cannot be smaller than mode of Legendre function.
+    valid_dets = _valid_dets_mask(azss_stats, min_valid_bins=max_mode + 1)
+
+    model = np.zeros((ndets, len(az)))
+    coeffs = np.zeros((ndets, max_mode + 1))
+    binned_model = np.full((ndets, nbins), np.nan)
+    sum_of_squares = np.full(ndets, np.nan)
+    redchi2s = np.full(ndets, np.nan)
+
+    if not valid_dets.any():
+        logger.warning('All the detectors have low az coverage and cannot make model')
+        return model
+
+    use_cached = ('coeffs' in azss_stats) and not overwrite
+
+    is_uniform = np.array_equal(m_2d[valid_dets].any(axis=0),
+                                m_2d[valid_dets].all(axis=0))
+
+    if is_uniform:
+        m = m_2d[valid_dets][0]
+        x_samp, x_legendre_bin_centers = _legendre_x(
+            az, azss_stats.binned_az, m, fit_range, bin_width)
+
+        if use_cached:
+            return L.legval(x_samp, azss_stats.coeffs.T)
+
+        # Vectorized Legendre fit over all valid detectors at once.
+        c = L.legfit(x_legendre_bin_centers[m],
+                     azss_stats.binned_signal[valid_dets][:, m].T,
+                     max_mode).T  # shape: (n_valid, max_mode + 1)
+        coeffs[valid_dets] = c
+        bm = L.legval(x_legendre_bin_centers, c.T)
+        binned_model[valid_dets] = np.where(m, bm, np.nan)
+        model[valid_dets] = L.legval(x_samp, c.T)
+
+        diff = azss_stats.binned_signal[valid_dets][:, m] - bm[:, m]
+        sum_of_squares[valid_dets] = np.sum(diff**2, axis=-1)
+        redchi2s[valid_dets] = (
+            sum_of_squares[valid_dets]
+            / azss_stats.uniform_binned_signal_sigma[valid_dets]**2
+            / (m.sum() - max_mode - 1)
+        )
     else:
-        az_min, az_max = fit_range[0], fit_range[1]
+        for i in np.where(valid_dets)[0]:
+            m_i = m_2d[i]
+            x_samp, x_legendre_bin_centers = _legendre_x(
+                az, azss_stats.binned_az, m_i, fit_range, bin_width)
+            if use_cached:
+                model[i] = L.legval(x_samp, azss_stats.coeffs[i])
+                continue
+            (coeffs[i],
+             binned_model[i],
+             sum_of_squares[i],
+             redchi2s[i]) = _fit_one_det(
+                azss_stats.binned_signal[i], x_legendre_bin_centers, m_i,
+                azss_stats.uniform_binned_signal_sigma[i], max_mode)
+            model[i] = L.legval(x_samp, coeffs[i])
 
-    x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
-    x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
-    x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
-    if ('coeffs' in azss_stats) and not overwrite:
-        return L.legval(x_legendre, azss_stats.coeffs.T)
-
-    coeffs = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m].T, max_mode)
-    coeffs = coeffs.T
-    binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
-    binned_model = np.where(~m, np.nan, binned_model)
-    sum_of_squares = np.sum(((azss_stats.binned_signal[:, m] - binned_model[:, m])**2), axis=-1)
-    redchi2s = sum_of_squares/azss_stats.uniform_binned_signal_sigma**2 / (len(x_legendre_bin_centers[m]) - max_mode - 1)
+        if use_cached:
+            return model
 
     mode_names = np.array([f'legendre{mode}' for mode in range(max_mode + 1)], dtype='<U10')
-    modes_axis = core.LabelAxis(name='azss_modes', vals=mode_names)
+    modes_axis = core.LabelAxis(name=modes_axis_name, vals=mode_names)
     azss_stats.add_axis(modes_axis)
     azss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_az_samps')])
-    azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'azss_modes')])
+    azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, modes_axis_name)])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
 
-    return L.legval(x_legendre, coeffs.T)
+    return model
 
 
 def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None, scan_flags=None,
              apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
-             method='interpolate', max_mode=None, subtract_in_place=False,
+             method='interpolate', max_mode=None, modes_axis_name='azss_modes', subtract_in_place=False,
              merge_stats=True, azss_stats_name='azss_stats',
              merge_model=True, azss_model_name='azss_model', coverage_threshold=0.95,
              exclude_turnarounds=True, return_det_mask=False):
@@ -238,6 +335,10 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         Defaults to 'interpolate'.
     max_mode: integer, optional
         The number of Legendre modes to use for azss when method is 'fit'. Required when method is 'fit'.
+    modes_axis_name: string, optional
+        The name assigned to the LabelAxis of azss legendre modes when method is 'fit'.
+        Set a unique name when fitting azss with different max_mode values to avoid axis name conflicts.
+        Defaults to 'azss_modes'.
     subtract_in_place: bool
         If True, it subtract the modeled tod from original signal. The aman.signal will be modified.
     merge_stats: boolean, optional
@@ -261,6 +362,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         - azss_stats: core.AxisManager
             - azss statistics including: azumith bin centers, bin counts, binned signal, std of each detector-az bin, std of each detector.
             - If ``method=fit`` then also includes: binned legendre model, legendre bin centers, fit coefficients, reduced chi2.
+            - If ``return_det_mask=True`` then also includes: bad_dets, coverages.
         - model_sig_tod: numpy.array
             - azss model as a function of time either from fits or interpolation depending on ``method`` argument.
     """
@@ -318,7 +420,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
                                                 exclude_turnarounds=exclude_turnarounds)
         azss_stats.wrap('bad_dets', bad_dets, [(0, 'dets')])
         azss_stats.wrap('az_coverage', coverages, [(0, 'dets')])
-    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, azrange)
+    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, modes_axis_name, azrange)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
@@ -330,7 +432,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
 
 
 def get_azss_model(aman, azss_stats, az=None, method='interpolate',
-                   max_mode=None, azrange=None):
+                   max_mode=None, modes_axis_name='azss_modes', azrange=None):
     """
     Function to return the azss template for subtraction given the azss_stats AxisManager
 
@@ -346,15 +448,15 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
         Method for modeling: 'interpolate' or 'fit'
     max_mode: int, optional
         Maximum Legendre mode for 'fit' method
+    modes_axis_name: string, optional
+        The name assigned to the LabelAxis of azss legendre modes when method is 'fit'.
     azrange: list, optional
         Azimuth range for fitting
-        
+
     Returns
     -------
     model: array-like
         AZSS model for each detector
-    good_dets_mask: array-like (optional)
-        Boolean mask of detectors with sufficient coverage (if return_det_mask=True)
     """
     if az is None:
         az = aman.boresight.az
@@ -362,13 +464,30 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
     if method == 'fit':
         if not isinstance(max_mode, int):
             raise ValueError('max_mode is not provided as integer')
-        model = fit_azss(az=az, azss_stats=azss_stats, max_mode=max_mode, fit_range=azrange)
+        model = fit_azss(
+            az=az, azss_stats=azss_stats, max_mode=max_mode,
+            modes_axis_name=modes_axis_name, fit_range=azrange)
 
     if method == 'interpolate':
-        # mask az bins that has no data and extrapolate
-        mask = ~np.any(np.isnan(azss_stats.binned_signal), axis=0)
-        f_template = interp1d(azss_stats.binned_az[mask], azss_stats.binned_signal[:, mask], fill_value='extrapolate')
-        model = f_template(az)
+        model = np.zeros((aman.dets.count, aman.samps.count))
+
+        valid_dets = _valid_dets_mask(azss_stats, min_valid_bins=1)
+        if not valid_dets.any():
+            logger.warning('All the detectors have low az coverage and cannot make model')
+            return model
+
+        m_2d = ~np.isnan(azss_stats.binned_signal)
+        is_uniform = np.array_equal(m_2d[valid_dets].any(axis=0),
+                                    m_2d[valid_dets].all(axis=0))
+        if is_uniform:
+            m = m_2d[valid_dets][0]
+            f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[:, m][valid_dets, :], fill_value='extrapolate')
+            model[valid_dets, :] = f_template(az)
+        else:
+            for i in np.where(valid_dets)[0]:
+                m = m_2d[i]
+                f_template = interp1d(azss_stats.binned_az[m], azss_stats.binned_signal[i][m], fill_value='extrapolate')
+                model[i, :] = f_template(az)
 
     if np.any(~np.isfinite(model)):
         logger.warning('azss model has nan. set zero to nan but this may make glitch')
@@ -379,7 +498,8 @@ def get_azss_model(aman, azss_stats, az=None, method='interpolate',
     return model
 
 
-def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None, azrange=None,
+def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_mode=None,
+                  modes_axis_name='azss_modes', azrange=None,
                   scan_flags=None, subtract_name='azss_remove', in_place=False, remove_template=False):
     """
     Subtract the scan synchronous signal (azss) template from the
@@ -427,7 +547,8 @@ def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_m
     else:
         raise TypeError("Signal must be None, str, or ndarray")
 
-    model = get_azss_model(aman, azss_stats, method=method, max_mode=max_mode, azrange=azrange)
+    model = get_azss_model(aman, azss_stats, method=method, max_mode=max_mode,
+                           modes_axis_name=modes_axis_name, azrange=azrange)
 
     if scan_flags is None:
         scan_flags = np.ones(aman.samps.count, dtype=bool)
