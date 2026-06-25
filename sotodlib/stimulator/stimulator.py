@@ -117,40 +117,48 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
             filter_freqs["f1_gain"] = CHOPPING_FREQS["f1"]
         filtering(aman, filter_freqs, "gain")
 
+        # Make and fit co-added data
+        model, params_base = get_fit_params(cal_type="coadd")
+        initialize_aman(aman, "coadd", model, n_bins)
+
+        get_coadd_data(aman, "gain", n_bins, det_mask)
+        fit_coadd_data(aman, "gain", det_mask, model, params_base)
+
+        # Delete filtered TOD data if requested.
+        # This operation will run for each filtering frequency in near future to save memory usage.
+        if delete_filtered_tod:
+            keys_to_delete = [key for key in aman._fields if key.startswith("signal_")]
+            for key in keys_to_delete:
+                aman.move(key, None)
+
     if valid_timeconstant:
         filter_freqs = {}
-        for key, freq in [
-            (key, freq)
-            for key, freq in zip(
-                aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs
-            )
-            if key != "f1_gain"
-        ]:
+        for key, freq in zip(aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs):
+            if key != 'f1_gain':
+                continue
+
             if round(freq) != CHOPPING_FREQS[key]:
                 filter_freqs[key] = round(freq)
             else:
                 filter_freqs[key] = CHOPPING_FREQS[key]
         filtering(aman, filter_freqs, "timeconstant")
 
-    # Make and fit co-added data
-    model, params_base = get_fit_params(cal_type="coadd")
-    initialize_aman(aman, "coadd", model, n_bins)
+        # Make and fit co-added data
+        model, params_base = get_fit_params(cal_type="coadd")
+        initialize_aman(aman, "coadd", model, n_bins)
 
-    if valid_gain:
-        get_coadd_data(aman, "gain", n_bins, det_mask)
-        fit_coadd_data(aman, "gain", det_mask, model, params_base)
-
-    if valid_timeconstant:
         get_coadd_data(aman, "timeconstant", n_bins, det_mask)
         fit_coadd_data(aman, "timeconstant", det_mask, model, params_base)
 
-    # Delete filtered TOD data if requested.
-    # This operation will run for each filtering frequency in near future to save memory usage.
-    if delete_filtered_tod:
-        keys_to_delete = [key for key in aman._fields if key.startswith("signal_")]
-        for key in keys_to_delete:
-            if key.startswith("signal_"):
-                del aman[key]
+        # Delete filtered TOD data if requested.
+        # This operation will run for each filtering frequency in near future to save memory usage.
+        if delete_filtered_tod:
+            keys_to_delete = [key for key in aman._fields if key.startswith("signal_")]
+            for key in keys_to_delete:
+                aman.move(key, None)
+
+
+
 
     return valid_gain, valid_timeconstant
 
@@ -281,7 +289,7 @@ def calc_timeconstant(aman, idxs=None):
         overwrite=True,
     )
 
-    if "stm_gain" in aman.stm_cal._fields:
+    if "stm_gain" in aman.stm_cal:
         f = aman.stm_cal.chopping_freqs[aman.stm_cal.chopping_freq_key.vals == "f1"][0]
         correction_factor = 1 / func_response_amplitude(
             f=f, tau=aman.stm_cal["fit_amp"]["lpf"]["tau"], a=1
@@ -362,17 +370,15 @@ def get_encoder_timing(aman, hkdata):
         valid_data = False
     else:
         # Add timing against encoder to axis manager
-        # aman.stm_cal.wrap('frac_timing', np.array(frac_timing), [(0,'samps')], overwrite=True)
-        aman.wrap("frac_timing", np.array(frac_timing), [(0, "samps")], overwrite=True)
+        aman.stm_cal.wrap('frac_timing', np.array(frac_timing), [(0,'samps')], overwrite=True)
 
     return valid_data
 
 
 def get_chopping_status(aman, min_step_duration=10, penalty=100):
     """
-    Get timing when the chopping speed changes.
-    t_chopping_change is time when the chopping speed changes.
-    It also include more two timing. One is first timing when TOD starts(t=0).
+    Get timing when the chopping speed changes. Those are saved in the axis manager as aman.stm_cal.t_chopping_change.
+    It also include two more timings. One is first timing when TOD starts(t=0).
     The other is last timing when TOD ends or chopping starts to end, whichever comes first.
 
     Args:
@@ -517,7 +523,7 @@ def get_chopping_freqs(aman):
 
 def get_signal_temp(aman, hkdata):
     """
-    Get signal temperature for chopping frequency.
+    Get stimulator signal temperature at each chopping frequency.
 
     Args:
         aman: axis manager with aman.stm_cal field
@@ -551,8 +557,7 @@ def get_signal_temp(aman, hkdata):
 
     label_positions = core.LabelAxis("positions", position_keys)
     aman.stm_cal.add_axis(label_positions)
-    arr = [x for x in temps.values()]
-    arr = np.array(arr)
+    arr = np.array(list(temps.values()))
 
     aman.stm_cal.wrap(
         "temps", arr, [(0, "positions"), (1, "chopping_freq_key")], overwrite=True
@@ -703,14 +708,14 @@ def initialize_aman(aman, init_type, model, n_bins=None):
                         ),
                     )
 
-                for key in ["x", "y", "yerr"]:
-                    arr = np.full((aman.dets.count, n_bins), np.nan)
-                    aman.stm_cal.coadd_data[filt_key][freq_key].wrap(
-                        f"{key}",
-                        arr,
-                        [(0, "dets"), (1, "stm_coadd_bins")],
-                        overwrite=True,
-                    )
+                    for key in ["x", "y", "yerr"]:
+                        arr = np.full((aman.dets.count, n_bins), np.nan)
+                        aman.stm_cal.coadd_data[filt_key][freq_key].wrap(
+                            f"{key}",
+                            arr,
+                            [(0, "dets"), (1, "stm_coadd_bins")],
+                            overwrite=True,
+                        )
 
         # Initialize axis manager for fit results. Do not overwrite if already exists.
         field = ensure_wrapped(aman.stm_cal, "fit_coadd")
@@ -892,7 +897,7 @@ def fit_coadd_data(aman, cal_type, det_mask, model, params_base):
     """
     if cal_type == "all":
         freq_keys = aman.stm_cal.coadd_data["hpf"]
-    if cal_type == "gain":
+    elif cal_type == "gain":
         freq_keys = ["f1_gain"]
     elif cal_type == "timeconstant":
         freq_keys = CHOPPING_FREQS.keys()
