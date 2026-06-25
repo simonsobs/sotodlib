@@ -629,7 +629,7 @@ def multilayer_load_and_preprocess(obs_id, configs_init, configs_proc,
         If True, do not attempt to validate that configs_init is the same as
         the config used to create the existing init db.
     stop_for_sims: bool
-        Optinal. If True, will stop before each step of the pipeline
+        Optional. If True, will stop before each step of the pipeline
         with the flag `use_data_aman` set to True. The intended use is
         to prepare all necessary data products that cannot be stored in
         the preprocessing database, to process simulations.
@@ -1238,7 +1238,9 @@ def cleanup_obs(obs_id, policy_dir, errlog, configs, context=None,
 def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                          logger=None, overwrite=False, save_archive=False,
                          save_proc_aman=True, compress=False,
-                         skip_missing=False, ignore_cfg_check=False):
+                         skip_missing=False, ignore_cfg_check=False,
+                         save_raw_tod=False, load_sim_tod=False, sim_map=None,
+                         sim_aman_file=None):
     """
     This function is expected to receive a single obs_id, and dets dictionary.
     The dets dictionary must match the grouping specified in the preprocess
@@ -1288,6 +1290,23 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
     ignore_cfg_check : bool
         If True, do not attempt to validate that configs_init is the same as the config
         used to create the existing init db when running ``multilayer_load_and_preprocess``.
+    save_raw_tod : bool
+        Optional. If True, save the AxisManager before running the initial
+        pipeline. Ignored if file exists and overwrite is False.
+    load_sim_tod : bool
+        Optional. If True, run pipeline with a simulated map and/or a simulated TOD
+        (or a coadd of both) replacing the real-data TOD before writing to the
+        preproc DBs and running the pipelines.
+        If False, noise_aman and sim_map are ignored.
+    NEW - sim_aman_file : str
+        Optional. Path to H5 file ith AxisManager with simulated TOD.
+        If not None, sim_aman.signal will replace the aman.signal.
+        Accepts fstring obs_id, freq, and wafer.
+        Should be compatible with obs_id. Ignored if load_sim_tod is False.
+    NEW - sim_map_file : str
+        Optional. Path to imulated TQU map to read in as modulated signal TOD
+        before both preprocessing layers using demod_mm.from_map. 
+        Ignored if load_sim_tod is False.
 
     Returns
     -------
@@ -1308,6 +1327,8 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
     """
+    if load_sim_tod and sim_map is not None:
+        raise NotImplementedError("sim_map is not implemented yet.")
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
 
@@ -1429,11 +1450,44 @@ def preproc_or_load_group(obs_id, configs_init, dets, configs_proc=None,
                                                        subdir=init_temp_subdir)
 
             aman = context_init.get_obs(obs_id, dets=dets)
+            print("dets in preproc", dets.keys())
+            print("dets.wafer_slot", dets["wafer_slot"])
+            wafer = str(dets["wafer_slot"])
+            freq = str(dets["wafer.bandpass"])
+            print("wafer", wafer, "freq", freq)
+            
+
             tags = np.array(context_init.obsdb.get(aman.obs_info.obs_id,
                                                    tags=True)['tags'])
             aman.wrap('tags', tags)
-            proc_aman, success = pipe_init.run(aman)
+            # NOTE: This is where preprocessing happens if a preproc_db doesn't
+            # yet exist. # TODO: implement sim_map.
+            if save_raw_tod:    
+                fname_aman = "/".join(out_dict_init['temp_file'].split("/")[:-1])
+                fname_aman += f"/raw_tod_{obs_id}_{wafer}_{freq}.h5"
+                print("save_file", fname_aman)
+                if not os.path.isfile(fname_aman) or overwrite:
+                    logger.info("Saving data axis manager with raw tod to "
+                                f"{fname_aman}")
+                    
+                aman.save(fname_aman, overwrite=True)
+                
+
+            if load_sim_tod and sim_aman_file is not None:
+                sim_fn = sim_aman_file.format(obs_id=obs_id,
+                                              freq=freq,
+                                              wafer=wafer)
+                print("Is file?", os.path.isfile(sim_fn))
+                sim_aman = core.AxisManager.load(sim_fn)
+
+                aman.move("signal", None)
+                aman.wrap("signal", sim_aman.signal,
+                          [(0, 'dets'), (1, 'samps')])
+
+            print("Before init")
+            proc_aman, success = pipe_init.run(aman)    
             aman.wrap('preprocess', proc_aman)
+            print("After init")
         except Exception as e:
             errmsg, tb = PreprocessErrors.get_errors(e)
             logger.error(f"Pipeline Run Error for {obs_id}: {group}\n{errmsg}\n{tb}")

@@ -21,10 +21,10 @@ import sotodlib.preprocess.preprocess_util as pp_util
 from sotodlib.preprocess.preprocess_util import PreprocessErrors
 from sotodlib.site_pipeline.utils.pipeline import main_launcher
 from sotodlib.site_pipeline.utils.obsdb import get_obslist
+from pixell import enmap
 
 
 logger = pp_util.init_logger("preprocess")
-
 
 def multilayer_preprocess_tod(obs_id: str,
                               configs_init: Union[str, dict],
@@ -32,7 +32,11 @@ def multilayer_preprocess_tod(obs_id: str,
                               group: list,
                               verbosity: int = 0,
                               compress: bool = False,
-                              overwrite: bool = False):
+                              overwrite: bool = False,
+                              save_raw_tod=False,
+                              load_sim_tod = False,
+                              sim_map_file: str = None,
+                              sim_aman_file: str = None):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
     and saves the results in the ManifestDb specified in the configs.
@@ -55,6 +59,18 @@ def multilayer_preprocess_tod(obs_id: str,
         Whether or not to compress the preprocessing h5 files.
     overwrite : bool
          If True, overwrite contents of temporary h5 files.
+    save_raw_tod: bool
+        Optional. Whether to save raw AxisManager to disk before running the
+        initial pipeline.
+    load_sim_tod: bool
+        Optional. Whether to inject simulated TOD signal instead of real data.
+    sim_aman_file: str
+        Optional. Path to AxisManager HDF5 file containing simulated TOD.
+        Ignored if load_sim_tod is False. Accepts fstrings obs_id, freq, and
+        wafer.
+    sim_map_file: str
+        Optional. Path to signal map to replace signal TOD.
+        Ignored if load_sim_tod is False.
 
     Returns
     -------
@@ -72,10 +88,17 @@ def multilayer_preprocess_tod(obs_id: str,
         and the traceback. Each will be None if preproc_or_load_group finished
         successfully.
     """
-    logger = pp_util.init_logger("preprocess", verbosity=verbosity)
+    logger = pp_util.init_logger("preprocess_sim", verbosity=verbosity)
 
     group_by = np.atleast_1d(configs_proc['subobs'].get('use', 'detset'))
     dets = {gb:gg for gb, gg in zip(group_by, group)}
+
+    # DEBUG
+    print("dets in multilayer", dets)
+
+    sim_map = None
+    if sim_map_file is not None:
+        sim_map = enmap.read_map(sim_map_file)
     aman, out_dict_init, out_dict_proc, errors = pp_util.preproc_or_load_group(
         obs_id=obs_id,
         configs_init=configs_init,
@@ -85,6 +108,10 @@ def multilayer_preprocess_tod(obs_id: str,
         overwrite=overwrite,
         save_archive=False,
         compress=compress,
+        save_raw_tod=save_raw_tod,
+        load_sim_tod=load_sim_tod,
+        sim_map=sim_map,
+        sim_aman_file=sim_aman_file
     )
 
     return out_dict_init, out_dict_proc, errors
@@ -191,10 +218,14 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           compress: bool = False,
           run_from_jobdb: bool = False,
           raise_error: bool = False,
-          pb_path: Optional[str] = None):
+          pb_path: Optional[str] = None,
+          save_raw_tod: Optional[str] = False,
+          load_sim_tod: Optional[bool] = False,
+          sim_aman_file: Optional[str] = None,
+          sim_map_file: Optional[str] = None):
 
     init_temp_subdir = "temp"
-    proc_temp_subdir = "temp_proc"
+    proc_temp_subdir = "temp_proc"\
 
     tqdm.monitor_interval = 0
 
@@ -394,6 +425,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 verbosity=verbosity,
                 compress=compress,
                 overwrite=overwrite,
+                save_raw_tod=save_raw_tod,
+                load_sim_tod=load_sim_tod,
+                sim_aman_file=sim_aman_file,
+                sim_map_file=sim_map_file
             )
         )
 
@@ -559,6 +594,29 @@ def get_parser(parser=None):
         type=str,
         default=None
     )
+    parser.add_argument(
+        '--save-raw-tod',
+        help="Whether to save TOD to disk before runnning initial pipeline.",
+        action='store_true',
+    )
+    parser.add_argument(
+        '--load-sim-tod',
+        help="Whether to inject simulated TOD signal instead of real data.",
+        action="store_true"
+    )
+    parser.add_argument(
+        '--sim-aman-file',
+        help="Path to AxisManager HDF5 file containing simulated TOD. Accepts"
+             " fstrings obs_id, freq, and wafer.",
+        type=str,
+        default=None
+    )
+    parser.add_argument(
+        '--sim-map-file',
+        help="Path to signal map to replace signal TOD.",
+        type=str,
+        default=None
+    )
     return parser
 
 
@@ -577,7 +635,11 @@ def main(configs_init: str,
          nproc: int = 4,
          run_from_jobdb: bool = False,
          raise_error: bool = False,
-         pb_path: Optional[str] = None):
+         pb_path: Optional[str] = None,
+         save_raw_tod: Optional[bool] = False,
+         load_sim_tod: Optional[bool] = False,
+         sim_aman_file: Optional[str] = None,
+         sim_map_file: Optional[str] = None):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -598,7 +660,12 @@ def main(configs_init: str,
               compress=compress,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error,
-              pb_path=pb_path)
+              pb_path=pb_path,
+              save_raw_tod=save_raw_tod,
+              load_sim_tod=load_sim_tod,
+              sim_aman_file=sim_aman_file,
+              sim_map_file=sim_map_file,
+              )
 
 
 if __name__ == '__main__':
