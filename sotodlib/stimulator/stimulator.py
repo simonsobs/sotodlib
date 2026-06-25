@@ -134,8 +134,10 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
 
     if valid_timeconstant:
         filter_freqs = {}
-        for key, freq in zip(aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs):
-            if key == 'f1_gain':
+        for key, freq in zip(
+            aman.stm_cal.chopping_freq_key.vals, aman.stm_cal.chopping_freqs
+        ):
+            if key == "f1_gain":
                 continue
 
             if round(freq) != CHOPPING_FREQS[key]:
@@ -365,7 +367,9 @@ def get_encoder_timing(aman, hkdata):
         valid_data = False
     else:
         # Add timing against encoder to axis manager
-        aman.stm_cal.wrap('frac_timing', np.array(frac_timing), [(0,'samps')], overwrite=True)
+        aman.stm_cal.wrap(
+            "frac_timing", np.array(frac_timing), [(0, "samps")], overwrite=True
+        )
 
     return valid_data
 
