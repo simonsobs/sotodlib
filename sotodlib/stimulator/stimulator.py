@@ -690,31 +690,31 @@ def initialize_aman(aman, init_type, model, n_bins=None):
 
     if init_type == "coadd":
         # Initalize axis manager for co-added data. Overwrite if already exists
-        if "coadd_data" not in aman.stm_cal.keys():
-            axis_bins = core.IndexAxis("stm_coadd_bins", n_bins)
-            aman.stm_cal.wrap("coadd_data", core.AxisManager(aman.dets, axis_bins))
+        ensure_wrapped(
+            aman.stm_cal,
+            "coadd_data",
+            axis=core.AxisManager(aman.dets, core.IndexAxis("stm_coadd_bins", n_bins)),
+        )
 
         for filt_key in filt_keys:
-            if filt_key not in aman.stm_cal.coadd_data.keys():
-                aman.stm_cal.coadd_data.wrap(filt_key, core.AxisManager())
+            ensure_wrapped(aman.stm_cal.coadd_data, filt_key, axis=core.AxisManager())
 
             for freq_key in freq_keys:
-                if freq_key not in aman.stm_cal.coadd_data[filt_key].keys():
-                    aman.stm_cal.coadd_data[filt_key].wrap(
-                        freq_key,
-                        core.AxisManager(
-                            aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
-                        ),
-                    )
+                ensure_wrapped(
+                    aman.stm_cal.coadd_data[filt_key],
+                    freq_key,
+                    axis=core.AxisManager(
+                        aman.dets, aman.stm_cal.coadd_data.stm_coadd_bins
+                    ),
+                )
 
-                    for key in ["x", "y", "yerr"]:
-                        arr = np.full((aman.dets.count, n_bins), np.nan)
-                        aman.stm_cal.coadd_data[filt_key][freq_key].wrap(
-                            f"{key}",
-                            arr,
-                            [(0, "dets"), (1, "stm_coadd_bins")],
-                            overwrite=True,
-                        )
+                for key in ["x", "y", "yerr"]:
+                    ensure_wrapped(
+                        aman.stm_cal.coadd_data[filt_key][freq_key],
+                        key,
+                        arr=np.full((aman.dets.count, n_bins), np.nan),
+                        axis=[(0, "dets"), (1, "stm_coadd_bins")],
+                    )
 
         # Initialize axis manager for fit results. Do not overwrite if already exists.
         field = ensure_wrapped(aman.stm_cal, "fit_coadd")
