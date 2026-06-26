@@ -11,7 +11,16 @@ from sotodlib.stimulator.utils_stimulator import (
     func_response_phase_with_dt,
 )
 
-CHOPPING_FREQS = {"f1": 6, "f2": 15, "f3": 33, "f4": 63, "f5": 93, "f6": 123, "f7": 147}
+CHOPPING_FREQS = {
+    "f1_gain": 6,
+    "f1": 6,
+    "f2": 15,
+    "f3": 33,
+    "f4": 63,
+    "f5": 93,
+    "f6": 123,
+    "f7": 147,
+}
 STM_NORMALIZE_TEMP = (
     750  # Kelvin. Normalization temperature for stimulator signal temperature.
 )
@@ -553,8 +562,7 @@ def initialize_aman(aman, init_type, model, n_bins=None):
         freq_keys = aman.stm_cal.chopping_freq_key.vals
     elif init_type == "timeconstant":
         freq_keys = aman.stm_cal.chopping_freq_key.vals
-        if "f1_gain" in freq_keys:
-            freq_keys.remove("f1_gain")
+        freq_keys = freq_keys[freq_keys != "f1_gain"]
     else:
         raise ValueError(
             f"'{init_type}' is a wrong initialization type. Please specify 'coadd' or 'timeconstant'."
@@ -604,11 +612,15 @@ def initialize_aman(aman, init_type, model, n_bins=None):
                         axis=[(0, "dets"), (1, "stm_coadd_bins")],
                     )
 
-        ensure_wrapped(aman.stm_cal, "filtering_params", axis=core.AxisManager())
+        ensure_wrapped(
+            aman.stm_cal,
+            "filtering_params",
+            axis=core.AxisManager(aman.stm_cal.chopping_freq_key),
+        )
         ensure_wrapped(
             aman.stm_cal.filtering_params,
             "filter_freqs",
-            arr=np.full(aman.stm_cal.chopping_freq_key.size, np.nan),
+            arr=np.full(aman.stm_cal.chopping_freq_key.count, np.nan),
             axis=[(0, "chopping_freq_key")],
         )
 
@@ -654,9 +666,10 @@ def initialize_aman(aman, init_type, model, n_bins=None):
             for filt_key in filt_keys:
                 if filt_key == "iirc":
                     continue
-                index_axis = core.IndexAxis(
-                    "ndata_taufit", aman.stm_cal.filtering_params.filter_freq_tau.size
-                )
+
+                ndata_taufit = np.sum(aman.stm_cal.chopping_freq_key.vals != "f1_gain")
+
+                index_axis = core.IndexAxis("ndata_taufit", ndata_taufit)
                 field = ensure_wrapped(
                     aman.stm_cal[fit_key],
                     filt_key,
@@ -671,7 +684,7 @@ def initialize_aman(aman, init_type, model, n_bins=None):
                     arr=np.full(
                         (
                             aman.dets.count,
-                            aman.stm_cal.filtering_params.filter_freq_tau.size,
+                            ndata_taufit,
                         ),
                         np.nan,
                     ),
@@ -691,7 +704,7 @@ def initialize_aman(aman, init_type, model, n_bins=None):
                     arr=np.full(
                         (
                             aman.dets.count,
-                            aman.stm_cal.filtering_params.filter_freq_tau.size,
+                            ndata_taufit,
                         ),
                         np.nan,
                     ),
@@ -757,7 +770,7 @@ def filtering(
     )
     aman.stm_cal.filtering_params.filter_freqs[
         aman.stm_cal.chopping_freq_key.vals == freq_key
-    ][0] = filter_freq
+    ] = filter_freq
 
 
 def get_coadd_data(aman, freq_key, n_bins, det_mask):
@@ -801,10 +814,7 @@ def get_coadd_data(aman, freq_key, n_bins, det_mask):
             if filt_key == "hpf" or filt_key == "iirc":
                 key = f"signal_{filt_key}"
             elif filt_key == "lpf":
-                if freq_key == "f1_gain":
-                    key = "signal_lpf"
-                else:
-                    key = f"signal_lpf_{freq_key}"
+                key = f"signal_lpf_{freq_key}"
 
             data = [[] for _ in range(n_bins)]
             for i_bin in range(n_bins):

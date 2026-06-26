@@ -309,7 +309,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         )
         filter_cutoff = (
             aman.stm_cal.filtering_params["lpf_cutoff_factor"]
-            * aman.stm_cal.filtering_params[
+            * aman.stm_cal.filtering_params.filter_freqs[
                 aman.stm_cal.chopping_freq_key.vals == "f1_gain"
             ][0]
         )
