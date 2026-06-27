@@ -497,10 +497,13 @@ class DataPackaging:
         if books != 0:
             complete[0] = False
             complete[1] += f"Have {books} unbound or failed books in timecode \n"
+        if complete[0]:
+            complete[1] += f"Timecode {timecode} is complete"
         return complete
 
     def books_in_timecode(
-        self, timecode, include_wont_fix=False, include_hk=True
+        self, timecode, include_wont_fix=False, include_hk=True,
+        include_level2_deleted=True,
     ):
         min_ctime = timecode*1e5
         max_ctime = (timecode+1)*1e5
@@ -513,6 +516,8 @@ class DataPackaging:
             q = q.filter(Books.status != WONT_BIND)
         if not include_hk:
             q = q.filter(Books.type != 'hk')
+        if not include_level2_deleted:
+            q = q.filter(not_(Books.lvl2_deleted))
         return q.all()
 
     def file_list_from_database(
@@ -643,19 +648,39 @@ class DataPackaging:
                 self.logger.warning(msg)
                 deletable[0] = True
                 deletable[1] += msg
+        if deletable[0]:
+            deletable[1] += f"Timecode {timecode} is deletable"
         return deletable
 
     def delete_timecode_level2(
         self, timecode, dry_run=True, include_hk=True, 
         verify_with_librarian=True,
     ):
-        book_list = self.books_in_timecode(timecode, include_hk=include_hk)
+        book_list = self.books_in_timecode(
+            timecode, include_hk=include_hk, 
+            include_level2_deleted=False,
+        )
+        good_to_delete = []
         books_not_deleted = []
 
         for book in book_list:
+            if verify_with_librarian:
+                in_lib = self.imprint.check_book_in_librarian(
+                    book, n_copies=2, n_tries=2,
+                    raise_on_error=False
+                )
+                if in_lib:
+                    good_to_delete.append(book)
+                else:
+                    books_not_deleted.append(book)   
+            else:
+                good_to_delete.append(book)    
+        
+        for book in good_to_delete:
+            # verify false here because, if true, we just checked it
             stat = self.imprint.delete_level2_files(
-                book, verify_with_librarian=verify_with_librarian,
-                n_copies_in_lib=2, dry_run=dry_run, n_tries=2
+                book, verify_with_librarian=False,
+                dry_run=dry_run,
             )
             if stat > 0:
                 books_not_deleted.append(book)    
@@ -665,8 +690,8 @@ class DataPackaging:
             for book in books_not_deleted:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
-            return False, ""
-        return True, ""
+            return False, msg
+        return True, f"Level 2 deleted for Timecode {timecode}"
 
     
     def delete_timecode_staged(
@@ -697,7 +722,7 @@ class DataPackaging:
                 msg += f'\t{book.bid}\n'   
             self.logger.error(msg)
             return False, msg
-        return True, ""
+        return True, f"Staged deleted for Timecode {timecode}"
     
     def check_and_delete_timecode(
         self, timecode, include_hk=True, verify_with_librarian=True
@@ -720,9 +745,11 @@ class DataPackaging:
             timecode, dry_run=False, include_hk=include_hk,
             verify_with_librarian=verify_with_librarian,
         )
+        return check
 
+    def cleanup_level2_folders(self, timecode):
         if not self.imprint.build_det:
-            return check
+            return 
         stc = os.path.join(self.SMURF.meta_path, str(timecode))
         ttc = os.path.join(self.SMURF.archive_path, str(timecode))
 
@@ -732,4 +759,4 @@ class DataPackaging:
         if os.path.exists(ttc):
             if len(os.listdir(ttc)) == 0 or just_suprsync(ttc):
                 shutil.rmtree(ttc)
-        return check
+        return 
