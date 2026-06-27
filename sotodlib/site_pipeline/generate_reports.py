@@ -329,6 +329,25 @@ def render_report(
     env = Environment(loader=FileSystemLoader(template_dir))
     template = env.get_template("report.html")
 
+    time_plots = {
+        "el_vs_time": ("el_center", "Elevation [deg]", "Elevation", lambda x: np.round(x, 2)),
+        "temp_vs_time": ("temp", "Ambient Temperature [°C]", "Ambient Temperature", lambda x: np.round(x, 2)),
+        "uv_vs_time": ("uv", "UV Index", "UV Index", None),
+        "wind_speed_vs_time": ("wind_speed", "Wind Speed [m/s]", "Wind Speed", None),
+        "wind_dir_vs_time": ("wind_dir", "Wind Direction [deg]", "Wind Direction", None),
+    }
+
+    time_figs = {
+        name: plots.plot_obs_timeseries(
+            data,
+            field=field,
+            ylabel=ylabel,
+            title=title,
+            transform=transform,
+        )
+        for name, (field, ylabel, title, transform) in time_plots.items()
+    }
+
     obs_efficiency_plots = plots.wafer_obs_efficiency(data)
     source_footprint_plots = plots.source_footprints(data)
     figures: Dict[str, go.Figure] = {
@@ -336,11 +355,6 @@ def render_report(
         "obs_efficiency_pie": obs_efficiency_plots.pie,
         "obs_efficiency_pie_pwv": obs_efficiency_plots.pie_good_pwv,
         "boresight_vs_time": plots.boresight_vs_time(data),
-        "el_vs_time": plots.el_vs_time(data),
-        "temp_vs_time": plots.temp_vs_time(data),
-        "uv_vs_time": plots.uv_vs_time(data),
-        "wind_speed_vs_time": plots.wind_speed_vs_time(data),
-        "wind_dir_vs_time": plots.wind_dir_vs_time(data),
         "scan_type_vs_time": plots.scan_type_vs_time(data),
         "hwp_freq_vs_time": plots.hwp_freq_vs_time(data),
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
@@ -352,6 +366,7 @@ def render_report(
         "source_focalplane": source_footprint_plots.focalplane,
         "source_table": source_footprint_plots.table,
         "map_png": plots.cov_map_plot(map_png_file),
+        **time_figs,
     }
 
     html_kw = dict(full_html=False, include_plotlyjs=False)
@@ -373,28 +388,52 @@ def render_report(
             # keep only observations and not operations
             if o.obs_type != "obs":
                 continue
-            is_close = any(abs(o.start_time - start_time) <= 20 for start_time in start_times)
+            is_close = any(abs(o.start_time - start_time) <= 60 for start_time in start_times)
             if not is_close:
                 unique_obs.append(o)
                 start_times.append(o.start_time)
     else:
         unique_obs = [o for o in data.obs_list if o.obs_type == "obs"]
 
-    total_time = (dt.datetime.fromisoformat(stop_time_str) - dt.datetime.fromisoformat(start_time_str)).total_seconds() / 3600
+    start = dt.datetime.fromisoformat(start_time_str)
+    stop = dt.datetime.fromisoformat(stop_time_str)
+
+    total_time_hrs = (stop - start).total_seconds() / 3600
+    # 10 minute time chunks
+    NSEG = int(np.ceil(total_time_hrs / 6))
 
     if data.pwv is not None:
-        mask = data.pwv[1] < 3
-        timediff = np.diff(data.pwv[0][mask])
-        # prevent gaps from adding time unnecessarily
-        mask = timediff < 120
-        good_time = np.sum(timediff[mask]) / 3600
-    else:
-        good_time = 0.
 
-    cmb_good_pwvtime = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv < 3])) / 3600
-    cmb_all_pwvtime = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv])) / 3600
-    idle_good_time = good_time - cmb_good_pwvtime
-    idle_all_time = total_time - cmb_all_pwvtime
+        t = np.asarray(data.pwv[0])
+        pwv = np.asarray(data.pwv[1])
+
+        t0 = start.timestamp()
+        t1 = stop.timestamp()
+
+        edges = np.linspace(t0, t1, NSEG + 1)
+
+        good = 0
+
+        for i in range(NSEG):
+            m = (t >= edges[i]) & (t < edges[i + 1])
+
+            if np.any(m):
+                mean_pwv = np.mean(pwv[m])
+            else:
+                continue
+
+            if mean_pwv < 3:
+                good += 1
+
+        good_pwv_time_hrs = total_time_hrs * (good / NSEG)
+
+    else:
+        good_pwv_time_hrs = 0
+
+    cmb_good_pwv_time_hrs = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv < 3])) / 3600
+    cmb_all_pwv_time_hrs = np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb" and o.pwv])) / 3600
+    idle_good_pwv_time_hrs = good_pwv_time_hrs - cmb_good_pwv_time_hrs
+    idle_all_pwv_time_hrs = total_time_hrs - cmb_all_pwv_time_hrs
 
     jinja_data = {
         "data": data,
@@ -412,10 +451,10 @@ def render_report(
             "Number of Cal Observations": len([o for o in unique_obs if o.obs_subtype == "cal"]),
             "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb"])) / 3600, 1),
             "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cal"])) / 3600, 1),
-            "Percentage of Time on CMB Observations (Any slot | PWV < 3):": np.round(100 * cmb_good_pwvtime / good_time, 2),
-            "Percentage of Time on CMB Observations (Any slot):": np.round(100 * cmb_all_pwvtime / total_time, 2),
-            "Percentage of Time spent not observing CMB (Any slot | PWV < 3):": np.round(100 * idle_good_time / good_time, 2),
-            "Percentage of Time spent not observing CMB (Any slot):": np.round(100 * idle_all_time / total_time, 2),
+            "Percentage of Time on CMB Observations (Any slot | PWV < 3):": np.round(100 * cmb_good_pwv_time_hrs / good_pwv_time_hrs, 2),
+            "Percentage of Time on CMB Observations (Any slot):": np.round(100 * cmb_all_pwv_time_hrs / total_time_hrs, 2),
+            "Percentage of Time spent not observing CMB (Any slot | PWV < 3):": np.round(100 * idle_good_pwv_time_hrs / good_pwv_time_hrs, 2),
+            "Percentage of Time spent not observing CMB (Any slot):": np.round(100 * idle_all_pwv_time_hrs / total_time_hrs, 2),
             "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cmb"]) else 0,
             "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
             "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
