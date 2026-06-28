@@ -46,6 +46,11 @@ LAT_TUBE_SLOTS = (
 SAT_WAFER_SLOTS = tuple(f"ws{i}" for i in range(7))
 
 
+# ============================================================
+# Helper plots for wafers, hover text, and colors.
+# ============================================================
+
+
 def get_wafers(platform: str) -> list[str]:
     """Return wafer identifiers for a given platform."""
 
@@ -660,7 +665,7 @@ def hwp_freq_vs_time(d: ReportData) -> go.Figure:
 
 # ============================================================
 # PWV, Yield, and NEPs (array averaged and effective detector)
-# related plots.
+# vs time.
 # ============================================================
 
 
@@ -843,6 +848,12 @@ def pwv_and_nep_vs_time(d, field_name="array"):
     return pwv_and_timeseries_vs_time(d, mode="nep", field_name=field_name)
 
 
+# ============================================================
+# Yield and NEPs (array averaged and effective detector)
+# vs PWV.
+# ============================================================
+
+
 def field_vs_pwv(
     d: "ReportData",
     mode: str,
@@ -1015,6 +1026,188 @@ def nep_vs_pwv(d, longterm_data=None, field_name=None):
         longterm_data=longterm_data,
         field_name=field_name,
     )
+
+
+# ============================================================
+# PWV and Yield histograms.
+# ============================================================
+
+
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from collections import defaultdict
+
+
+def field_hist(
+    d: "ReportData",
+    mode: str,
+    field_name: str | None = None,
+) -> go.Figure:
+    """
+    Histogram of yield or NEP values (PWV removed), plotted as band-paired subplots.
+    """
+
+    band_pairs = [
+        ("f090", "f150"),
+    ]
+
+    if d.cfg.platform in ["satp2", "lat"]:
+        band_pairs.append(("f220", "f280"))
+
+    if d.cfg.platform == "lat":
+        band_pairs.append(("f030", "f040"))
+
+    values = defaultdict(lambda: defaultdict(list))
+
+    for obs in d.obs_list:
+        if obs.obs_subtype != "cmb":
+            continue
+
+        if mode == "yield":
+            if obs.num_valid_dets.size == 0:
+                continue
+
+            for b in obs.num_valid_dets.dtype.names:
+                values[b]["yield"].append(obs.num_valid_dets[b][0])
+
+        elif mode == "nep":
+            field = obs.array_nep if field_name == "array" else obs.det_nep
+            if field.size == 0:
+                continue
+
+            for b in field.dtype.names:
+                for i, pol in enumerate(field[b].dtype.names):
+                    values[b][pol].append(field[b][0][i])
+
+    nrows = len(band_pairs)
+
+    fig = make_subplots(
+        rows=nrows,
+        cols=1,
+        shared_yaxes=True,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.1,
+    )
+
+    i = 0
+
+    for r, (b1, b2) in enumerate(band_pairs, start=1):
+        # Get bins
+        arr1_list = [np.asarray(v) for v in values[b1].values() if len(v) > 0]
+        arr2_list = [np.asarray(v) for v in values[b2].values() if len(v) > 0]
+
+        if len(arr1_list) == 0 and len(arr2_list) == 0:
+            continue
+
+        arr1 = np.concatenate(arr1_list)
+        arr2 = np.concatenate(arr2_list)
+
+        arr1 = arr1[np.isfinite(arr1)]
+        arr2 = arr2[np.isfinite(arr2)]
+
+        all_arr = np.concatenate([arr1, arr2])
+
+        lo, hi = np.nanpercentile(all_arr, [1, 99])
+
+        xbins = dict(
+            start=lo,
+            end=hi,
+            size=(hi - lo) / 40
+        )
+
+        for b in [b1, b2]:
+            for k, arr in values[b].items():
+
+                arr = np.asarray(arr)
+                arr = arr[np.isfinite(arr)]
+
+                label = (
+                    f"{k} ({b})"
+                    if mode == "nep"
+                    else f"Valid Dets ({b})"
+                )
+
+                fig.add_trace(
+                    go.Histogram(
+                        x=arr,
+                        name=label,
+                        xbins=xbins,
+                        opacity=0.5,
+                        marker=dict(
+                            color=MARKER_COLORS[i % len(MARKER_COLORS)],
+                            line=dict(width=1, color="black"),
+                        ),
+                        showlegend=True,
+                    ),
+                    row=r,
+                    col=1,
+                )
+
+                i += 1
+
+    if mode == "yield":
+        title = "Valid Detector Yield"
+        xlab = "Num Valid Dets"
+    else:
+        title = f"{field_name.capitalize()} NEP"
+        xlab = r"NEP [aW / √Hz]"
+
+    fig.update_layout(
+        barmode="overlay",
+        template="plotly_white",
+        height=320 * nrows,
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+            font=dict(size=18),
+        ),
+        margin=dict(l=40, r=40, t=140, b=40),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="lightgray",
+            borderwidth=1,
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text=xlab,
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+
+    fig.update_yaxes(
+        title_text="N",
+        showgrid=True,
+        gridcolor="lightgray",
+        zeroline=False,
+    )
+
+    return fig
+
+
+def yield_hist(d):
+    return field_hist(d, mode="yield")
+
+
+def nep_hist(d, field_name=None):
+    return field_hist(
+        d,
+        mode="nep",
+        field_name=field_name,
+    )
+
+
+# ============================================================
+# Coverage map.
+# ============================================================
 
 
 def cov_map_plot(map_png_file: str, embed:bool=True) -> str:

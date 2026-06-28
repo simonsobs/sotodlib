@@ -359,10 +359,13 @@ def render_report(
         "hwp_freq_vs_time": plots.hwp_freq_vs_time(data),
         "yield_vs_pwv": plots.yield_vs_pwv(data, longterm_data=longterm_data),
         "pwv_yield_vs_time": plots.pwv_and_yield_vs_time(data),
+        "yield_hist": plots.yield_hist(data),
         "pwv_and_array_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="array"),
         "array_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="array"),
+        "array_nep_hist": plots.nep_hist(data, field_name="array"),
         "pwv_and_det_nep_vs_time": plots.pwv_and_nep_vs_time(data, field_name="det"),
         "det_nep_vs_pwv": plots.nep_vs_pwv(data, longterm_data=longterm_data, field_name="det"),
+        "det_nep_hist": plots.nep_hist(data, field_name="det"),
         "source_focalplane": source_footprint_plots.focalplane,
         "source_table": source_footprint_plots.table,
         "map_png": plots.cov_map_plot(map_png_file),
@@ -400,7 +403,7 @@ def render_report(
 
     total_time_hrs = (stop - start).total_seconds() / 3600
     # 10 minute time chunks
-    NSEG = int(np.ceil(total_time_hrs / 6))
+    NSEG = int(np.ceil(total_time_hrs * 6))
 
     if data.pwv is not None:
 
@@ -416,11 +419,10 @@ def render_report(
 
         for i in range(NSEG):
             m = (t >= edges[i]) & (t < edges[i + 1])
-
-            if np.any(m):
-                mean_pwv = np.mean(pwv[m])
-            else:
+            if not np.any(m):
                 continue
+
+            mean_pwv = np.mean(pwv[m])
 
             if mean_pwv < 3:
                 good += 1
