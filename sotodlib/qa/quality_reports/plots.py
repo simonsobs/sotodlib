@@ -829,6 +829,7 @@ def pwv_and_timeseries_vs_time(
         secondary_y=False,
         showgrid=True,
         gridcolor="lightgray",
+        type="log",
     )
 
     fig.update_yaxes(
