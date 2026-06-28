@@ -329,7 +329,7 @@ def load_influx_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets', 'bandpass', 'wafer_slot']
+    keys = ['time', 'num_valid_dets', 'bandpass', 'wafer_slot', 'tel_tube']
     if cfg.platform == "lat":
         keys += ['array_noise_T', 'det_noise_T']
     elif cfg.platform in ['satp1', 'satp2', 'satp3']:
@@ -357,14 +357,19 @@ def load_influx_data(cfg: ReportDataConfig) -> pd.DataFrame:
     return df
 
 
-def merge_influx_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scale_factor: float) -> None:
-    timestamps = np.array([o.start_time for o in obs_list if o.obs_type=='obs'])
-    obsids = [o.obs_id for o in obs_list if o.obs_type=='obs']
+def merge_influx_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], platform: str, noise_scale_factor: float) -> None:
+    # Only CMB obs will have preprocessing data
+    timestamps = np.array([o.start_time for o in obs_list if o.obs_subtype=='cmb'])
+    tube_slots = np.array([f"lat{o.obs_tube_slot}" if platform=="lat" else platform for o in obs_list if o.obs_subtype=='cmb'])
+    obsids = np.array([o.obs_id for o in obs_list if o.obs_subtype=='cmb'])
 
-    def find_obsid(ts: float) -> Optional[str]:
-        idx = np.argmin(np.abs(ts - timestamps))
-        if np.isclose(ts, timestamps[idx], atol=1e-6):
-            return obsids[idx]
+    def find_obsid(ts: float, tel_tube: str) -> Optional[str]:
+        m = tube_slots == tel_tube
+        if not np.any(m):
+            return ""
+        idx = np.argmin(np.abs(ts - timestamps[m]))
+        if np.isclose(ts, timestamps[m][idx], atol=1e-6):
+            return obsids[m][idx]
         else:
             return ""
 
@@ -383,7 +388,10 @@ def merge_influx_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_s
         nep = nep_series[mask]
         return 1 / np.sqrt(np.sum(1 / nep**2))
 
-    df["obs_id"] = df["timestamp"].apply(find_obsid)
+    df["obs_id"] = df.apply(
+        lambda row: find_obsid(row["timestamp"], row["tel_tube"]),
+        axis=1,
+    )
 
     det_nep_cols = [c for c in df.columns if "det_noise_" in c]
     array_nep_cols = [c for c in df.columns if "array_noise_" in c]
@@ -400,16 +408,21 @@ def merge_influx_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_s
           .agg(agg_dict)
     )
 
-    totals_dict = (
-    totals.groupby("obs_id")
-          .apply(
-              lambda g: {
-                  row["bandpass"]: {c: row[c] for c in agg_dict.keys()}
-                  for _, row in g.iterrows()
-              }
-          )
-          .to_dict()
-    )
+    totals_dict = {}
+
+    for obs_id, g in totals.groupby("obs_id"):
+        band_dict = {}
+
+        for row in g.itertuples(index=False):
+            band = getattr(row, "bandpass")
+            band_dict[band] = {
+                c: getattr(row, c)
+                for c in agg_dict.keys()
+            }
+
+        totals_dict[obs_id] = band_dict
+
+    obs_lookup = {o.obs_id: o for o in obs_list}
 
     for obs_id, band_totals in totals_dict.items():
         band_totals.pop("NC", None)
@@ -417,27 +430,43 @@ def merge_influx_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_s
         if not obs_id:
             continue
 
-        obs_entry = obs_list[obsids.index(obs_id)]
+        obs_entry = obs_lookup[obs_id]
 
-        det_dtype = [(band, "i4") for band in band_totals.keys()]
-        row = tuple(vals["num_valid_dets"] for _, vals in band_totals.items())
-        obs_entry.num_valid_dets = np.array([row], dtype=det_dtype)
+        det_dtype = [(band, "i4") for band in band_totals]
+        det_row = tuple(vals["num_valid_dets"] for vals in band_totals.values())
+        obs_entry.num_valid_dets = np.array([det_row], dtype=det_dtype)
 
-        for key, attr_name in zip(["array_noise_", "det_noise_"], ["array_nep", "det_nep"]):
-            all_keys = sorted({
-                k
-                for vals in band_totals.values() if isinstance(vals, dict)
-                for k in vals if k.startswith(key)
-            })
+        for key, attr_name in zip(
+            ["array_noise_", "det_noise_"],
+            ["array_nep", "det_nep"],
+        ):
 
-            nep_dtype = [(band, [(k, "f8") for k in all_keys]) for band in band_totals.keys()]
+            nep_dtype = []
+            nep_row = []
 
-            nep_row = tuple(
-                tuple((noise_scale_factor * vals.get(k, np.nan)) for k in all_keys)
-                for _, vals in band_totals.items()
+            for band, vals in band_totals.items():
+
+                band_keys = sorted(
+                    k for k in vals
+                    if k.startswith(key)
+                )
+
+                nep_dtype.append(
+                    (band, [(k, "f8") for k in band_keys])
+                )
+
+                nep_row.append(
+                    tuple(
+                        noise_scale_factor * vals[k]
+                        for k in band_keys
+                    )
+                )
+
+            setattr(
+                obs_entry,
+                attr_name,
+                np.array([tuple(nep_row)], dtype=nep_dtype),
             )
-
-            setattr(obs_entry, attr_name, np.array([nep_row], dtype=nep_dtype))
 
 
 def populate_hkdb_fields(hkdb_data, pwv, obs_list):
@@ -463,7 +492,7 @@ def populate_hkdb_fields(hkdb_data, pwv, obs_list):
 
         if attr == "pwv":
             if pwv is None:
-                logger.warning("PWV data not found")
+                logger.warning("\tPWV data not found")
                 for o in obs_list:
                     o.pwv = np.nan
                 continue
@@ -482,7 +511,7 @@ def populate_hkdb_fields(hkdb_data, pwv, obs_list):
             continue
 
         if hkdb_data is None or key not in hkdb_data:
-            logger.warning(f"{attr} data not found")
+            logger.warning(f"\t{attr} data not found")
             for o in obs_list:
                 setattr(o, attr, np.nan)
             continue
@@ -574,14 +603,14 @@ class ReportData:
     def build(cls, cfg: ReportDataConfig) -> "ReportData":
         ctx = Context(cfg.ctx_path)
 
-        logger.info("Building Obs List")
+        logger.info("Building obs List")
         rows = ctx.obsdb.query(
             f"start_time >= {cfg.start_time.timestamp()} and "
             f"start_time <= {cfg.stop_time.timestamp()}"
         )
 
+        # Get tags
         obs_tags = defaultdict(list)
-
         for obs_id, tag in ctx.obsdb.conn.execute("SELECT obs_id, tag FROM tags"):
             obs_tags[obs_id].append(tag)
 
@@ -625,7 +654,7 @@ class ReportData:
 
         if influx_df is not None:
             logger.info("Merging InfluxDb data with obs list")
-            merge_influx_and_obs_list(influx_df, obs_list, cfg.noise_scale_factor)
+            merge_influx_and_obs_list(influx_df, obs_list, cfg.platform, cfg.noise_scale_factor)
         else:
             logger.warn("InfluxDb data not found")
 

@@ -720,6 +720,9 @@ def pwv_and_timeseries_vs_time(
     hover = defaultdict(list)
 
     for obs in d.obs_list:
+        if obs.obs_subtype != "cmb":
+            continue
+
         t = dt.datetime.fromtimestamp(obs.start_time, tz=dt.timezone.utc)
 
         if mode == "yield":
@@ -898,7 +901,10 @@ def field_vs_pwv(
     hover = defaultdict(list)
 
     for obs in d.obs_list:
-        if not np.isfinite(obs.pwv):
+        if (
+            not np.isfinite(obs.pwv)
+            or obs.obs_subtype != "cmb"
+        ):
             continue
 
         pwvs.append(obs.pwv)
@@ -909,8 +915,6 @@ def field_vs_pwv(
                 continue
 
             for b in field.dtype.names:
-                if 'o3' in obs.obs_id:
-                    print(b, obs.obs_id)
                 vals[b]["yield"].append(field[b][0])
                 hover[b].append(obs_hover(obs))
 
