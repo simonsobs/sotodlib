@@ -1034,12 +1034,6 @@ def nep_vs_pwv(d, longterm_data=None, field_name=None):
 # ============================================================
 
 
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from collections import defaultdict
-
-
 def field_hist(
     d: "ReportData",
     mode: str,
@@ -1056,8 +1050,8 @@ def field_hist(
     if d.cfg.platform in ["satp2", "lat"]:
         band_pairs.append(("f220", "f280"))
 
-    if d.cfg.platform == "lat":
-        band_pairs.append(("f030", "f040"))
+        if d.cfg.platform == "lat":
+            band_pairs.append(("f030", "f040"))
 
     values = defaultdict(lambda: defaultdict(list))
 
@@ -1299,21 +1293,7 @@ def source_footprints(d: "ReportData") -> go.Figure:
              3.50e-07,  0.00561629, -0.00561577,
         ]
 
-        wafers = [
-            'c1_ws0', 'c1_ws1', 'c1_ws2',
-            'i1_ws0', 'i1_ws1', 'i1_ws2',
-            'i2_ws0', 'i2_ws1', 'i2_ws2',
-            'i3_ws0', 'i3_ws1', 'i3_ws2',
-            'i4_ws0', 'i4_ws1', 'i4_ws2',
-            'i5_ws0', 'i5_ws1', 'i5_ws2',
-            'i6_ws0', 'i6_ws1', 'i6_ws2',
-            'o1_ws0', 'o1_ws1', 'o1_ws2',
-            'o2_ws0', 'o2_ws1', 'o2_ws2',
-            'o3_ws0', 'o3_ws1', 'o3_ws2',
-            'o4_ws0', 'o4_ws1', 'o4_ws2',
-            'o5_ws0', 'o5_ws1', 'o5_ws2',
-            'o6_ws0', 'o6_ws1', 'o6_ws2',
-        ]
+        wafers = get_wafers("lat")
 
         wafer_centers = {}
         for i, wafer in enumerate(wafers):
