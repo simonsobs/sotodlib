@@ -286,7 +286,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
              method='interpolate', max_mode=None, modes_axis_name='azss_modes', subtract_in_place=False,
              merge_stats=True, azss_stats_name='azss_stats',
              merge_model=True, azss_model_name='azss_model', coverage_threshold=0.95,
-             exclude_turnarounds=True, return_det_mask=False):
+             exclude_turnarounds=True, return_det_mask=False, return_stats=False):
     """
     Derive azss (Azimuth Synchronous Signal) statistics and model from the given axismanager data.
     **NOTE:** This function does not modify the ``signal`` unless ``subtract_in_place = True``.
@@ -421,10 +421,13 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
                                                 exclude_turnarounds=exclude_turnarounds)
         azss_stats.wrap('bad_dets', bad_dets, [(0, 'dets')])
         azss_stats.wrap('az_coverage', coverages, [(0, 'dets')])
-    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, modes_axis_name, azrange)
 
     if merge_stats:
         aman.wrap(azss_stats_name, azss_stats)
+    if return_stats:
+        return azss_stats
+
+    model_sig_tod = get_azss_model(aman, azss_stats, az, method, max_mode, modes_axis_name, azrange)
     if merge_model:
         aman.wrap(azss_model_name, model_sig_tod, [(0, 'dets'), (1, 'samps')])
     if subtract_in_place:
@@ -570,30 +573,56 @@ def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_m
 
 def subtract_azss_lr(
     aman,
-    azss_l,
-    azss_r,
     signal='signal',
-    az=None,
+    azss_l_name='azss_stats_left',
+    azss_r_name='azss_stats_right',
+    azss_l = None,
+    azss_r = None,
     *,
     apodize_samps=200,
     t_buffer=0.5,
+    flags=None,
     subtract=True,
-    method='interpolate',
-    max_mode=None,
-    modes_axis_name='azss_modes',
-    azrange=None,
+    get_azss_kwargs=dict(
+        azrange=None, bins=100,
+        apodize_edges=True, apodize_edges_samps=1600,
+        apodize_flags=True, apodize_flags_samps=200,
+        apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
+        method='interpolate', max_mode=None, modes_axis_name='azss_modes',
+        coverage_threshold=0.95, exclude_turnarounds=True, return_det_mask=False,
+    ),
 ):
+    if azss_l is None:
+        if flags is None:
+            flags = aman.flags.right_scan
+        else:
+            flags = aman.flags.right_scan + flags
+        azss_l = get_azss(aman, signal='signal', flags=flags,
+                 subtract_in_place=False, return_stats=True,
+                 merge_stats=True, azss_stats_name=azss_l_name, merge_model=False,
+                 **get_azss_kwargs,)
+    if azss_r is None:
+        if flags is None:
+            flags = aman.flags.right_scan
+        else:
+            flags = aman.flags.right_scan + flags
+        azss_r = get_azss(aman, signal='signal', flags=flags,
+                 subtract_in_place=False, return_stats=True,
+                 merge_stats=True, azss_stats_name=azss_r_name, merge_model=False,
+                 **get_azss_kwargs,)
+
+    # how to handle det_mask?
     sym = azss_l.copy()
     asym = azss_l.copy()
     sym.binned_signal = np.nanmean([azss_l.binned_signal, azss_r.binned_signal], axis=0)
     asym.binned_signal = np.nanmean([azss_l.binned_signal, -azss_r.binned_signal], axis=0)
 
-    sym_model = get_azss_model(
-        aman, sym, method=method, max_mode=max_mode,
-        modes_axis_name=modes_axis_name, azrange=azrange)
-    asym_model = get_azss_model(
-        aman, asym, method=method, max_mode=max_mode,
-        modes_axis_name=modes_axis_name, azrange=azrange)
+    # prepare kwargs if get_azss_model
+    # it might be better to make model in get_azss ?
+    # for legendre it's better to interpolate after separating to sym asym?
+    kwargs = {k: get_azss_kwargs.get(k) for k in ['method', 'max_mode', 'azrange', 'modes_axis_name']}
+    sym_model = get_azss_model(aman, sym, **kwargs)
+    asym_model = get_azss_model(aman, asym, **kwargs)
     asym_model *= 2*(aman.flags.left_scan.mask().astype(int) - 0.5)
 
     ta, _, _ = get_turnaround_flags(aman, t_buffer=t_buffer, merge=False)

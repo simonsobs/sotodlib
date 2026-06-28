@@ -1404,6 +1404,13 @@ class SubtractAzSSLR(_Preprocess):
 
       - name: "subtract_azss_template"
         process:
+          azss_l_name: 'azss_statsQ_left'
+          azss_r_name: 'azss_statsQ_left'
+          bins: 1080
+          flags: 'glitch_flags' # 
+
+      - name: "subtract_azss_template"
+        process:
           signal: 'signal'
           azss_l: 'azss_stats_left'
           azss_r: 'azss_stats_left'
@@ -1414,19 +1421,6 @@ class SubtractAzSSLR(_Preprocess):
           max_mode: None,
           modes_axis_name: 'azss_modes',
           azrange: None,
-
-    Note: the azss has to be run in advance, with
-    merge_stats True and subtract False
-
-      - name: "azss"
-        calc:
-          signal: 'demodQ'
-          azss_stats_name: 'azss_stats_left'
-          flags: 'glitch_flags_left'
-          merge_stats: True
-        save: True
-        process:
-          subtract: False
 
     .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_lr
     """
