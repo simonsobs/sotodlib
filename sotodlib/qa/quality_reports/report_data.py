@@ -618,7 +618,6 @@ class ReportData:
         for i, o in enumerate(rows):
             obs_list[i] = ObsInfo.from_obsdb_entry(o)
             obs_list[i].obs_tags = ",".join(obs_tags.get(o["obs_id"], []))
-            # obs_list[i].obs_tags = ",".join(ctx.obsdb.get(o['obs_id'], tags=True)['tags'])
 
         if cfg.longterm_obs_file is not None:
             logger.info("Getting longterm data")

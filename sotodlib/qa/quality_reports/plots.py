@@ -781,7 +781,7 @@ def pwv_and_timeseries_vs_time(
     if mode == "yield":
         title = "Valid Detectors and PWV"
         y_left = "Num Valid Dets"
-        tpad = 80
+        tpad = 140
 
     else:
         title = f"{field_name.capitalize()} NEP and PWV"
@@ -958,7 +958,7 @@ def field_vs_pwv(
     if mode == "yield":
         title = "Valid Detectors and PWV"
         ylab = "Num Valid Dets"
-        tpad = 80
+        tpad = 140
     else:
         title = f"{field_name.capitalize()} NEP and PWV"
         ylab = r"$\rm{NEP\ [aW/\sqrt{Hz}]}$"
