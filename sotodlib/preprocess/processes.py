@@ -1397,7 +1397,7 @@ class AzSS(_Preprocess):
             return keep
 
 
-class SubtractAzSSLT(_Preprocess):
+class SubtractAzSSLR(_Preprocess):
     """Subtract Azimuth Synchronous Signal (AzSS).
 
     Example configuration block::
@@ -1429,8 +1429,8 @@ class SubtractAzSSLT(_Preprocess):
             raise NotImplementedError("No support for using data AxisManager in process")
         process_cfgs = copy.deepcopy(self.process_cfgs)
         process_cfgs["azss_l"] = proc_aman.get(process_cfgs["azss_l"])
-        process_cfgs["azss_r"] = proc_aman.get(process_cfgs["azss_l"])
-        tod_ops.azss.subtract_azss_template(aman, **process_cfgs)
+        process_cfgs["azss_r"] = proc_aman.get(process_cfgs["azss_r"])
+        tod_ops.azss.subtract_azss_lr(aman, **process_cfgs)
         return aman, proc_aman
 
 

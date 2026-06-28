@@ -572,7 +572,7 @@ def subtract_azss_lr(
     aman,
     azss_l,
     azss_r,
-    signal_name='signal',
+    signal='signal',
     az=None,
     *,
     apodize_samps=200,
@@ -600,7 +600,7 @@ def subtract_azss_lr(
     apodizer = apodize.get_apodize_window_from_flags(aman, ta, apodize_samps)
 
     if subtract:
-        aman[signal_name] -= sym_model + asym_model * apodizer
+        aman[signal] -= sym_model + asym_model * apodizer
     return sym_model, asym_model, apodizer
 
 

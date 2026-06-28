@@ -14,6 +14,7 @@ def get_apodize_window_for_ends(aman, apodize_samps=1600):
     """
     w = np.ones(aman.samps.count)
     cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
+    cosedge = 0.5 * (np.cos(np.linspace(0, np.pi, apodize_samps)) + 1)
     w[-apodize_samps:] = cosedge
     w[:apodize_samps] = np.flip(cosedge)
     return w
@@ -50,6 +51,7 @@ def get_apodize_window_from_flags(aman, flags, apodize_samps=200):
     apodizer = ~flags_mask
     apodizer = apodizer.astype(float)
     cosedge = np.cos(np.linspace(0, np.pi/2, apodize_samps))
+    cosedge = 0.5 * (np.cos(np.linspace(0, np.pi, apodize_samps)) + 1)
 
     if flag_is_1d:
         idxes_left = np.where(np.diff(apodizer) == -1)[0]
