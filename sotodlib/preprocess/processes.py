@@ -1404,23 +1404,18 @@ class SubtractAzSSLR(_Preprocess):
 
       - name: "subtract_azss_template"
         process:
-          azss_l_name: 'azss_statsQ_left'
-          azss_r_name: 'azss_statsQ_left'
-          bins: 1080
-          flags: 'glitch_flags' # 
-
-      - name: "subtract_azss_template"
-        process:
-          signal: 'signal'
-          azss_l: 'azss_stats_left'
-          azss_r: 'azss_stats_left'
-          method: 'interpolate'
-          apodize_samps: 200,
-          t_buffer: 0.5,
-          method: 'interpolate',
-          max_mode: None,
-          modes_axis_name: 'azss_modes',
-          azrange: None,
+          signal: dsT
+          flags: glitch_flags
+          apodize_turnarounds_samps: 200
+          t_buffer: 0.5
+          azss_l: azss_statsT_left
+          azss_r: azss_statsT_right
+          subtract: True
+          get_azss_kwargs:
+            azrange: [-1.57079, 7.85398]
+            bins: 1351
+        save: True
+        select: True
 
     .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_lr
     """
@@ -1431,16 +1426,64 @@ class SubtractAzSSLR(_Preprocess):
 
         super().__init__(step_cfgs)
 
+    def calc_and_save(self, aman, proc_aman):
+        if self.process_cfgs:
+            self.savs(proc_aman, None)
+
+        return aman, proc_aman
+
+    def save(self, proc_aman, azss_stats):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap(
+                elf.process_cfgs['azss_l_name'],
+                aman[self.process_cfgs['azss_l_name']]
+            )
+            proc_aman.wrap(
+                elf.process_cfgs['azss_r_name'],
+                aman[self.process_cfgs['azss_r_name']]
+            )
+
     def process(self, aman, proc_aman, sim=False, data_aman=None):
         if data_aman is not None:
             raise NotImplementedError("No support for using data AxisManager in process")
-        process_cfgs = copy.deepcopy(self.process_cfgs)
-        # use azss_stats saved under aman to ensure that
-        # data and sim subtract different azss
-        process_cfgs["azss_l"] = aman.get(process_cfgs["azss_l"])
-        process_cfgs["azss_r"] = aman.get(process_cfgs["azss_r"])
-        tod_ops.azss.subtract_azss_lr(aman, **process_cfgs)
+        azss_l, azss_r = None
+        if not sim:
+            # use azss_stats saved under aman to ensure that
+            # data and sim subtract different azss
+            azss_l = proc_aman.get(process_cfgs["azss_l"])
+            azss_r = proc_aman.get(process_cfgs["azss_r"])
+        tod_ops.azss.subtract_azss_lr(
+            aman,
+            azss_l=azss_l,
+            azss_r=azss_r,
+            signal=self.process_cfg.get('signal'),
+            azss_state_left=self.process_cfg.get('azss_stats_left'),
+            azss_state_right=self.process_cfg.get('azss_stats_right'),
+            flags=self.process_cfg.get('flags'),
+            t_buffer=self.process_cfg.get('flags'),
+            **self.proess_cfg.get('get_azss_kwargs'),
+        )
         return aman, proc_aman
+
+    def select(self, meta, proc_aman=None, in_place=True):
+        if not self.select_cfgs:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+
+        keep = np.ones(meta.dets.count, dtype=bool)
+        if 'bad_dets' in proc_aman.get(process_cfgs["azss_l"]):
+            keep = ~proc_aman[process_cfgs["azss_l"]]['bad_dets']
+        if 'bad_dets' in proc_aman.get(process_cfgs["azss_r"]):
+            keep &= ~proc_aman[process_cfgs["azss_r"]]['bad_dets']
+
+        if in_place:
+            meta.restrict("dets", meta.dets.vals[keep])
+            return meta
+        else:
+            return keep
 
 
 class SubtractAzSSTemplate(_Preprocess):
