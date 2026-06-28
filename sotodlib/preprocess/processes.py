@@ -1415,7 +1415,20 @@ class SubtractAzSSLR(_Preprocess):
           modes_axis_name: 'azss_modes',
           azrange: None,
 
-    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_template
+    Note: the azss has to be run in advance, with
+    merge_stats True and subtract False
+
+      - name: "azss"
+        calc:
+          signal: 'demodQ'
+          azss_stats_name: 'azss_stats_left'
+          flags: 'glitch_flags_left'
+          merge_stats: True
+        save: True
+        process:
+          subtract: False
+
+    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_lr
     """
     name = "subtract_azss_lr"
 
@@ -1428,8 +1441,10 @@ class SubtractAzSSLR(_Preprocess):
         if data_aman is not None:
             raise NotImplementedError("No support for using data AxisManager in process")
         process_cfgs = copy.deepcopy(self.process_cfgs)
-        process_cfgs["azss_l"] = proc_aman.get(process_cfgs["azss_l"])
-        process_cfgs["azss_r"] = proc_aman.get(process_cfgs["azss_r"])
+        # use azss_stats saved under aman to ensure that
+        # data and sim subtract different azss
+        process_cfgs["azss_l"] = aman.get(process_cfgs["azss_l"])
+        process_cfgs["azss_r"] = aman.get(process_cfgs["azss_r"])
         tod_ops.azss.subtract_azss_lr(aman, **process_cfgs)
         return aman, proc_aman
 
