@@ -4,6 +4,7 @@ from numpy.polynomial import legendre as L
 from scipy.interpolate import interp1d
 from sotodlib import core, tod_ops
 from sotodlib.tod_ops import bin_signal, apodize, filters, pca
+from sotodlib.tod_ops.flags import get_turnaround_flags
 import logging
 
 logger = logging.getLogger(__name__)
@@ -565,6 +566,42 @@ def subtract_azss(aman, azss_stats, signal='signal', method='interpolate', max_m
     else:
         subtracted = signal[:, scan_flags] - model.astype(signal.dtype)[:, scan_flags]
         aman.wrap(subtract_name, subtracted, [(0, 'dets'), (1, 'samps')])
+
+
+def subtract_azss_lr(
+    aman,
+    azss_l,
+    azss_r,
+    signal_name='signal',
+    az=None,
+    *,
+    apodize_samps=200,
+    t_buffer=0.5,
+    subtract=True,
+    method='interpolate',
+    max_mode=None,
+    modes_axis_name='azss_modes',
+    azrange=None,
+):
+    sym = azss_l.copy()
+    asym = azss_l.copy()
+    sym.binned_signal = np.nanmean([azss_l.binned_signal, azss_r.binned_signal], axis=0)
+    asym.binned_signal = np.nanmean([azss_l.binned_signal, -azss_r.binned_signal], axis=0)
+
+    sym_model = get_azss_model(
+        aman, sym, method=method, max_mode=max_mode,
+        modes_axis_name=modes_axis_name, azrange=azrange)
+    asym_model = get_azss_model(
+        aman, asym, method=method, max_mode=max_mode,
+        modes_axis_name=modes_axis_name, azrange=azrange)
+    asym_model *= 2*(aman.flags.left_scan.mask().astype(int) - 0.5)
+
+    ta, _, _ = get_turnaround_flags(aman, t_buffer=t_buffer, merge=False)
+    apodizer = apodize.get_apodize_window_from_flags(aman, ta, apodize_samps)
+
+    if subtract:
+        aman[signal_name] -= sym_model + asym_model * apodizer
+    return sym_model, asym_model, apodizer
 
 
 def subtract_azss_template(

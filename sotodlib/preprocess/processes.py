@@ -1397,6 +1397,43 @@ class AzSS(_Preprocess):
             return keep
 
 
+class SubtractAzSSLT(_Preprocess):
+    """Subtract Azimuth Synchronous Signal (AzSS).
+
+    Example configuration block::
+
+      - name: "subtract_azss_template"
+        process:
+          signal: 'signal'
+          azss_l: 'azss_stats_left'
+          azss_r: 'azss_stats_left'
+          method: 'interpolate'
+          apodize_samps: 200,
+          t_buffer: 0.5,
+          method: 'interpolate',
+          max_mode: None,
+          modes_axis_name: 'azss_modes',
+          azrange: None,
+
+    .. autofunction:: sotodlib.tod_ops.azss.subtract_azss_template
+    """
+    name = "subtract_azss_lr"
+
+    def __init__(self, step_cfgs):
+        self.save_name = None
+
+        super().__init__(step_cfgs)
+
+    def process(self, aman, proc_aman, sim=False, data_aman=None):
+        if data_aman is not None:
+            raise NotImplementedError("No support for using data AxisManager in process")
+        process_cfgs = copy.deepcopy(self.process_cfgs)
+        process_cfgs["azss_l"] = proc_aman.get(process_cfgs["azss_l"])
+        process_cfgs["azss_r"] = proc_aman.get(process_cfgs["azss_l"])
+        tod_ops.azss.subtract_azss_template(aman, **process_cfgs)
+        return aman, proc_aman
+
+
 class SubtractAzSSTemplate(_Preprocess):
     """Subtract Azimuth Synchronous Signal (AzSS) common template.
     Make common template by weighted mean or pca.
@@ -3293,6 +3330,7 @@ _Preprocess.register(A2Stats)
 _Preprocess.register(Apodize)
 _Preprocess.register(Demodulate)
 _Preprocess.register(AzSS)
+_Preprocess.register(SubtractAzSSLR)
 _Preprocess.register(SubtractAzSSTemplate)
 _Preprocess.register(GlitchFill)
 _Preprocess.register(FlagTurnarounds)
