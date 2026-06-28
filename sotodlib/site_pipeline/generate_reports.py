@@ -437,6 +437,18 @@ def render_report(
     idle_good_pwv_time_hrs = good_pwv_time_hrs - cmb_good_pwv_time_hrs
     idle_all_pwv_time_hrs = total_time_hrs - cmb_all_pwv_time_hrs
 
+    # get number of 20 min gaps (det setup time) and longest gap between obs_ids with obs type
+    gaps = []
+    longest_gap = 0
+    unique_obs_sorted = sorted(unique_obs, key=lambda o: o.start_time)
+    unique_obs_sorted = [o for o in unique_obs_sorted if o.obs_type == "obs"]
+    for prev, curr in zip(unique_obs_sorted[:-1], unique_obs_sorted[1:]):
+        gap = curr.start_time - prev.stop_time
+        if gap > 1200:
+            gaps.append(gap)
+        if gap > longest_gap:
+            longest_gap = gap
+
     jinja_data = {
         "data": data,
         "report_interval": cfg.report_interval.capitalize(),
@@ -451,6 +463,8 @@ def render_report(
             "Number of Observations": len([o for o in unique_obs]),
             "Number of CMB Observations": len([o for o in unique_obs if o.obs_subtype == "cmb"]),
             "Number of Cal Observations": len([o for o in unique_obs if o.obs_subtype == "cal"]),
+            "Number of > 20 min Gaps Between Obs": len(gaps),
+            "Longest Gap Between Obs (hrs)": np.round(longest_gap / 3600, 2),
             "Time Spent on CMB Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cmb"])) / 3600, 1),
             "Time Spent on Cal Observations (hrs)": np.round(np.sum(np.array([o.duration for o in unique_obs if o.obs_subtype == "cal"])) / 3600, 1),
             "Percentage of Time on CMB Observations (Any slot | PWV < 3):": np.round(100 * cmb_good_pwv_time_hrs / good_pwv_time_hrs, 2),
@@ -460,6 +474,8 @@ def render_report(
             "Average Duration of CMB Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cmb"]) else 0,
             "Average Duration of Cal Observations (hrs)": np.round(np.nanmean(v) / 3600, 2) if (v := [o.duration for o in unique_obs if o.obs_subtype == "cal"]) else 0,
             "Average Obs PWV (mm)": np.round(np.nanmean([o.pwv for o in unique_obs]), 3),
+            "Median Obs PWV (mm)": np.round(np.nanmedian([o.pwv for o in unique_obs]), 3),
+            "Stddev Obs PWV (mm)": np.round(np.std([o.pwv for o in unique_obs]), 3),
         }
     }
 
