@@ -245,6 +245,10 @@ class FilterTest(unittest.TestCase):
         timeconst = np.full(tod.dets.count, 1e-3)
         tod.wrap('timeconst', timeconst)
 
+        # timeconst
+        timeshift = np.full(tod.dets.count, 1e-3)
+        tod.wrap('timeshift', timeshift)
+        
         for filt in [
                 tod_ops.filters.high_pass_butter4(fc),
                 tod_ops.filters.high_pass_sine2(fc),
@@ -266,13 +270,18 @@ class FilterTest(unittest.TestCase):
                 tod_ops.filters.timeconst_filter(timeconst=1e-3),
                 tod_ops.filters.identity_filter(),
                 tod_ops.filters.timeshift(dt=1e-3),
+                tod_ops.filters.timeshift_filter(dt=1e-3),
+                tod_ops.filters.timeshift_filter(dt=timeshift),
+                tod_ops.filters.timeshift_filter(dt='timeshift'),
         ]:
             f = np.fft.fftfreq(tod.samps.count) * f0
             y = filt(f, tod)
             sig_filt = tod_ops.fourier_filter(tod, filt)
             sigma1 = sig_filt.std(axis=1)
             print(f'Filter takes sigma from {sigma0} to {sigma1}')
-            if not isinstance(filt, (tod_ops.filters.identity_filter, tod_ops.filters.timeshift)):
+            if not isinstance(filt, (tod_ops.filters.identity_filter,
+                                     tod_ops.filters.timeshift,
+                                     tod_ops.filters.timeshift_filter)):
                 self.assertTrue(np.all(sigma1 < sigma0))
 
         # Confirm fail if not uniform per-wafer
