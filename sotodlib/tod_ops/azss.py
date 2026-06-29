@@ -579,7 +579,7 @@ def subtract_azss_lr(
     azss_l = None,
     azss_r = None,
     *,
-    apodize_samps=200,
+    apodize_turnarounds_samps=200,
     t_buffer=0.5,
     flags=None,
     subtract=True,
@@ -592,12 +592,16 @@ def subtract_azss_lr(
         coverage_threshold=0.95, exclude_turnarounds=True, return_det_mask=False,
     ),
 ):
+    """
+    Calculate AzSS of left going scans and right going scans
+    and smoothly connect them and subtract.
+    """
     if azss_l is None:
         if flags is None:
             flags = aman.flags.right_scan
         else:
             flags = aman.flags.right_scan + flags
-        azss_l = get_azss(aman, signal='signal', flags=flags,
+        azss_l = get_azss(aman, signal=signal, flags=flags,
                  subtract_in_place=False, return_stats=True,
                  merge_stats=True, azss_stats_name=azss_l_name, merge_model=False,
                  **get_azss_kwargs,)
@@ -606,7 +610,7 @@ def subtract_azss_lr(
             flags = aman.flags.right_scan
         else:
             flags = aman.flags.right_scan + flags
-        azss_r = get_azss(aman, signal='signal', flags=flags,
+        azss_r = get_azss(aman, signal=signal, flags=flags,
                  subtract_in_place=False, return_stats=True,
                  merge_stats=True, azss_stats_name=azss_r_name, merge_model=False,
                  **get_azss_kwargs,)
@@ -623,10 +627,10 @@ def subtract_azss_lr(
     kwargs = {k: get_azss_kwargs.get(k) for k in ['method', 'max_mode', 'azrange', 'modes_axis_name']}
     sym_model = get_azss_model(aman, sym, **kwargs)
     asym_model = get_azss_model(aman, asym, **kwargs)
-    asym_model *= 2*(aman.flags.left_scan.mask().astype(int) - 0.5)
+    asym_model *= 2 * (aman.flags.left_scan.mask().astype(int) - 0.5)
 
     ta, _, _ = get_turnaround_flags(aman, t_buffer=t_buffer, merge=False)
-    apodizer = apodize.get_apodize_window_from_flags(aman, ta, apodize_samps)
+    apodizer = apodize.get_apodize_window_from_flags(aman, ta, apodize_turnarounds_samps)
 
     if subtract:
         aman[signal] -= sym_model + asym_model * apodizer
