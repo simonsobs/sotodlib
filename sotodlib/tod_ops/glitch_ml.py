@@ -385,7 +385,9 @@ def classify_snippets(snippets, trained_forest):
         names for ``preds`` and ``stats_array``.
     """
     if isinstance(trained_forest, str):
-        with open('{}.pkl'.format(trained_forest), 'rb') as f:
+        if not trained_forest.endswith('.pkl'):
+            trained_forest += '.pkl'
+        with open(trained_forest, 'rb') as f:
             trained_forest = pk.load(f)
 
     # Compute the summary statistics in the order the forest expects
