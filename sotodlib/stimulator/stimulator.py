@@ -66,7 +66,7 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     return result
 
 
-def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
+def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_tod=True, make_iirc_coadd=False):
     """
     Preprocessing for stimulator data analysis using HK data.
     This includes getting timing against encoder signal, chopping status,
@@ -86,7 +86,8 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
         hkdata: Housekeeping data for aman.
         idxs: List of detector indices for calculation. If None, all detectors are calculated.
         n_bins: Number of bins for co-adding data.
-        delete_filtered_tod: Whether to delete filtered TOD data after processing.
+        delete_tod: Whether to delete TOD data after processing.
+        make_iirc_coadd: Whether to make IIR filter co-added data.
     Return:
         valid_gain: bool, True if gain can be calculated, False otherwise.
         valid_timeconstant: bool, True if time constant can be calculated, False otherwise.
@@ -120,7 +121,7 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
 
     # Co-add data and fit it for each frequency
     model, params_base = get_fit_params(cal_type="coadd")
-    initialize_aman(aman, "coadd", model, n_bins)
+    initialize_aman(aman, "coadd", model, n_bins, make_iirc_coadd=make_iirc_coadd)
 
     for freq_key in aman.stm_cal.chopping_freq_key.vals:
         freq = aman.stm_cal.chopping_freqs[
@@ -131,15 +132,16 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_filtered_tod=True):
         else:
             filter_freq = CHOPPING_FREQS[freq_key]
 
-        filtering(aman, freq_key, filter_freq)
+        filtering(aman, freq_key, filter_freq, delete_tod=delete_tod)
         get_coadd_data(aman, freq_key, n_bins, det_mask)
-        if delete_filtered_tod:
+        if delete_tod:
             aman.move(f"signal_lpf_{freq_key}", None)
         fit_coadd_data(aman, freq_key, det_mask, model, params_base)
 
-    if delete_filtered_tod:
-        aman.move("signal_iirc", None)
+    if delete_tod:
         aman.move("signal_hpf", None)
+        if make_iirc_coadd:
+            aman.move("signal_iirc", None)
 
     return valid_gain, valid_timeconstant
 
@@ -547,7 +549,7 @@ def get_signal_temp(aman, hkdata):
     )
 
 
-def initialize_aman(aman, init_type, model, n_bins=None):
+def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
     """
     Initialize the axis manager with the specified type.
 
@@ -556,8 +558,13 @@ def initialize_aman(aman, init_type, model, n_bins=None):
         init_type: type of initialization. 'coadd' or 'timeconstant'
         model: model for the fit
         n_bins: # of bins for co-added data
+        make_iirc_coadd: whether to make co-added data with inverted IIR filter
     """
-    filt_keys = ["iirc", "hpf", "lpf"]
+    if make_iirc_coadd:
+        filt_keys = ["iirc", "hpf", "lpf"]
+    else:
+        filt_keys = ["hpf", "lpf"]
+
     if init_type == "coadd":
         freq_keys = aman.stm_cal.chopping_freq_key.vals
     elif init_type == "timeconstant":
@@ -591,6 +598,12 @@ def initialize_aman(aman, init_type, model, n_bins=None):
             "coadd_data",
             axis=core.AxisManager(aman.dets, core.IndexAxis("stm_coadd_bins", n_bins)),
         )
+        ensure_wrapped(
+            aman.stm_cal.coadd_data,
+            'x',
+            arr=np.full((aman.dets.count, n_bins), np.nan),
+            axis=[(0, "dets"), (1, "stm_coadd_bins")],
+        )
 
         for filt_key in filt_keys:
             ensure_wrapped(aman.stm_cal.coadd_data, filt_key, axis=core.AxisManager())
@@ -604,7 +617,7 @@ def initialize_aman(aman, init_type, model, n_bins=None):
                     ),
                 )
 
-                for key in ["x", "y", "yerr"]:
+                for key in ["y", "yerr"]:
                     ensure_wrapped(
                         aman.stm_cal.coadd_data[filt_key][freq_key],
                         key,
@@ -720,6 +733,7 @@ def filtering(
     hpf_width=2,
     lpf_cutoff_factor=1.5,
     lpf_width_fraction=1 / 5,
+    delete_tod=False
 ):
     """
     Filtering signal data.
@@ -732,25 +746,33 @@ def filtering(
         hpf_width: full width of high-pass filter in Hz. Default is 2Hz.
         lpf_cutoff_factor: cutoff frequency for low-pass filter is calculated by multiplying this factor and chopping frequency. Default is 1.5.
         lpf_width_fraction: full width of low-pass filter is calculated by multiplying this factor and cutoff frequency. Default is 1/5.
+        delete_tod: whether to delete the filtered TOD data after processing. Default is False.
     """
 
-    # Invert IIR filter
-    if "signal_iirc" not in aman:
-        iirc_filter = tod_ops.filters.iir_filter(aman, invert=True)
-        signal_new = tod_ops.fourier_filter(aman, iirc_filter, signal_name="signal")
-        aman.wrap("signal_iirc", signal_new, [(0, "dets"), (1, "samps")])
-
-    # Make HPFed data
-    if "signal_hpf" not in aman:
-        hpf = tod_ops.filters.high_pass_sine2(hpf_cutoff, hpf_width)
-        signal_new = tod_ops.fourier_filter(aman, hpf, signal_name="signal_iirc")
-        aman.wrap("signal_hpf", signal_new, [(0, "dets"), (1, "samps")])
-
-    # Make LPFed data
+    # Define filters
+    iirc_filter = tod_ops.filters.iir_filter(aman, invert=True)
+    hpf = tod_ops.filters.high_pass_sine2(hpf_cutoff, hpf_width)
     filter_cutoff = lpf_cutoff_factor * filter_freq
     lpf = tod_ops.filters.low_pass_sine2(
         filter_cutoff, filter_cutoff * lpf_width_fraction
     )
+
+    # Invert IIR filter if requested.
+    if 'iirc' in aman.stm_cal.coadd_data._fields:
+        if "signal_iirc" not in aman:
+            signal_new = tod_ops.fourier_filter(aman, iirc_filter, signal_name="signal")
+            aman.wrap("signal_iirc", signal_new, [(0, "dets"), (1, "samps")])
+
+    # Make HPFed data
+    if "signal_hpf" not in aman:
+        filters = tod_ops.filters.FilterChain([iirc_filter, hpf])
+        signal_new = tod_ops.fourier_filter(aman, filters, signal_name="signal_iirc")
+        aman.wrap("signal_hpf", signal_new, [(0, "dets"), (1, "samps")])
+    # Save memory
+    if delete_tod:
+        aman.move("signal", None)
+
+    # Make LPFed data
     signal_new = tod_ops.fourier_filter(aman, lpf, signal_name="signal_hpf")
     aman.wrap(
         f"signal_lpf_{freq_key}",
@@ -781,13 +803,14 @@ def get_coadd_data(aman, freq_key, n_bins, det_mask):
         aman: axis manager of tod data, including timestamps and tod signal
         freq_key: frequency key for the co-added data
         n_bins: # of bins for co-added data
-        t_min: Minimum time for the data analysis
-        t_max: Maximum time for the data analysis
+        det_mask: boolean mask for the detectors to be co-added
     """
     t0 = aman.timestamps[0]
     bins = np.linspace(0, 1 - 1 / n_bins, n_bins)
     x = bins + 1 / n_bins / 2
-    filt_keys = ["iirc", "hpf", "lpf"]
+    aman.stm_cal.coadd_data["x"] = x
+
+    filt_keys = aman.stm_cal.coadd_data._fields
 
     # Get cuts for co-addition
     idx = np.where(aman.stm_cal.chopping_freq_key.vals == freq_key)[0][0]
@@ -832,7 +855,6 @@ def get_coadd_data(aman, freq_key, n_bins, det_mask):
                 ]
             )
 
-            aman.stm_cal.coadd_data[filt_key][freq_key]["x"][i_det] = x
             aman.stm_cal.coadd_data[filt_key][freq_key]["y"][i_det] = y
             aman.stm_cal.coadd_data[filt_key][freq_key]["yerr"][i_det] = yerr
 
