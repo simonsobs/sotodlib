@@ -66,7 +66,9 @@ def get_hk(hkdb_cfg, aman=None, t_start=None, t_end=None):
     return result
 
 
-def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_tod=True, make_iirc_coadd=False):
+def preprocessing(
+    aman, hkdata, idxs=None, n_bins=40, delete_tod=True, make_iirc_coadd=False
+):
     """
     Preprocessing for stimulator data analysis using HK data.
     This includes getting timing against encoder signal, chopping status,
@@ -106,6 +108,10 @@ def preprocessing(aman, hkdata, idxs=None, n_bins=40, delete_tod=True, make_iirc
     get_timing_cut(aman)
     get_chopping_freqs(aman)
     get_signal_temp(aman, hkdata)
+
+    # Finite data check
+    arr = np.isfinite(aman.signal).all(axis=1)
+    aman.stm_cal.wrap("finite_data", arr, [(0, "dets")], overwrite=True)
 
     # Check if data is valid for gain or time constant calculation
     if not valid_data:
@@ -194,7 +200,7 @@ def calc_timeconstant(aman, idxs=None):
             continue
 
         # Strange data check
-        if not np.isfinite(aman.signal[i_det]).all():
+        if not aman.stm_cal.finite_data[i_det]:
             continue
 
         # Fitting
@@ -340,7 +346,7 @@ def get_encoder_timing(aman, hkdata):
 
     if "stm_samps" not in aman._axes.keys():
         stm_samps = core.IndexAxis("stm_samps", t_enc.size)
-        stm_cal = core.AxisManager(stm_samps, aman.samps)
+        stm_cal = core.AxisManager(stm_samps, aman.samps, aman.dets)
         aman.wrap("stm_cal", stm_cal, overwrite=True)
     aman.stm_cal.wrap("t_enc", t_enc, [(0, "stm_samps")], overwrite=True)
     aman.stm_cal.wrap("t_hk", t_hk, [(0, "stm_samps")], overwrite=True)
@@ -600,7 +606,7 @@ def initialize_aman(aman, init_type, model, n_bins=None, make_iirc_coadd=False):
         )
         ensure_wrapped(
             aman.stm_cal.coadd_data,
-            'x',
+            "x",
             arr=np.full((aman.dets.count, n_bins), np.nan),
             axis=[(0, "dets"), (1, "stm_coadd_bins")],
         )
@@ -733,7 +739,7 @@ def filtering(
     hpf_width=2,
     lpf_cutoff_factor=1.5,
     lpf_width_fraction=1 / 5,
-    delete_tod=False
+    delete_tod=False,
 ):
     """
     Filtering signal data.
@@ -758,7 +764,7 @@ def filtering(
     )
 
     # Invert IIR filter if requested.
-    if 'iirc' in aman.stm_cal.coadd_data._fields:
+    if "iirc" in aman.stm_cal.coadd_data._fields:
         if "signal_iirc" not in aman:
             signal_new = tod_ops.fourier_filter(aman, iirc_filter, signal_name="signal")
             aman.wrap("signal_iirc", signal_new, [(0, "dets"), (1, "samps")])
@@ -766,11 +772,13 @@ def filtering(
     # Make HPFed data
     if "signal_hpf" not in aman:
         filters = tod_ops.filters.FilterChain([iirc_filter, hpf])
-        signal_new = tod_ops.fourier_filter(aman, filters, signal_name="signal_iirc")
+        signal_new = tod_ops.fourier_filter(aman, filters, signal_name="signal")
         aman.wrap("signal_hpf", signal_new, [(0, "dets"), (1, "samps")])
+
     # Save memory
     if delete_tod:
-        aman.move("signal", None)
+        if "signal" in aman:
+            aman.move("signal", None)
 
     # Make LPFed data
     signal_new = tod_ops.fourier_filter(aman, lpf, signal_name="signal_hpf")
@@ -810,7 +818,7 @@ def get_coadd_data(aman, freq_key, n_bins, det_mask):
     x = bins + 1 / n_bins / 2
     aman.stm_cal.coadd_data["x"] = x
 
-    filt_keys = aman.stm_cal.coadd_data._fields
+    filt_keys = [x for x in aman.stm_cal.coadd_data._fields if x != "x"]
 
     # Get cuts for co-addition
     idx = np.where(aman.stm_cal.chopping_freq_key.vals == freq_key)[0][0]
@@ -830,13 +838,13 @@ def get_coadd_data(aman, freq_key, n_bins, det_mask):
     for i_det, m in enumerate(det_mask):
         if not m:
             continue
-        if not np.isfinite(aman.signal[i_det]).all():
+        if not aman.stm_cal.finite_data[i_det]:
             continue
 
         for filt_key in filt_keys:
             if filt_key == "hpf" or filt_key == "iirc":
                 key = f"signal_{filt_key}"
-            elif filt_key == "lpf":
+            else:
                 key = f"signal_lpf_{freq_key}"
 
             data = [[] for _ in range(n_bins)]
@@ -876,14 +884,16 @@ def fit_coadd_data(aman, freq_key, det_mask, model, params_base):
             continue
 
         # Strange data check
-        if not np.isfinite(aman.signal[i_det]).all():
+        if not aman.stm_cal.finite_data[i_det]:
             continue
 
         # Fitting
-        for filt_key in [x for x in aman.stm_cal.coadd_data._fields if x != "iirc"]:
+        for filt_key in [
+            x for x in aman.stm_cal.coadd_data._fields if x != "iirc" and x != "x"
+        ]:
             params = params_base.copy()
 
-            x = aman.stm_cal.coadd_data[filt_key][freq_key]["x"][i_det]
+            x = aman.stm_cal.coadd_data["x"]
             y = aman.stm_cal.coadd_data[filt_key][freq_key]["y"][i_det]
             yerr = aman.stm_cal.coadd_data[filt_key][freq_key]["yerr"][i_det]
 

@@ -226,7 +226,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
 
         i_y = 0
         i_x = 1
-        x = aman.stm_cal.coadd_data["iirc"]["f1_gain"]["x"][i_det]
+        x = aman.stm_cal.coadd_data["x"]
         y = aman.stm_cal.coadd_data["iirc"]["f1_gain"]["y"][i_det]
         yerr = aman.stm_cal.coadd_data["iirc"]["f1_gain"]["yerr"][i_det]
         axes[i_y, i_x].errorbar(x, y, yerr, fmt="o", capsize=5)
@@ -236,7 +236,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
 
         i_y = 1
         i_x = 1
-        x = aman.stm_cal.coadd_data["hpf"]["f1_gain"]["x"][i_det]
+        x = aman.stm_cal.coadd_data["x"]
         y = aman.stm_cal.coadd_data["hpf"]["f1_gain"]["y"][i_det]
         yerr = aman.stm_cal.coadd_data["hpf"]["f1_gain"]["yerr"][i_det]
         axes[i_y, i_x].errorbar(
@@ -244,7 +244,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
         )
         axes[i_y, i_x].set_title(f"Co-added signal: Filtered data, {ufm}")
 
-        x = aman.stm_cal.coadd_data["lpf"]["f1_gain"]["x"][i_det]
+        x = aman.stm_cal.coadd_data["x"]
         y = aman.stm_cal.coadd_data["lpf"]["f1_gain"]["y"][i_det]
         yerr = aman.stm_cal.coadd_data["lpf"]["f1_gain"]["yerr"][i_det]
         axes[i_y, i_x].errorbar(
@@ -492,7 +492,7 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
                 axes[i_y, i_x].set_ylim(-0.005, 0.005)
 
             i_x = 1
-            x = aman.stm_cal.coadd_data["iirc"][f_key]["x"][i_det]
+            x = aman.stm_cal.coadd_data["x"]
             y = aman.stm_cal.coadd_data["iirc"][f_key]["y"][i_det]
             yerr = aman.stm_cal.coadd_data["iirc"][f_key]["yerr"][i_det]
             axes[i_y, i_x].errorbar(
@@ -504,14 +504,14 @@ def plot_tod(aman, i_det, cal_type, show=True, output_dir=None):
             axes[i_y, i_x].set_xlabel("Timing (1 cycle)")
             axes[i_y, i_x].set_ylabel("TOD [pW]")
 
-            x = aman.stm_cal.coadd_data["hpf"][f_key]["x"][i_det]
+            x = aman.stm_cal.coadd_data["x"]
             y = aman.stm_cal.coadd_data["hpf"][f_key]["y"][i_det]
             yerr = aman.stm_cal.coadd_data["hpf"][f_key]["yerr"][i_det]
             axes[i_y, i_x].errorbar(
                 x, y, yerr, fmt="o", capsize=3, color="C1", label="(IIRC+HPF)ed data"
             )
 
-            x = aman.stm_cal.coadd_data["lpf"][f_key]["x"][i_det]
+            x = aman.stm_cal.coadd_data["x"]
             y = aman.stm_cal.coadd_data["lpf"][f_key]["y"][i_det]
             yerr = aman.stm_cal.coadd_data["lpf"][f_key]["yerr"][i_det]
             axes[i_y, i_x].errorbar(
