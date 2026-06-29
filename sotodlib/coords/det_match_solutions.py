@@ -6,7 +6,6 @@ from collections import defaultdict
 import os
 import numpy as np
 import yaml
-from copy import deepcopy
 from scipy import interpolate
 from tqdm.auto import tqdm, trange
 from copy import deepcopy
@@ -32,14 +31,16 @@ class SolutionsCfg:
         Directory where results should be stored.
     wafer_info_path: str
         Path to the wafer_info h5 file.
-    tel_type: str
-        Tel type for the optics model. Either "SAT" or "LAT"
+    platform: str
+        Telescope platform.
+    wafer_slots: list
+        Optional list of wafer slots to make solutions for.
     base_obs_id: str
         Obs_id to use as a base for matching when merging multiple pointing
         obs_ids for a wafer.  Will default to the pointing obs_id with the
         greatest number of detectors above the min_R2 threshold.
     zemax_path: str
-        If running for a "LAT" tel_type, the path to the zemax file must be specified.
+        If running for the LAT, the path to the zemax file must be specified.
     apply_roll: bool
         Whether or not to apply the obs_id roll angle.  Some pointing sets
         may already be corrected for roll angle.
@@ -83,6 +84,8 @@ class SolutionsCfg:
         (xi_offset, eta_offset) where both are in radians.
     ufm_to_fp_path: str
         Path to file that maps wafer_slot to position on focal plane.
+    fp_to_rx_path: str
+        Path to file that maps tube slot to position on focal plane.
     freq_correct_by_muxband: bool
         If true, apply the same freq offset correction to all resonators in a mux-band.
     """
@@ -91,7 +94,8 @@ class SolutionsCfg:
     pointing_results_dir: str
     results_dir: str
     wafer_info_path: str
-    tel_type: str
+    platform: str
+    wafer_slots: Optional[list[str]] = None
     base_obs_id: Optional[str] = None
     zemax_path: Optional[str] = None
     apply_roll: bool = True
@@ -109,6 +113,8 @@ class SolutionsCfg:
 
     initial_pointing_offset: Tuple[float, float] = (0, 0)
     ufm_to_fp_path: Optional[str] = None
+    fp_to_rx_path: Optional[str] = None
+    imprinter_path: Optional[str] = None
     freq_correct_by_muxband: bool = True
 
     ctx: Context = field(init=False)
@@ -125,6 +131,9 @@ class SolutionsCfg:
 
     def __post_init__(self):
         self.ctx = Context(self.ctx_path)
+
+        if self.wafer_slots is None:
+            self.wafer_slots = ["ws.", "ws0", "ws1", "ws2", "ws3", "ws4", "ws5", "ws6"]
 
         if not os.path.exists(self.results_dir):
             if os.path.exists(os.path.split(self.results_dir)[0]):
@@ -145,6 +154,14 @@ class SolutionsCfg:
         if self.ufm_to_fp_path is None:
             self.ufm_to_fp_path = os.path.join(
                 self.site_pipeline_cfg_dir, "shared/focalplane/ufm_to_fp.yaml"
+            )
+        if self.fp_to_rx_path is None:
+            self.fp_to_rx_path = os.path.join(
+                self.site_pipeline_cfg_dir, "shared/focalplane/optics_tubes.yaml"
+            )
+        if self.imprinter_path is None:
+            self.imprinter_path = os.path.join(
+                self.site_pipeline_cfg_dir, f"{self.platform}/imprinter.yaml"
             )
 
 
@@ -230,7 +247,7 @@ def pointing_preprocess(cfg: SolutionsCfg, pinfo: PointingInfo):
     return meta
 
 
-def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=0):
+def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=0, ignore_north_south=False):
     """
     Combine all pointing measurements into a single resonator set, with the
     median pointing info from all. This requires a base_idx to be specified,
@@ -246,7 +263,13 @@ def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=
     meta = pinfos[base_idx].meta
     stream_id = meta.det_info.stream_id[0]
     wafer_slot = meta.det_info.wafer_slot[0]
-    base_resset = dm.ResSet.from_aman(meta, stream_id=stream_id, pointing=meta.tod_pointing)
+
+    base_resset = dm.ResSet.from_aman(
+        meta,
+        stream_id=stream_id,
+        pointing=meta.tod_pointing,
+        ignore_north_south=ignore_north_south
+    )
 
     pointing_map = {
         r.idx: [(r.xi, r.eta)] for r in base_resset
@@ -254,14 +277,19 @@ def merge_pointing_info(cfg: SolutionsCfg, pinfos: List[PointingInfo], base_idx=
 
     match_pars = dm.MatchParams(
         freq_width=cfg.match_pars["pointing"]["freq_width"],
-        dist_width=np.deg2rad(cfg.match_pars["pointing"]["dist_width"])
+        dist_width=np.deg2rad(cfg.match_pars["pointing"]["dist_width"]),
     )
 
     for i in range(len(pinfos)):
         if i == base_idx:
             continue
         meta = pinfos[i].meta
-        src = dm.ResSet.from_aman(meta, stream_id=stream_id, pointing=meta.tod_pointing)
+        src = dm.ResSet.from_aman(
+            meta,
+            stream_id=stream_id,
+            pointing=meta.tod_pointing,
+            ignore_north_south=ignore_north_south
+        )
         dst = base_resset
         match = dm.Match(src, dst, match_pars=match_pars)
         for rsrc, rdst in match.get_match_iter(include_unmatched=False):
@@ -390,7 +418,8 @@ def match_wafer(
     cfg: SolutionsCfg,
     am: AxisManager,
     stream_id: str,
-    meas_rset: Optional[dm.ResSet]
+    meas_rset: Optional[dm.ResSet],
+    ignore_north_south: bool = False
 ) -> MatchSolution:
     """
     Create a match solution for a given wafer slot.
@@ -409,19 +438,81 @@ def match_wafer(
 
     m = am.det_info.stream_id == stream_id
     wafer_slot = am.det_info.wafer_slot[m][0]
+    tube_slot = am.obs_info.tube_slot
 
     if meas_rset is None:
-        src = dm.ResSet.from_aman(am, stream_id, pointing=am[cfg.pointing_field])
+        src = dm.ResSet.from_aman(
+            am,
+            stream_id,
+            pointing=am[cfg.pointing_field],
+            ignore_north_south=ignore_north_south
+        )
     else:
         src = meas_rset
 
-    pt_cfg = dm.PointingConfig(
-        fp_file=cfg.ufm_to_fp_path, wafer_slot=wafer_slot, tel_type=cfg.tel_type,
-        zemax_path=cfg.zemax_path,
-        roll=np.deg2rad(am.obs_info.roll_center) if cfg.apply_roll else 0.0,
-        tube_slot = am.obs_info.tube_slot
-    )
-    dst = dm.ResSet.from_wafer_info_file(cfg.wafer_info_path, stream_id, pt_cfg=pt_cfg)
+    if ignore_north_south:
+        wafer_slots = []
+        wafers_dict = {}
+
+        # get wafer and wafer_slot entry from imprinter
+        with open(cfg.imprinter_path, "r") as f:
+            imprinter = yaml.safe_load(f)
+
+        for k, v in imprinter['tel_tubes'].items():
+            if v['tube_slot'] == tube_slot:
+                for ws in v['wafer_slots']:
+                    if 'wafer' in ws.keys():
+                        wafers_dict[ws['wafer_slot']] = (ws['wafer'].split('_')[-1].capitalize())
+                        wafer_slots.append(ws['wafer_slot'])
+    else:
+        wafer_slots = [wafer_slot]
+        wafers_dict = None
+
+    dst_merged = []
+    # loop through and get pointing information for all wafers
+    for ws in wafer_slots:
+        pt_cfg = dm.PointingConfig(
+            fp_file=cfg.ufm_to_fp_path, rx_file=cfg.fp_to_rx_path,
+            wafer_slot=ws, platform=cfg.platform,
+            zemax_path=cfg.zemax_path,
+            roll=np.deg2rad(am.obs_info.roll_center) if cfg.apply_roll else 0.0,
+            tube_slot = am.obs_info.tube_slot
+        )
+        dst_wafer = dm.ResSet.from_wafer_info_file(
+            cfg.wafer_info_path,
+            stream_id,
+            pt_cfg=pt_cfg,
+            ignore_north_south=ignore_north_south,
+        ).as_array()
+
+        # extract current wafer
+        if wafers_dict is not None:
+            mask = [wafers_dict[ws] in d["det_id"].astype(str) for d in dst_wafer]
+            dst_wafer = dst_wafer[mask]
+        dst_wafer['wafer_slot'][:] = ws
+
+        dst_merged.append(dst_wafer)
+    dst_merged = np.concatenate(dst_merged)
+
+    # get full wafer info and populate pointing and wafer_slot information
+    # from merged dst (not necesary if matching a single wafer)
+    if ignore_north_south:
+        dst = dm.ResSet.from_wafer_info_file(
+                cfg.wafer_info_path,
+                stream_id,
+                pt_cfg=None,
+                ignore_north_south=ignore_north_south,
+            ).as_array()
+
+        merge_fields = ["xi", "eta", "wafer_slot"]
+        for i, d in enumerate(dst_merged):
+            idx = np.where(dst['det_id'] == d['det_id'])[0][0]
+            if idx:
+                for field in merge_fields:
+                    dst[idx][field] = dst_merged[i][field]
+        dst = dm.ResSet.from_array(dst)
+    else:
+        dst = dm.ResSet.from_array(dst_merged)
 
     # first match
     match_pars = dm.MatchParams(
@@ -429,7 +520,7 @@ def match_wafer(
         dist_width=np.deg2rad(cfg.match_pars["match0"]["dist_width"]),
         enforce_pointing_reqs=True,
         allow_unassigned_to_assigned=False,
-        unassigned_slots=cfg.unassigned_slots
+        unassigned_slots=cfg.unassigned_slots,
     )
     match = dm.Match(src, dst, match_pars=match_pars, apply_dst_pointing=False)
 
@@ -497,7 +588,6 @@ def match_wafer(
     match.match_pars.dist_width = np.deg2rad(cfg.match_pars["match2"]["dist_width"])
 
     match._match()
-
     match_iterations.append(deepcopy(match))
 
     return MatchSolution(
@@ -555,13 +645,21 @@ def get_wafer_solution(
     else:
         base_idx = 0
 
-    meas_rset, pointing_map = merge_pointing_info(cfg, pointing_results, base_idx=base_idx)
-    # tod_pointing = get_best_tod_pointing(cfg, pointing_results)
+    # Whether or not to use North/South in match
+    ignore_north_south = (wafer_slot == "ws.")
+
+    meas_rset, pointing_map = merge_pointing_info(
+        cfg, pointing_results, base_idx=base_idx,
+        ignore_north_south=ignore_north_south
+    )
 
     meta = pointing_results[0].meta
     stream_id = meta.det_info.stream_id[0]
 
-    match_solution = match_wafer(cfg, meta, stream_id, meas_rset=meas_rset)
+    match_solution = match_wafer(
+        cfg, meta, stream_id, meas_rset=meas_rset,
+        ignore_north_south=ignore_north_south
+    )
 
     solution = FullWaferSolution(
         pointing_results=pointing_results,
@@ -577,8 +675,7 @@ def get_wafer_solution(
 
 
 def solve_all(cfg) -> Dict[str, Optional[FullWaferSolution]]:
-    wafer_slots = ["ws0", "ws1", "ws2", "ws3", "ws4", "ws5", "ws6"]
-    results = {ws: get_wafer_solution(cfg, ws, save=True) for ws in wafer_slots}
+    results = {ws: get_wafer_solution(cfg, ws, save=True) for ws in cfg.wafer_slots}
     return results
 
 
