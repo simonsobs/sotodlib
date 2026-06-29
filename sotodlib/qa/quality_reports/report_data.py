@@ -21,6 +21,13 @@ from sotodlib.core import Context
 from sotodlib.core.metadata import ManifestDb
 from pixell import enmap, enplot
 
+from sotodlib.io.ancil.pwv import (
+    params_250701,
+    _gaussian,
+    defeature_toco_250701,
+    apex_to_tocolin_250701,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,7 @@ class ReportDataConfig:
         start_time: Union[dt.datetime, float, str],
         stop_time: Union[dt.datetime, float, str],
         hk_cfg: Union[HkConfig, str, Dict[str, Any]],
+        load_hkdb: bool = True,
         buffer_time: float = 3600,
         influx_client_kw: Optional[Dict[str, Any]] = None,
         longterm_obs_file: Optional[str] = None,
@@ -61,6 +69,7 @@ class ReportDataConfig:
         self.longterm_obs_file: Optional[str] = longterm_obs_file
         self.preprocess_sourcedb_path: Optional[str] = preprocess_sourcedb_path
         self.load_source_footprints: bool = load_source_footprints
+        self.load_hkdb: bool = load_hkdb
         self.show_hk_pb: bool = show_hk_pb
         self.make_cov_map = make_cov_map
         self.noise_scale_factor = noise_scale_factor
@@ -127,21 +136,28 @@ class ObsInfo:
 
     @classmethod
     def from_obsdb_entry(cls, data) -> "ObsInfo":
-        obs_info = cls(
-            obs_id=data["obs_id"],
-            start_time=data["start_time"],
-            stop_time=data["stop_time"],
-            duration=data["duration"],
-            wafer_slots_list=data["wafer_slots_list"],
-            stream_ids_list=data["stream_ids_list"],
-            obs_type=data["type"],
-            obs_subtype=data["subtype"],
-            obs_tube_slot=data["tube_slot"],
-            boresight=-data["roll_center"] if data["roll_center"] is not None else np.nan,
-            el_center=data["el_center"] if data["el_center"] is not None else np.nan,
-            hwp_freq_mean=data["hwp_freq_mean"] if ("hwp_freq_mean" in data and data["hwp_freq_mean"] is not None) else np.nan,
+        get = data.get
+
+        return cls(
+            obs_id=get("obs_id"),
+            start_time=get("start_time"),
+            stop_time=get("stop_time"),
+            duration=get("duration"),
+            wafer_slots_list=get("wafer_slots_list"),
+            stream_ids_list=get("stream_ids_list"),
+            obs_type=get("type"),
+            obs_subtype=get("subtype"),
+            obs_tube_slot=get("tube_slot"),
+
+            boresight=(
+                -get("roll_center")
+                if get("roll_center") is not None
+                else np.nan
+            ),
+
+            el_center=get("el_center") or np.nan,
+            hwp_freq_mean=get("hwp_freq_mean") or np.nan,
         )
-        return obs_info
 
     def __repr__(self):
         inner = ", ".join(f"{k}={repr(v)}" for k, v in self.__dict__.items())
@@ -248,48 +264,63 @@ def load_pwv(cfg: ReportDataConfig) -> hkdb.HkResult:
         return None
 
 
-def get_and_merge_apex_pwv(cfg: ReportDataConfig, result=None):
+def get_and_merge_apex_pwv(cfg: ReportDataConfig, toco_pwv=None):
     """
-    Load the pwv from the APEX radiometer and merges.
-    Merge with Toco PWV when available.
+    Load APEX PWV measurements and merge with TOCO PWV when available.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray] or None
+        (timestamps, pwv) sorted by timestamp.
     """
     try:
-        result_apex = get_apex_data(cfg)
+        apex = get_apex_data(cfg)
     except Exception as e:
-        errmsg = f'{type(e)}: {e}'
-        tb = ''.join(traceback.format_tb(e.__traceback__))
+        errmsg = f"{type(e)}: {e}"
+        tb = "".join(traceback.format_tb(e.__traceback__))
         logger.error(f"get_apex_data failed with {errmsg}\n{tb}")
-        result_apex = None
+        apex = None
 
-    if result_apex is not None:
-        result_apex['timestamps'] = np.array(result_apex['timestamps'])[result_apex['pwv'] < 999]
-        result_apex['pwv'] = np.array(result_apex['pwv'])[result_apex['pwv'] < 999]
+    if apex is not None:
+        times = np.asarray(apex["timestamps"])
+        pwv = np.asarray(apex["pwv"])
 
-        result_apex = (np.array(result_apex['timestamps']), np.array(0.03+0.84 * result_apex['pwv']))
+        m = pwv < 999
+        apex = (
+            times[m],
+            apex_to_tocolin_250701(pwv[m]),
+        )
 
-    if result is not None:
-        result = (np.array(result[0])[result[1] <= 3], np.array(result[1])[result[1] <= 3])
-        result = (np.array(result[0])[result[1] > 0], np.array(result[1])[result[1] > 0])
+    if toco_pwv is not None:
+        times = np.asarray(toco_pwv[0])
+        pwv = np.asarray(toco_pwv[1])
 
-        if result_apex is not None:
-            combined_times = np.concatenate((result[0], result_apex[0]))
-            combined_data = np.concatenate((result[1], result_apex[1]))
+        m = (pwv > 0) & (pwv <= 3)
+        toco_pwv = (
+            times[m],
+            defeature_toco_250701(pwv[m]),
+        )
 
-            sorted_indices = np.argsort(combined_times)
-            sorted_times = combined_times[sorted_indices]
-            sorted_data = combined_data[sorted_indices]
-            return (sorted_times, sorted_data)
-        else:
-            return result
-    elif result_apex is not None:
-        return result_apex
-    else:
+    if apex is None and toco_pwv is None:
         return None
 
+    if apex is None:
+        return toco_pwv
 
-def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
+    if toco_pwv is None:
+        return apex
+
+    times = np.concatenate([toco_pwv[0], apex[0]])
+    pwv = np.concatenate([toco_pwv[1], apex[1]])
+
+    order = np.argsort(times)
+
+    return times[order], pwv[order]
+
+
+def load_influx_data(cfg: ReportDataConfig) -> pd.DataFrame:
     """
-    Loads QDS data from influxdb.
+    Loads InfluxDb data.
 
     """
     client = InfluxDBClient(**cfg.influx_client_kw)
@@ -298,7 +329,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     t0_str = (cfg.start_time - buff_time).isoformat().replace("+00:00", "Z")
     t1_str = (cfg.stop_time + buff_time).isoformat().replace("+00:00", "Z")
 
-    keys = ['time', 'num_valid_dets', 'bandpass', 'wafer_slot']
+    keys = ['time', 'num_valid_dets', 'bandpass', 'wafer_slot', 'tel_tube']
     if cfg.platform == "lat":
         keys += ['array_noise_T', 'det_noise_T']
     elif cfg.platform in ['satp1', 'satp2', 'satp3']:
@@ -317,7 +348,7 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     missing_keys = [key for key in keys if key not in df]
 
     if missing_keys:
-        logger.warn(f"missing keys from qds: {missing_keys}")
+        logger.warn(f"missing keys from influxdb: {missing_keys}")
         return None
 
     df["time"] = pd.to_datetime(df["time"])
@@ -326,14 +357,19 @@ def load_qds_data(cfg: ReportDataConfig) -> pd.DataFrame:
     return df
 
 
-def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scale_factor: float) -> None:
-    timestamps = np.array([o.start_time for o in obs_list])
-    obsids = [o.obs_id for o in obs_list]
+def merge_influx_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], platform: str, noise_scale_factor: float) -> None:
+    # Only CMB obs will have preprocessing data
+    timestamps = np.array([o.start_time for o in obs_list if o.obs_subtype=='cmb'])
+    tube_slots = np.array([f"lat{o.obs_tube_slot}" if platform=="lat" else platform for o in obs_list if o.obs_subtype=='cmb'])
+    obsids = np.array([o.obs_id for o in obs_list if o.obs_subtype=='cmb'])
 
-    def find_obsid(ts: float) -> Optional[str]:
-        idx = np.argmin(np.abs(ts - timestamps))
-        if np.isclose(ts, timestamps[idx], atol=0.1):
-            return obsids[idx]
+    def find_obsid(ts: float, tel_tube: str) -> Optional[str]:
+        m = tube_slots == tel_tube
+        if not np.any(m):
+            return ""
+        idx = np.argmin(np.abs(ts - timestamps[m]))
+        if np.isclose(ts, timestamps[m][idx], atol=1e-6):
+            return obsids[m][idx]
         else:
             return ""
 
@@ -352,7 +388,10 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scal
         nep = nep_series[mask]
         return 1 / np.sqrt(np.sum(1 / nep**2))
 
-    df["obs_id"] = df["timestamp"].apply(find_obsid)
+    df["obs_id"] = df.apply(
+        lambda row: find_obsid(row["timestamp"], row["tel_tube"]),
+        axis=1,
+    )
 
     det_nep_cols = [c for c in df.columns if "det_noise_" in c]
     array_nep_cols = [c for c in df.columns if "array_noise_" in c]
@@ -369,16 +408,21 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scal
           .agg(agg_dict)
     )
 
-    totals_dict = (
-    totals.groupby("obs_id")
-          .apply(
-              lambda g: {
-                  row["bandpass"]: {c: row[c] for c in agg_dict.keys()}
-                  for _, row in g.iterrows()
-              }
-          )
-          .to_dict()
-    )
+    totals_dict = {}
+
+    for obs_id, g in totals.groupby("obs_id"):
+        band_dict = {}
+
+        for row in g.itertuples(index=False):
+            band = getattr(row, "bandpass")
+            band_dict[band] = {
+                c: getattr(row, c)
+                for c in agg_dict.keys()
+            }
+
+        totals_dict[obs_id] = band_dict
+
+    obs_lookup = {o.obs_id: o for o in obs_list}
 
     for obs_id, band_totals in totals_dict.items():
         band_totals.pop("NC", None)
@@ -386,27 +430,98 @@ def merge_qds_and_obs_list(df: pd.DataFrame, obs_list: List[ObsInfo], noise_scal
         if not obs_id:
             continue
 
-        obs_entry = obs_list[obsids.index(obs_id)]
+        obs_entry = obs_lookup[obs_id]
 
-        det_dtype = [(band, "i4") for band in band_totals.keys()]
-        row = tuple(vals["num_valid_dets"] for _, vals in band_totals.items())
-        obs_entry.num_valid_dets = np.array([row], dtype=det_dtype)
+        det_dtype = [(band, "i4") for band in band_totals]
+        det_row = tuple(vals["num_valid_dets"] for vals in band_totals.values())
+        obs_entry.num_valid_dets = np.array([det_row], dtype=det_dtype)
 
-        for key, attr_name in zip(["array_noise_", "det_noise_"], ["array_nep", "det_nep"]):
-            all_keys = sorted({
-                k
-                for vals in band_totals.values() if isinstance(vals, dict)
-                for k in vals if k.startswith(key)
-            })
+        for key, attr_name in zip(
+            ["array_noise_", "det_noise_"],
+            ["array_nep", "det_nep"],
+        ):
 
-            nep_dtype = [(band, [(k, "f8") for k in all_keys]) for band in band_totals.keys()]
+            nep_dtype = []
+            nep_row = []
 
-            nep_row = tuple(
-                tuple((noise_scale_factor * vals.get(k, np.nan)) for k in all_keys)
-                for _, vals in band_totals.items()
+            for band, vals in band_totals.items():
+
+                band_keys = sorted(
+                    k for k in vals
+                    if k.startswith(key)
+                )
+
+                nep_dtype.append(
+                    (band, [(k, "f8") for k in band_keys])
+                )
+
+                nep_row.append(
+                    tuple(
+                        noise_scale_factor * vals[k]
+                        for k in band_keys
+                    )
+                )
+
+            setattr(
+                obs_entry,
+                attr_name,
+                np.array([tuple(nep_row)], dtype=nep_dtype),
             )
 
-            setattr(obs_entry, attr_name, np.array([nep_row], dtype=nep_dtype))
+
+def populate_hkdb_fields(hkdb_data, pwv, obs_list):
+    """
+    Attach weather + PWV data to obs_list.
+    """
+
+    fields = {
+        "temp": ("env-vantage.weather_data.temp_outside", None),
+        "uv": ("env-vantage.weather_data.UV", None),
+        "wind_speed": ("env-vantage.weather_data.wind_speed", None),
+        "wind_dir": ("env-vantage.weather_data.wind_dir", None),
+        "pwv": (None, lambda v: (-0.1 < v) & (v < 4.0)),
+    }
+
+    def compute_timeseries(times, values, obs):
+        m = (times >= obs.start_time) & (times <= obs.stop_time)
+        if not np.any(m):
+            return np.nan
+        return np.nanmean(values[m])
+
+    for attr, (key, post_mask) in fields.items():
+
+        if attr == "pwv":
+            if pwv is None:
+                logger.warning("\tPWV data not found")
+                for o in obs_list:
+                    o.pwv = np.nan
+                continue
+
+            t, v = pwv
+            t = np.asarray(t)
+            v = np.asarray(v)
+
+            for o in obs_list:
+                val = compute_timeseries(t, v, o)
+                if np.isfinite(val) and post_mask(val):
+                    o.pwv = val
+                else:
+                    o.pwv = np.nan
+
+            continue
+
+        if hkdb_data is None or key not in hkdb_data:
+            logger.warning(f"\t{attr} data not found")
+            for o in obs_list:
+                setattr(o, attr, np.nan)
+            continue
+
+        t, v = hkdb_data[key]
+        t = np.asarray(t)
+        v = np.asarray(v)
+
+        for o in obs_list:
+            setattr(o, attr, compute_timeseries(t, v, o))
 
 
 @dataclass
@@ -466,7 +581,7 @@ class ReportData:
         Configuration object used to generate the report
     obs_list: List[ObsInfo]
         List of observation info for each observation in the configured time range.
-        This contains data from the ObsDb, HkDb, and QDS database.
+        This contains data from the ObsDb, HkDb, and InfluxDb database.
     pwv: np.ndarray
         PWV throughout the specified time range. This is a 2D array where
         the first element is an array of timestamps, and the second element is
@@ -488,17 +603,21 @@ class ReportData:
     def build(cls, cfg: ReportDataConfig) -> "ReportData":
         ctx = Context(cfg.ctx_path)
 
-        logger.info("Building Obs List")
-        obs_list = [
-            ObsInfo.from_obsdb_entry(o)
-            for o in ctx.obsdb.query(
-                f"start_time >= {cfg.start_time.timestamp()} and "
-                f"start_time <= {cfg.stop_time.timestamp()}"
-            )
-        ]
+        logger.info("Building obs List")
+        rows = ctx.obsdb.query(
+            f"start_time >= {cfg.start_time.timestamp()} and "
+            f"start_time <= {cfg.stop_time.timestamp()}"
+        )
 
-        for i, o in enumerate(obs_list):
-            o.obs_tags = ",".join(ctx.obsdb.get(o.obs_id, tags=True)['tags'])
+        # Get tags
+        obs_tags = defaultdict(list)
+        for obs_id, tag in ctx.obsdb.conn.execute("SELECT obs_id, tag FROM tags"):
+            obs_tags[obs_id].append(tag)
+
+        obs_list = [None] * len(rows)
+        for i, o in enumerate(rows):
+            obs_list[i] = ObsInfo.from_obsdb_entry(o)
+            obs_list[i].obs_tags = ",".join(obs_tags.get(o["obs_id"], []))
 
         if cfg.longterm_obs_file is not None:
             logger.info("Getting longterm data")
@@ -506,99 +625,40 @@ class ReportData:
         else:
             longterm_obs_df = None
 
-        try:
-            hkdb_data = load_hkdb(cfg)
-        except Exception as e:
-            logger.error(f"load_hkdb failed with {e}")
+        # hkdb
+        if cfg.load_hkdb:
+            try:
+                logger.info("Getting hkdb data")
+                hkdb_data = load_hkdb(cfg)
+            except Exception as e:
+                logger.error(f"load_hkdb failed with {e}")
+                hkdb_data = None
+        else:
             hkdb_data = None
 
-        if hkdb_data is not None and "env-radiometer-class.pwvs.pwv" in hkdb_data.keys():
+        # Toco PWV
+        if (
+            hkdb_data is not None and
+            "env-radiometer-class.pwvs.pwv" in hkdb_data.keys()
+        ):
             toco_pwv = hkdb_data["env-radiometer-class.pwvs.pwv"]
         else:
             toco_pwv = None
 
-        logger.info("Loading PWV data")
+        logger.info("Merging Toco and APEX PWV")
         pwv = get_and_merge_apex_pwv(cfg, toco_pwv)
 
-        logger.info("Loading QDS data")
-        qds_df = load_qds_data(cfg)
+        logger.info("Loading Influx data")
+        influx_df = load_influx_data(cfg)
 
-        if qds_df is not None:
-            logger.info("Merging QDS data with obs list")
-            merge_qds_and_obs_list(qds_df, obs_list, cfg.noise_scale_factor)
+        if influx_df is not None:
+            logger.info("Merging InfluxDb data with obs list")
+            merge_influx_and_obs_list(influx_df, obs_list, cfg.platform, cfg.noise_scale_factor)
         else:
-            logger.warn("QDS data not found")
+            logger.warn("InfluxDb data not found")
 
-        # Add PWV data to obs_list
-        if pwv is not None:
-            for o in obs_list:
-                m = np.logical_and.reduce([pwv[0] >= o.start_time, pwv[0] <= o.stop_time])
-                _pwv = np.nanmean(pwv[1][m])
-                if -0.1 < _pwv < 4.0:
-                    o.pwv = _pwv
-        else:
-            logger.warn("pwv data not found")
-            for o in obs_list:
-                o.pwv = np.nan
-
-        # temperature
-        if (
-            hkdb_data is not None and
-            "env-vantage.weather_data.temp_outside" in hkdb_data.keys()
-           ):
-            temp = hkdb_data["env-vantage.weather_data.temp_outside"]
-            for o in obs_list:
-                m = np.logical_and.reduce([temp[0] >= o.start_time, temp[0] <= o.stop_time])
-                _temp = np.nanmean(temp[1][m])
-                o.temp = _temp
-        else:
-            logger.warn("temperature data not found")
-            for o in obs_list:
-                o.temp = np.nan
-        # uv
-        if (
-            hkdb_data is not None and
-            "env-vantage.weather_data.UV" in hkdb_data.keys()
-           ):
-            uv = hkdb_data["env-vantage.weather_data.UV"]
-            for o in obs_list:
-                m = np.logical_and.reduce([uv[0] >= o.start_time, uv[0] <= o.stop_time])
-                _uv = np.nanmean(uv[1][m])
-                o.uv = _uv
-        else:
-            logger.warn("UV data not found")
-            for o in obs_list:
-                o.uv = np.nan
-
-        # wind speed
-        if (
-            hkdb_data is not None and
-            "env-vantage.weather_data.wind_speed" in hkdb_data.keys()
-           ):
-            wind_speed = hkdb_data["env-vantage.weather_data.wind_speed"]
-            for o in obs_list:
-                m = np.logical_and.reduce([wind_speed[0] >= o.start_time, wind_speed[0] <= o.stop_time])
-                _wind_speed = np.nanmean(wind_speed[1][m])
-                o.wind_speed = _wind_speed
-        else:
-            logger.warn("wind speed data not found")
-            for o in obs_list:
-                o.wind_speed = np.nan
-
-        # wind direction
-        if (
-            hkdb_data is not None and
-            "env-vantage.weather_data.wind_dir" in hkdb_data.keys()
-           ):
-            wind_dir = hkdb_data["env-vantage.weather_data.wind_dir"]
-            for o in obs_list:
-                m = np.logical_and.reduce([wind_dir[0] >= o.start_time, wind_dir[0] <= o.stop_time])
-                _wind_dir = np.nanmean(wind_dir[1][m])
-                o.wind_dir = _wind_dir
-        else:
-            logger.warn("wind direction data not found")
-            for o in obs_list:
-                o.wind_dir = np.nan
+        # Get hkdb params for each obs
+        populate_hkdb_fields(hkdb_data, pwv, obs_list)
 
         data: "ReportData" = cls(
             cfg=cfg, obs_list=obs_list, pwv=pwv, longterm_obs_df=longterm_obs_df
@@ -629,8 +689,6 @@ class ReportData:
 
             if "cfg" not in hdf.attrs:
                 hdf.attrs["cfg"] = json.dumps(d)
-            # if self.pwv is not None and "pwv" not in hdf:
-            #     hdf.create_dataset("pwv", data=self.pwv)
 
             for obs in self.obs_list:
                 if obs.obs_id not in hdf:
