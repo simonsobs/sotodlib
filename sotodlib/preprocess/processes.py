@@ -1183,7 +1183,17 @@ class A2Stats(_Preprocess):
             proc_aman.wrap(self.save_name, a2_stats)
 
 class Apodize(_Preprocess):
-    """Apodize the edges of a signal. All process configs go to `apodize_cosine`
+    """Apodize the edges of a signal. All process configs go to `apodize_cosine`.
+    If flags is provided, apodize based on it; otherwise, apodize the edge of
+    the timestream.
+
+    Example config block::
+
+      - name: "apodize"
+        process:
+          signal_name: signal
+          apodize_samps: 2000
+          flags: glitch_flags
 
     .. autofunction:: sotodlib.tod_ops.apodize.apodize_cosine
     """
