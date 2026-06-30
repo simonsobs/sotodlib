@@ -34,7 +34,7 @@ config:
 .. code-block:: yaml
 
     hk_root: /so/data/satp1/hk
-    db_url: postgresql://<user>:${psql_password}@storage1/hkdb_satp1
+    db_url: postgresql://<user>:${psql_password}@storage2/hkdb_satp1
     aliases:
         fp_temp: cryo-ls372-lsa21yc.temperatures.Channel_02_T
 
@@ -49,7 +49,7 @@ matching the URL fields from the sqlalchemy docs, for example:
         drivername: postgresql
         username: <user>
         password: ${psql_password}
-        host: storage1
+        host: storage2
         database: hkdb_satp1
     aliases:
         fp_temp: cryo-ls372-lsa21yc.temperatures.Channel_02_T
