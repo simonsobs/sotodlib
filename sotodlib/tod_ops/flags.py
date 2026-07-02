@@ -157,7 +157,8 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
 def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
                          merge=True, merge_lr=True, overwrite=True, 
                          t_buffer=2., kernel_size=400, peak_threshold=0.1, rel_distance_peaks=0.3,
-                         truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False):
+                         truncate=False, qlim=1, merge_subscans=True, turnarounds_in_subscan=False,
+                         az_throw_threshold=None):
     """
     Compute turnaround flags for a dataset.
 
