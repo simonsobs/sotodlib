@@ -1,6 +1,10 @@
+import os
+import re
+import shutil
+import time
+
 import numpy as np
 import h5py
-import time
 
 
 class H5LockTimeoutError(Exception):
@@ -13,23 +17,38 @@ class H5ContextManager:
     Class to open an HDF5 file with retry logic on file locking.  This class
     can be used either as a context manager or as a regular function.
 
+    If the file is opened for writing (mode "a", "w", "r+", or "w-"), then
+    a temporary file is created in the same directory as the original and the
+    contents of the original are copied to that before modification.  The
+    temporary file is intentionally chosen to be the same suffix name (it
+    does not use the tempfile module).  This way if multiple processes are
+    trying to update the file, their access will be serialized.
+
+    After the context manager exits, the temp file is atomically moved into
+    place with the name of the original.  Any processes with the original
+    inode open will be unaffected.
+
+    Aside from the name of the file, the h5py.File constructor accepts only
+    **kwargs.  Any additional key word args passed here will be forwarded
+    to the h5py.File constructor.
+
     Examples
     --------
     As a context manager
-        with H5ContextManager("data.h5", "r") as f:
+        with H5ContextManager("data.h5", mode="r") as f:
             print(list(f.keys()))
 
     Direct function call:
-        f = H5ContextManager("data.h5", "r").open()
+        f = H5ContextManager("data.h5", mode="r").open()
         print(list(f.keys()))
-        f.close()
+        H5ContextManager.close(f)
 
     Parameters
     ----------
     filename : str
         Path to the HDF5 file.
-    *args :
-        Additional positional arguments passed to `h5py.File`.
+    mode : str, optional
+        The opening mode ('r', 'r+', 'a', 'w', or 'w-').
     max_attempts : int, optional
         Number of times to retry opening the file if it is locked.
     delay : int or float, optional
@@ -37,21 +56,51 @@ class H5ContextManager:
     **kwargs :
         Additional keyword arguments passed to `h5py.File`.
     """
-    def __init__(self, filename, *args, max_attempts=3, delay=5, **kwargs):
+
+    temp_suffix = ".temporary"
+
+    def __init__(self, filename, mode="r", max_attempts=3, delay=5, **kwargs):
         self.filename = filename
-        self.args = args
         self.kwargs = kwargs
         self.max_attempts = max_attempts
         self.delay = delay
         self.f = None
+        self.mode = mode
+        self._check_file_for_mode()
+        if self.max_attempts <= 0:
+            raise RuntimeError("max_attempts should be at least one")
+        if self.delay < 0:
+            raise RuntimeError("delay should be a positive number of seconds")
 
-        assert self.max_attempts > 0
-        assert self.delay >= 0
+    def _check_file_for_mode(self):
+        if self.mode in {"r", "r+"}:
+            # File should already exist
+            if not os.path.isfile(self.filename):
+                msg = f"Cannot open file {self.filename} with mode '{self.mode}',"
+                msg += " file does not exist"
+                raise RuntimeError(msg)
+        if self.mode == "w-":
+            # File should NOT exist
+            if os.path.isfile(self.filename):
+                msg = f"Cannot open file {self.filename} with mode '{self.mode}',"
+                msg += " file already exists"
+                raise RuntimeError(msg)
 
     def open(self):
+        temp_path = f"{self.filename}{self.temp_suffix}"
         for attempt in range(self.max_attempts):
             try:
-                self.f = h5py.File(self.filename, *self.args, **self.kwargs)
+                if self.mode == "r":
+                    # No tempfile needed
+                    self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
+                elif self.mode == "a" or self.mode == "r+":
+                    # Copy the existing file to a temp location for modification
+                    if os.path.isfile(self.filename):
+                        shutil.copy(self.filename, temp_path)
+                    self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
+                else:
+                    # Writing and truncating
+                    self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
                 return self.f
             except BlockingIOError as e:
                 # If the file is locked, retry opening it after a delay
@@ -66,15 +115,32 @@ class H5ContextManager:
                 # Other errors should fail immediately
                 raise e
 
+    @classmethod
+    def close(cls, hf):
+        if hf is None:
+            return
+        path = hf.filename
+        # Is this a temp file?
+        mat = re.match(f"(.*){cls.temp_suffix}", path)
+        if mat is None:
+            # No, original file
+            hf.close()
+        else:
+            # Temp file
+            orig = mat.group(1)
+            hf.close()
+            os.rename(path, orig)
+
     def __enter__(self):
         if self.f is None:
             self.open()
         return self.f
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.f:
-            self.f.close()
-            self.f = None
+        self.close(self.f)
+
+    def __delete__(self):
+        self.close(self.f)
 
 
 def tag_substr(dest, tags, max_recursion=20):
