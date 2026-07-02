@@ -58,7 +58,7 @@ def _valid_dets_mask(azss_stats, min_valid_bins=1):
 
 def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
               apodize_edges=True, apodize_edges_samps=1600,
-              apodize_flags=True, apodize_flags_samps=200):
+              apodize_flags=True, apodize_flags_samps=200, apo_type='C1'):
     """
     Bins a signal by azimuth angle.
 
@@ -99,36 +99,19 @@ def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
         * 'binned_signal': binned signal
         * 'binned_signal_sigma': estimated sigma of binned signal
     """
-    if apodize_edges:
-        weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
-        if isinstance(flags, str):
-            flags = aman.flags.get(flags)
-        if (flags is not None) and apodize_flags:
-            flags_mask = flags.mask()
-            # check the flags dimension
-            if flags_mask.ndim == 1:
-                flag_is_1d = True
-            else:
-                all_columns_same = np.all(np.all(flags_mask == flags_mask[0, :], axis=0))
-                if all_columns_same:
-                    flag_is_1d = True
-                    flags_mask = flags_mask[0]
-                else:
-                    flag_is_1d = False
+    weight_for_signal = None
+    if apodize_flags and (flags is not None):
+        weight_for_signal = apodize.get_apodize_window_from_flags(
+            aman, flags=flags, apodize_samps=apodize_flags_samps, apo_type=apo_type)
 
-            if flag_is_1d:
-                weight_for_signal = weight_for_signal * apodize.get_apodize_window_from_flags(aman, 
-                                                                                              flags=flags,
-                                                                                              apodize_samps=apodize_flags_samps)
-            else:
-                weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
-                                                                                                             flags=flags, 
-                                                                                                             apodize_samps=apodize_flags_samps)
-    else:
-        if (flags is not None) and apodize_flags:
-            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+    if apodize_edges:
+        edges_apodizer = apodize.get_apodize_window_for_ends(
+            aman, apodize_samps=apodize_edges_samps, apo_type=apo_type)
+        if weight_for_signal is None:
+            weight_for_signal = edges_apodizer
         else:
-            weight_for_signal = None
+            weight_for_signal *= edges_apodizer
+
     binning_dict = bin_signal(aman, bin_by=az, signal=signal,
                               range=azrange, bins=bins, flags=flags, weight_for_signal=weight_for_signal)
     return binning_dict
@@ -280,7 +263,7 @@ def fit_azss(az, azss_stats, max_mode, modes_axis_name='azss_modes', fit_range=N
 
 
 def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None, scan_flags=None,
-             apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200,
+             apodize_edges=True, apodize_edges_samps=1600, apodize_flags=True, apodize_flags_samps=200, apo_type='C1',
              apply_prefilt=True, prefilt_cfg=None, prefilt_detrend='linear',
              method='interpolate', max_mode=None, modes_axis_name='azss_modes', subtract_in_place=False,
              merge_stats=True, azss_stats_name='azss_stats',
@@ -322,6 +305,8 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
         If True, applies an apodization window based on the flags. Defaults to True.
     apodize_flags_samps : int, optional
         The number of samples over which to apply the flags apodization window. Defaults to 200.
+    apo_type: str, optional
+        Type of apodization, default is C1.
     apply_prefilt : bool, optional
         If True, applies a pre-filter to the signal before azss extraction. Defaults to True.
     prefilt_cfg : dict, optional
@@ -401,7 +386,8 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
     # do binning
     binning_dict = bin_by_az(aman, signal=signal, az=az, azrange=azrange, bins=bins, flags=flags,
                              apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps,
-                             apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
+                             apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,
+                             apo_type=apo_type)
     bin_centers = binning_dict['bin_centers']
     bin_counts = binning_dict['bin_counts']
     binned_signal = binning_dict['binned_signal']

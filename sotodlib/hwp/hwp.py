@@ -12,7 +12,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
               lin_reg=True, modes=[1, 2, 3, 4, 5, 6, 7, 8], apply_prefilt=True,
               prefilt_cfg=None, prefilt_detrend='linear', flags=None,
               apodize_edges=True, apodize_edges_samps=1600, 
-              apodize_flags=True, apodize_flags_samps=200,
+              apodize_flags=True, apodize_flags_samps=200, apo_type='C1',
               merge_stats=True, hwpss_stats_name='hwpss_stats',
               merge_model=True, hwpss_model_name='hwpss_model'):
     r"""
@@ -52,6 +52,16 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     flags : str or RangesMatrix or Ranges, optional
         Flags to be masked out before extracting HWPSS. If Default is None, and no mask will be applied.
         If provided by a string, `aman.flags.get(flags)` is used for the flags.
+    apodize_edges : bool, optional
+        If True, applies an apodization window to the edges of the signal. Defaults to True.
+    apodize_edges_samps : int, optional
+        The number of samples over which to apply the edge apodization window. Defaults to 1600.
+    apodize_flags : bool, optional
+        If True, applies an apodization window based on the flags. Defaults to True.
+    apodize_flags_samps : int, optional
+        The number of samples over which to apply the flags apodization window. Defaults to 200.
+    apo_type: str, optional
+        Type of apodization, default is C1.
     merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
@@ -124,7 +134,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
         hwp_angle_bin_centers, bin_counts, binned_hwpss, hwpss_sigma_bin = get_binned_hwpss(
             aman, signal, hwp_angle=None, bins=bins, flags=flags, 
             apodize_edges=apodize_edges, apodize_edges_samps=apodize_edges_samps, 
-            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps,)
+            apodize_flags=apodize_flags, apodize_flags_samps=apodize_flags_samps, apo_type=apo_type)
         
         # check bin count
         num_invalid_bins = np.count_nonzero(np.isnan(binned_hwpss[0][:]))
@@ -196,7 +206,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
 def get_binned_hwpss(aman, signal=None, hwp_angle=None,
                      bins=360, flags=None, 
                      apodize_edges=True, apodize_edges_samps=1600,
-                     apodize_flags=True, apodize_flags_samps=200):
+                     apodize_flags=True, apodize_flags_samps=200, apo_type='C1'):
     """
     Bin time-ordered data by the HWP angle and return the binned signal and its standard deviation.
 
@@ -222,6 +232,8 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
         If True, applies an apodization window based on the flags. Defaults to True.
     apodize_flags_samps : int, optional
         The number of samples over which to apply the flags apodization window. Defaults to 200.
+    apo_type: str, optional
+        Type of apodization, default is C1.
 
     Returns
     -------
@@ -236,35 +248,22 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     if hwp_angle is None:
         hwp_angle = aman['hwp_angle']
 
+    if isinstance(flags, str):
+        flags = aman.flags.get(flags)
+
+    weight_for_signal = None
+    if apodize_flags and (flags is not None):
+        weight_for_signal = apodize.get_apodize_window_from_flags(
+            aman, flags=flags, apodize_samps=apodize_flags_samps, apo_type=apo_type)
+
     if apodize_edges:
-        weight_for_signal = apodize.get_apodize_window_for_ends(aman, apodize_samps=apodize_edges_samps)
-        if isinstance(flags, str):
-            flags = aman.flags.get(flags)
-        if (flags is not None) and apodize_flags:
-            flags_mask = flags.mask()
-            if flags_mask.ndim == 1:
-                flag_is_1d = True
-            else:
-                all_columns_same = np.all(np.all(flags_mask == flags_mask[0, :], axis=0))
-                if all_columns_same:
-                    flag_is_1d = True
-                    flags_mask = flags_mask[0]
-                else:
-                    flag_is_1d = False
-            if flag_is_1d:
-                weight_for_signal = weight_for_signal * apodize.get_apodize_window_from_flags(aman, 
-                                                                                              flags=flags,
-                                                                                              apodize_samps=apodize_flags_samps)
-            else:
-                weight_for_signal = weight_for_signal[np.newaxis, :] * apodize.get_apodize_window_from_flags(aman, 
-                                                                                                             flags=flags, 
-                                                                                                             apodize_samps=apodize_flags_samps)
-    else:
-        if (flags is not None) and apodize_flags:
-            weight_for_signal = apodize.get_apodize_window_from_flags(aman, flags=flags, apodize_samps=apodize_flags_samps)
+        edges_apodizer = apodize.get_apodize_window_for_ends(
+            aman, apodize_samps=apodize_edges_samps, apo_type=apo_type)
+        if weight_for_signal is None:
+            weight_for_signal = edges_apodizer
         else:
-            weight_for_signal = None
-    
+            weight_for_signal *= edges_apodizer
+
     binning_dict = tod_ops.bin_signal(aman, bin_by=hwp_angle, range=[0, 2*np.pi],
                               bins=bins, signal=signal, flags=flags, weight_for_signal=weight_for_signal)
     
@@ -709,6 +708,7 @@ def get_tau_hwp(
     bpf_cfg=None,
     width=1000,
     apodize_samps=2000,
+    apo_type='C1',
     trim_samps=2000,
     min_fhwp=1.,
     max_fhwp=2.,
@@ -796,7 +796,7 @@ def get_tau_hwp(
 
     tod_ops.detrend_tod(aman, signal_name=signal, method="median")
     tod_ops.apodize.apodize_cosine(aman, signal_name=signal,
-                                   apodize_samps=apodize_samps)
+                                   apodize_samps=apodize_samps, apo_type=apo_type)
     demod_tod(aman, signal=signal, demod_mode=demod_mode,
               lpf_cfg=lpf_cfg, bpf_cfg=bpf_cfg, wrap=True)
 
