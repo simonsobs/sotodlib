@@ -409,6 +409,7 @@ class PSDCalc(_Preprocess):
       - "name : "psd"
         "signal: "signal" # optional
         "wrap": "psd" # optional
+        "freq_axis": "nusamps" # optional
         "process":
           "nperseg": 1024 # optional
           "noverlap": 0 # optional
@@ -423,6 +424,7 @@ class PSDCalc(_Preprocess):
     def __init__(self, step_cfgs):
         self.signal = step_cfgs.get('signal', 'signal')
         self.wrap = step_cfgs.get('wrap', 'psd')
+        self.freqs_axis = step_cfgs.get('freqs_axis', 'nusamps')
         self.save_name = None
 
         super().__init__(step_cfgs)
@@ -433,14 +435,21 @@ class PSDCalc(_Preprocess):
         full_output = self.process_cfgs.get('full_output')
         if full_output:
             freqs, Pxx, nseg = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                        freqs_axis=self.freqs_axis,
                                                         **self.process_cfgs)
         else:
             freqs, Pxx = tod_ops.fft_ops.calc_psd(aman, signal=aman[self.signal],
+                                                  freqs_axis=self.freqs_axis,
                                                   **self.process_cfgs)
-
-        fft_aman = core.AxisManager(aman.dets,
-                                    core.OffsetAxis("nusamps", len(freqs)))
-        pxx_axis_map = [(0, "dets"), (1, "nusamps")]
+        if self.freqs_axis in aman:
+            if len(freqs) != aman.get(self.freqs_axis).count:
+                raise ValueError(f'New freqs does not match the shape of {self.freqs_axis}\
+                                To avoid this, use the same value for nperseg')
+            fft_aman = core.AxisManager(aman.dets, aman.get(self.freqs_axis))
+        if self.freqs_axis not in aman:
+            fft_aman = core.AxisManager(aman.dets,
+                                        core.OffsetAxis(self.freqs_axis, len(freqs)))
+        pxx_axis_map = [(0, "dets"), (1, self.freqs_axis)]
         if self.process_cfgs.get('subscan', False):
             fft_aman.wrap("Pxx_ss", Pxx, pxx_axis_map+[(2, aman.subscans)])
             Pxx = np.nanmean(Pxx, axis=-1) # Mean of subscans
@@ -448,7 +457,7 @@ class PSDCalc(_Preprocess):
                 fft_aman.wrap("nseg_ss", nseg, [(0, aman.subscans)])
                 nseg = np.nansum(nseg)
 
-        fft_aman.wrap("freqs", freqs, [(0,"nusamps")])
+        fft_aman.wrap("freqs", freqs, [(0, self.freqs_axis)])
         fft_aman.wrap("Pxx", Pxx, pxx_axis_map)
         if full_output:
             fft_aman.wrap("nseg", nseg)

@@ -276,6 +276,7 @@ def calc_psd(
     overwrite=True,
     subscan=False,
     full_output=False,
+    freqs_axis='nusamps',
     label_axis='dets',
     **kwargs
 ):
@@ -331,7 +332,7 @@ def calc_psd(
             freqs, Pxx = _calc_psd_subscan(aman, signal=signal,
                                            freq_spacing=freq_spacing,
                                            **kwargs)
-        axis_map_pxx = [(0, label_axis), (1, "nusamps"), (2, "subscans")]
+        axis_map_pxx = [(0, label_axis), (1, freqs_axis), (2, "subscans")]
         axis_map_nseg = [(0, "subscans")]
     else:
         if timestamps is None:
@@ -367,15 +368,15 @@ def calc_psd(
             nseg = int(max_samples / kwargs["nperseg"])
 
         freqs, Pxx = welch(signal[:, start:stop], fs, **kwargs)
-        axis_map_pxx = [(0, aman[label_axis]), (1, "nusamps")]
+        axis_map_pxx = [(0, aman[label_axis]), (1, freqs_axis)]
         axis_map_nseg = None
 
     if merge:
-        if 'nusamps' not in aman:
-            aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(freqs))))
-            aman.wrap("freqs", freqs, [(0,"nusamps")])
+        if freqs_axis not in aman:
+            aman.merge(core.AxisManager(core.OffsetAxis(freqs_axis, len(freqs))))
+            aman.wrap("freqs", freqs, [(0, freqs_axis)])
         else:
-            if len(freqs) != aman.nusamps.count:
+            if len(freqs) != aman.get(freqs_axis).count:
                 raise ValueError('New freqs does not match the shape of nusamps\
                                 To avoid this, use the same value for nperseg')
 
@@ -613,7 +614,7 @@ def _curve_fit_bounds_array(bounds):
 def get_psd_mask(aman, psd_mask=None, f=None,
                 mask_hwpss=True, hwp_freq=None, max_hwpss_mode=10, hwpss_width=((-0.4, 0.6), (-0.2, 0.2)),
                 mask_peak=False, peak_freq=None, peak_width=(-0.002, +0.002),
-                merge=True, overwrite=True
+                merge=True, overwrite=True, freqs_axis="nusamps",
 ):
     """
     Function to get masks for hwpss or single peak in PSD.
@@ -678,9 +679,13 @@ def get_psd_mask(aman, psd_mask=None, f=None,
         if overwrite:
             if "psd_mask" in aman:
                 aman.move("psd_mask", None)
-        if 'nusamps' not in list(aman._axes.keys()):
-            aman.merge(core.AxisManager(core.OffsetAxis("nusamps", len(f))))
-        aman.wrap("psd_mask", psd_mask, [(0,"nusamps")])
+        if freqs_axis in list(aman._axes.keys()):
+            if len(f) != aman.get(freqs_axis).count:
+                raise ValueError('New freqs does not match the shape of nusamps\
+                                To avoid this, use the same value for nperseg')
+        else:
+            aman.merge(core.AxisManager(core.OffsetAxis(freqs_axis, len(f))))
+        aman.wrap("psd_mask", psd_mask, [(0, freqs_axis)])
     return psd_mask
 
 def get_binned_psd(
@@ -689,8 +694,9 @@ def get_binned_psd(
     pxx=None,
     unbinned_mode=3,
     base=1.05,
-    merge=False, 
+    merge=False,
     overwrite=True,
+    freqs_bin_axis="nusamps_bin",
 ):
     """
     Function that masks hwpss in PSD.
