@@ -205,14 +205,19 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     Ranges : RangesMatrix
         The turnaround flags as a Ranges object.
     """
+    if az_throw_threshold is None:
+        raise ValueError(
+                "`az_throw_threshold` is required and cannot be None"
+                )
+
     if az is None : 
         az = aman.boresight.az
 
     # Check that telescope was scanning. 
     if aman.obs_info.az_throw < az_throw_threshold:
         raise ValueError(
-                f"Azimuth motion {aman.obs_info.az_throw} is too small compared to threshold {az_throw_threshold} 
-                to compute turnaround flags"
+                f"""Azimuth motion {aman.obs_info.az_throw} is too small compared to threshold {az_throw_threshold} 
+                to compute turnaround flags"""
                 )
 
     if method not in ['az', 'scanspeed']:
