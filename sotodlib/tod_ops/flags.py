@@ -195,6 +195,9 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
         (Optional). Also merge an AxisManager with subscan information.
     turnarounds_in_subscan : bool
         (Optional). Turnarounds are included as part of a subscan.
+    az_throw_threshold : float
+        Minimum azimuth throw required to attempt turnaround flagging. If ``aman.obs_info.az_throw`` falls below this value, 
+        the obs is treated as stationary or incomplete and a ``ValueError`` is raised instead.
 
     Returns
     -------
@@ -203,7 +206,14 @@ def get_turnaround_flags(aman, az=None, method='scanspeed', name='turnarounds',
     """
     if az is None : 
         az = aman.boresight.az
-        
+
+    # Check that telescope was scanning. 
+    if aman.obs_info.az_throw < az_throw_threshold:
+        raise ValueError(
+                f"Azimuth motion {aman.obs_info.az_throw} is too small compared to threshold {az_throw_threshold} 
+                to compute turnaround flags"
+                )
+
     if method not in ['az', 'scanspeed']:
         raise ValueError('Unsupported method. Supported methods are `az` or `scanspeed`')
     
