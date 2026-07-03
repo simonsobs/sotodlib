@@ -1066,7 +1066,7 @@ def cleanup_archive(configs, logger=None, use_h5_ctx=False):
                 for key in keys:
                     if key not in db_datasets:
                         logger.debug(f"{key} not found in db. deleting it from {latest_file}.")
-                    del f[key]
+                        del f[key]
 
         db.conn.close()
 
