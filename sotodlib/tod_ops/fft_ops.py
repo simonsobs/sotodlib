@@ -313,14 +313,6 @@ def calc_psd(
     if signal is None:
         signal = aman.signal
 
-    if ("noverlap" not in kwargs) or \
-            ("noverlap" in kwargs and kwargs["noverlap"] != 0):
-        warnings.warn('calc_wn will be biased. noverlap argument of welch '
-                      'needs to be 0 to get unbiased median white noise estimate.')
-    if not full_output:
-        warnings.warn('calc_wn will be biased. full_output argument of calc_psd '
-                      'needs to be True to get unbiased median white noise estimate.')
-
     if subscan:
         if full_output:
             freqs, Pxx, nseg = _calc_psd_subscan(aman, signal=signal,
@@ -488,10 +480,11 @@ def calc_wn(aman, pxx=None, freqs=None, nseg=None, low_f=5, high_f=10, method='m
         nseg = aman.get('nseg')
 
     if nseg is None:
-        warnings.warn('white noise level estimated by median PSD is biased. '
-                      'nseg is necessary to debias. Need to use following '
-                      'arguments in calc_psd to get correct nseg. '
-                      '`noverlap=0, full_output=True`')
+        if method == 'median':
+            warnings.warn('white noise level estimated by median PSD is biased. '
+                          'nseg is necessary to debias. Need to use following '
+                          'arguments in calc_psd to get correct nseg. '
+                          '`noverlap=0, full_output=True`')
         debias = None
     else:
         if method == 'median':
