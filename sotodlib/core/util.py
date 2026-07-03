@@ -59,14 +59,13 @@ class H5ContextManager:
 
     temp_suffix = ".temporary"
 
-    def __init__(self, filename, mode="r", max_attempts=3, delay=5, override_temp=False, **kwargs):
+    def __init__(self, filename, mode="r", max_attempts=3, delay=5, **kwargs):
         self.filename = filename
         self.kwargs = kwargs
         self.max_attempts = max_attempts
         self.delay = delay
         self.f = None
         self.mode = mode
-        self.override_temp = override_temp
         self._check_file_for_mode()
         if self.max_attempts <= 0:
             raise RuntimeError("max_attempts should be at least one")
