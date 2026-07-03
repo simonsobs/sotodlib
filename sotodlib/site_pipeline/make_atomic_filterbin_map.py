@@ -110,6 +110,9 @@ class Cfg:
         Data type for timestreams
     dtype_map: str
         Data type for maps
+    use_h5_ctx : bool
+        Use h5 context manager to avoid metadata corruption and locked sqlite
+        dbs.  For use on site-computing.
     """
     def __init__(
         self,
@@ -151,6 +154,7 @@ class Cfg:
         wn_label: str = 'preprocess.noiseQ_mapmaking.std',
         apply_wobble: bool = True,
         compress: bool = True,
+        use_h5_ctx: bool = False,
     ) -> None:
         self.context = context
         self.preprocess_config = preprocess_config
@@ -190,6 +194,7 @@ class Cfg:
         self.wn_label = wn_label
         self.apply_wobble = apply_wobble
         self.compress = compress
+        self.use_h5_ctx = use_h5_ctx
     @classmethod
     def from_yaml(cls, path) -> "Cfg":
         with open(path, "r") as f:
@@ -269,6 +274,8 @@ def main(
     L.addHandler(ch)
 
     verbose = args.verbose - args.quiet
+
+    use_h5_ctx = args.use_h5_ctx
 
     recenter = None
     if args.center_at:
@@ -415,15 +422,15 @@ def main(
     for obs in obslists_arr:
         obs_id = obs[0][0]
         if len(preprocess_config)==1:
-            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False, use_h5_ctx=use_h5_ctx)
         else:
-            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False)
-            preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_init, errlog[0], preprocess_config[0], subdir='temp', remove=False, use_h5_ctx=use_h5_ctx)
+            preprocess_util.cleanup_obs(obs_id, policy_dir_proc, errlog[1], preprocess_config[1], subdir='temp_proc', remove=False, use_h5_ctx=use_h5_ctx)
 
     # remove datasets from final archive file not found in db
-    preprocess_util.cleanup_archive(preprocess_config[0], L)
+    preprocess_util.cleanup_archive(preprocess_config[0], L, use_h5_ctx)
     if len(preprocess_config) > 1:
-        preprocess_util.cleanup_archive(preprocess_config[1], L)
+        preprocess_util.cleanup_archive(preprocess_config[1], L, use_h5_ctx)
 
     run_list = []
     for oi, ol in enumerate(obslists_arr):
@@ -509,7 +516,7 @@ def main(
                     oid = outputs[ii][idx_prepoc]['db_data']['obs:obs_id']
                     group = [v for k, v in outputs[ii][idx_prepoc]['db_data'].items() if 'dets' in k]
                     preprocess_util.cleanup_mandb(outputs[ii][idx_prepoc], (oid, group), (errors[ii], None, None),
-                          preprocess_config[idx_prepoc], L)
+                          preprocess_config[idx_prepoc], L, use_h5_ctx=use_h5_ctx)
     L.info("Done")
     return True
 
