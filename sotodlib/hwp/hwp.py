@@ -61,7 +61,7 @@ def get_hwpss(aman, signal=None, hwp_angle=None, bin_signal=True, bins=360,
     apodize_flags_samps : int, optional
         The number of samples over which to apply the flags apodization window. Defaults to 200.
     apo_type: str, optional
-        Type of apodization, default is C1.
+        Type of apodization, default is C1. See tod_ops.apodize for all options.
     merge_stats : bool, optional
         Whether to add the extracted HWPSS statistics to `aman` as new axes. Default is `True`.
     hwpss_stats_name : str, optional
@@ -233,7 +233,7 @@ def get_binned_hwpss(aman, signal=None, hwp_angle=None,
     apodize_flags_samps : int, optional
         The number of samples over which to apply the flags apodization window. Defaults to 200.
     apo_type: str, optional
-        Type of apodization, default is C1.
+        Type of apodization, default is C1. See tod_ops.apodize for all options.
 
     Returns
     -------
@@ -739,6 +739,8 @@ def get_tau_hwp(
         width of single section of TOD.
     apodize_samps: int optional
         Number of samples on tod ends to apodize.
+    apo_type: str, optional
+        Type of apodization, default is C1. See tod_ops.apodize for all options.
     trim_samps: int optional
         Number of samples on tod ends to trim.
     min_fhwp: float optional

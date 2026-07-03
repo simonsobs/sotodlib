@@ -89,6 +89,8 @@ def bin_by_az(aman, signal=None, az=None, azrange=None, bins=100, flags=None,
         If True, applies an apodization window based on the flags. Defaults to True.
     apodize_flags_samps : int, optional
         The number of samples over which to apply the flags apodization window. Defaults to 200.
+    apo_type: str, optional
+        Type of apodization, default is C1. See tod_ops.apodize for all options.
 
     Returns
     -------
@@ -306,7 +308,7 @@ def get_azss(aman, signal='signal', az=None, azrange=None, bins=100, flags=None,
     apodize_flags_samps : int, optional
         The number of samples over which to apply the flags apodization window. Defaults to 200.
     apo_type: str, optional
-        Type of apodization, default is C1.
+        Type of apodization, default is C1. See tod_ops.apodize for all options.
     apply_prefilt : bool, optional
         If True, applies a pre-filter to the signal before azss extraction. Defaults to True.
     prefilt_cfg : dict, optional
