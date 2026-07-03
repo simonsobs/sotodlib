@@ -33,7 +33,7 @@ def multilayer_preprocess_tod(obs_id: str,
                               verbosity: int = 0,
                               compress: bool = False,
                               overwrite: bool = False,
-                              make_temp_h5: bool = False):
+                              use_h5_ctx: bool = False):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
     and saves the results in the ManifestDb specified in the configs.
@@ -56,9 +56,9 @@ def multilayer_preprocess_tod(obs_id: str,
         Whether or not to compress the preprocessing h5 files.
     overwrite : bool
          If True, overwrite contents of temporary h5 files.
-    make_temp_h5 : bool
-        Copy h5 archives to temporary files to prevent corruption from metadata sync.
-        For use on site-computing.
+    use_h5_ctx : bool
+        Use h5 context manager to avoid metadata corruption and locked sqlite
+        dbs.  For use on site-computing.
 
     Returns
     -------
@@ -89,7 +89,7 @@ def multilayer_preprocess_tod(obs_id: str,
         overwrite=overwrite,
         save_archive=False,
         compress=compress,
-        make_temp_h5=make_temp_h5,
+        use_h5_ctx=use_h5_ctx,
     )
 
     return out_dict_init, out_dict_proc, errors
@@ -197,7 +197,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           run_from_jobdb: bool = False,
           raise_error: bool = False,
           pb_path: Optional[str] = None,
-          make_temp_h5: Optional[bool] = False):
+          use_h5_ctx: Optional[bool] = False):
 
     init_temp_subdir = "temp"
     proc_temp_subdir = "temp_proc"
@@ -266,14 +266,14 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     for obs_id in obs_list:
         pp_util.cleanup_obs(obs_id, init_policy_dir, errlog, configs_init,
                             context_init, subdir=init_temp_subdir, remove=overwrite,
-                            make_temp_h5=make_temp_h5)
+                            use_h5_ctx=use_h5_ctx)
         pp_util.cleanup_obs(obs_id, proc_policy_dir, errlog, configs_proc,
                             context_proc, subdir=proc_temp_subdir, remove=overwrite,
-                            make_temp_h5=make_temp_h5)
+                            use_h5_ctx=use_h5_ctx)
 
     # remove datasets from final archive file not found in init db
     for config in (configs_init, configs_proc):
-        pp_util.cleanup_archive(config, logger, make_temp_h5)
+        pp_util.cleanup_archive(config, logger, use_h5_ctx)
 
     run_list = []
 
@@ -443,11 +443,11 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                     logger.info(f"Adding future result to init db for {obs_id}: {group}")
                     pp_util.cleanup_mandb(out_dict_init, out_meta, errors,
                                         configs_init, logger, overwrite,
-                                        db_manager=db_mgr_init, make_temp_h5=make_temp_h5)
+                                        db_manager=db_mgr_init, use_h5_ctx=use_h5_ctx)
                 logger.info(f"Adding future result to proc db for {obs_id}: {group}")
                 pp_util.cleanup_mandb(out_dict_proc, out_meta, errors,
                                     configs_proc, logger, overwrite,
-                                    db_manager=db_mgr_proc, make_temp_h5=make_temp_h5)
+                                    db_manager=db_mgr_proc, use_h5_ctx=use_h5_ctx)
 
                 # update jobdb
                 if jobdb_path is not None:
@@ -569,7 +569,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--make-temp',
-        help="Copy h5 archives to temporary files to prevent file corruption (for site-computing).",
+        help="Use h5 context manager to prevent file corruption (for site-computing).",
         type=bool,
         default=True
     )
@@ -592,7 +592,7 @@ def main(configs_init: str,
          run_from_jobdb: bool = False,
          raise_error: bool = False,
          pb_path: Optional[str] = None,
-         make_temp_h5: Optional[bool] = False):
+         use_h5_ctx: Optional[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -614,7 +614,7 @@ def main(configs_init: str,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error,
               pb_path=pb_path,
-              make_temp_h5=make_temp_h5)
+              use_h5_ctx=use_h5_ctx)
 
 
 if __name__ == '__main__':

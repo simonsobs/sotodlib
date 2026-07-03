@@ -95,7 +95,7 @@ def preprocess_tod(configs: Union[str, dict],
                    verbosity: int = 0,
                    compress: bool = False,
                    overwrite: bool = False,
-                   make_temp_h5: bool = False
+                   use_h5_ctx: bool = False
                   ):
     """Meant to be run as part of a batched script, this function calls the
     preprocessing pipeline a specific Observation ID and group combination
@@ -117,9 +117,9 @@ def preprocess_tod(configs: Union[str, dict],
         Whether or not to compress the preprocessing h5 files.
     overwrite : bool
         If True, overwrite contents of temporary h5 files.
-    make_temp_h5 : bool
-        Copy h5 archives to temporary files to prevent corruption from metadata sync.
-        For use on site-computing.
+    use_h5_ctx : bool
+        Use h5 context manager to avoid metadata corruption and locked sqlite
+        dbs.  For use on site-computing.
 
     Returns
     -------
@@ -145,7 +145,7 @@ def preprocess_tod(configs: Union[str, dict],
         overwrite=overwrite,
         save_archive=False,
         compress=compress,
-        make_temp_h5=make_temp_h5,
+        use_h5_ctx=use_h5_ctx,
     )
 
     return out_dict, errors
@@ -168,7 +168,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
           run_from_jobdb: bool = False,
           raise_error: bool = False,
           pb_path: Optional[str] = None,
-          make_temp_h5: Optional[bool] = False):
+          use_h5_ctx: Optional[bool] = False):
 
     temp_subdir = "temp"
 
@@ -215,10 +215,10 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
     )
     for obs_id in obs_list:
         pp_util.cleanup_obs(obs_id, policy_dir, errlog, configs, context,
-                            subdir=temp_subdir, remove=overwrite, make_temp_h5=make_temp_h5)
+                            subdir=temp_subdir, remove=overwrite, use_h5_ctx=use_h5_ctx)
 
     # remove datasets from final archive file not found in db
-    pp_util.cleanup_archive(configs, logger, make_temp_h5)
+    pp_util.cleanup_archive(configs, logger, use_h5_ctx)
 
     run_list = []
 
@@ -346,7 +346,7 @@ def _main(executor: Union["MPICommExecutor", "ProcessPoolExecutor"],
                 futures.remove(future)
 
                 pp_util.cleanup_mandb(out_dict, out_meta, errors, configs,
-                                    logger, overwrite, db_manager=db_manager, make_temp_h5=make_temp_h5)
+                                    logger, overwrite, db_manager=db_manager, use_h5_ctx=use_h5_ctx)
 
                 # update jobdb
                 if jobdb_path is not None:
@@ -464,7 +464,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--make-temp',
-        help="Copy h5 archives to temporary files to prevent file corruption (for site-computing).",
+        help="Use h5 context manager to prevent file corruption (for site-computing).",
         type=bool,
         default=True
     )
@@ -486,7 +486,7 @@ def main(configs: str,
          run_from_jobdb: bool = False,
          raise_error: bool = False,
          pb_path: Optional[str] = None,
-         make_temp_h5: Optional[bool] = False):
+         use_h5_ctx: Optional[bool] = False):
 
     rank, executor, as_completed_callable = get_exec_env(nproc)
     if rank == 0:
@@ -507,7 +507,7 @@ def main(configs: str,
               run_from_jobdb=run_from_jobdb,
               raise_error=raise_error,
               pb_path=pb_path,
-              make_temp_h5=make_temp_h5)
+              use_h5_ctx=use_h5_ctx)
 
 if __name__ == '__main__':
     main_launcher(main, get_parser)

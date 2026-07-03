@@ -53,8 +53,6 @@ class H5ContextManager:
         Number of times to retry opening the file if it is locked.
     delay : int or float, optional
         Delay in seconds between retries.
-    override_temp : bool
-        Override creation of temporary file and just use original file.
     **kwargs :
         Additional keyword arguments passed to `h5py.File`.
     """
@@ -98,18 +96,12 @@ class H5ContextManager:
                     self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
                 elif self.mode == "a" or self.mode == "r+":
                     # Copy the existing file to a temp location for modification
-                    if not self.override_temp:
-                        if os.path.isfile(self.filename):
-                            shutil.copy(self.filename, temp_path)
-                        self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
-                    else:
-                        self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
+                    if os.path.isfile(self.filename):
+                        shutil.copy(self.filename, temp_path)
+                    self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
                 else:
                     # Writing and truncating
-                    if not self.override_temp:
-                        self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
-                    else:
-                        self.f = h5py.File(self.filename, mode=self.mode, **self.kwargs)
+                    self.f = h5py.File(temp_path, mode=self.mode, **self.kwargs)
                 return self.f
             except BlockingIOError as e:
                 # If the file is locked, retry opening it after a delay
