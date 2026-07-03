@@ -569,7 +569,7 @@ def get_parser(parser=None):
     )
     parser.add_argument(
         '--use-h5-ctx',
-        help="Use h5 context manager to prevent file corruption (for site-computing).",
+        help="Use h5 context manager to prevent file corruption and db lock errrors (for site-computing).",
         type=bool,
         default=True
     )
